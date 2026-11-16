@@ -75,6 +75,7 @@ import { MAX_MAIL_BODY } from "@/lib/mail";
 import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
+import { FILTER_MAX_WORDS } from "@/lib/community-filter";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { MAX_TEAM, LOG_LINES } from "@/lib/team";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
@@ -491,6 +492,8 @@ export const FAMILIES: Record<string, Family> = {
     parts: [
       capped(MAX_SPACES * KB + MAX_QUESTIONS * KB + MAX_WELCOME * 3 + 8 * KB, "The settings, its spaces, questions and welcome.", src("lib/community-text.ts", "MAX_SPACES", "MAX_QUESTIONS", "MAX_WELCOME")),
       capped(MAX_REPORT_QUEUE * KEY, "The reports waiting, the newest MAX_REPORT_QUEUE.", src("lib/community-text.ts", "MAX_REPORT_QUEUE")),
+      // Each entry at most FILTER_MAX_WORD_LENGTH characters, every one written out at its longest in JSON (six bytes) with its quotes: under KEY.
+      capped(FILTER_MAX_WORDS * KEY, "The creator's words to check, in the settings: up to FILTER_MAX_WORDS of FILTER_MAX_WORD_LENGTH characters.", src("lib/community-filter.ts", "FILTER_MAX_WORDS", "FILTER_MAX_WORD_LENGTH")),
       item(512, "A member's record as they come in, and their place in the directory.", "membership"),
       per("buyer", 90, KEY, "Who reported what, ninety days."),
     ],

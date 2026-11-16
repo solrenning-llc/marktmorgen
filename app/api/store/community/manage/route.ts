@@ -26,6 +26,7 @@ import { parseDmSetting } from "@/lib/community-dm";
 import { parseChatSetting } from "@/lib/community-chat";
 import { forgetTicket } from "@/lib/community-access";
 import { dropCommunityImage } from "@/lib/community-files";
+import { FILTER_MAX_WORDS, FILTER_MAX_WORD_LENGTH, foldText } from "@/lib/community-filter";
 import {
   MAX_COMMUNITY_ABOUT,
   MAX_COMMUNITY_NAME,
@@ -51,6 +52,7 @@ const ACTIONS = new Set([
   "space-remove",
   "rewards",
   "onboarding",
+  "filter",
   "member",
   "dismiss",
   "report-hide",
@@ -212,6 +214,24 @@ export async function POST(request: NextRequest) {
       const questions = asked.map((q) => cleanLine(q, MAX_QUESTION)).filter(Boolean);
       if (questions.length > MAX_QUESTIONS) return fail("questions");
       return save({ ...config, questions, welcome: cleanText(body.welcome, MAX_WELCOME) });
+    }
+
+    // The words a member's post or comment is held for (113 [E2-COMMUNITY-MODERATION],
+    // lib/community-filter.ts), and whether more than a couple of links holds it too.
+    // Refused rather than trimmed, so what the studio shows is what was saved:
+    // more than FILTER_MAX_WORDS, or one longer than FILTER_MAX_WORD_LENGTH.
+    if (action === "filter") {
+      const asked = Array.isArray(body.words) ? body.words : null;
+      if (!asked || asked.length > FILTER_MAX_WORDS * 2 || asked.some((w) => typeof w !== "string" || w.length > FILTER_MAX_WORD_LENGTH * 4)) return fail("filter");
+      const words: string[] = [];
+      for (const entry of asked as string[]) {
+        const word = foldText(entry);
+        if (!word || words.includes(word)) continue;
+        if (word.length > FILTER_MAX_WORD_LENGTH) return fail("filter_long");
+        words.push(word);
+      }
+      if (words.length > FILTER_MAX_WORDS) return fail("filter_many");
+      return save({ ...config, filter: { words, links: body.links === true } });
     }
 
     if (action === "space-move") {

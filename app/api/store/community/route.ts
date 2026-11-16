@@ -31,6 +31,7 @@ import {
 } from "@/lib/community";
 import { communityViewer, maySeeSpace } from "@/lib/community-access";
 import { approvalFor, holdComment, holdPost, mustHold, withdrawHeld } from "@/lib/community-approval";
+import { filterHold } from "@/lib/community-filter";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
@@ -232,13 +233,18 @@ export async function POST(request: NextRequest) {
         img = { path, w, h, alt: cleanLine(form.get("img_alt"), MAX_ALT_LENGTH) };
       }
       const announce = owner && form.get("kind") === "announcement";
+      // The creator's words to check (113 [E2-COMMUNITY-MODERATION],
+      // lib/community-filter.ts): every piece of the post a reader would see,
+      // never the creator's. A list that cannot be read holds it too.
+      const filtered = filterHold(config.filter, [title, text, ...(poll?.options.map((o) => o.text) ?? []), img?.alt ?? ""], owner);
       // Held for the creator's approval (543 [CM2]): the post waits, seen only
       // by its author and the creator, and nothing below runs for it (no
-      // mention, no email) until it is approved.
-      if (holding) {
+      // mention, no email) until it is approved. Its words are kept exactly
+      // as written, whichever of the two held it.
+      if (holding || filtered) {
         let waiting: Awaited<ReturnType<typeof holdPost>>;
         try {
-          waiting = await holdPost(id, { space: chosen.id, author: key, title, text, img, kind: "post", poll }, store);
+          waiting = await holdPost(id, { space: chosen.id, author: key, title, text, img, kind: "post", poll }, store, undefined, filtered);
         } catch (error) {
           if (error instanceof DataRoomError && img) await dropCommunityImage(img.path);
           throw error;
@@ -305,8 +311,10 @@ export async function POST(request: NextRequest) {
       const parent = field("parent", 12);
       // A space whose creator approves comments first (543 [CM2]): the comment
       // waits, seen only by its author and the creator; nobody is told of it yet.
-      if (!owner && (await mustHold(id, (await approvalFor(id, post.sp)).comments, "c", viewer.member))) {
-        const waiting = await holdComment(id, { post: post.id, space: post.sp, parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store);
+      // Or one that uses a word on the creator's list (113 [E2-COMMUNITY-MODERATION]).
+      const filtered = filterHold(config.filter, [text], owner);
+      if (filtered || (!owner && (await mustHold(id, (await approvalFor(id, post.sp)).comments, "c", viewer.member)))) {
+        const waiting = await holdComment(id, { post: post.id, space: post.sp, parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store, undefined, filtered);
         if (!waiting.ok) return back(postPage, waiting.reason === "mine" ? "heldmine" : "heldfull", "reply");
         return back(postPage, "heldcomment", `held-${waiting.held.id}`);
       }

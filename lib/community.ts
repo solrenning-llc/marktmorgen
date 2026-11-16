@@ -83,6 +83,7 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { type CommunityFilter, parseFilter } from "@/lib/community-filter";
 import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
@@ -139,6 +140,14 @@ export type CommunityConfig = {
   questions: string[];
   /** Sent privately to a member the first time they come in, from the creator, when messages are on. */
   welcome: string;
+  /**
+   * The creator's words to check (113 [E2-COMMUNITY-MODERATION], lib/community-filter.ts):
+   * a member's post or comment that matches waits for the creator's approval
+   * (lib/community-approval.ts). Absent: never set, nothing is held by it.
+   * Null: set, and stored in a shape this code did not write, so everything
+   * a member sends waits until the creator saves the list again.
+   */
+  filter?: CommunityFilter | null;
 };
 
 export type Member = {
@@ -323,6 +332,9 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         .filter(Boolean)
         .slice(0, MAX_QUESTIONS),
       welcome: typeof value.welcome === "string" ? value.welcome.slice(0, MAX_WELCOME) : "",
+      // And before there was a word filter: none, so nothing is held by it.
+      // One that is there and does not read exactly holds everything (null).
+      ...(value.filter === undefined ? {} : { filter: parseFilter(value.filter) }),
     };
   } catch {
     return null;

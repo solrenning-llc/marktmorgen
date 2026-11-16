@@ -6,6 +6,11 @@
  * (the default, as before), approve the first 1 to 5 of each new member, or
  * approve every one. The creator is never held.
  *
+ * The creator's words to check hold a member's post or comment here too,
+ * whatever the space's rule (113 [E2-COMMUNITY-MODERATION], lib/community-filter.ts,
+ * from 16 November 2026): the same queue, the same answers, the same notice
+ * to its author, with the reason (`hr`) kept for the creator's queue only.
+ *
  * What waits is kept apart from the community's posts and comments, never in
  * the feed, a space, a post's comments or the search index (lib/community.ts),
  * so nothing that reads the community can show it to anybody: only its author
@@ -63,6 +68,7 @@ import { removeCommunityImage } from "@/lib/community-files";
 import { DataRoomError, type DataStore, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
+import { type HoldReason, parseHoldReason } from "@/lib/community-filter";
 import { HELD_DAYS, KEEP_DAYS, MAX_FIRST, MAX_HELD, MAX_MINE, MAX_WHY, TOLD_DAYS } from "@/lib/community-approval-rules";
 
 export { HELD_DAYS, KEEP_DAYS, MAX_FIRST, MAX_HELD, MAX_MINE, MAX_WHY, TOLD_DAYS } from "@/lib/community-approval-rules";
@@ -114,6 +120,12 @@ export type Held = {
   why: string;
   /** When it stopped waiting, in seconds; 0 while it waits. */
   done: number;
+  /**
+   * Why the creator's word filter held it (lib/community-filter.ts), for the
+   * creator's queue, or null when only the space's approval rule did. Items
+   * kept before the filter held anything have none.
+   */
+  hr: HoldReason | null;
 };
 
 const base = (id: string) => `nl:cm:${id}`;
@@ -272,6 +284,8 @@ export function parseHeld(raw: unknown): Held | null {
     if (img === undefined) return null;
     const poll = v.poll === null ? null : parsePoll(v.poll);
     if (v.poll !== null && !poll) return null;
+    const hr = v.hr === undefined || v.hr === null ? null : parseHoldReason(v.hr);
+    if (v.hr !== undefined && v.hr !== null && !hr) return null;
     return {
       id: v.id,
       kind: v.kind,
@@ -287,6 +301,7 @@ export function parseHeld(raw: unknown): Held | null {
       state: v.state as HeldState,
       why: v.why.slice(0, MAX_WHY),
       done: v.done as number,
+      hr,
     };
   } catch {
     return null;
@@ -360,8 +375,11 @@ async function hold(id: string, held: Held, room: DataStore, now: number): Promi
   return { ok: true, held };
 }
 
-/** Holds a member's post. The caller has checked everything it checks for a post that publishes. */
-export async function holdPost(id: string, input: NewPost, room: DataStore, now = nowSeconds()): Promise<HoldResult> {
+/**
+ * Holds a member's post. The caller has checked everything it checks for a
+ * post that publishes. `reason` is the word filter's, when it held it.
+ */
+export async function holdPost(id: string, input: NewPost, room: DataStore, now = nowSeconds(), reason: HoldReason | null = null): Promise<HoldResult> {
   return hold(
     id,
     {
@@ -379,18 +397,20 @@ export async function holdPost(id: string, input: NewPost, room: DataStore, now 
       state: "held",
       why: "",
       done: 0,
+      hr: reason,
     },
     room,
     now,
   );
 }
 
-/** Holds a member's comment on a post they can see. */
+/** Holds a member's comment on a post they can see; `reason` is the word filter's, when it held it. */
 export async function holdComment(
   id: string,
   input: { post: string; space: string; parent: string; author: string; text: string },
   room: DataStore,
   now = nowSeconds(),
+  reason: HoldReason | null = null,
 ): Promise<HoldResult> {
   return hold(
     id,
@@ -409,6 +429,7 @@ export async function holdComment(
       state: "held",
       why: "",
       done: 0,
+      hr: reason,
     },
     room,
     now,

@@ -2,13 +2,18 @@ import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, fieldsAsked } from "@/lib/api-fields";
 import { SALE_FIELDS, cursorOf, sales } from "@/lib/api-sales";
 import { canSell } from "@/lib/store-checkout";
+import { leadAddress } from "@/lib/api-read";
 import { API_SALES_UNITS } from "@/lib/store-allowance-rules";
 import { StripeError } from "@/lib/stripe-account";
 
 const unavailable = () => apiError(502, "unavailable", "Sales could not be read just now. Try again in a moment.");
 const badCursor = () => apiError(400, "invalid_cursor", "This cursor is not one this list gave. Send the next value of the page before, once, or leave cursor out to start from the newest sale.");
 
-/** GET /api/v1/sales?cursor=&fields= — the store's paid checkouts, newest first, as the studio's list of sales reads them (lib/api-sales.ts). */
+/**
+ * GET /api/v1/sales?cursor=&fields= — the store's paid checkouts, newest first, as the studio's list of sales reads them (lib/api-sales.ts).
+ * GET /api/v1/sales?email= — the same, of one buyer: Stripe is asked for the checkouts of that address only, at the
+ * same price, and the address is checked before anything more is taken or Stripe is asked.
+ */
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
@@ -23,12 +28,17 @@ export async function GET(request: Request) {
   if (!fields.ok) return apiOkFields(request, null);
   const unknown = fields.fields?.find((f) => !(SALE_FIELDS as readonly string[]).includes(f));
   if (unknown) return apiError(400, "unknown_field", `No item in this answer has a field named “${unknown}”.`);
+  // One buyer's sales: an address that cannot be one is refused before Stripe is read. Sent to Stripe as the buyer may
+  // have typed it, trimmed; Stripe's own filter decides which checkouts are that address's.
+  const params = new URL(request.url).searchParams;
+  const email = params.has("email") ? (params.get("email") ?? "").trim() : null;
+  if (email !== null && !leadAddress(email)) return apiError(400, "invalid_email", "This is not an email address. Send the buyer's address as email, such as email=dana@example.com.");
   // A page of sales is API_SALES_UNITS of the month's API requests, the request itself one of them.
   const refused = await takeMoreApi(store, API_SALES_UNITS - 1);
   if (refused) return refused;
   try {
     // The listings read for titles are taken before they are read (lib/api-sales.ts).
-    const page = await sales(store, cursor.cursor, (more, taken) => takeMoreApi(store, more, taken));
+    const page = await sales(store, cursor.cursor, (more, taken) => takeMoreApi(store, more, taken), email);
     if (page instanceof Response) return page;
     if (!page) return unavailable();
     return apiOkFields(request, page);

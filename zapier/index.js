@@ -748,6 +748,56 @@ const findContact = {
   },
 };
 
+/**
+ * One buyer's orders (GET /api/v1/sales?email=), newest first: Stripe is asked
+ * for the checkouts of that address on the creator's account. A page with no
+ * sale of this store but more after it was not read whole (those checkouts
+ * were another store's on the same account), so the run stops with the
+ * reason, never "nothing found"; any answer not of that buyer is unknown.
+ */
+const findOrder = {
+  key: "find_order",
+  noun: "Order",
+  display: {
+    label: "Find Order",
+    description: "Finds the orders a buyer paid for in your store, newest first, by their email address.",
+  },
+  operation: {
+    inputFields: [{ key: "email", label: "Buyer's email", required: true, type: "string", helpText: "The address the buyer gave at checkout." }],
+    perform: async (z, bundle) => {
+      const asked = String((bundle.inputData && bundle.inputData.email) || "").trim();
+      const response = await z.request({ url: `${API}/sales`, params: { email: asked } });
+      const body = response.data;
+      const rows = readResult(response, z);
+      if (!plain(body) || (body.next !== null && !text(body.next))) unknownRead(z);
+      if (rows.some((row) => !plain(row.buyer) || typeof row.buyer.email !== "string" || row.buyer.email.toLowerCase() !== asked.toLowerCase())) unknownRead(z);
+      if (!rows.length && body.next !== null) {
+        throw new z.errors.Error("The newest checkouts of this address on your Stripe account were not your store's, and there are more. Look the buyer up in your studio's sales instead.", "not_read_whole", 502);
+      }
+      return rows;
+    },
+    sample: {
+      checkout_session: "cs_live_a1B2c3",
+      kind: "one_time",
+      product: { id: "p_8f2c1a", title: "The Weeknight Cookbook" },
+      option: null,
+      bundle_items: null,
+      order_bump: null,
+      order_bumps: [],
+      amount_cents: 2900,
+      discount_cents: 0,
+      currency: "usd",
+      buyer: { email: "ada@example.com", name: "Ada Lovelace" },
+      opened_at: "2026-09-20T09:38:52.000Z",
+      paid_at: "2026-09-20T09:41:10.000Z",
+      refunded_cents: 0,
+      disputed: false,
+      trial: false,
+      source: { utm_source: null, utm_medium: null, utm_campaign: null, utm_content: null, site: null },
+    },
+  },
+};
+
 const byKey = (list) => Object.fromEntries(list.map((item) => [item.key, item]));
 
 module.exports = {
@@ -757,7 +807,7 @@ module.exports = {
   beforeRequest: [addKey],
   afterResponse: [explain],
   triggers: byKey(triggers),
-  searches: byKey([findContact]),
+  searches: byKey([findContact, findOrder]),
   creates: byKey([addSubscriber, changeLabels, giveAccess, createDiscountCode]),
   resources: {},
   // For the site's own checks: which events the triggers stand for.

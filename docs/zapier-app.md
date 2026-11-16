@@ -62,6 +62,13 @@ not already.
     in another shape, stops the run with the reason, never "nothing found".
     It counts toward the store's API requests as the API's other reads do,
     taken before it is read.
+  - Find Order (`GET /api/v1/sales?email=`) — the orders a buyer paid for in
+    the store, newest first, read from the creator's Stripe account with
+    Stripe's own filter on the address given at checkout, in the fields of a
+    page of sales. Nobody is "nothing found"; a page with none of this store's
+    but more after it (another store's checkouts on the same account), or an
+    answer naming another buyer, stops the run with the reason. It costs what
+    a page of sales costs, taken before Stripe is read.
 
 The five endpoints a store may have (`MAX_ENDPOINTS`) count those a Zap adds,
 so a creator cannot run past the store's own limit from Zapier. Every endpoint

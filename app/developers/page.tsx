@@ -716,6 +716,9 @@ export default function DevelopersPage() {
           A page can be empty and still have a <code className="font-mono">next</code>, when those checkouts were not this
           store&apos;s. A checkout that only saved a card is not a sale and is not listed. What a buyer typed at checkout is
           not included. 409 with <code className="font-mono">not_selling</code> while the store is not taking payments.
+          {" "}Add <code className="font-mono">email=dana@example.com</code> for one buyer&apos;s sales: Stripe is asked for the
+          checkouts of the address the buyer gave at checkout only, at the same cost, and an address that is not one is
+          refused with <code className="font-mono">invalid_email</code> before Stripe is asked.
         </Endpoint>
         <Code>{`{
   "data": [

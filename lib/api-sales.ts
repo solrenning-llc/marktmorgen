@@ -24,6 +24,12 @@
  * on Stripe for its whole ceiling: a call is API_SALES_UNITS of the store's
  * API requests (lib/store-allowance-rules.ts; its cost is API_SALES_READ in
  * tests/plan-cost-registry.ts).
+ *
+ * With `email` (GET /api/v1/sales?email=, 378 [TB4] WG (c)), Stripe is asked
+ * for the checkouts of that address only (its own filter,
+ * customer_details[email]): the same request, the same page and the same
+ * price. A sale of this store in Stripe's answer under another address makes
+ * the page unknown, never one buyer's order sent as another's.
  */
 import { isSettled } from "@/lib/instant-pay";
 import { onAccount } from "@/lib/stripe-account";
@@ -215,9 +221,10 @@ export function titleIds(metas: Record<string, string>[]): string[] {
  * read (listingsWork), so nothing is read beyond what was paid (Codex G2 on
  * #1899).
  */
-export async function sales(store: Store, cursor: string | null, charge: Charge): Promise<SalesPage | null | Response> {
+export async function sales(store: Store, cursor: string | null, charge: Charge, email: string | null = null): Promise<SalesPage | null | Response> {
   if (cursor !== null && !CURSOR.test(cursor)) throw new Error("A sales cursor is checked (cursorOf) before it is sent to Stripe");
-  const page = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?limit=${SALES_PAGE}&expand[]=data.payment_intent.latest_charge&expand[]=data.invoice${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ""}`);
+  const byEmail = email ? `&customer_details[email]=${encodeURIComponent(email)}` : "";
+  const page = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?limit=${SALES_PAGE}&expand[]=data.payment_intent.latest_charge&expand[]=data.invoice${byEmail}${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ""}`);
   // An unreadable list is unknown, never proof of no sales.
   if (typeof page !== "object" || page === null || Array.isArray(page) || page.object !== "list" || !Array.isArray(page.data) || typeof page.has_more !== "boolean" ||
       page.data.length > SALES_PAGE || page.data.some((row: unknown) => typeof row !== "object" || row === null || Array.isArray(row))) return null;
@@ -239,6 +246,15 @@ export async function sales(store: Store, cursor: string | null, charge: Charge)
   const ours = rows.filter((row) => handles.has(row.metadata?.store ?? ""));
   if (ours.some((row) => !STATUSES.includes(row.status as string) || !PAYMENT_STATUSES.includes(row.payment_status as string) || !MODES.includes(row.mode as string))) return null;
   const mine = ours.filter((row) => isSale(row));
+  // Asked for one address: a sale of this store under any other is an answer not the one asked, so unknown.
+  if (email) {
+    const wanted = email.toLowerCase();
+    const addressOf = (row: Row) => {
+      const typed = (obj(row.customer_details) ?? {}).email;
+      return (typeof typed === "string" && typed ? typed : typeof row.customer_email === "string" ? row.customer_email : "").trim().toLowerCase();
+    };
+    if (mine.some((row) => addressOf(row) !== wanted)) return null;
+  }
   // One sale that cannot be read makes the page unknown: never a guessed zero, a negative amount or "nothing charged".
   const read: Read[] = [];
   for (const row of mine) {

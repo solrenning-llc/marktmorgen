@@ -282,7 +282,7 @@ async function main(): Promise<void> {
   is("the product list is hidden from the trigger menu", app.triggers.product_list.display.hidden, true);
   is("adding a subscriber requires the agreement the list requires", app.creates.add_subscriber.operation.inputFields.some((f) => f.key === "agreed" && f.required === true), true);
   is("the four actions are the API's writes", Object.keys(app.creates).sort(), ["add_subscriber", "change_labels", "create_discount_code", "give_access"]);
-  is("the one search is a lookup of the list by address, its email required", [Object.keys(app.searches), app.searches.find_contact.operation.inputFields.map((f) => [f.key, f.required])], [["find_contact"], [["email", true]]]);
+  is("the searches are a lookup of the list and of the sales by address, each its email required", [Object.keys(app.searches), app.searches.find_contact.operation.inputFields.map((f) => [f.key, f.required]), app.searches.find_order.operation.inputFields.map((f) => [f.key, f.required])], [["find_contact", "find_order"], [["email", true]], [["email", true]]]);
   is("its example has the fields a contact of the list is sent with", Object.keys(app.searches.find_contact.operation.sample).sort(), [...LEAD_FIELDS].sort());
 
   part("A discount code is made only where the studio would make one, through the real route");

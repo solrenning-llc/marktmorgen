@@ -34,7 +34,7 @@ import { readDeals, readFields, readPersonTasks, readStages, readValues } from "
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
-import { listAgreements, readVersionExact } from "@/lib/agreement-store";
+import { VersionUnreadError, listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
@@ -278,7 +278,15 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const out: unknown[] = [];
     for (const a of list.filter((a) => same(a.email, s.email))) {
       const versions = [];
-      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersionExact(a, mark.n)) ?? {}) });
+      for (const mark of a.versions) {
+        // Kept but damaged text is said with the version's mark, never left out and never blocking the copy for good,
+        // as the assignment copier does (CX-123 rule 24); a reply that is not text or null still throws.
+        const version = await readVersionExact(a, mark.n).catch((error: unknown) => {
+          if (error instanceof VersionUnreadError) return "unread" as const;
+          throw error;
+        });
+        versions.push(version === "unread" ? { ...mark, unread: "This version's text is kept but could not be read for this copy." } : { ...mark, ...(version ?? {}) });
+      }
       // The agreement's id is the secret in its signing link, a key, left out: whoever held the file could sign as them.
       // They have it in the email that sent it. So are the store's own id, the linked payment request's secret and the
       // internal reason an email failed; what was agreed, each version and each signature stay.

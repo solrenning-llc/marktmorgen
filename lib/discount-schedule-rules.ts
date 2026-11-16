@@ -140,13 +140,3 @@ export function readScheduleConfirmation(raw: unknown): ScheduleEntry[] | null {
   }
   return out;
 }
-
-/**
- * Whether Stripe holds more codes than the studio was sent (lib/discount.ts,
- * readCodePage), read exactly, or null: an unreadable answer leaves the list
- * unconfirmed, never read as complete.
- */
-export function readMoreConfirmation(raw: unknown): boolean | null {
-  if (!plain(raw) || !Object.hasOwn(raw, "more") || typeof raw.more !== "boolean") return null;
-  return raw.more;
-}

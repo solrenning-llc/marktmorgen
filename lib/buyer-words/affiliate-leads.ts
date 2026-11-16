@@ -204,7 +204,7 @@ const pt: LeadWords = {
   termRules: (hold, daily, budget, store) =>
     `Um lead por pessoa, para sempre, e nunca o seu próprio endereço. Um lead pode ser pago após ${hold} dias de espera e quando ${store} o aprova. Até ${daily} dos seus leads ganham num dia, e os leads de todos os afiliados juntos ganham até ${budget} por mês; além disso, o lead continua a ser-lhe mostrado e não ganha nada. ${store} pode anular um lead que não seja genuíno, e vê porquê.`,
   disclose:
-    "Ser pago por cada lead também é uma ligação material: diga-o sempre que pedir às pessoas que se inscrevam, peçam ou marquem através da sua ligação, e nunca inscreva ninguém você mesmo nem use endereços que não sejam delas.",
+    "Ser pago por cada lead também é uma ligação material: diga-o sempre que pedir às pessoas que se inscrevam, peçam ou marquem através da sua ligação, e nunca inscreva ninguém por si próprio nem use endereços que não sejam delas.",
   head: "Os seus leads",
   kind: { signup: "Inscrição por e-mail", free: "Produto gratuito pedido", booking: "Chamada marcada" },
   status: {

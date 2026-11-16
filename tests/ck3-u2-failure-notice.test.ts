@@ -289,31 +289,28 @@ async function main() {
     }
 
     part("The studio's list: Stripe's first page, said plainly when there are more");
-    const { readCodePage, listCodes, MAX_CODES } = await import("@/lib/discount");
+    // Main's listCodes (lib/discount.ts, readStripePage) answers `complete` and refuses a page whose `has_more` is not
+    // exactly true or false: the merge of main into this PR keeps it in place of this PR's readCodePage (same purpose).
+    const { listCodes, MAX_CODES } = await import("@/lib/discount");
     const row = (i: number) => ({ id: `promo_row${i}`, code: `ROW${i}`, active: true, times_redeemed: 0, promotion: { coupon: { percent_off: 10, duration: "once" } } });
+    const completeOf = async () => listCodes(ACCOUNT).then((p) => (p.state === "ok" ? p.complete : "error"));
     listReply = { data: Array.from({ length: MAX_CODES }, (_, i) => row(i)), has_more: true };
-    is("Stripe says there are more: more", (await readCodePage(ACCOUNT)).state === "ok" && (await readCodePage(ACCOUNT) as { more: boolean }).more, true);
+    is("Stripe says there are more: not complete", await completeOf(), false);
     listReply = { data: [row(1), row(2)], has_more: false };
-    is("Stripe says that is all: not more", await readCodePage(ACCOUNT).then((p) => p.state === "ok" && p.more), false);
+    is("Stripe says that is all: complete", await completeOf(), true);
     listReply = { data: Array.from({ length: MAX_CODES }, (_, i) => row(i)) };
-    is("no answer about more, and a full page: read as more (never said complete without proof)", await readCodePage(ACCOUNT).then((p) => p.state === "ok" && p.more), true);
-    listReply = { data: [row(1)] };
-    is("no answer about more, and a short page: it is all there is", await readCodePage(ACCOUNT).then((p) => p.state === "ok" && p.more), false);
+    is("no answer about more: not a page (never said complete without proof)", await completeOf(), "error");
     listReply = { data: [row(1)], has_more: "yes" };
-    is("an answer about more in another shape: read as more", await readCodePage(ACCOUNT).then((p) => p.state === "ok" && p.more), true);
-    listReply = { data: [row(1), row(2)], has_more: false };
-    const plainList = await listCodes(ACCOUNT);
-    is("the other readers of listCodes keep their exact shape", plainList.state === "ok" ? Object.keys(plainList).sort() : null, ["codes", "state"]);
+    is("an answer about more in another shape: not a page", await completeOf(), "error");
     is("one page, one Stripe call, as before", calls.filter((c) => c.path.startsWith("/promotion_codes?")).length > 0 && MAX_CODES, 20);
 
     part("The route and the editor say it, and show every scheduled code");
     const route = readFileSync("app/api/store/discount/route.ts", "utf8");
-    is("the studio route reads the page with its more", route.includes("readCodePage(account)"), true);
-    is("and answers with it", /more: list\.more/.test(route), true);
-    is("the confirmation reads more exactly", [rules.readMoreConfirmation({ more: true }), rules.readMoreConfirmation({ more: false }), rules.readMoreConfirmation({ more: "true" }), rules.readMoreConfirmation({})], [true, false, null, null]);
+    is("the studio route reads the page with whether it is complete", route.includes("listCodes(account)"), true);
+    is("and answers with it", /complete: list\.complete/.test(route), true);
     const editor = readFileSync("components/discount-editor.tsx", "utf8");
-    is("the editor reads more, or the list is not confirmed", editor.includes("readMoreConfirmation(data)"), true);
-    is("the editor says plainly that only the newest are shown", editor.includes("Only your ${MAX_CODES} newest codes are shown here"), true);
+    is("the editor reads it, never complete without proof", editor.includes("complete: discountListComplete(data)"), true);
+    is("the editor says plainly that only the newest are shown", editor.includes("These are your ${MAX_CODES} newest codes."), true);
     is("the editor shows scheduled codes Stripe's page left out", editor.includes("unlisted"), true);
     is("the editor's card has the address the email links to", editor.includes('id="discount-codes"'), true);
     const cancels = editor.split("\n").filter((line) => line.includes('action: "unschedule"'));

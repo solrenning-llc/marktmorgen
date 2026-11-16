@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { reserveAiSpend, isAiBudgetConfigured } from '../lib/ai-spend';
 import { AUTOMATIC_AI_SPEND_CEILINGS, AUTOMATIC_AI_SPEND_REVIEW_ID, AUTOMATIC_AI_STORE_MICRO_USD, PAID_AI_ALLOCATIONS_PER_TIER, aiSpendLedgerKey, aiSpendOpenedKey, aiSpendPolicySnapshot, automaticAiSpendPolicy, ceilingPercent, currentAiSpendPolicy, isAiSpendPolicyValid } from '../lib/ai-spend-policy';
@@ -8,6 +8,10 @@ import { askModel } from '../lib/ai';
 import type { Store } from '@/lib/store';
 import { reset, ledger, opened, calls, seed } from './ai-spend-redis';
 import { calendarPeriod, calendarPeriodId } from './billing-period-fixture';
+// The month below is named once, at load, and the code reads the month again on every call (lib/ai-spend.ts,
+// lib/ai-spend-policy.ts): a run crossing 00:00 UTC on a month's last day failed the ledger and ceiling checks. Only
+// Date is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ['Date'], now: Date.now() });
 
 const now = new Date();
 const month = now.toISOString().slice(0, 7);

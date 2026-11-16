@@ -19,6 +19,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
 import { connectPayPal, payWithPayPal, unsettledBook } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
+import { affiliates as apiAffiliates } from "@/lib/api-read";
+import { affiliatesTool } from "@/lib/mcp-tools";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -100,6 +102,8 @@ async function main(): Promise<void> {
   ]);
   const store = shop();
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
+  // The readers count the program before reading it (chargeBook), which needs the store's product list.
+  const listed = { ...store, catalog: { items: [] } } as unknown as Store;
   const unlinkedOf = (book: Awaited<ReturnType<typeof readBook>>) => (book as { unlinkedInvoices?: unknown }).unlinkedInvoices;
 
   part("Read whole but with no one payment to link it to: out of the book, counted, the book still checked");
@@ -133,9 +137,19 @@ async function main(): Promise<void> {
   const sent = await payWithPayPal(store);
   is("nothing is sent while an invoice's commission is left out", [sent.ok ? "sent" : sent.reason, created.length - before], ["invoices_unlinked", 0]);
   is("and no batch file is made from it either", unsettledBook(both), "invoices_unlinked");
+  // Claude 7's MEDIUM on #3378 (@0ac59b6a40, @61a7cf1c47, @73ac47d96b): the API and MCP readers said this same book
+  // was checked, so a creator's own payout tool following /developers paid the affiliate short. They now say what
+  // unsettledBook says: not checked, and how many paid invoices are left out.
+  const api = (await apiAffiliates(listed, async () => null)) as { invoices_checked?: unknown; refunds_checked?: unknown; unlinked_invoices?: unknown };
+  is("/api/v1/affiliates: not checked, one left out", [api.refunds_checked, api.invoices_checked, api.unlinked_invoices], [true, false, 1]);
+  const mcp = (await affiliatesTool(listed, async () => null)) as { invoices_checked?: unknown; refunds_checked?: unknown; unlinked_invoices?: unknown };
+  is("get_affiliates: not checked, one left out", [mcp.refunds_checked, mcp.invoices_checked, mcp.unlinked_invoices], [true, false, 1]);
   invoicesBody = list(invoice());
   const linkedOnly = await payWithPayPal(store);
   is("with only the linked invoice, its commission is sent once", linkedOnly.ok ? [linkedOnly.people, linkedOnly.cents, created.length - before] : linkedOnly.reason, [1, 900, 1]);
+  const apiWhole = (await apiAffiliates(listed, async () => null)) as { invoices_checked?: unknown; unlinked_invoices?: unknown };
+  const mcpWhole = (await affiliatesTool(listed, async () => null)) as { invoices_checked?: unknown; unlinked_invoices?: unknown };
+  is("and with none left out, both readers say checked and 0", [apiWhole.invoices_checked, apiWhole.unlinked_invoices, mcpWhole.invoices_checked, mcpWhole.unlinked_invoices], [true, 0, true, 0]);
 
   part("Controls: an invoice that cannot be read is still not checked, and not counted as unlinked");
   for (const [what, over] of [

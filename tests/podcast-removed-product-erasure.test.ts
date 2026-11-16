@@ -86,3 +86,30 @@ test("the new family is counted and erased when a store closes", () => {
     assert.deepEqual(CLOSING[family], { how: "erase" }, `${family} is erased at closing`);
   }
 });
+
+// Codex V on #4471 @e9ad001138 (HIGH): the index and the product note were written in one script and the grant, which
+// holds the address, in a second one. A deletion that ran between the two found the index, deleted it, found no grant
+// yet and answered done; the second write then left the address in a grant no index leads to.
+test("a deletion between a new feed's index and its grant leaves no address behind", () => quietly(async () => {
+  const { pid } = await world();
+  const shop = (await storeForEmail(owner))!;
+  const late = "podcast-removed-late@example.test";
+  const original = redis.pipeline.bind(redis);
+  let erased: Awaited<ReturnType<typeof erasePerson>> | null = null;
+  redis.pipeline = async (commands) => {
+    const replies = await original(commands);
+    const indexWrite = commands.some((c) => c[0] === "EVAL" && c.some((a) => String(a).startsWith("nl:pod:by:")));
+    if (indexWrite && erased === null) {
+      redis.pipeline = original;
+      erased = await erasePerson((await storeForEmail(owner))!, late, { kind: "person" });
+    }
+    return replies;
+  };
+  let token: string | null;
+  try { token = await access.feedToken(shop, pid, late); } finally { redis.pipeline = original; }
+  assert.ok(erased, "the deletion ran between the feed's writes");
+  assert.equal(erased!.ok, true);
+  if (token) assert.equal(redis.run(["GET", grantKey(token)]), null, "no grant holds the erased address");
+  const left = ((redis.run(["SCAN", "0", "MATCH", "nl:pod:t:*"]) as [string, string[]])[1]).filter((key) => String(redis.run(["GET", key])).includes(late));
+  assert.deepEqual(left, [], "no grant anywhere holds the erased address");
+}));

@@ -358,7 +358,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
     );
   }
   const videoLine = courseFacts?.facts?.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
-  const accessEndLine = courseFacts?.accessEndLine ?? null;
+  // Said only where the checkout that stamps it is offered: a PayPal purchase takes no end (lib/paypal-delivery.ts,
+  // recordOpenEnrollment), so a course sold here through PayPal alone never shows a date (Claude 5's M1 on #3445).
+  const accessEndLine = canSellProduct(store, product) ? courseFacts?.accessEndLine ?? null : null;
   const courseUnread = courseFacts?.unread === true;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.

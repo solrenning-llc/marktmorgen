@@ -196,7 +196,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
               w.outline(total, course.modules.length),
               facts.videoSeconds !== null ? videoTotalLine(facts.videoSeconds, store.language) : null,
               course.certificate ? w.withCertificate : null,
-              !open && !settled && endsAt !== null ? w.accessEndsFact.replace("{when}", accessEndWhen(endsAt, store.language)) : null,
+              // Only where the checkout that stamps it is offered: a PayPal purchase takes no end (Claude 5's M1 on #3445).
+              !open && !settled && selling && endsAt !== null ? w.accessEndsFact.replace("{when}", accessEndWhen(endsAt, store.language)) : null,
             ]
               .filter(Boolean)
               .join(" · ")}

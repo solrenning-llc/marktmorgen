@@ -175,8 +175,9 @@ export default function TermsPage() {
           own page and its sales page show the date and time before anyone
           pays, and the date applies only to people who buy the course there
           while it is shown. People who bought before it was set, or another
-          way (your store page, the cart, a bundle, a gift, a group or a
-          pre-order), keep the course with no end. In the last 24 hours
+          way (your store page, the cart, a bundle, a gift, a group, a
+          pre-order or PayPal), keep the course with no end. Where the
+          course is sold only through PayPal, the date is not shown. In the last 24 hours
           before the date, it is no longer shown, and people who buy then
           keep the course with no end too. You can move the date later or
           remove it, but not earlier, and doing either reaches everyone it

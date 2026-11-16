@@ -201,8 +201,8 @@ export default function RefundsPage() {
         <p id="course-access-end">
           <strong className="text-black">A course with an end date.</strong>{" "}
           Access to a course you bought ends only on a date its page showed
-          you before you paid. If no date was shown when you bought it, your
-          access has no end.
+          you before you paid. If no date was shown when you bought it, or you
+          paid with PayPal, your access has no end.
         </p>
         <p id="store-closes">
           <strong className="text-black">If the store closes.</strong>{" "}

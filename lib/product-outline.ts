@@ -12,7 +12,13 @@
  * (as it does for a course's example titles); a draft may keep them. Only the
  * exact prompts are looked for, so the creator's own brackets are never
  * taken for one.
+ *
+ * The prompts of a new bundle's ready example (lib/bundle-example.ts) are
+ * looked for too: a bundle is a product on the store, and the product route
+ * refuses them on it the same way.
  */
+
+import { BUNDLE_EXAMPLE_PROMPTS } from "@/lib/bundle-example";
 
 export const PRODUCT_OUTLINE = [
   "[In one or two sentences: what someone gets, and what it helps them do.]",
@@ -29,10 +35,13 @@ export const PRODUCT_OUTLINE = [
 /** The prompts the outline holds: the parts in [brackets]. */
 export const PRODUCT_OUTLINE_PROMPTS: string[] = PRODUCT_OUTLINE.match(/\[[^\]\n]+\]/g) ?? [];
 
-/** The outline's prompts still in a product's words, in the order they appear; empty when none is left. */
+/** Every prompt a product's words may not keep on the store: the outline's, and a bundle's example's. */
+const STORE_PROMPTS: string[] = [...PRODUCT_OUTLINE_PROMPTS, ...BUNDLE_EXAMPLE_PROMPTS];
+
+/** The ready prompts still in a product's words (the outline's, or a bundle's example's), in the order they appear; empty when none is left. */
 export function productPromptsLeft(words: { title: string; summary: string; about: string }): string[] {
   const text = `${words.title}\n${words.summary}\n${words.about}`;
-  return PRODUCT_OUTLINE_PROMPTS.filter((prompt) => text.includes(prompt)).sort((a, b) => text.indexOf(a) - text.indexOf(b));
+  return STORE_PROMPTS.filter((prompt) => text.includes(prompt)).sort((a, b) => text.indexOf(a) - text.indexOf(b));
 }
 
 /** What the editor says when a product still holds a prompt, by what was refused: adding it, saving it while it is on the store, or publishing it. */

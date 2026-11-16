@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   is("chosen by what was pressed, with the route's first part and product", [editor.includes('productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"'), editor.includes("outline_left: PRODUCT_OUTLINE_LEFT,"), PRODUCT_OUTLINE_LEFT === productOutlineMessage("add", null, null)], [true, true, true]);
   is("once the description has words, a sentence instead of a button that does nothing; after the field's own help", [editor.includes("The outline goes only into an empty description. Clear the description to use it."), editor.indexOf("data-product-outline") > editor.indexOf('? "Reading what you wrote…"'), editor.indexOf("data-product-outline") < editor.indexOf("<TermsCheckPanel")], [true, true, true]);
   const bundle = readFileSync("app/api/store/bundle/route.ts", "utf8");
-  is("a bundle, on the store at once, is refused the same way, with words for it", [bundle.includes('if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });'), readFileSync("components/bundle-editor.tsx", "utf8").includes("outline_left: PRODUCT_OUTLINE_LEFT,")], [true, true]);
+  is("a bundle, on the store at once, is refused the same way, with words for it", [bundle.includes('if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });'), readFileSync("components/bundle-editor.tsx", "utf8").includes("outline_left: bundleExampleMessage(null),")], [true, true]);
   done();
 }
 

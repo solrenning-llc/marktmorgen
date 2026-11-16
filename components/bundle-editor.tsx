@@ -1,6 +1,7 @@
 "use client";
 
-import { PRODUCT_OUTLINE_LEFT } from "@/lib/product-outline";
+import { productPromptsLeft } from "@/lib/product-outline";
+import { BUNDLE_EXAMPLE, bundleExampleMessage } from "@/lib/bundle-example";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -26,7 +27,8 @@ export type PickerProduct = {
 };
 
 const MESSAGES: Record<string, string> = {
-  outline_left: PRODUCT_OUTLINE_LEFT,
+  // A part of the ready example (or a product outline's) still in [brackets]: a bundle is on the store at once.
+  outline_left: bundleExampleMessage(null),
   ...STUDIO_MESSAGES,
   count: `A bundle holds ${MIN_BUNDLE_ITEMS} to ${MAX_BUNDLE_ITEMS} different products.`,
   self: "A bundle cannot hold itself.",
@@ -92,6 +94,7 @@ export function BundleEditor({
   const [pickError, setPickError] = useState<string | null>(null);
   const asked = useRef(0);
   const ownerId = owner?.id ?? "";
+  const nameField = useRef<HTMLInputElement>(null);
 
   // The picker asks the server for one page at a time, as the name is typed.
   useEffect(() => {
@@ -150,13 +153,13 @@ export function BundleEditor({
     say(movedWords(name, to, items.length));
   }
 
-  async function post(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; id?: string }> {
+  async function post(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; id?: string; left?: string }> {
     const response = await fetch("/api/store/bundle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; id?: string };
+    return (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; id?: string; left?: string };
   }
 
   async function save() {
@@ -173,6 +176,12 @@ export function BundleEditor({
       setError(MESSAGES.price);
       return;
     }
+    // The route's own check, before it is asked: a bundle is on the store at once (lib/bundle-example.ts).
+    const left = mode === "create" ? productPromptsLeft({ title, summary, about: "" })[0] : undefined;
+    if (left) {
+      setError(bundleExampleMessage(left));
+      return;
+    }
     if (sentPick !== null && (sentPick < MIN_PICK || sentPick >= items.length)) {
       setError(MESSAGES.pick);
       return;
@@ -185,7 +194,7 @@ export function BundleEditor({
           ? await post({ action: "create", title, summary, price, items: ids, pick: sentPick })
           : await post({ action: "save", id: owner?.id, items: ids, pick: sentPick });
       if (!data.ok) {
-        setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+        setError(data.error === "outline_left" ? bundleExampleMessage(data.left ?? null) : MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         return;
       }
       toast(mode === "create" ? "Bundle added to your store." : "Bundle saved.");
@@ -237,6 +246,7 @@ export function BundleEditor({
           <label className="block sm:col-span-2" htmlFor="bundle-name">
             <span className="field-label">Name</span>
             <input
+              ref={nameField}
               id="bundle-name"
               className="field"
               value={title}
@@ -267,6 +277,35 @@ export function BundleEditor({
               placeholder="Every guide and template, in one purchase."
             />
           </label>
+          <div className="rounded-[var(--r-sm)] border border-line bg-white p-3 sm:col-span-2" data-bundle-example="">
+            <p id="bundle-example-help" className="text-sm text-ink-soft">
+              Not sure what to write? Start from an example: it sets out what buyers look for in a bundle&apos;s name and line, and each part in [brackets] is yours to replace with your own words, including the brackets. The bundle can&apos;t be added until you replace every one. The price and what goes in it stay yours to choose.
+            </p>
+            {title.trim() || summary.trim() ? (
+              <p className="mt-2 text-sm text-ink-soft">The example goes only into an empty name and line. Clear them to use it.</p>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm mt-2"
+                aria-describedby="bundle-example-help"
+                onClick={() => {
+                  // Only into an empty name and line: nothing typed is replaced.
+                  if (title.trim() || summary.trim()) return;
+                  setTitle(BUNDLE_EXAMPLE.title);
+                  setSummary(BUNDLE_EXAMPLE.summary);
+                  // The button gives way to a sentence: the focus moves to the name, its part to replace selected.
+                  requestAnimationFrame(() => {
+                    const field = nameField.current;
+                    if (!field) return;
+                    field.focus();
+                    field.setSelectionRange(0, BUNDLE_EXAMPLE.title.length);
+                  });
+                }}
+              >
+                Start from an example
+              </button>
+            )}
+          </div>
         </div>
       ) : null}
 

@@ -23,7 +23,7 @@
  *
  * Browser-safe: the studio can show the same numbers the checkout uses.
  */
-import { type SaleCandidate, saleable } from "./store-sale";
+import { type SaleCandidate, salePrice, saleable } from "./store-sale";
 
 export type MemberRule = {
   /** The rule's own name in the record, letters, digits, "_" and "-". */
@@ -95,11 +95,23 @@ export function qualifyingFor(setting: MemberPrices | undefined, product: SaleCa
   return [...new Set(memberRulesFor(setting, product).flatMap((rule) => rule.by))];
 }
 
-/** The percentage off this product for someone proved to hold `held`: the largest rule they meet, never a sum; 0 for none. */
-export function memberOffFrom(setting: MemberPrices | undefined, product: SaleCandidate, held: ReadonlySet<string>): number {
+/**
+ * Whether this percentage off leaves the product at or above `floorCents`, the smallest amount its store's currency
+ * charges (lib/money.ts, minCharge): never below it, as a sale or a fair price (lib/store-sale.ts, saleOff; DISC-S-1).
+ */
+export function memberKeepsFloor(product: SaleCandidate, percent: number, floorCents: number): boolean {
+  return salePrice(product.priceCents, percent) >= floorCents;
+}
+
+/**
+ * The percentage off this product for someone proved to hold `held`: the largest rule they meet, never a sum; 0 for
+ * none. A rule that would take the product below `floorCents` (the store currency's minCharge) is not one they meet
+ * for it, so the page, the claim and the checkout all keep the floor.
+ */
+export function memberOffFrom(setting: MemberPrices | undefined, product: SaleCandidate, held: ReadonlySet<string>, floorCents: number): number {
   let best = 0;
   for (const rule of memberRulesFor(setting, product)) {
-    if (rule.percent > best && rule.by.some((id) => held.has(id))) best = rule.percent;
+    if (rule.percent > best && rule.by.some((id) => held.has(id)) && memberKeepsFloor(product, rule.percent, floorCents)) best = rule.percent;
   }
   return best;
 }

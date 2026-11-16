@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
@@ -67,8 +68,13 @@ async function run(request: NextRequest): Promise<Response> {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const [got] = await redisPipeline([["SET", "nl:plans:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark("nl:plans:lock", 120, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   // Leaves time to answer inside maxDuration, whatever the jobs find.
   const deadline = Date.now() + 45_000;
   try {
@@ -101,10 +107,15 @@ async function run(request: NextRequest): Promise<Response> {
     // and makes the working card the one used next time (lib/payment-recovery.ts).
     // Before the upkeep below, because it is money agreed to, and upkeep can
     // wait a day while a member's access cannot.
+    // Every pass below that threw is named here and fails the run (#4280), except the two the route keeps as
+    // best-effort (the research pruning and the demo store): a pass caught to null was logged while the run still
+    // answered ok with HTTP 200, so members' failed renewals or invite credit failing on every run never showed.
+    const failedPasses: string[] = [];
     let recovered = null;
     try {
       recovered = await recoverFailedPayments(deadline);
     } catch (error) {
+      failedPasses.push("recoverFailedPayments");
       console.error("writing about failed renewals failed", error);
     }
     // Former members who agreed to hear from the creator: one come-back
@@ -113,6 +124,7 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       comeBack = await sendWinBacks(deadline);
     } catch (error) {
+      failedPasses.push("sendWinBacks");
       console.error("sending come-back offers failed", error);
     }
     // Running members who stopped coming, where the creator turned it on:
@@ -121,6 +133,7 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       nudged = await sendMemberNudges(deadline);
     } catch (error) {
+      failedPasses.push("sendMemberNudges");
       console.error("sending emails to members who stopped coming failed", error);
     }
     // Monthly members whose membership has a yearly price, where the creator
@@ -129,6 +142,7 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       yearly = await sendYearlyAsks(deadline);
     } catch (error) {
+      failedPasses.push("sendYearlyAsks");
       console.error("sending the yearly offer failed", error);
     }
     // The numbers stores show others, counted once a day (lib/verified-numbers.ts).
@@ -136,10 +150,12 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       verified = await sendVerified(deadline);
     } catch (error) {
+      failedPasses.push("sendVerified");
       console.error("reading the shared numbers failed", error);
     }
     // The ranges stores are set beside, from the last two weeks' samples (lib/benchmarks.ts): one read and one write.
     const benchmarks = await refreshRanges().then((r) => (r ? r.stores : null)).catch((error: unknown) => {
+      failedPasses.push("refreshRanges");
       console.error("working out the ranges of stores failed", error);
       return null;
     });
@@ -149,12 +165,14 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       invites = await settleInvites(deadline);
     } catch (error) {
+      failedPasses.push("settleInvites");
       console.error("adding invite credit failed", error);
     }
     let catalogs = null;
     try {
       catalogs = await moveAllStores(deadline);
     } catch (error) {
+      failedPasses.push("moveAllStores");
       console.error("moving stores to product records failed", error);
     }
     // Creator research answers are kept 24 months, as the privacy policy says.
@@ -169,9 +187,12 @@ async function run(request: NextRequest): Promise<Response> {
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
     // A subscription whose paid-up state could not be applied or checked
     // makes the run a failed one, not a healthy one (lib/billing-sync.ts).
-    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured());
-    return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
+    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured()) && failedPasses.length === 0;
+    return Response.json(
+      { ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo, failedPasses },
+      { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } },
+    );
   } finally {
-    await redisPipeline([["DEL", "nl:plans:lock"]]).catch(() => {});
+    await releaseMark("nl:plans:lock", lock);
   }
 }

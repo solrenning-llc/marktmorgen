@@ -803,7 +803,14 @@ export async function forgetSubmissionsPerson(
     if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission deleted");
     if (replies[0] === 1) gone += 1;
   }
-  const keys = [whoKey(folder, who), ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); })];
+  // Every entry's door is deleted again after the index and places (Claude 6 on #3570): a refused close or abort that
+  // put a door back while this erasure ran (both its checks still passing) is undone here, and one after the index is
+  // gone finds no entry and puts nothing back.
+  const keys = [
+    whoKey(folder, who),
+    ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); }),
+    ...entries.map((entry) => doorKey(folder, entry.id)),
+  ];
   const replies = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
   if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
   // And their room slots (buyerSlotFor), emptied in one step so the store's room keeps nothing of them; a step not

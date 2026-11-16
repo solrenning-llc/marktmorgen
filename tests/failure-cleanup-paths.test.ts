@@ -177,6 +177,7 @@ async function main(): Promise<void> {
     "page del(gone)": "pictures this page held in the page-picture registry, released after the page was written",
     "file/attach del(removed.pathname)": "the file the record held, after the record that replaced it was written, never an episode's audio its podcast still plays (kept when unknown)",
     "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
+    "site-page del(dropped)": "pictures a site page removed while this save ran held in the page-picture registry, released after its records were dropped",
     "podcast del(gone.pathname)": "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
     // The thumbnail copy (Encanto 5b-2) goes with the picture and its smaller copy, from the same door.
     "image dropFresh([path, smallPath, thumbPath])": "only the paths this request took from the picture door",
@@ -192,6 +193,7 @@ async function main(): Promise<void> {
     "product del(file.pathname)": "files of a removed product, read from its own records",
     "product del(linked.removed.pathname)": "the file the record held, after the link that replaced it was written",
     "option del(file.pathname)": "files of a removed option, read from its own record",
+    "stores deleteFile(some)": "a deleted extra store's own folders (its pictures, its files, its community's pictures), listed by prefix after deleteStore removed it; deleteStore admits only an extra store with no product",
     "links del(result.removed.path)": "the removed link's own picture, after it was written; link-image attach admits only a fresh or own name",
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
@@ -201,7 +203,7 @@ async function main(): Promise<void> {
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
-    "lib/takedown.ts del(done.removed.path)": "the own picture of the link the takedown removed, read from the record it wrote; link-image attach admits only a fresh or own name",
+    "lib/takedown.ts del(path)": "the own picture of the link the takedown removed, read from the record it wrote (path = done.removed.path; a failed delete goes to the daily job); link-image attach admits only a fresh or own name",
     "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };
   const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));

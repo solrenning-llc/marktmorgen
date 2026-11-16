@@ -8,6 +8,7 @@ import { checkUploadedImage } from "@/lib/uploaded-image";
 import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 /**
  * A link's own small picture (lib/store-link.ts, LinkImage): put on after
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest) {
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
       const link = store.links.find((each) => each.id === id);
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "page", "replace")) && link?.image) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "page", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && link?.image) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });

@@ -64,7 +64,7 @@ import { assistantMissedExact } from "@/lib/store-assistant";
 import { waitlistSizes, WAITLIST_VOICE_PRODUCTS } from "@/lib/waitlist";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
-import { readTitles } from "@/lib/catalog";
+import { productIds, readTitles } from "@/lib/catalog";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
 import type { Store } from "@/lib/store";
@@ -246,14 +246,23 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   }
 
   // Products coming soon that people joined the waitlist for (95 [D2-DEMAND-RADAR]): the name and how many, never who.
-  // The product's name is the text: names that could not be read leave the waitlists unread, never left out.
-  // A product people wait on with no name in the titles read (removed from the catalog while its waitlist stays,
-  // Codex T on #3731) is demand that cannot be named: the waitlists are unread, never a summary that leaves it out.
+  // The product's name is the text. A product the store's own index still lists but whose name could not be read
+  // leaves the waitlists unread, never left out (Codex T on #3731). A product the index no longer lists was removed
+  // while its waitlist stayed: its name is gone for good, not unread, so its people are counted under
+  // REMOVED_WAITLIST_TEXT and the summary can still be made (Claude 7 on #3731; before, one such product kept the
+  // waitlists unread for good, and every press paid its units for an answer that could not change).
   const sizes = await waitlistSizes(store).catch(failed("waitlist"));
-  if (sizes && sizes.some((w) => w.people > 0 && (!titlesRead || !titles.get(w.productId)))) unread.push("waitlist");
-  else for (const w of sizes ?? []) {
-    const title = titles.get(w.productId);
-    if (w.people > 0 && title) items.push({ source: "waitlist", text: title, n: w.people });
+  const listed = new Set(productIds(store));
+  const nameless = (w: { productId: string }) => listed.has(w.productId) && (!titlesRead || !titles.get(w.productId));
+  if (sizes && sizes.some((w) => w.people > 0 && nameless(w))) unread.push("waitlist");
+  else {
+    let gone = 0;
+    for (const w of sizes ?? []) {
+      if (w.people <= 0) continue;
+      if (!listed.has(w.productId)) gone += w.people;
+      else items.push({ source: "waitlist", text: titles.get(w.productId) as string, n: w.people });
+    }
+    if (gone > 0) items.push({ source: "waitlist", text: REMOVED_WAITLIST_TEXT, n: gone });
   }
 
   const out: VoiceItem[] = [];

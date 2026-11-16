@@ -3,7 +3,8 @@ import { Icon } from "@/components/icons";
 import type { GallerySection } from "@/lib/studio-modules";
 
 /** The link classes the studio uses for a text link: 44px tall (WCAG 2.5.5), underlined so it is not told by color alone. */
-const LINK = "inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4";
+// A 44 x 44 target, wide as well as tall: "Blog" was 35 px wide (2.5.5 AAA, tests/studio-header-targets.test.ts).
+const LINK = "inline-flex min-h-11 min-w-11 items-center font-semibold text-violet-deep underline underline-offset-4";
 
 /**
  * "Add to your store" (653 [WG13], app/studio/add): every module of the

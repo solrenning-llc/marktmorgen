@@ -381,8 +381,14 @@ async function sendReceipt(input: {
   const title = groupTitle(product, group);
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (!buyer) return false;
-  const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents * group.people;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else leaves the line out, never the catalog's price times the people or the
+  // store's own currency; the receipt still goes, with the link that hands out the places.
+  const amount = session.amount_total;
+  const currency = session.currency;
+  const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+    ? formatMoney(Number(amount), currency, speech(store).lang.locale)
+    : null;
   const g = givingWords(store.language);
   return sendEmail({ meter: input.again ? { by: "store", store, kind: "email" } : { by: "order" },
     from: input.from,
@@ -392,7 +398,7 @@ async function sendReceipt(input: {
       input.lead,
       "",
       g.forWho(title, peopleWords(group.people, store.language)),
-      g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+      ...(paid ? [g.paidLine(paid)] : []),
       g.orderRef(group.session ?? ""),
       ...consentEmailLines(store, input.session?.metadata),
       "",
@@ -910,9 +916,10 @@ function readPass(raw: unknown, account: string): RefundPass | null | undefined 
 }
 
 /**
- * Takes back the places of purchases refunded in full: reads the store's
- * refunds since it last looked, finds the purchase each paid for, and removes
- * it from every address that took a place. Returns how many places went.
+ * Takes back the places of purchases refunded in full, or whose dispute was
+ * lost (queue 388 [TB14]): reads the store's refunds and closing events since
+ * it last looked, finds the purchase each paid for, and removes it from every
+ * address that took a place. Returns how many places went.
  *
  * A refund takes the places back only once it succeeded on a charge refunded in full by the refunds that succeeded
  * (the owner's decision 18, 9 November 2026): one still on its way, or a part of a charge whose rest is on its way,
@@ -1024,11 +1031,11 @@ export async function revokeRefundedGroups(
       const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
       return !!marked && oneWrite(marked[0]) && marked[1] === 1;
     };
-    if (dispute) {
-      if (!rowGivesBack(refund)) return true;
-      // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
-      if (!pi) return markRead();
-    }
+    // A dispute closed as lost takes the purchase back as a full refund does, whatever its amount (lib/refunds.ts, the
+    // owner's rule of 4 November 2026; queue 388 [TB14]). One that names no payment says nothing of this store's
+    // purchases: it is marked read, so it never holds the place in the closing events back (main, #4774).
+    if (dispute && typeof id === "string" && id && !pi) return markRead();
+    if (dispute && !rowGivesBack(refund)) return true;
     if (!pi) return true;
     const onItsWay = !dispute && !decided && REFUND_ON_ITS_WAY.has(refund.status as string);
     const charge = refund.charge as { refunded?: unknown } | null;
@@ -1244,21 +1251,19 @@ export async function revokeRefundedGroups(
     }
   }
 
-  // Disputes closed as lost since this pass's start, read once a run as the siblings read them (lib/gifts.ts,
-  // lib/preorders.ts; lib/refunds.ts, lostDisputesOrRetry): each takes its purchase back as a full refund that succeeded
-  // does (the owner's decision 18). A read that fails or does not reach the end, or a dispute whose work was left
-  // unknown, keeps the anchor where this pass started should the pass end in this run, so they are read again; the place
-  // in the closing events moves only once every one read was handled (confirmLostRead).
-  const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("grp", sid));
-  let lostUnsure = !lost.complete;
-  for (const closed of lost.rows) {
+  // The disputes closed as lost since the anchor, read from Stripe's closing events as lib/gifts.ts reads them. Every
+  // row read and handled keeps the place inside them (lostCursorKey, confirmLostRead), whether or not the read reached
+  // the end, so a run that reads only the newest pages leaves the next run to go on from there instead of reading them
+  // again (Claude 1 on #4774, M1; lib/gifts.ts does the same). A row not handled keeps that place where it was. The
+  // anchor moves only once the read reached the end and every row was handled: the closings are read from the anchor,
+  // so while one is unread the anchor waits, and it stays in the window.
+  const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("group", sid));
+  let rowsUnsure = false;
+  for (const row of lost.rows) {
     if (Date.now() >= deadline) return revoked;
-    if ((await handle(closed)) !== true) lostUnsure = true;
+    if ((await handle(row)) !== true) rowsUnsure = true;
   }
-  if (!(await confirmLostRead(lost, seenKey(sid)))) lostUnsure = true;
-  // No further than the newest closing read when the sweep went on from a kept place, so a dispute closed meanwhile is
-  // read from the top next time (as lib/gifts.ts does).
-  const lostHold = lostUnsure ? since + 300 : lost.resumed ? Math.max(lost.newest, since + 300) : undefined;
+  const lostDone = !rowsUnsure && (await confirmLostRead(lost, seenKey(sid))) && lost.complete;
 
   let pages = REFUND_PAGES;
   if (after) {
@@ -1305,16 +1310,18 @@ export async function revokeRefundedGroups(
     for (const at of held) hold = hold === undefined ? at : Math.min(hold, at);
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
+      // The anchor moves only once the closing events were read to their end and every lost dispute read was handled
+      // (above, main #4774): the closings are read from the anchor, so it waits while they are not all read. A read that
+      // went on from a place an earlier run kept did not read the closings made since that run, newer than its newest
+      // one, so the anchor goes no further than that one, and no further than the newest refund this pass read
+      // (lib/gifts.ts; first money review of #3410): the next run reads them from there.
+      if (!lostDone) return revoked;
+      const lostAt = lost.resumed ? Math.min(newest, Math.max(lost.newest, since)) : undefined;
       // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further
-      // than its time, never back before where this pass started.
-      // The lost disputes of this run count only here, at the pass's end: they are read again on every run.
-      // The lost disputes' bound is capped at the newest refund this pass read, as lib/gifts.ts and lib/preorders.ts
-      // cap theirs (first money review of #3410): a sweep that went on from a kept place may have read closings newer
-      // than a refund made during the pass, seen only on the newest page, whose holds never move the anchor. Only that
-      // bound is capped: a row not readable may rightly hold later than `newest` (read.holdAt).
-      const lostAt = lostHold === undefined ? undefined : Math.min(lostHold, newest);
-      const until = lostAt === undefined ? hold : hold === undefined ? lostAt : Math.min(hold, lostAt);
-      const at = until === undefined ? newest : Math.max(since + 300, until);
+      // than its time, never back before where this pass started. A row not readable may rightly hold later than
+      // `newest` (read.holdAt), so only the lost disputes' bound is capped at it.
+      const heldAt = hold === undefined ? undefined : Math.max(since + 300, hold);
+      const at = heldAt === undefined && lostAt === undefined ? newest : Math.min(heldAt ?? Number.MAX_SAFE_INTEGER, lostAt ?? Number.MAX_SAFE_INTEGER);
       const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
       if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");
       return revoked;

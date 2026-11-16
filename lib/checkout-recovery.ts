@@ -231,8 +231,9 @@ async function paidSince(store: Store, email: string, productIds: string[], sinc
   const paid = rows.some(
     (row) => isSettled(row) && handles.has(row.metadata?.store ?? "") && bought(row).some((id) => id && productIds.includes(id)),
   );
-  // A page cut short is not "not paid", as lib/discount.ts codesMayTakeOff reads Stripe's lists.
-  if (!paid && listed.has_more === true) throw new Error("Stripe answered an address's checkouts cut short");
+  // A page cut short is not "not paid", as lib/discount.ts codesMayTakeOff reads Stripe's lists; and only a boolean
+  // has_more: false says the list ended (#4425): absent or in another shape is not known to be whole, never "not paid".
+  if (!paid && listed.has_more !== false) throw new Error("Stripe answered an address's checkouts cut short or not known to be whole");
   return paid;
 }
 

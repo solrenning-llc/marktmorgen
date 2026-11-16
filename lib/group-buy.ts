@@ -93,6 +93,8 @@ export type Group = {
   h?: number;
 };
 
+/** The shape of a charge's id, read before a purchase for several hands out places (PAYMENT_ID is below). */
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{3,252}$/;
 const groupKey = (id: string) => `nl:grp:${id}`;
 const membersKey = (id: string) => `nl:grp:${id}:m`;
 /** The count kept before 5 November 2026: no longer written, still deleted with the purchase. */
@@ -244,19 +246,39 @@ export async function settleGroup(input: {
   // below) did not exist yet, so no later run takes its places back. So the payment is asked about here, before any
   // place exists. Given back: kept as revoked, nothing settled or sent. An answer that does not read, or that is not
   // this payment's own (rule 30), throws: nothing is written, and the next run asks again.
-  if (pi && store.stripeAccountId) {
-    try {
-      const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
-      if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== pi) throw new UnknownReplyError("a purchase for several's payment");
-      if (await givenBack(store.stripeAccountId, payment)) {
+  // A positive checkout, or one that names a PaymentIntent, needs a readable payment on the store's current account,
+  // and the answer must be that PaymentIntent, succeeded, with its expanded charge tied to it (Codex X4 and N1 on
+  // #4494; fix as Codex X5 proposed). Only a free checkout, with no PaymentIntent, is settled with no read.
+  try {
+    const total = session.amount_total;
+    if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new UnknownReplyError("a purchase for several's total");
+    if (total > 0 || pi) {
+      const account = store.stripeAccountId;
+      if (!PAYMENT_ID.test(pi) || typeof account !== "string" || !account) throw new UnknownReplyError("a purchase for several's payment");
+      const payment = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
+      if (!payment || typeof payment !== "object" || Array.isArray(payment)) throw new UnknownReplyError("a purchase for several's payment");
+      const read = payment as { id?: unknown; object?: unknown; status?: unknown; latest_charge?: unknown };
+      const charge = read.latest_charge;
+      if (read.id !== pi || read.object !== "payment_intent" || read.status !== "succeeded" || !charge || typeof charge !== "object" || Array.isArray(charge)) {
+        throw new UnknownReplyError("a purchase for several's payment");
+      }
+      const chargeRead = charge as { id?: unknown; object?: unknown; payment_intent?: unknown };
+      const charged = chargeRead.payment_intent;
+      const chargedId = typeof charged === "string"
+        ? charged
+        : charged && typeof charged === "object" && !Array.isArray(charged) ? (charged as { id?: unknown }).id : "";
+      if (!CHARGE_ID.test(String(chargeRead.id ?? "")) || chargeRead.object !== "charge" || chargedId !== pi) {
+        throw new UnknownReplyError("a purchase for several's payment");
+      }
+      if (await givenBack(account, payment)) {
         await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS);
         await redisPipeline([["DEL", `${groupKey(id)}:settling`]]);
         return "already";
       }
-    } catch (error) {
-      await redisPipeline([["DEL", `${groupKey(id)}:settling`]]).catch(() => undefined);
-      throw error;
     }
+  } catch (error) {
+    await redisPipeline([["DEL", `${groupKey(id)}:settling`]]).catch(() => undefined);
+    throw error;
   }
   // A bundle hands over what it held when it was paid for, to every place.
   const items = bundleFromMeta(session.metadata ?? null, "bundle");

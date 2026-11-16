@@ -24,7 +24,7 @@ import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
-import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
+import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken, profileUnreadWords } from "@/lib/buyer-profile";
 import { channelName } from "@/lib/channel-names";
 import { formatMoney } from "@/lib/money";
 import { listSales } from "@/lib/store-checkout";
@@ -286,7 +286,11 @@ async function LatestBuyers({ store }: { store: Store }) {
                 </Link>
                 <span className="block text-sm text-ink-soft">{`${s.title} · ${day(s.paidAt)}`}</span>
               </span>
-              <span className="font-display font-semibold tabular-nums text-ink">{formatMoney(s.amount, s.currency)}</span>
+              {s.amount === null ? (
+                <span role="status" className="text-sm font-semibold text-ink">Amount could not be loaded</span>
+              ) : (
+                <span className="font-display font-semibold tabular-nums text-ink">{formatMoney(s.amount, s.currency)}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -343,6 +347,11 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         </p>
       ) : !store.stripeAccountId ? (
         <p className="notice notice-info mt-6">Connect your Stripe account, and what they paid is shown here.</p>
+      ) : null}
+      {profile.unread.length ? (
+        <p className="notice notice-warn mt-6" role="status">
+          {profileUnreadWords(profile.unread)}
+        </p>
       ) : null}
 
       <dl className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -426,28 +435,33 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         </section>
       ) : null}
 
-      {profile.courses.length ? (
+      {profile.courses.length || profile.unread.includes("courses") ? (
         <section aria-labelledby="courses-title" className="card mt-8 p-6 sm:p-8">
           <h2 id="courses-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Their courses</h2>
-          <ul className="mt-4 space-y-4">
-            {profile.courses.map((c, i) => {
-              const share = c.lessons ? Math.round((c.done / c.lessons) * 100) : 0;
-              return (
-                <li key={i} className="text-sm">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-semibold text-ink">{c.title}</span>
-                    <span className="tabular-nums text-ink-soft">{`${c.done} of ${c.lessons} ${c.lessons === 1 ? "lesson" : "lessons"} done`}</span>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-sand" role="img" aria-label={`${share}% of the lessons done`}>
-                    <div className="h-full rounded-full bg-violet-brand" style={{ width: `${share}%` }} />
-                  </div>
-                  <p className="mt-1 text-xs text-ink-soft">
-                    {c.lastSeen ? `Last opened ${day(c.lastSeen)}` : "Not opened yet"}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
+          {profile.unread.includes("courses") ? (
+            <p className="mt-2 text-sm text-ink-soft" role="status">How far they are in some of their courses could not be loaded just now, so those courses are missing here. Nothing was changed. Open this page again in a moment.</p>
+          ) : null}
+          {profile.courses.length ? (
+            <ul className="mt-4 space-y-4">
+              {profile.courses.map((c, i) => {
+                const share = c.lessons ? Math.round((c.done / c.lessons) * 100) : 0;
+                return (
+                  <li key={i} className="text-sm">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-semibold text-ink">{c.title}</span>
+                      <span className="tabular-nums text-ink-soft">{`${c.done} of ${c.lessons} ${c.lessons === 1 ? "lesson" : "lessons"} done`}</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-sand" role="img" aria-label={`${share}% of the lessons done`}>
+                      <div className="h-full rounded-full bg-violet-brand" style={{ width: `${share}%` }} />
+                    </div>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      {c.lastSeen ? `Last opened ${day(c.lastSeen)}` : "Not opened yet"}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
         </section>
       ) : null}
 
@@ -511,7 +525,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
       <section aria-labelledby="notes-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="notes-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Notes</h2>
         <p className="mt-1 text-sm text-ink-soft">For you and your team only. The buyer never sees them.</p>
-        {profile.person ? <PersonNotes person={profile.person} initial={profile.notes} /> : null}
+        {profile.unread.includes("notes") ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">Your team&apos;s notes about this person could not be loaded just now. Nothing was changed. Open this page again in a moment.</p>
+        ) : profile.person ? <PersonNotes person={profile.person} initial={profile.notes} /> : null}
       </section>
 
       {eraseToken ? (

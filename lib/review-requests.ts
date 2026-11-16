@@ -81,6 +81,8 @@ const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
 /** A run's claim on an order's one reminder (CLAIM_SECONDS, stretched before it goes), kept beside its first's mark. */
 const againKey = (reference: string) => `${sentKey(reference)}:again`;
+/** That address's stop on review requests, for the person's copy to read (lib/person-copy.ts). */
+export const reviewStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:rev:stop:${token}`;
 

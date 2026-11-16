@@ -99,6 +99,8 @@ const who = (email: string) => sha(`nimbus-recover:${normaliseEmail(email)}`).sl
 const sentKey = (session: string) => `nl:recover:sent:${session}`;
 const onceKey = (statsId: string, email: string, product: string) =>
   `nl:recover:once:${statsId}:${sha(`nimbus-recover-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
+/** That address's stop on checkout reminders, for the person's copy to read (lib/person-copy.ts). */
+export const recoveryStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:recover:off:${statsId}:${who(email)}`;
 /** What a reminder's stop mark can keep for good, counted in the store's data room before it is sent. */
 export const RECOVER_TRACE_BYTES = 192;

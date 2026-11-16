@@ -146,16 +146,29 @@ async function main(): Promise<void> {
     ["the token cannot be issued", () => { blobWorld.pages = [listing(blobs(0, 2))]; blobWorld.tokenFails = true; }],
     ["a token without its signing key", () => { blobWorld.pages = [listing(blobs(0, 2))]; blobWorld.token = { delegationToken: "d", validUntil: Date.now() + 600_000 }; }],
     ["a token that has run out", () => { blobWorld.pages = [listing(blobs(0, 2))]; blobWorld.token = { delegationToken: "d", clientSigningToken: "c", validUntil: Date.now() - 1 }; }],
-    // Claude 7's LEVE on #3313: a key whose signed address does not lead back to it is never handed out as signed.
-    ["a key with a # (its signed address ends at the #)", () => { blobWorld.pages = [listing([...blobs(0, 1), { pathname: `${PREFIX}a#b.pdf`, size: 1, etag: "e1" }])]; }],
-    ["a key with a ? (its signed address reads it as a query)", () => { blobWorld.pages = [listing([{ pathname: `${PREFIX}a?b.pdf`, size: 1, etag: "e2" }])]; }],
-    ["a key with an encoded part (its address decodes to another key)", () => { blobWorld.pages = [listing([{ pathname: `${PREFIX}a%2Fb.pdf`, size: 1, etag: "e3" }])]; }],
   ];
   for (const [what, arrange] of broken) {
     reset();
     arrange();
     const got = await call(`?source=blob&store=${STORE}`);
     is(`${what}: 503 with no entries`, [got.status, got.text.includes("entries")], [503, false]);
+  }
+
+  // Claude 7's LEVE on #3313: a key whose signed address does not lead back to it is never handed out as signed.
+  // Claude 5's MEDIUM on #3313: that key is left out alone, never the page; the listing is never complete
+  // ("unsignable", no cursor), so the Worker alarms and applies no orphan end (tests/backup-files-unsignable.test.ts).
+  const unsignable: [string, string][] = [
+    ["a key with a # (its signed address ends at the #)", "a#b.pdf"],
+    ["a key with a ? (its signed address reads it as a query)", "a?b.pdf"],
+    ["a key with an encoded part (its address decodes to another key)", "a%2Fb.pdf"],
+  ];
+  for (const [what, name] of unsignable) {
+    reset();
+    blobWorld.pages = [listing([...blobs(0, 1), { pathname: `${PREFIX}${name}`, size: 1, etag: "e1" }])];
+    const got = await call(`?source=blob&store=${STORE}`);
+    const page = got.json as BackupFilesPage | null;
+    is(`${what}: never handed out, signed or not`, [got.status, got.text.includes(name), got.text.includes(encodeURIComponent(name)), page?.entries.map((e) => e.key)], [200, false, false, [`${PREFIX}file-00000.pdf`]]);
+    is(`${what}: the listing is never complete`, [page?.complete, page?.reason, page?.cursor], [false, "unsignable", null]);
   }
 
   part("pages: a cursor to go on from, and a store over its pages is never complete");

@@ -156,15 +156,19 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   const raw = await fieldOf(statsId, before);
   const old = await fieldOf(statsId, after);
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([after, v], 1) : 0);
-  if (raw === null || raw === "") {
-    // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
-    // restrict them, so it goes, and gives its room back.
-    if (weight(old) === 0) return UNCHANGED;
+  if (raw === null) {
+    // No restriction to carry (the field was never set): a field the new address had from before (someone else's,
+    // long gone) must not restrict them, so it goes, and gives its room back. Any stored text, an empty one
+    // included, is carried as it is: a record that cannot be read opens nothing (mapOf), and moving it must not
+    // turn it into no restriction (Claude 1, #2036). An empty text at the new address goes too: kept, it would read
+    // as a record that opens nothing, and the teammate would lose every pipeline (Codex X5, #2036). It has no room
+    // to give back.
+    if (old === null) return UNCHANGED;
     const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]).catch(() => null));
     // Not confirmed: it may have landed, so what the new address held is carried, for the caller to put it back.
     if (deleted === null) throw new PipelineAccessCopyUnconfirmed({ prior: old, now: null }, 0);
     if (deleted === 0) return UNCHANGED;
-    await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
+    if (weight(old) > 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
     return { prior: old, now: null };
   }
   // A record moved, not a new one. Its room is taken BEFORE it is written, so a write that lands is never left
@@ -223,7 +227,8 @@ export async function undoUnconfirmedCopy(store: DataStore, to: string, unconfir
   if (!statsId || !isRedisConfigured()) return;
   const after = normaliseEmail(to);
   const prior = unconfirmed.copy.prior;
-  const put = oneAnswer(await redisPipeline([prior ? ["HSET", accessKey(statsId), after, prior] : ["HDEL", accessKey(statsId), after]]));
+  // A stored empty record ("", opens nothing) is put back, never deleted into "no restriction" (Claude 7 on #2036).
+  const put = oneAnswer(await redisPipeline([prior !== null ? ["HSET", accessKey(statsId), after, prior] : ["HDEL", accessKey(statsId), after]]));
   if (put === null) throw new Error("putting back the new address's pipeline access could not be confirmed");
   if (unconfirmed.taken > 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: unconfirmed.taken }]);
 }
@@ -252,7 +257,7 @@ export async function undoPipelineAccessCopy(store: DataStore, to: string, copy:
       await forceData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
     }
   }
-  const put = oneAnswer(await redisPipeline([copy.prior ? ["HSET", accessKey(statsId), after, copy.prior] : ["HDEL", accessKey(statsId), after]]));
+  const put = oneAnswer(await redisPipeline([copy.prior !== null ? ["HSET", accessKey(statsId), after, copy.prior] : ["HDEL", accessKey(statsId), after]]));
   if (put === null) throw new Error("putting back the new address's pipeline access could not be confirmed");
   if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
 }

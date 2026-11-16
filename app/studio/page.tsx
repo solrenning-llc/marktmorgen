@@ -74,6 +74,8 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
+import { readShare } from "@/lib/report-guests";
+import { shareView } from "@/lib/report-guests-rules";
 import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
@@ -1656,6 +1658,8 @@ export default async function StudioPage({
                   const meta = metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null);
                   const voice = store ? readVoice(store).catch(() => null) : undefined;
                   const chosen = team && store ? weeklyTeam(store.handle).catch(() => []) : null;
+                  // 405 [HX1]: a list that does not read is said so, never shown empty.
+                  const guests = team && store?.sid ? readShare(store.sid).then((share) => shareView(share, Date.now())).catch(() => "unknown" as const) : null;
                   const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }));
                   const chat = may("settings") ? chatSetup(store.statsId).catch(() => null) : undefined;
                   return (
@@ -1694,6 +1698,7 @@ export default async function StudioPage({
                             }
                           : null
                       }
+                      reportGuests={await guests}
                       goal={(await goal).cents}
                       chat={await chat}
                       chatSales={store.chatSales}

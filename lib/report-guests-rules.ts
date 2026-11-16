@@ -174,3 +174,34 @@ export function guestLines(figures: ReportFigure[], values: GuestFigures): strin
     return `${name}: ${value.toLocaleString("en-US")}`;
   });
 }
+
+/**
+ * The figures the studio offers today: those the numbers the jobs already read
+ * hold in full or say are not known (lib/stats-report.ts, summaryOf). New
+ * subscribers and sales through affiliates have no aggregated reader there
+ * yet, so they are not offered and a save naming them is refused: a figure
+ * that could only ever say "unknown" is not shown as if it worked.
+ */
+export const FIGURES_OFFERED: readonly ReportFigure[] = ["sales", "revenue", "visits"];
+
+/** How the studio says where an address is (405 [HX1], unit 5). */
+export type GuestStatus = "waiting" | "ended" | "getting" | "stopped";
+export const STATUS_WORDS: Record<GuestStatus, string> = {
+  waiting: "Invited: waiting for a yes",
+  ended: "Invitation ended: remove and add again to invite again",
+  getting: "Gets the email",
+  stopped: "Stopped the email",
+};
+
+export function guestStatus(guest: Guest, now: number): GuestStatus {
+  if (guest.state === "confirmed") return "getting";
+  if (guest.state === "left") return "stopped";
+  return inviteOpen(guest, now) ? "waiting" : "ended";
+}
+
+/** What the studio is shown of a store's choice: never a link or its hash. */
+export type ShareView = { figures: ReportFigure[]; every: ReportEvery; guests: { address: string; status: GuestStatus }[] };
+
+export function shareView(share: { figures: ReportFigure[]; every: ReportEvery; guests: Guest[] }, now: number): ShareView {
+  return { figures: share.figures, every: share.every, guests: share.guests.map((guest) => ({ address: guest.address, status: guestStatus(guest, now) })) };
+}

@@ -276,6 +276,8 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/webhooks": row("connections", never(SECRET)),
   "POST store/weekly-ai": row("email", draft),
   "POST store/weekly-team": row("email", draft),
+  // 405 [HX1]: who outside the team gets the store's numbers, and the invitation each new address is sent.
+  "POST store/report-guests": row("numbers", never("Sending the store's numbers to an address outside its team, and emailing that address an invitation, stays with the creator in the studio.")),
   "POST store/welcome-offer": row("offers", draft),
   "POST store/why-not-ask": row("pages", draft),
   "POST store/yearly-ask": row("email", draft),

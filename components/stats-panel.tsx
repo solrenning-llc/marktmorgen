@@ -32,6 +32,8 @@ import { HEARD_NAMES, isHeardAnswer } from "@/lib/heard-rules";
 import { toast } from "@/components/toast";
 import { type InsightContext, insightsFrom } from "@/lib/insights";
 import { WeeklyTeamPicker } from "@/components/weekly-team-picker";
+import { ReportGuestsPicker } from "@/components/report-guests-picker";
+import type { ShareView } from "@/lib/report-guests-rules";
 import { SalesGoalCard } from "@/components/sales-goal-card";
 import { ChatSummaryEditor } from "@/components/chat-summary-editor";
 import { goalMoneyByDay } from "@/lib/sales-goal-rules";
@@ -468,6 +470,7 @@ export function StatsPanel({
   canSetHeard = false,
   canSetAttribution = false,
   weeklyTeam = null,
+  reportGuests = null,
   goal = 0,
   chat,
   chatSales = false,
@@ -499,6 +502,8 @@ export function StatsPanel({
   canSetAttribution?: boolean;
   /** For whoever runs the team: members who see the numbers, and those who get the weekly email too. */
   weeklyTeam?: { members: string[]; chosen: string[] } | null;
+  /** The numbers email to addresses outside the team (405 [HX1]): for whoever runs the team; "unknown" when it did not read. */
+  reportGuests?: ShareView | "unknown" | null;
   /** The month's goal (lib/sales-goal-rules.ts), 0 for none. */
   goal?: number;
   /** For whoever may change settings: the chat the numbers are posted to (lib/chat-summary.ts); undefined for anybody else. */
@@ -1486,6 +1491,7 @@ export function StatsPanel({
           Visits go back as far as they are kept, 400 days.
         </p>
         {weeklyTeam ? <WeeklyTeamPicker members={weeklyTeam.members} chosen={weeklyTeam.chosen} /> : null}
+        {reportGuests ? <ReportGuestsPicker initial={reportGuests} /> : null}
         {weeklyAi !== undefined ? <WeeklyAiToggle on={weeklyAi} /> : null}
         {chat !== undefined ? <ChatSummaryEditor kind={chat} sales={chatSales} /> : null}
       </div>

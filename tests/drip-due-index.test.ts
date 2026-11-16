@@ -23,6 +23,7 @@ import { type Course, isOpen } from "@/lib/course";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import * as registry from "./plan-cost-registry";
+import { dataUsed } from "@/lib/store-data";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { type SesMailFixtureOptions, installSesMailFixture } from "./ses-mail-fixture";
@@ -321,6 +322,33 @@ async function main(): Promise<void> {
     is("nothing sent; the marks stop at the store's ceiling", [counts.sent, claims() <= learn.DRIP_REFUSALS_PER_STORE], [0, true]);
     const most = typeof R.dripRunCommandsPerStore === "function" ? (R.dripRunCommandsPerStore as (e: number) => number)(entriesPerRun) + (R.DRIP_RUN_FIXED_COMMANDS as number) : -1;
     is(`the run's commands (${seen.length}) within the formula (${most})`, seen.length <= most, true);
+  }
+
+  part("A pair already in the index takes no room again: a schedule change and a visit after the walk (Claude 5 on #3344, MEDIUM 1)");
+  {
+    const store = await setup();
+    await registerDrip(store, PRODUCT as never, COURSE);
+    const used = async () => (await dataUsed(store))?.used ?? Number.NaN;
+    for (let i = 0; i < 20; i += 1) await original([["HSET", `nl:course:${COURSE.id}:students`, emailKey(`walked${i}@example.com`), JSON.stringify({ e: `walked${i}@example.com`, s: NOW, l: NOW })]]);
+    await original([["SADD", pendingKey(store), `${COURSE.id}|${store.handle}|${PRODUCT.id}`]]);
+    await quietly(() => run(store));
+    const walked = await used();
+    const pairs = (await original([["ZCARD", dueKey(store)]]))[0];
+    is("the walk indexed every student's pairs", Number(pairs) > 0, true);
+    const later = courseOf(COURSE.id, [{ id: "module000001", dripDays: 0 }, { id: "module000002", dripDays: 2 }, { id: "module000003", dripDays: 31 }]);
+    await registerDrip(store, PRODUCT as never, later);
+    await quietly(() => run(store, NOW, async (id) => (id === COURSE.id ? later : null)));
+    is("the same pairs rescored", (await original([["ZCARD", dueKey(store)]]))[0], pairs);
+    is("a schedule change takes no room again for pairs already there", await used(), walked);
+    for (let i = 0; i < 20; i += 1) await touchStudent(COURSE.id, `walked${i}@example.com`, NOW, store, { course: later, productId: PRODUCT.id });
+    is("a visit after the walk takes no room again for its pairs", await used(), walked);
+  }
+
+  part("A store that pays nothing is walked too, and its share prices the walk (Claude 5 on #3344, MEDIUM 3)");
+  {
+    const source = readFileSync("tests/plan-cost-registry.ts", "utf8");
+    const worst = source.slice(source.indexOf("export function nonPayingWorst"), source.indexOf("\n}\n", source.indexOf("export function nonPayingWorst")));
+    is("nonPayingWorst prices course-drip-run", /course-drip-run/.test(worst), true);
   }
 
   part("The cost line per plan, computed from the code's constants, fits the Store plan's room under US$65");

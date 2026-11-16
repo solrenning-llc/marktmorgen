@@ -69,6 +69,7 @@ import { MAX_PARTS, copyInParts, manifestBound, openManifest, runStoredBound } f
 import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
+import { windowCountBy } from "@/lib/window-count";
 import { LockBusyError, releaseLock, takeLock, type Held } from "@/lib/redis-lock";
 
 /** The reviewed ceiling: one run's caps, the retention and storage ceiling, and when and from what it was reviewed. */
@@ -292,10 +293,11 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   // there for the day after.
   const day = `nl:backup:ran:${dayOf(now)}`;
   try {
-    // Read in its exact shape only (CX-123 rule 24, Codex G's MEDIUM): two replies, the SET's "OK" or null, and
-    // the INCRBY's own integer. Anything else (true, [1], "01", a missing reply) is unknown and lets no run start.
-    const reply: unknown = await redisPipeline([["SET", day, "0", "NX", "EX", 2 * 86_400], ["INCRBY", day, 1]]);
-    const runs = Array.isArray(reply) && reply.length === 2 && (reply[0] === null || reply[0] === "OK") ? reply[1] : undefined;
+    // Read in its exact shape only (CX-123 rule 24, Codex G's MEDIUM): two replies, the INCRBY's own integer and the
+    // EXPIRE's 0 or 1 (lib/window-count.ts, so the day's key never outlives its day). Anything else (true, [1], "01", a
+    // missing reply) is unknown and lets no run start.
+    const reply: unknown = await redisPipeline(windowCountBy(day, 2 * 86_400, 1));
+    const runs = Array.isArray(reply) && reply.length === 2 && (reply[1] === 0 || reply[1] === 1) ? reply[0] : undefined;
     if (typeof runs !== "number" || !Number.isSafeInteger(runs) || runs < 1) return (await letGo(), { ok: false, reason: "mark_error" });
     if (runs > BACKUP_RUNS_PER_DAY) return (await letGo(), { ok: false, reason: "already_ran" });
   } catch {

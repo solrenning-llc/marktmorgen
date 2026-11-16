@@ -13,11 +13,13 @@ import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { forgetBoughtCommands } from "@/lib/buyer-library";
 import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
-import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_OPEN_ORDER_SECONDS, type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
+import { tellCanceled } from "@/lib/paypal-cancel";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
-import { type Store, ensureListId, storeRef } from "@/lib/store";
+import { type Store, ensureListId, forgetPayPalPast, storeRef } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
@@ -369,6 +371,42 @@ async function handedOver(statsId: string, order: string): Promise<void> {
 }
 
 /**
+ * A PayPal sale whose affiliate or partner credit failed after it was handed over (an unknown read of the affiliate,
+ * rule 24, or Redis trouble): kept in the same list as `credit:<order>`, so the sweep credits it again from the paid
+ * record (creditAgain), never by handing the order over or emailing the buyer twice. Its own read is the one the list
+ * already costs a sweep. Best effort, as the hand-over's own retry mark is.
+ */
+const CREDIT_PREFIX = "credit:";
+async function oweCredit(store: Store, order: string, error: unknown): Promise<void> {
+  console.error("crediting a PayPal sale failed; credited again at the next sweep", order, error);
+  if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), dueNow(), `${CREDIT_PREFIX}${order}`]]).catch(() => undefined);
+}
+
+/** Credits again a sale kept by oweCredit; true once it is credited or there is nothing left to credit. Throws while unknown. */
+async function creditAgain(store: Store, order: string): Promise<boolean> {
+  const paid = await readPaidExact(order);
+  if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
+  // Erased, or past its time: nothing left to credit from.
+  if (paid === null) return true;
+  // The person deleted from the store at their own request since paying: credited for the sale paid, with nothing that
+  // names them (no bond), as the hand-over does (Claude 1 cloud, MEDIUM on #3858). An unknown mark throws: the credit
+  // stays owed for the next sweep, never made on a guess (rule 24).
+  const listId = await deletionListId(store);
+  const erased = await erasedSincePaid(listId, paid, true);
+  const product = await readListing(store, paid.product);
+  await creditPayPalSale(store, paid, product?.title ?? "", !erased);
+  // Read once more after the bond, as the hand-over does (Claude 6, MEDIUM on #3858): a deletion that wrote its mark
+  // between the read above and the bond did not see that bond, so it is taken back here. Also when the first read said
+  // erased, so a bond an earlier try wrote before stopping is taken back too. One HGET a try; the forget's reply is
+  // read exactly, and anything but 0 or 1 throws, so the credit stays owed for the next sweep (rule 24).
+  if (paid.via && store.statsId && (erased || (await erasedSincePaid(listId, paid, true)))) {
+    const replies = repliesFor(await redisPipeline([forgetBondCommand(store.statsId, paid.email, paid.via.aff)]), 1);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("taking back the bond of a person deleted during a PayPal credit's retry");
+  }
+  return true;
+}
+
+/**
  * Gives the buyer what they paid for and emails the receipt. False when the product is gone (Redis answered that
  * its record is not there). Everything it hands over is read first, a bundle's products too; a read that is
  * unknown throws before anything is handed over, and the order is kept for the sweep to hand over, never taken
@@ -454,7 +492,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
       return null;
     },
   });
-  await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
+  await creditPayPalSale(store, paid, product.title).catch((error) => oweCredit(store, paid.order, error));
   // The person's own deletion completed during this try, after its check (finding 3): what the try wrote of them is
   // taken back, the webhooks are not told, and the order leaves the list. Read once more, after every write that names
   // them (the bond last), so a deletion that writes its mark after this read deletes those writes itself. One HGET a try.
@@ -527,6 +565,15 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
   let handed = 0;
   for (const order of orders) {
     if (Date.now() >= deadline) break;
+    if (order.startsWith(CREDIT_PREFIX)) {
+      try {
+        if (await creditAgain(store, order.slice(CREDIT_PREFIX.length))) await redisPipeline([["ZREM", key, order]]);
+      } catch (error) {
+        console.error("crediting a PayPal sale again failed; tried again at the next sweep", store.handle, order, error);
+        await redisPipeline([["ZADD", key, dueNow(), order]]).catch(() => undefined);
+      }
+      continue;
+    }
     try {
       const paid = await readPaidExact(order);
       if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
@@ -562,7 +609,26 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
  * whose product could not be read handed over (counted as cleared).
  */
 export async function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number }> {
+  // PayPal disconnected (lib/store.ts, paypalPast): its orders are still answered, but only while some are left on the
+  // store's three lists and within PAYPAL_PAST_SECONDS of the disconnection (three ZCARD in one round trip first,
+  // PAYPAL_PAST_WATCH in tests/plan-cost-registry.ts). With none left, or past the window, the account is forgotten
+  // and the store is no longer swept for PayPal; an unknown count is asked again next run, never taken for "none".
+  // Not before PAYPAL_OPEN_ORDER_SECONDS after the disconnection, though: an order opened just before it is on none of
+  // the lists until its buyer comes back (openOrder keeps it that long), and a payment PayPal holds as pending then
+  // must still be asked about with this account (review of #3924, MEDIUM).
+  if (!store.paypalSeller && store.paypalPast) {
+    const past = store.paypalPast;
+    const left = paypalPastWatched(store) && store.statsId ? await paypalOrdersLeft(store.statsId) : 0;
+    if (left === null) return { cleared: 0, revoked: 0 };
+    if (left === 0) {
+      const openable = paypalPastWatched(store) && Date.now() < past.at + PAYPAL_OPEN_ORDER_SECONDS * 1000;
+      if (!openable) await forgetPayPalPast(storeRef(store), past.at).catch((error) => console.error("forgetting a disconnected PayPal account failed", store.handle, error));
+      return { cleared: 0, revoked: 0 };
+    }
+  }
   const done = await watchPayPal(store, deadline, {
+    // An order PayPal never confirmed: the buyer and the creator are told it is canceled (lib/paypal-cancel.ts).
+    canceled: (order, who) => tellCanceled(store, order, who),
     handOver: async (paid) => {
       await handOverPayPal(store, paid);
     },
@@ -594,4 +660,22 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
   });
   done.cleared += await handOverAgain(store, deadline);
   return done;
+}
+
+/**
+ * Tries again, once a run of the five-minute job, the notices of canceled PayPal orders the sender refused, to their
+ * buyers and their creators (lib/paypal-sales.ts, retryCancelNotices): each told from its store as it is now, found by the handle kept with the
+ * order and checked by its stats id. A store that cannot be read is tried again next time; a store that is gone, or is
+ * another store now, leaves nobody to send from, and the page the buyer comes back to still says the order was
+ * canceled.
+ */
+export async function retryPayPalCancelNotices(deadline: number): Promise<number> {
+  return retryCancelNotices(deadline, async (canceled, who) => {
+    // Read exactly (rule 24): a reply out of shape is not "no store". It throws, and retryCancelNotices reads the
+    // throw as "refused", so both notices wait for the next run instead of being dropped for good.
+    const store = await storeForHandleExactly(canceled.handle);
+    if (store === "unknown") throw new UnknownReplyError("the store of a canceled PayPal order");
+    if (store === "none" || store.statsId !== canceled.store) return { buyer: "none", creator: "none" };
+    return tellCanceled(store, canceled, who);
+  });
 }

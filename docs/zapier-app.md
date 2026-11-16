@@ -31,6 +31,10 @@ not already.
   - Add or Remove Labels (`POST /api/v1/leads/labels`)
   - Give Product Access (`POST /api/v1/access`), its product field filled from
     `GET /api/v1/products`.
+  - Create Discount Code (`POST /api/v1/codes`) — made on the creator's own
+    Stripe account with the studio's rules, only while the store is taking
+    payments; letters already used there are refused, so a repeated run makes
+    no second code.
 
 The five endpoints a store may have (`MAX_ENDPOINTS`) count those a Zap adds,
 so a creator cannot run past the store's own limit from Zapier. Every endpoint

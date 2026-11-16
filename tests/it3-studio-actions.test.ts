@@ -151,11 +151,11 @@ is("\"refund my plan\" opens the plan's own refund", first("refund my plan"), "r
 is("\"afiliate\" (a typo) opens Affiliates", first("afiliate"), "affiliates");
 is("\"affiliates\" (plural) opens Affiliates", first("affiliates"), "affiliates");
 is("\"invoice\" opens Payment requests", first("invoice"), "requests");
-is("\"invoice\" also finds the plan's own invoices", ids("invoice").includes("invoices"), true);
-is("\"plan invoice\" opens the plan's own invoices", first("plan invoice"), "invoices");
+is("\"invoice\" also finds the plan's own invoices", ids("invoice").includes("plan-bills"), true);
+is("\"plan invoice\" opens the plan's own invoices", first("plan invoice"), "plan-bills");
 is("a bare \"receipt\" puts the buyers first, where a buyer's order receipt is", first("receipt"), "people");
-is("\"receipt\" still finds the plan's own invoices", ids("receipt").includes("invoices"), true);
-is("\"plan receipt\" opens the plan's own invoices", first("plan receipt"), "invoices");
+is("\"receipt\" still finds the plan's own invoices", ids("receipt").includes("plan-bills"), true);
+is("\"plan receipt\" opens the plan's own invoices", first("plan receipt"), "plan-bills");
 is("\"companies\" opens the companies", first("companies"), "companies");
 is("\"company\" (singular) opens the companies", first("company"), "companies");
 is("\"b2b\" finds the companies", ids("b2b").includes("companies"), true);
@@ -185,7 +185,7 @@ for (const role of ["owner", "admin", "editor", "support"] as const) {
 }
 is("support: no plan refund (billing)", ids("refund", context("support")).includes("refund"), false);
 is("support: buyers still found for \"refund\" (orders)", ids("refund", context("support")).includes("people"), true);
-is("support: no plan invoices (billing)", ids("receipt", context("support")).includes("invoices"), false);
+is("support: no plan invoices (billing)", ids("receipt", context("support")).includes("plan-bills"), false);
 is("Discord never found without Discord's keys", ids("discord", context("owner", { has: { ...everything, discord: false } })), []);
 is("video calls never found without a meeting app", ids("zoom", context("owner", { has: { ...everything, meet: false } })).includes("meetings"), false);
 

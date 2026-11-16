@@ -87,6 +87,7 @@ import {
   type BackupFilesReason,
   type BackupFilesSource,
   isContractKey,
+  isContractUrl,
   parseFilesPage,
   sourcePrefix,
 } from "@/lib/backup-files-contract";
@@ -428,6 +429,12 @@ export async function backupFilesPage(
       signed = await source.sign(object.key);
     } catch (error) {
       if (!(error instanceof UnsignableKey)) throw error;
+      refuse();
+      continue;
+    }
+    // The contract's own address rule too (Claude 3's second MEDIUM on #3313): an address past it would make
+    // parseFilesPage refuse the whole page, so its key is left out alone, as above.
+    if (!isContractUrl(signed.url)) {
       refuse();
       continue;
     }

@@ -132,6 +132,25 @@ export function isContractKey(value: unknown): value is string {
   return typeof value === "string" && value.length >= 1 && value.length <= 1024 && !CONTROL.test(value);
 }
 
+/** The longest signed address an entry may carry, in characters. */
+export const BACKUP_FILES_URL_MOST = 8192;
+
+/**
+ * The contract's own rule for an entry's signed address: a plain https URL (no user or password) of at most
+ * BACKUP_FILES_URL_MOST characters. The route runs it on each address right after signing (lib/backup-files-source.ts),
+ * so a key whose address breaks it (a valid key of mostly non-ASCII characters, percent-encoded past the bound) is left
+ * out alone, never the whole page (Claude 3's second MEDIUM on #3313).
+ */
+export function isContractUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > BACKUP_FILES_URL_MOST) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
 function keyOf(value: unknown, what: string): string {
   if (!isContractKey(value)) fail(`${what} is not an object key`);
   return value as string;
@@ -191,13 +210,7 @@ export function parseFilesPage(raw: unknown): BackupFilesPage {
     seen.add(key);
     if (typeof entry.etag !== "string" || !ETAG_PATTERN.test(entry.etag)) fail(`entries[${i}].etag is not an etag`);
     if (typeof entry.size !== "number" || !Number.isSafeInteger(entry.size) || entry.size < 0) fail(`entries[${i}].size is not a count of bytes`);
-    let url: URL | null = null;
-    try {
-      url = typeof entry.url === "string" && entry.url.length <= 8192 ? new URL(entry.url) : null;
-    } catch {
-      url = null;
-    }
-    if (!url || url.protocol !== "https:" || url.username || url.password) fail(`entries[${i}].url is not a plain https URL`);
+    if (!isContractUrl(entry.url)) fail(`entries[${i}].url is not a plain https URL`);
     return { source: source as BackupFilesSource, key, etag: entry.etag as string, size: entry.size as number, url: entry.url as string, expiresAt: wholeTime(entry.expiresAt, `entries[${i}].expiresAt`) };
   });
   const end = pageEnd(value, BACKUP_FILES_REASONS);

@@ -84,7 +84,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
       <main id="content" className="relative mx-auto max-w-xl px-4 py-12 sm:py-16">
         <div className="st-card p-6 sm:p-10">
           <p className="st-muted text-sm font-semibold">{w.eyebrow(store.name)}</p>
-          <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
+          <h1 id="pay-request-title" className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
           {status === "paid" ? (
             <p className="st-muted mt-4 text-lg">
               {request.outside
@@ -105,7 +105,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
             </div>
           ) : null}
 
-          <table className="mt-6 w-full text-left text-sm">
+          <table aria-labelledby="pay-request-title" className="mt-6 w-full text-left text-sm">
             <thead>
               <tr className="st-muted">
                 <th scope="col" className="py-2 pr-3 font-semibold">{w.item}</th>

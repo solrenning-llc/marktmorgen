@@ -5,6 +5,7 @@ import { courseIndexes } from "@/lib/certificate";
 import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
+import { dropMirroredPicture } from "@/lib/picture-r2-copy";
 import { waitingCount } from "@/lib/preorders";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
@@ -27,7 +28,8 @@ import {
   type Product,
 } from "@/lib/store";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
-import { readRecurring } from "@/lib/product-recurring";
+import { everyOf, readRecurring } from "@/lib/product-recurring";
+import { everyProblem } from "@/lib/recurring-every-rules";
 import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
@@ -185,8 +187,9 @@ export async function POST(request: NextRequest) {
   // Absent or unrecognised means a single sale, which is what a product is
   // unless the creator says otherwise. A trial or a payment count that was
   // typed and is not a whole number in range is said, not dropped.
-  const recurring = readRecurring(text(body.every, 10), body.trial, body.payments);
-  if (recurring === "trial" || recurring === "payments") {
+  // How often it charges (609 [WP8]): `everyCount`, absent or 1 for every interval; only a listed choice is kept.
+  const recurring = readRecurring(text(body.every, 10), body.trial, body.payments, body.everyCount);
+  if (recurring === "trial" || recurring === "payments" || recurring === "every") {
     return Response.json({ ok: false, error: recurring }, { status: 400 });
   }
   // The suggested price, when the buyer chooses what to pay, as typed: it is
@@ -265,6 +268,19 @@ export async function POST(request: NextRequest) {
       const problem = yearlyProblem(after, after.yearly, min, store.tiers);
       if (problem) return Response.json({ ok: false, error: `yearly_${problem}` }, { status: 400 });
     }
+  }
+
+  // Charged every N (609 [WP8]): what is still counted in single weeks or months is refused with its reason, against
+  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say.
+  if ((action === "add" || action === "edit") && recurring && everyOf(recurring) > 1) {
+    const current = action === "edit" ? await readListing(guarded.store, id) : null;
+    const problem = everyProblem(everyOf(recurring), {
+      intro: intro === undefined ? current?.intro : intro,
+      yearly: yearly === undefined ? current?.yearly : yearly,
+      inTiers: action === "edit" && guarded.store.tiers.includes(id),
+      payments: recurring.payments,
+    });
+    if (problem) return Response.json({ ok: false, error: `every_${problem}` }, { status: 400 });
   }
 
   try {
@@ -380,6 +396,8 @@ export async function POST(request: NextRequest) {
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
+        // And its copy in the pictures' own bucket, when it was copied there (#4237, item 4).
+        if (going.image?.r2) await dropMirroredPicture(imagePaths(going.image));
         // A course takes its lessons with it: their records, and their files.
         if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).

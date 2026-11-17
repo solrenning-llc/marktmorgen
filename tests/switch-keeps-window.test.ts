@@ -582,6 +582,9 @@ async function main(): Promise<void> {
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #2843 (16 November 2026, 16h): main's newer costs with the stack's Blob lines leave Store and Scale one
     // cent less in a yearly month: 36.43 and 576.27 where 36.44 and 576.28 were; still above zero (MR). Cost is not lowered.
+    // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
+    // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #2843 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     is("11: and 36.42, 257.36 and 576.27 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.42", "257.36", "576.27"]);
   } finally {
     Date.now = realNow;

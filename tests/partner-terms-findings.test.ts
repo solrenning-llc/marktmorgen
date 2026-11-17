@@ -68,6 +68,19 @@ async function main(): Promise<void> {
   await notePartners(await store(), sale("cs_test_after_end", T - DAY + 60));
   is("a sale paid before the end, noted after it, still earns; one after it does not", await earned(), [`cs_test_before_end:${p}`]);
 
+  // Codex X4 on #1924 (MEDIUM): parseAffiliate drops an end it cannot read, so a dated commitment read through
+  // readAffiliateExact became one "until revoked", and ending it wrote over the record. Which commitment was in force
+  // is not known: UnknownReplyError, with not one byte of the record changed.
+  part("2b. An unreadable stored commitment is unknown and is never overwritten");
+  const malformed = "ffffffffffff";
+  const malformedRaw = JSON.stringify(person(malformed, { share: { percent: 10, products: [A], until: "not-seconds" } }));
+  await redis.pipeline([["HSET", people, malformed, malformedRaw]]);
+  const refused = await proposePartnerShare(await store(), malformed, null, T).then(() => "resolved", (error: Error) => error.name);
+  is("the malformed commitment is unknown, never read as until revoked", refused, "UnknownReplyError");
+  is("and no byte of the record is overwritten", (await redis.pipeline([["HGET", people, malformed]]))[0], malformedRaw);
+  // Out of the way of the parts below, which read every partner's commitment for the cap.
+  await redis.pipeline([["HDEL", people, malformed]]);
+
   part("3. The end is compared with when the buyer paid, not when the checkout opened");
   const q = "bbbbbbbbbbbb";
   await put(person(q));

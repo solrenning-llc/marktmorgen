@@ -388,6 +388,15 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/group-buy.ts REFUNDS_END: a pass over a store's refunds ended, its anchor and the account it is of in one step.
+        if (key.startsWith("-- marktmorgen:group-refunds-end:v1\n") && args[0] === "4" && args.length === 7) {
+          const [, anchor, owner, left, pass, at, account] = args;
+          this.run(["SET", anchor, at]);
+          this.run(["SET", owner, account]);
+          this.run(["ZREM", left, account]);
+          this.run(["DEL", pass]);
+          return 1;
+        }
         // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
         if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
           const [, members, ...keys] = args;
@@ -1193,6 +1202,17 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/tier-benefits.ts BENEFIT_MARK: one person's benefit marks written only while they are not on the store's
+        // list of the deleted; -1 when they are, otherwise each HSETNX's reply and the SADD's.
+        if (key.startsWith("-- marktmorgen:benefit-mark:v1\n") && args[0] === "3" && args.length >= 8 && (args.length - 6) % 2 === 0) {
+          const [, marks, who, erased, print, person, ...pairs] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          const out: unknown[] = [];
+          for (let i = 0; i < pairs.length; i += 2) out.push(this.run(["HSETNX", marks, pairs[i], pairs[i + 1]]));
+          out.push(this.run(["SADD", who, person]));
+          return out;
+        }
         // lib/calendar-sync.ts CALENDAR_CONFIG_SWAP: a store's calendar settings written only over the exact text they
         // were read as ("1"), or only while still absent ("0"); 0 when changed since (issue #3984).
         if (key.startsWith("-- marktmorgen:calendar-config-swap:v1\n") && args[0] === "1" && args.length === 5) {
@@ -1594,6 +1614,30 @@ export class MemoryRedis {
             changed.push(field);
           }
           return changed;
+        }
+        // lib/quiz.ts QUIZ_TRY: one try checked against the state the caller read, counted, charged to the store and written at once.
+        if (key.startsWith("-- marktmorgen:quiz-try:v1\n") && (args[0] === "3" || args[0] === "4") && args.length === 1 + Number(args[0]) + 8) {
+          const n = Number(args[0]);
+          const [tries, last, passes, usage] = args.slice(1, 1 + n);
+          const [seenTries, seenLast, rawMost, json, lessonId, passed, rawAllowance, keepSeconds] = args.slice(1 + n);
+          const triesNow = this.run(["GET", tries]);
+          const lastNow = this.run(["GET", last]);
+          if ((triesNow ?? "") !== seenTries || (lastNow ?? "") !== seenLast) return ["stale", 0];
+          const used = seenTries === "" ? 0 : Number(seenTries);
+          const most = Number(rawMost);
+          if (most > 0 && used >= most) return ["no_tries", used];
+          if (n === 4) {
+            const spent = this.run(["GET", usage]);
+            const count = spent === null || spent === undefined ? 0 : Number(spent);
+            if (!Number.isSafeInteger(count) || count < 0) return ["unavailable", 0];
+            if (count >= Number(rawAllowance)) return ["usage_limit", used];
+            this.run(["INCR", usage]);
+            this.run(["EXPIRE", usage, keepSeconds]);
+          }
+          const now = this.run(["INCR", tries]);
+          this.run(["SET", last, json]);
+          if (passed === "1") this.run(["SADD", passes, lessonId]);
+          return ["ok", now];
         }
         // lib/mail.ts GIVE_BACK_FLOOR: a count given back by at most itself, never below zero; one that is not a whole number is an error, nothing changed.
         if (key.startsWith("-- marktmorgen:give-back-floor:v1\n") && args[0] === "1" && args.length === 3) {

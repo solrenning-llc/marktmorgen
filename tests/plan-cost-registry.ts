@@ -1003,10 +1003,10 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - ordersPerStoreRun: at most REFUND_WATCH_BATCH due orders read from it a run;
  * - payPalReadsPerOrderLook: one GET of the order's capture at PayPal each time it is looked at (inside the job's run
  *   deadline; no dated source here gives PayPal's price per API call, so it is an open gap, never zero);
- * - ownCommandsPerOrderLook: the paid record's GET, one write of the list (ZADD for the next look, or ZREM) and at
- *   most two SET XX of the paid record (the Path's money, #3443): PayPal's word when it changes the record (a partial
- *   refund's or a reversal's takenOff, or the blind mark taken off), then the blind mark when a reversal's refund mark
- *   is not known written: 4;
+ * - ownCommandsPerOrderLook: the paid record's GET, the order put late before PayPal is asked (one ZADD, Codex U on
+ *   #3443), one write of the list (ZADD for the next look, or ZREM) and at most two SET XX of the paid record (the
+ *   Path's money, #3443): PayPal's word when it changes the record (a partial refund's or a reversal's takenOff, or the
+ *   blind mark taken off), then the blind mark when a reversal's refund mark is not known written: 5;
  * - lateLooksPerOrderPerDayAtMost: a look whose word could not be written on the paid record puts the order back
  *   already late (WATCH_LATE_SECONDS in lib/paypal-sales.ts, Codex X4 on #3443), so it is looked at on every run of
  *   the five-minute job, 288 a day, for as long as the record cannot be written, instead of hourly; bounded still by
@@ -1024,7 +1024,7 @@ export const PAYPAL_REFUND_WATCH = {
   listReadsPerStoreRun: 1,
   ordersPerStoreRun: 25,
   payPalReadsPerOrderLook: 1,
-  ownCommandsPerOrderLook: 4,
+  ownCommandsPerOrderLook: 5,
   lateLooksPerOrderPerDayAtMost: 288,
   looksPerOrderPerDayAtMost: 24,
   looksPerOrderPerDayAfter30Days: 1,

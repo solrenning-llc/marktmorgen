@@ -1421,6 +1421,13 @@ export async function watchPayPal(
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
+    // Late before PayPal is asked (Codex U on #3443, U-20261117-0033): from here until this look's own write gives the
+    // order its next place, the Path reads it as late (readPayPalWatchLate), so no write left unconfirmed after PayPal's
+    // answer (the blind mark, PayPal's word, the next place) can leave a sale counted whose state was not proven. Every
+    // way out of this look below writes that place (ZADD or ZREM); one not known made leaves the order late, looked at
+    // again on the next run. This mark not known written: PayPal is not asked this run and nothing new is learned.
+    const held = repliesFor(await redisPipeline([["ZADD", watchKey(statsId), String(lateAt(now)), order]]).catch(() => null), 1);
+    if (!held || (held[0] !== 0 && held[0] !== 1)) continue;
     // The account the order was paid to, whatever account the store has connected since (C7, 12 November 2026); a
     // record from before it was kept falls back to the store's account now: the connected one, or, while PayPal is
     // disconnected, the one kept (paypalMerchant), never a read of a connection that is not there.

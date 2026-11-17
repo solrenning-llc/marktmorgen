@@ -31,7 +31,7 @@ import { creditPayPalSale, readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { readFileSync } from "node:fs";
 import { AFFILIATE_ENTRY_BYTES, BOOK_KEPT_REFUND_BYTES } from "@/lib/api-read-rules";
-import { PAYPAL_REFUNDS_READ, type Paid, readPayPalRefundsWithCoverage, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_REFUNDS_READ, type Paid, WATCH_LATE_SECONDS, readPayPalRefundsWithCoverage, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -300,7 +300,10 @@ async function main(): Promise<void> {
         redis.pipeline = original;
       }
       const kept = sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:order-write:v1") && c.some((a) => String(a).startsWith(`nl:ppsell:back:${SID}`)));
-      return { kept, sent };
+      // The order put late before PayPal is asked (Codex U on #3443): one ZADD of the watch at a score already past
+      // WATCH_LATE_SECONDS, part of the watch line's own commands (PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook).
+      const late = sent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}` && c[c.length - 1] === ORDER && Number(c[2]) <= Math.floor(Date.now() / 1000) - WATCH_LATE_SECONDS);
+      return { kept, sent: sent.filter((c) => !late.includes(c)), late };
     };
     await setup();
     captures.set(CAPTURE, "REFUNDED");
@@ -337,6 +340,7 @@ async function main(): Promise<void> {
       captures.set(CAPTURE, status);
       const look = await scripts(() => answering(failure.command, failure.prefix, failure.reply, () => watch()));
       const label = `${status}, ${failure.name} unknown`;
+      is(`${label}: put late once before PayPal was asked`, look.late.length, 1);
       is(`${label}: looked at again an hour on, one script`, [look.kept.length, look.sent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}`).length], [1, 1]);
       const counted = [
         (c: (string | number)[]) => failure.command === "HGET" && c[0] === "HGET" && String(c[1]).startsWith(failure.prefix),
@@ -357,8 +361,8 @@ async function main(): Promise<void> {
       is(`${label}: every other command of a failed look is a take-back mark (ZADD or EXPIRE of its set)`, rest.every((c) => (c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))), true);
       is(`${label}: the marks of a failed look are within the line`, rest.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
       is(
-        `${label}: the whole failed look is within the lines' sum`,
-        look.sent.length - (failure.command === "HGET" ? 1 : 0) <=
+        `${label}: the whole failed look, its late mark included, is within the lines' sum`,
+        look.sent.length + look.late.length - (failure.command === "HGET" ? 1 : 0) <=
           PAYPAL_PENDING_SWEEP.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook +

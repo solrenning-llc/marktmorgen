@@ -139,6 +139,23 @@ async function main(): Promise<void> {
   is("and the login another store still uses keeps its grant at Meta", [granted.get(USER_2), revokedFor], [true, []]);
   skewMs = 0;
 
+  // Codex X4 on #4159 @ec3229d254 (MEDIUM, privacy): before anything is written, the store's own connection on the
+  // same login is still a user of the grant. A reconnect that goes stale must not give it back and break that
+  // connection, which the studio would still show as connected.
+  part("A stale reconnect with the same login keeps the grant the store's own connection still uses");
+  await connect(a, USER_1);
+  revokedFor.length = 0;
+  staleOnAccounts = true;
+  loginAs = USER_1;
+  const sameStale = await finishMeta({ statsId: a.statsId!, sid: a.sid, code: "good-code", redirect, by: a.email, owner: { email: a.email, handle: a.handle }, currency: a.currency, startedAt: Date.now() });
+  staleOnAccounts = false;
+  skewMs = 0;
+  is("nothing new is kept: the reconnect expired", sameStale.ok ? "kept" : sameStale.error, "expired");
+  is("the login's grant is not given back while the store's own connection uses it", [granted.get(USER_1), revokedFor], [true, []]);
+  is("and the store's existing connection still reads Meta", await readMetaSpend(a.statsId!, a.currency), "read");
+  const after = await disconnectMeta(a.statsId!);
+  is("disconnecting it afterwards still gives the grant back, once", [after && after.metaAccess, granted.get(USER_1), revokedFor], ["removed", false, [USER_1]]);
+
   part("What the creator is told");
   const keptLine = accountChangeWords({ kind: "metaads-disconnected", kept: true }).line;
   is("the email never says the permission was given back when it was kept", [/given back/i.test(keptLine), /Another store still uses this Meta login/.test(keptLine), /Disconnect that store too/.test(keptLine)], [false, true, true]);

@@ -151,7 +151,9 @@ test("a line kept under an operation id is read back and can be removed by it", 
   assert.equal((await addSpend(SID, { ...LINE, op: OP })).ok, true);
   const read = await readSpendLines(SID);
   assert.deepEqual(read.spends.map((s) => s.id), [OP]);
-  assert.deepEqual((await removeSpend(SID, OP)).spends, []);
+  const removed = await removeSpend(SID, OP);
+  assert.ok(removed.ok, "the removal is confirmed");
+  assert.deepEqual(removed.ok ? removed.spends : null, []);
   assert.deepEqual(await rows(), []);
 });
 

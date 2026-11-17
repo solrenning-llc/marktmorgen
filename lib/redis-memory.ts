@@ -570,6 +570,57 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/community.ts LIKE_PRESS: the like, its trace entry and the author's point in one step, only while the
+        // like's lock is the press's and the like is as it was read.
+        if (key.startsWith("-- marktmorgen:community-like-press:v1\n") && Number(args[0]) >= 7 && args.length >= 1 + Number(args[0]) + 6) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const [author, token, who, ref, expect, point] = argv.splice(argv.length - 6, 6);
+          const [lock, likes, trace, members] = keys.slice(-4);
+          if (this.run(["GET", lock]) !== token) return [0];
+          const held = this.run(["SISMEMBER", likes, who]);
+          if (String(held) !== expect) return [2];
+          if (held === 0) {
+            let charged = 0;
+            if (point === "1") {
+              const raw = this.run(["HGET", members, author]);
+              let still = false;
+              if (typeof raw === "string") {
+                try {
+                  const record = JSON.parse(raw) as { k?: unknown; e?: unknown; removed?: unknown; muted?: unknown } | null;
+                  still = !!record && typeof record === "object" && record.k === author && typeof record.e === "string" && record.removed === false && typeof record.muted === "boolean";
+                } catch {
+                  still = false;
+                }
+              }
+              if (still) {
+                const out = this.orderWrite([String(count), ...keys, ...argv]) as unknown[];
+                if (out[0] === -1) return [-1];
+                charged = Number(out[0]);
+              }
+            }
+            this.run(["SADD", likes, who]);
+            return [1, 1, this.run(["SADD", trace, ref]), charged];
+          }
+          if (point === "1") {
+            const score = (board: string): number | false => {
+              const raw = this.run(["ZSCORE", board, author]);
+              if (raw === null) return 0;
+              const value = Number(raw);
+              return Number.isSafeInteger(value) ? value : false;
+            };
+            const total = score(keys[1]);
+            const today = score(keys[2]);
+            if (total === false || today === false) return [-1];
+            for (const [board, value] of [[keys[1], total], [keys[2], today]] as [string, number][]) {
+              if (value < 0) this.run(["ZADD", board, "0", author]);
+              else if (value > 0) this.run(["ZINCRBY", board, "-1", author]);
+            }
+          }
+          this.run(["SREM", likes, who]);
+          return [1, 0, this.run(["SREM", trace, ref]), 0];
+        }
         // lib/order-data.ts ORDER_WRITE_IF_SAME: each check, then ORDER_WRITE as it is on the rest.
         if (key.startsWith("-- marktmorgen:order-write-if-same:v1\n")) {
           const count = Number(args[0]);

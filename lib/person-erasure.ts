@@ -44,10 +44,10 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
 import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
-import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
+import { emailKey, forgetLearnerPerson, learnerProbes, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
@@ -69,15 +69,16 @@ import { forgetCrmPerson } from "@/lib/crm";
 import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
-import { forgetFinishPerson } from "@/lib/course-finish";
-import { forgetQuizPerson } from "@/lib/quiz";
+import { finishMarkProbes, forgetFinishPerson } from "@/lib/course-finish";
+import { forgetQuizPerson, passedProbe } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
-import { forgetCertificatesPerson } from "@/lib/certificate";
+import { certificateProbe, forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetStockAlertPerson } from "@/lib/stock-alerts";
+import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseRecords } from "@/lib/removed-courses";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
@@ -94,6 +95,7 @@ import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
+import { forgetBenefitPerson } from "@/lib/tier-benefits";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
@@ -163,7 +165,7 @@ export const ERASERS: Eraser[] = [
     },
   },
   { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
-  { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds) : Promise.resolve(0)) },
+  { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
   { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/stock-alerts.ts", run: (s) => forgetStockAlertPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
@@ -197,6 +199,7 @@ export const ERASERS: Eraser[] = [
   // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
   { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
+  { module: "lib/tier-benefits.ts", run: (s) => forgetBenefitPerson(s.store, s.person) },
   {
     module: "lib/reviews.ts",
     only: "person",
@@ -226,6 +229,24 @@ export type ErasureResult =
   | { ok: false; reason: "incomplete"; parts: ErasedPart[]; failed: string[] };
 
 /** Works out where one person may be found in one store. */
+/**
+ * The dropped courses (lib/removed-courses.ts) where this learner has a record, and how many were looked at: their
+ * student row, lessons done, quizzes passed or a certificate, asked of the modules that keep them. Every reply read
+ * exactly: anything but a 0 or a 1 throws, never "no record".
+ */
+async function droppedCoursesOf(statsId: string, learner: string, skip: ReadonlySet<string>): Promise<{ courses: RemovedCourse[]; probed: number }> {
+  // The list holds each dropped course's id and product only; a course's lessons and modules are read only where the
+  // person has something (#4542 review: reading every course's ids cost more than the erasure counted).
+  const dropped = (await droppedCourseIds(statsId)).filter((c) => !skip.has(c.courseId));
+  if (!dropped.length) return { courses: [], probed: 0 };
+  const probes = dropped.flatMap((c) => [...learnerProbes(c.courseId, learner), passedProbe(c.courseId, learner), certificateProbe(c.courseId, learner), ...finishMarkProbes(c.courseId, learner)]);
+  if (probes.length !== dropped.length * DROPPED_PROBES) throw new Error("a dropped course's probes are not DROPPED_PROBES");
+  const replies = repliesFor(await redisPipeline(probes), probes.length);
+  if (!replies || !replies.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's records in a store's dropped courses");
+  const hit = dropped.filter((_, i) => replies.slice(i * DROPPED_PROBES, (i + 1) * DROPPED_PROBES).some((r) => r === 1));
+  return { courses: await droppedCourseRecords(statsId, hit), probed: dropped.length };
+}
+
 export async function erasureScope(store: Store, email: string): Promise<ErasureScope | null> {
   const ref = storeRef(store);
   let current: Store | null = store;
@@ -237,6 +258,9 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
   // Read exactly (rule 24): an outline kept but unreadable throws, so the deletion answers "unavailable" and is
   // pressed again, never done with the person's records in that course still kept; only a confirmed absent one is left out.
   const courses = await readCoursesExact([...courseOf.keys()]);
+  // And the courses the store dropped where this person has a record (lib/removed-courses.ts): their records kept under
+  // one are still reached. Read exactly: a list or a probe that cannot be read throws, so the erasure is pressed again.
+  const dropped = await droppedCoursesOf(current.statsId, emailKey(email), new Set(courses.keys()));
   return {
     store: current,
     sid: current.sid,
@@ -250,9 +274,11 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
       courseId: course.id,
       lessonIds: course.modules.flatMap((m) => m.lessons.map((l) => l.id)),
       moduleIds: course.modules.map((m) => m.id),
-    })),
+    })).concat(dropped.courses),
     productIds: current.catalog.items.map((item) => item.id),
     communityId: current.community?.id ?? null,
+    droppedCourses: dropped.probed,
+    droppedRecords: dropped.courses.length,
   };
 }
 
@@ -277,6 +303,8 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     roomMessages,
     events,
     certificates,
+    droppedCourses: scope.droppedCourses ?? 0,
+    droppedRecords: scope.droppedRecords ?? 0,
   };
 }
 

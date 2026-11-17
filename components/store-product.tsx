@@ -1,4 +1,5 @@
 import { EmailField } from "@/components/email-field";
+import { ACCESS_END_FIELD } from "@/lib/course-access-end";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
 import { lengthList, listedLengths } from "@/lib/call-lengths";
@@ -6,7 +7,7 @@ import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
 import { fairOff } from "@/lib/fair-price";
-import { endsLine, membershipLine, planLine, speech, worthLine } from "@/lib/buyer-words";
+import { endsLine, everyPhrase, membershipLine, planLine, speech, worthLine } from "@/lib/buyer-words";
 import Link from "next/link";
 import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
@@ -90,6 +91,16 @@ export function offNow(store: Store, product: Listing): number {
 }
 
 /**
+ * The price pill as the checkout charges it now while a store-wide sale covers the product, with no old price beside
+ * it: for words that cannot cross a price out (a shared link's picture, the store guide's picks). Never a fair price
+ * for a country, which is the visitor's own; a sale is the same for everybody (lib/store-sale.ts).
+ */
+export function salePill(store: Store, product: Listing): string {
+  const off = saleNow(store, product);
+  return off ? speech(store).money(salePrice(product.priceCents, off)) : pricePill(store, product);
+}
+
+/**
  * The price pill, with the old price crossed out while a sale covers the
  * product. What is crossed out is the product's price, never a made-up one.
  */
@@ -164,6 +175,7 @@ export function ProductFacts({
   linkCourse = true,
   bundleItems = null,
   videoLine = null,
+  accessEndLine = null,
 }: {
   store: Store;
   product: Listing;
@@ -176,6 +188,11 @@ export function ProductFacts({
    * and null when any video's length is unknown.
    */
   videoLine?: string | null;
+  /**
+   * For a course: when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays;
+   * only the page that read the course passes it.
+   */
+  accessEndLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -235,6 +252,7 @@ export function ProductFacts({
           ) : null}
         </p>
       ) : null}
+      {course && accessEndLine ? <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>{accessEndLine}</p> : null}
     </>
   );
 }
@@ -559,6 +577,7 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  accessEnd = null,
   chosenOption = null,
 }: {
   store: Store;
@@ -605,6 +624,12 @@ export function BuyBox({
    */
   stepped?: boolean;
   /**
+   * For a course on its own sales page (24 [E7]): the end that page says ("none" or the end in seconds), sent with the
+   * form so the checkout refuses a sale whose end changed and stamps the one shown. Null everywhere else: a card that
+   * draws no date sells with no end.
+   */
+  accessEnd?: string | null;
+  /**
    * The price option a link to this page named (630 [HN6](27), lib/option-link-rules.ts linkedOption): drawn chosen,
    * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
    */
@@ -625,7 +650,8 @@ export function BuyBox({
   const options = sellableOptions(product);
   // Only an option this box offers right now can be the one the link chose.
   const linked = chosenOption && options.some((option) => option.id === chosenOption) ? options.find((option) => option.id === chosenOption)! : null;
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // How often, as charged: "a month", or "every 3 months" (609 [WP8]).
+  const every = product.recurring ? ` ${everyPhrase(store, product.recurring.interval, product.recurring.every)}` : "";
   // What one costs in each option whose name says how many (lib/option-units.ts); not for a membership's price.
   const units = product.recurring ? new Map<string, UnitLine>() : unitLines(options);
   const unitWords = (u: UnitLine) => [w.perUnit(money(u.perUnitCents), u.unit), u.savePercent ? w.unitSaving(u.savePercent) : ""].filter(Boolean).join(" · ");
@@ -759,6 +785,7 @@ export function BuyBox({
     <form id={formId} action="/api/store/checkout" method="post" target="_top" className="mt-4" data-checkout="">
       <input type="hidden" name="handle" value={store.handle} />
       <input type="hidden" name="product" value={product.id} />
+      {accessEnd !== null ? <input type="hidden" name={ACCESS_END_FIELD} value={accessEnd} /> : null}
       {embed?.site ? <input type="hidden" name="site" value={embed.site} /> : null}
       {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
       {/*
@@ -1109,7 +1136,7 @@ export function pageAction(
       : trial
         ? w.startTrial(trial)
         : product.recurring
-          ? introButton(store, product) ?? w.subscribeFor(money(product.priceCents), w.every(product.recurring.interval))
+          ? introButton(store, product) ?? w.subscribeFor(money(product.priceCents), everyPhrase(store, product.recurring.interval, product.recurring.every))
           : w.buyFor(money(salePrice(product.priceCents, offNow(store, product)))),
   };
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
+import { LAUNCH_HOLD_SECONDS, MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
 import type { WaitlistView } from "@/lib/waitlist";
 import type { PreorderView } from "@/lib/preorders";
 import { MAX_PREORDER_DAYS, PREORDER_PROBLEMS, type PreorderProblem, addDays, todayOf } from "@/lib/preorder-rules";
@@ -13,6 +13,7 @@ const MESSAGES: Record<string, string> = {
   free: "A free product already takes addresses. A waitlist is for something paid.",
   address: "Add a postal address for the bottom of the email: US law asks for one in any email about something for sale.",
   busy: "The launch email is still going out. Wait for it to finish.",
+  switched_off: "Your store is switched off after notices about its content, so no launch email can go out. Check the notice at the top of your studio.",
   unknown: "That product is no longer in your store. Reload the page.",
   empty: "Buyers have pre-ordered it, and they get it the moment it goes on sale. Add its file, its link or a lesson first.",
   soon: "Mark it coming soon first: pre-orders are taken instead of a buy button.",
@@ -78,7 +79,7 @@ export function WaitlistPanel({
   /** Its price, in the store's currency, as the waitlist's email carries it. */
   price: string;
 }) {
-  const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null });
+  const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null, switchedOff: false });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
   const [day, setDay] = useState(preorders?.day ?? "");
   const [agree, setAgree] = useState(false);
@@ -318,9 +319,13 @@ export function WaitlistPanel({
 
       {launch ? (
         <p className="mt-3 text-sm text-ink-soft" role="status">
-          {launch.finished
-            ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
-            : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+          {launch.stopped
+            ? `The waitlist email stopped because your store stayed switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} went out. Whoever did not get it is still on the waitlist. To email them, mark it coming soon again, then put it on sale.`
+            : launch.finished
+              ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
+              : view.switchedOff
+                ? `Paused while your store is switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails sent so far. The rest go out by themselves once your store is back on. If it is still switched off on ${dayWords(new Date((launch.started + LAUNCH_HOLD_SECONDS) * 1000).toISOString().slice(0, 10))}, the email stops, and whoever did not get it stays on the waitlist.`
+                : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
         </p>
       ) : null}
 

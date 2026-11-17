@@ -20,6 +20,7 @@ import { breakRunning, pauseView } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS, PAUSE_EVERY_DAYS } from "@/lib/plan-pause-rules";
 import { MarkShipped } from "@/components/mark-shipped";
 import { paypalSalesConfigured } from "@/lib/paypal-sales";
+import { PayPalWaiting } from "@/components/paypal-waiting-notice";
 import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
@@ -186,6 +187,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
 import { hoursWords } from "@/lib/watch-rules";
@@ -209,7 +211,7 @@ import { CALL_ORDER_UNITS, TRIAL_ORDERS, ordersIncluded, ordersWords } from "@/l
 import { ordersCountedExact } from "@/lib/order-admission";
 import { BUYER_RESERVE_BPS, SETUP_VISITS, TRIAL_VISITS, countWords, publicVisitLimit, visitLimitFor, visitsIncluded, visitsWords } from "@/lib/traffic-rules";
 import { AI_MONTHLY } from "@/lib/ai-rules";
-import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, REFUND_DAYS, SCALE_MONTHLY_EMAILS, priceWords, yearSaving } from "@/lib/plan";
+import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PLAN_TITLES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, REFUND_DAYS, SCALE_MONTHLY_EMAILS, priceWords, yearSaving } from "@/lib/plan";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { unusedSummary } from "@/lib/closing-refunds";
@@ -250,7 +252,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const NEXT_WHEN_SELLING = [...(isDomainsConfigured() ? [] : ["Your own domain, on Pro"])];
+// The plan by the name the signup page and the pricing page give it (lib/plan.ts, PLAN_TITLES), never "Pro".
+const NEXT_WHEN_SELLING = [...(isDomainsConfigured() ? [] : [`Your own domain, on the ${PLAN_TITLES.pro} plan`])];
 /** One time on the creator's calendar, with everyone booked into it. */
 type CallSlot = { key: string; product: Listing | undefined; start: number; people: PaidCall[] };
 
@@ -376,6 +379,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
   accounts: {
     title: "Meta found no ad account to read",
     body: "The Facebook login you used cannot see any ad account. Nothing was kept. Connect again with the login that runs your ads.",
+  },
+  // Meta told us, while it was connecting, that this Facebook login removed the app or asked for its data to be deleted.
+  removed: {
+    title: "Nothing was connected",
+    body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
   },
   refused: {
     title: "Meta did not finish connecting",
@@ -717,6 +725,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   deleted: {
     title: "The store was deleted",
     body: "Its addresses answer nothing for 30 days, and then anyone may take them. Your other stores are as they were.",
+  },
+  partly: {
+    title: "The store was deleted, but a last step was not confirmed",
+    body: "We could not confirm one last step, such as holding back its addresses for 30 days or taking it off its team's lists. Your other stores are as they were.",
   },
   confirm: {
     title: "Type the store's address to delete it",
@@ -1096,6 +1108,8 @@ export default async function StudioPage({
   // What each part below reads is only read for a role that is shown it
   // (lib/team-roles.ts), so nothing a role may not see reaches the page.
   const sold = planReads.sold ? await planReads.sold : null;
+  // The receipts download's form starts with last month (lib/receipt-batch-rules.ts).
+  const receiptDays = lastMonthDays(todayNow());
 
   const [delivery, watchedReading, trafficReading] = await planReads.usage;
   const watched = watchedReading ?? 0;
@@ -1326,7 +1340,7 @@ export default async function StudioPage({
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
         <StudioHeader
-          current={store}
+          current={current ?? store}
           role={role}
           stores={view.stores}
           owned={view.owned}
@@ -1547,7 +1561,7 @@ export default async function StudioPage({
                   ? [{ href: studioPath(store, "", "calendar"), title: "Your calendar", text: "Your own busy times, kept out of the team calls you host.", icon: "calendar" as const }]
                   : []),
                 ...(PRO_ON_SALE && may("draft")
-                  ? [{ href: studioPath(store, "", "email"), title: "Email", text: "One-off emails and sequences to your list.", icon: "mail" as const, tag: "Pro" }]
+                  ? [{ href: studioPath(store, "", "email"), title: "Email", text: "One-off emails and sequences to your list.", icon: "mail" as const, tag: `${PLAN_TITLES.pro} plan` }]
                   : []),
                 // One email to one business, opened in the creator's own mailbox (lib/outreach.ts).
                 ...(may("draft")
@@ -2351,7 +2365,7 @@ export default async function StudioPage({
               <div id="domain" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your own domain</p>
-                  <span className="tag tag-brand">Pro</span>
+                  <span className="tag tag-brand">{`${PLAN_TITLES.pro} plan`}</span>
                 </div>
                 {paid && hasPro(tier) ? (
                   <DomainEditor
@@ -2363,20 +2377,20 @@ export default async function StudioPage({
                 ) : (
                   <>
                     <p className="mt-2 text-ink-soft">
-                      {`Your store on a domain of your own, like shop.yourname.com, with its certificate handled for you. Part of Pro, ${PLANS_ON_SALE ? "at" : "which, when plans open, is"} ${priceWords("pro", "month")}.`}
+                      {`Your store on a domain of your own, like shop.yourname.com, with its certificate handled for you. Part of the ${PLAN_TITLES.pro} plan, ${PLANS_ON_SALE ? "at" : "which, when plans open, is"} ${priceWords("pro", "month")}.`}
                     </p>
                     {store.domain ? (
                       <p className="mt-3 rounded-2xl bg-sand px-4 py-3 text-sm text-ink-soft">
-                        {`${store.domain.name} is resting while your store is not on Pro: visitors are sent to marktmorgen.com/@${store.handle}. It opens your store again the moment Pro is back.`}
+                        {`${store.domain.name} is resting while your store is not on the ${PLAN_TITLES.pro} plan: visitors are sent to marktmorgen.com/@${store.handle}. It opens your store again the moment that plan is back.`}
                       </p>
                     ) : null}
                     {/* #billing is drawn only for whoever may change the plan, where billing is set up, and offers Pro only while plans are on sale. */}
                     {!may("billing") ? (
                       <p className="mt-5 text-sm text-ink-soft">The store&apos;s owner chooses its plan.</p>
                     ) : !PLANS_ON_SALE || !billingReady ? (
-                      <p className="mt-5 text-sm text-ink-soft">Paid plans are not on sale yet, so this store cannot move to Pro for now.</p>
+                      <p className="mt-5 text-sm text-ink-soft">{`Paid plans are not on sale yet, so this store cannot move to the ${PLAN_TITLES.pro} plan for now.`}</p>
                     ) : (
-                      <a href="#billing" className="btn btn-secondary mt-5">See Pro</a>
+                      <a href="#billing" className="btn btn-secondary mt-5">{`See the ${PLAN_TITLES.pro} plan`}</a>
                     )}
                   </>
                 )}
@@ -2387,12 +2401,12 @@ export default async function StudioPage({
               <div className="card mt-8 p-6 sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Email your list</p>
-                  <span className="tag tag-brand">Pro</span>
+                  <span className="tag tag-brand">{`${PLAN_TITLES.pro} plan`}</span>
                 </div>
                 <p className="mt-2 text-ink-soft">
                   {paid && hasPro(tier)
                     ? "Write to the people who agreed to hear from you: one-off emails, emails scheduled for later, and sequences that go out by themselves after someone joins or buys."
-                    : `One-off emails, emails scheduled for later, and sequences that go out by themselves after someone joins or buys. Part of Pro, at ${priceWords("pro", "month")}.`}
+                    : `One-off emails, emails scheduled for later, and sequences that go out by themselves after someone joins or buys. Part of the ${PLAN_TITLES.pro} plan, at ${priceWords("pro", "month")}.`}
                 </p>
                 <Link href={studioPath(store, "", "email")} className="btn btn-primary mt-5">
                   {paid && hasPro(tier) ? "Open Email" : "See what it does"}
@@ -2578,6 +2592,8 @@ export default async function StudioPage({
                   </details>
                 </>
               ) : (
+                <>
+                <PayPalWaiting store={store} />
                 <form action={`/api/store/paypal/connect${pin}`} method="post" className="mt-5">
                   <button type="submit" className="btn btn-primary">
                     Connect your PayPal account
@@ -2587,6 +2603,7 @@ export default async function StudioPage({
                     one, and to confirm what Marktmorgen may do. Then it sends you back here.
                   </p>
                 </form>
+                </>
               )}
             </div>
             ) : null}
@@ -2673,7 +2690,13 @@ export default async function StudioPage({
                       : <>{"The last moment to start a plan and keep this store was "}<strong>{momentWords(lastPlanMoment(closing.day))}</strong>{". It has passed, so a plan can no longer be started for it."}</>}
                   </p>
                 )}
-                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store. */}
+                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store.
+                    Once the plan has ended, that file is the owner's only (issue #4081, app/api/store/export/route.ts). */}
+                {role !== "owner" ? (
+                  <p className="mt-5 text-sm text-ink-soft">
+                    Now that the plan has ended, only the store&rsquo;s owner can download the whole store&rsquo;s file. Ask them to download it before the closing day.
+                  </p>
+                ) : (
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <form action="/api/store/export" method="get" className="max-w-full">
                     <input type="hidden" name="store" value={store.sid} />
@@ -2686,6 +2709,7 @@ export default async function StudioPage({
                     {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
+                )}
                 <p className="mt-3 text-sm text-ink-soft">
                   {`We email you ${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it, and nothing is removed sooner than a week after the last of those emails.`}
                 </p>
@@ -3496,6 +3520,27 @@ export default async function StudioPage({
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.
                     </p>
+                    {/* A month's receipts in one ZIP (lib/receipt-batch.ts, 601 [KB22] U3): counted before anything is made. */}
+                    <form method="get" action="/api/store/receipt-batch" className="mt-6 rounded-[var(--r-md)] bg-sand p-5" aria-labelledby="receipt-batch-title">
+                      <h3 id="receipt-batch-title" className="font-bold text-ink">Download receipts for several sales</h3>
+                      <p id="receipt-batch-help" className="mt-1 text-sm text-ink-soft">
+                        One ZIP file with a receipt (PDF) for each one-time sale paid in these days, up to {RECEIPT_BATCH_MAX} receipts.
+                        Both days must be in the same month. Dates are in UTC, as on the receipts. A sale without a receipt,
+                        such as one refunded in full, is named in a text file in the ZIP with the reason.
+                      </p>
+                      {store?.sid ? <input type="hidden" name="store" value={store.sid} /> : null}
+                      <div className="mt-3 flex flex-wrap items-end gap-3">
+                        <div>
+                          <label htmlFor="receipt-batch-from" className="block text-sm font-semibold text-ink">First day</label>
+                          <input id="receipt-batch-from" name="from" type="date" required defaultValue={receiptDays.from} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
+                        </div>
+                        <div>
+                          <label htmlFor="receipt-batch-to" className="block text-sm font-semibold text-ink">Last day</label>
+                          <input id="receipt-batch-to" name="to" type="date" required defaultValue={receiptDays.to} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
+                        </div>
+                        <button type="submit" className="btn btn-secondary inline-flex min-h-11 items-center">Download the receipts (ZIP)</button>
+                      </div>
+                    </form>
                   </>
                 )}
               </section>

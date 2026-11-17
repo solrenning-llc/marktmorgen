@@ -1764,6 +1764,11 @@ export const COST_LINES: CostLine[] = [
       // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).
       { file: "app/[handle]/certificate/[id]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_CARD_UNITS - 1)"] },
       { file: "lib/certificate.ts", names: ["CERTIFICATE_CARD_UNITS = 2"] },
+      // A quiz try takes QUIZ_TRY_UNITS after its per-connection limit and before the listing, the access or the course is
+      // read, never one of the store's buyer actions (#3466, 16 November 2026): at its heaviest it sends 30 commands, inside
+      // two later pages' (tests/quiz-try-admission.test.ts); the try written is in the quizzes line besides.
+      { file: "app/api/store/course/quiz/route.ts", names: ["withinLimit(\"quiz-connection\"", "takeBuyerRead(store, QUIZ_TRY_UNITS)", "withinLimit(\"quiz-student\""] },
+      { file: "lib/quiz-usage-rules.ts", names: ["QUIZ_TRY_UNITS = 2", "QUIZ_TRIES_PER_CONNECTION_MINUTE", "QUIZ_TRIES_PER_STUDENT_HOUR"] },
       // A product's shared card reads its picture from the file store and draws: one request before its listing, the rest of
       // PRODUCT_CARD_UNITS before the picture is read (tests/c1-cost-product-card.test.ts).
       { file: "app/[handle]/p/[product]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, PRODUCT_CARD_UNITS - 1)"] },
@@ -2574,6 +2579,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "assist-day": guard("A daily limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-ask": PUBLIC, "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
+  "quiz-connection": BURST("public-requests"), "quiz-student": BURST("public-requests"),
   "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),

@@ -9,7 +9,7 @@
  * Fast Origin Transfer US$0.06 to US$0.43 a GB on a miss. The figures are typed here, not imported, so this check
  * cannot agree with the registry by sharing its number.
  *
- * Then a refunded first year of the Store plan, with that logo, must stay under the owner's US$66 ceiling (BROADCAST-262)
+ * Then a refunded first year of the Store plan, with that logo, must stay under the owner's US$66 ceiling
  * (tests/plan-margin.test.ts). The ceiling is never raised to pass: if the logo cannot fit, it is not drawn.
  */
 import { render } from "@/lib/mail";
@@ -73,10 +73,15 @@ part("A refunded first year stays under the owner's ceiling with the logo at the
   const kept = (paidStorageBytes(tier) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
   const year = worstCost(tier) + providerFeeUsd(PRICES_WITHOUT_COMMISSION[tier].year) + kept;
   const extra = Math.max(0, floorFor(tier) - (line ? line.monthlyUsd(tier) : 0));
-  // BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"): the ceiling is US$ 66; its item 4 names the
-  // course-drip PR (#3344) to be counted against it.
-  is(`a refunded Store first year, repriced at the dearest region, is under US$66 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
-    year + extra < 66, true);
+  // BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), as tests/read-ceilings.test.ts and tests/plan-margin.test.ts hold it: the owner's
+  // ceiling is US$ 66, the dollar over US$ 65 room for every picture upload's Blob operations only
+  // (the picture-uploads line, #2803). So the year with that line stays under US$ 66, and without it, under US$ 65 as before.
+  // BROADCAST-262 item 4 names the course-drip PR (#3344) among those counted against US$ 66, so its drip-run line
+  // shares the room above US$ 65 with the picture uploads; no other line does.
+  const uploads = COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd(tier) ?? 0;
+  const drip = COST_LINES.find((l) => l.id === "course-drip-run")?.monthlyUsd(tier) ?? 0;
+  is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the picture uploads' and drip-run lines and US$66 with them (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, those lines ${uploads.toFixed(4)} and ${drip.toFixed(4)})`,
+    year + extra - uploads - drip < 65 && year + extra < 66, true);
 }
 
 done();

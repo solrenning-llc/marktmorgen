@@ -948,14 +948,18 @@ const accountStoresKey = (email: string) =>
  * record there that is not the store of its key, or a set of more stores than an account may have throws
  * UnknownReplyError; an id with no record (nil), or a record of another owner (a move half done, which accountStores
  * does not list either), is not one. Until then prepareStore read accountStores, which reads a set that does not
- * answer as a list as no other store (Claude 6 on #3156). Its caller takes a throw as not known (servesAnother).
+ * answer as a list as no other store (Claude 6 on #3156). A member of the set that is not a store's id makes the whole
+ * set unknown, as in a teammate's index (memberStoresExact): only store ids are ever added to it, so one that is not
+ * is a damaged set, never proof of no other store (Codex N1 on #3660). Its caller takes a throw as not known
+ * (servesAnother).
  */
 async function ownsAnother(email: string, sid: string): Promise<boolean> {
   const first = await storeUnder(email, "whether the owner of a closing store keeps a first store (GET)");
   if (first && first.sid !== sid) return true;
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", accountStoresKey(email)]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
-  const others = ids.filter((id) => STORE_ID_PATTERN.test(id) && id !== sid);
+  if (ids.some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
+  const others = ids.filter((id) => id !== sid);
   if (others.length > MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError(`the owner's other stores, more than an account may have (SMEMBERS),`);
   for (const id of others) {
     const other = await storeUnder(`#${id}`, "whether the owner of a closing store keeps another store (GET)");

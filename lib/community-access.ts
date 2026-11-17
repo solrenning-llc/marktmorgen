@@ -717,9 +717,15 @@ export async function maySeeSpace(
   config: CommunityConfig,
   space: { id: string; only: string[] },
   viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
+  /** `strict` as holdsTicket's, for deciding who an email goes to: an answer that could not be had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
-  // An answer that could not be read is not a yes: the space stays shut, never opened on a guess.
-  return (await spaceAnswer(store, config, space, viewer)) === true;
+  // An answer that could not be read is not a yes: the space stays shut, never opened on a guess. With `strict`
+  // (lib/community-mail.ts deciding who an email goes to), it throws instead of being a no, so nobody is left out of a
+  // batch counted as sent (rules 24 and 30, main's #4380 line).
+  const answer = await spaceAnswer(store, config, space, viewer);
+  if (answer === "unknown" && options.strict) throw new UnknownReplyError("a member's access to a space");
+  return answer === true;
 }
 
 /**

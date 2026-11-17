@@ -62,8 +62,12 @@ async function main(): Promise<void> {
   is("nor a fractional one", await money(), "unknown");
   put(Array.from({ length: 101 }, (_, i): [string, Shape] => [idOf(100 + i), { cents: 3500, kept: true }]));
   is("more members than one read takes is unknown, never cut to the first hundred", await money(), "unknown");
+  // Main's 1224fc01b checks every listed record for its folder and its own video before the parts are chosen.
   put([[C, { cents: 3500, kept: true }], [E, { cents: 3500, folder: OTHER }]]);
-  is("control: a record that is neither owed nor kept is not checked for its folder", await money(), { owed: [], unconfirmed: [{ id: C, cents: 3500 }] });
+  is("a listed record that is neither owed nor kept, naming another folder, is unknown too (main's rule)", await money(), "unknown");
+  put([[C, { cents: 3500, kept: true }]]);
+  redis.run(["SET", `nl:stream:auto:${C}`, record(D, { cents: 3500, kept: true }), "EX", 3600]);
+  is("a kept charge read under one video's key that names another video is unknown", await money(), "unknown");
   done();
 }
 

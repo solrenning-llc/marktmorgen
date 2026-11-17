@@ -467,7 +467,7 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
     if (raw !== "charging") await unqueue(id, raw, now);
     return "none";
   }
-  if (pending.owed) return collectRefund(id, pending, pending.owed, now);
+  if (pending.owed) return collectRefund(id, raw as string, pending, pending.owed, now);
   const answer = await askStream("GET", `/videos/${id}`);
   if (answer.status === 404) {
     // The video is gone, deleted with its lesson: what was not written is given back.
@@ -575,7 +575,8 @@ async function settle(id: string, raw: string, pending: Pending, got: string[], 
   // the other had settled and deleted the record (Stripe refuses a key reused with another amount, and the refusal was
   // kept as the whole payment owed). The look that loses looks again, and reads what the first one decided.
   const owed: Owed = { cents, key, since: now, looks: 0 };
-  if (!(await swapRecord(id, raw, JSON.stringify({ ...pending, got, owed })))) {
+  const closing = JSON.stringify({ ...pending, got, owed });
+  if (!(await swapRecord(id, raw, closing))) {
     await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
     return false;
   }
@@ -584,8 +585,7 @@ async function settle(id: string, raw: string, pending: Pending, got: string[], 
     await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id], ...keepListed(pending)]);
     return false;
   }
-  await closeOwed(id, pending, now);
-  return true;
+  return closeOwed(id, closing, pending);
 }
 
 /** A captions record replaced only while it is still `from`, with its expiry, in one script (the local stand-in, lib/redis-memory.ts, models it by name). */
@@ -705,11 +705,21 @@ function keepListed(pending: Pending): (string | number)[][] {
   return parts ? [["SADD", owedKey(parts.folder), parts.id], ["EXPIRE", owedKey(parts.folder), REFUND_KEEP_SECONDS]] : [];
 }
 
-/** A refund owed is settled: the record and its listings go. */
-async function closeOwed(id: string, pending: Pending, now: number): Promise<void> {
+/** Close only the record this worker settled, together with its listings. */
+const CLOSE_OWED = [
+  "-- marktmorgen:captions-close-owed:v1",
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end',
+  'if KEYS[3] then redis.call("SREM", KEYS[3], ARGV[2]) end',
+  'redis.call("ZREM", KEYS[2], ARGV[2])',
+  'redis.call("DEL", KEYS[1])',
+  "return 1",
+].join("\n");
+
+async function closeOwed(id: string, raw: string, pending: Pending): Promise<boolean> {
   const folder = readStreamPath(pending.path)?.folder;
-  await redisPipeline([["DEL", pendingKey(id)], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
-  await unqueue(id, null, now);
+  const keys = [pendingKey(id), QUEUE, ...(folder ? [owedKey(folder)] : [])];
+  const replies = repliesFor(await redisPipeline([["EVAL", CLOSE_OWED, keys.length, ...keys, raw, id]]), 1);
+  return replies?.[0] === 1;
 }
 
 /**
@@ -733,19 +743,14 @@ async function unqueue(id: string, left: unknown, now: number): Promise<void> {
  * Unreadable, unconfirmed or still waiting: looked at again, at most
  * REFUND_LOOKS_MAX times; then kept, marked stuck, and no longer queued.
  */
-async function collectRefund(id: string, pending: Pending, owed: Owed, now: number): Promise<"done" | "waiting"> {
+async function collectRefund(id: string, raw: string, pending: Pending, owed: Owed, now: number): Promise<"done" | "waiting"> {
   if (owed.stuck) {
     await redisPipeline([["ZREM", QUEUE, id]]);
     return "waiting";
   }
   // A settlement that gives nothing back (every language delivered) only closes.
-  if (owed.cents === 0) {
-    await closeOwed(id, pending, now);
-    return "done";
-  }
-  if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
-    await closeOwed(id, pending, now);
-    return "done";
+  if (owed.cents === 0 || await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
+    return await closeOwed(id, raw, pending) ? "done" : "waiting";
   }
   const looks = owed.looks + 1;
   if (looks >= REFUND_LOOKS_MAX) {
@@ -871,7 +876,7 @@ export async function autoCaptionsMoney(folder: string): Promise<{ owed: { id: s
   if (!members) throw new UnknownReplyError("the owed captions refunds");
   // A member this version does not read, or more members than one read takes, is unknown, never "not owed":
   // dropping or cutting them would hide money the creator may need to write to support about.
-  if (members.length > OWED_READ_MAX || members.some((m) => !STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the owed captions refunds");
+  if (members.length > OWED_READ_MAX || new Set(members).size !== members.length || members.some((m) => !STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the owed captions refunds");
   const ids = [...members].sort();
   if (!ids.length) return out;
   const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
@@ -880,11 +885,13 @@ export async function autoCaptionsMoney(folder: string): Promise<{ owed: { id: s
     if (rows[i] === null) return;
     const pending = parsePending(rows[i]);
     if (!pending) throw new UnknownReplyError("a caption refund owed to a store");
+    // The row read under this video's key names this folder and this very video: a path that does not read, names
+    // another folder (Codex T) or another video of the same folder (Codex X8, after #3881) is unknown, never "none owed".
+    const path = readStreamPath(pending.path);
+    if (!path || path.folder !== folder || path.id !== id) throw new UnknownReplyError("a caption refund owed to a store");
     const owed = pending.owed;
     if (owed && owed.cents === 0) return;
     if (!owed && pending.kept === undefined) return;
-    // Listed under this folder: a path that does not read, or names another folder, is unknown, never "none owed" (Codex T).
-    if (readStreamPath(pending.path)?.folder !== folder) throw new UnknownReplyError("a caption refund owed to a store");
     // An amount is a whole number of cents above zero; anything else is unknown, never "$0.00" (Codex g).
     const cents = owed ? owed.cents ?? pending.cents : pending.cents;
     if (!Number.isSafeInteger(cents) || cents <= 0) throw new UnknownReplyError("a caption refund owed to a store");

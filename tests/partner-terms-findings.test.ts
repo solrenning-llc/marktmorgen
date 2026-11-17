@@ -168,6 +168,27 @@ async function main(): Promise<void> {
   is("the job reads the offer's payment with its settled charge, so the time is there", readFileSync("lib/upsell.ts", "utf8").includes("expand[]=latest_charge.balance_transaction"), true);
 
 
+  part("3c. A sale is credited at the share in force when it was paid, never at one that came into force after (Codex G point 3)");
+  {
+    const C = "prodcccccc";
+    const s3 = "dddddddddddd";
+    await put(person(s3));
+    const start = T - 2 * DAY;
+    is("a share started for someone with none", await proposePartnerShare(await store(), s3, { percent: 25, products: [C] }, start), { ok: true, state: "started" });
+    const onC = (ref: string, created: number, payment_intent: unknown) => ({ ...session(ref, created, payment_intent), metadata: { store: handle, product: C, title: "Course" } });
+    await noteSession(await store(), onC("cs_test_c_paid_before", start - 7200, charged("pi_c_paid_before", start - 7000, start - 3600)));
+    is("a sale paid before the share started earns nothing, though noted after it", (await earned()).includes(`cs_test_c_paid_before:${s3}`), false);
+    await noteSession(await store(), onC("cs_test_c_paid_after", start - 7200, charged("pi_c_paid_after", start - 7000, start + 3600)));
+    is("a sale paid after it started earns", (await earned()).includes(`cs_test_c_paid_after:${s3}`), true);
+    const cUnknown = await noteSession(await store(), onC("cs_test_c_unknown", start - 60, "pi_c_not_expanded")).then(() => "noted", (error: Error) => error.name);
+    is("opened before it started, no settled charge: unknown, never credited on the checkout's time", [cUnknown, (await earned()).includes(`cs_test_c_unknown:${s3}`)], ["UnknownReplyError", false]);
+    const cLate = await noteSession(await store(), onC("cs_test_c_late", start + 60, "pi_c_late")).then(() => "noted", (error: Error) => error.name);
+    is("opened after it started, no settled charge: noted at the checkout's time, and it earns", [cLate, (await earned()).includes(`cs_test_c_late:${s3}`)], ["noted", true]);
+    const offerOnC = (id: string, created: number, latest_charge: unknown) => ({ id, object: "payment_intent", status: "succeeded", amount: 1000, currency: "usd", created, latest_charge, metadata: { product: C, title: "Course" } });
+    await noteCharge(await store(), offerOnC("pi_c_offer_before", start - 7000, charged("pi_c_offer_before", start - 7000, start - 3600, start - 7000).latest_charge));
+    is("an offer after paying, settled before the share started, earns nothing", (await earned()).includes(`pi_c_offer_before:${s3}`), false);
+  }
+
   part("4. An answer whose write may have landed is never said to have changed nothing");
   const r = "cccccccccccc";
   await put(person(r));

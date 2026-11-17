@@ -348,7 +348,6 @@ async function main(): Promise<void> {
     is("the record's thumbnail is under a new name in the same folder, with its width", [after?.thumb?.path !== thumb, after?.thumb?.path.slice(0, after.thumb.path.lastIndexOf("/")), after?.thumb?.width], [true, thumb.slice(0, thumb.lastIndexOf("/")), 240]);
     is("the copy holds the thumbnail's bytes", after?.thumb ? (await fetchPicture(after.thumb.path))[2] : "", "ffd8ffe03d07");
   }
-
   part("The pictures' own bucket on, its delete of an old name failing: the takedown is not done until it is gone");
   // Codex X5 and Claude 7 on #4357: a takedown said "moved" while the old name still answered from the bucket.
   const bucket: PictureR2Config = { endpoint: "https://acc.r2.cloudflarestorage.com", bucket: "mm-pictures", origin: "https://images.example.com", key: { accessKeyId: "k".repeat(20), secretAccessKey: "s".repeat(40) } };
@@ -361,7 +360,7 @@ async function main(): Promise<void> {
   const first = await withdrawProductPicture(OWNER, mirrored.id, null, remember, { r2: bucket }).then((v) => v, () => "threw");
   is("the press throws, never says moved", first, "threw");
   is("both old names were sent a delete, the picture's failing", r2Deletes.splice(0), [`DELETE ${mirrored.image.path}`, `DELETE ${mirrored.image.small!.path}`]);
-  // With #2801's thumbnail copy the kept names carry `thumb` too: none for this picture.
+  // With #2801's thumbnail copy the kept names carry `thumb` too: null for a picture that has none (rule 23, nothing loosened).
   is("the old names are kept for the next press", remembered, { path: mirrored.image.path, small: mirrored.image.small!.path, thumb: null });
   is("and the failed one is on the bucket's list to be tried again", (await redis.pipeline([["SMEMBERS", PICTURE_DROP_QUEUE]]))[0], [mirrored.image.path]);
   is("the file store's old names already answer not found", servedYear(await fetchPicture(mirrored.image.path)), gone);

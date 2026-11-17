@@ -50,7 +50,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { takeAllowance } from "@/lib/store-allowance";
-import { COST_LINES, DAY_WINDOWS, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
+import { COST_LINES, DAY_WINDOWS, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost, studioPictureWork } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -357,10 +357,13 @@ async function main(): Promise<void> {
     // Rule 23 (#2801, the thumbnail copy; MR audit gap 1, one studio-blob line since C4-20261106-2790-C56-167): the US$ 66
     // is room for the Blob operations of studio pictures; that line is left out to show the readings figure is still the
     // one sized under 65.
-    // Changed (rule 23, #2852): every picture upload's Blob operations, as the owner's decision reads (the dollar more "is
-    // room for every picture upload's Blob operations"): the studio's, a community picture's and an email's (buyer-blob
-    // holds students' files too, at the dearest action, a community picture's check, which leaves nothing out).
-    const uploads = ["studio-blob", "buyer-blob", "mail-picture-blob"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? Number.NaN), 0);
+    // Changed (rule 23, #2852): every picture upload's Blob operations: the studio's (with a trial store's share,
+    // studioPictureWork; Claude 7 on #2852), a community picture's and an email's (buyer-blob holds students' files too,
+    // at the dearest action, a community picture's check, which leaves nothing out).
+    // Its scope, with the buyer and email pictures' lines: the coordinator's answer C1-20261116-2258-todos-4 (16 Nov 2026
+    // 22h58 Fortaleza, #4827 comment 6935544893), option (a) of 6934185062: "O dólar acima de US$65 cobre qualquer custo
+    // honesto até US$66, inclusive o custo próprio de cada PR", for #2852 by name (Claude 7's MEDIUM on #2852).
+    const uploads = studioPictureWork("creator") + ["buyer-blob", "mail-picture-blob"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? Number.NaN), 0);
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
     is("the readings figure is still the one sized under US$ 65: without the picture-upload lines, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);

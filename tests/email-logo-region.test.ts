@@ -15,7 +15,7 @@
 import { render } from "@/lib/mail";
 import * as emailThemeModule from "@/lib/email-theme";
 import * as registry from "./plan-cost-registry";
-import { COST_LINES } from "./plan-cost-registry";
+import { COST_LINES, studioPictureWork } from "./plan-cost-registry";
 import { providerFeeUsd, worstCost, GB, STORAGE_PER_GB } from "./plan-cost-model";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -74,10 +74,13 @@ part("A refunded first year stays under the owner's ceiling with the logo at the
   const year = worstCost(tier) + providerFeeUsd(PRICES_WITHOUT_COMMISSION[tier].year) + kept;
   const extra = Math.max(0, floorFor(tier) - (line ? line.monthlyUsd(tier) : 0));
   // BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), as tests/read-ceilings.test.ts and tests/plan-margin.test.ts hold it: the owner's
-  // ceiling is US$ 66, the dollar over US$ 65 room for the pictures' Blob operations only: on this branch the studio-blob
-  // line (#2843) with this PR's buyer-blob and mail-picture-blob lines (rule 23, #2852, as tests/read-ceilings.test.ts sums
-  // them). So the year with those lines stays under US$ 66, and without them, under US$ 65 as before. A missing line is NaN and fails.
-  const blob = ["studio-blob", "buyer-blob", "mail-picture-blob"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd(tier) ?? Number.NaN), 0);
+  // ceiling is US$ 66, the dollar over US$ 65 room for the pictures' Blob operations: the studio pictures' work (#2843's
+  // studio-blob line with a trial store's share, studioPictureWork; Claude 7 on #2852) and this PR's buyer-blob and
+  // mail-picture-blob lines (rule 23, #2852, as tests/read-ceilings.test.ts sums them). So the year with them stays under
+  // US$ 66, and without them, under US$ 65 as before. A missing line is NaN and fails.
+  // That scope is recorded in the coordinator's answer C1-20261116-2258-todos-4 (16 Nov 2026 22h58 Fortaleza, #4827 comment
+  // 6935544893), option (a) of 6934185062, for #2852 by name: any honest cost up to US$ 66 (Claude 7's MEDIUM on #2852).
+  const blob = studioPictureWork(tier) + ["buyer-blob", "mail-picture-blob"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd(tier) ?? Number.NaN), 0);
   is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the picture uploads' lines and US$66 with them (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, those lines ${blob.toFixed(4)})`,
     year + extra - blob < 65 && year + extra < 66, true);
 }

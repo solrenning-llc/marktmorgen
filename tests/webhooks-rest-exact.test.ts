@@ -380,6 +380,26 @@ async function main(): Promise<void> {
     }
   }
 
+  part("A message not kept: the log read in another shape after its count gives the count back, so it is counted once (Codex L on #3446, MEDIUM)");
+  for (const overflow of [false, true]) {
+    store = await setup();
+    await real([["SET", `nl:hooks:wait:${statsId}:skip:large:${day}`, overflow ? SKIPPED_LINES_PER_DAY : 0]]);
+    // The day's count line is read against the log first (LRANGE); a message's own new line is pushed at once (LPUSH).
+    // Either failing after the day's INCR must give the count back (Codex L on #3446, MEDIUM).
+    const how = overflow ? "the log read as 42" : "the push failing after it ran";
+    if (overflow) swap = (c) => (c[0] === "LRANGE" && c[1] === `nl:hooks:log:${statsId}` ? { reply: 42 } : undefined);
+    else landed = (c) => (c[0] === "LPUSH" && c[1] === `nl:hooks:log:${statsId}` ? { reply: FAILS } : undefined);
+    const first = await outcome(emitEvent(store, "sale.completed", "cs_LogLarge01", tooLarge));
+    swap = null;
+    landed = null;
+    const label = overflow ? "the day's count line" : "its own line";
+    is(`${label}, ${how}: unknown, and the event's mark let go`, [first, await get(saleMarkKey("cs_LogLarge01"))], ["unknown", null]);
+    is(`${label}, ${how}: its count given back`, await skipCount(), overflow ? SKIPPED_LINES_PER_DAY : 0);
+    await emitEvent(store, "sale.completed", "cs_LogLarge01", tooLarge);
+    is(`${label}: noticed again with the log read exactly, its line in the log once`, (await lineWords()).length, 1);
+    is(`${label}: the message counted once for the day`, await skipCount(), overflow ? SKIPPED_LINES_PER_DAY + 1 : 1);
+  }
+
   part("The store's log: another shape is unknown, never an empty log; no line is put in it twice");
   for (const [name, value] of [['"x"', "x"], ["[1]", [1]], ["an object", { x: 1 }], ["undefined", undefined], ["null", null]] as [string, unknown][]) {
     store = await setup();

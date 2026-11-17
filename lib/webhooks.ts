@@ -2122,7 +2122,10 @@ async function skippedLines(statsId: string, deliveries: Delivery[], reason: "la
   if (n <= SKIPPED_LINES_PER_DAY) {
     const lines = deliveries.map((d) => noticeLine(d.id, statsId, d.endpoint, d.eventId, d.type as WebhookEvent, words, now));
     const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), true);
-    await pushMissing(statsId, lines.filter((_, at) => written[at] === "there").map((line) => line.id), lines.filter((_, at) => written[at] === "new").map((line) => line.id));
+    // Putting the lines in the log that fails (a log read in another shape, a push that did not answer) gives the day's
+    // count back before the event's mark is let go, so the event noticed again is counted once (Codex L on #3446).
+    await pushMissing(statsId, lines.filter((_, at) => written[at] === "there").map((line) => line.id), lines.filter((_, at) => written[at] === "new").map((line) => line.id))
+      .catch(() => countNotKept(key));
     if (written.includes("absent")) await countNotKept(key);
     return;
   }
@@ -2137,13 +2140,13 @@ async function skippedLines(statsId: string, deliveries: Delivery[], reason: "la
     ),
   }));
   const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), false);
-  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "absent").map((line) => line.id));
+  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "absent").map((line) => line.id)).catch(() => countNotKept(key));
   if (written.includes("absent")) await countNotKept(key);
 }
 
 /**
- * A message not kept whose lines are not there: its count for the day is given back, so it is counted once when
- * the event is noticed again, and it throws (emitEvent lets the event's mark go). A count that cannot be given back
+ * A message not kept whose lines are not there, or not put in the store's log: its count for the day is given back,
+ * so it is counted once when the event is noticed again, and it throws (emitEvent lets the event's mark go). A count that cannot be given back
  * is said in the server's log; the figure is then one more than the messages.
  */
 async function countNotKept(key: string): Promise<never> {

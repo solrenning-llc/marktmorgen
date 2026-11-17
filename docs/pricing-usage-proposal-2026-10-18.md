@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $118.80 | $1,212.28 | $69 / $690 |
-| Studio | $174.65 | $1,855.73 | $449 / $4,490 |
-| Scale | $272.85 | $2,994.73 | $999 / $9,990 |
+| Store | $118.80 | $1,212.45 | $69 / $690 |
+| Studio | $174.65 | $1,855.90 | $449 / $4,490 |
+| Scale | $272.95 | $2,994.95 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -42,10 +42,10 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 17.3% | 60.24% | 60.05% | $77.72 | 0.49 |
+| $129 / $1,290 **(recommended)** | 17.1% | 60.24% | 60.05% | $77.72 | 0.49 |
 | $149 / $1,490 | 70.0% | 60.26% | 60.06% | $89.80 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.41% | 60.20% | $102.10 | 0.38 |
-| $199 / $1,990 | 100.0% | 60.91% | 60.73% | $121.22 | 0.32 |
+| $199 / $1,990 | 100.0% | 60.90% | 60.73% | $121.21 | 0.32 |
 
 ### Studio
 
@@ -57,7 +57,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $199 / $1,990 | 0.1% | 60.33% | 60.03% | $120.06 | 2.23 |
 | $249 / $2,490 **(recommended)** | 15.7% | 60.34% | 60.03% | $150.26 | 1.78 |
 | $299 / $2,990 | 30.0% | 60.38% | 60.05% | $180.54 | 1.48 |
-| $449 / $4,490 | 72.9% | 60.36% | 60.01% | $271.05 | 0.99 |
+| $449 / $4,490 | 72.9% | 60.36% | 60.01% | $271.04 | 0.99 |
 
 ### Scale
 
@@ -66,9 +66,9 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $349 / $3,490 | 3.7% | 60.42% | 60.03% | $210.87 | 2.85 |
+| $349 / $3,490 | 3.7% | 60.41% | 60.03% | $210.86 | 2.85 |
 | $399 / $3,990 **(recommended)** | 10.2% | 60.41% | 60.02% | $241.04 | 2.49 |
-| $499 / $4,990 | 23.5% | 60.41% | 60.01% | $301.45 | 1.99 |
+| $499 / $4,990 | 23.5% | 60.40% | 60.01% | $301.44 | 1.99 |
 | $999 / $9,990 | 88.7% | 60.41% | 60.01% | $603.56 | 0.99 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$129 / $1,290** | **$249 / $2,490** | **$399 / $3,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **580** · 3,400 · 3,000 | **1,500** · 10,000 · 10,000 | **4,000** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **570** · 3,400 · 3,000 | **1,500** · 10,000 · 10,000 | **4,000** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **34** · 200 · 200 | **70** · 450 · 450 | **150** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **1,000** · 7,000 · 5,000 | **1,000** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **6 + 39** · 40 + 250 · 40 + 250 | **8 + 40** · 80 + 400 · 80 + 400 |

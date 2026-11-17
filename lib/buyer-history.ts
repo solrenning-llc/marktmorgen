@@ -126,7 +126,9 @@ export function historyFrom(handles: Set<string>, listings: unknown[], email: st
   const out = { state: "known" as const, checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0, under: address };
   try {
     for (const listing of listings) {
-      if (!isObject(listing) || !Array.isArray(listing.data) || typeof listing.has_more !== "boolean") return UNKNOWN;
+      if (!isObject(listing) || listing.object !== "list" || !Array.isArray(listing.data) ||
+          listing.data.length > REFUND_HISTORY_LIST || typeof listing.has_more !== "boolean" ||
+          (listing.has_more && listing.data.length === 0)) return UNKNOWN;
       if (listing.has_more) out.more = true;
       for (const row of listing.data) {
         const read = rowOf(row, address, handles);

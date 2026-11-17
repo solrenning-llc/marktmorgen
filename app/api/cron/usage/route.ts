@@ -326,7 +326,13 @@ async function watchUsage(): Promise<Response> {
   const given: string[] = [];
   // Kept as each notice goes out, not only at the end (Claude 7's cron hunt): a run stopped partway (the function's
   // time limit, a crash) wrote to some owners and recorded none, so the next day wrote to them again. Under the lock.
-  const record = () => redisPipeline([["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400]]);
+  // True only on exactly "OK" (CX-123 rule 24).
+  const record = async (): Promise<boolean> => {
+    const replies = await redisPipeline([["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400]]).catch(() => null);
+    return repliesFor(replies, 1)?.[0] === "OK";
+  };
+  // Stores not written to today because their place on the told list could not be written first: tried next run.
+  let unrecorded = 0;
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
@@ -340,7 +346,18 @@ async function watchUsage(): Promise<Response> {
       continue;
     }
     if (!isSenderConfigured()) break;
-    const sent = await sendEmail({ meter: { by: "company" },
+    // The store goes on the told list before its notice, for the list's own period, and comes off only on a certain
+    // refusal (Codex L on #4529): a notice the provider may have accepted with its answer lost, or a run stopped
+    // right after the send, never writes to the same owner again. A list not written exactly sends nothing to this
+    // store today; the list is put back as it was, and the store is tried next run.
+    given.push(store.folder);
+    if (!(await record())) {
+      given.pop();
+      unrecorded += 1;
+      if (!(await record())) console.error("usage-watch: the told list could not be put back after an unconfirmed write; a store may wait a period for its notice");
+      continue;
+    }
+    const outcome = await sendEmailOutcome({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: email,
       replyTo: SUPPORT_EMAIL,
@@ -373,12 +390,14 @@ async function watchUsage(): Promise<Response> {
       ].join("\n"),
     }).catch((error) => {
       console.error("sending the allowance notice failed", error);
-      return false;
+      return "uncertain" as const;
     });
-    if (sent === true) {
-      told += 1;
-      given.push(store.folder);
-      await record();
+    if (outcome === "sent") told += 1;
+    if (outcome === "refused") {
+      given.pop();
+      // Off the list again, so the next run writes to the owner. Not confirmed, it may stay held: a notice that was
+      // certainly not sent then waits for the list's period, never a second notice.
+      if (!(await record())) console.error("usage-watch: a refused allowance notice could not be taken off the told list; it may wait a period");
     }
   }
 
@@ -410,12 +429,15 @@ async function watchUsage(): Promise<Response> {
 
   await record();
 
+  if (unrecorded > 0) {
+    console.error(`usage-watch: ${unrecorded} store(s) over the delivery allowance could not be put on the told list before their notice; they were not written to and are tried again next run`);
+  }
   if (unreadOwners > 0) {
     console.error(`usage-watch: ${unreadOwners} store(s) over the delivery allowance have an owner that could not be read today; they were not written to and are tried again next run`);
   }
 
   return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, video, visits, orders },
+    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, unrecorded, video, visits, orders },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

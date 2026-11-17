@@ -5,7 +5,7 @@
  * read at the start. Two runs at once (a retried invocation, a manual run beside the scheduled one) both read nobody
  * told and both wrote to every owner; and a run stopped after writing to some owners (the function's time limit, a
  * crash) left the list as it was, so the next day wrote to them again. The run now holds a lock, as the other
- * scheduled jobs do, and the told list takes each owner as soon as their notice went out.
+ * scheduled jobs do, and the told list takes each owner before their notice goes out (Codex L on #4529).
  *
  * Synthetic stores and addresses; Resend is a stand-in that keeps who was written to; real MemoryRedis.
  */
@@ -70,9 +70,11 @@ test("a run stopped after writing to one owner does not write to them again the 
   } finally {
     redis.pipeline = real;
   }
-  assert.equal(sent.length, 2, "both owners were written to before the stop");
+  // Since Codex L's MEDIUM on #4529 the store goes on the told list before its notice: the write that names the
+  // second store is the one that is stopped, so its notice never goes out in that run.
+  assert.equal(sent.length, 1, "the first owner was written to before the stop, the second was not");
   await quiet(() => run());
   assert.equal(count("heavy-a@example.com"), 1, "the first owner, recorded as told, is not written to again");
-  // The second notice went out but the run stopped before recording it: it is the one notice sent again.
-  assert.equal(count("heavy-b@example.com"), 2);
+  // The second owner is written to by the next run, once: no notice is sent twice.
+  assert.equal(count("heavy-b@example.com"), 1);
 });

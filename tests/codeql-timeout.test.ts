@@ -12,6 +12,9 @@
  * only, and "All checks (codeql)" accepts that one skip only there; every pull request, push to main, daily and
  * manual run still analyzes with the same queries and uploads. paths-ignore for tests/ and proofs/ was weighed and
  * left out: scripts/ (the margin calculators among them) import tests/, so it would cut real data flow.
+ *
+ * 180 minutes (owner, 16/11/2026): on 16/11/2026 finished runs took 64 to 112 minutes and three were cut at 120, one on
+ * main's own push, which froze the queue for about 4 hours (#4826). Coverage is unchanged; only the time limit grows.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -21,7 +24,7 @@ import { done, is, part } from "./check";
 const yaml = readFileSync(".github/workflows/codeql.yml", "utf8");
 
 part("Time to finish");
-is("the analyze job may run 120 minutes, read as the queue health report reads it", codeqlTimeout(yaml), 120);
+is("the analyze job may run 180 minutes, read as the queue health report reads it", codeqlTimeout(yaml), 180);
 
 part("The same coverage");
 is("both languages are analyzed", /language: \[javascript-typescript, actions\]/.test(yaml), true);

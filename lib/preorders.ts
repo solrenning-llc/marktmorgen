@@ -490,8 +490,16 @@ async function sendOut(store: Store, product: Listing, to: string, deps: HandOve
 /** The receipt: what was pre-ordered, what it cost, and the day it is expected. */
 async function sendReceipt(store: Store, product: Listing, session: Session, to: string, reference: string, day: string | null, deps: HandOverDeps, idempotencyKey?: string): Promise<boolean> {
   const p = preorderWords(store.language);
-  const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else sends nothing and answers false, never the catalog's current price or the
+  // store's own currency: the confirmation lets its mark go (confirmPreorderOnce) and a later pass, reading the
+  // checkout again, sends the receipt under the same idempotency key.
+  const amount = session.amount_total;
+  const currency = session.currency;
+  if (!Number.isSafeInteger(amount) || Number(amount) < 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
+    console.error("a pre-order's receipt waits: the amount charged is unknown");
+    return false;
+  }
   const said = speech(store);
   return sendEmail({ meter: { by: "order" },
     from: deps.from,
@@ -501,7 +509,7 @@ async function sendReceipt(store: Store, product: Listing, session: Session, to:
       p.receiptLead(store.name),
       "",
       p.receiptWhat(product.title),
-      p.receiptPaid(formatMoney(amount, currency, said.lang.locale)),
+      p.receiptPaid(formatMoney(Number(amount), currency, said.lang.locale)),
       p.receiptRef(reference),
       ...consentEmailLines(store, session.metadata),
       "",
@@ -773,7 +781,9 @@ export async function revokeRefundedPreorders(
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`);
+      const latest = now() + 300;
+      return readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
     } catch (error) {
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading refunds for pre-orders: a page in another shape", error);

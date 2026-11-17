@@ -47,7 +47,9 @@ const loadStore = cache(async (raw: string) => {
 export async function generateMetadata({ params }: LayoutProps<"/[handle]">): Promise<Metadata> {
   const { handle } = await params;
   const store = await loadStore(handle);
-  if (!store) return {};
+  // A store switched off after a report (lib/takedown.ts) puts nothing of its own in the head, as an
+  // address with no store: its manifest answers 404, and its name and icons are not shown.
+  if (!store || store.suspended) return {};
   return {
     manifest: `/@${store.handle}/manifest.webmanifest`,
     applicationName: store.name,
@@ -56,13 +58,18 @@ export async function generateMetadata({ params }: LayoutProps<"/[handle]">): Pr
       apple: [{ url: iconUrl(store, 180), sizes: "180x180", type: "image/png" }],
     },
     appleWebApp: { capable: true, title: shortName(store.name), statusBarStyle: "default" },
+    // A shared link to a page of the store unfolds into the store's, never the site's preview picture
+    // (Marktmorgen's illustration and its alt text are not what the page shows). A page with a picture
+    // of its own (the creator's photo on the front page, a product's drawn picture) sets its own over this.
+    openGraph: { type: "website", siteName: store.name, images: [] },
+    twitter: { card: "summary", images: [] },
   };
 }
 
 export async function generateViewport({ params }: LayoutProps<"/[handle]">): Promise<Viewport> {
   const { handle } = await params;
   const store = await loadStore(handle);
-  return store ? { themeColor: themeColour(store) } : {};
+  return store && !store.suspended ? { themeColor: themeColour(store) } : {};
 }
 
 export default async function StoreLayout({ children, params }: LayoutProps<"/[handle]">) {

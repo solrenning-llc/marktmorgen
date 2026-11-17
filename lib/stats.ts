@@ -29,7 +29,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
-import { type DiscountElsewhere, type DiscountRow, discountElsewhere, discountImpact } from "@/lib/discount-impact";
+import { type DiscountCodeRow, type DiscountElsewhere, type DiscountRow, discountCodes, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
@@ -68,10 +68,34 @@ const MAX_SOURCES = 40;
  * and the day's totals stay right. A day of a busy store names some 60.
  */
 export const DAY_FIELDS_MAX = 100;
+/**
+ * The most fields a day's record may have when a reach beacon adds one (#4608): below DAY_FIELDS_MAX, so the
+ * store page's reach fields, which any visitor can name through app/api/store/read, never take the last places of
+ * the day. Past this, a new reach field counts under "~"; views, sources, countries and answers keep their room, and
+ * the day's first view still gives the record its end.
+ */
+export const REACH_FIELDS_MAX = 70;
 /** The most fields the all-time record may have between the trims that read it (readLife): its own and LIFE_MAX_FIELDS of counts. */
 export const LIFE_WRITE_MAX = 2_100;
 
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * The counts one capped-count EVAL answered (lib/capped-count.ts), read exactly: a list of `fields` whole numbers
+ * at or above zero, each a number or its decimal text. Anything else is not known (rule 24), never "not the first".
+ */
+function knownCounts(replies: unknown, fields: number): number[] | null {
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const reply: unknown = replies[0];
+  if (!Array.isArray(reply) || reply.length !== fields) return null;
+  const out: number[] = [];
+  for (const value of reply as unknown[]) {
+    const n = typeof value === "number" ? value : typeof value === "string" && /^(0|[1-9][0-9]{0,15})$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+    out.push(n);
+  }
+  return out;
+}
 const countsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}`;
 const visitorsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}:u`;
 const lifeKey = (statsId: string) => `nl:stats:${statsId}:life`;
@@ -186,14 +210,36 @@ export async function recordHit(
     // day, because every visit's cost is held to what a plan charges for it
     // (tests/traffic-cost.ts). The day's count only, not the all-time
     // record, so "all time" has no figure for it rather than a wrong one.
-    const [opened] = await cappedCount(counts, DAY_FIELDS_MAX, [{ field: `pv:${hit.id}`, by: 1 }]);
-    if (opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+    // An answer that is not known (lost after the write, or in another shape) may be the day's first write too:
+    // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
+    let opened: number | null = null;
+    try {
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+    } catch (error) {
+      console.error("counting a product page's view failed", error);
+    }
+    if (opened === null || opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]).catch(() => null);
     return null;
   } else {
     return null;
   }
-  const [counted, ...results] = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
-  const values = Array.isArray(counted) ? counted.map(Number) : [];
+  // The expiries an unknown answer still sends: what this hit may have written first today. Never the all-time
+  // record's start, which only a known first write may say (rule 24).
+  const unknownExpiries = (): (string | number)[][] => [
+    ["EXPIRE", counts, TTL_SECONDS],
+    ...(hit.kind === "view" ? [["EXPIRE", liveKey(store.statsId as string), 86400], ["EXPIRE", visitorsKey(store.statsId as string, day), TTL_SECONDS]] : []),
+  ];
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+  } catch (error) {
+    // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
+    await redisPipeline(unknownExpiries()).catch(() => null);
+    throw error;
+  }
+  const [counted, ...results] = Array.isArray(replies) ? replies : [];
+  const known = knownCounts([counted], tally.length);
+  const values = known ?? [];
   // Written once, not on every hit (11 October 2026: every visit's commands
   // are a cost held to what a plan charges, tests/traffic-cost.ts, and these
   // three were sent on every page view though they change nothing after the
@@ -201,17 +247,24 @@ export async function recordHit(
   // — so filling it from the kept days never counts that day or any after it
   // twice — with the day's first write of this kind; the visitors' expiry with
   // the visitor new to the day, who is a visitor for all time too.
-  const follow: (string | number)[][] = [];
+  const follow: (string | number)[][] = known ? [] : unknownExpiries();
   if (firstAt >= 0 && values[firstAt] === 1) {
     follow.push(["EXPIRE", counts, TTL_SECONDS], ["HSETNX", life, "started", day]);
     // Those who were on before today let go once a day, so a store viewed
     // every day and never looked at live keeps a day of them, not every one.
     if (hit.kind === "view") follow.push(["ZREMRANGEBYSCORE", liveKey(store.statsId), 0, now - 30 * 60_000], ["EXPIRE", liveKey(store.statsId), 86400]);
   }
-  if (pfAt >= 0 && Number(results[pfAt]) === 1) {
+  if (pfAt >= 0 && (results[pfAt] === 1 || results[pfAt] === "1")) {
     follow.push(["HINCRBY", life, "u", 1], ["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
+  } else if (pfAt >= 0 && results[pfAt] !== 0 && results[pfAt] !== "0") {
+    // Not known whether this visitor was new to the day: the day's visitors keep their expiry, and nobody is counted.
+    follow.push(["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
   }
-  if (follow.length) await redisPipeline(follow);
+  // Each key's expiry once: an unknown answer already sends the visitors' expiry, and a visitor new to the day would
+  // send it again (Claude 1's review of #3676).
+  const expiring = new Set<string>();
+  const once = follow.filter((c) => c[0] !== "EXPIRE" || (!expiring.has(String(c[1])) && Boolean(expiring.add(String(c[1])))));
+  if (once.length) await redisPipeline(once);
   // The store page's views so far today, for the busy-day alert (lib/stats-report.ts).
   return hit.kind === "view" ? values[firstAt] || null : null;
 }
@@ -224,7 +277,7 @@ export async function recordHit(
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }]);
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -957,7 +1010,7 @@ export type SalesStats = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (lib/discount-impact.ts); null with no discounted sale. */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[] };
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[]; codes: DiscountCodeRow[] };
   /** When buyers bought over the 90 days: checkouts by hour of the week in UTC, Sunday 0:00 first (hoursOfWeek). */
   hours?: { sales: number[]; cents: number[] };
 };
@@ -1307,11 +1360,25 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(meta).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/** The billing reasons of a membership's payments after the checkout's own ("subscription_create"). */
+const AFTER_CHECKOUT_REASONS = new Set(["subscription_cycle", "subscription_update"]);
+
+/**
+ * A paid invoice of a membership or payment plan that the checkout did not already count: a period renewal
+ * ("subscription_cycle") or a plan change charged at once ("subscription_update", lib/tier-switch.ts,
+ * lib/yearly-switch.ts), both money kept, as a refund of either is subtracted (MM-E2E-SUB-1;
+ * docs/bx2-earnings-design.md). Any other reason ("manual", an unknown or future one) is never taken as membership
+ * money, even with this store's metadata (MM-E2E-SUB-2), as lib/plan-refund-rules.ts reads only known reasons.
+ */
+function paidAfterCheckout(invoice: Record<string, unknown>): boolean {
+  return invoice.status === "paid" && typeof invoice.billing_reason === "string" && AFTER_CHECKOUT_REASONS.has(invoice.billing_reason);
+}
+
 /**
  * The payments after the first of this store's memberships and payment plans
- * since `since` (seconds): paid invoices Stripe made because a period came
- * round (billing_reason "subscription_cycle"), on subscriptions this store
- * opened. At most `pages` pages of a hundred. Pure on what it is handed, so a
+ * since `since` (seconds): paid invoices after the checkout's own
+ * (paidAfterCheckout: a period renewal or a plan change charged at once), on
+ * subscriptions this store opened. At most `pages` pages of a hundred. Pure on what it is handed, so a
  * test can give it invoices.
  */
 export function renewalsFrom(
@@ -1330,7 +1397,7 @@ export function renewalsFrom(
   // and handed on as an ordinary record of own keys, which a page can take.
   const bySourceDay: ChannelDays = Object.create(null);
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     if (currencyOf(invoice) !== currency) continue;
@@ -1368,7 +1435,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
   const handles = saleHandles(store);
   const out: Entry[] = [];
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
@@ -1465,7 +1532,7 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
 /**
  * The paid renewals of this store since `since` (seconds), each with the
  * buyer's address as the invoice has it: the same invoices renewalEntries
- * counts (paid, billing_reason "subscription_cycle", this store's handles),
+ * counts (paidAfterCheckout, this store's handles),
  * at most `pages` pages of a hundred; `partial` when there were more.
  */
 export async function readRenewalPayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ rows: RenewalPayment[]; partial: boolean }> {
@@ -1482,7 +1549,7 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const invoice of rows) {
-      if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+      if (!paidAfterCheckout(invoice)) continue;
       if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
       const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
       const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
@@ -1869,11 +1936,14 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     !(out.refundsIn?.d90 ?? []).some((r) => r.source === UNRECORDED);
   out.levers = measureSalesLevers(read,store.currency,readPartial,now);
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
+  const refundedIntents = new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean));
   out.discounts = {
-    rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
+    rows: discountImpact(read, refundedIntents, store.currency, now, STATS_DAYS),
     refundsRead: refundRows !== null,
     // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
     elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
+    // The same checkouts by the code they used (760 [STN7], unit 2), from the same sales: nothing more is read.
+    codes: discountCodes(read, refundedIntents, store.currency, now, STATS_DAYS),
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),
@@ -2227,7 +2297,7 @@ export type StatsData = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (SalesStats.discounts). */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[] } | null;
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[]; codes?: DiscountCodeRow[] } | null;
   /** Checkouts by hour of the week in UTC over the 90 days (SalesStats.hours); the browser turns them to its own time. */
   hours?: { sales: number[]; cents: number[] } | null;
   /**

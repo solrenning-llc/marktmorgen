@@ -14,7 +14,8 @@ import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
-import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { activePlan } from "@/lib/product-extras";
+import { accessEndAhead, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
 import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
@@ -23,7 +24,7 @@ import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
-  CertificateSwitch, CourseStart,
+  CertificateSwitch, CourseAccessEnd, CourseStart,
   CourseEditor,
   GiveTriesBack,
   StudentAccess,
@@ -34,6 +35,7 @@ import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoCaptionStates, autoCaptionsMoney } from "@/lib/auto-captions";
+import { CaptionsRefundsOwed } from "@/components/captions-refunds-owed";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
@@ -84,16 +86,20 @@ export default async function StudioCoursePage({
   const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
   const streams = await streamStates(videoPaths).catch(() => ({}));
   // And the languages each one has captions in.
-  const captions = await streamCaptions(videoPaths).catch(() => ({}));
+  const captions = await streamCaptions(videoPaths).catch(() => null);
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for; and
   // those whose captions could not be confirmed, kept for a person (`held`).
-  const { writing, held } = await autoCaptionStates(videoPaths).catch(() => ({ writing: {}, held: [] as string[] }));
-  // AI captions money not settled, shown to whoever may see the plan's card: refunds Stripe has not confirmed yet,
-  // and charges kept for a person, apart. Null when it could not be read: said, never shown as nothing owed.
+  // Null when it could not be read (rule 24): said as unknown, never as none.
+  const captionStates = await autoCaptionStates(videoPaths).catch(() => null);
+  const writing = captionStates ? captionStates.writing : null;
+  const held = captionStates ? captionStates.held : [];
+  // AI captions money not settled, shown to whoever may see the plan's card: refunds Stripe has not confirmed yet
+  // (main's CaptionsRefundsOwed), and charges kept for a person, apart. One exact read for both (autoCaptionsMoney):
+  // null when it could not be read (rule 24), so the page says so instead of hiding as if nothing were owed.
   const captionsMoney: Awaited<ReturnType<typeof autoCaptionsMoney>> | null = can(view.role, "billing") ? await autoCaptionsMoney(folder).catch(() => null) : { owed: [], unconfirmed: [] };
-  const owedRows = captionsMoney?.owed ?? [];
-  const unconfirmedRows = captionsMoney?.unconfirmed ?? [];
+  const owedRows = captionsMoney ? captionsMoney.owed : null;
+  const unconfirmedRows = captionsMoney ? captionsMoney.unconfirmed : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
@@ -191,22 +197,18 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        {owedRows.length ? (
-          <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
-            <h2 id="captions-refunds" className="text-base font-bold text-ink">
-              Refunds for AI captions not confirmed yet
+        {owedRows === null ? (
+          <section aria-labelledby="captions-refunds-unread" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds-unread data-captions-money-unread>
+            <h2 id="captions-refunds-unread" className="text-base font-bold text-ink">
+              Refunds and charges for AI captions could not be checked
             </h2>
-            <ul className="mt-2 space-y-1 text-sm text-ink">
-              {owedRows.map((row) => (
-                <li key={row.id}>
-                  {row.stuck
-                    ? `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was not confirmed by Stripe, and we have stopped checking it on our own. Write to ${SUPPORT_EMAIL} about it.`
-                    : `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was asked for, and Stripe has not confirmed it yet. We check it again on our own; you do not need to do anything.`}
-                </li>
-              ))}
-            </ul>
+            <p className="mt-2 text-sm text-ink">
+              We could not read whether a refund for AI captions is still waiting for Stripe, or whether a charge for AI captions is still waiting for a person to confirm it. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
+            </p>
           </section>
-        ) : null}
+        ) : (
+          <CaptionsRefundsOwed rows={owedRows} />
+        )}
         {unconfirmedRows.length ? (
           <section aria-labelledby="captions-unconfirmed" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-unconfirmed>
             <h2 id="captions-unconfirmed" className="text-base font-bold text-ink">
@@ -220,11 +222,6 @@ export default async function StudioCoursePage({
               ))}
             </ul>
           </section>
-        ) : null}
-        {captionsMoney === null ? (
-          <p className="mt-5 max-w-[80ch] text-sm text-ink" role="status" data-captions-money-unread data-captions-refunds-unread>
-            We could not read your AI captions refunds and charges just now. Reload the page in a moment to see them.
-          </p>
         ) : null}
         <CourseAccessCheck
           check={lessonCaptionCheck(course, streams, captions, writing)}
@@ -241,8 +238,9 @@ export default async function StudioCoursePage({
           draft={product.hidden === true}
           folder={folder}
           streams={streams}
-          captions={captions}
-          writing={writing}
+          // The editor's own lesson Captions part still reads a missing entry as none (a leftover; the check above says unknown).
+          captions={captions ?? {}}
+          writing={writing ?? {}}
           held={held}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
@@ -303,6 +301,7 @@ export default async function StudioCoursePage({
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
+            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} membership={product.recurring !== null} planOffered={activePlan(product) !== null} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
             {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (
@@ -438,14 +437,15 @@ export default async function StudioCoursePage({
                       <td className="whitespace-nowrap py-2 pr-3">{day(student.lastSeen)}</td>
                       {quizLessons.length ? (
                         <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
-                          {`${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
+                          {/* Null: this student's passes could not be read just now (rule 24), never shown as 0. */}
+                          {passed[i] === null ? "Could not be read" : `${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
                         </td>
                       ) : null}
                       {seesBuyers ? (
                         <td className="py-2">
                           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                             <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
-                            {quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
+                            {passed[i] !== null && quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
                           </span>
                         </td>
                       ) : null}

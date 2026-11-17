@@ -826,11 +826,15 @@ export async function autoCaptionStates(pathnames: string[]): Promise<{ writing:
   const writing: Record<string, string[]> = {};
   const held: string[] = [];
   if (!wanted.length || !isRedisConfigured()) return { writing, held };
-  const rows = await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)]));
+  // Rule 24 (main's #3881): a record that is there but does not read is unknown, never "not being written".
+  const rows = repliesFor(await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)])), wanted.length);
+  if (!rows) throw new UnknownReplyError("captions being written");
   wanted.forEach(({ path }, i) => {
+    if (rows[i] === null) return;
     const pending = parsePending(rows[i]);
+    if (!pending) throw new UnknownReplyError("captions being written");
     // A request whose refund is owed is no longer being written; one kept for a person is not either.
-    if (!pending || pending.owed) return;
+    if (pending.owed) return;
     if (pending.kept !== undefined) {
       held.push(path);
       return;
@@ -846,46 +850,54 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
   return (await autoCaptionStates(pathnames)).writing;
 }
 
+/** The most owed refunds one studio read takes; more are said to be unknown, never cut to the first ones. */
+const OWED_READ_MAX = 100;
+
 /**
- * The AI captions money not settled in one store folder, deleted videos included, read exactly (rule 24): refunds
- * Stripe has not confirmed (`owed`: cents owed and whether automatic looks have stopped), and charges kept for a
- * person (`unconfirmed`: what was charged; no refund was decided, since what the service delivered is unknown, so it
- * is never a refund owed, never refunded and never delivered). A list or a record in an unknown shape throws
- * UnknownReplyError, never "nothing owed"; a listed record confirmed gone is not listed.
+ * The AI captions money not settled in one store folder, deleted videos included, read exactly (rule 24; main's
+ * #3881 checks for both parts): refunds Stripe has not confirmed (`owed`: cents owed and whether automatic looks
+ * have stopped), and charges kept for a person (`unconfirmed`: what was charged; no refund was decided, since what
+ * the service delivered is unknown, so it is never a refund owed, never refunded and never delivered). Each record
+ * is in one part at most: owed wins over kept, and a settlement that gives nothing back (owed cents 0) is in neither.
+ * A list or a record in an unknown shape, more members than one read takes, a record that names another folder or
+ * an amount that is not a whole number of cents above zero throws UnknownReplyError, never "nothing owed"; a listed
+ * record confirmed gone is not listed.
  */
 export async function autoCaptionsMoney(folder: string): Promise<{ owed: { id: string; cents: number; stuck: boolean }[]; unconfirmed: { id: string; cents: number }[] }> {
   const out: { owed: { id: string; cents: number; stuck: boolean }[]; unconfirmed: { id: string; cents: number }[] } = { owed: [], unconfirmed: [] };
   if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return out;
-  const listed = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
-  const members = listed ? stringList(listed[0]) : null;
-  if (!members) throw new UnknownReplyError("the store's AI captions money not settled");
-  // Every member a video id exactly (Codex G's MEDIUM at f830b9f4d0): any other string makes the whole list unknown,
-  // never left out, so a list that holds only such members is never "nothing owed".
-  if (!members.every((m) => STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the store's AI captions money not settled");
-  const ids = [...members].sort().slice(0, 100);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the owed captions refunds");
+  // A member this version does not read, or more members than one read takes, is unknown, never "not owed":
+  // dropping or cutting them would hide money the creator may need to write to support about.
+  if (members.length > OWED_READ_MAX || members.some((m) => !STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the owed captions refunds");
+  const ids = [...members].sort();
   if (!ids.length) return out;
   const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
-  if (!rows) throw new UnknownReplyError("the store's AI captions money not settled");
+  if (!rows) throw new UnknownReplyError("the owed captions refunds");
   ids.forEach((id, i) => {
-    const raw = rows[i];
-    if (raw === null) return;
-    if (typeof raw !== "string") throw new UnknownReplyError("an AI captions record");
-    const pending = parsePending(raw);
-    // A record that does not read is unknown (rule 24): it throws, never left out as nothing owed.
-    if (!pending) throw new UnknownReplyError("an AI captions record");
-    if (readStreamPath(pending.path)?.folder !== folder) return;
-    // A settlement that gives nothing back (cents 0) is about to be closed: neither owed nor kept for a person.
-    if (pending.owed) {
-      if (pending.owed.cents !== 0) out.owed.push({ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true });
-    } else if (pending.kept !== undefined) out.unconfirmed.push({ id, cents: pending.cents });
+    if (rows[i] === null) return;
+    const pending = parsePending(rows[i]);
+    if (!pending) throw new UnknownReplyError("a caption refund owed to a store");
+    const owed = pending.owed;
+    if (owed && owed.cents === 0) return;
+    if (!owed && pending.kept === undefined) return;
+    // Listed under this folder: a path that does not read, or names another folder, is unknown, never "none owed" (Codex T).
+    if (readStreamPath(pending.path)?.folder !== folder) throw new UnknownReplyError("a caption refund owed to a store");
+    // An amount is a whole number of cents above zero; anything else is unknown, never "$0.00" (Codex g).
+    const cents = owed ? owed.cents ?? pending.cents : pending.cents;
+    if (!Number.isSafeInteger(cents) || cents <= 0) throw new UnknownReplyError("a caption refund owed to a store");
+    if (owed) out.owed.push({ id, cents, stuck: owed.stuck === true });
+    else out.unconfirmed.push({ id, cents });
   });
   return out;
 }
 
 /**
  * Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and
- * whether automatic looks have stopped. A reply in an unknown shape throws UnknownReplyError, never "none owed"
- * (CX-123 rules 24 and 30): money owed is never hidden by a read that failed. A record gone (expired) is not owed.
+ * whether automatic looks have stopped. Rule 24: a set or a record that does not read is unknown, never "nothing
+ * owed" (autoCaptionsMoney's exact read), so the studio says it could not check instead of hiding a refund.
  */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   return (await autoCaptionsMoney(folder)).owed;

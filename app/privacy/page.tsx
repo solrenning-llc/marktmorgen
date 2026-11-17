@@ -29,7 +29,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -75,7 +75,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you type for the bottom of your emails goes in those
+          emails only; it is shown on your store&apos;s public policies page too only
+          if you check the box for that where you type it, and comes off the
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When
@@ -304,7 +308,9 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
@@ -1217,7 +1223,10 @@ export default function PrivacyPage() {
           creator&apos;s choice and responsibility. We keep each address and its
           signing secret until the creator removes it, a mark of each event
           sent for 30 days so it is never sent twice, and each delivery, with
-          the answer the address gave, for up to seven days.
+          the answer the address gave, for up to seven days. When a free copy
+          or a list sign-up could not be passed on to those addresses at once,
+          we keep that event, with the same details, for up to seven days to
+          try again, and never send it about someone deleted from the store.
         </p>
         <p id="store-forms">
           <strong className="text-black">Forms and quizzes on a store&apos;s pages.</strong>{" "}
@@ -1238,7 +1247,13 @@ export default function PrivacyPage() {
           went to, when, and the buyer&apos;s email address, so the buyer can
           see it again and the creator can see who has it, and whether the
           creator revoked it. Anyone can ask whether a key is valid; the answer
-          says nothing about who bought it. Keys are kept with the
+          says nothing about who bought it. When a creator limits a key to a
+          few devices, we keep, for each device their software names, a one-way
+          code made with a key only our server holds, different for every
+          license key and never the identifier the software sent, and when the
+          buyer freed a device. Nobody can turn a code back into the device or
+          match it on another key. These codes are kept with the key and go by
+          themselves 400 days after their last change. Keys are kept with the
           store&apos;s records.
         </p>
         <p id="quizzes">
@@ -1572,8 +1587,10 @@ export default function PrivacyPage() {
           themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
-          every connection that user made, with its tokens, at once. If the
-          creator withdraws our access in their Google account, we stop using
+          every connection that user made, with its tokens, at once. We then
+          keep, for one day, a scrambled form of that Zoom user ID and the time
+          Zoom told us, only so that a connection being finished at that very
+          moment is not kept either. If the creator withdraws our access in their Google account, we stop using
           the connection and tell them, and disconnecting deletes it.
         </p>
         <p id="meta-ads" className="scroll-mt-24">
@@ -1593,7 +1610,10 @@ export default function PrivacyPage() {
           and delete the connection, its token and every figure read from
           it. If they remove our app in their Facebook settings, or ask Meta
           for their data to be deleted, Meta tells us and we do the same at
-          once, and tell the store&apos;s owner.
+          once, and tell the store&apos;s owner. We then keep, for one day,
+          a scrambled form of that Meta user ID and the time Meta told us,
+          only so that a connection being finished at that very moment is
+          not kept either.
         </p>
         <p id="comparisons" className="scroll-mt-24">
           <strong className="text-black">Comparisons between stores.</strong>{" "}
@@ -2241,7 +2261,8 @@ export default function PrivacyPage() {
             their sales and tax records and are not stored by us; and the few
             order records a purchase still needs for a refund or for delivery,
             each with only what it needs and for the time section 1 gives it:
-            PayPal orders, license keys you bought, gifts and group places,
+            PayPal orders, license keys you bought and the codes of the devices
+            they run on, gifts and group places,
             pre-orders, packages of calls, your place on a booked group
             call&apos;s guest list until 60 days after it, and when a physical
             order shipped. The links emailed to you before stop working. A few
@@ -2249,7 +2270,9 @@ export default function PrivacyPage() {
             link that opens a page for a day or less; the list of addresses an
             email already going out is sent down, which passes a deleted address
             over (until it finishes, at most 60 days); a reminder waiting for its
-            hour, which is then not sent (at most a week); an import&apos;s file
+            hour, which is then not sent (at most a week); an event for the
+            creator&apos;s webhooks still waiting to be sent, which is then not
+            sent (at most a week); an import&apos;s file
             (14 days after it began); the events a store&apos;s webhooks already
             sent to the creator (7 days); and one-way marks that limit how often
             something is sent or asked (at most 32 days).
@@ -2260,6 +2283,10 @@ export default function PrivacyPage() {
             shown without your name. Delete them in the community first if you
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
+            If a creator removed a course before we began keeping a record of
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

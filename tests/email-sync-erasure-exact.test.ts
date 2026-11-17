@@ -48,7 +48,8 @@ async function under<T>(alter: (batch: Batch, answers: unknown[]) => unknown[], 
 /** The queue's lease (LEASE_SCRIPT), which the in-memory double does not run, done here by its three steps. */
 const leased = async (batch: Batch, answers: () => Promise<unknown[]>): Promise<unknown[]> => {
   const [command] = batch;
-  if (batch.length !== 1 || command?.[0] !== "EVAL") return answers();
+  // Only the lease script; a named script (lib/email-sync.ts WRITE_IF_READ) runs in the in-memory double itself.
+  if (batch.length !== 1 || command?.[0] !== "EVAL" || String(command[1]).startsWith("-- marktmorgen:")) return answers();
   const [, , , key, member, now, until] = command;
   const due = redis.run(["ZSCORE", String(key), String(member)]);
   if (due === null || Number(due) > Number(now)) return [0];

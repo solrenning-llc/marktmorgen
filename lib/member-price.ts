@@ -89,6 +89,29 @@ function paidAndKept(payment: unknown): boolean {
   return charge.paid === true && charge.refunded === false && charge.amount_refunded === 0 && charge.disputed === false;
 }
 
+const textMap = (value: unknown): value is Record<string, string> => plainObject(value) && Object.values(value).every((one) => typeof one === "string");
+
+/**
+ * Whether a subscription, as the checkout's expansion gave it, carries every field heldFromSessions decides by (Codex U
+ * on #2999): its status; its own metadata and its items, from which currentMeta reads the product it is on now (a
+ * missing one would fall back to the product bought, so a member moved off it would still hold it); and its pause,
+ * from which memberState reads whether it is paused (a missing one would read as no pause). Stripe sends each of
+ * them on a subscription object, `pause_collection` as null when there is no pause; anything else is unreadable.
+ */
+export function subscriptionDecidable(sub: unknown): boolean {
+  if (!plainObject(sub) || sub.object !== "subscription" || typeof sub.status !== "string") return false;
+  if (!textMap(sub.metadata)) return false;
+  const items = sub.items;
+  if (!plainObject(items) || !Array.isArray(items.data)) return false;
+  const first: unknown = items.data[0];
+  if (items.data.length && (!plainObject(first) || !plainObject(first.price) || !textMap(first.price.metadata))) return false;
+  if (!Object.prototype.hasOwnProperty.call(sub, "pause_collection")) return false;
+  const pause = sub.pause_collection;
+  if (pause === null) return true;
+  if (!plainObject(pause)) return false;
+  return pause.resumes_at === null || typeof pause.resumes_at === "number";
+}
+
 /**
  * Whether heldFromSessions can decide on this row: every field it reads, in a shape Stripe gives with the two
  * expansions asked (Codex V's review of #2999, MEDIUM). A row that cannot be decided is unreadable
@@ -99,9 +122,9 @@ function paidAndKept(payment: unknown): boolean {
 export function sessionDecidable(row: Record<string, unknown>): boolean {
   if (typeof row.status !== "string" || typeof row.mode !== "string" || typeof row.payment_status !== "string") return false;
   const meta = row.metadata;
-  if (!plainObject(meta) || !Object.values(meta).every((value) => typeof value === "string")) return false;
+  if (!textMap(meta)) return false;
   if (row.status !== "complete" || meta.kind !== undefined) return true;
-  if (row.mode === "subscription") return plainObject(row.subscription) && typeof row.subscription.status === "string";
+  if (row.mode === "subscription") return subscriptionDecidable(row.subscription);
   if (row.mode !== "payment" || row.payment_status !== "paid") return true;
   const payment = row.payment_intent;
   if (!plainObject(payment) || typeof payment.status !== "string") return false;

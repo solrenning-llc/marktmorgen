@@ -273,6 +273,25 @@ export async function forgetPipelineAccess(store: DataStore, email: string): Pro
 }
 
 /**
+ * The teammate's lock taken only on SET NX's exact reply (rule 24; Codex g on #2036): exactly ["OK"] is taken,
+ * exactly [null] is held by someone else (busy). Any other shape (["OK", "unexpected"], an empty or sparse list, a
+ * Proxy, not a list) is unknown: the lock may not be ours, so nothing is read or written and the owner is told it
+ * was not saved, never that it was. A lock an unknown reply did set runs out by itself after LOCK_SECONDS.
+ */
+async function claimLock(statsId: string, who: string, token: string): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["SET", lockKey(statsId, who), token, "NX", "EX", LOCK_SECONDS]]), 1);
+  if (reply?.[0] === "OK") return;
+  if (reply?.[0] === null) throw new PipelineAccessBusyError();
+  throw new PipelineAccessWriteUnconfirmed();
+}
+
+/** The lock let go only when its GET answers exactly [token]; an unknown or failed read leaves it to run out, never deleting a lock that may be someone else's. */
+async function releaseLock(statsId: string, who: string, token: string): Promise<void> {
+  const held = repliesFor(await redisPipeline([["GET", lockKey(statsId, who)]]).catch(() => null), 1)?.[0];
+  if (held === token) await redisPipeline([["DEL", lockKey(statsId, who)]]).catch(() => {});
+}
+
+/**
  * One teammate's access to one pipeline set to `access`, the rest of their
  * restrictions kept. One change per teammate at a time (a short lock), so
  * two people saving at once never write over each other's choice: the
@@ -283,13 +302,11 @@ export async function forgetPipelineAccess(store: DataStore, email: string): Pro
 export async function setPipelineAccess(statsId: string, email: string, pipelineIds: readonly string[], pipelineId: string, access: PipelineAccess, room: DataStore): Promise<AccessMap> {
   const who = normaliseEmail(email);
   const token = randomBytes(12).toString("hex");
-  const [claimed] = await redisPipeline([["SET", lockKey(statsId, who), token, "NX", "EX", LOCK_SECONDS]]);
-  if (claimed !== "OK") throw new PipelineAccessBusyError();
+  await claimLock(statsId, who, token);
   try {
     return (await writeChoices(statsId, who, pipelineIds, { [pipelineId]: access }, room)).saved;
   } finally {
-    const [held] = await redisPipeline([["GET", lockKey(statsId, who)]]).catch(() => [null]);
-    if (held === token) await redisPipeline([["DEL", lockKey(statsId, who)]]).catch(() => {});
+    await releaseLock(statsId, who, token);
   }
 }
 
@@ -305,13 +322,11 @@ export async function setPipelineAccess(statsId: string, email: string, pipeline
 export async function setPipelineChoices(statsId: string, email: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore, was?: AccessMap | null): Promise<{ before: AccessMap | null; saved: AccessMap }> {
   const who = normaliseEmail(email);
   const token = randomBytes(12).toString("hex");
-  const [claimed] = await redisPipeline([["SET", lockKey(statsId, who), token, "NX", "EX", LOCK_SECONDS]]);
-  if (claimed !== "OK") throw new PipelineAccessBusyError();
+  await claimLock(statsId, who, token);
   try {
     return await writeChoices(statsId, who, pipelineIds, choices, room, was);
   } finally {
-    const [held] = await redisPipeline([["GET", lockKey(statsId, who)]]).catch(() => [null]);
-    if (held === token) await redisPipeline([["DEL", lockKey(statsId, who)]]).catch(() => {});
+    await releaseLock(statsId, who, token);
   }
 }
 

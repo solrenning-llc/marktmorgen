@@ -13,6 +13,7 @@ import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { readBook } from "@/lib/affiliates";
 import { rememberBuyer } from "@/lib/affiliate-bond";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
+import { CONFIRM_WITHIN_SECONDS } from "@/lib/purchase-email";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
@@ -93,6 +94,27 @@ async function main(): Promise<void> {
   redis.pipeline = real as typeof redis.pipeline;
   is("the next pass reads no buyer's bond again for sessions already settled", bondReads, 0);
   is("and nothing failed", again.failed, 0);
+
+  // Codex X4 on #4413 (X4-20261116-2218, MEDIUM): the settled mark and its expiry were three commands of one pipeline
+  // (ZADD, ZREMRANGEBYSCORE, EXPIRE), which Redis does not run as one. A write that stops after the ZADD left the
+  // sessions marked with no expiry: the next pass found them settled and never wrote again, so the key kept them for
+  // good. The mark and its expiry are one write now: all of it, or nothing and the next pass marks them again.
+  const [settledKey] = redis.keys().filter((k) => k.startsWith("nl:sweep:aff:"));
+  is("control: the store's settled mark exists", typeof settledKey, "string");
+  await redis.pipeline([["DEL", settledKey]]);
+  sessions = many.slice(0, 10).map((row, i) => ({ ...row, id: `cs_test_sweepbondPart${String(i).padStart(5, "0")}`, payment_intent: `pi_sweepbondPart${String(i).padStart(5, "0")}` }));
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    const marks = batch.some((c) => String(c[0]) !== "ZMSCORE" && c.some((a) => String(a) === settledKey));
+    if (!marks) return real(batch);
+    // The first command of the write runs; the connection is lost before the rest.
+    await real(batch.slice(0, 1));
+    throw new Error("the connection was lost after the first command (test)");
+  }) as typeof redis.pipeline;
+  await sweepCheckouts(Date.now() + 20_000);
+  redis.pipeline = real as typeof redis.pipeline;
+  await sweepCheckouts(Date.now() + 20_000);
+  const [ttl] = await redis.pipeline([["TTL", settledKey]]);
+  is("a write cut after its first command never leaves the mark without its expiry", Number(ttl) > 0 && Number(ttl) <= CONFIRM_WITHIN_SECONDS, true);
   done();
 }
 

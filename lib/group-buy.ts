@@ -418,16 +418,19 @@ export async function settleGroup(input: {
       if (read.id !== pi || read.object !== "payment_intent" || read.status !== "succeeded" || !charge || typeof charge !== "object" || Array.isArray(charge)) {
         throw new UnknownReplyError("a purchase for several's payment");
       }
-      const chargeRead = charge as { id?: unknown; object?: unknown; payment_intent?: unknown };
+      const chargeRead = charge as { id?: unknown; object?: unknown; payment_intent?: unknown; refunded?: unknown; disputed?: unknown };
       const charged = chargeRead.payment_intent;
       const chargedId = typeof charged === "string"
         ? charged
         : charged && typeof charged === "object" && !Array.isArray(charged) ? (charged as { id?: unknown }).id : "";
-      if (!CHARGE_ID.test(String(chargeRead.id ?? "")) || chargeRead.object !== "charge" || chargedId !== pi) {
+      if (typeof chargeRead.id !== "string" || !CHARGE_ID.test(chargeRead.id) || chargeRead.object !== "charge" || chargedId !== pi ||
+          typeof chargeRead.refunded !== "boolean" || typeof chargeRead.disputed !== "boolean") {
         throw new UnknownReplyError("a purchase for several's payment");
       }
       if (await givenBack(account, payment)) {
-        await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS);
+        if (!(await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS))) {
+          throw new UnknownReplyError("a revoked purchase for several's record");
+        }
         await releaseMark(settling, mark);
         return "already";
       }

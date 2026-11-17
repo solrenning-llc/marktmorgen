@@ -44,5 +44,7 @@ The email is never blocked: the panel says "You can still send it", and "Yes, se
 - **Contrast:** colors are already moved to 7:1 for stores and emails, so no pair below 7:1 can go out; a
   warning with a choice instead would be a change of behavior.
 - **Assistive technology:** checked with axe (every WCAG 2.0–2.2 A/AA/AAA rule), target size, real Tab presses
-  and reflow in Chromium (`tests/e2e/mail-access-review.mjs`); Firefox and WebKit run in CI. No screen reader,
+  and reflow in Chromium (`tests/e2e/mail-access-review.mjs`, run from the regular suite by
+  `tests/mail-access-review-browser.test.ts`). Firefox and WebKit are not run in CI: the script takes
+  `E2E_BROWSER=firefox|webkit` for a run by hand, and none is recorded here. No screen reader,
   voice control or person was used: a gap, not a pass.

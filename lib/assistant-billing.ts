@@ -348,6 +348,11 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     let disputedAt = store.assistantPlan?.disputedAt ?? "";
     if (!disputedAt && current.status === "active" && (await disputed(id))) {
       disputedAt = new Date(nowSeconds * 1000).toISOString();
+    }
+    // On a store whose add-on was disputed, any add-on subscription Stripe still charges is ended, on every sync until
+    // Stripe has taken it: an ending Stripe refused once, and a second subscription paid after the dispute (a checkout
+    // opened before it), never keep charging for an add-on the store no longer gives.
+    if (disputedAt && current.status !== "canceled" && current.status !== "incomplete_expired") {
       await onPlatform("DELETE", `/subscriptions/${encodeURIComponent(id)}`).catch((error) => console.error("ending a disputed add-on failed", error));
     }
     if (!disputedAt && current.status === "active" && current.cancel_at_period_end !== true && standingOf(store, nowSeconds) !== "paid") {

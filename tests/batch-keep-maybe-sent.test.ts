@@ -48,7 +48,7 @@ const paid = (id: string, email: string, product: string) => ({
   id, object: "checkout.session", status: "complete", payment_status: "paid", created: Math.floor(Date.now() / 1000) - 86_400,
   amount_total: 2700, currency: "usd", customer_details: { email }, metadata: { store: "harbor", product },
 });
-type Noting = (messages: email.BatchMessage[], batchKey: string, meter: email.EmailMeter, receipt: { maybeSent: boolean }) => Promise<"sent" | "retry" | "refused">;
+type Noting = (messages: email.BatchMessage[], batchKey: string, meter: email.EmailMeter, receipt: { maybeSent: boolean }, runtime?: Parameters<typeof email.sendBatchNoting>[4]) => Promise<"sent" | "retry" | "refused">;
 /** The sender with its receipt; before it existed, the plain sender, whose receipt says nothing. */
 const sendBatchNoting: Noting = (email as unknown as { sendBatchNoting?: Noting }).sendBatchNoting ?? ((messages, key, meter) => email.sendBatch(messages, key, meter));
 const letter = (to: string) => ({ from: "Harbor <harbor@example.com>", to, subject: "Hello", text: "Hello", html: "<p>Hello</p>" });

@@ -6,7 +6,8 @@
  *   - what it sells, from the products it lists (visibleIds: not drafts),
  *     counting only what is paid for: digital content sold once
  *     (deliversDigitally, not a membership) and memberships;
- *   - whether it takes PayPal right now (sellsThroughPayPal);
+ *   - which accounts it takes money into right now: Stripe (canSell) and PayPal
+ *     (sellsThroughPayPal), the same checks its store and product pages make;
  *   - the ad pixels switched on, by their platforms' own names (PIXEL_INFO);
  *   - the postal address on its emails, when set and the creator chose to show it there too.
  */
@@ -14,6 +15,7 @@ import type { Store } from "@/lib/store";
 import { type Listing, readListingsAll, visibleIds } from "@/lib/catalog";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
+import { canSell } from "@/lib/store-checkout";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
 import type { PolicyFactsInput } from "@/lib/store-policy-facts";
 import { takePublicRequest } from "@/lib/traffic";
@@ -31,13 +33,20 @@ type Sold = { priceCents?: number } & Partial<Record<Exclude<Read, "priceCents">
 const paid = (p: Sold) => (p.priceCents ?? 0) > 0 || Boolean(p.recurring) || Boolean(p.pwyw) || Boolean(p.plan);
 
 /** The input from products already read: kept apart so it can be checked without a store. */
-export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, products: readonly Sold[], paypal: boolean, selfCancel = false): PolicyFactsInput {
+export function policyInputFrom(
+  store: Pick<Store, "name" | "pixels" | "mail">,
+  products: readonly Sold[],
+  takes: Pick<PolicyFactsInput, "stripe" | "paypal">,
+  selfCancel = false,
+): PolicyFactsInput {
   const sold = products.filter(paid);
   return {
     storeName: store.name,
     sellsDigital: sold.some((p) => !p.recurring && deliversDigitally(p)),
     sellsMemberships: sold.some((p) => Boolean(p.recurring)),
-    paypal,
+    // Named, never by position: a store can take money by PayPal alone (Codex N1's MEDIUM on #1824).
+    stripe: takes.stripe,
+    paypal: takes.paypal,
     pixels: PIXEL_KINDS.filter((kind) => Boolean(store.pixels?.[kind])).map((kind) => PIXEL_INFO[kind].name),
     // Only by the creator's own choice where the address is typed: the email footer's address is never public by default (#1824).
     postalAddress: store.mail?.onPolicies === true ? store.mail.address : "",
@@ -51,7 +60,8 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
   const products = await readListingsAll(store, visibleIds(store));
   // The same check the purchase email makes before it sends the /manage link (lib/purchase-email.ts).
-  return policyInputFrom(store, products, sellsThroughPayPal(store), canManage(store));
+  // The accounts the money goes into, by the same checks the store and product pages make (takenBy).
+  return policyInputFrom(store, products, { stripe: canSell(store), paypal: sellsThroughPayPal(store) }, canManage(store));
 }
 
 /**

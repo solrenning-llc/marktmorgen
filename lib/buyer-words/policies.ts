@@ -16,7 +16,11 @@ export type PolicyWords = {
   titles: { seller: string; cancel: string; memberships: string; measurement: string; contact: string };
   sellerIs: (name: string) => string;
   notParty: string;
-  payments: (name: string, paypal: boolean) => string;
+  /**
+   * Where the money goes, naming only the accounts the store takes it with right now (Codex N1's MEDIUM on #1824):
+   * its Stripe account, its PayPal account, or both. With neither, no sentence is said (lib/store-policy-facts.ts).
+   */
+  payments: (name: string, via: PaidInto) => string;
   cancelIntro: string;
   cancelDigital: string;
   cancelMembership: string;
@@ -31,6 +35,9 @@ export type PolicyWords = {
   notAdvice: string;
 };
 
+/** The accounts a store takes money into right now: Stripe (canSell), PayPal (sellsThroughPayPal), or both. */
+export type PaidInto = "stripe" | "paypal" | "both";
+
 /** A space a line cannot break at, before French ":". */
 const S = " ";
 
@@ -41,7 +48,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Who sells", cancel: "Canceling within 14 days", memberships: "Memberships", measurement: "Ad measurement", contact: "Contact" },
     sellerIs: (n) => `${n} is the seller. Each sale is a contract between ${n} and the buyer.`,
     notParty: "Marktmorgen provides the store and its checkout. It is not a party to the sale and is not the merchant of record.",
-    payments: (n, paypal) => `Payments go into ${n}'s own Stripe account${paypal ? ", or its own PayPal account when you pay with PayPal" : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `Payments go into ${n}'s own PayPal account.` : `Payments go into ${n}'s own Stripe account${via === "both" ? ", or its own PayPal account when you pay with PayPal" : ""}.`,
     cancelIntro: "In the European Union, the United Kingdom and some other places, a consumer who buys online usually has 14 days to cancel.",
     cancelDigital:
       "For digital content, such as a file, a link, a course or a private podcast, that right ends once access starts only if you agreed at checkout that it may start within the 14 days, said you understood you would lose the right, and received a confirmation of both.",
@@ -63,7 +71,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Quién vende", cancel: "Cancelar en 14 días", memberships: "Membresías", measurement: "Medición de anuncios", contact: "Contacto" },
     sellerIs: (n) => `${n} es quien vende. Cada venta es un contrato entre ${n} y quien compra.`,
     notParty: "Marktmorgen ofrece la tienda y su pago. No es parte de la venta ni actúa como comerciante registrado.",
-    payments: (n, paypal) => `Los pagos van a la propia cuenta de Stripe de ${n}${paypal ? ", o a su propia cuenta de PayPal cuando pagas con PayPal" : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `Los pagos van a la propia cuenta de PayPal de ${n}.` : `Los pagos van a la propia cuenta de Stripe de ${n}${via === "both" ? ", o a su propia cuenta de PayPal cuando pagas con PayPal" : ""}.`,
     cancelIntro: "En la Unión Europea, el Reino Unido y algunos otros lugares, quien compra en línea como consumidor suele tener 14 días para cancelar.",
     cancelDigital:
       "Para el contenido digital, como un archivo, un enlace, un curso o un pódcast privado, ese derecho termina cuando empieza el acceso solo si aceptaste al pagar que empezara dentro de los 14 días, dijiste que entendías que perderías el derecho y recibiste una confirmación de ambas cosas.",
@@ -85,7 +94,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Qui vend", cancel: "Se rétracter dans les 14 jours", memberships: "Abonnements", measurement: "Mesure des publicités", contact: "Contact" },
     sellerIs: (n) => `${n} est le vendeur. Chaque vente est un contrat entre ${n} et l'acheteur.`,
     notParty: "Marktmorgen fournit la boutique et son paiement. Marktmorgen n'est pas partie à la vente et n'agit pas comme vendeur officiel.",
-    payments: (n, paypal) => `Les paiements vont sur le propre compte Stripe de ${n}${paypal ? ", ou sur son propre compte PayPal quand vous payez avec PayPal" : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `Les paiements vont sur le propre compte PayPal de ${n}.` : `Les paiements vont sur le propre compte Stripe de ${n}${via === "both" ? ", ou sur son propre compte PayPal quand vous payez avec PayPal" : ""}.`,
     cancelIntro: "Dans l'Union européenne, au Royaume-Uni et dans certains autres pays, un consommateur qui achète en ligne dispose en général de 14 jours pour se rétracter.",
     cancelDigital:
       "Pour un contenu numérique, comme un fichier, un lien, une formation ou un podcast privé, ce droit prend fin au début de l'accès seulement si vous avez accepté au paiement qu'il commence dans les 14 jours, déclaré comprendre que vous perdriez ce droit et reçu une confirmation des deux.",
@@ -106,7 +116,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Wer verkauft", cancel: "Widerruf innerhalb von 14 Tagen", memberships: "Mitgliedschaften", measurement: "Messung von Werbung", contact: "Kontakt" },
     sellerIs: (n) => `${n} ist der Verkäufer. Jeder Verkauf ist ein Vertrag zwischen ${n} und der kaufenden Person.`,
     notParty: "Marktmorgen stellt den Shop und die Kasse bereit. Marktmorgen ist nicht Partei des Verkaufs und tritt nicht als Händler auf.",
-    payments: (n, paypal) => `Zahlungen gehen auf das eigene Stripe-Konto von ${n}${paypal ? ` oder, wenn Sie mit PayPal zahlen, auf das eigene PayPal-Konto von ${n}` : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `Zahlungen gehen auf das eigene PayPal-Konto von ${n}.` : `Zahlungen gehen auf das eigene Stripe-Konto von ${n}${via === "both" ? ` oder, wenn Sie mit PayPal zahlen, auf das eigene PayPal-Konto von ${n}` : ""}.`,
     cancelIntro: "In der Europäischen Union, im Vereinigten Königreich und an einigen anderen Orten haben Verbraucher beim Online-Kauf in der Regel 14 Tage Zeit für einen Widerruf.",
     cancelDigital:
       "Bei digitalen Inhalten wie einer Datei, einem Link, einem Kurs oder einem privaten Podcast erlischt dieses Recht mit Beginn des Zugangs nur, wenn Sie an der Kasse zugestimmt haben, dass er innerhalb der 14 Tage beginnt, erklärt haben, dass Sie wissen, dass Sie das Recht dadurch verlieren, und eine Bestätigung von beidem erhalten haben.",
@@ -128,7 +139,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Chi vende", cancel: "Recesso entro 14 giorni", memberships: "Abbonamenti", measurement: "Misurazione degli annunci", contact: "Contatti" },
     sellerIs: (n) => `${n} è il venditore. Ogni vendita è un contratto tra ${n} e chi acquista.`,
     notParty: "Marktmorgen fornisce il negozio e il pagamento. Non è parte della vendita e non agisce come venditore registrato.",
-    payments: (n, paypal) => `I pagamenti vanno sul conto Stripe intestato a ${n}${paypal ? `, oppure sul conto PayPal intestato a ${n} quando paghi con PayPal` : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `I pagamenti vanno sul conto PayPal intestato a ${n}.` : `I pagamenti vanno sul conto Stripe intestato a ${n}${via === "both" ? `, oppure sul conto PayPal intestato a ${n} quando paghi con PayPal` : ""}.`,
     cancelIntro: "Nell'Unione europea, nel Regno Unito e in alcuni altri luoghi, chi acquista online come consumatore di solito ha 14 giorni per recedere.",
     cancelDigital:
       "Per i contenuti digitali, come un file, un link, un corso o un podcast privato, questo diritto termina all'inizio dell'accesso solo se al pagamento hai accettato che iniziasse entro i 14 giorni, hai dichiarato di capire che avresti perso il diritto e hai ricevuto una conferma di entrambe le cose.",
@@ -150,7 +162,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Wie verkoopt", cancel: "Annuleren binnen 14 dagen", memberships: "Lidmaatschappen", measurement: "Meten van advertenties", contact: "Contact" },
     sellerIs: (n) => `${n} is de verkoper. Elke verkoop is een overeenkomst tussen ${n} en de koper.`,
     notParty: "Marktmorgen levert de winkel en de betaling. Marktmorgen is geen partij bij de verkoop en treedt niet op als verkoper.",
-    payments: (n, paypal) => `Betalingen gaan naar de eigen Stripe-rekening van ${n}${paypal ? ", of naar de eigen PayPal-rekening als je met PayPal betaalt" : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `Betalingen gaan naar de eigen PayPal-rekening van ${n}.` : `Betalingen gaan naar de eigen Stripe-rekening van ${n}${via === "both" ? ", of naar de eigen PayPal-rekening als je met PayPal betaalt" : ""}.`,
     cancelIntro: "In de Europese Unie, het Verenigd Koninkrijk en enkele andere plaatsen heeft een consument die online koopt meestal 14 dagen om te annuleren.",
     cancelDigital:
       "Bij digitale inhoud, zoals een bestand, een link, een cursus of een privépodcast, vervalt dat recht zodra de toegang begint alleen als je bij het afrekenen hebt ingestemd dat die binnen de 14 dagen mag beginnen, hebt verklaard te begrijpen dat je het recht dan verliest, en een bevestiging van beide hebt ontvangen.",
@@ -172,7 +185,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Quem vende", cancel: "Cancelar no prazo de 14 dias", memberships: "Subscrições", measurement: "Medição de anúncios", contact: "Contacto" },
     sellerIs: (n) => `${n} é o vendedor. Cada venda é um contrato entre ${n} e o comprador.`,
     notParty: "A Marktmorgen fornece a loja e o pagamento. Não é parte na venda nem atua como vendedor registado.",
-    payments: (n, paypal) => `Os pagamentos são feitos para a própria conta Stripe de ${n}${paypal ? ", ou para a própria conta PayPal da loja quando paga com PayPal" : ""}.`,
+    payments: (n, via) =>
+      via === "paypal" ? `Os pagamentos são feitos para a própria conta PayPal de ${n}.` : `Os pagamentos são feitos para a própria conta Stripe de ${n}${via === "both" ? ", ou para a própria conta PayPal da loja quando paga com PayPal" : ""}.`,
     cancelIntro: "Na União Europeia, no Reino Unido e noutros lugares, um consumidor que compra online tem normalmente 14 dias para cancelar.",
     cancelDigital:
       "Para conteúdo digital, como um ficheiro, uma ligação, um curso ou um podcast privado, esse direito termina quando o acesso começa apenas se, no pagamento, aceitou que começasse dentro dos 14 dias, declarou compreender que perderia o direito e recebeu uma confirmação de ambos.",

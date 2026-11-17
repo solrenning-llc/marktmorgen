@@ -9,8 +9,10 @@
  *
  *   - Seller: the creator is the seller, the sale is a contract between them
  *     and the buyer, Marktmorgen is not the merchant of record, and payments
- *     go into the creator's own Stripe account by direct charges (app/terms,
- *     section 3); PayPal only when the store has it connected.
+ *     go into the creator's own accounts: Stripe by direct charges (app/terms,
+ *     section 3) only when the store sells through it (canSell), PayPal only
+ *     when it sells through PayPal (sellsThroughPayPal); with neither, no
+ *     account is named (Codex N1's MEDIUM on #1824).
  *   - Canceling within 14 days: for digital content and for memberships, the
  *     two rules the checkout asks by (lib/digital-consent.ts), with the same
  *     meaning as the Terms, never saying more than they do.
@@ -29,7 +31,7 @@
  * any word, so a later unit keeps each version with its date.
  */
 import { createHash } from "node:crypto";
-import { POLICY_WORDS } from "@/lib/buyer-words/policies";
+import { POLICY_WORDS, type PaidInto } from "@/lib/buyer-words/policies";
 import { parseLanguage } from "@/lib/store-language";
 
 export type PolicyFactsInput = {
@@ -38,7 +40,12 @@ export type PolicyFactsInput = {
   sellsDigital: boolean;
   /** Memberships (subscriptions). */
   sellsMemberships: boolean;
-  /** Whether the store has its PayPal connected for checkout. */
+  /**
+   * Whether the store takes money into its own Stripe account right now (canSell, as its store and product pages
+   * decide it). Never assumed: a store can take payments by PayPal alone (Codex N1's MEDIUM on #1824).
+   */
+  stripe: boolean;
+  /** Whether the store takes money into its own PayPal account right now (sellsThroughPayPal). */
   paypal: boolean;
   /** The ad pixels switched on, by their platform names ("Meta", "Google"…). */
   pixels: readonly string[];
@@ -60,6 +67,12 @@ export const NOT_ADVICE = POLICY_WORDS.en.notAdvice;
 const list = (items: readonly string[], and: string) =>
   items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${and} ${items[items.length - 1]}`;
 
+/** Where the money goes, only into the accounts the store takes it with; with neither, no sentence names one. */
+function paymentSentence(payments: (name: string, via: PaidInto) => string, name: string, input: Pick<PolicyFactsInput, "stripe" | "paypal">): string[] {
+  const via: PaidInto | null = input.stripe === true ? (input.paypal === true ? "both" : "stripe") : input.paypal === true ? "paypal" : null;
+  return via ? [payments(name, via)] : [];
+}
+
 /** The sections, in order, with only what applies to this store, in the store's language (English by default). */
 export function policyFacts(input: PolicyFactsInput, language: unknown = "en"): PolicySection[] {
   const w = POLICY_WORDS[parseLanguage(language)];
@@ -67,7 +80,7 @@ export function policyFacts(input: PolicyFactsInput, language: unknown = "en"): 
   const name = input.storeName.trim();
   if (!name) return [];
   const sections: PolicySection[] = [
-    { id: "seller", title: w.titles.seller, sentences: [w.sellerIs(name), w.notParty, w.payments(name, input.paypal)] },
+    { id: "seller", title: w.titles.seller, sentences: [w.sellerIs(name), w.notParty, ...paymentSentence(w.payments, name, input)] },
   ];
   const cancel: string[] = [];
   if (input.sellsDigital || input.sellsMemberships) cancel.push(w.cancelIntro);

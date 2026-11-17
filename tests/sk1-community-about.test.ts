@@ -56,10 +56,14 @@ globalThis.fetch = (async () => {
 
 const real = redis.pipeline.bind(redis);
 let sent: (string | number)[][] = [];
-let spoil: "none" | "hlen" | "mget" = "none";
+let spoil: "none" | "hlen" | "mget" | "cfg-extra" | "cfg-number" = "none";
 redis.pipeline = (async (commands: (string | number)[][]) => {
   sent.push(...commands);
   const replies = await real(commands);
+  const settingsGet = commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).endsWith(":cfg");
+  // Codex g's review of #3016 (MEDIUM): the settings' GET answered with one reply too many, or in another shape.
+  if (spoil === "cfg-extra" && settingsGet) return [...replies, "EXTRA"];
+  if (spoil === "cfg-number" && settingsGet) return [42];
   return commands.map((c, i) => {
     if (spoil === "hlen" && c[0] === "HLEN") return "QUEUED";
     if (spoil === "mget" && c[0] === "MGET") return "QUEUED";
@@ -109,6 +113,13 @@ async function main(): Promise<void> {
   is("it opens the one space not kept for another product, of two", [plain.page.ways[0].spaces, plain.page.spaces], [1, 2]);
   is("no counts", plain.page.counts, null);
   is("no member, feed or post read", names().filter((n) => /:m$|:feed$|^MGET nl:cm:|:p:/.test(n)), []);
+  // Codex g's review of #3016 (MEDIUM, rule 24): the page decides from the settings whether the community's words go
+  // public, so a settings read that is not exactly one reply, or one in another shape, shows nothing.
+  for (const how of ["cfg-extra", "cfg-number"] as const) {
+    spoil = how;
+    is(`the settings' read answered ${how === "cfg-extra" ? "with one reply too many" : "in another shape"}: nothing shown`, (await aboutPage(store)).state, "none");
+    spoil = "none";
+  }
   store = (await setCommunity(OWNER, false))!;
   is("the community switched off: not found", (await aboutPage(store)).state, "none");
   store = (await setCommunity(OWNER, true))!;
@@ -228,7 +239,7 @@ async function main(): Promise<void> {
     const resting = await aboutPage(store);
     is(`the page ${on ? "on" : "off"}, the store resting: resting, and the settings not read`, [resting.state, names().includes(cfg)], ["resting", false]);
   }
-  is("the visit is counted (isResting) before the settings are read", lib.indexOf("isResting(store") > 0 && lib.indexOf("isResting(store") < lib.indexOf("readConfig(id)"), true);
+  is("the visit is counted (isResting) before the settings are read", lib.indexOf("isResting(store") > 0 && lib.indexOf("isResting(store") < lib.indexOf("readConfigExact(id)"), true);
   const settingsRead = request("heavy", 1, SITEMAP_SETTINGS_BYTES) + walkRead(0, SITEMAP_SETTINGS_BYTES);
   is("the settings read after the count fits in the one counted request, at a later page's price", settingsRead <= laterPageCost(), true);
   console.log(`About page settings read: $${settingsRead.toFixed(6)} at most, inside one counted request at $${laterPageCost().toFixed(6)}`);

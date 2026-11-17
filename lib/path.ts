@@ -238,15 +238,14 @@ export async function visitPath(store: Store, record: PathRecord, now = Date.now
       const [readMoney, readCounts] = await Promise.all([readPathMoney(store, now).catch(() => null), readPathCounts(store, now)]);
       // A reading whose refunds are unknown (money null, no sale counted as kept) never replaces a kept one, as a reading
       // that could not be made at all does not: it would show a store with kept sales as having none (Claude 4's LOW on #3443).
-      if (readMoney && (readMoney.cents !== null || !money)) {
-        money = readMoney;
-        moneyTriedAt = undefined;
-      } else if (readMoney) {
-        // Kept, but the attempt is written down, so the next visits wait PATH_MONEY_SECONDS before reading and charging again.
-        moneyTriedAt = now;
-      }
+      // With no money kept before, the unknown reading is shown (unknown, never zero).
+      if (readMoney && (readMoney.cents !== null || !money)) money = readMoney;
       if (readCounts) counts = readCounts;
-      changed = Boolean(readMoney || readCounts);
+      // The charged reading is confirmed only when both its money and its counts are. Any other end (refunds unknown, the
+      // money or the counts not read at all, with or without a reading kept before) writes the attempt down, so the next
+      // visits wait PATH_MONEY_SECONDS before reading and charging again (Codex L and Codex U on b007bbdf73).
+      moneyTriedAt = readMoney && readMoney.cents !== null && readCounts ? undefined : now;
+      changed = true;
     }
   }
   const read = factsFrom(store, counts, money);

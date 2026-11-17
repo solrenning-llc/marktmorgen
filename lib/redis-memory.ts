@@ -302,12 +302,17 @@ export class MemoryRedis {
           const keys = args.slice(1, 1 + Number(args[0])), argv = args.slice(1 + Number(args[0]));
           let queued = 0;
           for (let i = 2; i < keys.length; i++) {
+            this.scriptCalls += 1;
             if (this.run(["GET", keys[i]]) !== argv[2]) continue;
             this.run(["SET", keys[i], "1", "EX", argv[1]]);
             this.run(["ZADD", keys[0], argv[0], argv[i + 1]]);
+            this.scriptCalls += 2;
             queued += 1;
           }
-          if (queued > 0) this.run(["HINCRBY", keys[1], "started", String(queued)]);
+          if (queued > 0) {
+            this.run(["HINCRBY", keys[1], "started", String(queued)]);
+            this.scriptCalls += 1;
+          }
           return queued;
         }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.

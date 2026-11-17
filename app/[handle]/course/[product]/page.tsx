@@ -116,7 +116,6 @@ export default async function CoursePage({ params, searchParams }: Params) {
     : [new Set<string>() as Set<string> | null, new Set<string>() as Set<string> | null, null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
-    // The day the page opens it from: the row takes it, so the drip emails go on the same day (lib/learn.ts).
     const stamp = access.stamp; // the purchase's end (24 [E7]), so drip emails stop with access
     after(() => touchStudent(course.id, email, access.start, store, stamp, course));
     // Once the whole month's visits are used, a course rests too (lib/traffic-rules.ts).

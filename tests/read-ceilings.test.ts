@@ -349,17 +349,12 @@ async function main(): Promise<void> {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allowed, with the room that existed: the first
     // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
     // The ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), US$ 65 before. The dollar more
-    // is room for the picture-uploads line (the Blob operations of every picture upload), not for more readings: the
-    // figure is still the one sized under US$ 65, where, without that line, one more heavy reading a day would pass it.
+    // is room for any honest cost up to US$ 66, not only the picture uploads (coordinator's decision 6934185062, option (a)).
+    // History: the readings figure was sized under US$ 65, where one more heavy reading a day would have passed it; that
+    // sizing is kept as a note, not as a second ceiling under the owner's.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
-    const oneMore = 32 * (heavyWorst - lightWorst);
-    const uploads = COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd("creator") ?? Number.NaN;
-    // BROADCAST-262 item 4 names the course-drip PR (#3344) among those counted against US$ 66: its drip-run line shares
-    // the room above US$ 65 with the picture uploads, and the readings figure is sized without both.
-    const drip = COST_LINES.find((l) => l.id === "course-drip-run")?.monthlyUsd("creator") ?? Number.NaN;
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
-    is("the readings figure is still the one sized under US$ 65: without the upload and drip-run lines, one more heavy reading a day would pass it", year - uploads - drip < 65 && year - uploads - drip + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

@@ -41,6 +41,7 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.
   "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
   // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
+  "nl:oprob:": ["lib/order-problem-rules.ts", "ORDER_PROBLEM_REPLY_DAYS"],
   "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],
   // A webhook event kept to be tried again (a capped part: the whole outbox, OUTBOX_MAX_KEPT records): kept a week at most.
   "nl:hookout:": ["lib/webhook-outbox.ts", "OUTBOX_KEEP_SECONDS"],

@@ -25,7 +25,8 @@
  *
  *   nl:wf:run:<flowId>:<person>   hash: email, status, step, note, startedAt, updatedAt, open,
  *                                 waits, offLooks (looks while the store was switched off), waitAt
- *                                 ("<step>:<first wait>"), retries (lib/flow-retry.ts)
+ *                                 ("<step>:<first wait>"), retries (lib/flow-retry.ts);
+ *                                 a wait only for Amazon SES room counts nothing (letGoWaitClock)
  *   nl:wf:log:<flowId>:<person>   list of JSON events, oldest first, at most MAX_RUN_EVENTS
  *   nl:wf:runs:<flowId>           zset: person → last change, every run of the last 400 days
  *                                 (complete, so a person or a store can be erased in full)
@@ -335,6 +336,51 @@ export async function countWaits(
     fresh.push(["HSET", runKey(flowId, personOf(email)), "waitAt", `${index}:${nowSeconds}`]);
   });
   if (fresh.length) await redisPipeline(fresh).catch(() => {});
+  return out;
+}
+
+/**
+ * For people whose step waits only for room at Amazon SES (lib/flows.ts,
+ * waitOrStop): nothing is counted, and the step's day clock (waitAt) is let
+ * go, so the time spent waiting for that room never counts toward
+ * MAX_WAIT_DAYS_PER_STEP; a later wait for another reason starts its clock
+ * afresh. One command each. A failure is only logged: it can stop nothing.
+ */
+export async function letGoWaitClock(flowId: string, emails: string[]): Promise<void> {
+  if (!emails.length) return;
+  await redisPipeline(emails.map((email) => ["HDEL", runKey(flowId, personOf(email)), "waitAt"])).catch((error) => console.error("letting go of a workflow wait clock failed", error));
+}
+
+/**
+ * Counts one more park for room at Amazon SES on each of these runs, lets go of the step's day clock (letGoWaitClock),
+ * and answers each run's parks so far and the second it was first parked at step `index` (lib/flows.ts, waitOrStop):
+ * the parks are bounded per run (SES_PARKS_PER_RUN), and a step parked again keeps its first place. Null for anyone
+ * whose answer was not read exactly (rule 24): an unknown count is never room for one more park.
+ */
+export async function countSesParks(flowId: string, emails: string[], index: number, nowSeconds: number): Promise<Map<string, { parks: number; since: number } | null>> {
+  const out = new Map<string, { parks: number; since: number } | null>();
+  if (!emails.length) return out;
+  const reply = await redisPipeline(emails.flatMap((email) => {
+    const run = runKey(flowId, personOf(email));
+    return [["HINCRBY", run, "sesParks", 1], ["HDEL", run, "waitAt"], ["HGET", run, "sesAt"]];
+  })).catch(() => null);
+  const firsts: (string | number)[][] = [];
+  emails.forEach((email, i) => {
+    const parks = replied(reply, emails.length * 3) ? reply[i * 3] : null;
+    const at = replied(reply, emails.length * 3) ? reply[i * 3 + 2] : undefined;
+    if (typeof parks !== "number" || !Number.isSafeInteger(parks) || parks < 1 || (at !== null && typeof at !== "string")) {
+      out.set(email, null);
+      return;
+    }
+    const [atIndex, atSince] = typeof at === "string" ? at.split(":").map(Number) : [NaN, NaN];
+    if (atIndex === index && Number.isSafeInteger(atSince) && atSince > 0 && atSince <= nowSeconds) {
+      out.set(email, { parks, since: atSince });
+      return;
+    }
+    firsts.push(["HSET", runKey(flowId, personOf(email)), "sesAt", `${index}:${nowSeconds}`]);
+    out.set(email, { parks, since: nowSeconds });
+  });
+  if (firsts.length) await redisPipeline(firsts).catch((error) => console.error("noting when a workflow step was first parked failed", error));
   return out;
 }
 

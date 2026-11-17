@@ -1,6 +1,6 @@
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import type { NextRequest } from "next/server";
-import { deleteFile as del } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import {
   addOption,
   editOption,
@@ -91,9 +91,7 @@ export async function POST(request: NextRequest) {
     // Deliberately after the write, and best effort. A file left behind costs
     // a fraction of a cent; an option pointing at nothing costs a sale.
     for (const file of result.removed) {
-      await del(file.pathname).catch((error: unknown) => {
-        console.error("could not delete the file of a removed option", error);
-      });
+      await deleteOrSweep(file.pathname, "the file of a removed option");
       await dropStamped(file);
     }
 

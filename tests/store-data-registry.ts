@@ -77,6 +77,7 @@ import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { MAX_TEAM, LOG_LINES, LOG_LINE_BYTES } from "@/lib/team";
+import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
@@ -664,7 +665,7 @@ export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- lib/ g–l
   "nl:gift:@lib/gifts.ts": { what: "Gifts: the gift, its payment, the refunds read", parts: [per("order", 400, 2_560, "A gift and its payment: two addresses, a message of MAX_GIFT_MESSAGE and a name of MAX_GIFT_FROM in any script, GIFT_KEPT_SECONDS.", KIND("gift")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled (thirty days) and where an unfinished pass over them stands (lib/gifts.ts passKey, a JSON of under 300 bytes, a week).")] },
   "nl:gift:pi:@lib/gifts.ts": short("The gift a payment paid for", "order", 400, KEY, KIND("gift")),
-  "nl:grp:@lib/group-buy.ts": { what: "Purchases for several people: the purchase, who took a place, the emails, the refunds read", parts: [per("order", 400, KB, "A purchase and each place taken in it (each place is an order, and takes a member of at most an address, with its open's 32-character token).", KIND("group")), capped(2 * KEY + 64 * KB, "The store's marks and the refunds already handled (thirty days from the last one marked)."), per("store", 1, MARK, "Today's emails of a link.", MAIL("place"))] },
+  "nl:grp:@lib/group-buy.ts": { what: "Purchases for several people: the purchase, who took a place, the emails, the refunds read", parts: [per("order", 400, KB, "A purchase and each place taken in it (each place is an order, and takes a member of at most an address, with its open's 32-character token), and, for a day at most (STUCK_SAID_SECONDS), one key-sized mark that its refund stuck on its way was said in the log, and, for an hour at most (CHARGE_HELD_RECHECK_SECONDS), one key-sized mark that its charge was read with a part on its way.", KIND("group")), capped(3 * KEY + 64 * KB + 16 * (KEY + ENTRY_BYTES), "The store's marks and the refunds already handled (thirty days from the last one marked); the Stripe account the refunds' anchor is of, and the marks of at most REFUND_ACCOUNTS_KEPT (16) accounts the store left, each an account id and a time.", src("lib/group-buy.ts", "REFUND_ACCOUNTS_KEPT")), per("store", 1, MARK, "Today's emails of a link.", MAIL("place"))] },
   "nl:grp:pi:@lib/group-buy.ts": short("The purchase a payment paid for", "order", 400, KEY, KIND("group")),
   "nl:grp:take:@lib/group-buy.ts": short("A place's link", "store", 30, LINK_BYTES, MAIL("place")),
   "nl:ab:@lib/headline-test.ts": room("A headline test's counts: counted with its page while it runs, and on their own after (AB_RECORD_BYTES)", "lib/sales-page-store.ts"),
@@ -801,6 +802,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:agree:p:@lib/agreement-store.ts": room("One person's agreements in a store (at most MAX_PER_PERSON): an entry each, counted with its record", "lib/agreement-store.ts"),
   "nl:agree:lock:@lib/agreement-store.ts": short("An agreement being signed or given a new version, ten seconds", "request", 1, MARK, REQ("agreement-sign")),
   "nl:letters:i:@lib/letters.ts": room("An email published on the store: its subject and words as sent, counted with its entry before it is written, until it goes by itself (letterRoomBytes)", "lib/letters.ts"),
+  "nl:oprob:@lib/order-problem.ts": room("A buyer's open problem with an order (567 [GD1] (a)): \"pending\" or \"filed:<conversation id>\" under the order's reference, written with SET NX after its bytes are counted, gone by itself after ORDER_PROBLEM_PENDING_SECONDS or ORDER_PROBLEM_REPLY_DAYS", "lib/order-problem.ts"),
   "nl:withdraw:@lib/withdrawal.ts": room("A buyer's withdrawal from an order (EU art. 11a): the order's reference and the time, written once with SET NX after its bytes are counted, gone by itself after WITHDRAWAL_KEEP_DAYS", "lib/withdrawal.ts"),
   "nl:letters:link:@lib/letter-access.ts": short("An emailed link to read an email kept for members, and its opens, an hour", "access", 1, LINK_BYTES, MAIL("letter link")),
   "nl:letters:ok:@lib/letter-access.ts": short("Whether a reader holds one of a published email's products, answered for minutes", "request", 1, KEY, REQ("page")),
@@ -1083,6 +1085,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:team:log:@lib/team.ts": { what: "What the team did", parts: [capped(LOG_LINES * (LOG_LINE_BYTES + 64), "The newest LOG_LINES, each at most LOG_LINE_BYTES.", src("lib/team.ts", "LOG_LINES", "LOG_LINE_BYTES"))] },
   "nl:team:of:@lib/team.ts": company("The stores a person is on", "A person's, not a store's: at most the stores they are on."),
   "nl:product:note:@lib/thanks-note-store.ts": { what: "Notes after paying", room: ["lib/thanks-note-store.ts"] },
+  // 422 [PT2]: each benefit at most MAX_BENEFIT_TEXT characters (4 bytes each in UTF-8), its membership's id and a few numbers.
+  "nl:tben:@lib/tier-benefits.ts": { what: "Benefits handed over by hand on each membership", parts: [capped(MAX_BENEFITS_KEPT * (MAX_BENEFIT_TEXT * 4 + 256), "MAX_BENEFITS_KEPT benefits, retired ones included.", src("lib/tier-benefit-rules.ts", "MAX_BENEFITS_KEPT", "MAX_BENEFIT_TEXT"))] },
+  "nl:tben:given:@lib/tier-benefits.ts": room("The creator's marks of the benefits given, by member", "lib/tier-benefits.ts"),
+  "nl:tben:who:@lib/tier-benefits.ts": room("The members with marks, so a deleted store's go with it", "lib/tier-benefits.ts"),
   "nl:ticket:in:@lib/ticket-code.ts": { what: "An in-person ticket's one-time check-in mark (36 [F5] unit 1): event and ticket ids only, a time-and-random value, made with SET NX and its expiry, kept until the code ends and a day more (MAX_TICKET_DAYS + 1 at most), never for good. Built and off: nothing calls checkIn, and no ticket is sold before the opening; one ticket is one order", parts: [per("order", 401, MARK, "A ticket's check-in mark, at most 401 days.")] },
   "nl:tier:@lib/tier-switch.ts": short("A membership's lock while it changes tier", "request", 1, 128, REQ("tier switch")),
   "nl:tier:price:@lib/tier-switch.ts": { what: "A price made for a tier switch, per product and currency: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },

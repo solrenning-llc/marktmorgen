@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     const fair = (await storeForEmail(OWNER))?.fair;
     return fair ? { on: fair.on, all: fair.all, products: fair.products } : null;
   };
-  const setting = (products: string[]) => ({ on: true, auto: true, maxOff: 50, levels: {}, all: false, products });
+  const setting = (products: unknown[]) => ({ on: true, auto: true, maxOff: 50, levels: {}, all: false, products });
 
   part("A setting saved first, limited to two products");
   is("control: saved", await save(setting(ids(2))), [200, true, null]);

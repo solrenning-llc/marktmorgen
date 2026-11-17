@@ -36,7 +36,7 @@ import { isFree } from "@/lib/store";
 import { type Listing, readListings } from "@/lib/catalog";
 import { canSellProduct, fromPriceCents } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
-import { type CommunityConfig, readConfig, readConfigExact } from "@/lib/community";
+import { type CommunityConfig, readConfigExact } from "@/lib/community";
 import { seesSpace } from "@/lib/community-gate";
 import { isResting, takePublicRequest } from "@/lib/traffic";
 import { listingUnits } from "@/lib/public-read-rules";
@@ -119,7 +119,14 @@ export async function aboutPage(store: Store, now = Date.now()): Promise<AboutAn
   // (Claude 7's review of #3016, MEDIUM): a hit on a page that is off, or on a resting store, is counted too, and a
   // resting store reads nothing. The settings read that follows fits in that one request (tests/sk1-community-about.test.ts).
   if (await isResting(store, now)) return { state: "resting" };
-  const config = await readConfig(id);
+  // Read exactly (Codex g's review of #3016, MEDIUM; rule 24): these settings decide whether the community's words go
+  // public, so a reply lost, one too many, in another shape or a damaged setup shows nothing, as the store's map does.
+  let config: CommunityConfig | null;
+  try {
+    config = await readConfigExact(id);
+  } catch {
+    return { state: "none" };
+  }
   if (!config || !config.page.on) return { state: "none" };
   if (config.access.length && !(await takePublicRequest(store, "public", now, listingUnits(config.access.length)))) return { state: "resting" };
   const products = config.access.length ? await readListings(store, config.access) : [];

@@ -667,11 +667,14 @@ export async function dropProductInvites(
       held.push({ field, token });
     }
     if (held.length) {
-      const links = held.map((h) => linkKey(h.token));
+      // The links first, their DEL read, and only then the invitations and their reminders (Codex N4's MEDIUM on
+      // #4831): an invitation is the only way back to its link, and Redis does not run a pipeline as one, so a link
+      // whose deletion is not known done keeps the invitation that leads to it, found again by the next try.
+      const gone = repliesFor(await redisPipeline([["DEL", ...held.map((h) => linkKey(h.token))]]), 1);
+      if (!gone || countOf(gone[0]) === null) throw new UnknownReplyError("the deletion of a removed membership's invitation links");
       const commands: (string | number)[][] = [
         ["HDEL", key, ...held.map((h) => h.field)],
         ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-        ["DEL", ...links],
       ];
       const replies = repliesFor(await redisPipeline(commands), commands.length);
       if (!replies || !replies.every((r) => countOf(r) !== null)) throw new UnknownReplyError("the deletion of a removed membership's invitations");

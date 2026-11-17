@@ -9,7 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { affiliateCookieName, changeIdentity, decideMany, noteCharge, noteSession, notePartners, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
+import { affiliateCookieName, answerShareChange, changeIdentity, decideMany, noteCharge, noteSession, notePartners, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
 import { offerWords } from "@/lib/partner-invites";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { POST as answerRoute } from "@/app/api/store/affiliates/partner-answer/route";
@@ -187,6 +187,32 @@ async function main(): Promise<void> {
     const offerOnC = (id: string, created: number, latest_charge: unknown) => ({ id, object: "payment_intent", status: "succeeded", amount: 1000, currency: "usd", created, latest_charge, metadata: { product: C, title: "Course" } });
     await noteCharge(await store(), offerOnC("pi_c_offer_before", start - 7000, charged("pi_c_offer_before", start - 7000, start - 3600, start - 7000).latest_charge));
     is("an offer after paying, settled before the share started, earns nothing", (await earned()).includes(`pi_c_offer_before:${s3}`), false);
+  }
+
+  part("3d. A share changed after the payment: the sale earns what was agreed when it was paid (option c1)");
+  {
+    const D = "proddddddd";
+    const s4 = "eeeeeeeeeeee";
+    await put(person(s4));
+    const t0 = T - 20 * DAY;
+    const t2 = T - 3 * DAY;
+    await proposePartnerShare(await store(), s4, { percent: 10, products: [D] }, t0);
+    is("a raise is asked", await proposePartnerShare(await store(), s4, { percent: 20, products: [D] }, t2 - DAY), { ok: true, state: "waiting" });
+    const waiting = (await read(s4)).terms!.change!;
+    is("and the partner says yes", await answerShareChange(await store(), s4, true, changeIdentity(waiting), t2, async () => true), { ok: true, state: "changed" });
+    const onD = (ref: string, created: number, payment_intent: unknown) => ({ ...session(ref, created, payment_intent), metadata: { store: handle, product: D, title: "Kit" } });
+    const percentOf = async (ref: string) => {
+      const [raw] = (await redis.pipeline([["HGET", `nl:aff:${statsId}:shares`, `${ref}:${s4}`]])) as (string | null)[];
+      return raw ? (JSON.parse(raw) as { percent: number }).percent : null;
+    };
+    await noteSession(await store(), onD("cs_test_d_before_yes", t2 - 7200, charged("pi_d_before_yes", t2 - 7000, t2 - 3600)));
+    is("paid before the yes, noted after it: the 10% agreed then, not the 20% of now", await percentOf("cs_test_d_before_yes"), 10);
+    await noteSession(await store(), onD("cs_test_d_after_yes", t2 + 60, charged("pi_d_after_yes", t2 + 100, t2 + 3600)));
+    is("paid after the yes: 20%", await percentOf("cs_test_d_after_yes"), 20);
+    const older = await noteSession(await store(), onD("cs_test_d_before_start", t0 - 7200, charged("pi_d_before_start", t0 - 7000, t0 - 3600))).then(() => "noted", (error: Error) => error.name);
+    is("paid before the 10% began, two changes back: unknown, never guessed", [older, await percentOf("cs_test_d_before_start")], ["UnknownReplyError", null]);
+    const kept = await read(s4);
+    is("the record keeps the share before it, with when that one began", [kept.shareFrom, kept.shareBefore?.share?.percent, kept.shareBefore?.from], [t2, 10, t0]);
   }
 
   part("4. An answer whose write may have landed is never said to have changed nothing");

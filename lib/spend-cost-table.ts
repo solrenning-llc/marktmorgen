@@ -124,8 +124,10 @@ export const STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION = BLOB_ADVANCED_MICRO_US
  * that admission reads (VAULT_LIST_PAGES), CreateMultipartUpload and
  * CompleteMultipartUpload; AbortMultipartUpload and DeleteObject are free.
  * Class B: three file measurements (VAULT_MEASURE_REQUESTS each, a HEAD and a
- * ranged GET): the expired session admission retires, the completion, and a
- * cancellation after a completion whose measurement could not be read. Each
+ * ranged GET): the expired session admission retires, the completion, a
+ * cancellation after a completion whose measurement could not be read, and
+ * the read-back of an object a refused close deleted, to confirm it is gone
+ * before its reserved bytes are given back (lib/vault-storage.ts, #4283). Each
  * signed piece is one Class A part upload. Vercel Blob: every page of the
  * host file store's listing that admission reads (BLOB_LIST_PAGES, Vercel
  * Blob list, an Advanced Operation). Bunny Stream: the read of the store's
@@ -138,7 +140,7 @@ export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   + ceilDiv(BigInt(VERCEL_CPU_MICRO_USD_PER_HOUR), BigInt(3600))
   + ceilDiv(BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS * 20), BigInt(1_000_000)));
 export const UPLOAD_OPEN_CLASS_A_OPS = VAULT_LIST_PAGES + 2;
-export const UPLOAD_OPEN_CLASS_B_OPS = 3 * VAULT_MEASURE_REQUESTS;
+export const UPLOAD_OPEN_CLASS_B_OPS = 4 * VAULT_MEASURE_REQUESTS;
 export const UPLOAD_OPEN_BLOB_ADVANCED_OPS = BLOB_LIST_PAGES;
 export const UPLOAD_OPEN_STREAM_API_READS = STREAM_HELD_REQUESTS;
 /** Requests one upload start is priced for: the start, and the finish and

@@ -77,6 +77,25 @@ end
 return {take(KEYS[1], total), take(KEYS[2], today)}`;
 
 /**
+ * What a point on a like writes, for a step that changes the like and the point together (lib/community.ts,
+ * pressLike): null when nobody earns there (not a community, or not a member's key); otherwise the two boards
+ * (all-time first, then today's) and the commands one point adds, as award writes them.
+ */
+export function likePoint(id: string, who: string, now = Date.now()): { boards: [string, string]; add: (string | number)[][] } | null {
+  if (!COMMUNITY.test(id) || !MEMBER.test(who)) return null;
+  const all = allKey(id);
+  const day = dayKey(id, dayOf(now));
+  return {
+    boards: [all, day],
+    add: [
+      ["ZINCRBY", all, 1, who],
+      ["ZINCRBY", day, 1, who],
+      ["EXPIRE", day, DAYS_KEPT * 86_400],
+    ],
+  };
+}
+
+/**
  * Gives a member a point, or takes one back. Only a member's own key earns:
  * the creator, and anything that is not a member key, is passed over.
  * All-time points never go below zero.

@@ -157,6 +157,28 @@ test("an erasure counts every waitlist mark it walks, and an oversized set is un
   await assert.rejects(erasureScope(shop, person), UnknownReplyError, "an oversized set is unknown, never walked unpaid");
 });
 
+test("a SMEMBERS reply shorter or longer than the counts just read is unknown, never the complete list of waitlists", async () => {
+  // Codex X4 on #4462 at d499d7a3dd: SCARD said a mark exists, so a list without it would let the erasure skip that waitlist.
+  for (const [what, change] of [
+    ["one member short", (list: string[]) => list.slice(1)],
+    ["one member more", (list: string[]) => [...list, "extra0001"]],
+  ] as [string, (list: string[]) => string[]][]) {
+    const { shop } = await world({ soon: true });
+    const base: Pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: Parameters<Pipeline>[0]) => {
+      const replies = await base(commands);
+      if (commands.length === 2 && commands.every((command) => command[0] === "SMEMBERS")) return [change(replies[0] as string[]), replies[1]];
+      return replies;
+    }) as Pipeline;
+    try {
+      await assert.rejects(erasureScope(shop, person), UnknownReplyError, `${what}: the reply does not match SCARD, so the list is unknown`);
+    } finally {
+      redis.pipeline = base;
+    }
+    assert.ok(await erasureScope(shop, person), `${what}: control, the same world with replies that read is walked`);
+  }
+});
+
 test("the hold and the drop are paid before anything goes, and the drop gives back the waitlist's room", async () => {
   const units = named.WAITLIST_DROP_UNITS as number;
   const most = named.WAITLIST_DROP_COMMANDS as number;

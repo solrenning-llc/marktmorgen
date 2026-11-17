@@ -17,6 +17,7 @@ import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, release
 import type { CallSetup } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
 import type { TeamHost } from "@/lib/team-scheduling-rules";
+import { movedKey } from "@/lib/call-records";
 import { CLAIM_MARGIN_MS, claimsKey, hostId, readClaims } from "@/lib/host-claims";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { writeTeam } from "@/lib/team-booking";
@@ -163,6 +164,35 @@ async function main(): Promise<void> {
   is("and her claim for it is let go", await mayaClaims(), [{ start: S, held: true }]);
   is("so Harbor's team offers her then again", await offered(harbor.store, harbor.product, T2), true);
   listed.length = 0;
+
+  // Codex V's HIGH on #3490 (V-20261117-0216-review-3490.md): the move's SET and its read-back answer in an unknown
+  // shape while Redis did apply it. The move may be written, so its new time must stay protected, never given back.
+  part("An unacknowledged persisted move keeps the new time protected");
+  {
+    const before = T;
+    const after = T2;
+    const booking = await hold(lantern.store, lantern.product, before);
+    if (!booking.ok) throw new Error("no hold for the isolated move");
+    await confirmBooking({ store: lantern.store, product: lantern.product, session: booking.session, start: before, end: before + HOUR, buyerEmail: "buyer@example.com", buyerTz: NY, due: null, cancel: null, origin: "https://marktmorgen.com" });
+    listed.push(paidRow(booking.session, lantern.store, lantern.product, before, false));
+    const moveKey = movedKey(booking.session);
+    const pipeline = redis.pipeline;
+    redis.pipeline = async (commands) => {
+      const out = await pipeline.call(redis, commands);
+      return commands.some((c) => (c[0] === "SET" || c[0] === "GET") && c[1] === moveKey) ? ["unknown"] : out;
+    };
+    try {
+      const result = await moveBooking({ store: lantern.store, product: lantern.product, session: booking.session, booked: { start: before, end: before + HOUR, email: "buyer@example.com", buyerTz: NY }, start: after, origin: "https://marktmorgen.com" });
+      is("the move is reported unconfirmed", result.ok ? "moved" : result.reason, "error");
+      const written = JSON.parse(String(redis.run(["GET", moveKey]))) as { s: number };
+      is("the authoritative move nevertheless points to the new time", written.s, after);
+      is("the new time remains protected until the move can be reconciled", (await mayaClaims()).some((c) => c.start === after), true);
+      is("and the old time stays protected too while the move is not known", (await mayaClaims()).some((c) => c.start === before), true);
+    } finally {
+      redis.pipeline = pipeline;
+      listed.length = 0;
+    }
+  }
 
   part("A hold given back lets her time go");
   const U = weekdayAt(5, 720);

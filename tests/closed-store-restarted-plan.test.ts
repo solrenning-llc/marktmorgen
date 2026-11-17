@@ -12,9 +12,15 @@
  * whatever happens to the plan since, as closeOne does); the same is read again under the store's lock right before
  * the record goes, so a plan started meanwhile keeps the record. A place in the final line that does not read is
  * neither (rule 24): the store stays in line, untouched, moved back a walk. Synthetic stores, in-memory Redis.
+ *
+ * Codex X4's MEDIUM on #3643: the second read, under the lock, came after the preparation had already taken the
+ * store's calendar claims, team, API keys, webhooks, email sync, phones, path and host calendar: a plan started in
+ * between kept the record but left the live store partly wiped. Nothing of the store is deleted before that read.
  */
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, unmarkDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
+import { claimsKey, hostId } from "@/lib/host-claims";
+import { hostCalendarKeys } from "@/lib/host-calendar";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -27,6 +33,9 @@ let withdrawUnknown = 0;
 let finalUnknown = false;
 // Run when the walk's entry is first written (HSET BATCH_KEY), after the walk's first read and before the record's going.
 let inWindow: (() => Promise<void>) | null = null;
+// Run when the store's team is first read (GET nl:team:<sid>): after the walk's first read of the plan and before
+// anything of the store is deleted (Codex X4's MEDIUM on #3643).
+let onTeamRead: (() => Promise<void>) | null = null;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (withdrawUnknown > 0 && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:closing-withdraw-entry:v1")) {
@@ -36,6 +45,11 @@ redis.pipeline = async (commands: (string | number)[][]) => {
   if (finalUnknown && commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === FINAL_INDEX) {
     finalUnknown = false;
     return ["QUEUED"];
+  }
+  if (onTeamRead && commands.some((c) => c[0] === "GET" && /^nl:team:[^:]+$/.test(String(c[1])))) {
+    const run = onTeamRead;
+    onTeamRead = null;
+    await run();
   }
   if (inWindow && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) {
     const run = inWindow;
@@ -75,6 +89,31 @@ async function erase(now: number) {
 }
 
 const dataOf = (store: Store) => redis.run(["GET", `nl:zz:${store.statsId}:data`]);
+
+/**
+ * The live state the preparation takes away before the record goes, seeded raw: a calendar claim held for the store,
+ * its team's log, its API keys, its webhooks, its email sync, its phones, its owner's path and the host's calendar.
+ * Answers each key (with its claim field) and whether it is there now.
+ */
+function seedLive(store: Store): () => [string, boolean][] {
+  const claims = claimsKey(hostId(store.email));
+  const claimField = "k000000000000000000000001";
+  redis.run(["HSET", claims, claimField, `1|2|0|${store.sid}`]);
+  const keys = [
+    `nl:team:log:${store.sid}`,
+    `nl:api:keys:${store.sid}`,
+    `nl:hooks:cfg:${store.statsId}`,
+    `nl:esync:cfg:${store.statsId}`,
+    `nl:phone:cfg:${store.statsId}`,
+    `nl:phone:st:${store.statsId}`,
+    hostCalendarKeys(hostId(store.email))[0],
+  ];
+  for (const key of keys) {
+    if (key.startsWith("nl:api:keys:")) redis.run(["HSET", key, "k1", "x"]);
+    else redis.run(["SET", key, "x"]);
+  }
+  return () => [[`${claims} ${claimField}`, redis.run(["HEXISTS", claims, claimField]) === 1], ...keys.map((key): [string, boolean] => [key, redis.run(["EXISTS", key]) === 1])];
+}
 
 async function main(): Promise<void> {
   globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
@@ -121,6 +160,41 @@ async function main(): Promise<void> {
     is("the store is not prepared", [report.stores, report.started, report.finished], [0, false, 0]);
     is("its record and data still stand", [(await storeForEmail(email))?.sid ?? null, dataOf(store)], [store.sid, "w"]);
     is("it is out of line, and its pending entry out of the batch", [redis.run(["ZSCORE", DUE_KEY, email]), redis.run(["HGET", BATCH_KEY, email])], [null, null]);
+  }
+
+  part("Codex X4's MEDIUM on #3643: a plan started after the first read and before anything is deleted leaves the live store whole");
+  redis.clear();
+  {
+    const email = "partlywiped@example.com";
+    const store = await makeStore(email, "partlywiped");
+    await endPlan(email, "0006");
+    redis.run(["SET", `nl:zz:${store.statsId}:data`, "p"]);
+    const live = seedLive(store);
+    onTeamRead = async () => {
+      await setSubscription(email, { customerId: "cus_restart0006", subscriptionId: "sub_restart0006", active: true });
+    };
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await erase(T);
+    is("the plan started before anything was deleted", onTeamRead, null);
+    is("the store is not prepared", [report.stores, report.started, report.finished], [0, false, 0]);
+    is("its record and data still stand", [(await storeForEmail(email))?.sid ?? null, dataOf(store)], [store.sid, "p"]);
+    is("its claim, team, API keys, webhooks, email sync, phones and calendar are all still there", live().filter(([, there]) => !there).map(([key]) => key), []);
+    is("it is out of line, and its pending entry out of the batch", [redis.run(["ZSCORE", DUE_KEY, email]), redis.run(["HGET", BATCH_KEY, email])], [null, null]);
+  }
+
+  part("Control for the above: the same live state goes with a store whose plan stays ended");
+  redis.clear();
+  {
+    const email = "wiped@example.com";
+    const store = await makeStore(email, "wipedplan");
+    await endPlan(email, "0007");
+    const live = seedLive(store);
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await erase(T);
+    is("it is prepared, walked and finished", [report.stores, report.finished], [1, 1]);
+    is("every seeded key is gone", live().filter(([, there]) => there).map(([key]) => key), []);
   }
 
   part("A closing day that has begun is seen through: a plan paid on it does not keep the store (as closeOne)");

@@ -556,24 +556,32 @@ async function main(): Promise<void> {
     // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
     // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
     // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
+    // Merge of main into #2803 (16 November 2026): main's outbox and this PR's Blob costs together; computed, still above zero (MR).
+    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #2803 (16 November 2026, Claude 5 fix H): main's latest model and this PR's Blob costs together; computed, not chosen, each still above zero (MR).
     // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
     // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
     // figures as the model computes them; still above zero (MR), cost not lowered.
-    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
     // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
     // figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #1496 (15 November 2026): the visit model counts what Upstash bills (a visit at the most
     // $0.000264 -> $0.000304), so each plan keeps less, still above zero (MR); figures as the model computes them
     // with main's costs and #1496's together. Cost is not lowered.
     // Merge of main into #1496 (17 November 2026, Claude 1 cloud c1-conflitos-5): main's model and #1496's visit model
     // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 41.47, 303.30 and 662.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["41.47", "303.30", "662.17"]);
+    // Merge of main into #1496 (17 November 2026, Claude 1 cleanup routine): main's model (with #2803's upload costs) and
+    // #1496's visit model together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 40.71, 301.41 and 656.49 dollars in their worst month on a monthly plan", worstMonth("month"), ["40.71", "301.41", "656.49"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 33.41, 248.18 and 538.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["33.41", "248.18", "538.90"]);
+    // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
+    // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
+    is("11: and 32.65, 246.28 and 533.22 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["32.65", "246.28", "533.22"]);
   } finally {
     Date.now = realNow;
   }

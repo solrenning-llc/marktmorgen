@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $124.78 | $1,283.10 | $69 / $690 |
-| Studio | $187.75 | $2,010.65 | $449 / $4,490 |
-| Scale | $302.15 | $3,344.75 | $999 / $9,990 |
+| Store | $141.70 | $1,494.28 | $69 / $690 |
+| Studio | $231.85 | $2,538.50 | $449 / $4,490 |
+| Scale | $433.85 | $4,929.10 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -43,9 +43,9 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $149 / $1,490 **(recommended)** | 14.7% | 60.29% | 60.05% | $89.84 | 0.39 |
-| $169 / $1,690 | 31.0% | 60.31% | 60.04% | $101.94 | 0.35 |
-| $199 / $1,990 | 52.9% | 60.39% | 60.08% | $120.19 | 0.29 |
+| $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
+| $169 / $1,690 **(recommended)** | 13.8% | 60.33% | 60.04% | $101.97 | 0.34 |
+| $199 / $1,990 | 38.2% | 60.38% | 60.05% | $120.16 | 0.29 |
 
 ### Studio
 
@@ -55,9 +55,9 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $249 / $2,490 | 6.1% | 60.36% | 60.03% | $150.32 | 1.72 |
-| $299 / $2,990 **(recommended)** | 14.3% | 60.39% | 60.02% | $180.58 | 1.43 |
-| $449 / $4,490 | 38.6% | 60.42% | 60.01% | $271.31 | 0.95 |
+| $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
+| $299 / $2,990 | 5.6% | 60.41% | 60.02% | $180.64 | 1.42 |
+| $449 / $4,490 **(recommended)** | 30.0% | 60.46% | 60.05% | $271.49 | 0.95 |
 
 ### Scale
 
@@ -67,9 +67,9 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $349 / $3,490 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $399 / $3,990 | 2.4% | 60.43% | 60.02% | $241.15 | 2.34 |
-| $499 / $4,990 | 7.7% | 60.46% | 60.02% | $301.73 | 1.87 |
-| $999 / $9,990 **(recommended)** | 35.0% | 60.56% | 60.09% | $605.07 | 0.93 |
+| $399 / $3,990 | cannot keep 60% with only the video hours included | — | — | — | — |
+| $499 / $4,990 | cannot keep 60% with only the video hours included | — | — | — | — |
+| $999 / $9,990 **(recommended)** | 27.5% | 60.52% | 60.02% | $604.61 | 0.93 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
 
@@ -79,22 +79,22 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 
 | | Store | Studio | Scale |
 | --- | --- | --- | --- |
-| Price, monthly / yearly | **$149 / $1,490** | **$299 / $2,990** | **$999 / $9,990** |
+| Price, monthly / yearly | **$169 / $1,690** | **$449 / $4,490** | **$999 / $9,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **490** · 3,400 · 3,000 | **1,400** · 10,000 · 10,000 | **13,000** · 40,000 · 40,000 |
-| Orders a month: included · #553 · before #553 | **29** · 200 · 200 | **64** · 450 · 450 | **520** · 1,500 · 1,500 |
-| List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **990** · 7,000 · 5,000 | **3,400** · 10,000 · 8,000 |
-| AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **5 + 35** · 40 + 250 · 40 + 250 | **27 + 130** · 80 + 400 · 80 + 400 |
-| Storage: included · #553 · before #553 | **0.5 GB** · 5 GB · 5 GB | **5.5 GB** · 40 GB · 40 GB | **27.5 GB** · 80 GB · 80 GB |
+| Visits a month: included · #553 · before #553 | **460** · 3,400 · 3,000 | **2,900** · 10,000 · 10,000 | **10,000** · 40,000 · 40,000 |
+| Orders a month: included · #553 · before #553 | **27** · 200 · 200 | **130** · 450 · 450 | **410** · 1,500 · 1,500 |
+| List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **2,000** · 7,000 · 5,000 | **2,700** · 10,000 · 8,000 |
+| AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **11 + 74** · 40 + 250 · 40 + 250 | **21 + 100** · 80 + 400 · 80 + 400 |
+| Storage: included · #553 · before #553 | **0.5 GB** · 5 GB · 5 GB | **11.5 GB** · 40 GB · 40 GB | **21.5 GB** · 80 GB · 80 GB |
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
-| Access emails a month: included · #553 · before #553 | **22** · 150 · 150 | **57** · 400 · 400 | **340** · 1,000 · 1,000 |
-| Store emails a month: included · #553 · before #553 | **11** · 75 · 75 | **42** · 300 · 300 | **270** · 800 · 800 |
-| Net at full included use, monthly (sizing reading) | 60.29% | 60.39% | 60.56% |
-| Net at full included use, yearly (sizing reading) | 60.05% | 60.02% | 60.09% |
-| Net at full use, monthly, under the most-tax reading (the gate) | 12.10% | 12.13% | 12.20% |
-| Net a customer, a month, at full included use | $89.84 | $180.58 | $605.07 |
-| The same at #553's price | $35.30 | $258.81 | $565.34 |
+| Access emails a month: included · #553 · before #553 | **20** · 150 · 150 | **110** · 400 · 400 | **270** · 1,000 · 1,000 |
+| Store emails a month: included · #553 · before #553 | **10** · 75 · 75 | **89** · 300 · 300 | **210** · 800 · 800 |
+| Net at full included use, monthly (sizing reading) | 60.33% | 60.46% | 60.52% |
+| Net at full included use, yearly (sizing reading) | 60.04% | 60.05% | 60.02% |
+| Net at full use, monthly, under the most-tax reading (the gate) | 12.11% | 12.17% | 12.19% |
+| Net a customer, a month, at full included use | $101.97 | $271.49 | $604.61 |
+| The same at #553's price | $34.65 | $257.19 | $560.46 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 
@@ -121,9 +121,9 @@ Each plan at its recommended price with every included figure used, plus one of 
 
 | Plan | Monthly: revenue, net | Yearly: revenue, net |
 | --- | --- | --- |
-| Store | $318.00, 60.38% | $3,518.00, 60.28% |
-| Studio | $580.00, 60.40% | $6,362.00, 60.23% |
-| Scale | $1,280.00, 60.53% | $13,362.00, 60.17% |
+| Store | $338.00, 60.39% | $3,718.00, 60.27% |
+| Studio | $730.00, 60.44% | $7,862.00, 60.21% |
+| Scale | $1,280.00, 60.50% | $13,362.00, 60.12% |
 
 ## How it would be enforced, and what is not built
 
@@ -151,8 +151,8 @@ Each plan at its recommended price with every included figure used, plus one of 
 
 | Proposed plan | The competitor plan it would be set beside | Its price |
 | --- | --- | --- |
-| Store at $149 / $1,490 | Stan Creator ($29 / $300); Beacons Creator Plus ($30 / $300) | $149 a month here |
-| Studio at $299 / $2,990 | Stan Creator Pro ($99 / $948); ClickFunnels Launch ($97 / $970); HighLevel Starter ($97 / $970); Kajabi Basic ($179) | $299 a month here |
+| Store at $169 / $1,690 | Stan Creator ($29 / $300); Beacons Creator Plus ($30 / $300) | $169 a month here |
+| Studio at $449 / $4,490 | Stan Creator Pro ($99 / $948); ClickFunnels Launch ($97 / $970); HighLevel Starter ($97 / $970); Kajabi Basic ($179) | $449 a month here |
 | Scale at $999 / $9,990 | Kajabi Growth ($249, $199 a month yearly); HighLevel Unlimited ($297 / $2,970); ClickFunnels Optimize ($297 / $2,970) | $999 a month here |
 
 ## For the owner to decide

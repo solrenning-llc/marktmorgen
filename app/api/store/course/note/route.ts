@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   if (!store || !product?.course) return no("unknown", 404);
   const course = await readCourse(product.course.id);
   if (!course) return no("unknown", 404);
-  const access = await courseAccess(store, product, await cookies());
+  const access = await courseAccess(store, product, await cookies(), course);
   if (!access.learner) return no("closed", 403);
   if (access.learner.owner) return no("owner", 403);
   // Their own notes only, by their own key; never someone signed in to another course only, never during a preview.
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
   const w = lessonNotesWords(store.language);
   const course = await readCourse(product.course.id);
   if (!course) return plain("Not found.", 404);
-  const access = await courseAccess(store, product, await cookies());
+  const access = await courseAccess(store, product, await cookies(), course);
   const who = noteReaderOf(access, course.id);
   if (!who) return plain("Not found.", 404);
   if (!store.statsId) return plain(w.readFailed, 503);

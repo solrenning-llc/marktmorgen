@@ -372,7 +372,7 @@ async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: numb
  * may still be live on the creator's Stripe account (Claude 6 on #4522).
  * Stripe's own expiry still stops it at its end.
  */
-async function offThenFailed(shop: Shop, account: string, statsId: string, entry: ScheduleEntry, nowSeconds: number): Promise<Outcome> {
+async function offThenFailed(shop: Shop, account: string, statsId: string, entry: Kept, nowSeconds: number): Promise<Outcome> {
   // Asked twice, as in scheduleCode: a stop Stripe answers in an unclear way is tried once more at once.
   if ((await stopCode(account, entry.id)) || (await stopCode(account, entry.id))) return missed(shop, statsId, entry, nowSeconds, true);
   const tries = entry.tries + 1;

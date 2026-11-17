@@ -115,7 +115,7 @@ async function main() {
     await reset();
     active = false;
     await sched.scheduleCode(shop, asked, { start, end }, NOW);
-    const rules = (await import("@/lib/discount-schedule-rules")) as { STOP_TRIES?: number; SCHEDULE_UNITS: number };
+    const rules = (await import("@/lib/discount-schedule-rules")) as { STOP_TRIES?: number; NOTICE_TRIES: number; SCHEDULE_UNITS: number };
     const stopTries = rules.STOP_TRIES ?? 3;
     stopFails = true;
     stops = 0;
@@ -133,7 +133,7 @@ async function main() {
     const entry = kept.ok ? (kept.schedules[0] as { failed: boolean; stopUnconfirmed?: boolean }) : null;
     // Two stop calls a run: in the last switch-on try (paid as that try), then in each of the STOP_TRIES runs after it.
     is("RED: Stripe is asked to stop it at most twice a run, in the last try and the paid stop tries", stops <= 2 * (stopTries + 1), true);
-    is("RED: every try is paid for at scheduling", rules.SCHEDULE_UNITS, ACTIVATION_TRIES + stopTries);
+    is("RED: every try is paid for at scheduling (with the failure email's tries, from main)", rules.SCHEDULE_UNITS, ACTIVATION_TRIES + stopTries + rules.NOTICE_TRIES);
     is("RED: out of the due list once its stop tries are used", await isDue(), false);
     is("RED: kept as failed with its stop unconfirmed, never a plain failure", [entry?.failed, entry?.stopUnconfirmed], [true, true]);
 

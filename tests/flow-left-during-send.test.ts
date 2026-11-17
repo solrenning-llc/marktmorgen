@@ -23,7 +23,12 @@ Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let leaveAfterRead: string | null = null;
 let eraseAfterRead: (() => Promise<void>) | null = null;
+let refuseErasedCleanup = false;
 redis.pipeline = (async (batch: Command[]) => {
+  if (refuseErasedCleanup && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-forget-if-erased:v1"))) {
+    refuseErasedCleanup = false;
+    throw new Error("synthetic: the cleanup write failed");
+  }
   const values = await real(batch);
   if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
     // The person unsubscribes right after sendGroup read their row (before sendTo's own tokensFor read).
@@ -92,6 +97,23 @@ async function main(): Promise<void> {
   is("their run is not written back: nothing of them is left", await readRun(flowId, personOf("erased@example.com")), null);
   const [indexed] = await real([["ZSCORE", `nl:wf:runs:${flowId}`, personOf("erased@example.com")]]);
   is("and they are not in the workflow's list of runs", indexed, null);
+
+  part("Erased between the step's row read and the send, with any later cleanup write failing once (Codex L on #2287)");
+  // The attempt is written only while this take still holds the person's lease, in the same Redis step: an erasure
+  // that took the lease first leaves nothing to write back, so nothing hangs on a cleanup that can fail and is not
+  // retried. Here every write that would come after the claim to clear their run again fails, once.
+  await upsertContact(list, "erased2@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "erased2@example.com", { joined: false, tag: "welcome" });
+  refuseErasedCleanup = true;
+  eraseAfterRead = async () => {
+    await forgetContactPerson(list, "erased2@example.com");
+    await forgetWorkflowPerson(store, "erased2@example.com");
+  };
+  await run();
+  refuseErasedCleanup = false;
+  is("the erasure was injected", eraseAfterRead, null);
+  is("nothing was sent to them", sentTo("erased2@example.com"), 0);
+  is("no attempt or history of theirs is written back, with no cleanup to depend on", await readRun(flowId, personOf("erased2@example.com")), null);
 
   part("Refused by the email service, address by address: failed with the service's words, never also 'left' (Claude 1 on #4307)");
   // On main since #3489, sendTo answers a fourth list, `refused`, in neither done nor rest. The PR's rule (whoever is

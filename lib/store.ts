@@ -300,6 +300,11 @@ export type MailSettings = {
   fromName: string;
   /** A postal address where the creator can be reached. */
   address: string;
+  /**
+   * The creator chose to show the address on the store's public policies page too (#1824). Typed for the footer
+   * of list emails, it is often where the creator lives, so it is never public by default, only when this is exactly true.
+   */
+  onPolicies?: true;
 };
 
 export const MAX_MAIL_NAME = 60;
@@ -310,7 +315,7 @@ function parseMail(raw: unknown): MailSettings | null {
   const value = raw as Record<string, unknown>;
   const fromName = typeof value.fromName === "string" ? value.fromName.trim().slice(0, MAX_MAIL_NAME) : "";
   const address = typeof value.address === "string" ? value.address.trim().slice(0, MAX_MAIL_ADDRESS) : "";
-  return fromName && address ? { fromName, address } : null;
+  return fromName && address ? { fromName, address, ...(value.onPolicies === true ? { onPolicies: true as const } : {}) } : null;
 }
 
 /** The creator's own domain, on Pro. */
@@ -1320,6 +1325,32 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
   if (email.startsWith(RELEASED_PREFIX)) return null;
   const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
   return parseStore(raw);
+}
+
+/**
+ * storeForHandle on Redis's exact answer only (rule 24): null only where the
+ * handle is free or was let go, or the record it leads to is truly not there;
+ * a reply missing or in any other shape, and a record that is there but
+ * cannot be read, throw UnknownReplyError, so a page says the store could
+ * not be read rather than that there is no such store.
+ */
+export async function storeForHandleExact(handle: string): Promise<Store | null> {
+  if (handleProblem(handle)) return null;
+  // Redis not there is not knowing the store, never "no such store" (Codex X5 on #2970): the deletion page would
+  // otherwise fall silently to every store.
+  if (!isRedisConfigured()) unknownHandleReply();
+  const [email] = repliesFor(await redisPipeline([["GET", handleKey(handle)]]), 1) ?? unknownHandleReply();
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) unknownHandleReply();
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return null;
+  const [raw] = repliesFor(await redisPipeline([["GET", await ownerKey(email)]]), 1) ?? unknownHandleReply();
+  if (raw === null) return null;
+  return (typeof raw === "string" ? parseStore(raw) : null) ?? unknownHandleReply();
+}
+
+function unknownHandleReply(): never {
+  throw new UnknownReplyError("the store behind an address");
 }
 
 /**
@@ -3576,8 +3607,9 @@ export async function editProduct(
       // A bundle is one sale of several things at one price: never free, never
       // charged again and again, never priced by its buyer (lib/bundle-rules.ts).
       if (isBundle(product) && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "bundle" };
-      // A physical product is sold once, at a price (lib/shipping.ts): shipped by the creator.
-      if (product.shipping && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "shipped" };
+      // A physical product is sold once, for a price (lib/shipping.ts): shipped by the creator. The price may be
+      // one the buyer chooses, at or above this one (514 [PF2]), checked by pwywProblem below as on any product.
+      if (product.shipping && (fields.priceCents === 0 || recurring)) return { ok: false, reason: "shipped" };
       const next: Product = {
         ...product,
         title: fields.title,
@@ -3604,6 +3636,30 @@ export async function editProduct(
     return result;
   }
   return { ok: true, store: result.store, product: result.product };
+}
+
+/**
+ * A product's title alone, for a change the creator confirmed from the AI
+ * agent's proposals (631 [AA1] (c), lib/agent-kinds.ts): its price, terms and
+ * everything else stay exactly as they are. Empty is refused, as on the
+ * studio's own form. The words checks are the caller's (descriptionRefusal).
+ */
+export async function setProductTitle(email: string, id: string, rawTitle: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
+  const title = rawTitle.trim().slice(0, MAX_TITLE_LENGTH);
+  // `only.expected`: written only while the title is still that, checked under the store's lock (an agent's
+  // proposal confirmed or undone, lib/agent-kinds.ts); "changed" when it is not, and nothing is written.
+  const result = await onProduct<"title" | "changed">(email, id, (product) =>
+    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title } : { ok: false, reason: "title" },
+  );
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
+}
+
+/** A product's short summary alone, as setProductTitle: everything else stays. Empty is allowed, as on the studio's form. */
+export async function setProductSummary(email: string, id: string, rawSummary: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
+  const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
+  // `only.expected`, as setProductTitle: written only while the summary is still that.
+  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary }));
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
 /** Takes something off the store. Returns the product as it was, for its files. */

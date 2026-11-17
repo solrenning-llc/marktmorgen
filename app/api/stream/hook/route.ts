@@ -53,9 +53,10 @@ export async function POST(request: NextRequest) {
   }
   try {
     const result = await heard(parsed);
-    // Captions the service was asked to write are listed the moment it says so (lib/auto-captions.ts).
+    // Captions the service was asked to write are listed the moment it says so (lib/auto-captions.ts), at most
+    // HOOK_LOOKS_MAX looks a request, counted before each: past them only the five-minute job looks.
     const guid = (parsed as { VideoGuid?: unknown } | null)?.VideoGuid;
-    if (result === "looked" && typeof guid === "string") await syncAutoCaptions(guid.toLowerCase());
+    if (result === "looked" && typeof guid === "string") await syncAutoCaptions(guid.toLowerCase(), Date.now(), "announcement");
     return Response.json({ ok: true, result });
   } catch (error) {
     // Answered as a failure, so the service sends it again.

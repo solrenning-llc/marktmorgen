@@ -10,7 +10,7 @@ import { MAX_UNLOCK_PRODUCTS } from "@/lib/community-locked";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
-import { AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_LOOK_TIMING, AUTO_CAPTIONS_LOOK_WAIT_MS, AUTO_CAPTIONS_LOOKS_MONTH_USD, AUTO_CAPTIONS_LOOKS_PER_RUN, AUTO_CAPTIONS_REFUND_LOOK, SHAPES as COST_SHAPES, autoCaptionsGivenBackLooks } from "./plan-cost-registry";
+import { AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_HOOK_LOOK, AUTO_CAPTIONS_HOOK_LOOKS, AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_LOOK_TIMING, AUTO_CAPTIONS_LOOK_WAIT_MS, AUTO_CAPTIONS_LOOKS_MONTH_USD, AUTO_CAPTIONS_LOOKS_PER_RUN, AUTO_CAPTIONS_REFUND_LOOK, SHAPES as COST_SHAPES, autoCaptionsGivenBackLooks } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
@@ -788,8 +788,12 @@ test("the looks at an AI captions request given back in full are priced, from li
   assert.ok(source.includes(`export const REFUND_LOOKS_MAX = ${refundLooks};`), "looks at a refund owed");
   assert.ok(source.includes(`["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, ${AUTO_CAPTIONS_LOOKS_PER_RUN}]`), "videos looked at in a run");
   assert.ok(AUTO_CAPTIONS_LOOK_WAIT_MS <= COST_SHAPES.wait.seconds * 1000, "a look waits no longer than the wait shape holds");
+  // The announcements' looks are bounded in the code, and the bound is the one priced (Claude 7 and Claude 5 on #3427).
+  assert.ok(source.includes(`export const HOOK_LOOKS_MAX = ${AUTO_CAPTIONS_HOOK_LOOKS};`), "looks on the service's announcements");
+  assert.ok(read("app/api/stream/hook/route.ts").includes('syncAutoCaptions(guid.toLowerCase(), Date.now(), "announcement")'), "the hook looks as an announcement");
+  assert.ok(AUTO_CAPTIONS_HOOK_LOOK > AUTO_CAPTIONS_LOOK, "a look on an announcement pays its count too");
   const looks = autoCaptionsGivenBackLooks();
   assert.ok(Number.isSafeInteger(looks) && looks > 288, `${looks} looks`);
-  for (const usd of [AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_REFUND_LOOK, AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_LOOKS_MONTH_USD]) assert.ok(Number.isFinite(usd) && usd > 0, String(usd));
-  console.log(`AI captions given back in full: ${looks} looks and ${refundLooks} refund looks, at most $${AUTO_CAPTIONS_GIVEN_BACK_USD.toFixed(4)} a request; the five-minute job's looks at most $${AUTO_CAPTIONS_LOOKS_MONTH_USD.toFixed(2)} a month`);
+  for (const usd of [AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_REFUND_LOOK, AUTO_CAPTIONS_HOOK_LOOK, AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_LOOKS_MONTH_USD]) assert.ok(Number.isFinite(usd) && usd > 0, String(usd));
+  console.log(`AI captions given back in full: ${looks} looks, ${AUTO_CAPTIONS_HOOK_LOOKS} on announcements and ${refundLooks} refund looks, at most $${AUTO_CAPTIONS_GIVEN_BACK_USD.toFixed(4)} a request; the five-minute job's looks at most $${AUTO_CAPTIONS_LOOKS_MONTH_USD.toFixed(2)} a month`);
 });

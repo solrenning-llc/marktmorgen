@@ -89,6 +89,15 @@ const ORDER_LOOKS_MS = 14 * 86_400_000;
  * for this long; then kept for a person, never refunded on an unknown answer and never dropped.
  */
 const DELIVERY_LOOKS_MS = 14 * 86_400_000;
+/**
+ * The most looks the service's announcements (app/api/stream/hook) may take at one request being written, whatever it
+ * announces and however often it sends one again: one for each language a request may ask for (MAX_AUTO_LANGUAGES),
+ * and as many again for an announcement sent twice. Each is counted in the request's own record before the service is
+ * asked (syncAutoCaptions, `hooks`), so past it an announcement asks nothing and only the five-minute job's schedule
+ * looks. A request kept on an unknown answer lives up to 400 days; without this bound every announcement for its video
+ * in that time would be a call to the service and a write here (Claude 7 and Claude 5 on #3427).
+ */
+export const HOOK_LOOKS_MAX = 6;
 /** Each month's counts of what was kept for a person, for the owner's report: numbers only, no store, no person. */
 const keptMonthKey = (month: string) => `nl:stream:autokept:month:${month}`;
 const KEPT_KINDS = ["delivery", "order", "refund"] as const;
@@ -175,6 +184,8 @@ type Pending = {
   owed?: Owed;
   /** When it was kept for a person: what the service delivered was still unknown after every automatic look (unknownLook). */
   kept?: number;
+  /** Looks the service's announcements took at it, at most HOOK_LOOKS_MAX. */
+  hooks?: number;
 };
 
 function parseOwed(raw: unknown): Owed | undefined {
@@ -209,6 +220,8 @@ function parsePending(raw: unknown): Pending | null {
       // One that does not read is kept, never dropped: a refund to it is then not confirmed, so it is owed and shown.
       ...(value.credit !== undefined ? { credit: readCredit(value.credit) } : {}),
       ...(typeof value.kept === "number" && Number.isSafeInteger(value.kept) ? { kept: value.kept } : {}),
+      // A count that does not read is taken as spent (rule 24): an announcement then asks nothing, and the sweep looks.
+      ...(value.hooks !== undefined ? { hooks: Number.isSafeInteger(value.hooks) && (value.hooks as number) >= 0 ? (value.hooks as number) : HOOK_LOOKS_MAX } : {}),
       ...(value.owed !== undefined ? { owed: parseOwed(value.owed) ?? { cents: null, key: `nl-captions:unreadable:${value.at}:refund`, since: value.at, looks: REFUND_LOOKS_MAX, stuck: true as const } } : {}),
     };
   } catch {
@@ -554,15 +567,22 @@ function deliveredIn(data: unknown): string[] | null {
  * it arrives, and settles the request once it is all there, or refunds what
  * is not after GIVE_UP_HOURS, only on an answer that says what was delivered
  * (unknownLook has the rest).
+ *
+ * `by` the service's announcement (app/api/stream/hook): only a request being
+ * written is looked at, and only HOOK_LOOKS_MAX times, each counted in its
+ * record before the service is asked; an order or a refund owed is left to the
+ * five-minute job's schedule, where it is queued, so an announcement never
+ * calls Stripe.
  */
-export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"done" | "waiting" | "none"> {
+export async function syncAutoCaptions(id: string, now = Date.now(), by: "sweep" | "announcement" = "sweep"): Promise<"done" | "waiting" | "none"> {
   if (!STREAM_ID_PATTERN.test(id) || !isRedisConfigured()) return "none";
   const key = pendingKey(id);
   const read = repliesFor(await redisPipeline([["GET", key]]), 1);
   // Unread is not absent: the video stays queued (an order taken out of the queue would be found only by a retry).
   if (!read) return "waiting";
-  const raw = read[0];
+  let raw = read[0];
   const order = parseOrder(raw);
+  if (order && by === "announcement") return "waiting";
   if (order) {
     if (now - order.at < ORDER_SETTLE_MS) {
       await redisPipeline([["ZADD", QUEUE, order.at + ORDER_SETTLE_MS, id]]);
@@ -575,7 +595,18 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
     if (raw !== "charging") await unqueue(id, raw, now);
     return "none";
   }
-  if (pending.owed) return collectRefund(id, raw as string, pending, pending.owed, now);
+  if (pending.owed) return by === "announcement" ? "waiting" : collectRefund(id, raw as string, pending, pending.owed, now);
+  if (by === "announcement") {
+    // Counted before the service is asked, only over the record read (MARK_KEPT's compare-and-set, keeping its time to
+    // live): a count spent, a record changed meanwhile or a reply that does not read exactly asks nothing (rule 24).
+    const hooks = pending.hooks ?? 0;
+    if (hooks >= HOOK_LOOKS_MAX) return "waiting";
+    const counted = JSON.stringify({ ...(JSON.parse(raw as string) as object), hooks: hooks + 1 });
+    const swapped = repliesFor(await redisPipeline([["EVAL", MARK_KEPT, 1, key, raw as string, counted]]), 1)?.[0];
+    if (swapped !== 1) return "waiting";
+    raw = counted;
+    pending.hooks = hooks + 1;
+  }
   const answer = await askStream("GET", `/videos/${id}`);
   if (answer.status === 404) {
     // The video is gone, deleted with its lesson: what was not written is given back.
@@ -604,6 +635,7 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
 /**
  * Marks a request kept for a person only while its record is still the one read before asking the service, keeping
  * its time to live (the EXPIRE just before it): 1 marked, 0 changed or gone meanwhile, and nothing written over it.
+ * The same compare-and-set counts an announcement's look (syncAutoCaptions, `hooks`).
  */
 const MARK_KEPT = [
   "-- marktmorgen:auto-captions-kept:v1",

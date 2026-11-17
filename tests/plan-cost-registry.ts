@@ -876,6 +876,38 @@ export const PAYPAL_PRESS = paypalPressCost(PAYPAL_PRESS_BOOK_COMMANDS);
  * the integrations line at PAYPAL_PRESS.
  */
 export const PAYPAL_PRESSES_UNTAKEN = 1;
+/**
+ * The studio's captions route (app/api/store/stream/captions/route.ts) after the one "integration" unit it takes
+ * (withinServiceWhy "stream-captions"), at the worst each action was measured at by tests/stream-captions-cost.test.ts
+ * on the synthetic Redis, video service and Stripe of tests/auto-captions-own-captions.test.ts (Claude 7 and Claude 5
+ * on #3427, MEDIUM 1): its short-window count (INCR, EXPIRE), then the action's own commands, each script counted as
+ * one with every call inside it as Upstash bills them, with every claim and the request's write read back. `add` and
+ * `remove` hold the language (withOwnCaptions) and call the service once; `auto` (three languages, those the service
+ * lists written down) reads the service's list (askedFree) and asks it to write, and waits on Stripe: the most calls
+ * of any of its paths (a card declined after its invoice was made: the subscription, the customer, the invoice, its
+ * item, finalize, pay, void, and the order's invoice read back; LEVE 1 of Claude 7 on #3427, older than this PR, is
+ * priced here too). Each figure is the most of any path measured, taken apart, so their sum is above every path's.
+ * None fits the `integration` unit's ten commands and ten seconds, so the line integrations is priced at the dearer of
+ * the two for every unit of the figure (INTEGRATION_WORST_USD).
+ */
+export const STREAM_CAPTIONS_WORST = {
+  guardCommands: 2,
+  add: { commands: 11, videoCalls: 1, stripeCalls: 0 },
+  remove: { commands: 9, videoCalls: 1, stripeCalls: 0 },
+  auto: { commands: 16, videoCalls: 2, stripeCalls: 8 },
+  /** What any action moves through the database at the most: measured under 3 KB, a video's twelve caption languages listed. */
+  dbBytes: 20_000,
+} as const;
+/** One captions request of this action at its worst, in dollars: its call, its waits at 2 GB (each call to the video service at STREAM_TIMEOUT_MS, each to Stripe at STRIPE_TIMEOUT_MS, never under the wait shape), its commands and bytes. */
+export function streamCaptionsCost(action: "add" | "remove" | "auto"): number {
+  const worst = STREAM_CAPTIONS_WORST[action];
+  const seconds = Math.max(SHAPES.wait.seconds, (worst.videoCalls * STREAM_TIMEOUT_MS + worst.stripeCalls * STRIPE_TIMEOUT_MS) / 1000);
+  return CALL + SHAPES.wait.cpu * CPU_SECOND + seconds * MEMORY_SECOND + (STREAM_CAPTIONS_WORST.guardCommands + worst.commands + TAKE_COMMANDS) * COMMAND + STREAM_CAPTIONS_WORST.dbBytes * DB_BYTE;
+}
+/** The dearest captions request, in dollars. */
+export const STREAM_CAPTIONS_REQUEST_USD = Math.max(streamCaptionsCost("add"), streamCaptionsCost("remove"), streamCaptionsCost("auto"));
+/** One unit of the "integration" figure at the most it costs: a call out at UNIT_COST.integration, or a captions request. */
+export const INTEGRATION_WORST_USD = Math.max(UNIT_COST.integration, STREAM_CAPTIONS_REQUEST_USD);
 
 /** Checkout-refusal panel, inside the existing studio unit (not added again):
  * one HMGET for seven UTC days plus last, with the writer's 60/300-character
@@ -1964,15 +1996,17 @@ export const COST_LINES: CostLine[] = [
     id: "integrations",
     feature: "Calls to other services: meetings and Zoom, a host's calendar checked by hand, Discord, email platforms, Meta ads, PayPal, affiliate kits and pay-to, outreach reads of a business's site, person lookups, the vault, video upload doors and captions, email pictures (17 October 2026)",
     // A press of "Pay with PayPal" takes its units at its size (paypalPressUnits); payday's auto-pay takes none, so it is added at its most (Claude 7 on #4488).
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration") + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
+    // A unit of the figure may be a captions request, dearer than a call out, so every unit is priced at the dearer (INTEGRATION_WORST_USD).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].integration * INTEGRATION_WORST_USD + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
       { file: "app/api/store/affiliates/paypal/route.ts", names: ['withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))', "bookSizes(store)", "maxDuration = 60"] },
       { file: "lib/paypal-payouts.ts", names: ["payWithPayPal", "holdLock(lock)", "withLock(`nl:pp:${statsId}:lock`, 120, 5_000", "readBook(store, undefined, { titles: false })", "paypalPressUnits", "PAYPAL_PRESS_BASE_UNITS", "PAYPAL_PRESS_UNIT_COMMANDS"] },
       { file: "lib/affiliate-payday.ts", names: ["claimMonth", "if (!(await keepMonth(store.statsId, month))) throw", "payWithPayPal(store)"] },
+      { file: "app/api/store/stream/captions/route.ts", names: ["withinServiceWhy(\"stream-captions\"", "requestAutoCaptions(store, pathname", "addStoreCaption(store, pathname", "dropStoreCaption(pathname, lang)"] },
     ],
-    basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
+    basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers, or a captions request of the studio at its worst when that is dearer (STREAM_CAPTIONS_WORST, held by tests/stream-captions-cost.test.ts: AI captions asked for wait on the video service twice and on Stripe up to eight times), every unit priced at the dearer (INTEGRATION_WORST_USD); what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
   },
   {
     id: "free-share",
@@ -2274,6 +2308,8 @@ export function nonPayingWorst(): number {
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
+    // A unit of its integration figure may be a captions request, dearer than a call out (INTEGRATION_WORST_USD).
+    + allowances.integration * (INTEGRATION_WORST_USD - UNIT_COST.integration)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
@@ -2352,7 +2388,12 @@ export const ADD_ON_LINES: AddOnLine[] = [
  * back costs at most AUTO_CAPTIONS_GIVEN_BACK_USD, and the five-minute job looks at no more than
  * AUTO_CAPTIONS_LOOKS_PER_RUN videos a run, given back or not, so its month of looks is at most
  * AUTO_CAPTIONS_LOOKS_MONTH_USD (a month of 31 days). Looks on the service's own announcements (app/api/stream/hook)
- * are outside that monthly figure: not certified, never zero. Neither figure is yet a line of lib/llc-fixed-costs.ts.
+ * are outside that monthly figure: at most AUTO_CAPTIONS_HOOK_LOOKS a request whatever the service announces
+ * (lib/auto-captions.ts HOOK_LOOKS_MAX, counted in the request's record before the service is asked, held by
+ * tests/stream-captions-cost.test.ts), each at most AUTO_CAPTIONS_HOOK_LOOK, a look and the count's compare-and-set;
+ * for a request given back in full they are inside AUTO_CAPTIONS_GIVEN_BACK_USD, and for one used its own price pays
+ * them. An announcement never calls Stripe (an order or a refund owed is left to the schedule). Neither figure is yet a
+ * line of lib/llc-fixed-costs.ts.
  */
 export const AUTO_CAPTIONS_LOOK_TIMING = { firstMs: 3 * 60_000, againMs: 10 * 60_000, maxGapMs: 6 * 3_600_000, deliveryLooksMs: 14 * 86_400_000, refundLooks: 40 } as const;
 /** GET of the record, then at the most SET and ZADD of it, or DEL, ZREM and SREM with the languages listed (HSET). */
@@ -2367,6 +2408,12 @@ export const AUTO_CAPTIONS_LOOK = request("wait", AUTO_CAPTIONS_LOOK_COMMANDS, 2
 export const AUTO_CAPTIONS_REFUND_LOOK = CALL + SHAPES.wait.cpu * CPU_SECOND + ((2 * STRIPE_TIMEOUT_MS) / 1000) * MEMORY_SECOND + AUTO_CAPTIONS_LOOK_COMMANDS * COMMAND + 2 * AUTO_CAPTIONS_RECORD_BYTES * DB_BYTE;
 /** The video service's wait a look is priced at, in milliseconds, held against the shape by the test. */
 export const AUTO_CAPTIONS_LOOK_WAIT_MS = STREAM_TIMEOUT_MS;
+/** The most looks the service's announcements take at one request (lib/auto-captions.ts HOOK_LOOKS_MAX). */
+export const AUTO_CAPTIONS_HOOK_LOOKS = 6;
+/** The count taken before each: one compare-and-set script with its GET and SET, as Upstash bills it. */
+export const AUTO_CAPTIONS_HOOK_COUNT_COMMANDS = 3;
+/** One look on an announcement: a look, and its count's script sending the record read and the record counted. */
+export const AUTO_CAPTIONS_HOOK_LOOK = request("wait", AUTO_CAPTIONS_LOOK_COMMANDS + AUTO_CAPTIONS_HOOK_COUNT_COMMANDS, 4 * AUTO_CAPTIONS_RECORD_BYTES);
 
 /** The most looks at the video service one request given back in full can take, by the schedule above. */
 export function autoCaptionsGivenBackLooks(): number {
@@ -2383,7 +2430,7 @@ export function autoCaptionsGivenBackLooks(): number {
 }
 
 /** What the looks at one request given back in full cost at the most, in dollars, with no revenue to pay them. */
-export const AUTO_CAPTIONS_GIVEN_BACK_USD = autoCaptionsGivenBackLooks() * AUTO_CAPTIONS_LOOK + AUTO_CAPTIONS_LOOK_TIMING.refundLooks * AUTO_CAPTIONS_REFUND_LOOK;
+export const AUTO_CAPTIONS_GIVEN_BACK_USD = autoCaptionsGivenBackLooks() * AUTO_CAPTIONS_LOOK + AUTO_CAPTIONS_LOOK_TIMING.refundLooks * AUTO_CAPTIONS_REFUND_LOOK + AUTO_CAPTIONS_HOOK_LOOKS * AUTO_CAPTIONS_HOOK_LOOK;
 /** The five-minute job's looks at AI captions in a month of 31 days at the most, given back or not, in dollars. */
 export const AUTO_CAPTIONS_LOOKS_MONTH_USD = AUTO_CAPTIONS_LOOKS_PER_RUN * 12 * 24 * 31 * Math.max(AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_REFUND_LOOK);
 

@@ -119,6 +119,40 @@ try{
  await tabA.locator(`#product-form-${id}`).getByRole("button",{name:"Save",exact:true}).click();
  await tabA.locator(`#product-form-${id}`).waitFor({state:"detached",timeout:30000});
  check("a save after taking the saved version is taken",await tabA.locator("[data-stale-notice]").count(),0);
+ // Codex L on #4238 @1c28763ce6 (MEDIUM): finishing one product's "Keep my changes and save" must not close another
+ // product's editor and lose the words typed in it. Product A's save is held at the network while product B is opened
+ // and typed in; when A's save then goes through, B stays open with its words.
+ const named="Weekly Meal Planner, renamed in tab B",other="Weekend Batch Cooking Plan";
+ const tabD=await context.newPage(),tabE=await context.newPage();
+ for(const tab of [tabD,tabE]){
+  await tab.goto(origin+studio,{waitUntil:"networkidle"});
+  await tab.locator("[data-product-editor] li",{has:tab.locator(`text="${named}"`)}).first().getByRole("button",{name:"Edit",exact:true}).click();
+  await tab.locator(`#product-form-${id}`).waitFor();
+ }
+ await tabE.locator(`#product-summary-${id}`).fill("Saved in tab E.");
+ await tabE.locator(`#product-form-${id}`).getByRole("button",{name:"Save",exact:true}).click();
+ await tabE.locator(`#product-form-${id}`).waitFor({state:"detached",timeout:30000});
+ await tabD.locator(`#product-title-${id}`).fill("A name typed in tab D");
+ await tabD.locator(`#product-form-${id}`).getByRole("button",{name:"Save",exact:true}).click();
+ await tabD.locator("[data-stale-notice]").waitFor({timeout:30000});
+ let release=()=>{};const held=new Promise(resolve=>{release=resolve;});let heldOne=false;
+ await tabD.route("**/api/store/product",async route=>{if(!heldOne&&route.request().method()==="POST"){heldOne=true;await held;}await route.continue();});
+ await tabD.getByRole("button",{name:"Keep my changes and save"}).click();
+ await tabD.waitForFunction(()=>true);
+ for(let n=0;n<50&&!heldOne;n++)await new Promise(resolve=>setTimeout(resolve,100));
+ check("product A's save is on its way, held",heldOne,true);
+ await tabD.locator("[data-product-editor] li",{has:tabD.locator(`text="${other}"`)}).first().getByRole("button",{name:"Edit",exact:true}).click();
+ const formB=tabD.locator(`form[id^="product-form-"]:not(#product-form-${id})`).first();
+ await formB.waitFor({timeout:10000});
+ const idB=(await formB.getAttribute("id")).slice("product-form-".length);
+ await tabD.locator(`#product-title-${idB}`).fill("Words typed for product B");
+ release();
+ await tabD.waitForResponse(response=>response.url().includes("/api/store/product")&&response.request().method()==="POST",{timeout:30000}).catch(()=>{});
+ await tabD.waitForTimeout(1500);
+ check("product B's editor stays open when product A's save finishes",await tabD.locator(`#product-form-${idB}`).count(),1);
+ check("and B's typed words are still there",await tabD.locator(`#product-title-${idB}`).inputValue().catch(()=>null),"Words typed for product B");
+ await tabE.reload({waitUntil:"networkidle"});
+ check("product A's kept changes were saved",await tabE.getByText("A name typed in tab D").count()>0,true);
  await context.close();
 }finally{
  await browser?.close();app.kill();await services.close();

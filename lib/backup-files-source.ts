@@ -428,7 +428,9 @@ export async function backupFilesPage(
     refused = true;
   };
   // The last object looked at, handed out or left out: a page cut off goes on after it. Left out is carried in the
-  // cursor (refused), so it is never looked at again and its end is still "unsignable".
+  // cursor (refused), so its end is still "unsignable". A key the contract refuses (a control or past 1,024
+  // characters) is never the resume point, since the cursor refuses it too (Claude 6's MEDIUM on #4840): it is
+  // passed without a cutoff until a key the cursor can carry is looked at, and looked at again after a cutoff, harmless.
   let looked = state.after;
   for (const object of objects) {
     const resume = carry({ page: state.page, provider: state.provider, after: looked });
@@ -441,7 +443,6 @@ export async function backupFilesPage(
     // #3313): such a key would make parseFilesPage refuse the whole page, so it is left out alone, as below.
     if (!isContractKey(object.key)) {
       refuse();
-      looked = object.key;
       continue;
     }
     let signed: { url: string; expiresAt: number };

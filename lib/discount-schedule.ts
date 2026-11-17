@@ -369,17 +369,23 @@ async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: numb
  * run asks Stripe to switch it off again (activateOne), at most STOP_TRIES
  * times, all paid for at scheduling (SCHEDULE_UNITS). Past them it leaves the
  * due list, kept as failed with its stop unconfirmed, and the studio says it
- * may still be live on the creator's Stripe account (Claude 6 on #4522).
- * Stripe's own expiry still stops it at its end.
+ * may still be live on the creator's Stripe account (Claude 6 on #4522), and
+ * the creator is emailed so (Codex X6 on #4522). Stripe's own expiry still
+ * stops it at its end.
  */
 async function offThenFailed(shop: Shop, account: string, statsId: string, entry: Kept, nowSeconds: number): Promise<Outcome> {
   // Asked twice, as in scheduleCode: a stop Stripe answers in an unclear way is tried once more at once.
   if ((await stopCode(account, entry.id)) || (await stopCode(account, entry.id))) return missed(shop, statsId, entry, nowSeconds, true);
   const tries = entry.tries + 1;
   if (tries >= ACTIVATION_TRIES + STOP_TRIES) {
+    // Out of the list to switch on, onto the list to tell the creator, in this same run (Codex X6's MEDIUM on #4522):
+    // the worst state for money, a code Stripe may still apply, is never left for the creator to find in the studio.
+    // The email says the stop was not confirmed (failureNotice, stopUnconfirmed); tellOne still sends it once.
+    const member = memberOf(shop.sid, statsId, entry.id);
     const kept = await counted([
       ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries, failed: true, stopUnconfirmed: true })],
-      ["ZREM", DUE_KEY, memberOf(shop.sid, statsId, entry.id)],
+      ["ZREM", DUE_KEY, member],
+      ["ZADD", TELL_KEY, nowSeconds, member],
     ]);
     return kept ? "failed" : "unknown";
   }

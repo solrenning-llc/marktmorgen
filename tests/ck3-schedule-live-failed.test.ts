@@ -113,8 +113,12 @@ async function main() {
 
     part("RED (Claude 6 on #4522): a stop that never confirms stops calling Stripe after the paid tries, never shown as plainly failed");
     await reset();
+    await redis.pipeline([["DEL", "nl:dsched:tell"]]);
     active = false;
     await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    // The creator's email, caught here: every notice the job sends is kept, and each is answered as sent.
+    const notices: { code: string; failed: boolean; stopUnconfirmed?: boolean }[] = [];
+    const telling = { ...deps, tell: async (_store: unknown, entry: { code: string; failed: boolean; stopUnconfirmed?: boolean }) => (notices.push(entry), true) };
     const rules = (await import("@/lib/discount-schedule-rules")) as { STOP_TRIES?: number; NOTICE_TRIES: number; SCHEDULE_UNITS: number };
     const stopTries = rules.STOP_TRIES ?? 3;
     stopFails = true;
@@ -123,7 +127,7 @@ async function main() {
     try {
       // Every five minutes for the whole 48-hour window: far more runs than the tries paid for.
       while (clock < end - RETRY_SECONDS) {
-        await sched.activateScheduledCodes(Date.now() + 10_000, clock, deps);
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, telling as typeof deps);
         clock += RETRY_SECONDS;
       }
     } finally {
@@ -136,6 +140,14 @@ async function main() {
     is("RED: every try is paid for at scheduling (with the failure email's tries, from main)", rules.SCHEDULE_UNITS, ACTIVATION_TRIES + stopTries + rules.NOTICE_TRIES);
     is("RED: out of the due list once its stop tries are used", await isDue(), false);
     is("RED: kept as failed with its stop unconfirmed, never a plain failure", [entry?.failed, entry?.stopUnconfirmed], [true, true]);
+    // Codex X6 on #4522 (MEDIUM): the worst state for money is told to the creator, once, with words of its own.
+    is("RED: the creator is told, once, that its stop was not confirmed", notices.map((n) => [n.code, n.failed, n.stopUnconfirmed === true]), [["TESTCODE", true, true]]);
+    is("and nothing is left to tell", (await redis.pipeline([["ZCARD", "nl:dsched:tell"]]))[0], 0);
+    const { failureNotice } = await import("@/lib/discount-schedule-notice");
+    const mail = failureNotice({ sid: SID }, { code: "TESTCODE", start, end, stopUnconfirmed: true }, start + HOUR);
+    is("RED: the email says it may still be on, never that it is off", [/may still be on/.test(mail.subject), /may still be able to use it until its end/.test(mail.text), /still off/.test(mail.text)], [true, true, false]);
+    const plain = failureNotice({ sid: SID }, { code: "TESTCODE", start, end }, start + HOUR);
+    is("control: a plain failure keeps its own words", [/did not switch on/.test(plain.subject), /still off/.test(plain.text)], [true, true]);
 
     // Claude 4 cloud U on #4522 (6894719098, MEDIUM): activateCode answers false for a refusal and for a 5xx, a
     // timeout or a lost reply alike; in the last three the switch-on may have landed. The last try then kept the

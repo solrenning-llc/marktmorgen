@@ -347,6 +347,23 @@ const WALK_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
  */
 const affiliateSettledKey = (account: string, store: Store) => `nl:sweep:aff:${account}:${store.sid || store.handle}`;
 /**
+ * The affiliate step's settled mark and its retention, in one step (Codex X4 on #4413): the session ids at the run's
+ * time in one ZADD (at most a page's hundred), the day's older ones trimmed, and the key's expiry set to the day. KEYS: the mark; ARGV: the time, the day in
+ * seconds, then the session ids. Answers how many ids it was given.
+ */
+export const KEEP_AFFILIATE_SETTLED = `-- marktmorgen:sweep-affiliate-settled:v1
+local at = tonumber(ARGV[1])
+local keep = tonumber(ARGV[2])
+local members = {}
+for i = 3, #ARGV do
+  members[#members + 1] = at
+  members[#members + 1] = ARGV[i]
+end
+redis.call('ZADD', KEYS[1], unpack(members))
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', at - keep - 1)
+redis.call('EXPIRE', KEYS[1], keep)
+return #ARGV - 2`;
+/**
  * A walk that has taken longer than this to reach the end of the day's checkouts is said in the log, every run it
  * goes on: an order paid in the last part of its checkout's day may then be read late, or leave the day before the
  * walk reaches it (an hour is twelve runs, at most 3,600 sessions of one kind, when the store is reached every run).
@@ -568,8 +585,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         .then((reply) => repliesFor(repliesFor(reply, 1)?.[0], paid.length))
         .catch(() => null);
       paid.forEach((row, i) => {
+        // Settled only on a score as Redis writes one (a number, or its text); anything else settles nobody (Codex X4's LOW).
         const score = scores?.[i];
-        if (typeof score === "string" || typeof score === "number") settledBefore.add(row.id as string);
+        if ((typeof score === "number" && Number.isFinite(score)) || (typeof score === "string" && /^\d{1,15}(\.\d+)?$/.test(score))) settledBefore.add(row.id as string);
       });
     }
     if (affiliatesOn(store) && paid.some((row) => !settledBefore.has(row.id as string))) {
@@ -613,13 +631,13 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       }
       // Written once the page's step is done; a write that fails leaves them unsettled, passed on again next run,
       // where noteSession's writes (HSETNX) record nothing twice.
+      // The mark and its expiry are one script (KEEP_AFFILIATE_SETTLED; Codex X4 on #4413): a write cut after its first
+      // command can never leave the day's sessions marked with no expiry, which the next pass would read as settled
+      // and never write again. Either all of it is done or none, and the next pass marks them again.
       if (settledNow.length && settledKey) {
         const at = Math.floor(Date.now() / 1000);
-        await redisPipeline([
-          ["ZADD", settledKey, ...settledNow.flatMap((id) => [at, id])],
-          ["ZREMRANGEBYSCORE", settledKey, "-inf", at - CONFIRM_WITHIN_SECONDS - 1],
-          ["EXPIRE", settledKey, CONFIRM_WITHIN_SECONDS],
-        ]).catch((error) => console.error("noting the checkouts whose affiliate step is settled failed; read again next run", store.handle, describe(error)));
+        await redisPipeline([["EVAL", KEEP_AFFILIATE_SETTLED, 1, settledKey, at, CONFIRM_WITHIN_SECONDS, ...settledNow]])
+          .catch((error) => console.error("noting the checkouts whose affiliate step is settled failed; read again next run", store.handle, describe(error)));
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered

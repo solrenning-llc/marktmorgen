@@ -175,6 +175,14 @@ export class MemoryRedis {
       }
       case "EVAL": {
         // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from, sent as its SHA-1.
+        // lib/checkout-sweep.ts KEEP_AFFILIATE_SETTLED: the sessions marked, the day trimmed and the expiry set, in one step.
+        if (key.startsWith("-- marktmorgen:sweep-affiliate-settled:v1\n") && args[0] === "1" && args.length >= 4) {
+          const [, mark, at, keep, ...ids] = args;
+          for (const id of ids) this.run(["ZADD", mark, at, id]);
+          this.run(["ZREMRANGEBYSCORE", mark, "-inf", String(Number(at) - Number(keep) - 1)]);
+          this.run(["EXPIRE", mark, keep]);
+          return ids.length;
+        }
         if (key.startsWith("-- marktmorgen:flows-write-if:v2\n") && args[0] === "1" && args.length === 5) {
           const [, list, had, expected, json] = args;
           const now = this.run(["GET", list]);

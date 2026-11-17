@@ -30,6 +30,7 @@ import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 const ACCOUNT_A = "acct_1GrpCursorA01";
 const ACCOUNT_B = "acct_1GrpCursorB01";
@@ -37,6 +38,9 @@ const ACCOUNT_B = "acct_1GrpCursorB01";
 const lists = new Map<string, unknown[]>();
 const reads: { account: string; after: string | null; status: number }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
   const path = url.pathname.replace(/^\/v1/, "");

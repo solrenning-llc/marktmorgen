@@ -24,7 +24,7 @@ import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, replyList, repliesFor, stringList } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -591,8 +591,17 @@ export async function revokeRefundedGifts(
     const read = repliesFor(await redisPipeline([["HLEN", retryKey(sid)], ["HMGET", retryKey(sid), ...ids]]), 2);
     const counted = countOf(read?.[0]);
     const there = read?.[1];
-    const known = Array.isArray(there) && there.length === ids.length && there.every((v) => v === null || (typeof v === "string" && PAYMENT_ID.test(v)));
-    const fresh = known ? (there as unknown[]).filter((v) => v === null).length : null;
+    // Read slot by slot from the reply's own data (replyList; Codex X6 on #3302, LOW): a sparse reply would let every and
+    // filter skip its holes and count too few new rows. Any text already there is a field HLEN counts, so the HSET below
+    // puts the payment read from Stripe over it, a malformed one included (Codex X6, LOW), and it adds nothing to the
+    // count; only nil is a new row.
+    const slots = replyList(there);
+    let fresh: number | null = slots && slots.length === ids.length ? 0 : null;
+    for (const value of slots ?? []) {
+      if (fresh === null) break;
+      if (value === null) fresh += 1;
+      else if (typeof value !== "string") fresh = null;
+    }
     if (counted === null || fresh === null || counted + fresh > REFUND_RETRY_CAP) {
       console.error("reading refunds for gifts: the list to try again is full or unknown; the anchor waits at the rows");
       return false;

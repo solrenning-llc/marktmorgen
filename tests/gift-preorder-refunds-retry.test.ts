@@ -637,6 +637,52 @@ async function rotation(job: Job, base: number): Promise<void> {
   await original.call(redis, [["DEL", job.retry], ["DEL", fromKey]]);
 }
 
+/**
+ * Codex X6 on #3302, two LOWs: a field already on the list in another shape (not a payment) made the whole check of
+ * the page unknown, so the HSET that puts the right payment over it never ran and the row held the anchor on every
+ * pass; and a sparse HMGET reply passed the check (every and filter skip holes), counted too few new rows and let the
+ * list grow past its cap.
+ */
+async function oddReplies(job: Job, base: number): Promise<void> {
+  part(`${job.name}: a field on the list in another shape is put right, never holding the anchor`);
+  const odd = await job.make(200);
+  refunds = list(`${job.name}v`, 5, base, { 2: odd.pi });
+  const id = String(refunds[2].id);
+  await original.call(redis, [["HSET", job.retry, id, "not a payment"]]);
+  const refusing = async (email: string) => {
+    if (email === odd.email) throw new Error("the ledger never answers for this one");
+  };
+  is(`${job.name}: nothing taken back while the work fails`, await job.run(refusing), 0);
+  is(`${job.name}: the field now holds the refund's payment`, await waiting(job.retry), { [id]: odd.pi });
+  is(`${job.name}: the anchor moves to the newest refund: the row is kept on the list`, await read(job.anchor), String(base));
+  is(`${job.name}: handled at last from the list`, await job.run(), 1);
+  is(`${job.name}: no longer held`, await odd.holds(), false);
+  is(`${job.name}: the list is empty`, await waiting(job.retry), {});
+
+  part(`${job.name}: a sparse HMGET reply is unknown, never a count of too few new rows`);
+  const sparse = await job.make(201);
+  refunds = list(`${job.name}w`, 5, base + 100, { 2: sparse.pi });
+  const refusingSparse = async (email: string) => {
+    if (email === sparse.email) throw new Error("the ledger never answers for this one");
+  };
+  redis.pipeline = async (commands) => {
+    const replies = await original.call(redis, commands);
+    // The list one short of full by HLEN, and the HMGET of the page's ids with a hole in each slot.
+    if (commands[0]?.[0] === "HLEN" && commands[0][1] === job.retry) return [100, new Array(commands[1].length - 2), ...replies.slice(2)];
+    return replies;
+  };
+  try {
+    is(`${job.name}: nothing taken back while the work fails`, await job.run(refusingSparse), 0);
+  } finally {
+    redis.pipeline = original;
+  }
+  is(`${job.name}: nothing put on the list past its cap`, await waiting(job.retry), {});
+  is(`${job.name}: the anchor waits at the row that could not be kept`, await read(job.anchor), String(base + 100 - 2));
+  is(`${job.name}: the next pass reads it again and takes it back once it can be`, await job.run(), 1);
+  is(`${job.name}: no longer held once handled`, await sparse.holds(), false);
+  is(`${job.name}: the anchor moves to the newest refund`, await read(job.anchor), String(base + 100));
+}
+
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_refund_retry_only_a_stand_in";
@@ -722,6 +768,8 @@ async function main(): Promise<void> {
   // refund dated past now + 300 s is an unreadable row (#4838), so the pages here are dated before NOW.
   await recount(gift, NOW - 2_000);
   await recount(pre, NOW - 1_000);
+  await oddReplies(gift, NOW - 900);
+  await oddReplies(pre, NOW - 500);
 
   done();
 }

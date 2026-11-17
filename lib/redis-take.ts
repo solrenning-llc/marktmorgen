@@ -40,6 +40,12 @@ local n = redis.call("SCARD", KEYS[1])
 if n > 0 then redis.call("DEL", KEYS[1]) end
 return n`;
 
+/** KEYS[1] a sorted set: how many members it held, and the sorted set deleted (SET_TAKE_COUNT's twin, by ZCARD). */
+export const ZSET_TAKE_COUNT = `-- marktmorgen:zset-take-count:v1
+local n = redis.call("ZCARD", KEYS[1])
+if n > 0 then redis.call("DEL", KEYS[1]) end
+return n`;
+
 /**
  * KEYS[1] a set, KEYS[2..] plain values: {the set's members, each value
  * (false for none, so their places are kept), how many keys were deleted},

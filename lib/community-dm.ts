@@ -56,7 +56,7 @@ import { CREATOR } from "@/lib/community";
 import { stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { SET_TAKE_COUNT } from "@/lib/redis-take";
+import { SET_TAKE_COUNT, ZSET_TAKE_COUNT } from "@/lib/redis-take";
 
 /**
  * Where messages are counted in the store's data room (lib/store-data.ts):
@@ -598,11 +598,21 @@ export async function forgetDmPerson(id: string, who: string, room?: DataStore):
     if (!read || read.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
     replies = read;
   }
-  // Then their own lists: the people they declined counted and deleted in one step, so they are given back once,
-  // and their lists of conversations and requests; every reply exact.
-  const tail = repliesFor(await redisPipeline([["EVAL", SET_TAKE_COUNT, 1, shutKey(id, who)], ["DEL", inboxKey(id, who), askedKey(id, who)]]), 2);
-  const declined = replyCount(tail?.[0]);
-  if (declined === null || replyCount(tail?.[1]) === null) throw new UnknownReplyError(what);
+  // Then their own lists: the people they declined counted and deleted in one step, so they are given back once (both
+  // keepings: the set from before declines had a time, and the sorted set by when), and their lists of conversations
+  // and requests; every reply exact.
+  const tail = repliesFor(
+    await redisPipeline([
+      ["EVAL", SET_TAKE_COUNT, 1, shutKey(id, who)],
+      ["EVAL", ZSET_TAKE_COUNT, 1, shutAtKey(id, who)],
+      ["DEL", inboxKey(id, who), askedKey(id, who)],
+    ]),
+    3,
+  );
+  const declinedBefore = replyCount(tail?.[0]);
+  const declinedAt = replyCount(tail?.[1]);
+  if (declinedBefore === null || declinedAt === null || replyCount(tail?.[2]) === null) throw new UnknownReplyError(what);
+  const declined = declinedBefore + declinedAt;
   if (room) {
     // A conversation this deletion removed gives its whole slot back, as declining one does.
     const gone = pairs.filter((_, i) => (replyCount(replies[at[i]]) ?? 0) > 0);

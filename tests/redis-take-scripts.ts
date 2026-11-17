@@ -33,6 +33,11 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set]);
     return n;
   },
+  "zset-take-count:v1": (run, [zset]) => {
+    const n = Number(run(["ZCARD", zset])) || 0;
+    run(["DEL", zset]);
+    return n;
+  },
   // lib/community.ts CAS_MEMBER: a member's record written only over what was read, the directory with it.
   "member-cas:v1": (run, [members, dir], [member, was, next, listed, at]) => {
     if (run(["HGET", members, member]) !== was) return 0;

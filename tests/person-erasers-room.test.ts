@@ -179,6 +179,8 @@ async function community(): Promise<void> {
   is("Ana's conversation and refusal take room", (await used()) > withTheirs, true);
   await twice(() => forgetDmPerson(ID, ana, ROOM));
   is("exactly Ana's room is given back", await used(), withTheirs);
+  // Declines are kept by when (the sorted set dm:xs:), and those from before in the plain set dm:x:: both go with her.
+  is("her declines are deleted", (await redis.pipeline([["EXISTS", `nl:cm:${ID}:dm:xs:${ana}`, `nl:cm:${ID}:dm:x:${ana}`]]))[0], 0);
   is("Bia and Carla's conversation is kept", withTheirs > start, true);
 }
 

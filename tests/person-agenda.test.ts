@@ -23,6 +23,12 @@ import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEma
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The studio requests are counted in the month the clock is in; a real month end passing mid-file read the new
+// month's 0 against the count the check expected. The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 async function main() {
   const STATS = "s".repeat(16);

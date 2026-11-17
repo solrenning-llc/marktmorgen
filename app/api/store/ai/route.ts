@@ -18,7 +18,7 @@ import { readDepth, reachShares } from "@/lib/page-depth";
 import { LANGUAGES, isLanguage } from "@/lib/store-language";
 import { readStats } from "@/lib/stats";
 import { isFree } from "@/lib/store";
-import { idsOfKind, productIds, readListing, readListings } from "@/lib/catalog";
+import { type Listing, idsOfKind, productIds, readListing, readListings } from "@/lib/catalog";
 import { DEFAULT_SEQUENCE_DRAFT, MAX_SEQUENCE_PRODUCTS, SEQUENCE_DRAFT_COUNTS } from "@/lib/sequence-draft";
 import { storeBase } from "@/lib/purchase-email";
 import { productLink } from "@/lib/checkout-recovery";
@@ -35,6 +35,7 @@ import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
 import { heldPictureRefusal, heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
+import { heldInCatalog, touchesHeld } from "@/lib/child-safety-holds";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -49,6 +50,31 @@ const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt"
  * Who may ask is who may write that thing: products and courses need the
  * products permission, an email the one to write drafts (lib/team-roles.ts).
  */
+/**
+ * The ids of these listings that are neither kept for a child-safety report nor a bundle holding one, for a writing
+ * help that reads the whole catalog (blog, store posts, bio, media kit, FAQ, email sequence). The keep mark is written
+ * before the product is hidden, and a hide that did not go in leaves it listed, so being listed says nothing (Codex L
+ * on #3588). One read of the marks of every listing and every product of its bundle, at most two MGETs
+ * (heldInCatalog); a read that cannot be read leaves out every listing it was read for, never "not held".
+ */
+async function notHeld(store: Parameters<typeof heldInCatalog>[0], listings: readonly Pick<Listing, "id" | "bundle">[]): Promise<Set<string>> {
+  if (listings.length === 0) return new Set();
+  try {
+    const held = await heldInCatalog(store, listings.flatMap((p) => [p.id, ...(p.bundle ?? [])]));
+    return new Set(listings.filter((p) => !touchesHeld(p, held)).map((p) => p.id));
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return new Set();
+  }
+}
+
+/** The listed products of these that a writing help may name (notHeld), in their order. */
+async function openCatalog<T extends Pick<Listing, "id" | "bundle" | "hidden">>(store: Parameters<typeof heldInCatalog>[0], products: readonly T[]): Promise<T[]> {
+  const listed = products.filter((p) => !p.hidden);
+  const open = await notHeld(store, listed);
+  return listed.filter((p) => open.has(p.id));
+}
+
 export async function POST(request: NextRequest) {
   // A review or a translation sends the page being edited, which may be long, and
   // twice as long with a second version being tested (lib/sales-page.ts, MAX_PAGE_BYTES).
@@ -226,12 +252,12 @@ export async function POST(request: NextRequest) {
   }
   if (body.kind === "blog") {
     // A blog post, from the creator's words and what the store sells (lib/ai.ts, writeBlogPost).
-    const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ title: p.title, summary: p.summary }));
+    const products = (await openCatalog(store, store.catalog.head)).map((p) => ({ title: p.title, summary: p.summary }));
     return answer(writeBlogPost(store, { notes, products }));
   }
   if (body.kind === "posts" && !body.product) {
     // Posts about the whole store, from its line and what it sells (the record every visit already reads).
-    const listed = store.catalog.head.filter((p) => !p.hidden).slice(0, 12);
+    const listed = (await openCatalog(store, store.catalog.head)).slice(0, 12);
     if (listed.length === 0 && !store.bio) return fail("notes");
     const facts = [
       `Store: ${store.name}`,
@@ -261,7 +287,7 @@ export async function POST(request: NextRequest) {
   }
   if (body.kind === "bio") {
     // What the store sells, from the record every visit already reads (lib/catalog.ts, head).
-    const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ title: p.title, summary: p.summary }));
+    const products = (await openCatalog(store, store.catalog.head)).map((p) => ({ title: p.title, summary: p.summary }));
     return answer(writeBio(store, { products, notes }));
   }
   if (body.kind === "setup") {
@@ -269,7 +295,7 @@ export async function POST(request: NextRequest) {
   }
   if (body.kind === "kit") {
     // From the record every visit already reads, and the kit as it is in the studio now (not yet saved, perhaps).
-    const products = store.catalog.head.filter((p) => !p.hidden).map((p) => p.title);
+    const products = (await openCatalog(store, store.catalog.head)).map((p) => p.title);
     const audience = (Array.isArray(body.audience) ? body.audience.slice(0, 8) : [])
       .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>) : {}))
       .filter((row) => isSocialNetwork(row.n) && typeof row.count === "string" && row.count.trim())
@@ -280,7 +306,7 @@ export async function POST(request: NextRequest) {
   if (body.kind === "faq") {
     // What the store says about itself: what it sells and how each is handed
     // over, from the record every visit already reads, and the creator's notes for answers.
-    const products = store.catalog.head.filter((p) => !p.hidden);
+    const products = await openCatalog(store, store.catalog.head);
     const facts = [
       `Store: ${store.name}`,
       store.bio ? `About it: ${store.bio}` : "",
@@ -327,8 +353,16 @@ export async function POST(request: NextRequest) {
     const tag = trigger === "tagged" ? cleanTag(body.tag) : "";
     const hidden = new Set(idsOfKind(store, "hidden"));
     const paid = new Set(idsOfKind(store, "paid"));
-    const ids = productIds(store).filter((id) => !hidden.has(id) && paid.has(id)).slice(0, MAX_SEQUENCE_PRODUCTS);
-    const listings = await readListings(store, ids);
+    const candidates = productIds(store).filter((id) => !hidden.has(id) && paid.has(id));
+    // A product kept for a report is left out before the slice, so it takes no place (notHeld). The record says which
+    // products are bundles only for its first page (the head), so a bundle is checked again once its listing is read:
+    // one holding a held product is left out too.
+    const open = await notHeld(store, candidates.map((id) => ({ id, bundle: null })));
+    const ids = candidates.filter((id) => open.has(id)).slice(0, MAX_SEQUENCE_PRODUCTS);
+    const read = await readListings(store, ids);
+    const bundles = read.filter((p) => (p.bundle ?? []).length > 0);
+    const openBundles = await notHeld(store, bundles);
+    const listings = read.filter((p) => (p.bundle ?? []).length === 0 || openBundles.has(p.id));
     const facts = (p: (typeof listings)[number]) => ({ title: p.title, summary: p.summary, price: priceWords(p, store.currency, store.tiers), link: productLink(store, p.id) });
     let followed: ReturnType<typeof facts> | null = null;
     if (trigger === "product" || trigger === "finished") {

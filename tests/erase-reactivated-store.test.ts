@@ -17,8 +17,10 @@
  * exactly whether it is still due: its closing day seen through (the final index) with what it kept removed for that
  * ending, or its plan ended and the closing job's record removed for that same ending. A store whose plan runs again
  * (and not in a closing day) leaves the line and nothing of it is touched; a store whose closing is not done for its
- * current ending leaves the line too (the closing job puts it back when it is); a read that is unknown, or a closing
- * day with a plan running, keeps it in line and erases nothing.
+ * current ending leaves the line too (the closing job puts it back when it is); a read that is unknown keeps it in
+ * line and erases nothing. A store in its closing day (the final index) is erased even when a plan reads running, as
+ * closeOne does: lib/closing-plan-guard.ts refunds every payment made since that day began (coordinator's decision
+ * C1-20261117-1422-c3c5-1).
  */
 import { DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue, unmarkDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
@@ -175,11 +177,14 @@ async function main(): Promise<void> {
     is("its new ending has no closing yet: nothing erased, out of line (the closing job puts it back when it is closed)", [await outcome(walk), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: false, leads: true, due: false }]);
   }
 
-  part("A closing day with a plan running, or a read that is unknown: kept in line, nothing erased");
+  part("A closing day with a plan running is erased (the payment is refunded); a read that is unknown: kept in line, nothing erased");
   {
     await world({ final: true });
     await reactivate(OWNER);
-    is("in its closing day and a plan reads running: kept in line, nothing erased", [await outcome(walk), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: true }]);
+    // Coordinator's decision C1-20261117-1422-c3c5-1: from the start of its closing day (FINAL_INDEX) a store is
+    // erased even when a plan reads paid, as closeOne and #3643 do. lib/closing-plan-guard.ts refunds and undoes every
+    // payment made since that day began; the customer's right is earlier (a checkout opened before lastPlanMoment).
+    is("in its closing day and a plan reads running: seen through: erased, the payment refunded by closing-plan-guard", [await outcome(walk), finished, await state()], ["done:true begun:1 finished:1", [OWNER], { record: false, running: false, leads: false, due: false }]);
 
     const unknowns: [string, string, unknown][] = [
       ["the closing record's read answers a number", "GET", 42],

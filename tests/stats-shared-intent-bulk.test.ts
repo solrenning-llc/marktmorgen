@@ -61,6 +61,21 @@ async function main() {
   part("The same payment also paid an invoice that is not the store's (listed in the same answer)");
   invoicePayments = [pay("inpay_1", "in_renew_new", "pi_sharedintent01"), pay("inpay_2", "in_payment_link_x", "pi_sharedintent01")];
   is("a refund of a payment that also paid another invoice: kept unknown", usd((await readSales(store, NOW))!)?.keptCents ?? null, null);
+  // Codex X5 on #4549 (MEDIUM, money): a renewal that names the payment is a candidate, not proof of all its allocations.
+  invoices = [{ ...renewal, payment_intent: "pi_sharedintent01" }];
+  const namedRenewal = usd((await readSales(store, NOW))!);
+  is("the same allocation is unknown when the renewal names the intent", [namedRenewal?.keptCents, namedRenewal?.missing], [null, ["refunds"]]);
+  invoicePayments = [pay("inpay_1", "in_renew_new", "pi_sharedintent01")];
+  is("confirmed allocation of a renewal that names the intent: $40 kept", usd((await readSales(store, NOW))!)?.keptCents, 4000);
+
+  part("A paid allocation names the same payment, but its invoice could not be read");
+  // Codex G on #4549 (MEDIUM, money): an allocation whose invoice is unreadable may be another store's.
+  invoicePayments = [pay("inpay_1", "in_renew_new", "pi_sharedintent01"), { ...pay("inpay_2", "in_unreadable", "pi_sharedintent01"), invoice: null }];
+  is("unreadable invoice on the same payment: kept unknown", usd((await readSales(store, NOW))!)?.keptCents, null);
+
+  part("An unreadable invoice on another payment does not taint this payment");
+  invoicePayments = [pay("inpay_1", "in_renew_new", "pi_sharedintent01"), { ...pay("inpay_2", "in_unreadable", "pi_other00001"), invoice: null }];
+  is("unreadable invoice on another payment: $40 kept, known", usd((await readSales(store, NOW))!)?.keptCents, 4000);
 
   part("Checkout: the membership's first invoice shares its payment with another invoice");
   invoices = [];
@@ -70,6 +85,13 @@ async function main() {
   invoicePayments = [pay("inpay_3", "in_first_member", "pi_firstmember001"), pay("inpay_4", "in_payment_link_y", "pi_firstmember001")];
   refunds = [refund("pi_firstmember001", 1000)];
   is("checkout: a refund of a payment that also paid another invoice: kept unknown", usd((await readSales(store, NOW))!)?.keptCents ?? null, null);
+  // Codex X5 again: a subscription checkout that names the payment is attributed to its channel, not proven the store's.
+  sessions = [{ ...(sessions[0] as Record<string, unknown>), payment_intent: "pi_firstmember001" }];
+  const namedCheckout = usd((await readSales(store, NOW))!);
+  is("the same allocation is unknown when the checkout names the intent", [namedCheckout?.keptCents, namedCheckout?.missing], [null, ["refunds"]]);
+  invoicePayments = [pay("inpay_3", "in_first_member", "pi_firstmember001")];
+  const confirmedCheckout = (await readSales(store, NOW))!;
+  is("valid checkout attribution stays on the original channel", [usd(confirmedCheckout)?.keptCents, confirmedCheckout.keptIn?.d7.byChannel], [4000, [{ source: "instagram", keptCents: 4000 }]]);
 
   part("The bulk read cut short: its other invoices may be among those not read");
   sessions = [];

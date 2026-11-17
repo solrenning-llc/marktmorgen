@@ -239,6 +239,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:status:views:@lib/status-page.ts": company("The public status page's requests in an hour (247 [SP4])", "One key an hour, the company's: a count and nothing else, kept two hours, so at most three at once."),
   "nl:stripe-check:runs@lib/status-page.ts": company("The Stripe check's last runs, for the public status page (247 [SP4])", "One list, the company's job: a time and a pass or fail per run, nothing else, cut to STATUS_RUNS_KEPT (60) entries of under 64 bytes and kept 70 days after the last run."),
   "nl:usage-watch:told@app/api/cron/usage/route.ts": company("What the usage watch told the owner", "One key, the company's job."),
+  "nl:usage-watch:lock@app/api/cron/usage/route.ts": lock("The daily usage watch"),
   "nl:weekly:lock@app/api/cron/weekly/route.ts": lock("The weekly job"),
   "nl:meet:zoomseen:@app/api/integrations/zoom/deauthorize/route.ts": company("Zoom's notices already handled", "Zoom's own notices, kept a day: the company's."),
   "nl:inbound:seen:@app/api/mail/inbound/route.ts": company("Inbound mail already handled", "The email provider's notices, kept a few days: the company's."),
@@ -713,6 +714,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:used:@lib/mail.ts": { what: "Monthly emails used in the window", parts: [capped(14 * KEY, "One a window.")] },
   "nl:sender:@lib/mail.ts": company("The owner told of the sender's month", "The company's."),
   "nl:meet:conn:@lib/meet-connect.ts": { what: "Connections to Zoom and Google, the store's and each host's", parts: [capped((MAX_TEAM + 2) * 2 * 4 * KB, "Two providers, the store and each host.", src("lib/team.ts", "MAX_TEAM"))] },
+  "nl:meet:gone:@lib/meet-connect.ts": company("When Zoom told us a user removed the app", "Per Zoom user, a hash of its ID and a time, kept a day (GONE_SECONDS): it stops a connection being finished at that moment."),
   "nl:meet:log:@lib/meet-connect.ts": { what: "The store's last problems", parts: [capped(20 * KB, "The newest LOG_SIZE.", src("lib/meet-connect.ts", "LOG_SIZE"))] },
   "nl:meet:refresh:@lib/meet-connect.ts": short("A token being refreshed", "integration", 1, 128),
   "nl:meet:state:@lib/meet-connect.ts": short("A consent in progress, ten minutes", "integration", 1, 512),
@@ -922,6 +924,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rev:stop:@lib/review-requests.ts": { what: "A review ask's stop link: one for each address, the same in every email", parts: [kept(LINK_BYTES, "Review asks go to buyers: one a buyer, kept while they are asked.")] },
   "nl:rev:@lib/reviews.ts": { what: "Reviews and their lists", room: ["lib/reviews.ts", "lib/store.ts"], parts: [kept(MARK, "A payment's reviews, for refunds.")] },
   "nl:rev:all:@lib/reviews.ts": { what: "Every review, for the studio", room: ["lib/reviews.ts"] },
+  "nl:rev:hid:@lib/reviews.ts": { what: "A hide left by a review its buyer deleted", room: ["lib/reviews.ts"] },
   // Since 14 November 2026 a review's save also holds its payment's lock (payLockKey) beside its product's: two keys a buyer action.
   "nl:rev:lock:@lib/reviews.ts": { what: "A product's reviews, and a payment's list of reviews, being written", parts: [per("buyer", 1, 128, "A product's reviews being written"), per("buyer", 1, 128, "A payment's list of reviews being written")] },
   "nl:rev:new:@lib/reviews.ts": { what: "Reviews not seen yet", room: ["lib/reviews.ts"] },
@@ -1157,6 +1160,8 @@ export const FAMILIES: Record<string, Family> = {
   // winbacksSent), erased with the store. Still priced at the figure of a key a day kept 62 days, above its one key.
   "nl:wb:n:@lib/winback-send.ts": short("Come-back offers counted, all time (one key a store, no expiry, erased with the store)", "day", 62, 128),
   "nl:wb:once:@lib/winback-send.ts": short("An address told of a product", "own", 60, KEY, MAIL("come back")),
+  // At most one a link, a day at the most: the checkout address it opened (up to OPEN_URL_MAX), or a claim's value.
+  "nl:wb:open:@lib/winback-send.ts": short("The checkout a come-back link opened, handed back to a second press", "own", 1, KEY + 1_000, MAIL("come back")),
   "nl:yearask:@lib/yearly-ask.ts": { what: "A member asked to go yearly", parts: [item(MARK, "One a membership, five years: counted as for good.", "membership")] },
   "nl:yearask:count:@lib/yearly-ask.ts": short("Asks counted a month", "day", 62, 128),
   "nl:yearask:cursor@lib/yearly-ask.ts": company("Where the yearly ask stopped", "One key, the company's job."),

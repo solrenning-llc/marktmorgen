@@ -46,6 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -54,6 +55,7 @@ import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
+import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
@@ -76,7 +78,6 @@ import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
-import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
@@ -119,10 +120,11 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
+import { WINBACK_OPEN_STRIPE_CALLS } from "@/lib/winback";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
@@ -440,6 +442,32 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
 /**
+ * Vercel Blob operations, from the official page read on 6 November 2026 (Claude 4, C4-20261106-0830-C5-39;
+ * https://vercel.com/docs/vercel-blob/usage-and-pricing, "Managed Infrastructure pricing", on-demand rates): an
+ * upload (put) is an Advanced Operation, $5.00 per million; a head or a read is a Simple Operation, $0.40 per million.
+ * The operations a plan includes are never counted as zero (rule MR).
+ */
+export const BLOB_ADVANCED_OP = 5 / 1e6;
+export const BLOB_SIMPLE_OP = 0.4 / 1e6;
+/**
+ * The puts one upload request may send: @vercel/blob tries a failed put again up to VERCEL_BLOB_RETRIES times (10 unless
+ * set; dist getRetries), and no official page says a put tried again, or refused, is not billed. Unknown is never zero:
+ * 1 + 10 (Revisor 1 on #2803; tests/picture-upload-costs.test.ts reads the installed SDK's default).
+ */
+export const BLOB_PUT_TRIES = 11;
+/**
+ * A head goes through the same request as a put (requestApi) and is tried again as often; a read through get() is one
+ * plain fetch, sent once (Codex S on #2801; tests/picture-upload-costs.test.ts reads the installed SDK).
+ */
+export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
+/**
+ * The signing requests one upload request may send: issueSignedToken is requestApi("/signed-token", POST) in the
+ * installed SDK, the same request as a put, tried again as often. No official page says a signed-token request is free,
+ * so each try is counted at the dearer Advanced Operation: unknown is never zero (Claude 1 on #2803, 6708192310;
+ * tests/picture-upload-costs.test.ts reads the installed SDK).
+ */
+export const BLOB_SIGN_TRIES = BLOB_PUT_TRIES;
+/**
  * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
  * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
  * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
@@ -604,6 +632,13 @@ export function affiliateLoadRead(size: AffiliateLoadSize): number {
 export function publicListingsRead(listings: number): number {
   return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
 }
+/**
+ * What reading whether a come-back link's person already has a membership that has not ended costs at the most
+ * (lib/winback-send.ts, openWinBack), besides the press itself (a public request, "come-back"): the units taken, and
+ * WINBACK_OPEN_STRIPE_CALLS calls to the creator's Stripe account, each waited on at 2 GB with a whole page's body.
+ * Taken as WINBACK_OPEN_REQUEST_UNITS public requests before it reads (tests/plan-cost-registry.test.ts).
+ */
+export const WINBACK_OPEN_READ = TAKE_COMMANDS * COMMAND + WINBACK_OPEN_STRIPE_CALLS * stripePage();
 /**
  * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
  * the request, the store's counts and the listings it reads, every page of
@@ -895,6 +930,13 @@ export function readShapeCost(shape: ReadShape): number {
   return CALL + shape.cpu * CPU_SECOND + (shape.seconds + shape.stripePages * EXPORT_PAGE_SECONDS) * MEMORY_SECOND
     + shape.commands * COMMAND + shape.dbBytes * DB_BYTE + shape.outBytes * ORIGIN_PER_BYTE;
 }
+
+/**
+ * A month's receipts in one ZIP at its worst (601 [KB22] U3, lib/receipt-batch.ts): the whole run at 2 GB and on the CPU,
+ * every receipt numbered, the fullest ZIP sent, every Stripe page waited on. Paid by RECEIPT_BATCH_UNITS studio requests,
+ * taken before Stripe is read (tests/kb22-receipt-batch.test.ts holds the units above this), so the "studio" line holds.
+ */
+export const RECEIPT_BATCH_COST = readShapeCost(RECEIPT_BATCH_SHAPE);
 
 /**
  * One reading of Marktmorgen Path's money and counts (lib/path.ts, visitPath):
@@ -1298,6 +1340,18 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
   },
   {
+    id: "picture-uploads",
+    feature: "Studio picture uploads (a product's, a link's and a page's picture): each copy's Blob puts, every try counted, and the checks of its name and bytes (6 November 2026; never counted before)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * ((BLOB_PUT_TRIES + BLOB_SIGN_TRIES) * BLOB_ADVANCED_OP + (3 * BLOB_HEAD_TRIES + 2) * BLOB_SIMPLE_OP + 2 * CDN_PER_REQUEST + 2 * MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE)),
+    sources: [
+      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor", "issueSignedToken"] },
+      { file: "lib/studio-route.ts", names: ["countStudio"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "lib/uploaded-image.ts", names: ["firstBytes", "reader.cancel()"] },
+    ],
+    basis: "Every copy of a picture (the picture and its smaller copy) is put through its own upload request, and attaching them is one more; each is a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling. Each request is counted at the dearest one may be: its put (an Advanced Operation) with every try again the SDK may send (BLOB_PUT_TRIES), Simple Operations: three heads (the one that checks a name is free; one for the picture and one for its smaller copy), each with its tries again (BLOB_HEAD_TRIES); its signing request (issueSignedToken, requestApi in the SDK), counted as an Advanced Operation with every try (BLOB_SIGN_TRIES), because no official page says it is free; and two reads, one plain fetch each, each a CDN request, with both copies' whole bytes (MAX_IMAGE_BYTES each) at the dearer Blob transfer rate kept here plus Fast Origin Transfer, since a private blob fetched on a miss pays both (as PICTURE_READ prices a private picture read; Claude 1 on #2803). The read is counted whole: firstBytes reads a stream it cancels after sixteen bytes, and no official page says the Blob honors a byte range with 206 or bills only the bytes sent (Claude 4, C4-20261106-1120-TODOS-63). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: a buyer's review photo (lib/review-photo.ts) and an email's picture (lib/mail-pictures.ts), each a Blob put of its own, reported apart to be bounded and counted.",
+  },
+  {
     id: "free-delivery",
     feature: "Downloads (sold and free)",
     monthlyUsd: () => (FREE_PAUSE_ABOVE_BYTES / GB) * FILE_DELIVERY_PER_GB,
@@ -1621,6 +1675,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A come-back link's checkout reads whether the person has a membership still running before it opens (R43, follow-up to #3371).
+      { file: "lib/winback-send.ts", names: ["takeBuyerRead(store, WINBACK_OPEN_REQUEST_UNITS)", "WINBACK_OPEN_STRIPE_CALLS - 2"] },
+      { file: "lib/winback.ts", names: ["WINBACK_OPEN_STRIPE_CALLS", "WINBACK_OPEN_REQUEST_UNITS"] },
       // A member's page and each action on it read one list of memberships for each customer of the address its link holds, side by side,
       // at most MANAGE_CUSTOMERS_MAX, the link's record within MANAGE_GRANT_BYTES (inside LINK_BYTES of tests/store-data-registry.ts):
       // Stripe bills no API call and no store command or byte is added, so the request's own cost is unchanged (R43 F1 on #2985, 9 November 2026).
@@ -2264,6 +2321,43 @@ export const PAYPAL_PAST_WATCH = { countReadsPerStoreRun: 3, forgetWritesAtMost:
  */
 export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 30 * 86_400, lateLooksPerOrder: 8 } as const;
 
+/**
+ * Zoom's notice that a user removed the app (app/api/integrations/zoom/deauthorize, forgetUser in lib/meet-connect.ts;
+ * Claude 7's MEDIUM 2 on #3333): a company cost, never a plan's, since Zoom sends it and no store asks for it. Each
+ * notice at its most:
+ * - guardCommands: the route's own guard, withinLimit's INCR and EXPIRE, claimMark's SET NX and its read back, and
+ *   releaseMark's script (EVAL, GET, DEL) when the notice is let go for Zoom's retry;
+ * - forgetFixedCommands: the deletion's mark (SET ... EX GONE_SECONDS) and the read of the user's stores (SMEMBERS),
+ *   one pipeline;
+ * - for each of at most storesPerPass (FORGET_PASS) stores: its renewal lock tried lockTries times in lockWaitMs
+ *   (lib/redis-lock.ts takeLock, waits of 20 ms doubling to 250 ms), then storeCommandsAfterLock: the connection's
+ *   GET, its DEL, the test mark's DEL and the store's SREM from the index, and the lock let go (EVAL, GET, DEL);
+ * - markBytes kept markSeconds: the mark's key (58 bytes) and its value (at most the 16 digits KEEP_UNLESS_GONE
+ *   reads), rounded up, one mark a Zoom account.
+ * Bounded per sending address by the route's PER_MINUTE (noticesPerAddressMinute); a notice signed again by Zoom is a
+ * new one. The bytes of the connections and the index read back are not in this line (their size is Zoom's tokens and
+ * the account's stores): open, never zero. Held to the code by tests/zoom-notice-cost.test.ts; not yet a dollar line
+ * of lib/llc-fixed-costs.ts.
+ */
+export const ZOOM_NOTICE_FORGET = {
+  noticesPerAddressMinute: 120,
+  guardCommands: 7,
+  forgetFixedCommands: 2,
+  storesPerPass: 50,
+  lockWaitMs: 9_000,
+  lockTries: 39,
+  storeCommandsAfterLock: 7,
+  markBytes: 128,
+  markSeconds: 86_400,
+} as const;
+/** ZOOM_NOTICE_FORGET priced at the registry's rates: one notice at its most, and an address's minute at its most notices. */
+export function zoomNoticeForgetCost(): { perNoticeUsd: number; perAddressMinuteUsd: number } {
+  const z = ZOOM_NOTICE_FORGET;
+  const commands = z.guardCommands + z.forgetFixedCommands + z.storesPerPass * (z.lockTries + z.storeCommandsAfterLock);
+  const perNoticeUsd = commands * COMMAND + z.markBytes * DB_BYTE_MONTH * (z.markSeconds / (30 * 86_400));
+  return { perNoticeUsd, perAddressMinuteUsd: perNoticeUsd * z.noticesPerAddressMinute };
+}
+
 /** Per-use costs that no monthly figure bounds yet: not in worstCost, so nothing here is certified. */
 export type OpenItem = { id: string; what: string; names?: string[] };
 export const OPEN: OpenItem[] = [];
@@ -2374,6 +2468,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "import-cf-plan-month": line("clickfunnels"), "import-cf-save": line("clickfunnels"), "import-cf-save-month": line("clickfunnels"),
   "import-start": line("imports"), "import-start-month": line("imports"), "import-step": line("imports"), "import-step-month": line("imports"),
   "import-rows": line("imports"), "import-report": line("imports"), "import-report-month": line("imports"),
+  // An AI suggestion of an import's columns: its model call is reserved in the store's AI budget (line ai, askModel); this only spaces the asks.
+  "import-columns": BURST("ai"),
   "countUse:shareMonthKey(opened.id": line("funnel-share"), "countUse:storeMonthKey(statsId": line("funnel-share"),
   "countUse:storeMonthKey(store.statsId": line("funnel-share"), "countUse:storeUseKey(statsId": line("funnel-share"), "countUse:key: string": line("funnel-share"),
   // A copy into another store of the same account (18 October 2026): the destination's own previews and imports, the same line.
@@ -2398,7 +2494,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "stock-hold": guard("Holds one connection may start on a store's limited products within one hold's time (lib/stock.ts, HOLDS_PER_ADDRESS): a bound on held units, not per store use."),
   "mail-ses": guard("The email provider's own notices: a company cost."), "mail-inbound": guard("The email provider's inbound notices, per connection: a company cost; what is sent on to a creator is one of their store's emails (lib/inbound-mail.ts)."),
   "mail-clicked": guard("A click beacon from a store page opened from an email link, which the page itself counts: a few commands and no work, per connection."),
-  "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost."),
+  "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost, priced per notice and per address a minute by ZOOM_NOTICE_FORGET (the deletion's mark kept a day and up to FORGET_PASS stores walked)."),
   "plan-refund": guard("The plan refund route (app/api/billing/refund, 305 [SY1]): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and one write; the money is the reviewed refund exposure (docs/funded-exposure-review.md), a company cost."),
   "plan-withdraw": guard("The plan withdrawal route (app/api/billing/withdraw, 588 [KB9] unit 3): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and, once per withdrawal, the plan refund flow; the money is the reviewed refund exposure under the money-back guarantee (docs/funded-exposure-review.md), a company cost."),
   "plan-refund-review": guard("The plan refund's review page (app/studio/refund, 305 [SY1]): drawn at most SHOWN_PER_DAY (20) a store a day, each a bounded Stripe reading (MAX_CALLS) and one short key: a company cost."),

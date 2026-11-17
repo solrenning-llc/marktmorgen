@@ -82,8 +82,9 @@ test("the earnings record reads the end at the sale's own time", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync("lib/affiliates.ts", "utf8");
   // Since main's orders of several lines (each partner on the lines of their own products), read per line.
-  assert.match(source, /shareOn\(a\.share, line\.product, sale\.at\) > 0/);
-  assert.match(source, /percent: shareOn\(partner\.share, theirs\[0\]\.product, sale\.at\)/);
+  // The share in force when the sale was paid (shareAt, Codex G's point 3 on #1924), its end read at that time too.
+  assert.match(source, /shareOn\(shareAt\(a, sale\.at\), line\.product, sale\.at\) > 0/);
+  assert.match(source, /percent: shareOn\(held, theirs\[0\]\.product, sale\.at\)/);
 });
 
 test("the creator cannot change an agreed share alone, except ending one that runs until revoked", () => {

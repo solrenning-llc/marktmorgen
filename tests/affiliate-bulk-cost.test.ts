@@ -95,6 +95,8 @@ async function main(): Promise<void> {
     cleared: { paid: Number.MAX_SAFE_INTEGER, with: Array.from({ length: 50 }, (_, i) => i.toString(16).padStart(12, "a")) },
     by: { id: "fffffffffff1", percent: 90 },
     warned: Number.MAX_SAFE_INTEGER,
+    // When the share came into force (Codex G's point 3 on #1924).
+    shareFrom: Number.MAX_SAFE_INTEGER,
     // 630 [HN6](39): a change waiting for the partner, as wide as a share, and the longest history kept.
     terms: {
       change: { share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"r".repeat(36)}${String(i).padStart(4, "0")}`), until: Number.MAX_SAFE_INTEGER }, asked: Number.MAX_SAFE_INTEGER },

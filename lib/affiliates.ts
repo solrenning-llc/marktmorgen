@@ -118,6 +118,7 @@ import {
   endedAt,
   lastDaySeconds,
   readTerms,
+  sameShare,
   settleTerms,
   shareRunning,
   stepOf,
@@ -219,6 +220,12 @@ export type Affiliate = {
    * the two add up, and the cap counts them together.
    */
   share: PartnerShare | null;
+  /**
+   * When `share` came into force, in whole seconds (Codex G's point 3 on #1924): a sale paid before it is never
+   * credited at it (shareAt). Absent on a share that came into force before this was kept, which is taken as in force
+   * before any sale noted now, as it always was.
+   */
+  shareFrom?: number;
   /**
    * What the creator looked at and let through (releaseHold): the paid-search
    * clicks there were then, and the affiliates they shared an address with
@@ -414,6 +421,7 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
       warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
+      ...(typeof value.shareFrom === "number" && Number.isSafeInteger(value.shareFrom) && value.shareFrom > 0 ? { shareFrom: value.shareFrom } : {}),
       ...(() => {
         const terms = readTerms(value.terms);
         return terms.change || terms.history.length ? { terms } : {};
@@ -489,7 +497,7 @@ export type ShareProposal =
 
 /** Whether two reads of one record hold the same agreement: its status, its share and its terms. */
 function sameCommitment(a: Affiliate, b: Affiliate): boolean {
-  return a.status === b.status && JSON.stringify(a.share) === JSON.stringify(b.share) && JSON.stringify(a.terms ?? null) === JSON.stringify(b.terms ?? null);
+  return a.status === b.status && JSON.stringify(a.share) === JSON.stringify(b.share) && (a.shareFrom ?? null) === (b.shareFrom ?? null) && JSON.stringify(a.terms ?? null) === JSON.stringify(b.terms ?? null);
 }
 
 /** A record with these terms, or without the field when there is nothing to keep. */
@@ -506,6 +514,8 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
   const withdrawn = (): PartnerTerms =>
     terms.change ? { change: null, history: withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) } : terms;
   let share = current;
+  // A share that comes into force here starts earning now (shareAt): an end moved earlier keeps when its share began.
+  let from = affiliate.shareFrom;
   let kept: PartnerTerms;
   let state: "started" | "same" | "applied" | "waiting";
   if (current === null || !shareRunning(current, nowSeconds)) {
@@ -516,6 +526,7 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
       state = "same";
     } else {
       share = next;
+      from = nowSeconds;
       kept = { change: null, history: withStep(terms.history, stepOf("started", "creator", next, nowSeconds)) };
       state = "started";
     }
@@ -528,6 +539,7 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
       // Only ending a share until revoked gets here while it runs: it ends now, its end kept, so a sale paid before
       // this moment and written down later still earns ("What was already earned is still paid").
       share = next === null ? endedAt(current, nowSeconds) : next;
+      if (next !== null) from = nowSeconds;
       kept = { change: null, history: withStep(terms.history, stepOf(next === null ? "revoked" : "changed", "creator", next, nowSeconds)) };
       state = "applied";
     } else {
@@ -535,7 +547,7 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
       state = "waiting";
     }
   }
-  return { next: withTerms({ ...affiliate, share }, kept), state };
+  return { next: withTerms({ ...affiliate, share, ...(from !== undefined ? { shareFrom: from } : {}) }, kept), state };
 }
 
 /**
@@ -633,7 +645,9 @@ export async function answerShareChange(
       if (change.share !== null && !(await allowed(change.share))) return { ok: false, reason: "cap" };
       if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's answer was written");
       const share = change.share ?? (found.share ? endedAt(found.share, nowSeconds) : null);
-      apply = (now) => withTerms({ ...now, share }, { change: null, history: withStep(terms.history, stepOf("changed", "partner", change.share, nowSeconds)) });
+      // A changed share earns from the yes on (shareAt); an ending keeps when its share began, its end says the rest.
+      const from = change.share !== null ? { shareFrom: nowSeconds } : {};
+      apply = (now) => withTerms({ ...now, share, ...from }, { change: null, history: withStep(terms.history, stepOf("changed", "partner", change.share, nowSeconds)) });
     }
     const changed = await changeAffiliate(store, id, (now) => {
       // The partner's own check ran on what was read; it is never applied over something else behind their back.
@@ -722,8 +736,10 @@ function commitmentReads(raw: string): boolean {
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const { share, status } = value as { share?: unknown; status?: unknown };
+    const { share, status, shareFrom } = value as { share?: unknown; status?: unknown; shareFrom?: unknown };
     if (!shareReadsExactly(share)) return false;
+    // When the share came into force decides which sales it earns on (shareAt): absent, or a moment, never guessed.
+    if (shareFrom !== undefined && !(typeof shareFrom === "number" && Number.isSafeInteger(shareFrom) && shareFrom > 0)) return false;
     return share === undefined || share === null || status === "pending" || status === "approved" || status === "declined" || status === "removed";
   } catch {
     return false;
@@ -1695,7 +1711,9 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
         refused = true;
         return null;
       }
-      const next: Affiliate = { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share };
+      // An invitation's share earns from this yes on (shareAt), unless it is the very share already in force.
+      const starts = grant.p && !(now.share && sameShare(now.share, grant.p)) ? { shareFrom: Math.floor(Date.now() / 1000) } : {};
+      const next: Affiliate = { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share, ...starts };
       return grant.p ? withTerms(next, startedBy(now.terms ?? NO_TERMS, grant.p)) : next;
     });
     if (refused) return { ok: false, reason: "withdrawn" };
@@ -1727,7 +1745,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
       share: invited ? grant.p ?? null : null,
       cleared: null,
       by,
-      ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p) } : {}),
+      ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p), shareFrom: Math.floor(now / 1000) } : {}),
     }));
     if ("other" in made) {
       // Only the index's own record (ownRecord): one under another address is never this link's (Codex G on #3573).
@@ -2193,7 +2211,8 @@ export const STUDIO_UNIT_BYTES = 1_000_000;
  * two addresses of MAX_EMAIL_LENGTH and a note of MAX_NOTE_LENGTH characters, each character at its widest (a control
  * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest, and
  * a partner's terms (630 [HN6](39)): a change waiting as wide as a share, and MAX_TERM_HISTORY steps of history.
- * tests/affiliate-bulk-cost.test.ts holds the widest record under it (28,091 bytes when this was set).
+ * tests/affiliate-bulk-cost.test.ts holds the widest record under it (28,091 bytes when this was set; 28,120 with
+ * shareFrom, Codex G's point 3 on #1924).
  */
 export const AFFILIATE_RECORD_MAX_BYTES = 32_000;
 
@@ -2992,7 +3011,7 @@ export async function notePartners(
   const charged = lines.reduce((sum, line) => sum + line.cents, 0);
   const goods = Math.max(0, sale.base - (sale.shipping ?? 0));
   const holders = (partners ?? (await listPartners(store))).filter(
-    (a) => a.status === "approved" && lines.some((line) => shareOn(a.share, line.product, sale.at) > 0),
+    (a) => a.status === "approved" && lines.some((line) => shareOn(shareAt(a, sale.at), line.product, sale.at) > 0),
   );
   if (!holders.length) return;
   // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched: the partner's inbox or
@@ -3000,7 +3019,9 @@ export async function notePartners(
   const buyer = sale.buyer ? canonicalEmail(sale.buyer) : "";
   const commands: (string | number)[][] = [];
   for (const partner of holders) {
-    const theirs = lines.filter((line) => shareOn(partner.share, line.product) > 0);
+    // The share in force when the sale was paid, never one that came into force since (Codex G's point 3 on #1924).
+    const held = shareAt(partner, sale.at);
+    const theirs = lines.filter((line) => shareOn(held, line.product) > 0);
     const weight = theirs.reduce((sum, line) => sum + line.cents, 0);
     // The whole order: every line that was charged is theirs (an order whose every line is free, only when every line is).
     const whole = weight === charged && (charged > 0 || theirs.length === lines.length);
@@ -3014,7 +3035,7 @@ export async function notePartners(
       base: whole ? sale.base : charged > 0 ? Math.floor((goods * weight) / charged) : 0,
       total: sale.total,
       currency: readCurrencyCode(sale.currency),
-      percent: shareOn(partner.share, theirs[0].product, sale.at),
+      percent: shareOn(held, theirs[0].product, sale.at),
       // A 50% partner buying their own product at 50% off is not a sale.
       self: Boolean(buyer) && (canonicalEmail(partner.email) === buyer || canonicalEmail(payAddress(partner)) === buyer),
       // The account a Stripe sale was paid into, as writeReferral writes it (readBook).
@@ -3155,6 +3176,15 @@ function bumpCents(value: unknown): number {
 }
 
 /**
+ * The share a partner held at a moment (Codex G's point 3 on #1924): the one in force, unless it came into force after
+ * that moment (shareFrom), when there was none to earn at. A sale is credited at what was agreed when it was paid,
+ * never at a share accepted since. A share kept from before shareFrom was recorded has none and is in force throughout.
+ */
+function shareAt(partner: Pick<Affiliate, "share" | "shareFrom">, atSeconds: number): PartnerShare | null {
+  return partner.shareFrom !== undefined && atSeconds < partner.shareFrom ? null : partner.share;
+}
+
+/**
  * When the buyer paid, for a partner's end (630 [HN6](39)): the time of the payment's settled charge
  * (`payment_intent.latest_charge`, expanded by the sweep), succeeded and paid. Neither the intent's own `created` (made
  * before the buyer pays) nor the checkout's opening is a payment time (Codex G on #1924): without a settled charge's
@@ -3188,7 +3218,15 @@ async function paidForPartners(store: Store, session: SessionLike, opened: numbe
     const listed = partners ?? (await listPartners(store));
     // A checkout with no exact opening time is never taken as opened after an end (Codex G on #1924). Every product of
     // the order counts, the lines added at checkout too (orderLines), not only its main one (Codex G on #1924, point 1).
-    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.some((p) => products.includes(p)) && (opened === null || opened < a.share.until));
+    // A share that came into force after the checkout opened (shareFrom) is the same doubt from the other side: paid
+    // before it or after it is not known (Codex G's point 3 on #1924).
+    const straddles = listed.some(
+      (a) =>
+        a.status === "approved" &&
+        a.share !== null &&
+        a.share.products.some((p) => products.includes(p)) &&
+        [a.share.until, a.shareFrom].some((moment) => moment !== undefined && (opened === null || opened < moment)),
+    );
     if (straddles) throw new UnknownReplyError("when a sale near a partner's end was paid");
   }
   return opened ?? fallback;

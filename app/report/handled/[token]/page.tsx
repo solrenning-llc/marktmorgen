@@ -71,7 +71,7 @@ export default async function ReportHandledPage({ params, searchParams }: Params
         {`A ${what}${found.handle ? ` about @${found.handle}` : ""} has been open since ${utcTime(found.firstAt)}. While it is open, a reminder goes to the support inbox every 24 hours.`}
       </p>
       <p className="mt-3 text-ink-soft">
-        Mark it handled only when the steps in docs/incident-response.md section 8 are done. The reminders then stop. Nothing else changes: anything that was held stays held, and nothing is deleted.
+        Mark it handled only when the steps in docs/incident-response.md section 9 are done. The reminders then stop. Nothing else changes: anything that was held stays held, and nothing is deleted.
       </p>
       <HandledForm token={token} />
     </Frame>

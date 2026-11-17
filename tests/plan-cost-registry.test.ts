@@ -12,7 +12,8 @@ import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
-import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
+import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
+import { BENEFIT_PAGE_UNITS, BENEFIT_STRIPE_PAGES } from "@/lib/tier-benefit-rules";
 import { TEST_SALES_PAGES, broadcastSizesBytes } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/person-agenda";
@@ -51,6 +52,7 @@ import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -58,6 +60,8 @@ import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
+import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_PROGRESS_COMMANDS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -290,6 +294,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // Opening a come-back link's checkout reads whether the person has a membership still running (lib/winback-send.ts): WINBACK_OPEN_REQUEST_UNITS
+  // public requests, taken before it, more than its calls to the creator's Stripe account cost.
+  assert.ok(WINBACK_OPEN_REQUEST_UNITS * laterPageCost() >= WINBACK_OPEN_READ, `${WINBACK_OPEN_REQUEST_UNITS} x ${laterPageCost()} < ${WINBACK_OPEN_READ}`);
+  console.log(`a come-back link's running-membership reading: $${WINBACK_OPEN_READ.toFixed(6)} at most, counted as ${WINBACK_OPEN_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
   // at every size, from an empty program or store to the largest, the requests cost more than the reads.
   const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 1_000, 5_000, 50_000, 1_000_000];
@@ -364,6 +372,16 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
   console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
+  // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
+  // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.
+  assert.equal(STUDIO_REQUEST_BYTES, 50_000);
+  assert.ok(read("tests/plan-cost-registry.ts").includes(`studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, ${STUDIO_REQUEST_BYTES.toLocaleString("en-US").replace(/,/g, "_")})`), "UNIT_COST.studio is priced at STUDIO_REQUEST_BYTES");
+  for (const flows of [0, 1, 50_000, 400_000, 8_000_000]) for (const versions of [0, 1, 50_000, 4_000_000]) {
+    const size = { flows, versions, largest: Math.min(versions, 400_000) };
+    for (const [path, commands, bytes] of [["list", 4, listVersionsBytes(size)], ["restore", 14, restoreBytes(size)], ["restore again", 8, restoreTryBytes(size)], ["keep", 8, keepVersionBytes(size, 400_000)]] as const) {
+      assert.ok(flowHistoryUnits(bytes) * UNIT_COST.studio >= request("studio", commands, bytes), `${path} ${flows}/${versions}: ${flowHistoryUnits(bytes)} x ${UNIT_COST.studio} < ${request("studio", commands, bytes)}`);
+    }
+  }
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });
@@ -413,6 +431,14 @@ test("a companies request fits its studio requests, and each page that reads eve
  assert.ok(sentBytes(amp) <= SENT_TIMES * amp.length && sentBytes(amp) >= 8 * amp.length, `${sentBytes(amp)} for ${amp.length}`);
  assert.ok(sent >= 17, `the fullest companies page sends ${sent} studio requests' worth: never less than the review's 17`);
  console.log(`the fullest companies page: ${STUDIO_PAGE_UNITS} + ${COMPANIES_READ_UNITS} + ${sent} studio requests, and its reading of the buyers when Stripe is read`);
+});
+
+test("a reading of who is owed a membership benefit fits the studio requests counted before its pages, at every number of pages, and no fewer would do", () => {
+ // Claude 7's cost MEDIUM on #3014: every page load and every give or undo press reads Stripe and the marks owed.
+ for (let pages = 1; pages <= BENEFIT_STRIPE_PAGES; pages += 1) {
+  assert.ok(benefitsRead(pages) <= UNIT_COST.studio * BENEFIT_PAGE_UNITS * pages, `${pages} pages: ${benefitsRead(pages)} > ${pages} x ${BENEFIT_PAGE_UNITS} x ${UNIT_COST.studio}`);
+ }
+ assert.ok(benefitsRead(1) > UNIT_COST.studio * (BENEFIT_PAGE_UNITS - 1), `${benefitsRead(1)} <= ${BENEFIT_PAGE_UNITS - 1} x ${UNIT_COST.studio}: lower BENEFIT_PAGE_UNITS`);
 });
 
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {

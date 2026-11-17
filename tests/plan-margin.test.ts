@@ -472,7 +472,8 @@ test("the one exposure is the first payment refunded in full: bounded, once per 
     // Bounded, and once per account; since the prices of 18 October 2026 a refunded first year is dearer, because
     // the card fee Stripe keeps grows with the charge: it is a funded exposure (docs/funded-exposure-review.md).
     assert.ok(month < 15, `${schedule}: a first month given back can cost $${month.toFixed(2)} on one account`);
-    assert.ok(year < 65, `${schedule}: a first year given back can cost $${year.toFixed(2)} on one account`);
+    // The owner's ceiling for it is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66") and the coordinator's decision 6934185062, option (a): any honest cost up to US$ 66 (17 November 2026, merge of base #3588 into #3480, as #4830 does on main); US$ 65 before. No price, visible limit or commission moves.
+    assert.ok(year < 66, `${schedule}: a first year given back can cost $${year.toFixed(2)} on one account`);
   }
   const policy = readFileSync(join(process.cwd(), "app/refunds/page.tsx"), "utf8");
   assert.match(policy, /first payment on your account/, "the guarantee must say it is for the first payment, or every month is free for anyone who asks");

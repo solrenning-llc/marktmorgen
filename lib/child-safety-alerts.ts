@@ -4,7 +4,7 @@
  * REMIND_HOURS until the owner marks the report handled; for an intimate
  * image a reminder also goes WARN_BEFORE_HOURS before the TAKE IT DOWN Act's
  * 48-hour deadline, naming it in UTC (C1-20261109-1546-TODOS-70; procedure in
- * docs/incident-response.md section 8).
+ * docs/incident-response.md section 9).
  *
  *   nl:csa:alert:<id>   JSON     one open report: its kind, where, the store's handle, what was done
  *                                when it came in, when it came in and was last emailed, how many
@@ -245,12 +245,13 @@ function reminderText(alert: Alert, n: number, now: number, link: string, last: 
   const about = alert.handle ? ` about @${alert.handle}` : "";
   const done: Record<HoldOutcome, string> = {
     held: "When it came in, the product it points at was taken off the store automatically, and it stays held.",
-    files_unconfirmed: "When it came in, the product it points at was taken off the store, but keeping its files could not be confirmed: suspend the store, as docs/incident-response.md section 8 says.",
-    no_product: "When it came in, nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 8 says.",
-    not_held: "Nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 8 says.",
-    capped: "When it came in, nothing was taken off automatically (the store's daily cap was reached): act on it by hand, as docs/incident-response.md section 8 says.",
-    unknown: "When it came in, taking it off the store could not be confirmed: act on it by hand, as docs/incident-response.md section 8 says.",
-    failed: "When it came in, taking it off the store did not work: act on it by hand, as docs/incident-response.md section 8 says.",
+    files_unconfirmed: "When it came in, the product it points at was taken off the store, but keeping its files could not be confirmed: suspend the store, as docs/incident-response.md section 9 says.",
+    no_product: "When it came in, nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
+    not_held: "Nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
+    outside: "When it came in, the address was not a Marktmorgen address, so nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 9 says.",
+    capped: "When it came in, nothing was taken off automatically (the store's daily cap was reached): act on it by hand, as docs/incident-response.md section 9 says.",
+    unknown: "When it came in, taking it off the store could not be confirmed: act on it by hand, as docs/incident-response.md section 9 says.",
+    failed: "When it came in, taking it off the store did not work: act on it by hand, as docs/incident-response.md section 9 says.",
   };
   const deadline = utcTime(alert.deadline);
   const timing = child
@@ -269,7 +270,7 @@ function reminderText(alert: Alert, n: number, now: number, link: string, last: 
     child
       ? "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it."
       : "Do not forward or describe the image, and do not ask any AI agent to look at it.",
-    "The steps are in docs/incident-response.md section 8.",
+    "The steps are in docs/incident-response.md section 9.",
     "",
     `When it is dealt with, mark it handled here, and the reminders stop: ${link}`,
     ...(last ? ["", `This is the last reminder for this report: reminders stop after ${ALERT_DAYS} days or ${ALERT_SENDS} emails. Act on it now.`] : []),

@@ -12,7 +12,7 @@
 import { hideHeldProducts } from "@/lib/child-safety";
 import { keepKey } from "@/lib/child-safety-holds";
 import { readListing } from "@/lib/catalog";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, storeRef, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   // Each product held and waiting to be taken off, as holdReported leaves it when the hide did not go through.
   for (const id of ids) {
     redis.run(["SET", keepKey(store, id), "1", "EX", 400 * 86_400]);
-    redis.run(["ZADD", QUEUE, queuedAt, JSON.stringify([storeRef(store), tag, id])]);
+    redis.run(["ZADD", QUEUE, queuedAt, JSON.stringify([store.sid, tag, id])]);
   }
   const owner = redis.keys().find((key) => key.startsWith("nl:store:owner:"));
   if (!owner) throw new Error("no owner key");
@@ -70,12 +70,16 @@ async function main(): Promise<void> {
   const after = scores();
   is("every product still queued: never dropped", after.length, WAITING);
   is("those tried wait an hour, those not reached stay due for the next run", [after.filter((score) => score > now).length, after.filter((score) => score === queuedAt).length], [busy.waiting, WAITING - busy.waiting]);
+  // The next hourly run may start a little before a full hour later (cron jitter, a faster claim): a product tried
+  // and not confirmed off is due for it, never left visible a second hour (Claude 3 on #3588, comment 6801516714).
+  const early = (redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", String(now + 3_600_000 - 60_000)]) as string[]).length;
+  is("a run a minute short of the hour still finds every product tried and not confirmed off", early, WAITING);
   redis.run(["DEL", lock]);
   let at = now + 2 * 3_600_000;
 
   part("A deadline already past: nothing is tried, everything stays queued as it was");
-  const early = await hideHeldProducts(at, Date.now() - 1);
-  is("nothing tried", early, { hidden: 0, waiting: 0, gone: 0 });
+  const late = await hideHeldProducts(at, Date.now() - 1);
+  is("nothing tried", late, { hidden: 0, waiting: 0, gone: 0 });
   is("all still queued, each due when it was", scores(), after);
   is("nothing taken off", await hiddenCount(), 0);
 

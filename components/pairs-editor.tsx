@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { MAX_PAIRS } from "@/lib/store-collections";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   target: "One of those products is no longer in your store. Reload the page and try again.",
@@ -12,6 +13,12 @@ const MESSAGES: Record<string, string> = {
   store_full: "Your store record is full. Remove something from it and try again.",
 };
 const FAILED = "We could not confirm these picks. Reload this page to check before trying again.";
+
+/** What the picks form says for a refusal: its own words, the hold's (cloud P on #3471), or that the save was not confirmed. */
+export function pairsRefusal(code: unknown): string {
+  if (code === "on_hold" || code === "hold_unread") return STUDIO_MESSAGES[code];
+  return typeof code === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, code) ? MESSAGES[code] : FAILED;
+}
 
 /**
  * "Goes well with" for one product (lib/store-collections.ts): up to
@@ -57,7 +64,7 @@ export function PairsEditor({
       const data = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
       if (!response.ok || data?.ok !== true || data.error || data.id !== productId || !Array.isArray(data.pairs) || JSON.stringify(data.pairs) !== JSON.stringify(expected)) {
         const problem = data?.ok === true ? undefined : data?.error;
-        setError(typeof problem === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, problem) ? MESSAGES[problem] : FAILED);
+        setError(pairsRefusal(problem));
         return;
       }
       setSaved(expected);

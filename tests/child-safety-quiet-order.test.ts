@@ -15,7 +15,7 @@ import { GET as quiet } from "@/app/api/cron/quiet/route";
 import { ALERTS_DUE } from "@/lib/child-safety-alerts";
 import { keepKey } from "@/lib/child-safety-holds";
 import { POST as reportRoute } from "@/app/api/report/route";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, storeRef, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -82,7 +82,8 @@ async function main(): Promise<void> {
   const queue = (at: number) => {
     for (const id of ids.slice(0, WAITING)) {
       redis.run(["SET", keepKey(store, id), "1", "EX", 400 * 86_400]);
-      redis.run(["ZADD", QUEUE, at, JSON.stringify([storeRef(store), tag, id])]);
+      // The queue names the store by its id since the base's #3588 (lib/child-safety.ts hideMember), never by its owner.
+      redis.run(["ZADD", QUEUE, at, JSON.stringify([store.sid, tag, id])]);
     }
   };
   const makeDue = () => redis.run(["ZADD", ALERTS_DUE, "XX", Date.now() - 60_000, open[0]]);

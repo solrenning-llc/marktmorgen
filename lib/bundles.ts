@@ -54,12 +54,11 @@ export async function offeredItems(store: Store, listings: Listing[]): Promise<M
   const missing = bundleItemsToRead(listings);
   const read = missing.length ? await readListings(store, missing) : [];
   const all = [...listings, ...read];
-  // A product kept for a child-safety report is always off the store (hidden), so only a bundle's hidden products
-  // are read for a hold, and a page whose bundles hold none reads nothing more; a hold that cannot be read counts
-  // as held (lib/child-safety-holds.ts).
-  const inside = new Set(bundles.flatMap((p) => p.bundle ?? []));
-  const hidden = all.filter((p) => p.hidden && inside.has(p.id)).map((p) => p.id);
-  const held = hidden.length ? await heldOrUnreadable(store, hidden) : undefined;
+  // Every product of a bundle is read for a child-safety hold, hidden or not: a hold whose hide did not go in leaves
+  // the product listed (Claude 4 and Claude 1 on #3471). One read for the page's bundles; a hold that cannot be read
+  // counts as held (lib/child-safety-holds.ts).
+  const inside = [...new Set(bundles.flatMap((p) => p.bundle ?? []))];
+  const held = inside.length ? await heldOrUnreadable(store, inside) : undefined;
   for (const bundle of bundles) out.set(bundle.id, deliverableItems(bundle, all, held));
   return out;
 }
@@ -76,15 +75,17 @@ export async function holdsCourse(store: Store, bundle: Pick<Listing, "bundle">)
 }
 
 /**
- * The listings a one-click offer after paying may name, from `listings`: a
+ * The listings a one-click offer after paying may name, from `listings`: none
+ * kept for a child-safety report, hidden or not (its own mark is read, Claude 4
+ * and Claude 1 on #3471; a mark that cannot be read leaves it out), and a
  * bundle only while it holds enough to hand over and no course (holdsCourse).
- * Everything else is passed through untouched, and a list without bundles is
- * returned as it came, with nothing read.
  */
 export async function offerableAfterPaying(store: Store, listings: Listing[]): Promise<Listing[]> {
-  if (!listings.some((p) => p.bundle && p.bundle.length > 0)) return listings;
-  const inside = await offeredItems(store, listings);
-  return listings.filter((p) => {
+  const kept = listings.length ? await heldOrUnreadable(store, listings.map((p) => p.id)) : new Set<string>();
+  const open = listings.filter((p) => !kept.has(p.id));
+  if (!open.some((p) => p.bundle && p.bundle.length > 0)) return open;
+  const inside = await offeredItems(store, open);
+  return open.filter((p) => {
     if (!p.bundle?.length) return true;
     const items = inside.get(p.id) ?? [];
     return items.length >= MIN_BUNDLE_ITEMS && !items.some((item) => item.course !== null);

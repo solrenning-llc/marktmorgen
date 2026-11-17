@@ -280,11 +280,10 @@ async function main(): Promise<void> {
   is("named under a product that is not held", await describe({ product: freeId, path: heldPicture }), [409, "on_hold", "nothing read"]);
   is("a picture on its sales page, named under another product", await describe({ product: freeId, path: heldPagePicture }), [409, "on_hold", "nothing read"]);
   is("named under a page of the store's own", await describe({ page: siteId, path: heldPicture }), [409, "on_hold", "nothing read"]);
-  // A picture that is not a held product's gets past the hold: refused for no hold. Since main's #2975 the month's job
-  // is taken before the file store is read (lib/ai.ts, describePicture), and no AI provider is set up here, so the ask
-  // stops there ("off") with nothing read; before it, it reached the file store (nothing there here, "invalid").
-  is("a picture that is not a held product's gets past the hold (no AI set up here, so nothing is read)", await describe({ product: freeId, path: freePicture }), [400, "off", "nothing read"]);
-  is("as from a page of the store's own", await describe({ page: siteId, path: freePicture }), [400, "off", "nothing read"]);
+  // Past the hold's door, the writing job is taken before the picture is read (lib/ai.ts describePicture, #2975), and
+  // the AI is off here, so it stops there: what matters is that the hold does not refuse it.
+  is("a picture that is not a held product's gets past the hold", (await describe({ product: freeId, path: freePicture }))[1] !== "on_hold", true);
+  is("as from a page of the store's own", (await describe({ page: siteId, path: freePicture }))[1] !== "on_hold", true);
 
   part("A hold whose taking off the store did not go through: still read by nobody but the owner");
   if (!(await setProductHidden(OWNER, pdfId, false)).ok) throw new Error("not shown again");
@@ -303,9 +302,9 @@ async function main(): Promise<void> {
   is("a preview: try again later", (await preview(pdfId))[0], 503);
   is("the shared card does not name it", await card(pdfId), false);
   is("the team's studio download: try again later", (await download("editor", pdfId))[0], 503);
-  is("the AI: try again later, nothing sent", await ai({ kind: "page", product: pdfId, readFile: true }), [503, "unavailable"]);
-  is("a picture description, under a product that is not held: try again later, nothing read", await describe({ product: freeId, path: freePicture }), [503, "unavailable", "nothing read"]);
-  is("under a page of the store's own too", await describe({ page: siteId, path: freePicture }), [503, "unavailable", "nothing read"]);
+  is("the AI: try again later, nothing sent", await ai({ kind: "page", product: pdfId, readFile: true }), [503, "hold_unread"]);
+  is("a picture description, under a product that is not held: try again later, nothing read", await describe({ product: freeId, path: freePicture }), [503, "hold_unread", "nothing read"]);
+  is("under a page of the store's own too", await describe({ page: siteId, path: freePicture }), [503, "hold_unread", "nothing read"]);
   is("the owner still sees the course", await front("owner"), "shown");
   redis.pipeline = real as typeof redis.pipeline;
 

@@ -19,7 +19,7 @@
 import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
@@ -586,13 +586,16 @@ async function settlePendingInvites(statsId: string, productId: string): Promise
  * them: INVITES_PER_UNIT x (INVITE_READ_BYTES_MAX + INVITE_DROP_BYTES_MAX) + INVITES_FIRST_REQUEST_BYTES, held by
  * tests/move-invites-page-bytes.test.ts against the real field and record (Claude 1's review of #4831, MEDIUM).
  */
-export const INVITES_PER_UNIT = 50;
+export const INVITES_PER_UNIT = 22;
 /**
- * The most one invitation weighs as HSCAN returns it: its field (an address's 32-character print, a colon and a
- * product id of 40) and its record as inviteMembers writes it (an address of MAX_EMAIL_LENGTH, ids at their longest,
- * every number at 13 digits: about 500 bytes), each in RESP's framing, rounded up.
+ * The most one invitation weighs as HSCAN returns it, in UTF-8 bytes: its field (an address's 32-character print, a
+ * colon and a product id of 40) and its record as inviteMembers writes it (an address of MAX_EMAIL_LENGTH, ids at their
+ * longest, every number at 13 digits: about 500 bytes with an address of one-byte characters), each in RESP's framing,
+ * rounded up. The importer counts an address in UTF-16 code units, and one unit may weigh six bytes in the record (a
+ * control character, which EMAIL_PATTERN lets through, written by JSON.stringify as \u0001; a CJK character weighs
+ * three), so the address's five more bytes a unit are counted on top (Codex P on #4831).
  */
-export const INVITE_READ_BYTES_MAX = 620;
+export const INVITE_READ_BYTES_MAX = 620 + 5 * MAX_EMAIL_LENGTH;
 /** The most deleting one weighs in the request: its field again (HDEL), its reminder (ZREM: a store id, "|" and the field) and its link (DEL). */
 export const INVITE_DROP_BYTES_MAX = 300;
 /** The first request's own commands besides its page: the removal's mark, the count, and the note's SISMEMBER, SCARD, SADD and SREM. */

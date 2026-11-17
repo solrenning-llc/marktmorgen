@@ -1816,7 +1816,7 @@ export const COST_LINES: CostLine[] = [
       // (Claude 3, MEDIUM on #3473): the note's SISMEMBER, SCARD and SADD, then the mark, the count, the first page and the
       // note's SREM, ten commands at the most in that one request (UNIT_COST.studio's twenty), and a page at its heaviest within its 50,000 bytes (INVITE_READ_BYTES_MAX, INVITE_DROP_BYTES_MAX, held by tests/move-invites-page-bytes.test.ts); a page answered with more than asked pays one request more for each further INVITES_PER_UNIT before it is deleted.
       { file: "app/api/store/product/route.ts", names: ["countStudio(guarded.store, null, units)"] },
-      { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 50;", "if (extra > 0 && !(await pay(extra))) throw new InvitesUnpaidError();", "if (!(await pay(1))) throw new InvitesUnpaidError();", "if (!firstPaid && !(await pay(1))) throw new InvitesUnpaidError();", "PENDING_MAX = 20;"] },
+      { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 22;", "if (extra > 0 && !(await pay(extra))) throw new InvitesUnpaidError();", "if (!(await pay(1))) throw new InvitesUnpaidError();", "if (!firstPaid && !(await pay(1))) throw new InvitesUnpaidError();", "PENDING_MAX = 20;"] },
       { file: "app/api/store/product/route.ts", names: ["await notePendingInvites(guarded.store, id, pay);", "await dropProductInvites(removed.store, id, pay, !!before)"] },
       // A discount code scheduled ahead (511 [CK3]) takes SCHEDULE_UNITS more studio requests before Stripe is asked, one for each try the
       // five-minute job may make to switch it on (each one call to the creator's Stripe account, which bills none, and a few commands),

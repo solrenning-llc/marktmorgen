@@ -2423,8 +2423,10 @@ export function ProductEditor({
                 run(
                   { action: "edit", id: product.id, ...payload, rev: openedRev },
                   () => {
-                    setEditingId(null);
-                    setPriceReview(null);
+                    // Only this product's editor closes (Codex L on #4238): another product opened while the save
+                    // was on its way keeps its editor, its typed words and its own price check.
+                    setEditingId((current) => (current === product.id ? null : current));
+                    setPriceReview((current) => (current === product.id ? null : current));
                   },
                   "Product saved.",
                 );

@@ -36,7 +36,11 @@ redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
   return batch.map((c, i) => (c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:") && [...tiredFolders].some((f) => String(c[1]).includes(f)) ? 1_000_000_000 : values[i]));
 }) as typeof redis.pipeline;
-const realNow = Date.now;
+// A frozen clock from a fixed instant, moved only by `later` (Claude 4 on #3330: the same head passed one day and failed
+// the next). The real clock's day, and the time a slow run takes, decided whether LOW 2's last open was the off path
+// (which asks only the paying list) or a stale reading's re-read of the store's record (which turns off by the record).
+const START = Date.UTC(2026, 10, 15, 21, 17, 0);
+const realNow = () => START;
 let shift = 0;
 Date.now = () => realNow() + shift;
 // The NIT: only the test's clock moves; the in-memory database reads Date.now itself.
@@ -167,12 +171,18 @@ async function main() {
   const blindCode = await link(blind.s, "reel");
   tiredFolders.add(blind.folder);
   await open(blindCode);
-  for (let h = 0; h < 31 * 2; h += 1) { later(12 * HOUR); forgetShortLinkOpenMemory(); await open(blindCode); }
+  const turned: number[] = [];
+  for (let h = 0; h < 31 * 2; h += 1) { later(12 * HOUR); forgetShortLinkOpenMemory(); turned.push((await open(blindCode)).status); }
+  // Its record read says it has no paid plan and has rested 31 days: turned off by the record, not by the list.
+  is("LOW 2: before the list breaks, the link is already turned off by its record", turned.at(-1), 410);
   forgetShortLinkOpenMemory();
   breakPayingList = true;
   const blindAnswer = await open(blindCode);
   breakPayingList = false;
+  // A link turned off asks only whether the store pays again; that list unreadable is unknown, never "off".
   is("LOW 2: refused as unknown, not as turned off", blindAnswer.status, 503);
+  forgetShortLinkOpenMemory();
+  is("LOW 2 control: the list read again, the link is still turned off", (await open(blindCode)).status, 410);
   done();
 }
 main();

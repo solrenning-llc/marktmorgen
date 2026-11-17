@@ -16,6 +16,8 @@ import {
   parseCollections,
 } from "@/lib/store-collections";
 import { NewTab } from "@/components/new-tab";
+import { SaidLine, useSaid } from "@/components/said-line";
+import { endWords, movedWords } from "@/lib/move-words";
 
 const MESSAGES: Record<string, string> = {
   title: "Give every collection a name.",
@@ -57,6 +59,8 @@ export function CollectionsEditor({
   const changed = JSON.stringify(rows) !== JSON.stringify(saved);
   const incomplete = rows.some((row) => !row.title.trim() || row.products.length === 0);
   const update = (index: number, change: Partial<Row>) => setRows((all) => all.map((row, i) => (i === index ? { ...row, ...change } : row)));
+  // Each move said for screen readers; Move up on the first product says it is already first (WCAG 4.1.3, 2.4.3).
+  const [said, say] = useSaid();
 
   async function save() {
     if (unavailable) return;
@@ -148,13 +152,20 @@ export function CollectionsEditor({
                         <span className="flex shrink-0 items-center gap-1">
                           <button
                             type="button"
-                            disabled={unavailable || at === 0}
-                            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-lilac disabled:opacity-40"
+                            disabled={unavailable}
+                            aria-disabled={at === 0 || undefined}
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-lilac disabled:opacity-40 aria-disabled:opacity-40"
                             aria-label={`Move ${titles.get(id) ?? "this product"} up`}
                             onClick={() => {
+                              const name = titles.get(id) ?? "This product";
+                              if (at === 0) {
+                                say(endWords(name, "first"));
+                                return;
+                              }
                               const next = [...row.products];
                               [next[at - 1], next[at]] = [next[at], next[at - 1]];
                               update(index, { products: next });
+                              say(movedWords(name, at - 1, row.products.length));
                             }}
                           >
                             <span aria-hidden="true" className="text-sm">&uarr;</span>
@@ -226,6 +237,7 @@ export function CollectionsEditor({
           {error}
         </p>
       ) : null}
+      <SaidLine said={said} />
     </div>
   );
 }

@@ -7,6 +7,8 @@
  * and leaves Marktmorgen with nothing to hold, skim or lose. The 0% on the home
  * page is this file.
  */
+import { everyOf } from "@/lib/product-recurring";
+import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
@@ -14,6 +16,7 @@ import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrig
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
+import { rememberPlan } from "@/lib/plans";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleOff } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
@@ -51,6 +54,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
+import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
@@ -64,7 +68,9 @@ import { isHouseStore } from "@/lib/house-store";
 import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
 import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
+import type { ReturningCode } from "@/lib/returning-code-rules";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
+import { type UnpaidProof, unpaidProof } from "@/lib/checkout-return";
 
 /**
  * How long a paid link keeps working.
@@ -136,6 +142,17 @@ export function canSellProduct(store: Store, product: Listing): boolean {
 /** The figure a product card leads with: the cheapest way in. */
 export function fromPriceCents(product: Listing): number {
   return lowestPriceCents(sellableOptions(product), product.priceCents);
+}
+
+/** A code only for people who bought here before that Stripe would not take on this checkout (lib/returning-code.ts). */
+export class ReturningCodeRefused extends Error {
+  /** "code": Stripe would not take its coupon (used up, ended, deleted); "other": the code cannot go on this checkout. */
+  readonly reason: "code" | "other";
+  constructor(reason: "code" | "other") {
+    super(reason === "code" ? "Stripe would not take this code's coupon" : "This code cannot go on this checkout");
+    this.name = "ReturningCodeRefused";
+    this.reason = reason;
+  }
 }
 
 /**
@@ -266,6 +283,17 @@ export async function createCheckout(
      */
     code?: string;
     /**
+     * A code only for people who already bought here (554 [DS1], unit 2;
+     * lib/returning-code.ts), already checked by the route against what
+     * `email` bought: its coupon comes off, for that email only, with no box
+     * beside it. Like a code from a link, it never stacks: a come-back or
+     * welcome offer, a membership's introductory price, a fair price or a
+     * sale across the store already applied wins, and then the checkout is
+     * refused (ReturningCodeRefused "other") rather than opened without the
+     * code the buyer asked for.
+     */
+    returning?: ReturningCode;
+    /**
      * The buyer's yes, checked on the form before paying, to start access at
      * once and lose the right to cancel once it starts (lib/digital-consent.ts).
      * Needed whenever this order hands over anything digitally: without it,
@@ -275,7 +303,7 @@ export async function createCheckout(
   } = {},
   /** Internal integration dependency; never populated from HTTP or environment flags. */
   confirmationRuntime: ConfirmationOriginRuntime = {},
-): Promise<{ url: string; id: string }> {
+): Promise<{ url: string; id: string; closesAt?: number | null }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
   if (extras.gift) extras = { ...extras, bumps: [], plan: false, upsellKey: undefined, group: undefined };
   if (extras.preorder) {
@@ -467,6 +495,16 @@ export async function createCheckout(
     body.set("metadata[upsell_key]", extras.upsellKey);
   }
 
+  // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
+  // admitted here, before Stripe's page opens, so nobody is stopped while paying.
+  // A purchase for several people holds its places too. Admitted before anything
+  // is read from or made on the creator's Stripe account for this checkout (its
+  // coupons and codes, below): a checkout the store cannot take reads nothing
+  // (rule MR; audit G2).
+  const admitted = await admitOrders(store, 1 + (extras.group ? extras.group.people : 0), Date.now(), itemsHandedOver([product, ...added.map((offer) => offer.target)]));
+  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
+  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
+
   // The box a buyer types a discount code into, shown only by a store that has
   // one. An empty box on every checkout is an invitation to go and look for a
   // code that does not exist, and a buyer who leaves to search for one is a
@@ -515,6 +553,15 @@ export async function createCheckout(
     // How a membership began, for who stays (lib/discount-impact.ts, entryOf).
     if (recurring) body.set("subscription_data[metadata][discount]", "sale");
     mayComeOff.push({ kind: "percent", percent: saleOffNow });
+  } else if (extras.returning && extras.email && !pwyw) {
+    // A code only for people who bought here before, checked by the route:
+    // the creator's coupon, with no box beside it (Stripe takes one or the
+    // other), and the checkout opens for the email that was checked.
+    body.set("discounts[0][coupon]", extras.returning.coupon);
+    body.set("metadata[returning]", extras.returning.code);
+    if (recurring) body.set("subscription_data[metadata][discount]", "code");
+    const off = extras.returning.off;
+    mayComeOff.push(off.kind === "percent" ? { kind: "percent", percent: off.percent } : off.currency === store.currency.toLowerCase() ? { kind: "cents", cents: off.cents } : { kind: "unknown" });
   } else if (store.hasDiscounts && !pwyw) {
     // A code from a link, or one typed in Stripe's box: either may be the
     // largest the store has.
@@ -530,6 +577,10 @@ export async function createCheckout(
       body.set("allow_promotion_codes", "true");
     }
   }
+  // A code for returning buyers that did not go on (another discount already
+  // applies, or the buyer names the price): never opened without the code
+  // the buyer asked for, and never two discounts.
+  if (extras.returning && body.get("discounts[0][coupon]") !== extras.returning.coupon) throw new ReturningCodeRefused("other");
   if (extras.email) body.set("customer_email", extras.email);
 
   if (extras.gift) {
@@ -589,15 +640,20 @@ export async function createCheckout(
   if (membership) {
     // The subscription is created on the creator's own account, like every
     // other charge here, so the member is their customer and not ours.
-    body.set("line_items[0][price_data][recurring][interval]", membership.interval);
+    // How often, as the page says it (609 [WP8]): the interval, and its count only when it is more than one.
+    for (const [key, value] of stripeEveryFields("line_items[0][price_data][recurring]", membership.interval, everyOf(membership))) body.set(key, value);
     // Paid yearly, where the creator offers it: the year's price, once a year (lib/yearly-price.ts).
     const yearlyNow = extras.yearly ? activeYearly(product, store.tiers) : null;
     if (yearlyNow) {
       body.set("line_items[0][price_data][unit_amount]", String(yearlyNow.cents));
       body.set("line_items[0][price_data][recurring][interval]", "year");
+      body.delete("line_items[0][price_data][recurring][interval_count]");
       body.set("metadata[every]", "year");
       body.set("subscription_data[metadata][every]", "year");
     }
+    // Kept on the order for the words after paying, which say it as charged even if the product changes meanwhile.
+    const paidEvery = yearlyNow ? null : paidEveryValue(membership.interval, everyOf(membership));
+    if (paidEvery) body.set(`metadata[${PAID_EVERY_KEY}]`, paidEvery);
     body.set("subscription_data[metadata][store]", store.handle);
     body.set("subscription_data[metadata][product]", product.id);
     if (chosen) body.set("subscription_data[metadata][option]", chosen.id);
@@ -689,6 +745,22 @@ export async function createCheckout(
   // line is still at its floor here, which is the least it can be.
   applyShare(body, store, { recurring, least: leastPaid(linesTotal(body).cents, mayComeOff) });
 
+  // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
+  // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
+  // inTheCurrencyShown set it above. Judged here, after the share, on the
+  // session as it will be sent. The creator's choice and own prices arrive
+  // with their fields in unit 3b; until then a store is (a), automatic.
+  if (BUYER_CURRENCY_LIVE) {
+    applyBuyerCurrency(body, buyerCurrencyPlan({
+      live: BUYER_CURRENCY_LIVE,
+      mode: DEFAULT_BUYER_CURRENCY_MODE,
+      fee: hasApplicationFee(body),
+      settles: settlesIn(store.currency, await accountSettlementCurrency(store.stripeAccountId)),
+      manualPrices: false,
+      taxRates: hasTaxRates(body),
+    }));
+  }
+
   // The yes, with its version, its kind and its time, written last before the
   // order is admitted, with a field held back for the admitted mark: refused
   // rather than dropped when Stripe's fields have no room for it
@@ -714,13 +786,6 @@ export async function createCheckout(
   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
     throw new Error("The payment page could not be opened");
   }
-
-  // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
-  // admitted here, before Stripe's page opens, so nobody is stopped while paying.
-  // A purchase for several people holds its places too.
-  const admitted = await admitOrders(store, 1 + (extras.group ? extras.group.people : 0), Date.now(), itemsHandedOver([product, ...added.map((offer) => offer.target)]));
-  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
-  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
 
   // Where the receipt page sends the buyer back to, and the sale.completed
   // webhook's source: written last, and only while Stripe's fifty metadata
@@ -759,6 +824,7 @@ export async function createCheckout(
     if (!reserved.ok) throw new Error("The payment page could not be opened");
     const ready = await openConfirmationOrigin(reserved.id, confirmationRuntime);
     if (!ready) throw new Error("The payment page could not be confirmed");
+    // The confirmed origin's own answer, as it is kept (no closing time is read back on this path).
     return ready;
   }
 
@@ -797,6 +863,15 @@ export async function createCheckout(
         body.delete(DISPLAY_NAME);
         named = false;
         continue;
+      }
+      // Only a refusal that names this coupon is about it: Stripe's sentence for a
+      // coupon used up, ended or deleted carries its id; a refusal of the
+      // reminder's consent or of the tax documents does not, and is put right below.
+      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && (error.stripeMessage.includes(extras.returning.coupon) || error.code === "coupon_expired" || (/\bcoupon\b/i.test(error.stripeMessage) && !/consent|tax|invoice|price/i.test(error.stripeMessage)))) {
+        // The code's coupon is used up, ended or gone on the creator's
+        // account: the buyer typed it for a discount, so no checkout opens at
+        // a price they did not ask for. They are told on the form.
+        throw new ReturningCodeRefused("code");
       }
       if (body.has("discounts[0][promotion_code]") && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
         // The code from the link is real but not for this sale — a minimum,
@@ -839,7 +914,20 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
-  return { url: session.url, id: session.id };
+  // A payment plan, or a membership that ends after a set number of payments, is written down before the buyer
+  // leaves, so the plans job gives it its end whether or not they come back from paying: here, whichever door opened
+  // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
+  // rememberPlan throws unless the write is confirmed, and on an id the job could not follow (Codex X4 on #4493), so a
+  // checkout whose end is not on that list is never handed out; the open session then expires unpaid.
+  if (plan || (membership && membership.payments > 0)) await rememberPlan(store.stripeAccountId ?? "", session.id);
+  // When Stripe closes it, in Unix seconds: its own expires_at, else the one this checkout was opened with (a held unit,
+  // the reminders' hour), else null (Stripe's default day). A caller that keeps the address keeps it no longer
+  // (lib/winback-send.ts; Claude 7's review of #3482, MEDIUM).
+  const told = Number(body.get("expires_at"));
+  const closesAt = Number.isSafeInteger(session.expires_at) && Number(session.expires_at) > 0
+    ? Number(session.expires_at)
+    : body.has("expires_at") && Number.isSafeInteger(told) && told > 0 ? told : null;
+  return { url: session.url, id: session.id, closesAt };
 }
 
 /** A product added at checkout, as an order hands it over. */
@@ -939,8 +1027,10 @@ export type Order =
        */
       reusable: boolean;
     }
+  /** Not paid: what can be proved about it from this session alone (648 [WG8], lib/checkout-return.ts). */
+  | { state: "unpaid"; proof: UnpaidProof }
   /** Refunded in full: what it bought is closed, on every page (lib/refunds.ts). */
-  | { state: "unpaid" | "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
+  | { state: "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
 
 /**
  * Decides whether this buyer may have the file.
@@ -1012,7 +1102,7 @@ export async function readOrder(
     return { state: "processing" };
   }
   if (!isSettled(session)) {
-    return { state: "unpaid" };
+    return { state: "unpaid", proof: unpaidProof(session) };
   }
   // Given back in full: the download, the course and the offers after it
   // close, whatever time is left on the link.
@@ -1119,7 +1209,12 @@ export type Sale = {
   /** Stripe's own id for the sale. The creator can search it in Stripe. */
   reference: string;
   title: string;
-  amount: number;
+  /**
+   * What it cost, in the currency's smallest unit, exactly as Stripe gave it.
+   * null when Stripe did not give a whole number of at least zero: unknown,
+   * shown as unknown, never as 0 (rule 24).
+   */
+  amount: number | null;
   /** What it was paid in, as Stripe says. */
   currency: string;
   email: string | null;
@@ -1129,6 +1224,8 @@ export type Sale = {
   stillDownloadable: boolean;
   /** A booked call delivers a time, not a download. */
   isCall: boolean;
+  /** A one-time payment (Stripe's mode "payment"), which has a receipt (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */
+  oneTime?: boolean;
   /** What the buyer answered at checkout, question by question. */
   answers: Answer[];
   /** A membership that began with a free trial, so nothing was charged yet. */
@@ -1152,6 +1249,7 @@ type SessionRecord = {
   id?: unknown;
   status?: unknown;
   payment_status?: unknown;
+  mode?: unknown;
   created?: unknown;
   amount_total?: unknown;
   currency?: unknown;
@@ -1217,12 +1315,15 @@ export async function listSales(store: Store): Promise<SaleList> {
           row.metadata?.title ||
           known?.title ||
           "A product that is no longer listed",
-        amount: typeof row.amount_total === "number" ? row.amount_total : 0,
+        // Only a whole number of the smallest unit, at least zero, is an amount; anything
+        // else Stripe gave is unknown, never $0.00 nor the odd figure.
+        amount: Number.isSafeInteger(row.amount_total) && (row.amount_total as number) >= 0 ? (row.amount_total as number) : null,
         currency: typeof row.currency === "string" && row.currency ? row.currency : "usd",
         email: typeof email === "string" && email ? email : null,
         paidAt,
         stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
         isCall: row.metadata?.kind === "call",
+        oneTime: row.mode === "payment",
         answers: readAnswers(row),
         trial: Number(row.metadata?.trial_days) > 0,
         isTip: row.metadata?.kind === "tip",

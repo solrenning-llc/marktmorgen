@@ -27,7 +27,7 @@ async function main() {
  await redis.pipeline([["HSET","nl:aff:statsid1:people",affiliate,JSON.stringify({id:affiliate,email:"sara@example.com",code:"sara",status:"approved",appliedAt:1,decidedAt:1,note:""})]]);
  const store={sid:"storeid1",handle:"harbor",name:"Harbor",email:"owner@example.com",statsId:"statsid1",currency:"usd",previousHandles:[],releasedHandles:[],affiliates:{...NO_AFFILIATES,enabled:true,percent:20}} as unknown as Store;
  const meta={store:"harbor",product:"course",title:"Course",via:affiliate,via_rate:"20",utm_source:"instagram",utm_campaign:"launch",utm_content:"story-a"};
- const session={id:"cs_post1",mode:"payment",status:"complete",payment_status:"paid",created:1760000000,amount_total:10000,amount_subtotal:10000,currency:"usd",payment_intent:"pi_post1",metadata:meta,customer_details:{email:"buyer@example.com"}};
+ const session={id:"cs_post1",mode:"payment",status:"complete",payment_status:"paid",created:1760000000,amount_total:10000,amount_subtotal:10000,total_details:{amount_tax:0},currency:"usd",payment_intent:"pi_post1",metadata:meta,customer_details:{email:"buyer@example.com"}};
  await noteSession(store,session,new Map(),[]);
  await noteSession(store,session,new Map(),[]);
  await noteCharge(store,{id:"pi_extra1",status:"succeeded",amount:5000,currency:"usd",receipt_email:"buyer@example.com",created:1760000000,metadata:meta});

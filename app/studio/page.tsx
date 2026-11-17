@@ -187,6 +187,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
 import { hoursWords } from "@/lib/watch-rules";
@@ -1106,6 +1107,8 @@ export default async function StudioPage({
   // What each part below reads is only read for a role that is shown it
   // (lib/team-roles.ts), so nothing a role may not see reaches the page.
   const sold = planReads.sold ? await planReads.sold : null;
+  // The receipts download's form starts with last month (lib/receipt-batch-rules.ts).
+  const receiptDays = lastMonthDays(todayNow());
 
   const [delivery, watchedReading, trafficReading] = await planReads.usage;
   const watched = watchedReading ?? 0;
@@ -2686,7 +2689,13 @@ export default async function StudioPage({
                       : <>{"The last moment to start a plan and keep this store was "}<strong>{momentWords(lastPlanMoment(closing.day))}</strong>{". It has passed, so a plan can no longer be started for it."}</>}
                   </p>
                 )}
-                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store. */}
+                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store.
+                    Once the plan has ended, that file is the owner's only (issue #4081, app/api/store/export/route.ts). */}
+                {role !== "owner" ? (
+                  <p className="mt-5 text-sm text-ink-soft">
+                    Now that the plan has ended, only the store&rsquo;s owner can download the whole store&rsquo;s file. Ask them to download it before the closing day.
+                  </p>
+                ) : (
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <form action="/api/store/export" method="get" className="max-w-full">
                     <input type="hidden" name="store" value={store.sid} />
@@ -2699,6 +2708,7 @@ export default async function StudioPage({
                     {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
+                )}
                 <p className="mt-3 text-sm text-ink-soft">
                   {`We email you ${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it, and nothing is removed sooner than a week after the last of those emails.`}
                 </p>
@@ -3509,6 +3519,27 @@ export default async function StudioPage({
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.
                     </p>
+                    {/* A month's receipts in one ZIP (lib/receipt-batch.ts, 601 [KB22] U3): counted before anything is made. */}
+                    <form method="get" action="/api/store/receipt-batch" className="mt-6 rounded-[var(--r-md)] bg-sand p-5" aria-labelledby="receipt-batch-title">
+                      <h3 id="receipt-batch-title" className="font-bold text-ink">Download receipts for several sales</h3>
+                      <p id="receipt-batch-help" className="mt-1 text-sm text-ink-soft">
+                        One ZIP file with a receipt (PDF) for each one-time sale paid in these days, up to {RECEIPT_BATCH_MAX} receipts.
+                        Both days must be in the same month. Dates are in UTC, as on the receipts. A sale without a receipt,
+                        such as one refunded in full, is named in a text file in the ZIP with the reason.
+                      </p>
+                      {store?.sid ? <input type="hidden" name="store" value={store.sid} /> : null}
+                      <div className="mt-3 flex flex-wrap items-end gap-3">
+                        <div>
+                          <label htmlFor="receipt-batch-from" className="block text-sm font-semibold text-ink">First day</label>
+                          <input id="receipt-batch-from" name="from" type="date" required defaultValue={receiptDays.from} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
+                        </div>
+                        <div>
+                          <label htmlFor="receipt-batch-to" className="block text-sm font-semibold text-ink">Last day</label>
+                          <input id="receipt-batch-to" name="to" type="date" required defaultValue={receiptDays.to} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
+                        </div>
+                        <button type="submit" className="btn btn-secondary inline-flex min-h-11 items-center">Download the receipts (ZIP)</button>
+                      </div>
+                    </form>
                   </>
                 )}
               </section>

@@ -97,6 +97,8 @@ async function main(): Promise<void> {
     warned: Number.MAX_SAFE_INTEGER,
     // When the share came into force (Codex G's point 3 on #1924).
     shareFrom: Number.MAX_SAFE_INTEGER,
+    // And the share in force before it, as wide as a share (option c1).
+    shareBefore: { share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"s".repeat(36)}${String(i).padStart(4, "0")}`), until: Number.MAX_SAFE_INTEGER }, from: Number.MAX_SAFE_INTEGER },
     // 630 [HN6](39): a change waiting for the partner, as wide as a share, and the longest history kept.
     terms: {
       change: { share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"r".repeat(36)}${String(i).padStart(4, "0")}`), until: Number.MAX_SAFE_INTEGER }, asked: Number.MAX_SAFE_INTEGER },
@@ -108,6 +110,7 @@ async function main(): Promise<void> {
   const keptBytes = Buffer.byteLength(JSON.stringify({ ...kept, decidedAt: Number.MAX_SAFE_INTEGER }));
   console.log(`  the widest record: ${keptBytes} bytes`);
   is("read back whole (its share, its addresses)", [kept?.share?.products.length, kept?.cleared?.with.length, kept?.email.length], [200, 50, MAX_EMAIL_LENGTH]);
+  is("and the share before it whole", [kept?.shareBefore?.share?.products.length, kept?.shareBefore?.from], [200, Number.MAX_SAFE_INTEGER]);
   is("and its terms whole (the change waiting, the history)", [kept?.terms?.change?.share?.products.length, kept?.terms?.history.length], [200, MAX_TERM_HISTORY]);
   is("no more than AFFILIATE_RECORD_MAX_BYTES as written", keptBytes <= AFFILIATE_RECORD_MAX_BYTES, true);
   await real([["HDEL", people, widest.id]]);

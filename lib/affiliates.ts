@@ -227,6 +227,12 @@ export type Affiliate = {
    */
   shareFrom?: number;
   /**
+   * The share in force just before `share` came into force (null: none), with when that one came into force (absent:
+   * before this was kept), so a sale paid before shareFrom and noted after it earns what was agreed when it was paid
+   * (shareAt; Codex G's point 3 on #1924, option c1). One level only: a sale paid before `from` is unknown and waits.
+   */
+  shareBefore?: { share: PartnerShare | null; from?: number };
+  /**
    * What the creator looked at and let through (releaseHold): the paid-search
    * clicks there were then, and the affiliates they shared an address with
    * then. Somebody new sharing it holds it again. Null for anybody never held.
@@ -423,6 +429,12 @@ function parseAffiliate(raw: unknown): Affiliate | null {
       warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
       ...(typeof value.shareFrom === "number" && Number.isSafeInteger(value.shareFrom) && value.shareFrom > 0 ? { shareFrom: value.shareFrom } : {}),
       ...(() => {
+        const before = value.shareBefore as { share?: unknown; from?: unknown } | undefined;
+        if (!before || typeof before !== "object") return {};
+        const from = typeof before.from === "number" && Number.isSafeInteger(before.from) && before.from > 0 ? { from: before.from } : {};
+        return { shareBefore: { share: parsePartnerShare(before.share), ...from } };
+      })(),
+      ...(() => {
         const terms = readTerms(value.terms);
         return terms.change || terms.history.length ? { terms } : {};
       })(),
@@ -497,7 +509,12 @@ export type ShareProposal =
 
 /** Whether two reads of one record hold the same agreement: its status, its share and its terms. */
 function sameCommitment(a: Affiliate, b: Affiliate): boolean {
-  return a.status === b.status && JSON.stringify(a.share) === JSON.stringify(b.share) && (a.shareFrom ?? null) === (b.shareFrom ?? null) && JSON.stringify(a.terms ?? null) === JSON.stringify(b.terms ?? null);
+  return a.status === b.status && JSON.stringify(a.share) === JSON.stringify(b.share) && (a.shareFrom ?? null) === (b.shareFrom ?? null) && JSON.stringify(a.shareBefore ?? null) === JSON.stringify(b.shareBefore ?? null) && JSON.stringify(a.terms ?? null) === JSON.stringify(b.terms ?? null);
+}
+
+/** What a record keeps of the share it had when another comes into force (shareBefore): that share and its start. */
+function beforeOf(affiliate: Pick<Affiliate, "share" | "shareFrom">): { share: PartnerShare | null; from?: number } {
+  return { share: affiliate.share, ...(affiliate.shareFrom !== undefined ? { from: affiliate.shareFrom } : {}) };
 }
 
 /** A record with these terms, or without the field when there is nothing to keep. */
@@ -516,6 +533,7 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
   let share = current;
   // A share that comes into force here starts earning now (shareAt): an end moved earlier keeps when its share began.
   let from = affiliate.shareFrom;
+  let before = affiliate.shareBefore;
   let kept: PartnerTerms;
   let state: "started" | "same" | "applied" | "waiting";
   if (current === null || !shareRunning(current, nowSeconds)) {
@@ -527,6 +545,7 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
     } else {
       share = next;
       from = nowSeconds;
+      before = beforeOf(affiliate);
       kept = { change: null, history: withStep(terms.history, stepOf("started", "creator", next, nowSeconds)) };
       state = "started";
     }
@@ -539,7 +558,10 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
       // Only ending a share until revoked gets here while it runs: it ends now, its end kept, so a sale paid before
       // this moment and written down later still earns ("What was already earned is still paid").
       share = next === null ? endedAt(current, nowSeconds) : next;
-      if (next !== null) from = nowSeconds;
+      if (next !== null) {
+        from = nowSeconds;
+        before = beforeOf(affiliate);
+      }
       kept = { change: null, history: withStep(terms.history, stepOf(next === null ? "revoked" : "changed", "creator", next, nowSeconds)) };
       state = "applied";
     } else {
@@ -547,7 +569,7 @@ function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: n
       state = "waiting";
     }
   }
-  return { next: withTerms({ ...affiliate, share, ...(from !== undefined ? { shareFrom: from } : {}) }, kept), state };
+  return { next: withTerms({ ...affiliate, share, ...(from !== undefined ? { shareFrom: from } : {}), ...(before !== undefined ? { shareBefore: before } : {}) }, kept), state };
 }
 
 /**
@@ -646,8 +668,8 @@ export async function answerShareChange(
       if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's answer was written");
       const share = change.share ?? (found.share ? endedAt(found.share, nowSeconds) : null);
       // A changed share earns from the yes on (shareAt); an ending keeps when its share began, its end says the rest.
-      const from = change.share !== null ? { shareFrom: nowSeconds } : {};
-      apply = (now) => withTerms({ ...now, share, ...from }, { change: null, history: withStep(terms.history, stepOf("changed", "partner", change.share, nowSeconds)) });
+      const from = (now: Affiliate) => (change.share !== null ? { shareFrom: nowSeconds, shareBefore: beforeOf(now) } : {});
+      apply = (now) => withTerms({ ...now, share, ...from(now) }, { change: null, history: withStep(terms.history, stepOf("changed", "partner", change.share, nowSeconds)) });
     }
     const changed = await changeAffiliate(store, id, (now) => {
       // The partner's own check ran on what was read; it is never applied over something else behind their back.
@@ -736,10 +758,17 @@ function commitmentReads(raw: string): boolean {
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const { share, status, shareFrom } = value as { share?: unknown; status?: unknown; shareFrom?: unknown };
+    const { share, status, shareFrom, shareBefore } = value as { share?: unknown; status?: unknown; shareFrom?: unknown; shareBefore?: unknown };
     if (!shareReadsExactly(share)) return false;
     // When the share came into force decides which sales it earns on (shareAt): absent, or a moment, never guessed.
     if (shareFrom !== undefined && !(typeof shareFrom === "number" && Number.isSafeInteger(shareFrom) && shareFrom > 0)) return false;
+    // The share before it, read whole or not at all: its share exactly, and when it came into force absent or a moment.
+    if (shareBefore !== undefined) {
+      if (!shareBefore || typeof shareBefore !== "object" || Array.isArray(shareBefore)) return false;
+      const before = shareBefore as { share?: unknown; from?: unknown };
+      if (!("share" in before) || !shareReadsExactly(before.share)) return false;
+      if (before.from !== undefined && !(typeof before.from === "number" && Number.isSafeInteger(before.from) && before.from > 0)) return false;
+    }
     return share === undefined || share === null || status === "pending" || status === "approved" || status === "declined" || status === "removed";
   } catch {
     return false;
@@ -1712,7 +1741,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
         return null;
       }
       // An invitation's share earns from this yes on (shareAt), unless it is the very share already in force.
-      const starts = grant.p && !(now.share && sameShare(now.share, grant.p)) ? { shareFrom: Math.floor(Date.now() / 1000) } : {};
+      const starts = grant.p && !(now.share && sameShare(now.share, grant.p)) ? { shareFrom: Math.floor(Date.now() / 1000), shareBefore: beforeOf(now) } : {};
       const next: Affiliate = { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share, ...starts };
       return grant.p ? withTerms(next, startedBy(now.terms ?? NO_TERMS, grant.p)) : next;
     });
@@ -1745,7 +1774,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
       share: invited ? grant.p ?? null : null,
       cleared: null,
       by,
-      ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p), shareFrom: Math.floor(now / 1000) } : {}),
+      ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p), shareFrom: Math.floor(now / 1000), shareBefore: { share: null } } : {}),
     }));
     if ("other" in made) {
       // Only the index's own record (ownRecord): one under another address is never this link's (Codex G on #3573).
@@ -2211,10 +2240,10 @@ export const STUDIO_UNIT_BYTES = 1_000_000;
  * two addresses of MAX_EMAIL_LENGTH and a note of MAX_NOTE_LENGTH characters, each character at its widest (a control
  * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest, and
  * a partner's terms (630 [HN6](39)): a change waiting as wide as a share, and MAX_TERM_HISTORY steps of history.
- * tests/affiliate-bulk-cost.test.ts holds the widest record under it (28,091 bytes when this was set; 28,120 with
- * shareFrom, Codex G's point 3 on #1924).
+ * tests/affiliate-bulk-cost.test.ts holds the widest record under it (28,091 bytes at 32,000; with shareFrom and the
+ * share before it, as wide as a share, 36,821 bytes, so 40,000 since Codex G's point 3 on #1924, option c1).
  */
-export const AFFILIATE_RECORD_MAX_BYTES = 32_000;
+export const AFFILIATE_RECORD_MAX_BYTES = 40_000;
 
 /**
  * Commands the partner lock takes at the most: a try every 20 ms, doubling up to 250 ms, for PARTNER_LOCK_WAIT_MS;
@@ -3177,11 +3206,18 @@ function bumpCents(value: unknown): number {
 
 /**
  * The share a partner held at a moment (Codex G's point 3 on #1924): the one in force, unless it came into force after
- * that moment (shareFrom), when there was none to earn at. A sale is credited at what was agreed when it was paid,
- * never at a share accepted since. A share kept from before shareFrom was recorded has none and is in force throughout.
+ * that moment (shareFrom); then the one before it (shareBefore), when that one had begun, or none when nothing was
+ * kept. A sale is credited at what was agreed when it was paid, never at a share accepted since. A share kept from
+ * before shareFrom was recorded is in force throughout. Paid before two changes: UnknownReplyError, and it waits.
  */
-function shareAt(partner: Pick<Affiliate, "share" | "shareFrom">, atSeconds: number): PartnerShare | null {
-  return partner.shareFrom !== undefined && atSeconds < partner.shareFrom ? null : partner.share;
+function shareAt(partner: Pick<Affiliate, "share" | "shareFrom" | "shareBefore">, atSeconds: number): PartnerShare | null {
+  if (partner.shareFrom === undefined || atSeconds >= partner.shareFrom) return partner.share;
+  // Paid before the share in force began: the one before it, when that one had begun (option c1).
+  const before = partner.shareBefore;
+  if (!before) return null;
+  if (before.from === undefined || atSeconds >= before.from) return before.share;
+  // Paid before two changes: what was agreed then is not kept, so it is not known (rule 24), never guessed or zero.
+  throw new UnknownReplyError("the share a partner held when a sale was paid");
 }
 
 /**
@@ -3224,7 +3260,7 @@ async function paidForPartners(store: Store, session: SessionLike, opened: numbe
       (a) =>
         a.status === "approved" &&
         a.share !== null &&
-        a.share.products.some((p) => products.includes(p)) &&
+        [a.share, a.shareBefore?.share ?? null].some((held) => held !== null && held.products.some((p) => products.includes(p))) &&
         [a.share.until, a.shareFrom].some((moment) => moment !== undefined && (opened === null || opened < moment)),
     );
     if (straddles) throw new UnknownReplyError("when a sale near a partner's end was paid");

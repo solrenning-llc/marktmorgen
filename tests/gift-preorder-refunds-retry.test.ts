@@ -718,9 +718,10 @@ async function main(): Promise<void> {
   await stuck(pre, NOW - 4_000);
   await stale(pre, NOW - 20_000);
   await rotation(pre, NOW - 30_000);
-  // After every other part, newer than any anchor they left.
-  await recount(gift, NOW + 10_000);
-  await recount(pre, NOW + 20_000);
+  // After every other part, newer than any anchor they left (the newest is NOW - 4_000), and not in the future: a
+  // refund dated past now + 300 s is an unreadable row (#4838), so the pages here are dated before NOW.
+  await recount(gift, NOW - 2_000);
+  await recount(pre, NOW - 1_000);
 
   done();
 }

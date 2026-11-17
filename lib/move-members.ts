@@ -505,7 +505,8 @@ export async function openMove(
     // The mark lives as long as Stripe keeps this checkout open, and a minute (B2): a checkout on a store with
     // reminders closes in an hour, a held unit's in half an hour. Its closing time not read: the longest.
     // The time Stripe gave with the checkout is used first; read again only when that answer left it out (A3).
-    const closes = held.value.expiresAt ?? (await checkoutCloses(store, held.value.id));
+    // When Stripe closes it, as openCheckout read it (closesAt, main's since #3482); unknown (null), read from Stripe.
+    const closes = held.value.closesAt ?? (await checkoutCloses(store, held.value.id));
     const life = closes === null ? OPEN_SECONDS : Math.min(OPEN_SECONDS, Math.max(60, closes - Math.floor(Date.now() / 1000) + 60));
     await redisPipeline([["SET", key, held.value.url, "XX", "EX", life]]);
     return { ok: true, url: held.value.url };

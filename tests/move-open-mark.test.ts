@@ -126,14 +126,19 @@ async function main(): Promise<void> {
   is("opened; the mark lives as long as that checkout and a minute, though the session cannot be read", [i1.ok, ivyTtl > ivyLife && ivyTtl <= ivyLife + 60], [true, true]);
   is("and the session was not read again", sessionReads - readsBefore, 0);
 
-  part("A checkout whose closing time cannot be read keeps the mark for the longest a checkout lives");
+  part("Stripe's answer says no closing time and the session cannot be read: the mark follows the closing time asked for");
+  // Merge of main (17 November 2026): openCheckout's closesAt (#3482, Claude 7's MEDIUM there) falls back to the
+  // expires_at this checkout was opened with, which Stripe keeps, so the closing time is known and the mark follows it
+  // (and a minute), never the longest. Only a checkout that asked for none and cannot be read keeps the longest
+  // (lib/move-members.ts, OPEN_SECONDS); this store sends reminders, so each of its checkouts asks for an hour.
   sessionUnreadable = true;
   postSaysCloses = false;
   const g1 = await press("gus");
   sessionUnreadable = false;
   postSaysCloses = true;
-  const longest = Number(redis.run(["TTL", mark("gus")]));
-  is("opened, and the mark kept a day and a minute (no second checkout while one may be open)", [g1.ok, longest > 86_400 && longest <= 86_460], [true, true]);
+  const asked = Number(checkouts.at(-1)!.get("expires_at")) - Math.floor(Date.now() / 1000);
+  const kept = Number(redis.run(["TTL", mark("gus")]));
+  is("opened, and the mark kept as long as the checkout asked to stay open, and a minute", [g1.ok, asked > 3_500 && asked <= 3_600, kept > asked && kept <= asked + 60], [true, true, true]);
 
   part("B3: the mark is let go only when nothing was made at Stripe");
   const before = checkouts.length;

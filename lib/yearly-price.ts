@@ -31,7 +31,7 @@ export function parseYearly(raw: unknown): Yearly | null {
 export type YearlyCandidate = {
   id: string;
   priceCents: number;
-  recurring: { interval: string; trialDays: number; payments: number } | null;
+  recurring: { interval: string; trialDays: number; payments: number; every?: number } | null;
   options: unknown[];
   pwyw: unknown;
   intro?: unknown;
@@ -43,7 +43,8 @@ export type YearlyProblem = "membership" | "month" | "payments" | "options" | "p
 export function yearlyProblem(product: YearlyCandidate, yearly: Yearly, minCents: number, tiers: readonly string[] = []): YearlyProblem | null {
   const recurring = product.recurring;
   if (!recurring || product.priceCents <= 0) return "membership";
-  if (recurring.interval !== "month") return "month";
+  // Twelve monthly payments, so only beside one charged every month, never every few (609 [WP8]).
+  if (recurring.interval !== "month" || (recurring.every ?? 1) > 1) return "month";
   if (recurring.payments > 0) return "payments";
   if (product.options.length > 0) return "options";
   if (product.pwyw) return "pwyw";

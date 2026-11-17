@@ -80,6 +80,21 @@ async function main(): Promise<void> {
   is("making a link: a write not answered OK throws", [await throws([null, 0, 0], () => makeDraftPreview(store, draft.product.id, now)), await throws([null, "OK", null], () => makeDraftPreview(store, draft.product.id, now))], [true, true]);
   is("revoking: a missing reply throws", await throws([], () => revokeDraftPreview(store, draft.product.id)), true);
 
+  // Codex N4 on #3597 (MEDIUM): each DEL names one key, so it answers exactly 0 or 1. Any other reply, with nothing
+  // deleted, is an end that was not confirmed: the revocation throws, and the publish route answers 503 and publishes
+  // nothing, never "revoked" with the private link still opening.
+  part("Revoking: a DEL answered in any other shape is not a confirmed end");
+  const fifth = await makeDraftPreview(store, draft.product.id, now);
+  const crookedDels = async (dels: unknown[]) => {
+    redis.pipeline = (async (batch: (string | number)[][]) => (batch[0]?.[0] === "DEL" ? dels : realPipeline(batch))) as typeof redis.pipeline;
+    try { await revokeDraftPreview(store, draft.product.id); return false; } catch { return true; } finally { redis.pipeline = realPipeline; }
+  };
+  is("null, a string, an object or a count past one key each throws", [await crookedDels([null, null]), await crookedDels(["1", "1"]), await crookedDels([{}, 1]), await crookedDels([2, 1])], [true, true, true, true]);
+  is("and the link they did not delete still opens, so nothing may be published on them", (await readDraftPreview(fifth.code, now + 60)) !== null, true);
+  await revokeDraftPreview(store, draft.product.id);
+  is("control: a real revocation ends it", await readDraftPreview(fifth.code, now + 60), null);
+  is("and revoking again, with nothing left, still confirms (0 is an exact answer)", await revokeDraftPreview(store, draft.product.id).then(() => true, () => false), true);
+
   // Review of e42726e5 (Claude 6), MEDIUM 1: a product taken down after a notice stayed open through its link.
   part("A product taken down after a notice");
   const before = await makeDraftPreview(store, draft.product.id, now);

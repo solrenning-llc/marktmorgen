@@ -767,34 +767,52 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
     return parts ? [{ path, id: parts.id }] : [];
   });
   if (!wanted.length || !isRedisConfigured()) return {};
-  const rows = await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)]));
+  // Rule 24: a record that is there but does not read is unknown, never "not being written".
+  const rows = repliesFor(await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)])), wanted.length);
+  if (!rows) throw new UnknownReplyError("captions being written");
   const out: Record<string, string[]> = {};
   wanted.forEach(({ path }, i) => {
+    if (rows[i] === null) return;
     const pending = parsePending(rows[i]);
+    if (!pending) throw new UnknownReplyError("captions being written");
     // A request whose refund is owed is no longer being written.
-    const left = pending && !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
+    const left = !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
     if (left.length) out[path] = left;
   });
   return out;
 }
 
+/** The most owed refunds one studio read takes; more are said to be unknown, never cut to the first ones. */
+const OWED_READ_MAX = 100;
+
+/** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
 /**
- * Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and
- * whether automatic looks have stopped. A reply in an unknown shape throws UnknownReplyError, never "none owed"
- * (CX-123 rules 24 and 30): money owed is never hidden by a read that failed. A record gone (expired) is not owed.
+ * Rule 24: a set or a record that does not read is unknown, never "nothing owed". A member whose record is gone
+ * (null) is no longer owed; one whose record is there but does not read throws UnknownReplyError, so the studio
+ * says it could not check instead of hiding a refund the creator may need to write to support about.
  */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return [];
-  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1)?.[0]);
-  if (!members || !members.every((m) => STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the caption refunds owed to a store");
-  const ids = members.sort().slice(0, 100);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the owed captions refunds");
+  // A member this version does not read, or more members than one read takes, is unknown, never "not owed":
+  // dropping or cutting them would hide a refund the creator may need to write to support about.
+  if (members.length > OWED_READ_MAX || members.some((m) => !STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the owed captions refunds");
+  const ids = [...members].sort();
   if (!ids.length) return [];
   const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
-  if (!rows) throw new UnknownReplyError("the caption refunds owed to a store");
+  if (!rows) throw new UnknownReplyError("the owed captions refunds");
   return ids.flatMap((id, i) => {
     if (rows[i] === null) return [];
     const pending = parsePending(rows[i]);
     if (!pending) throw new UnknownReplyError("a caption refund owed to a store");
-    return pending.owed && pending.owed.cents !== 0 && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    if (!pending.owed || pending.owed.cents === 0) return [];
+    // Listed under this folder: a path that does not read, or names another folder, is unknown, never "none owed" (Codex T).
+    if (readStreamPath(pending.path)?.folder !== folder) throw new UnknownReplyError("a caption refund owed to a store");
+    // An amount owed is a whole number of cents above zero; anything else is unknown, never "a refund of $0.00" (Codex g).
+    const cents = pending.owed.cents ?? pending.cents;
+    if (!Number.isSafeInteger(cents) || cents <= 0) throw new UnknownReplyError("a caption refund owed to a store");
+    return [{ id, cents, stuck: pending.owed.stuck === true }];
   });
 }

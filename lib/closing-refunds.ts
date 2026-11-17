@@ -405,7 +405,9 @@ export async function giveBackUnused(
      * was already given back on any charge (every refund, ours under this invoice or not) and what a dispute took to
      * the buyer (Codex U and N1 on #4428) are taken off what is owed, and the rest goes back through the charges that
      * are not disputed; a charge already given back under this invoice is never asked again. Each refund has its own
-     * idempotency key. Any answer that does not read throws, and the member is tried again.
+     * idempotency key, moved on by every failure Stripe's list confirms on that charge under this invoice (Codex X8,
+     * #4480; Claude 1 on #4428), so a retry is never Stripe replaying an earlier answer. Any answer that does not read
+     * throws, and the member is tried again.
      */
     const giveSplit = async (
       row: UnusedRow,
@@ -413,7 +415,7 @@ export async function giveBackUnused(
       whole: boolean,
       ops: { settle: (r: PaidPeriod["r"], amount?: number) => Promise<void>; short: (give: number) => Promise<void>; count: () => void; final: boolean },
     ) => {
-      type Read = { intent: string; charge: Record<string, unknown>; refunded: number; away: number; prior: { state: "done" | "pending"; amount: number } | null };
+      type Read = { intent: string; charge: Record<string, unknown>; refunded: number; away: number; prior: { state: "done" | "pending"; amount: number } | null; failures: number };
       const readAll = async (): Promise<Read[]> => {
         const reads: Read[] = [];
         for (const intent of intents) {
@@ -423,8 +425,10 @@ export async function giveBackUnused(
           const prior = priorRefund(list, intent, row.paid.inv, row.paid.cur);
           if (prior === "unknown") throw new Error("the refunds already made for this payment could not be read whole");
           const away = await disputedAway(charge, ops.count);
+          // Confirmed failures under this invoice on this charge, counted only when none of ours stands (#4480).
+          const failures = prior === null ? failedRefunds(list, intent, row.paid.inv, row.paid.cur) : 0;
           // Never less than ours already made on it, whether or not the charge counts a pending refund yet.
-          reads.push({ intent, charge, refunded: Math.max(charge.amount_refunded as number, prior?.amount ?? 0), away, prior });
+          reads.push({ intent, charge, refunded: Math.max(charge.amount_refunded as number, prior?.amount ?? 0), away, prior, failures });
         }
         return reads;
       };
@@ -458,7 +462,7 @@ export async function giveBackUnused(
             "/refunds",
             new URLSearchParams({ payment_intent: next.intent, amount: String(give), reason: "requested_by_customer", "metadata[closing_refund]": row.paid.inv, "metadata[store_closing]": "unused_time" }),
             undefined,
-            `closing-refund:${row.paid.inv}:${next.intent}`,
+            next.failures === 0 ? `closing-refund:${row.paid.inv}:${next.intent}` : `closing-refund:${row.paid.inv}:${next.intent}:${next.failures}`,
           );
         } catch (error) {
           if (error instanceof StripeError && error.code === "balance_insufficient") {
@@ -477,9 +481,11 @@ export async function giveBackUnused(
         if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
         if (state === "failed") {
           if (ops.final) {
-            const amount = stillToGive(row.unused, row.paid.back ?? 0);
-            await ops.settle("over", amount);
-            out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
+            // What is still owed, from the figures just read: the unused part less every refund the invoice's charges
+            // carry (the creator's own and this pass's earlier rounds included) and what disputes took, never the
+            // unused part less only what earlier closings recorded (Claude 1 on #4428).
+            await ops.settle("over", left);
+            out.unmade.push({ sub: row.sub, amount: left, cur: row.paid.cur, email: row.paid.e });
           } else {
             console.error("a closing refund was refused by Stripe; the member stays to be reconciled");
             out.failed += 1;

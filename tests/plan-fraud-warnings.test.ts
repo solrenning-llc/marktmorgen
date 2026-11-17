@@ -42,6 +42,8 @@ let listBroken = false;
 let seenUnreadable: unknown = undefined;
 /** The HSET that writes a decision answers in another shape. */
 let decisionUnconfirmed = false;
+/** The listed row of these warnings carries this `actionable` instead (undefined: the field is left out). */
+let listedActionable: Map<string, unknown> = new Map();
 const asked: string[] = [];
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -71,7 +73,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       const charge = charges[warning.charge];
       // Stripe's own rule: actionable until disputed or fully refunded.
       const actionable = warning.actionable && !charge.disputed && charge.amount_refunded < charge.amount;
-      return { ...warning, actionable, charge: url.searchParams.getAll("expand[]").includes("data.charge.invoice") ? { object: "charge", ...charge } : charge.id };
+      const row: Record<string, unknown> = { ...warning, actionable, charge: url.searchParams.getAll("expand[]").includes("data.charge.invoice") ? { object: "charge", ...charge } : charge.id };
+      if (listedActionable.has(warning.id)) {
+        const shape = listedActionable.get(warning.id);
+        if (shape === undefined) delete row.actionable;
+        else row.actionable = shape;
+      }
+      return row;
     });
     return Response.json({ object: "list", data: page, has_more: start + 100 < listed.length });
   }
@@ -116,6 +124,7 @@ function reset(): void {
   listBroken = false;
   seenUnreadable = undefined;
   decisionUnconfirmed = false;
+  listedActionable = new Map();
   asked.length = 0;
   refundBodies.length = 0;
 }
@@ -368,6 +377,54 @@ async function main(): Promise<void> {
       is(`${corrupt}: the corrupt decision stays visible and the run fails closed`, [await redis.pipeline([["HGET", SEEN_KEY, id]]), counts.failed, counts.complete], [[corrupt], 1, false]);
       is(`${corrupt}: the real subscription is still active`, subscriptions.sub_P65.status, "active");
     }
+  }
+
+  part("A stored valid decision must belong to the subscription on the same warning (Codex U, Codex X2, Claude 3 on #4168, MEDIUM)");
+  {
+    for (const actionable of [true, false]) {
+      reset();
+      const id = warn(66, plan(66), 6_900, { actionable });
+      subscriptions.sub_P67 = plan(67);
+      await redis.pipeline([["HSET", SEEN_KEY, id, "act:sub_P67"]]);
+      const counts = await run();
+      is(`actionable ${actionable}: no refund or ending is made from a decision of another subscription`, [posts().length, deletes().length], [0, 0]);
+      is(`actionable ${actionable}: the decision stays visible and both subscriptions stay active`,
+        [await redis.pipeline([["HGET", SEEN_KEY, id]]), subscriptions.sub_P66.status, subscriptions.sub_P67.status],
+        [["act:sub_P67"], "active", "active"]);
+      is(`actionable ${actionable}: the run fails closed`, [counts.failed, counts.complete], [1, false]);
+    }
+    reset();
+    const id = warn(65, plan(65));
+    await redis.pipeline([["HSET", SEEN_KEY, id, "act:sub_P999"]]);
+    const counts = await run();
+    is("a decision naming no such subscription is not read as ended", [posts().length, deletes().length, await redis.pipeline([["HGET", SEEN_KEY, id]]), subscriptions.sub_P65.status, counts.complete], [0, 0, ["act:sub_P999"], "active", false]);
+    reset();
+    const matching = warn(69, plan(69));
+    await redis.pipeline([["HSET", SEEN_KEY, matching, "act:sub_P69"]]);
+    const resumed = await run();
+    is("a decision of the warning's own subscription still resumes: refunded and ended", [resumed.refunded, charges.ch_C69.amount_refunded, subscriptions.sub_P69.status, await redis.pipeline([["HGET", SEEN_KEY, matching]])], [1, 6_900, "canceled", ["final"]]);
+  }
+
+  part("An actionable state that is not a boolean never becomes \"not actionable\" or final (Codex U, Claude 3 on #4168, MEDIUM)");
+  {
+    for (const [label, shape] of [["missing", undefined], ["a string", "true"], ["null", null]] as const) {
+      reset();
+      const id = warn(68, plan(68));
+      listedActionable.set(id, shape);
+      const counts = await run();
+      is(`${label}: no refund or ending`, [posts().length, deletes().length], [0, 0]);
+      is(`${label}: no decision is written and the subscription stays active`, [await redis.pipeline([["HGET", SEEN_KEY, id]]), subscriptions.sub_P68.status], [[null], "active"]);
+      is(`${label}: the run fails closed`, [counts.failed, counts.complete], [1, false]);
+      listedActionable.clear();
+      const next = await run();
+      is(`${label}: once Stripe answers a boolean, the payment is refunded and the subscription ended`, [next.refunded, charges.ch_C68.amount_refunded, subscriptions.sub_P68.status], [1, 6_900, "canceled"]);
+    }
+    reset();
+    const id = warn(70, plan(70));
+    await redis.pipeline([["HSET", SEEN_KEY, id, "act:sub_P70"]]);
+    listedActionable.set(id, undefined);
+    const counts = await run();
+    is("a decided warning with no readable actionable state is not settled either", [posts().length, deletes().length, await redis.pipeline([["HGET", SEEN_KEY, id]]), counts.complete], [0, 0, ["act:sub_P70"], false]);
   }
 
   part("A decided refund held by the run's budget is never closed as final by a later run that could not read the list (Claude 7 on #4168, MEDIUM)");

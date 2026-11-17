@@ -92,6 +92,8 @@ export const RESERVED_SLUGS = new Set([
   "p",
   // A payment request's page (app/[handle]/pay/[request]).
   "pay",
+  // The store's policies, built from its settings (app/[handle]/policies, 617 [SZ1]).
+  "policies",
   "podcast",
   // A draft's private preview (app/[handle]/preview/[code], 754 [STN1]).
   "preview",

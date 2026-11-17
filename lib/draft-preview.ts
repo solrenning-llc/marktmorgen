@@ -18,7 +18,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 /** How long a link opens: seven days. */
 export const PREVIEW_SECONDS = 7 * 86_400;
@@ -105,7 +105,10 @@ export async function revokeDraftPreview(store: Owner, productId: string): Promi
   // The pointer goes first: from then on no record opens, whatever is left of it.
   const commands: (string | number)[][] = [["DEL", pointerKey(statsId, productId)]];
   if (hash !== null && HASH.test(hash)) commands.push(["DEL", lookupKey(hash)]);
-  await exactly(commands);
+  // Each DEL names one key, so it answers exactly 0 or 1; any other reply is an end not confirmed, never "revoked":
+  // it throws, and the publish route answers 503 with nothing published (Codex N4 on #3597).
+  const replies = await exactly(commands);
+  if (replies.some((reply) => { const n = countOf(reply); return n === null || n > 1; })) throw new UnknownReplyError("the end of a preview link");
 }
 
 /**

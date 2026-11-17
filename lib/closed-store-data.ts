@@ -139,6 +139,11 @@ export type Batched = {
   queued?: true;
   /** A deleted store's addresses that still led to it when it was deleted, held back again at its admission (settleDeletedStore). */
   holds?: string[];
+  /**
+   * A deleted store's community id, so a round its admission puts in line lists its community's pictures too
+   * (community/<folder>/), which nothing else names once its record is gone (Claude 5's LEVE 1 on #4348).
+   */
+  community?: string;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -329,6 +334,7 @@ export async function queueDeleted(store: Store, now = Date.now()): Promise<Batc
     at: now,
     deleted: true,
     queued: true,
+    ...(store.community?.id ? { community: store.community.id } : {}),
   };
   const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
   if (written !== 0 && written !== 1) throw new UnknownReplyError("a deleted store's walk entry written");
@@ -415,7 +421,8 @@ async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, str
         console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; its walk waits, and it is put in line to try again", error);
         sure = false;
         try {
-          await queueStoreForget(entry.statsId ?? null, entry.sid);
+          // Its community too, checked there against COMMUNITY_ID, so the round lists its pictures as well.
+          await queueStoreForget(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === "string" ? entry.community : null);
         } catch (queued) {
           console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued);
         }

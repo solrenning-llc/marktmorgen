@@ -2024,7 +2024,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
       { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
-      { file: "lib/closed-store-data.ts", names: ["queueDeleted", "admitDeleted", "BATCH_SWAP", "DELETE_SETTLES_MS", "if (!entry.deleted) await finish(entry, now)", "settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] })", "await forgetBoth(entry.statsId ?? null, entry.sid)", "await queueStoreForget(entry.statsId ?? null, entry.sid)"] },
+      { file: "lib/closed-store-data.ts", names: ["queueDeleted", "admitDeleted", "BATCH_SWAP", "DELETE_SETTLES_MS", "if (!entry.deleted) await finish(entry, now)", "settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] })", "await forgetBoth(entry.statsId ?? null, entry.sid)", "await queueStoreForget(entry.statsId ?? null, entry.sid, Date.now(), typeof entry.community === \"string\" ? entry.community : null)"] },
       { file: "lib/store.ts", names: ["await queue(store)", "deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner)])", "storeExactly", "settleDeletedStore", "DELETED_HOLD"] },
       { file: "lib/store-forget-retry.ts", names: ["FORGET_TRY_COMMANDS", "forgetBoth"] },
       { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },

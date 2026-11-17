@@ -1512,8 +1512,8 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
 /**
  * The payments of this store's paid renewals that the invoices name (the
  * same invoices renewalEntries counts): on the invoice itself in older API
- * versions, or among its payments when they come with it. A refund or dispute
- * of one of them is confirmed as the store's (X8-2325). Pure.
+ * versions, or among its payments when they come with it. These ids identify
+ * invoice-backed candidates; the invoice alone does not prove all allocations. Pure.
  */
 export function renewalPaymentIntents(store: Store, invoices: Record<string, unknown>[]): Set<string> {
   const handles = saleHandles(store);
@@ -1561,11 +1561,17 @@ export type RenewalPayment = {
  * read 2 November 2026), so a refund of a membership's or a payment plan's
  * payment can be matched whatever API version the account answers in. At
  * most `pages` pages of a hundred, stopping at `deadline`; `partial` when
- * there was more (270 [GR1], unit 3a).
+ * there was more (270 [GR1], unit 3a). A paid row that names a payment but no
+ * readable invoice cannot prove the payment's full allocation in bulk.
  */
-export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ byInvoice: Map<string, string[]>; partial: boolean }> {
+export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{
+  byInvoice: Map<string, string[]>;
+  unreadableInvoiceIntents: Set<string>;
+  partial: boolean;
+}> {
   // Every paid payment of an invoice (one paid in parts has several); a paid one with no payment intent (a charge) is kept as "", a miss.
   const byInvoice = new Map<string, string[]>();
+  const unreadableInvoiceIntents = new Set<string>();
   let after = "";
   const seen = new Set<string>();
   let partial = false;
@@ -1577,9 +1583,13 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
+      if (row.status !== "paid") continue;
       const invoice = typeof row.invoice === "string" ? row.invoice : "";
       const intent = (row.payment as { payment_intent?: unknown } | null | undefined)?.payment_intent;
-      if (row.status !== "paid" || !invoice) continue;
+      if (!invoice) {
+        if (typeof intent === "string" && intent) unreadableInvoiceIntents.add(intent);
+        continue;
+      }
       byInvoice.set(invoice, [...(byInvoice.get(invoice) ?? []), typeof intent === "string" ? intent : ""]);
     }
     if (!list.has_more) break;
@@ -1588,7 +1598,7 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     if (!after) { partial = true; break; }
     if (page === pages - 1 || Date.now() > deadline) { partial = true; break; }
   }
-  return { byInvoice, partial };
+  return { byInvoice, unreadableInvoiceIntents, partial };
 }
 
 /**
@@ -2044,21 +2054,21 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     // What each currency kept (lib/retained-revenue.ts): every reading as entries with its channel.
     const byPayment = new Map(read.filter((sale) => sale.paymentIntent).map((sale) => [sale.paymentIntent, sale]));
     const placed = (paymentIntent: string) => (paymentIntent ? byPayment.get(paymentIntent)?.source : undefined) ?? UNRECORDED;
-    // Only a refund or dispute of a payment confirmed as the store's (a sale or
-    // a renewal read) is taken off its kept total. Any other one may be a
-    // payment made outside the store, such as a payment link, so the kept
-    // total is left unknown rather than reduced by it (X8-2325).
-    const renewalPayments = new Set(renewalRead?.paymentIntents ?? []);
-    // A payment the store's own invoice does not name (a renewal in the current API shape, a subscription checkout
-    // paid by its invoice) is proven the store's by the account's invoice payments (review of #4549): read only when a
-    // refund or dispute is otherwise unconfirmed. An answer that does not read proves nothing, so it stays unconfirmed.
-    const known = (pi: string) => Boolean(pi) && (byPayment.has(pi) || renewalPayments.has(pi));
-    const adjustments = [...(refundRead?.rows ?? []), ...(disputeRead?.rows ?? [])];
+    // Channel attribution is separate from proof that a payment belongs to this store.
+    // A renewal or invoice-backed checkout can name a payment shared with other invoices.
+    const invoiceBacked = new Set(renewalRead?.paymentIntents ?? []);
+    const confirmedPayments = new Set<string>();
     const checkoutInvoices = new Map<string, (typeof read)[number]>();
     for (const sale of read) {
-      const invoice = (sale.row as { invoice?: unknown } | undefined)?.invoice;
+      const invoice = sale.row.invoice;
       if (typeof invoice === "string" && invoice) checkoutInvoices.set(invoice, sale);
+      if (!sale.paymentIntent) continue;
+      if (sale.row.mode === "subscription" || (invoice !== undefined && invoice !== null)) invoiceBacked.add(sale.paymentIntent);
+      else confirmedPayments.add(sale.paymentIntent);
     }
+    for (const intent of invoiceBacked) confirmedPayments.delete(intent);
+    const known = (pi: string) => confirmedPayments.has(pi);
+    const adjustments = [...(refundRead?.rows ?? []), ...(disputeRead?.rows ?? [])];
     const storeInvoices = new Set([...(renewalRead?.invoiceIds ?? []), ...checkoutInvoices.keys()]);
     if (store.stripeAccountId && storeInvoices.size > 0 && adjustments.some((row) => row.paymentIntent && !known(row.paymentIntent))) {
       const paid = await readInvoicePayments(store, sinceBefore, 5).catch((error) => {
@@ -2072,7 +2082,11 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       const invoicesOf = new Map<string, Set<string>>();
       if (paid && !paid.partial) {
         for (const [invoice, intents] of paid.byInvoice) {
-          for (const intent of intents) if (intent) invoicesOf.set(intent, (invoicesOf.get(intent) ?? new Set<string>()).add(invoice));
+          for (const intent of intents) {
+            if (intent && !paid.unreadableInvoiceIntents.has(intent)) {
+              invoicesOf.set(intent, (invoicesOf.get(intent) ?? new Set<string>()).add(invoice));
+            }
+          }
         }
       }
       for (const [intent, paidInvoices] of invoicesOf) {
@@ -2080,13 +2094,13 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
         const [only] = paidInvoices;
         const sale = paidInvoices.size === 1 ? checkoutInvoices.get(only) : undefined;
         if (sale) byPayment.set(intent, sale);
-        else renewalPayments.add(intent);
+        confirmedPayments.add(intent);
       }
     }
     // A payment still unconfirmed (a membership payment older than the invoices read above) is looked up by its own
     // invoice payment, at most OLD_PAYMENT_LOOKUPS_PER_READING a reading (#4549); a lookup that fails proves nothing.
     if (store.stripeAccountId) {
-      for (const pi of await confirmOldPayments(store, adjustments.map((row) => row.paymentIntent).filter((pi) => pi && !known(pi)))) renewalPayments.add(pi);
+      for (const pi of await confirmOldPayments(store, adjustments.map((row) => row.paymentIntent).filter((pi) => pi && !known(pi)))) confirmedPayments.add(pi);
     }
     const adjustment = (row: { created: number; cents: number; currency: string; paymentIntent: string }): Entry => {
       const entry: Entry = { day: dayKey(row.created), cents: row.cents, currency: row.currency, source: placed(row.paymentIntent) };

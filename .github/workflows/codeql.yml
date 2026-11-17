@@ -1,8 +1,9 @@
 # 508 [SG4] part 1: CodeQL code scanning, free for a public repository.
-# Runs on every pull request, on main and once a day. It reads the code and
+# Analyzes every pull request, every push to main and once a day. It reads the code and
 # uploads its findings to the repository's code scanning; it changes nothing,
-# merges nothing and needs no secret. Actions are pinned to full commit SHAs
-# at least two weeks old (github/codeql-action v4.38.3, 8 October 2026).
+# merges nothing and needs no secret. In the merge queue the analysis is skipped on
+# purpose (see the analyze job) and the required check still reports. Actions are
+# pinned to full commit SHAs at least two weeks old (github/codeql-action v4.38.3, 8 October 2026).
 name: CodeQL
 run-name: PV8 source ${{ github.sha }}
 on:
@@ -55,14 +56,38 @@ jobs:
         run: python3 scripts/ci_documentation_scope.py
   analyze:
     needs: documentation-scope
-    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    # Skipped on purpose under merge_group (Claude 1 cloud Q, 15/11/2026; docs/codeql-merge-queue-2026-11-15.md,
+    # tests/codeql-timeout.test.ts). Measured on 15/11/2026: in the merge queue this job took 64 min median (p90 80,
+    # max 103, 182 runs in 24 h), the slowest step of every group, and there it protected nothing, as these sources
+    # read on 15/11/2026 show:
+    # 1. github/codeql-action analyze/action.yml at the pinned commit 24c54180 (v4.38.3): `upload: never` "avoids
+    #    uploading the SARIF file to Code Scanning", and no input of the step fails it on a finding (there is no
+    #    fail-on input); so a merge group's analysis could fail only on an execution error or a time-out.
+    # 2. GitHub Docs (github/docs d59b2631, 13/11/2026), "Triage code scanning alerts in pull requests": what fails on
+    #    a finding of severity error, critical or high is the "code scanning results" check, made from uploaded
+    #    results; with upload never, a merge group had none. "Code scanning merge protection": rulesets "will not
+    #    apply to: Merge queue groups". The note in "Workflow configuration options" to add merge_group is there so
+    #    pull requests "are also scanned" in the queue, i.e. results uploaded; ours never were (the ref is deleted).
+    # 3. Ruleset 26510779 "main: tests before merge" (REST API, 15/11/2026, updated 12/11/2026): deletion,
+    #    non_fast_forward, pull_request, required_status_checks (the nine final checks) and merge_queue; no
+    #    code_scanning rule, and no other ruleset or branch protection on main.
+    # What still analyzes, all with upload: every pull request (its required final check must pass before the
+    # queue takes it, on the PR merged with main), every push to main (main only fast-forwards to the queue's
+    # commit, so that is the very code the queue tested; never reused, scripts/ci_full_tree_proof.py) and the
+    # daily and manual runs. The final check below accepts this one skip only under merge_group, only for this
+    # job, only with CI_ANALYSIS_OUTSIDE_QUEUE (scripts/ci_all_checks.py), and the main-red alarm never takes a
+    # merge-queue run of CodeQL as main's result (scripts/main_red_alarm.mjs).
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && github.event_name != 'merge_group' }}
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
+    # 180, not 120 (owner, 16/11/2026): on 16/11/2026 the finished runs of this job took 64 to 112 minutes (25
+    # pull_request and push runs) and three were cut at 120, one on main's own push: the main-red alarm opened #4826
+    # and the queue froze for about 4 hours, until the retry passed in 107. Same queries, same coverage, more time.
     # 120, not 60 (ALL-194, 14/11/2026): the JavaScript analysis is limited by time, not memory. run-queries already
     # uses every core of the runner (--threads=4) and ~14 GB (--ram=14568) with no memory error; runs that finish take
     # 27 to 54 minutes, and those cancelled at 60 had most queries done (82 of 105 on #3559). The merge queue waits
     # 360 minutes for checks, so a longer job is still answered. Coverage is unchanged (tests/codeql-timeout.test.ts).
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read
@@ -83,16 +108,15 @@ jobs:
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: /language:${{ matrix.language }}
-          # A merge group's ref (gh-readonly-queue/main/pr-N-...) is deleted as soon as the group
-          # merges or is rebuilt, often before the upload, which then fails with "ref ... not found
-          # in this repository" and marks the scan as a configuration error. The merge group still
-          # runs the whole analysis; its results are uploaded by the push run on main for the same
-          # commit (main has no code-scanning merge rule, only the required checks).
-          upload: ${{ github.event_name == 'merge_group' && 'never' || 'always' }}
+          # Every run that analyzes uploads: the job never runs under merge_group, whose ref
+          # (gh-readonly-queue/main/pr-N-...) is deleted when the group merges or is rebuilt, which
+          # made an upload there fail with "ref ... not found in this repository".
+          upload: always
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
-    # passes only when every job above passed, or was skipped for a documentation-only change.
+    # passes only when every job above passed, or was skipped for a documentation-only change,
+    # or (analyze alone, only under merge_group) was skipped on purpose as said above.
     name: All checks (codeql)
     needs: [analyze, documentation-scope]
     if: ${{ always() }}
@@ -102,9 +126,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Read every job's result; a skip counts only for a documentation-only change
+      - name: Read every job's result; a skip counts only for a documentation-only change or analyze in the merge queue
         env:
           NEEDS: ${{ toJSON(needs) }}
+          CI_EVENT: ${{ github.event_name }}
+          CI_ANALYSIS_OUTSIDE_QUEUE: "true"
         run: |
           python3 scripts/test_ci_all_checks.py
           python3 scripts/ci_all_checks.py

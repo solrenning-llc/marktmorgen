@@ -10,7 +10,7 @@ export function DealAgenda({ deals, stages, currency, today, disabled, whyId, on
   const rows = dealWorklistRows(deals, stages, "agenda");
   if (!rows.length) return <p className="mt-6 rounded-xl bg-paper p-4 text-sm text-ink-soft">No loaded deals match this selection.</p>;
   return (
-    <div className="mt-6 overflow-x-auto">
+    <div className="mt-6 overflow-x-auto" tabIndex={0} role="region" aria-label="Deals across all stages, as a table">
       <table className="w-full min-w-[54rem] text-left text-sm">
         <caption className="sr-only">Selected deals ordered across all stages</caption>
         <thead><tr className="text-ink-soft">{["Action date (UTC)", "Next action", "Deal and contact", "Stage", "Responsible", "Recorded value", ...(onEdit ? ["Edit"] : [])].map(label => <th key={label} scope="col" className="py-3 pr-4 font-semibold">{label}</th>)}</tr></thead>

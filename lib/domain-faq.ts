@@ -6,8 +6,8 @@
  * domains are switched on (isDomainsConfigured, lib/domains.ts) and to whoever
  * may change the store's settings (lib/team-roles.ts), and usable only on an
  * active Studio or Scale plan, its trial included (canUseDomain, hasPro). The
- * studio still labels Studio "Pro", so the answers give both names. No figure but the
- * code's own.
+ * card names the plan as the signup and pricing pages do (PLAN_TITLES), so the
+ * answers name it once. No figure but the code's own.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_TITLES, TRIAL_DAYS } from "@/lib/plan";
@@ -15,7 +15,7 @@ import { tryBeforePaying } from "@/lib/beginner-faq";
 import { ROLE_NAMES } from "@/lib/team-roles";
 
 /** The studio's own words. */
-export const DOMAIN_WORDS = { card: "Your own domain", field: "Your domain", add: "Add the domain", studioPlan: "Pro" } as const;
+export const DOMAIN_WORDS = { card: "Your own domain", field: "Your domain", add: "Add the domain", studioPlan: `${PLAN_TITLES.pro} plan` } as const;
 
 export function domainBeginnerQuestions(on: boolean, onSale = PLANS_ON_SALE, trialDays = TRIAL_DAYS): { q: string; a: string }[] {
   const w = DOMAIN_WORDS;
@@ -29,7 +29,7 @@ export function domainBeginnerQuestions(on: boolean, onSale = PLANS_ON_SALE, tri
     {
       q: "How do I add my domain?",
       a: on
-        ? `Your own domain is part of the ${PLAN_TITLES.pro} and ${PLAN_TITLES.scale} plans; inside your studio, where you run your store, ${PLAN_TITLES.pro} is labeled “${w.studioPlan}”. On one of them, the owner or an ${ROLE_NAMES.admin} types it under “${w.field}” in the “${w.card}” card and presses “${w.add}”, then adds the records the card shows in the domain's DNS settings, where it was bought. The domain is held for your store for three days while you do this.`
+        ? `Your own domain is part of the ${PLAN_TITLES.pro} and ${PLAN_TITLES.scale} plans. On one of them, the owner or an ${ROLE_NAMES.admin} types it under “${w.field}” in the “${w.card}” card and presses “${w.add}”, then adds the records the card shows in the domain's DNS settings, where it was bought. The domain is held for your store for three days while you do this.`
         : "Not for now: there is nowhere to add one until domains are switched on here.",
     },
     {

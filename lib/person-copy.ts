@@ -60,6 +60,7 @@ import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
 import { pointsRecordOf } from "@/lib/community-points";
 import { allNoticesOf } from "@/lib/community-notify";
+import { benefitMarksOf } from "@/lib/tier-benefits";
 import { deviceCount } from "@/lib/community-push";
 import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
@@ -152,6 +153,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/closing-holds.ts": { how: "copied", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
   "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
+  "lib/tier-benefits.ts": { how: "copied", what: "Which membership benefits the store marked as handed to you, and for which month or year" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
 };
 
@@ -193,6 +195,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/next-offer.ts": { how: "passing", days: 3, what: "The product the store's assistant suggested after an order, under the order's reference with no name or address, deleted three days later" },
   "lib/community.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your community posts, comments, likes and reports are in your community part" },
   "lib/community-polls.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your votes in community polls are in your community part" },
+  "lib/plan-late-notice.ts": { how: "passing", days: 400, what: "If a payment of your payment plan was taken after the plan ended and then refunded: whether you were emailed about that refund and how many times it was tried, kept under the payment's Stripe invoice only, so you are never emailed about it twice. Your address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
   "lib/purchase-moves.ts": { how: "passing", days: 2, what: "A request to move your purchases to another address, with both addresses and when each confirmed it, kept for its day and one more; found only by the links emailed to the two addresses" },
@@ -472,6 +475,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/tier-benefits.ts": async (s) => (await benefitMarksOf(s.store, s.person)).map((m) => ({ benefit: m.benefit, period: m.period, markedGiven: iso(m.at) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),

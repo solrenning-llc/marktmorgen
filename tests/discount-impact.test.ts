@@ -144,16 +144,20 @@ async function main(): Promise<void> {
   sessions = [
     session("cs_test_full00000001", "ana@example.com", 2, 2000, 0),
     session("cs_test_sale00000001", "ben@example.com", 6, 1600, 400, { sale: "20" }),
+    session("cs_test_code00000001", "cy@example.com", 7, 1500, 500, { code: "spring" }),
   ];
   refunds = [{ id: "re_1", status: "succeeded", amount: 1600, currency: "usd", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_sale00000001" }];
   const read = await readSales(store, NOW);
   is("in the sales the studio reads", read?.discounts, {
     rows: [
       { kind: "full", sales: 1, cents: 2000, off: 0, refunded: 0, buyers: 1, again: 0 },
+      { kind: "code", sales: 1, cents: 1500, off: 500, refunded: 0, buyers: 1, again: 0 },
       { kind: "sale", sales: 1, cents: 1600, off: 400, refunded: 1, buyers: 1, again: 0 },
     ],
     refundsRead: true,
     elsewhere: [],
+    // The same checkouts by the code they used (760 [STN7], unit 2), from the same sales.
+    codes: [{ code: "SPRING", group: "code", sales: 1, cents: 1500, off: 500, refunded: 0 }],
   });
   is("with nothing more asked of Stripe than the sales, renewals, refunds and disputes the numbers read anyway", [...new Set(asked)].sort(), ["/checkout/sessions", "/disputes", "/invoices", "/payment_intents", "/refunds"]);
 

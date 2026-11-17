@@ -18,6 +18,7 @@
  * money and never converted: a buyer who pays in euros on purpose, once
  * buyers may (docs/buyer-currency-and-language.md), is said, not dropped.
  */
+import { CODE_PATTERN } from "@/lib/discount-rules";
 import { formatMoney } from "@/lib/money";
 
 /** Which discount a sale had, as the checkout wrote it (lib/store-checkout.ts). */
@@ -129,6 +130,95 @@ export function discountImpact(sales: DiscountSale[], refunded: Set<string>, cur
     .filter((row): row is NonNullable<typeof row> => Boolean(row))
     .map(({ emails, againEmails, ...row }) => ({ ...row, buyers: emails.size, again: againEmails.size }));
   return rows.some((row) => row.kind !== "full") ? rows : null;
+}
+
+/**
+ * One discount code's sales over the same days (760 [STN7], unit 2), so the
+ * creator sees which code sold, not only that codes did. `group` is "code"
+ * for a code the checkout named; "others" adds up the codes past
+ * CODE_ROWS_MAX; "typed" holds the codes a buyer typed in Stripe's own box,
+ * which the checkout cannot name (Stripe says only that a discount came off),
+ * so they are one row and never guessed. `code` is null except for "code".
+ */
+export type DiscountCodeRow = {
+  code: string | null;
+  group: "code" | "others" | "typed";
+  sales: number;
+  /** Paid, after the code. */
+  cents: number;
+  /** What the code took off. */
+  off: number;
+  /** Of these sales, how many were refunded (in full or in part). */
+  refunded: number;
+};
+
+/**
+ * The most codes listed one by one; the rest are added into one row, so the
+ * table stays short whatever the store had over the 90 days (a store keeps
+ * at most twenty live codes, lib/discount-rules.ts, but codes since removed
+ * still have their sales).
+ */
+export const CODE_ROWS_MAX = 20;
+
+/**
+ * The code a checkout's own note names, upper case as Stripe compares codes:
+ * a code from a link (`code`, also a call's code taken off before Stripe's
+ * page) or a code for returning buyers (`returning`). Null when none is
+ * named, or when the note is not a code as lib/discount-rules.ts allows one,
+ * so nothing else is ever shown as a code. Pure.
+ */
+export function codeOf(row: Record<string, unknown>): string | null {
+  const meta = (row.metadata ?? {}) as Record<string, unknown>;
+  for (const value of [meta.code, meta.returning]) {
+    if (typeof value !== "string") continue;
+    const code = value.trim().toUpperCase();
+    if (CODE_PATTERN.test(code)) return code;
+  }
+  return null;
+}
+
+/**
+ * Sales by code: the checkouts the table by kind counts as "Discount code"
+ * (the same days, the store's currency, no one-click extras or tips), each
+ * under the code it named, most sales first, then more revenue, then the
+ * code's letters; past CODE_ROWS_MAX codes the rest are added into one
+ * "others" row, and codes typed in Stripe's box come last as one "typed"
+ * row. The rows add up to that "Discount code" row. Empty when no sale had
+ * a code. Worked out from the sales already read: nothing more is asked of
+ * Stripe. Pure.
+ */
+export function discountCodes(sales: DiscountSale[], refunded: Set<string>, currency: string, now: number, days = 90): DiscountCodeRow[] {
+  const since = now - days * 86_400_000;
+  const named = new Map<string, DiscountCodeRow>();
+  const typed: DiscountCodeRow = { code: null, group: "typed", sales: 0, cents: 0, off: 0, refunded: 0 };
+  for (const sale of sales) {
+    if (sale.upsell || sale.currency !== currency) continue;
+    if (sale.created < since || sale.created > now) continue;
+    const meta = (sale.row.metadata ?? {}) as Record<string, string>;
+    if (meta.kind === "tip" || discountKindOf(sale.row) !== "code") continue;
+    const code = codeOf(sale.row);
+    const row = code === null ? typed : named.get(code) ?? { code, group: "code" as const, sales: 0, cents: 0, off: 0, refunded: 0 };
+    row.sales += 1;
+    row.cents += sale.cents;
+    row.off += discountOff(sale.row);
+    if (sale.paymentIntent && refunded.has(sale.paymentIntent)) row.refunded += 1;
+    if (code !== null) named.set(code, row);
+  }
+  const ranked = [...named.values()].sort((a, b) => b.sales - a.sales || b.cents - a.cents || ((a.code as string) < (b.code as string) ? -1 : 1));
+  const rows = ranked.slice(0, CODE_ROWS_MAX);
+  const rest = ranked.slice(CODE_ROWS_MAX);
+  if (rest.length) {
+    const others: DiscountCodeRow = { code: null, group: "others", sales: 0, cents: 0, off: 0, refunded: 0 };
+    for (const row of rest) {
+      others.sales += row.sales;
+      others.cents += row.cents;
+      others.off += row.off;
+      others.refunded += row.refunded;
+    }
+    rows.push(others);
+  }
+  if (typed.sales) rows.push(typed);
+  return rows;
 }
 
 /** The checkouts of one other currency over the same days, counted apart from the table. */

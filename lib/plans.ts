@@ -26,10 +26,19 @@ const PENDING = "nl:plans:pending";
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
 
-/** Written down when a plan's checkout opens, so it is settled either way. */
+/**
+ * Written down when a plan's checkout opens, so it is settled either way.
+ *
+ * It returns only once the write is confirmed: the checkout is handed to the buyer on that promise, and a plan the
+ * job cannot find is charged past its last payment. So an account or session id the job could not follow, no Redis,
+ * or a SADD reply other than exactly 0 or 1 (unknown, short or of another shape) throws, never passes as written
+ * (Codex X4 on #4493).
+ */
 export async function rememberPlan(account: string, session: string): Promise<void> {
-  if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
-  await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) throw new Error("A plan's checkout cannot be written down: not a Stripe account and checkout session");
+  const replies = await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  const added = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
+  if (added !== 0 && added !== 1) throw new Error("Redis did not confirm the plan's checkout was written down");
 }
 
 /**
@@ -49,12 +58,23 @@ export function addPeriods(anchorSeconds: number, interval: Interval, n: number)
   return Math.floor(target.getTime() / 1000);
 }
 
-export type PlanState = "done" | "open" | "gone";
+export type PlanState = "done" | "open" | "gone" | "unread";
+
+/**
+ * A Stripe reply decides only when it is the object asked for (rule 30): it
+ * holds its own id, equal to the one requested. A reply for another object,
+ * or with no id, proves nothing about this plan. A reply that is not an
+ * object at all (a JSON null, a string, a number) is not its own either: it
+ * answers "unread", never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 
 /**
  * Gives a paid plan, or a membership that ends by itself, its end. "open"
  * means the checkout can still be paid; "gone" means it never will be, or is
- * neither.
+ * neither; "unread" means Stripe answered for something other than what was
+ * asked, so nothing is known and the plan stays pending for the next pass.
  */
 export async function finishPlan(account: string, session: string): Promise<PlanState> {
   if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return "gone";
@@ -65,6 +85,7 @@ export async function finishPlan(account: string, session: string): Promise<Plan
     if (error instanceof StripeError && error.status === 404) return "gone";
     throw error;
   }
+  if (!isOwnReply(view, session)) return "unread";
   const meta = (view.metadata ?? {}) as Record<string, string>;
   const isPlan = meta.kind === "plan";
   if (!isPlan && !meta.ends_after) return "gone";
@@ -72,6 +93,8 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   if (view.status !== "complete" || typeof view.subscription !== "string") return "gone";
 
   const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(view.subscription)}`);
+  // Read before cancel_at or status: another subscription's end is not this plan's.
+  if (!isOwnReply(subscription, view.subscription)) return "unread";
   if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) return "done";
   if (subscription.status === "canceled") return "done";
   const payments = Number(isPlan ? meta.plan_payments : meta.ends_after);
@@ -85,13 +108,16 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const anchor = Math.max(cycle, trialEnd);
   if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
 
-  await onAccount(
+  const cancelAt = addPeriods(anchor, interval, payments);
+  const updated = await onAccount(
     "POST",
     account,
     `/subscriptions/${encodeURIComponent(view.subscription)}`,
-    new URLSearchParams({ cancel_at: String(addPeriods(anchor, interval, payments)), proration_behavior: "none" }),
+    new URLSearchParams({ cancel_at: String(cancelAt), proration_behavior: "none" }),
   );
-  return "done";
+  // Settled only on the subscription's own answer carrying the end just set (Codex S on #3086: the id alone does
+  // not prove the end was written); otherwise the next pass reads it again and finds the end in place, or sets it.
+  return isOwnReply(updated, view.subscription) && updated.cancel_at === cancelAt ? "done" : "unread";
 }
 
 /**
@@ -101,7 +127,10 @@ export async function finishPlan(account: string, session: string): Promise<Plan
 export async function settlePlans(limit = 200): Promise<{ done: number; open: number; dropped: number; failed: number }> {
   const counts = { done: 0, open: 0, dropped: 0, failed: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["SMEMBERS", PENDING]]);
+  // Only the members this run settles are read, never the whole set: every plan checkout opened adds one and only
+  // this job takes them out, so a backlog is read once per run at most `limit` (c1-cost-plans-pending). Taken at
+  // random, so members kept (open for their two days, or failing) never stand in front of the same others every run.
+  const [raw] = await redisPipeline([["SRANDMEMBER", PENDING, limit]]);
   const members = Array.isArray(raw) ? (raw as string[]).slice(0, limit) : [];
   const now = Math.floor(Date.now() / 1000);
   for (const member of members) {
@@ -110,6 +139,11 @@ export async function settlePlans(limit = 200): Promise<{ done: number; open: nu
       const state = await finishPlan(account, session);
       if (state === "open" && now - Number(opened) < 2 * 86400) {
         counts.open += 1;
+        continue;
+      }
+      // Kept for the job's next run, never settled on a reply that was not its own.
+      if (state === "unread") {
+        counts.failed += 1;
         continue;
       }
       if (state === "done") counts.done += 1;

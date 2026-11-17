@@ -68,6 +68,8 @@ export const REVIEW_STOP = /^[0-9a-f]{40}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
+/** That address's stop on review requests, for the person's copy to read (lib/person-copy.ts). */
+export const reviewStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:rev:stop:${token}`;
 
@@ -244,8 +246,10 @@ export async function sendReviewRequests(
 ): Promise<AskCounts> {
   const counts: AskCounts = { sent: 0, dropped: 0, waiting: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", ASK_DUE_KEY, 0, nowSeconds, "LIMIT", 0, MAX_ASKS_PER_RUN]]);
-  const members = Array.isArray(raw) ? (raw as string[]) : [];
+  // Read exactly (rule 24): a reply of another shape is unknown, never "nothing due"; the cron reports it failed.
+  const raw = repliesFor(await redisPipeline([["ZRANGEBYSCORE", ASK_DUE_KEY, 0, nowSeconds, "LIMIT", 0, MAX_ASKS_PER_RUN]]), 1)?.[0];
+  if (!Array.isArray(raw) || !raw.every((m) => typeof m === "string")) throw new exactReply.UnknownReplyError("the review requests that are due");
+  const members = raw as string[];
   const stores = new Map<string, Store | null>();
   const groups = new Map<string, { store: Store; ready: Ready[] }>();
   const drop = async (member: string) => {

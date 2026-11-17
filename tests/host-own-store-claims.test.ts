@@ -188,6 +188,37 @@ async function main(): Promise<void> {
       is("the authoritative move nevertheless points to the new time", written.s, after);
       is("the new time remains protected until the move can be reconciled", (await mayaClaims()).some((c) => c.start === after), true);
       is("and the old time stays protected too while the move is not known", (await mayaClaims()).some((c) => c.start === before), true);
+      redis.pipeline = pipeline;
+      // The same move asked again finishes it (the "same move" step): counted once, the old time let go.
+      const again = await moveBooking({ store: lantern.store, product: lantern.product, session: booking.session, booked: { start: before, end: before + HOUR, email: "buyer@example.com", buyerTz: NY }, start: after, origin: "https://marktmorgen.com" });
+      is("the same move asked again is done", again.ok ? "moved" : again.reason, "moved");
+      is("counted once", (JSON.parse(String(redis.run(["GET", moveKey]))) as { n: number }).n, 1);
+      is("its new time is kept for good", (await mayaClaims()).some((c) => c.start === after && !c.held), true);
+      is("and its old time is let go", (await mayaClaims()).some((c) => c.start === before), false);
+    } finally {
+      redis.pipeline = pipeline;
+      listed.length = 0;
+    }
+  }
+
+  part("A move whose write surely did not land gives its new time back (control)");
+  {
+    const before = weekdayAt(4, 900);
+    const after = before + HOUR;
+    const booking = await hold(lantern.store, lantern.product, before);
+    if (!booking.ok) throw new Error("no hold for the control move");
+    await confirmBooking({ store: lantern.store, product: lantern.product, session: booking.session, start: before, end: before + HOUR, buyerEmail: "buyer@example.com", buyerTz: NY, due: null, cancel: null, origin: "https://marktmorgen.com" });
+    listed.push(paidRow(booking.session, lantern.store, lantern.product, before, false));
+    const moveKey = movedKey(booking.session);
+    const pipeline = redis.pipeline;
+    // The SET answers in another shape and does nothing; the read-back answers exactly: no key.
+    redis.pipeline = async (commands) => (commands.some((c) => c[0] === "SET" && c[1] === moveKey) ? ["unknown"] : pipeline.call(redis, commands));
+    try {
+      const result = await moveBooking({ store: lantern.store, product: lantern.product, session: booking.session, booked: { start: before, end: before + HOUR, email: "buyer@example.com", buyerTz: NY }, start: after, origin: "https://marktmorgen.com" });
+      is("the move is refused", result.ok ? "moved" : result.reason, "error");
+      is("nothing was written", redis.run(["GET", moveKey]), null);
+      is("its new time is given back", (await mayaClaims()).some((c) => c.start === after), false);
+      is("and the old one stays", (await mayaClaims()).some((c) => c.start === before && !c.held), true);
     } finally {
       redis.pipeline = pipeline;
       listed.length = 0;

@@ -89,7 +89,7 @@ import {
   zoneName,
 } from "@/lib/call-setup";
 import { bookingLength, ownLength } from "@/lib/call-lengths";
-import { planCheck, planReminders, readMoves, unplanReminders, writeMove } from "@/lib/call-records";
+import { MoveNotWritten, planCheck, planReminders, readMoves, unplanReminders, writeMove } from "@/lib/call-records";
 import { calendarBusy } from "@/lib/calendar-sync";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { emitEvent } from "@/lib/webhooks";
@@ -685,6 +685,15 @@ function elsewhere(claims: HostClaim[], busy: OwnBusy[], group?: { callsId: stri
   const known = new Set(busy.flatMap((b) => [b.own, b.claim]).filter(Boolean));
   const ours = (c: HostClaim) => (group ? c.claim === ownGroupClaim(group.callsId, group.productId, c.start) : false);
   return claims.filter((c) => !known.has(c.claim) && !ours(c)).map((c) => ({ start: c.start, end: c.end }));
+}
+
+/**
+ * The claim a weekly booking's move takes at its new time: one id for this booking and this time, so the same move
+ * asked again finds the claim a first try kept and takes it as its own (Codex V's HIGH on #3490). Shaped as
+ * newClaimId's ids are.
+ */
+function moveClaimId(callsId: string, session: string, start: number): string {
+  return `k${createHash("sha256").update(`move|${callsId}|${session}|${start}`).digest("hex").slice(0, 24)}`;
 }
 
 /** The call whose own shared claims `elsewhere` leaves out: a group call of this store, else none. */
@@ -1766,7 +1775,11 @@ export async function moveBooking(input: {
       } catch {
         return { ok: false, reason: "error" };
       }
-      const others = against(product, busy.filter((b) => b.session !== session), sessions, [...blocked, ...elsewhere(claims, busy, groupOf(store, product))], ownerOf(store));
+      // The new time's own claim has an id of its own for this booking and time (moveClaimId): a move whose write was
+      // not known kept that claim for good (Codex V's HIGH on #3490), and the same move asked again takes it as its own,
+      // never as another store's time.
+      const moveClaim = moveClaimId(callsId, session, start);
+      const others = against(product, busy.filter((b) => b.session !== session), sessions, [...blocked, ...elsewhere(claims.filter((c) => c.claim !== moveClaim), busy, groupOf(store, product))], ownerOf(store));
       if (!isBookable(at, now, others, start, product.id)) return { ok: false, reason: "taken" };
       if (at.kind === "weekly") {
         const mine = busy.find((b) => b.session === session && b.own);
@@ -1774,7 +1787,7 @@ export async function moveBooking(input: {
         // The new time is claimed as a hold is, under a claim of its own (a group seat joins the claim of its new time),
         // kept for good only once the move is written, and the old one let go only then (Claude 1's review 6799341330 of
         // #3490, MEDIUM): a move refused after its claim was taken leaves the old time claimed and gives the new one back.
-        const taken = await claimOwner(store, { id: product.id, call: at }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now);
+        const taken = await claimOwner(store, { id: product.id, call: at }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now, moveClaim);
         if (!taken.ok) return { ok: false, reason: taken.reason };
         ownMoved = taken.claim;
         ownFresh = taken.fresh;
@@ -1785,8 +1798,15 @@ export async function moveBooking(input: {
     try {
       await writeMove(session, { s: start, e: end, n: from.moves + 1 });
     } catch (error) {
-      // Refused: the new time's own claim goes back (a group claim other seats hold stays), the old one stays.
-      if (ownMoved && ownFresh) await releaseClaim([ownerOf(store)], ownMoved).catch(() => {});
+      // Surely not written: the new time's own claim goes back (a group claim other seats hold stays), the old one stays.
+      if (error instanceof MoveNotWritten) {
+        if (ownMoved && ownFresh) await releaseClaim([ownerOf(store)], ownMoved).catch(() => {});
+        throw error;
+      }
+      // Not known (Codex V's HIGH on #3490): the move may be written, so the new time is kept for good and the old one
+      // stays claimed too, both protected, until the same move asked again finishes it (the "same move" step above),
+      // which lets the old time go. Never a time the booking may now hold given back on an unknown reply.
+      if (ownMoved) await confirmClaim([ownerOf(store)], ownMoved, start, end, `${callsId}:${product.id}`).catch((why) => console.error("keeping a move's new time after an unknown write failed", why));
       throw error;
     }
     // Written: the owner's new time is kept for good (an answer not confirmed throws, and the move says it failed).

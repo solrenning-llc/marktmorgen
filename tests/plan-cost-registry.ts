@@ -1822,6 +1822,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
       { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES + NOTICE_TRIES", "MAX_SCHEDULED_CODES", "NOTICE_RETRY_SECONDS"] },
       { file: "app/api/cron/imports/route.ts", names: ["activateScheduledCodes("] },
+      // A delivery check (479 [SB2], unit 2) takes DELIVERY_CHECK_UNITS studio requests before the product is read and
+      // anything it hands over is asked for; tests/delivery-check.test.ts holds them over the check at its worst.
+      { file: "app/api/store/delivery-check/route.ts", names: ["countStudio(store, null, DELIVERY_CHECK_UNITS)"] },
+      { file: "lib/delivery-check-rules.ts", names: ["DELIVERY_CHECK_UNITS", "MAX_DELIVERY_ITEMS", "DELIVERY_ITEM_MS", "ADDRESS_READ_BYTES"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
       // The studio's one search box (766 [STN13]): STUDIO_SEARCH_UNITS studio requests taken before its one exact read of every product's card (readCardsExact, never filled in from the products' records), with the store's minute and day counters (two commands each) inside them, counted first so a search they refuse takes none; tests/stn13-studio-search.test.ts holds the dearest search, MAX_PRODUCTS cards, under them.
@@ -2328,6 +2332,43 @@ export const PAYPAL_PAST_WATCH = { countReadsPerStoreRun: 3, forgetWritesAtMost:
  */
 export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 30 * 86_400, lateLooksPerOrder: 8 } as const;
 
+/**
+ * Zoom's notice that a user removed the app (app/api/integrations/zoom/deauthorize, forgetUser in lib/meet-connect.ts;
+ * Claude 7's MEDIUM 2 on #3333): a company cost, never a plan's, since Zoom sends it and no store asks for it. Each
+ * notice at its most:
+ * - guardCommands: the route's own guard, withinLimit's INCR and EXPIRE, claimMark's SET NX and its read back, and
+ *   releaseMark's script (EVAL, GET, DEL) when the notice is let go for Zoom's retry;
+ * - forgetFixedCommands: the deletion's mark (SET ... EX GONE_SECONDS) and the read of the user's stores (SMEMBERS),
+ *   one pipeline;
+ * - for each of at most storesPerPass (FORGET_PASS) stores: its renewal lock tried lockTries times in lockWaitMs
+ *   (lib/redis-lock.ts takeLock, waits of 20 ms doubling to 250 ms), then storeCommandsAfterLock: the connection's
+ *   GET, its DEL, the test mark's DEL and the store's SREM from the index, and the lock let go (EVAL, GET, DEL);
+ * - markBytes kept markSeconds: the mark's key (58 bytes) and its value (at most the 16 digits KEEP_UNLESS_GONE
+ *   reads), rounded up, one mark a Zoom account.
+ * Bounded per sending address by the route's PER_MINUTE (noticesPerAddressMinute); a notice signed again by Zoom is a
+ * new one. The bytes of the connections and the index read back are not in this line (their size is Zoom's tokens and
+ * the account's stores): open, never zero. Held to the code by tests/zoom-notice-cost.test.ts; not yet a dollar line
+ * of lib/llc-fixed-costs.ts.
+ */
+export const ZOOM_NOTICE_FORGET = {
+  noticesPerAddressMinute: 120,
+  guardCommands: 7,
+  forgetFixedCommands: 2,
+  storesPerPass: 50,
+  lockWaitMs: 9_000,
+  lockTries: 39,
+  storeCommandsAfterLock: 7,
+  markBytes: 128,
+  markSeconds: 86_400,
+} as const;
+/** ZOOM_NOTICE_FORGET priced at the registry's rates: one notice at its most, and an address's minute at its most notices. */
+export function zoomNoticeForgetCost(): { perNoticeUsd: number; perAddressMinuteUsd: number } {
+  const z = ZOOM_NOTICE_FORGET;
+  const commands = z.guardCommands + z.forgetFixedCommands + z.storesPerPass * (z.lockTries + z.storeCommandsAfterLock);
+  const perNoticeUsd = commands * COMMAND + z.markBytes * DB_BYTE_MONTH * (z.markSeconds / (30 * 86_400));
+  return { perNoticeUsd, perAddressMinuteUsd: perNoticeUsd * z.noticesPerAddressMinute };
+}
+
 /** Per-use costs that no monthly figure bounds yet: not in worstCost, so nothing here is certified. */
 export type OpenItem = { id: string; what: string; names?: string[] };
 export const OPEN: OpenItem[] = [];
@@ -2438,6 +2479,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "import-cf-plan-month": line("clickfunnels"), "import-cf-save": line("clickfunnels"), "import-cf-save-month": line("clickfunnels"),
   "import-start": line("imports"), "import-start-month": line("imports"), "import-step": line("imports"), "import-step-month": line("imports"),
   "import-rows": line("imports"), "import-report": line("imports"), "import-report-month": line("imports"),
+  // An AI suggestion of an import's columns: its model call is reserved in the store's AI budget (line ai, askModel); this only spaces the asks.
+  "import-columns": BURST("ai"),
   "countUse:shareMonthKey(opened.id": line("funnel-share"), "countUse:storeMonthKey(statsId": line("funnel-share"),
   "countUse:storeMonthKey(store.statsId": line("funnel-share"), "countUse:storeUseKey(statsId": line("funnel-share"), "countUse:key: string": line("funnel-share"),
   // A copy into another store of the same account (18 October 2026): the destination's own previews and imports, the same line.
@@ -2462,7 +2505,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "stock-hold": guard("Holds one connection may start on a store's limited products within one hold's time (lib/stock.ts, HOLDS_PER_ADDRESS): a bound on held units, not per store use."),
   "mail-ses": guard("The email provider's own notices: a company cost."), "mail-inbound": guard("The email provider's inbound notices, per connection: a company cost; what is sent on to a creator is one of their store's emails (lib/inbound-mail.ts)."),
   "mail-clicked": guard("A click beacon from a store page opened from an email link, which the page itself counts: a few commands and no work, per connection."),
-  "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost."),
+  "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost, priced per notice and per address a minute by ZOOM_NOTICE_FORGET (the deletion's mark kept a day and up to FORGET_PASS stores walked)."),
   "plan-refund": guard("The plan refund route (app/api/billing/refund, 305 [SY1]): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and one write; the money is the reviewed refund exposure (docs/funded-exposure-review.md), a company cost."),
   "plan-withdraw": guard("The plan withdrawal route (app/api/billing/withdraw, 588 [KB9] unit 3): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and, once per withdrawal, the plan refund flow; the money is the reviewed refund exposure under the money-back guarantee (docs/funded-exposure-review.md), a company cost."),
   "plan-refund-review": guard("The plan refund's review page (app/studio/refund, 305 [SY1]): drawn at most SHOWN_PER_DAY (20) a store a day, each a bounded Stripe reading (MAX_CALLS) and one short key: a company cost."),

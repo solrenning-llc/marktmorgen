@@ -164,6 +164,19 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", payoutsKey, "abcdefabcdef", JSON.stringify({ id: "abcdefabcdef", aff: BEA, cents: 3_000, currency: "usd", date: "2026-11-12", reference: "cash", at: Date.now() + 1_000 })]]);
   const byHand = await confirm({ date: "2026-11-12", reference: "x", file: f4.file });
   is("refused as out of date, nothing written", [byHand.status, byHand.data.error, (await paidTo())[BEA]], [409, "stale", 6_000]);
+  part("A payout row the book cannot read stops the confirmation");
+  await redis.pipeline([["HSET", sales, "cs_ana4", sale("cs_ana4", ANA, 10_000)]]);
+  const f5 = await download();
+  is("the file pays Ana thirty dollars", [f5.status, f5.body.includes(",30.00,USD,")], [200, true]);
+  const paidBefore = await paidTo();
+  await redis.pipeline([["HSET", payoutsKey, "edededededed", JSON.stringify({
+    id: "edededededed", aff: ANA, cents: "3000", currency: "usd", date: "2026-11-12", at: Date.now() + 1_000,
+  })]]);
+  const unread = await confirm({ date: "2026-11-12", reference: "x", file: f5.file });
+  is("no payout is recorded on an unread book", [unread.status, unread.data.error], [500, "server_error"]);
+  await redis.pipeline([["HDEL", payoutsKey, "edededededed"]]);
+  is("the existing recorded amounts are unchanged", await paidTo(), paidBefore);
+  is("the file remains available once the book can be checked", (await confirm({ date: "2026-11-12", reference: "x", file: f5.file })).status, 200);
   done();
 }
 

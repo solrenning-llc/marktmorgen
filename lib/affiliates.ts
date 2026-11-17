@@ -2411,20 +2411,14 @@ export async function addPayoutOnce(store: Store, input: PayoutInput & { id: str
 }
 
 /**
- * Every payout written in the store's book, read exactly; UnknownReplyError when the reply is not a list of field
- * and value pairs. A value that does not read as a payout is left out, as readBook leaves it out of the book.
+ * Every payout written in the store's book, read exactly as readBook reads it (hashPairsExact, exactPayout):
+ * UnknownReplyError when the reply is not a list of field and value pairs or when a row does not read as a payout,
+ * so a file is never written down, nor dropped, against a book that could not be checked.
  */
 export async function readPayoutsExact(store: Store): Promise<Payout[]> {
   if (!store.statsId) throw new Error("a store's payouts need its statsId");
-  const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
-  const flat = reply ? stringList(reply[0]) : null;
-  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
-  const payouts: Payout[] = [];
-  for (let i = 1; i < flat.length; i += 2) {
-    const payout = parsePayout(flat[i]);
-    if (payout) payouts.push(payout);
-  }
-  return payouts;
+  return hashPairsExact(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), "the payouts written down")
+    .map(([, raw]) => exactPayout(raw));
 }
 
 /**

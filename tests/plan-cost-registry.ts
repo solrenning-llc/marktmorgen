@@ -2585,6 +2585,11 @@ export const SCOPES: Record<string, ScopeClass> = {
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "picture-door": BURST("studio"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),
+  // A buyer's report of a problem with an order (567 [GD1] (a), app/api/store/order-problem): at most ORDER_PROBLEM_PER_DAY a buyer a store, each one inbox message from the store's figure (lib/inbox.ts, open) and its notice from the store's email figure (tellTeam).
+  // Its own commands beyond the message (the per-buyer counter, the order's mark, the room: ORDER_PROBLEM_COMMANDS in
+  // lib/order-problem.ts) are taken from the lookup's buyer requests (found.meter, ORDERS_UNIT_COMMANDS each, priced as
+  // the store's public requests) before they are sent, never from this unit, which the message uses (Claude 7 on #3837).
+  "order-problem": BURST("inbox"),
   // Calls to other services: counted in the store's window as well (lib/metered-limits.ts, withinService).
   "meet-host": SERVICE, "meet-manage": SERVICE, "meet-start": SERVICE, "metaads-start": SERVICE, "discord-connect": SERVICE, esync: SERVICE,
   "paypal-connect": SERVICE, "paypal-pay": SERVICE, "paypal-sell-connect": SERVICE, "aff-kit": SERVICE, "aff-payto": SERVICE, "outreach-find": SERVICE,

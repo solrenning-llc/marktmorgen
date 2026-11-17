@@ -135,7 +135,7 @@ const joined = (product: string, status: string, over: Record<string, unknown> =
   payment_status: "paid",
   metadata: { store: HANDLE, product },
   payment_intent: null,
-  subscription: { id: "sub_Member000001", object: "subscription", status, metadata: { store: HANDLE, product }, items: { data: [] }, ...subOver },
+  subscription: { id: "sub_Member000001", object: "subscription", status, metadata: { store: HANDLE, product }, items: { object: "list", data: [] }, pause_collection: null, ...subOver },
   ...over,
 });
 

@@ -302,7 +302,16 @@ async function silenceLapses(store: Store, state: State, now: number, save: (nex
   const from = state.day ?? state.lapseFrom;
   if (from === undefined) state.lapseFrom = now;
   await save(state);
-  if (store.stripeAccountId) await noteAccountReply(store.stripeAccountId, "silent", now).catch((error) => console.error("noting a creator account's silence failed", error));
+  // Today's note of this silence is what the joint-failure lock counts (lib/held-stores.ts, accountsSilentTogether):
+  // a note not confirmed holds the store this run, never read as "not together" (Codex T's review of #3463, HIGH).
+  if (store.stripeAccountId) {
+    try {
+      await noteAccountReply(store.stripeAccountId, "silent", now);
+    } catch (error) {
+      console.error("noting a creator account's silence failed; held", error);
+      return "other";
+    }
+  }
   if (from === undefined || now < from + STRIPE_SILENT_DAYS * DAY_MS) return "other";
   if (restart || now < (state.silentFrom ?? now) + STRIPE_SILENT_DAYS * DAY_MS) return "other";
   if (await accountsSilentTogether(now)) return "other";
@@ -1279,12 +1288,27 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
   let refusedAs: OverdueReason = "other";
   let ownChecked: "ok" | OverdueReason | null = null;
   const account = store.stripeAccountId;
-  const note = (refused: boolean) => (account ? noteAccountReply(account, refused, now).catch((error) => console.error("noting a creator account's reply failed", error)) : Promise.resolve());
+  /** Today's note of the account's reply, which the joint-failure lock counts: true only when confirmed (or no account). */
+  const note = async (refused: boolean): Promise<boolean> => {
+    if (!account) return true;
+    try {
+      await noteAccountReply(account, refused, now);
+      return true;
+    } catch (error) {
+      console.error("noting a creator account's reply failed", error);
+      return false;
+    }
+  };
   const refusalLapses = async (): Promise<boolean> => {
     const restart = next.refusedFrom === undefined || next.refusedLast === undefined || now - next.refusedLast > REFUSAL_GAP_MS;
     next = { ...next, refusedFrom: restart ? now : next.refusedFrom, refusedLast: now };
     await save(next);
-    await note(true);
+    // A refusal not confirmed in today's note would leave the lock counting without it: held this run (Codex T's
+    // review of #3463, HIGH), never read as "not together".
+    if (!(await note(true))) {
+      refusedAs = "other";
+      return false;
+    }
     // Several accounts refusing together is ours, whatever this store's own count says: kept, reported as our key's.
     if (await accountsRefuseTogether(now)) {
       refusedAs = "key";

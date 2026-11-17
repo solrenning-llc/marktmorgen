@@ -180,7 +180,10 @@ async function main(): Promise<void> {
   // absent cursor; read as one, the walk would restart from the newest events and leave the older ones unread.
   part("An unreadable backfill cursor never restarts the Stripe walk");
   const cursor = "evt_Backfill01";
-  for (const [name, reply] of OFF_SHAPES) {
+  // A text that is no event id is just as unread (Claude 4 and Claude 5 on #3446 @f86b21895b): only an event id read
+  // from Stripe is ever written there, so another text is a corrupted cursor, never an absent one.
+  const offCursors: [string, unknown][] = [...OFF_SHAPES, ["a text that is no event id", "garbage"], ["an empty text", ""]];
+  for (const [name, reply] of offCursors) {
     store = await setup();
     timeline = [evt("evt_Backfill02", "cs_Backfill02")];
     const backKey = `${anchorKey()}:back`;

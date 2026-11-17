@@ -24,7 +24,8 @@
  * try it again, knowing it may arrive twice; or end the run.
  *
  *   nl:wf:run:<flowId>:<person>   hash: email, status, step, note, startedAt, updatedAt, open,
- *                                 waits, waitAt ("<step>:<first wait>"), retries (lib/flow-retry.ts)
+ *                                 waits, offLooks (looks while the store was switched off), waitAt
+ *                                 ("<step>:<first wait>"), retries (lib/flow-retry.ts)
  *   nl:wf:log:<flowId>:<person>   list of JSON events, oldest first, at most MAX_RUN_EVENTS
  *   nl:wf:runs:<flowId>           zset: person → last change, every run of the last 400 days
  *                                 (complete, so a person or a store can be erased in full)
@@ -62,6 +63,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_RUN_EVENTS, MAX_STEPS, RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 
@@ -155,6 +157,15 @@ export async function admitRuns(listId: string, limit: number, wanted: number, n
   return admitted;
 }
 
+/**
+ * Gives back `n` places in today's runs taken by admitRuns for starts that were not confirmed queued (lib/flows.ts,
+ * startFlows): not refused, so not counted as such; their start may come again today.
+ */
+export async function giveBackRuns(listId: string, n: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (n <= 0) return;
+  await redisPipeline([["HINCRBY", dayKey(listId, nowSeconds), "started", -n]]).catch(() => {});
+}
+
 /** Moves runs admitted today to refused: the ones that could not start after all (no room for them, lib/flows.ts). */
 export async function refuseRuns(listId: string, n: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
   if (n <= 0) return;
@@ -173,6 +184,31 @@ export async function runsToday(listId: string | null, nowSeconds = Math.floor(D
   } catch {
     return null;
   }
+}
+
+/**
+ * After a first-step queue write whose answer was lost (lib/flows.ts, startFlows), for each person: true only when it
+ * is proven that nothing was queued and the run never moved (no such member in the queue, and the run still at step 0
+ * with no attempt open); false when the step is in the queue or the run moved on, or has no record at all; null when
+ * that cannot be read exactly (CX-123 rule 24). Only true may give the once-only start back: the write may have
+ * landed, and a start given back after its step went out would send that step again (Codex X5 and Codex P on #4307).
+ */
+export async function firstStepNeverQueued(flowId: string, queueKey: string, entries: { email: string; member: string }[]): Promise<(boolean | null)[]> {
+  if (!entries.length) return [];
+  const reply = await redisPipeline(
+    entries.flatMap(({ email, member }) => [["ZSCORE", queueKey, member], ["HMGET", runKey(flowId, personOf(email)), "step", "open"]]),
+  ).catch(() => null);
+  const each = repliesFor(reply, entries.length * 2);
+  return entries.map((_, i) => {
+    if (!each) return null;
+    const score = each[2 * i];
+    const fields = each[2 * i + 1];
+    if (score !== null && typeof score !== "string" && typeof score !== "number") return null;
+    if (!Array.isArray(fields) || fields.length !== 2 || fields.some((value) => value !== null && typeof value !== "string")) return null;
+    if (score !== null) return false;
+    const [step, open] = fields as (string | null)[];
+    return step === "0" && open === null;
+  });
 }
 
 /** Opens a fresh run for each of these people, at the first step. */
@@ -221,28 +257,43 @@ export async function claimAttempts(flowId: string, emails: string[], index: num
 /**
  * Counts one more wait for each of these people at step `index`, and says,
  * for each, how many waits their run has had and since when this step has
- * been waiting (lib/flow-retry.ts decides). Null for anyone whose count could
- * not be read: an unknown count is not room for one more wait.
+ * been waiting (lib/flow-retry.ts decides). `switchedOff` counts a look while
+ * the store is switched off, in its own field (`offLooks`, half a wait each),
+ * and reads the whole waits with it; otherwise a whole wait, read with the
+ * looks. Null for anyone whose count could not be read, the other field
+ * included (rule 24: only a missing field is none): an unknown count is not
+ * room for one more wait.
  */
-export async function countWaits(flowId: string, emails: string[], index: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Map<string, { waits: number; since: number } | null>> {
-  const out = new Map<string, { waits: number; since: number } | null>();
+export async function countWaits(
+  flowId: string,
+  emails: string[],
+  index: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  switchedOff = false,
+): Promise<Map<string, { waits: number; offLooks: number; since: number } | null>> {
+  const out = new Map<string, { waits: number; offLooks: number; since: number } | null>();
   if (!emails.length) return out;
-  const reply = await redisPipeline(emails.flatMap((email) => [["HINCRBY", runKey(flowId, personOf(email)), "waits", 1], ["HGET", runKey(flowId, personOf(email)), "waitAt"]])).catch(() => null);
+  const [counted, other] = switchedOff ? ["offLooks", "waits"] : ["waits", "offLooks"];
+  const reply = await redisPipeline(emails.flatMap((email) => [["HINCRBY", runKey(flowId, personOf(email)), counted, 1], ["HMGET", runKey(flowId, personOf(email)), other, "waitAt"]])).catch(() => null);
   const fresh: (string | number)[][] = [];
   emails.forEach((email, i) => {
-    const waits = Array.isArray(reply) ? reply[2 * i] : null;
-    const at = Array.isArray(reply) ? reply[2 * i + 1] : undefined;
-    if (!Array.isArray(reply) || reply.length !== 2 * emails.length || typeof waits !== "number" || !Number.isSafeInteger(waits) || waits < 1 || (at !== null && typeof at !== "string")) {
+    const added = Array.isArray(reply) ? reply[2 * i] : null;
+    const read = Array.isArray(reply) ? reply[2 * i + 1] : null;
+    const [kept, at] = Array.isArray(read) && read.length === 2 ? read : [undefined, undefined];
+    const keptCount = kept === null ? 0 : typeof kept === "string" && /^(0|[1-9]\d{0,15})$/.test(kept) ? Number(kept) : NaN;
+    if (!Array.isArray(reply) || reply.length !== 2 * emails.length || typeof added !== "number" || !Number.isSafeInteger(added) || added < 1 || !Number.isSafeInteger(keptCount) || (at !== null && typeof at !== "string")) {
       out.set(email, null);
       return;
     }
+    const waits = switchedOff ? keptCount : added;
+    const offLooks = switchedOff ? added : keptCount;
     const [step, since] = typeof at === "string" ? at.split(":").map(Number) : [NaN, NaN];
     if (step === index && Number.isSafeInteger(since) && since > 0) {
-      out.set(email, { waits, since });
+      out.set(email, { waits, offLooks, since });
       return;
     }
     // This step's first wait: its clock starts now.
-    out.set(email, { waits, since: nowSeconds });
+    out.set(email, { waits, offLooks, since: nowSeconds });
     fresh.push(["HSET", runKey(flowId, personOf(email)), "waitAt", `${index}:${nowSeconds}`]);
   });
   if (fresh.length) await redisPipeline(fresh).catch(() => {});
@@ -304,6 +355,35 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
     if (TERMINAL.has(status)) commands.push(["EXPIRE", run, RUN_KEEP_SECONDS], ["EXPIRE", log, RUN_KEEP_SECONDS]);
   }
   await redisPipeline(commands);
+}
+
+/**
+ * Ends as "left" the runs of people the sender left out because they left the list after their row was read, each in
+ * one Redis step and only where the run still holds its own record (its address, written when it opened or at any
+ * earlier step): a person erased meanwhile (forgetWorkflowPerson) took their run with them, and nothing of theirs,
+ * their address least of all, is written back (Claude 7 on #4307). What claimAttempts wrote again after the erasure
+ * (the open attempt and its event, with no address) is deleted in the same step.
+ * KEYS: the run, its history, the workflow's index; ARGV: the address, the time, the event, the lifetime, the person.
+ */
+const LEFT_IF_RUN = `-- marktmorgen:flow-left-if-run:v1
+if redis.call('HEXISTS', KEYS[1], 'email') == 0 then
+  redis.call('DEL', KEYS[1], KEYS[2])
+  return 0
+end
+redis.call('HDEL', KEYS[1], 'open')
+redis.call('RPUSH', KEYS[2], ARGV[3])
+redis.call('HSET', KEYS[1], 'email', ARGV[1], 'status', 'left', 'step', -1, 'note', '', 'updatedAt', ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[2], ARGV[5])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+return 1`;
+
+export async function settleLeftIfRun(flowId: string, index: number, stepId: string, kind: string, emails: string[], note: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (!emails.length) return;
+  await redisPipeline(emails.map((email) => {
+    const person = personOf(email);
+    return ["EVAL", LEFT_IF_RUN, 3, runKey(flowId, person), logKey(flowId, person), indexKey(flowId), normaliseEmail(email), nowSeconds, event({ at: nowSeconds, step: index, stepId, kind, state: "failed", note }), RUN_KEEP_SECONDS, person];
+  }));
 }
 
 /** What happened at a step without an attempt: a condition that did not hold, the goal reached, the run ended. */
@@ -370,8 +450,15 @@ export async function listRuns(flowId: string, limit: number): Promise<RunRecord
   const people = (reply[0] as unknown[]).filter((p): p is string => typeof p === "string" && PERSON_KEY.test(p));
   if (!people.length) return [];
   const rows = await redisPipeline(people.map((person) => ["HGETALL", runKey(flowId, person)])).catch(() => null);
-  if (!replied(rows, people.length)) throw new FlowRunUnavailable();
+  // An off-shape row is unknown, never a run left out of the list (CX-123 rules 24/30, #2861).
+  if (!replied(rows, people.length) || !rows.every(hashReply)) throw new FlowRunUnavailable();
   return people.map((person, i) => parseRun(person, rows[i])).filter((r): r is RunRecord => r !== null);
+}
+
+/** An HGETALL reply in its exact shape: a list of strings in field/value pairs (CX-123 rule 24). */
+function hashReply(raw: unknown): boolean {
+  const slots = stringList(raw);
+  return slots !== null && slots.length % 2 === 0;
 }
 
 /** One run and its history, oldest event first; null when there is no such run. */
@@ -379,7 +466,8 @@ export async function readRun(flowId: string, person: string): Promise<{ run: Ru
   if (!PERSON_KEY.test(person)) return null;
   if (!isRedisConfigured()) throw new FlowRunUnavailable();
   const reply = await redisPipeline([["HGETALL", runKey(flowId, person)], ["LRANGE", logKey(flowId, person), 0, MAX_RUN_EVENTS * 2]]).catch(() => null);
-  if (!replied(reply, 2) || !Array.isArray(reply[1])) throw new FlowRunUnavailable();
+  // An HGETALL slot that is not exactly a list of strings in pairs is unknown, never "no such run" (CX-123 rule 24).
+  if (!replied(reply, 2) || !Array.isArray(reply[1]) || !hashReply(reply[0])) throw new FlowRunUnavailable();
   const run = parseRun(person, reply[0]);
   if (!run) return null;
   return { run, events: (reply[1] as unknown[]).map(parseEvent).filter((e): e is RunEvent => e !== null) };
@@ -445,7 +533,8 @@ export async function runPeople(flowId: string, page = 500): Promise<{ person: s
   for (let i = 0; i < people.length; i += page) {
     const chunk = people.slice(i, i + page);
     const emails = await redisPipeline(chunk.map((person) => ["HGET", runKey(flowId, person), "email"])).catch(() => null);
-    if (!replied(emails, chunk.length)) throw new FlowRunUnavailable();
+    // Exactly nil is "this run holds no address"; any other shape is unknown, so its queued steps are never left behind.
+    if (!replied(emails, chunk.length) || emails.some((email) => email !== null && typeof email !== "string")) throw new FlowRunUnavailable();
     chunk.forEach((person, j) => out.push({ person, email: typeof emails[j] === "string" ? (emails[j] as string) : "" }));
   }
   return out;

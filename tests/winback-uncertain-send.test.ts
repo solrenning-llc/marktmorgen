@@ -41,6 +41,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const lte = Number(url.searchParams.get("created[lte]"));
     return answer({ object: "list", data: events.filter((e) => Number(e.created) >= gte && Number(e.created) <= lte), has_more: false });
   }
+  // The customers of one address (lib/winback-send.ts reads every one of them, audit R43): those set above.
+  if (path === "/customers") return answer({ object: "list", data: [...customers].filter(([, e]) => e === url.searchParams.get("email")).map(([id, email]) => ({ id, object: "customer", email })), has_more: false });
+  if (path === "/customers/search") {
+    const address = (url.searchParams.get("query")?.match(/^email:"([^"]*)"$/)?.[1] ?? "").toLowerCase();
+    return answer({ object: "search_result", data: [...customers].filter(([, e]) => e.toLowerCase() === address).map(([id, email]) => ({ id, object: "customer", email })), has_more: false, next_page: null });
+  }
   const customer = path.match(/^\/customers\/(cus_\w+)$/);
   if (customer) return answer({ id: customer[1], email: customers.get(customer[1]) ?? null });
   if (path === "/subscriptions") return answer({ object: "list", data: [], has_more: false });

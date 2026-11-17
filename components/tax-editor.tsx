@@ -6,6 +6,8 @@ import { toast } from "@/components/toast";
 import type { TaxSetting } from "@/lib/tax";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import Link from "next/link";
+import { useStudioHref } from "@/components/studio-store-pin";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -38,6 +40,7 @@ export function TaxEditor({
 }) {
   const ready = useSyncExternalStore(subscribeToReadiness, clientReady, serverReady);
   const router = useRouter();
+  const studioHref = useStudioHref();
   const [enabled, setEnabled] = useState(tax.enabled);
   const [included, setIncluded] = useState(tax.included);
   const [ids, setIds] = useState(tax.ids);
@@ -110,6 +113,12 @@ export function TaxEditor({
             ) : (
               <span className="text-ink-soft">Stripe could not be asked about your tax setup just now.</span>
             )}
+          </p>
+          {/* The page that reads where the account collects tax (655 [WG15], app/studio/tax/page.tsx). */}
+          <p className="text-sm">
+            <Link href={studioHref("/studio/tax")} className="link inline-flex min-h-11 items-center font-semibold">
+              See where you are registered to collect tax
+            </Link>
           </p>
 
           <label className="flex items-start gap-3 text-sm font-semibold text-ink">

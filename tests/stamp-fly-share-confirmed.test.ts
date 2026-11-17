@@ -23,7 +23,8 @@ type Command = (string | number)[];
 const pipeline = redis.pipeline.bind(redis);
 let refuseShareAdd: "throw" | "odd" | null = null;
 redis.pipeline = (async (commands: Command[]) => {
-  const adds = commands.some((c) => c[0] === "HINCRBY" && String(c[2]).includes(":f:") && Number(c[3]) > 0);
+  // The share's add: a plain HINCRBY before, the token's hold script since Codex X4's MEDIUM on #3899.
+  const adds = commands.some((c) => (c[0] === "HINCRBY" && String(c[2]).includes(":f:") && Number(c[3]) > 0) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fly-share-hold:v1\n")));
   if (adds && refuseShareAdd === "throw") throw new Error("synthetic: the share's write refused before it was applied");
   if (adds && refuseShareAdd === "odd") return commands.map(() => "QUEUED");
   return pipeline(commands);

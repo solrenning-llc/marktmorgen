@@ -33,7 +33,7 @@
  * (lib/visit.ts). Every one of those is in the creator's favor, which is
  * the way round a figure that is billed from has to err.
  */
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { headers } from "next/headers";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
@@ -332,9 +332,10 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
   if (share === "unknown" || (share !== null && share.spent)) return false;
   if (!(await takePublic(store, who, now, units, true, true))) return false;
   // The copy goes ahead only once its share holds it too, read in its exact shape (Codex X8's MEDIUM on #3899): an add
-  // refused or answered otherwise gives the window's hold back and refuses, so no give-back later subtracts from a
-  // share that never held it, and no credit below zero is left for the next copies.
-  if (share !== null && !(await moveShare(share, units).catch(() => false))) {
+  // refused, or answered otherwise and not found in place by its token, gives the window's hold back and refuses, so
+  // no give-back later subtracts from a share that never held it, no credit below zero is left for the next copies,
+  // and no share is left debited for a copy that was not made (Codex C2's and X4's MEDIUM on #3899).
+  if (share !== null && !(await holdShare(share, units))) {
     await movePublicRequests(store, -units, now);
     return false;
   }
@@ -342,10 +343,66 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
 }
 
 /**
+ * A connection's share of copies taken for one hold, under the hold's own token (Codex C2's and X4's MEDIUM on #3899):
+ * the token's field is written first, and only when it is not there, so one hold is never added twice and a hold
+ * fenced by FLY_SHARE_SETTLE never lands after it; then the share's count, then its expiry. Answers the share's count,
+ * or -1 when the token was already there (nothing added). KEYS: the share's hash; ARGV: the share's field, the token's
+ * field, the hold's units, the share's expiry in seconds.
+ */
+const FLY_SHARE_HOLD = `-- marktmorgen:fly-share-hold:v1
+if redis.call('HSETNX', KEYS[1], ARGV[2], ARGV[3]) == 0 then return -1 end
+local n = redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return n`;
+
+/**
+ * A hold whose reply was lost or came in another shape, settled by its token alone: 1 when the token holds the hold's
+ * units (the hold is in place); 0 when no token is there, which is then written as "~" with the share's expiry, so the
+ * hold can never land after it; -1 for anything else (nothing written). KEYS: the share's hash; ARGV: the token's
+ * field, the hold's units, the share's expiry in seconds.
+ */
+const FLY_SHARE_SETTLE = `-- marktmorgen:fly-share-settle:v1
+local held = redis.call('HGET', KEYS[1], ARGV[1])
+if held == ARGV[2] then return 1 end
+if held then return -1 end
+redis.call('HSET', KEYS[1], ARGV[1], '~')
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return 0`;
+
+/** One script's reply read in its exact shape: a single whole number (CX-123 rule 24); null for anything else. */
+function oneWhole(replies: unknown): number | null {
+  const reply = repliesFor(replies, 1)?.[0];
+  return typeof reply === "number" && Number.isSafeInteger(reply) ? reply : null;
+}
+
+/**
+ * Adds a hold of `units` to the connection's share of copies (FLY_SHARE_HOLD). True only when the share holds it: its
+ * count answered in its exact shape, at least `units`; or, when that reply is lost or in another shape, the hold found
+ * in place by its token (FLY_SHARE_SETTLE). False when the hold was not added (then fenced, so it never lands later)
+ * and when the settling cannot be read either: a copy is never made on an unknown, and nothing is given back from a
+ * share that may not hold it.
+ */
+async function holdShare(share: ConnectionShare, units: number): Promise<boolean> {
+  if (!Number.isSafeInteger(units) || units < 1) return false;
+  const token = `${share.day}:h:${randomBytes(8).toString("hex")}`;
+  try {
+    const count = oneWhole(await redisPipeline([["EVAL", FLY_SHARE_HOLD, 1, share.key, share.field, token, units, share.keep]]));
+    if (count !== null && count >= units) return true;
+  } catch {
+    // The reply was lost: the hold may be in place or not, which only its token tells.
+  }
+  try {
+    return oneWhole(await redisPipeline([["EVAL", FLY_SHARE_SETTLE, 1, share.key, token, units, share.keep]])) === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The asking connection's share of the day for copies made on the fly in this store's window, read now (the same size
  * as its share for pages, clientDayShare): null outside a request; "unknown" when it cannot be read.
  */
-type ConnectionShare = { key: string; field: string; keep: number; spent: boolean };
+type ConnectionShare = { key: string; field: string; day: string; keep: number; spent: boolean };
 
 async function connectionShare(store: Store, now: number): Promise<ConnectionShare | null | "unknown"> {
   if (!isRedisConfigured()) return "unknown";
@@ -364,7 +421,7 @@ async function connectionShare(store: Store, now: number): Promise<ConnectionSha
     const raw = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
     if (raw !== null && (typeof raw !== "string" || !/^-?\d{1,15}$/.test(raw))) return "unknown";
     const spent = (raw === null ? 0 : Number(raw)) >= clientDayShare(requestLimitFor(store, now / 1000));
-    return { key, field, keep: keepSecondsFor(window, now), spent };
+    return { key, field, day, keep: keepSecondsFor(window, now), spent };
   } catch {
     return "unknown";
   }
@@ -372,7 +429,8 @@ async function connectionShare(store: Store, now: number): Promise<ConnectionSha
 
 /**
  * One HINCRBY on a connection's share (a give-back below zero), with the share's expiry. True only when both answered
- * in their exact shape: a whole count, at least `by` for an add, and 1 for the expiry (CX-123 rule 24).
+ * in their exact shape: a whole count, at least `by` for an add, and 1 for the expiry (CX-123 rule 24). A hold is added
+ * by holdShare, under its token; this gives back what a confirmed hold did not use.
  */
 async function moveShare(share: ConnectionShare, by: number): Promise<boolean> {
   if (!Number.isSafeInteger(by) || by === 0) return true;

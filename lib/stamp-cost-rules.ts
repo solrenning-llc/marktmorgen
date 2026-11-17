@@ -31,6 +31,14 @@ export const NO_ROOM_NOTE_SECONDS = 60 * 60;
 export const FLY_HOLD_SECONDS = 60;
 /** Public requests the held function, its commands and the note it reads are counted as on every copy made on the fly. */
 export const FLY_BASE_UNITS = 7;
+/**
+ * Redis commands a copy made on the fly sends on its connection's share of copies (lib/traffic.ts), each counted at its
+ * most as if all ran: the share read before the hold; the hold's script (FLY_SHARE_HOLD), one command and its three
+ * calls; the settling of a reply lost or in another shape (FLY_SHARE_SETTLE), one and its three at the most; and the
+ * give-back of what was not used, the share read again with its HINCRBY and EXPIRE. Upstash bills a script as one
+ * command plus every redis.call it runs. Counted in the held function's part (FLY_BASE, tests/plan-cost-registry.ts).
+ */
+export const FLY_SHARE_COMMANDS = 1 + (1 + 3) + (1 + 3) + 3;
 /** Milliseconds of CPU one public request pays for on a copy made on the fly. */
 export const FLY_CPU_MS_PER_UNIT = 1_500;
 /**

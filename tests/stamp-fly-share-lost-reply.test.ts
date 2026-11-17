@@ -9,9 +9,10 @@
  * Now each hold on the share carries its own token, and a reply that is lost or in another shape is settled by that
  * token alone: a hold found in place is confirmed and the copy goes ahead; a hold found absent is fenced, so it can
  * never land later, and refused with the window given back; a settling that cannot be read either is refused (no
- * copy is made on an unknown). Synthetic Redis; nothing is reached.
+ * copy is made on an unknown). An add that lands after it was settled as absent is not counted. What all of it sends on
+ * the share stays inside FLY_SHARE_COMMANDS (lib/stamp-cost-rules.ts). Synthetic Redis; nothing is reached.
  */
-import { flyHoldUnits } from "@/lib/stamp-cost-rules";
+import { FLY_SHARE_COMMANDS, flyHoldUnits } from "@/lib/stamp-cost-rules";
 import { givePublicRequests, holdPublicRequests } from "@/lib/traffic";
 import { clientDayShare, requestLimitFor } from "@/lib/traffic-rules";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -48,13 +49,33 @@ async function shareTotal(window: string, counter: string): Promise<{ sum: numbe
 
 /**
  * Losing replies: "add" loses the reply of the pipeline that raised a share of copies (it is applied first, then the
- * reply throws); "all" also loses every reply after it in this hold, so nothing the hold sends next can be read.
+ * reply throws); "all" also loses every reply after it in this hold, so nothing the hold sends next can be read;
+ * "late" keeps the share's add back and throws, as a request still on its way, for the test to deliver afterwards.
  */
-let lose: "add" | "all" | null = null;
+let lose: "add" | "all" | "late" | null = null;
 let lost = false;
+let late: Command[][] = [];
 let windowId = "";
 let counterKey = "";
+/** Commands sent on a connection's share (its key's family), each script counted with the calls it ran. */
+let shareCommands = 0;
+const onShare = (c: Command) => String(c[0] === "EVAL" ? c[3] : c[1]).startsWith("nl:traffic:c:");
+const addsShare = (c: Command) => onShare(c) && ((c[0] === "HINCRBY" && String(c[2]).includes(":f:") && Number(c[3]) > 0) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fly-share-hold:")));
 redis.pipeline = (async (commands: Command[]) => {
+  const calls = redis.scriptCalls;
+  try {
+    return await sent(commands);
+  } finally {
+    if (commands.some(onShare)) shareCommands += commands.filter(onShare).length + (redis.scriptCalls - calls);
+  }
+}) as typeof redis.pipeline;
+
+async function sent(commands: Command[]): Promise<unknown[]> {
+  if (lose === "late" && !lost && commands.some(addsShare)) {
+    lost = true;
+    late.push(commands);
+    throw new Error("synthetic: the share's add is still on its way");
+  }
   if (lose === "all" && lost) {
     await pipeline(commands);
     throw new Error("synthetic: the reply was lost after Redis applied the commands");
@@ -67,7 +88,7 @@ redis.pipeline = (async (commands: Command[]) => {
     throw new Error("synthetic: the share's add was applied, then its reply was lost");
   }
   return replies;
-}) as typeof redis.pipeline;
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -97,6 +118,7 @@ async function main(): Promise<void> {
     const shareBefore = (await share()).sum;
     lose = "add";
     lost = false;
+    shareCommands = 0;
     const held = await holdPublicRequests(store, big, now, "buyer", { shared: true });
     lose = null;
     is("the add was applied and its reply lost (the scenario took place)", lost, true);
@@ -104,6 +126,7 @@ async function main(): Promise<void> {
       // Confirmed by its token: the copy goes ahead, and settles as any other.
       is("held: the window counts the hold", (await windowCount()) - windowBefore, big);
       await givePublicRequests(store, big - used, now, { shared: true });
+      is(`what it sent on the share, given back included, stays inside FLY_SHARE_COMMANDS (${FLY_SHARE_COMMANDS})`, shareCommands > 0 && shareCommands <= FLY_SHARE_COMMANDS, true);
       is("the window counts what the copy used", (await windowCount()) - windowBefore, used);
       is("and so does the connection's share", (await share()).sum - shareBefore, used);
     } else {
@@ -120,6 +143,29 @@ async function main(): Promise<void> {
     is("held", held, true);
     if (held) await givePublicRequests(store, next - used, now, { shared: true });
     is("no share is left below zero", (await share()).negative, false);
+  }
+
+  part("An add still on its way when the hold is settled never lands on the share");
+  {
+    answering(new Request(`https://marktmorgen.com/@${HANDLE}/download`, { headers: { "x-forwarded-for": "203.0.113.93" } }));
+    const windowBefore = await windowCount();
+    const shareBefore = (await share()).sum;
+    lose = "late";
+    lost = false;
+    late = [];
+    shareCommands = 0;
+    const held = await holdPublicRequests(store, big, now, "buyer", { shared: true });
+    lose = null;
+    is("the add was kept back (the scenario took place)", lost && late.length === 1, true);
+    is("the copy is refused", held, false);
+    is("what it sent on the share stays inside FLY_SHARE_COMMANDS", shareCommands > 0 && shareCommands <= FLY_SHARE_COMMANDS, true);
+    is("the window is given back", await windowCount(), windowBefore);
+    for (const commands of late) await pipeline(commands);
+    is("the add delivered afterwards does not raise the share", (await share()).sum, shareBefore);
+    const next = flyHoldUnits(20 * MB);
+    const again = await holdPublicRequests(store, next, now, "buyer", { shared: true });
+    is("and the connection's next copy is held", again, true);
+    if (again) await givePublicRequests(store, next - used, now, { shared: true });
   }
 
   part("Nothing after the add can be read either: the copy is refused, never made on an unknown");

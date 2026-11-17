@@ -51,7 +51,8 @@ import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
-import { readPaid, stillPending } from "@/lib/paypal-sales";
+import { PENDING_GIVE_UP_SECONDS, canceledFor, readPaid, stillPending } from "@/lib/paypal-sales";
+import { paypalCancelWords } from "@/lib/buyer-words/paypal-cancel";
 import { paypalHandedOver } from "@/lib/paypal-handed";
 import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
@@ -77,7 +78,8 @@ import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
-import { speech } from "@/lib/buyer-words";
+import { everyPhrase, speech } from "@/lib/buyer-words";
+import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
@@ -116,6 +118,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   declined: { always: true },
   failed: { always: false },
   checking: { always: false },
+  busy: { always: true },
   unavailable: { always: true },
   changed: { always: true },
 };
@@ -632,6 +635,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const ended = order.state === "paid" && order.membership === "ended";
   // The creator's own note after paying, read only for a product that has one (lib/thanks-note.ts).
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
+  // How often a membership charges as it was bought, read from the order: a monthly one may have been paid yearly
+  // (lib/yearly-price.ts), and one charged every few months is said so, "every 3 months" (609 [WP8]), even if the
+  // product changed while the checkout was open.
+  const paidAs = order.state === "paid" && order.product.recurring ? paidEveryOf((order.record.metadata ?? {}) as Record<string, string>, order.product.recurring) : null;
+  const paidPhrase = paidAs ? everyPhrase(store, paidAs.interval, paidAs.count) : speech(store).w.every("month");
   // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
   // The first charge after a free trial or a move, as the checkout made it: the year's price when paid yearly.
@@ -842,9 +850,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                               money(introPaid.cents, order.currency),
                               introPaid.count,
                               order.product.recurring.interval,
-                              t.priceEvery(money(introPaid.regular, order.currency), speech(store).w.every(paidEvery)),
+                              t.priceEvery(money(introPaid.regular, order.currency), paidPhrase),
                             )
-                          : t.priceEvery(money(order.amount, order.currency), speech(store).w.every(paidEvery))
+                          : t.priceEvery(money(order.amount, order.currency), paidPhrase)
                         : order.plan
                           ? t.priceToday(money(order.amount, order.currency))
                           : money(order.amount, order.currency),
@@ -900,8 +908,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {canManage(store) ? (
                     <>
                       {order.endsAfter > 0
-                        ? t.renewsForSelf(speech(store).w.every(paidEvery), order.endsAfter)
-                        : t.renewsUntilSelf(speech(store).w.every(paidEvery))}
+                        ? t.renewsForSelf(paidPhrase, order.endsAfter)
+                        : t.renewsUntilSelf(paidPhrase)}
                       <Link href={`/@${store.handle}/manage`} className="font-semibold underline underline-offset-4">
                         {t.manageMembership}
                       </Link>
@@ -909,8 +917,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     </>
                   ) : (
                     order.endsAfter > 0
-                      ? t.renewsForReply(speech(store).w.every(paidEvery), order.endsAfter, store.name)
-                      : t.renewsUntilReply(speech(store).w.every(paidEvery), store.name)
+                      ? t.renewsForReply(paidPhrase, order.endsAfter, store.name)
+                      : t.renewsUntilReply(paidPhrase, store.name)
                   )}
                 </p>
               ) : null}
@@ -1493,6 +1501,15 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
           return false;
         })
       : false;
+  // Canceled because PayPal never confirmed the payment (lib/paypal-sales.ts, cancelOrder): said so, also to a buyer
+  // PayPal gave no address for. A mark that cannot be read is unknown, never "not found".
+  const canceled =
+    !ours && allowed && !unread && !waiting
+      ? await canceledFor(store, order).catch(() => {
+          unread = true;
+          return null;
+        })
+      : null;
   const fresh = ours ? saleClock() - ours.at < DOWNLOAD_WINDOW_SECONDS : false;
   const link = ours && delivered && fresh ? await ordersLinkFor(store, ours.email, storeBase(store)).catch(() => null) : null;
   const t = thanksWords(store.language);
@@ -1560,6 +1577,12 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             <>
               <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{t.ppCouldNotCheck}</h1>
               <p className="st-muted mt-4">{t.ppCouldNotCheckBody}</p>
+            </>
+          ) : canceled ? (
+            <>
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{paypalCancelWords(store.language).heading}</h1>
+              <p className="st-muted mt-4">{paypalCancelWords(store.language).pageBody(Math.round(PENDING_GIVE_UP_SECONDS / 86_400))}</p>
+              <p className="st-muted mt-3">{canceled.charged === "none" ? paypalCancelWords(store.language).notCharged : paypalCancelWords(store.language).pagePending(store.name)}</p>
             </>
           ) : waiting ? (
             <>

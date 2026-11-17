@@ -50,6 +50,11 @@ export type MemberSub = {
   amount: number;
   currency: string;
   interval: string;
+  /**
+   * How many of those one renewal covers, as Stripe bills it (interval_count, 609 [WP8]): 3 with "month" is every 3
+   * months. 1 when Stripe sends none; null when it sends one out of shape, so nothing is said rather than a guess.
+   */
+  every: number | null;
   /** Whether a discount already comes off it. */
   discounted: boolean;
 };
@@ -119,6 +124,7 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
     amount: price.unit_amount,
     currency: price.currency,
     interval: recurring.interval,
+    every: recurring.interval_count === undefined || recurring.interval_count === null ? 1 : typeof recurring.interval_count === "number" && Number.isSafeInteger(recurring.interval_count) && recurring.interval_count >= 1 ? recurring.interval_count : null,
     discounted: hasDiscount(sub),
   };
 }
@@ -190,8 +196,12 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   if (code.state === "error") return { ok: false, reason: "stripe" };
   if (code.state === "none" || !code.active) return { ok: false, reason: "code" };
   try {
-    const changed = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
-    if (!changed || !Object.hasOwn(changed, "id") || changed.id !== subscription) return { ok: false, reason: "stripe" };
+    const row = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    // Applied only on Stripe's answer for this membership, its own id, showing a discount on it (rule 30, DISC-C-3):
+    // any other answer is not known to have put it on, so the creator is never told the renewals are discounted.
+    if (!row || !Object.hasOwn(row, "id") || row.id !== subscription) return { ok: false, reason: "stripe" };
+    // Read as the member list reads it (hasDiscount): a discount that does not read throws, and is "stripe" below.
+    if (!hasDiscount(row)) return { ok: false, reason: "stripe" };
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.

@@ -2196,7 +2196,9 @@ export async function closeStoreRecord(
       ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
       { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
-      ...[owner, beforeMoveKeyOf(owner), ...extraKeys].map((key) => ({ op: "DEL", key, words: [] })),
+      // The record is the very last change, so it goes in the last step even when the changes take more than one
+      // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
+      ...[beforeMoveKeyOf(owner), ...extraKeys, owner].map((key) => ({ op: "DEL", key, words: [] })),
     ];
     if (!(await applyIfHeld(held, changes))) throw new StoreBusyError();
     return true;

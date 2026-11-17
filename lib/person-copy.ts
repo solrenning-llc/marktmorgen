@@ -182,6 +182,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
   "lib/imports.ts": { how: "copied", what: "Rows of a file the store imported from another platform that name you, kept 14 days from the import, and whether an email to you from that import still waits" },
   "lib/webhooks.ts": { how: "copied", what: "What the store's own systems were sent about you by its webhooks, kept for a week as they received it" },
+  "lib/lesson-play.ts": { how: "passing", days: 1, what: "Which lesson video you pressed Play on and the player it got, kept for at most half an hour so a reload or another lesson does not hold the store's video time again" },
   "lib/letter-access.ts": { how: "passing", days: 1, what: "A link to read a members' email that you asked for works for an hour; how often a link was asked for is counted by a one-way code, for an hour" },
   "lib/free.ts": { how: "passing", days: 1, what: "How often your address asked for free products, counted by a one-way code, for an hour" },
   "lib/buyer-orders.ts": { how: "passing", days: 1, what: "A link to your purchases that was emailed to you works for 24 hours" },

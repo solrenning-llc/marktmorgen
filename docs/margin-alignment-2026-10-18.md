@@ -18,7 +18,7 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.89 | $31.89 | $5.41 | 9.95% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $91.26 | $313.62 | $52.77 | 9.71% | $1.00 | positive | no |
+| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $91.27 | $313.61 | $52.77 | 9.71% | $1.00 | positive | no |
 | Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $26.63 | $229.51 | $41.43 | 11.71% | $0.25 | positive | no |
 | Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $303.76 | $2,270.20 | $407.49 | 11.52% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $55.45 | $514.21 | $93.19 | 11.84% | $0.25 | positive | no |

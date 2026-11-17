@@ -203,7 +203,7 @@ async function main(): Promise<void> {
     CURRENCIES.map((c) => keptWith(`Recipe pack for ${c.code.toUpperCase()} 40`).length),
     CURRENCIES.map(() => 0),
   );
-  const fine = ["Ganache Basics", "Weekend Bake Plan", "40 recipes for home bakers", "A 40 day starter plan", "Bake one loaf a day"];
+  const fine = ["Ganache Basics", "Weekend Bake Plan", "40 recipes for home bakers", "A 40 recipe starter plan", "Bake one loaf a day"];
   is("ideas with none of it are still shown", fine.map((t) => keptWith(t).length), fine.map(() => 1));
   // Focal review of #3441 (Claude 2, LEVE A): earnings wordings that were still shown, and honest product names that were refused.
   const earnings = [
@@ -223,8 +223,11 @@ async function main(): Promise<void> {
     "Recipe pack for 40 pesos",
   ];
   is("earnings in other words: never shown", earnings.map((t) => [t, keptWith(t).length]), earnings.map((t) => [t, 0]));
-  const honest = ["Pay-what-you-want sourdough guide", "Paid newsletter starter kit", "Sales page templates for bakers", "Treino com pesos livres", "A 40 week bread journal"];
+  const honest = ["Pay-what-you-want sourdough guide", "Paid newsletter starter kit", "Sales page templates for bakers", "Treino com pesos livres", "A 40 recipe bread journal"];
   is("product names that only name a way to sell or a thing: still shown", honest.map((t) => [t, keptWith(t).length]), honest.map((t) => [t, 1]));
+  // Main's rule since #3484 (heldToFacts): a count that names what it counts is held only by a fact counting the same
+  // thing. The store wrote 40 recipes, never 40 days or weeks, so an idea that says so is not shown.
+  is("a number the store wrote, counting another thing: never shown", ["A 40 week bread journal", "A 40 day starter plan"].map((t) => keptWith(t).length), [0, 0]);
   is(
     "a money figure, a percentage, earnings, a guarantee, urgency, a deal, a link or a number the store never wrote: never shown",
     refused.map((title) => kept([idea(title)]).length),

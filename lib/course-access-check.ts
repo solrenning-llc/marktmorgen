@@ -34,6 +34,8 @@ export type LessonCaptionCheck = {
   elsewhere: CheckedLesson[];
   /** Every lesson video is ready and has captions. */
   done: boolean;
+  /** The captions, or those being written by AI, could not be read (rule 24): nothing above is known. */
+  unknown?: true;
 };
 
 /**
@@ -48,13 +50,15 @@ export function captionsAnchor(lessonId: string): string {
 export function lessonCaptionCheck(
   course: Course,
   states: Record<string, StreamState>,
-  captions: Record<string, CaptionTrack[]>,
-  writing: Record<string, string[]>,
+  captions: Record<string, CaptionTrack[]> | null,
+  writing: Record<string, string[]> | null,
 ): LessonCaptionCheck | null {
   const videos = course.modules.flatMap((unit, m) =>
     unit.lessons.flatMap((lesson, l) => (lesson.video ? [{ id: lesson.id, title: lesson.title, module: m + 1, lesson: l + 1, path: lesson.video.pathname }] : [])),
   );
   if (!videos.length) return null;
+  // Null is a read that failed (rule 24): never "no captions", which would point at paid AI captions for nothing.
+  if (captions === null || writing === null) return { missing: [], writing: 0, notReady: 0, elsewhere: [], done: false, unknown: true };
   const missing: CheckedLesson[] = [];
   const elsewhere: CheckedLesson[] = [];
   let beingWritten = 0;

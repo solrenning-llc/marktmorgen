@@ -45,6 +45,14 @@ export const setMemberToken = async (_community: string, member: Member, token: 
   return record.t;
 };
 export const holdsTicket = async () => true;
+/** Who may see a gated space (lib/community-access.ts maySeeSpace): everybody unless a test says otherwise. */
+export let seesSpace: (email: string) => boolean = () => true;
+export const setSeesSpace = (rule: (email: string) => boolean) => { seesSpace = rule; };
+export const maySeeSpace = async (_store: unknown, _config: unknown, _space: unknown, viewer: { email: string }) => seesSpace(viewer.email);
+/** The post an announcement is about, for a send queued before it kept its space (lib/community.ts readPost). */
+export let postSpace: string | null = null;
+export const setPostSpace = (space: string | null) => { postSpace = space; };
+export const readPost = async (_community: string, post: string) => (postSpace === null ? null : { id: post, sp: postSpace });
 export const askingAgainWontTell = () => false;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
@@ -72,6 +80,7 @@ export const sendBatchOutcome = async (messages: unknown[]) => { sent.push(messa
 export const BATCH_SIZE = 100;
 export const CHECKED_BATCH_SIZE = 25;
 export const SENDER_WAIT_NOTE = "Waiting for the sender.";
+export const SENDER_RETRY_NOTE = "Paused for a moment: the service that sends our email did not take this batch just now. It is tried again by itself.";
 export const canWrite = () => true;
 export const fromLine = () => "Synthetic <sender@example.com>";
 export const storeSender = fromLine;
@@ -88,5 +97,5 @@ export const orderWrite = async (_owner: unknown, commands: (string | number)[][
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; reserved.length = 0; released.length = 0; tokenWriteFails = false; rsvpUnknown = false; batchAnswer = "sent";
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; reserved.length = 0; released.length = 0; tokenWriteFails = false; rsvpUnknown = false; batchAnswer = "sent"; seesSpace = () => true; postSpace = null;
 }

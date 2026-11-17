@@ -61,7 +61,9 @@ async function main(): Promise<void> {
   setBatchAnswer("uncertain");
   let last: AnnouncementJob | null = null;
   for (let i = 0; i < 5; i += 1) last = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
-  is("five unknown answers: the batch is counted once, not five times", [held(), last?.status], [2, "failed"]);
+  // Merge of main into #4073 (17 November 2026, Claude 1 cloud c1-conflitos-7): main's outage drill ends a job only on a
+  // refusal (lib/community-mail.ts), so after five unknown answers the email is still waiting, never abandoned.
+  is("five unknown answers: the batch is counted once, not five times, and still waits", [held(), last?.status], [2, "sending"]);
 
   // A later answer that says nothing went cannot prove the first did not: the count stays, never given back.
   seed();

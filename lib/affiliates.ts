@@ -2544,8 +2544,17 @@ export async function attributedAffiliate(
 /** The share an offer after paying earns the affiliate the order came through. */
 export async function funnelRate(store: Store, affId: string, productId: string): Promise<number> {
   if (!affiliatesOn(store)) return 0;
-  const affiliate = await readAffiliate(store, affId);
-  if (affiliate?.status !== "approved") return 0;
+  // An id that cannot name an affiliate, or a store with no records, has none: nothing to read.
+  if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(affId)) return 0;
+  // Read exactly (rule 24; Claude 1's MEDIUM on #2897): this share is charged on at once and cannot be added later,
+  // so only Redis's own "none" (null) is no affiliate. A reply of another shape, or text that does not read as a
+  // record, throws before the offer is claimed or charged, never charged without the affiliate's share.
+  const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), affId]]), 1);
+  if (!reply) throw new UnknownReplyError("an affiliate's record for an offer's share (HGET)");
+  if (reply[0] === null) return 0;
+  const affiliate = parseAffiliate(reply[0]);
+  if (!affiliate) throw new UnknownReplyError("an affiliate's record for an offer's share, unreadable");
+  if (affiliate.status !== "approved") return 0;
   return commissionRate(store.affiliates, productId, affiliate.rate);
 }
 
@@ -2657,7 +2666,7 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
     // Not for a person deleted at their own request (lib/paypal-delivery.ts): the bond names them, the referral does not.
-    if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
+    if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule, paid.at).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
 }
 
@@ -2940,7 +2949,7 @@ export async function noteSession(
   // after the sale, so a bond that fails costs a future commission rather than
   // one already earned (lib/affiliate-bond.ts).
   if (buyer) {
-    await rememberBuyer(store, buyer, aff, store.affiliates.rule).catch((error) =>
+    await rememberBuyer(store, buyer, aff, store.affiliates.rule, at).catch((error) =>
       console.error("remembering an affiliate's buyer failed", error),
     );
   }

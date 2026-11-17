@@ -979,8 +979,16 @@ async function main(): Promise<void> {
   const sesFirst = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
   amazonLosesReply = () => null;
   const sesSecond = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
-  is("Amazon's lost answer is not the outcome a caller may keep one count for",
-    [sesFirst, sesSecond, amazon.filter((m) => m.to === "probe-twice@example.com").length], ["unconfirmed", "sent", 2]);
+  // Merge of main into #4073 (17 November 2026, Claude 1 cloud c1-conflitos-7): main's possibly-taken mark (lib/ses.ts
+  // markMaybe, kept two days at most) keeps the retry from writing to Amazon again while it lasts. A provider that is
+  // down keeps the email waiting with no end (lib/community-mail.ts), so the retry can come after the mark is gone and
+  // write to Amazon again: the lost answer still never excuses a second count.
+  is("Amazon's lost answer is not the outcome a caller may keep one count for; while the mark lasts, Amazon is not written to again",
+    [sesFirst, sesSecond, amazon.filter((m) => m.to === "probe-twice@example.com").length], ["unconfirmed", "sent", 1]);
+  for (const key of redis.keys()) if (key.startsWith("nl:ses:maybe:")) redis.run(["DEL", key]);
+  const sesThird = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
+  is("past the mark, the same email is posted to Amazon again, so it is counted again",
+    [sesThird, amazon.filter((m) => m.to === "probe-twice@example.com").length], ["sent", 2]);
   part("Control: Resend's answer not known (5xx, 408 or none) is the outcome a caller keeps one count for; tried again, written once");
   for (const loss of [503, 408, "throw"] as const) {
     account = approved({ ProductionAccessEnabled: false }); askAgain(); clear();

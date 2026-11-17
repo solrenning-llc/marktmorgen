@@ -142,7 +142,11 @@ async function refundedOn(invoice: Invoice): Promise<number> {
       if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string") {
         throw new UnknownReplyError("invite credits: a refund");
       }
+      // Only Stripe's known refund states are read (issue #4424): succeeded, pending and requires_action took or are
+      // taking the money back; failed and canceled did not. Any other status does not tell whether the money went
+      // back, so it is unknown, not "no refund": the store fails this run and no credit is written.
       if (status === "succeeded" || status === "pending" || status === "requires_action") total += amount;
+      else if (status !== "failed" && status !== "canceled") throw new UnknownReplyError("invite credits: a refund status");
     }
   }
   return total;
@@ -406,7 +410,13 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
       "metadata[nimbus_invite_credit]": id,
     });
     const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, `nimbus-invite-${id}`);
-    txn = typeof made.id === "string" ? made.id : "";
+    // Done only on a receipt (issue #4422): Stripe answers a created balance transaction with its `cbtxn_` id. A reply
+    // without one does not show the credit landed, so it throws: the credit stays owed and on the owed list, and the
+    // next run reads the history again and, if it is still not there, sends with the same idempotency key.
+    if (typeof made.id !== "string" || !made.id.startsWith("cbtxn_") || made.id.length <= "cbtxn_".length) {
+      throw new UnknownReplyError(`invite credits: the receipt for ${id}`);
+    }
+    txn = made.id;
     known.set(id, txn);
   }
   await redisPipeline([

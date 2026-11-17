@@ -147,6 +147,26 @@ async function main() {
     is(`reply ${shown(reply)}: one email in all`, emails.filter((to) => to.startsWith(id)).length, 1);
   }
 
+  part("an unreadable answer about a mark from before the plan was in the key sends nothing and counts nothing");
+  for (const [i, reply] of ([[], [undefined], ["unconfirmed"], ["1"]] as unknown[][]).entries()) {
+    const id = `sub_noticeleg${i}`;
+    const at = TODAY + 30 * DAY + (16 + i) * 3600;
+    subscriptions = [yearly(id, at)];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const legacy = commands.length === 1 && commands[0][0] === "EXISTS" && String(commands[0][1]).startsWith("nl:remind:");
+      return legacy ? [...reply] : original.call(redis, commands);
+    }) as typeof redis.pipeline;
+    let odd: Awaited<ReturnType<typeof sendReminders>>;
+    try {
+      odd = await sendReminders(NOW);
+    } finally {
+      redis.pipeline = original;
+    }
+    is(`reply ${shown(reply)}: nothing sent, counted as unknown`, [odd.sent, odd.unknown, odd.missed], [0, 1, 0]);
+    const next = await sendReminders(NOW + 3600);
+    is(`reply ${shown(reply)}: the next run sends it once`, [next.sent, next.unknown, emails.filter((to) => to.startsWith(id)).length], [1, 0, 1]);
+  }
+
   part("controls: a proven nil, and an answer lost on a write that landed");
   const controls: unknown[] = [];
   {

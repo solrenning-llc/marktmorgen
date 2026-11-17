@@ -11,6 +11,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue } from "@/lib/claim-mark";
+import { repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -370,6 +371,34 @@ export async function sendFailedPlanNotices(): Promise<{
 }
 
 /**
+ * The mark of a charge's notice: once per charge, by its date and the plan and
+ * amount it charges. A switch inside a trial keeps the trial's end, and one
+ * between plans of the same interval keeps the period's end, so the date alone
+ * would let the notice about the plan left stand for a charge of another
+ * amount.
+ */
+function reminderKey(reminder: Reminder): string {
+  return `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}:${reminder.tier}:${reminder.cycle}:${reminder.amountCents}`;
+}
+
+/**
+ * A mark from before the plan and amount were in the key (the kind, the
+ * subscription and the charge's date only), read exactly (rule 24): "taken" when it is there,
+ * so the charge was already warned of; "free" only on a proven absence;
+ * anything else is unknown, and nothing is sent or counted on it.
+ */
+async function legacyMark(reminder: Reminder): Promise<"free" | "taken" | "unknown"> {
+  try {
+    const held = repliesFor(await redisPipeline([["EXISTS", `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`]]), 1);
+    if (held && held[0] === 1) return "taken";
+    if (held && held[0] === 0) return "free";
+  } catch {
+    // Unreadable: unknown, below.
+  }
+  return "unknown";
+}
+
+/**
  * Goes over every trial and every paying subscription and sends what is due.
  * Safe to run as often as it is called: each charge is warned of once.
  */
@@ -404,8 +433,8 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
             // went for this charge, so a missed one is counted once. Ours only
             // on an exact claim (lib/claim-mark.ts); somebody else's is a sent
             // or counted notice; unknown is neither, and the next run asks again.
-            const missedKey = `nl:remind:${missed.kind}:${missed.subscription}:${missed.at}`;
-            const unsent = await claimMark(missedKey, 60 * DAY, claimValue());
+            const before = await legacyMark(missed);
+            const unsent = before === "free" ? await claimMark(reminderKey(missed), 60 * DAY, claimValue()) : before;
             if (unsent === "ours") {
               counts.missed += 1;
               console.warn(`billing reminder missed: ${missed.kind}, ${daysWords(missed.at, nowSeconds)} before the charge`);
@@ -418,8 +447,11 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         }
         // Sent only on an exact claim (lib/claim-mark.ts): taken is a notice
         // already sent; unknown sends nothing, and the next run asks again.
-        const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const claimed = await claimMark(key, 60 * DAY, claimValue());
+        // A mark from before the plan was in the key still counts for its
+        // date (legacyMark), so nobody is written to twice for it.
+        const key = reminderKey(reminder);
+        const before = await legacyMark(reminder);
+        const claimed = before === "free" ? await claimMark(key, 60 * DAY, claimValue()) : before;
         if (claimed === "unknown") {
           counts.unknown += 1;
           console.warn(`billing reminder claim unknown: ${reminder.kind}, not sent; tried again on the next run`);

@@ -300,6 +300,11 @@ export type MailSettings = {
   fromName: string;
   /** A postal address where the creator can be reached. */
   address: string;
+  /**
+   * The creator chose to show the address on the store's public policies page too (#1824). Typed for the footer
+   * of list emails, it is often where the creator lives, so it is never public by default, only when this is exactly true.
+   */
+  onPolicies?: true;
 };
 
 export const MAX_MAIL_NAME = 60;
@@ -310,7 +315,7 @@ function parseMail(raw: unknown): MailSettings | null {
   const value = raw as Record<string, unknown>;
   const fromName = typeof value.fromName === "string" ? value.fromName.trim().slice(0, MAX_MAIL_NAME) : "";
   const address = typeof value.address === "string" ? value.address.trim().slice(0, MAX_MAIL_ADDRESS) : "";
-  return fromName && address ? { fromName, address } : null;
+  return fromName && address ? { fromName, address, ...(value.onPolicies === true ? { onPolicies: true as const } : {}) } : null;
 }
 
 /** The creator's own domain, on Pro. */
@@ -1219,6 +1224,23 @@ export async function storeForRefExact(ref: string): Promise<Store | null> {
   return store;
 }
 
+/**
+ * What is kept under one ref's record key, read exactly (rule 24): "gone" only when Redis answers nil; "there" with the
+ * ids of the store whose record it is (this store's, or another's at the same key) only for text that reads as a store
+ * record (parseStore); anything else, text included ("QUEUED", "OK", a cut record), throws UnknownReplyError (Claude 7's
+ * ALTO 2 on #3643). The closing walk reads it before it walks a store, so it never erases one whose record is still
+ * there, and knows whether that record is the closing store's own (Codex L, Codex P and Claude 2 cloud L on #3643).
+ */
+export async function storeRecordAt(ref: string): Promise<{ state: "gone" } | { state: "there"; sid: string; statsId: string | null }> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return { state: "gone" };
+  const store = typeof reply[0] === "string" ? parseStore(reply[0]) : null;
+  if (!store || typeof store.sid !== "string") throw new UnknownReplyError("a store's record (GET, not a record)");
+  return { state: "there", sid: store.sid, statsId: typeof store.statsId === "string" && store.statsId ? store.statsId : null };
+}
+
 /** One bounded read for the funded restart's final source check.
  * It cannot migrate, save, infer absence from an oversized/partial answer,
  * or turn a current-source observation into permission for another POST. */
@@ -2114,17 +2136,73 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
  * its place among its account's stores and in the company's lists go. Its
  * owner's account and sign-in stay, and may make a store again. Run after
  * everything that needed the record has read it.
+ *
+ * The record is read again under the store's lock right before it goes, and
+ * `beforeDelete` is handed what it holds then (null when it is already gone):
+ * a write that landed since the caller's own read (a photo put on, an id
+ * made) is seen there, so the caller can name its keys while the record
+ * still does (Codex G on #3614). A write after this waits for the lock and
+ * then finds no store. A read again that does not read is never "unchanged"
+ * (rule 24): it throws, with the record still there. The record goes last,
+ * and only while the lock is still this call's (deleteIfHeldOnly). Answers
+ * false, with nothing done, when another store (another sid) is kept at its
+ * key by then: its ref and its owner's folder are that store's now, so the
+ * caller must not walk them (Revisor 2 on #3643); true otherwise.
  */
-export async function closeStoreRecord(store: Store, extraKeys: string[] = []): Promise<void> {
+export async function closeStoreRecord(
+  store: Store,
+  extraKeys: string[] = [],
+  beforeDelete?: (fresh: Store | null) => Promise<void>,
+): Promise<boolean> {
   const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
-  await redisPipeline([
-    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
-    ["DEL", owner, beforeMoveKeyOf(owner), ...extraKeys],
-    ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
-    ["ZREM", ENDED_INDEX, storeRef(store)],
-    ["SREM", SHARING_INDEX, storeRef(store)],
-  ]);
+  let held: Held;
+  try {
+    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, LOCK_WAIT_MS);
+  } catch (error) {
+    if (error instanceof LockBusyError) throw new StoreBusyError();
+    throw error;
+  }
+  try {
+    const read = repliesFor(await redisPipeline([["GET", owner]]), 1);
+    const raw = read?.[0];
+    // Only nil is "gone", and only a record that parses is what it holds now.
+    if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    const fresh = raw === null ? null : parseStore(raw);
+    if (raw !== null && !fresh) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    // Only this store's own record (the same sid) is this closing's to read and delete: another store at the same key
+    // (Codex G on #3643) means this one's record is already gone. Nothing of the other is read, released or deleted,
+    // and this returns as for a record that is gone, so the walk takes this ref out of line and never prepares the
+    // other store under it a walk later (Claude 6 on #3643); this store's entry still walks only its own marks.
+    // A store from before ids (sid "") given one since the walk's read (ensureStoreId) is still this store: its stats id,
+    // made once and never changed, says so (Claude 7's LEVE on #3643). Only then is a different sid read as the same store.
+    const sameLegacy = store.sid === "" && Boolean(store.statsId) && fresh?.statsId === store.statsId;
+    if (fresh && fresh.sid !== store.sid && !sameLegacy) return false;
+    await beforeDelete?.(fresh);
+    // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
+    // go first, and the record last. Its id leaves its account's list at both addresses read, as one moved since is the
+    // account's now (Claude 6 on #3643). Only "OK" for each hold and a count for each removal is done (rule 24): any
+    // other answer throws before the record goes, so the record stays, the closing walk prepares the store again and
+    // every step is run again (Claude 6's MEDIUM on #3643).
+    const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
+    const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
+    const holds = [...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
+    // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
+    const sid = sameLegacy && fresh ? fresh.sid : store.sid;
+    const removals = [
+      ...(STORE_ID_PATTERN.test(sid) ? [["DEL", storeIdKey(sid)], ...[...accounts].map((account) => ["SREM", account, sid])] : []),
+      ["ZREM", ENDED_INDEX, storeRef(store)],
+      ["SREM", SHARING_INDEX, storeRef(store)],
+    ];
+    const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
+    if (!replies || replies.some((reply, i) => (i < holds.length ? reply !== "OK" : countOf(reply) === null))) {
+      throw new UnknownReplyError("a closing store's addresses held back and its places released");
+    }
+    if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner), ...extraKeys]))) throw new StoreBusyError();
+    return true;
+  } finally {
+    await releaseLock(held);
+  }
 }
 
 export type RenameResult =
@@ -3602,8 +3680,9 @@ export async function editProduct(
       // A bundle is one sale of several things at one price: never free, never
       // charged again and again, never priced by its buyer (lib/bundle-rules.ts).
       if (isBundle(product) && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "bundle" };
-      // A physical product is sold once, at a price (lib/shipping.ts): shipped by the creator.
-      if (product.shipping && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "shipped" };
+      // A physical product is sold once, for a price (lib/shipping.ts): shipped by the creator. The price may be
+      // one the buyer chooses, at or above this one (514 [PF2]), checked by pwywProblem below as on any product.
+      if (product.shipping && (fields.priceCents === 0 || recurring)) return { ok: false, reason: "shipped" };
       const next: Product = {
         ...product,
         title: fields.title,

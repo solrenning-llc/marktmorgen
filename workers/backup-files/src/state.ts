@@ -84,6 +84,8 @@ export type Cycle = {
   storesPages: number;
   storeList: { store: string; roomBytes: number }[];
   steps: Record<string, StepState>;
+  /** Sources the route refused 429 "day_ceiling" this UTC day: not asked again until the next day (BACKUP_FILES_DAY_CEILING_REFUSALS). */
+  dayCeiling: BackupFilesSource[];
   sums: Record<BackupFilesSource, DayCount & { stores: number }>;
   alarms: Alarm[];
   sent: string[];
@@ -242,7 +244,7 @@ function stepState(v: unknown, what: string): StepState {
   return { status: o.status as StepState["status"], pending: whole(o.pending, `${what}.pending`), pages: list(o.pages, `${what}.pages`).map((c, i) => cursor(c, `${what}.pages[${i}]`)), asked: whole(o.asked, `${what}.asked`) };
 }
 function cycle(v: unknown): Cycle {
-  const o = exact(v, ["day", "records", "recordsCursor", "recordsPages", "stores", "storesCursor", "storesPages", "storeList", "steps", "sums", "alarms", "sent", "done"], "cycle");
+  const o = exact(v, ["day", "records", "recordsCursor", "recordsPages", "stores", "storesCursor", "storesPages", "storeList", "steps", "dayCeiling", "sums", "alarms", "sent", "done"], "cycle");
   const steps: Record<string, StepState> = {};
   const rawSteps = o.steps;
   if (!rawSteps || typeof rawSteps !== "object" || Array.isArray(rawSteps) || Object.getPrototypeOf(rawSteps) !== Object.prototype) fail("cycle.steps is not an object");
@@ -263,6 +265,11 @@ function cycle(v: unknown): Cycle {
       return { store: store(room.store, `cycle.storeList[${i}].store`), roomBytes: whole(room.roomBytes, `cycle.storeList[${i}].roomBytes`, 1) };
     }),
     steps,
+    dayCeiling: list(o.dayCeiling, "cycle.dayCeiling").map((v, i, all) => {
+      const named = source(v, `cycle.dayCeiling[${i}]`);
+      if (all.indexOf(v) !== i) fail("cycle.dayCeiling names a source twice");
+      return named;
+    }),
     sums: bySource(o.sums, "cycle.sums", (s, what) => {
       const sum = exact(s, ["day", "objects", "bytes", "stores"], what);
       return { day: whole(sum.day, `${what}.day`), objects: whole(sum.objects, `${what}.objects`), bytes: whole(sum.bytes, `${what}.bytes`), stores: whole(sum.stores, `${what}.stores`) };

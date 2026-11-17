@@ -284,7 +284,7 @@ const shrunk = (earlier: DayCount, now: { objects: number; bytes: number }) =>
 
 function newCycle(day: number): Cycle {
   const sum = () => ({ day, objects: 0, bytes: 0, stores: 0 });
-  return { day, records: "pending", recordsCursor: null, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
+  return { day, records: "pending", recordsCursor: null, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, dayCeiling: [], sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
 }
 
 const bucketOf = (ctx: Ctx, source: BackupFilesSource) => (source === "bunny" ? ctx.env.VIDEOS_BUCKET : ctx.env.FILES_BUCKET);
@@ -297,6 +297,18 @@ function storeOfKey(source: BackupFilesSource, key: string): string | null {
 
 type RouteReply = { ok: true; text: string } | { ok: false; why: string };
 
+/** Whether a 429 is the route's own day ceiling, read exactly: `{ "version": 1, "error": "day_ceiling" }` and nothing else. */
+function dayCeilingReply(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const keys = Object.keys(value).sort();
+    return keys.length === 2 && keys[0] === "error" && keys[1] === "version" && (value as Record<string, unknown>).version === 1 && (value as Record<string, unknown>).error === "day_ceiling";
+  } catch {
+    return false;
+  }
+}
+
 async function routeGet(ctx: Ctx, query: [string, string][]): Promise<RouteReply> {
   const url = new URL(ctx.route.href);
   for (const [name, value] of query) url.searchParams.set(name, value);
@@ -304,7 +316,10 @@ async function routeGet(ctx: Ctx, query: [string, string][]): Promise<RouteReply
   try {
     const reply = await ctx.opts.fetch(url.href, { method: "GET", headers: { Authorization: `Bearer ${ctx.secret}` }, redirect: "manual", signal: AbortSignal.timeout(BACKUP_FILES_FETCH_MS) });
     const text = await reply.text();
-    return reply.status === 200 ? { ok: true, text } : { ok: false, why: `status_${reply.status}` };
+    if (reply.status === 200) return { ok: true, text };
+    // The route's day ceiling is told apart from every other refusal: the source is not asked again that UTC day.
+    if (reply.status === 429 && dayCeilingReply(text)) return { ok: false, why: "day_ceiling" };
+    return { ok: false, why: `status_${reply.status}` };
   } catch {
     return { ok: false, why: "unreachable" };
   }
@@ -616,7 +631,7 @@ async function readStores(ctx: Ctx): Promise<void> {
   }
 }
 
-type Listing = { status: "complete" | "failed" | "incomplete"; entries: { entry: BackupFilesEntry; page: number }[]; pages: (string | null)[] };
+type Listing = { status: "complete" | "failed" | "incomplete"; ceiling?: true; entries: { entry: BackupFilesEntry; page: number }[]; pages: (string | null)[] };
 
 async function listAll(ctx: Ctx, source: BackupFilesSource, store: string): Promise<Listing> {
   const listing: Listing = { status: "incomplete", entries: [], pages: [] };
@@ -625,6 +640,7 @@ async function listAll(ctx: Ctx, source: BackupFilesSource, store: string): Prom
   for (let i = 0; i < BACKUP_FILES_PAGES_PER_STORE; i++) {
     listing.pages.push(cursor);
     const reply = await routeGet(ctx, cursor === null ? [["source", source], ["store", store]] : [["source", source], ["store", store], ["cursor", cursor]]);
+    if (!reply.ok && reply.why === "day_ceiling") return { ...listing, status: "failed", ceiling: true };
     try {
       if (!reply.ok) throw new Error(reply.why);
       const page = parseFilesPage(reply.text);
@@ -655,6 +671,10 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
   const where = { source, store };
   const today = ctx.day;
   const listing = await listAll(ctx, source, store);
+  if (listing.ceiling && !ctx.cycle.dayCeiling.includes(source)) {
+    ctx.cycle.dayCeiling.push(source);
+    raise(ctx, "files_day_ceiling", { source });
+  }
   const fresh: Fresh = new Map(listing.entries.map((e) => [e.entry.key, e]));
   ctx.fresh.set(stepKey(source, store), fresh);
 
@@ -750,6 +770,13 @@ async function passList(ctx: Ctx): Promise<void> {
   for (const { store, roomBytes } of ctx.cycle.storeList) {
     for (const source of ctx.sources) {
       if (ctx.cycle.steps[stepKey(source, store)]) continue;
+      // The route refused this source past its day ceiling: no other store of it is asked until the next UTC day, so
+      // the route is refused at most once a source a day (BACKUP_FILES_DAY_CEILING_REFUSALS; Codex N1's LOW 1 on #3313).
+      // The step fails, so nothing of it is claimed listed or copied, and no deletion runs on it.
+      if (ctx.cycle.dayCeiling.includes(source)) {
+        ctx.cycle.steps[stepKey(source, store)] = { status: "failed", pending: 0, pages: [], asked: 0 };
+        continue;
+      }
       ctx.run.boundary(BACKUP_FILES_PAGES_PER_STORE + 4);
       const state = await loadStore(ctx, store);
       state.roomBytes = roomBytes;

@@ -95,15 +95,16 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
  * after priorRefund found none that stands, so every row already reads. A confirmed failure gave nothing back, and
  * the next attempt goes under a key of its own: under the same key Stripe would replay the failed (or earlier
  * pending) answer instead of trying again. An unknown outcome is never counted, so its retry keeps the same key.
+ * `mark` is the metadata field naming the invoice, as priorRefund's (a plan's late refunds use plan_late_refund).
  */
-export function failedRefunds(list: unknown, intent: string, invoice: string, currency: string): number {
+export function failedRefunds(list: unknown, intent: string, invoice: string, currency: string, mark = "closing_refund"): number {
   const field = (value: unknown, key: string): unknown =>
     value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
   const rows = field(list, "data");
   if (!Array.isArray(rows)) return 0;
   let failed = 0;
   for (const row of rows) {
-    if (field(field(row, "metadata"), "closing_refund") !== invoice) continue;
+    if (field(field(row, "metadata"), mark) !== invoice) continue;
     if (refundState(row, intent, field(row, "amount") as number, currency) === "failed") failed += 1;
   }
   return failed;

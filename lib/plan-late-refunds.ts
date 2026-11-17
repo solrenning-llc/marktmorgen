@@ -10,7 +10,8 @@
  * refunds are made (lib/closing-refunds.ts), whose readers this reuses:
  *
  *   - never twice: each refund names its invoice in its metadata (plan_late_refund) and in its idempotency key, and
- *     before one is made Stripe is asked for the refunds already made on that payment (priorRefund);
+ *     before one is made Stripe is asked for the refunds already made on that payment (priorRefund); one Stripe
+ *     confirms failed or canceled gave nothing back, and the next goes under a key of its own (lateRefundKey);
  *   - given back only when Stripe says so: a refund that reads pending or requires_action is not money given back
  *     yet (the owner's decision 18; the reviews of #3367 at 9489992283, Claude 3 MEDIUM 2 and Claude 6 N1), so the plan
  *     stays "owed" and is read again; a payment already refunded in full is read for its refunds' states too (expanded
@@ -34,7 +35,7 @@
  * give back, the refund itself (PLAN_SETTLE_RUN in tests/plan-cost-registry.ts); more wait for the next pass.
  */
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { available, priorRefund, refundState, settledCost } from "@/lib/closing-refunds";
+import { available, failedRefunds, priorRefund, refundState, settledCost } from "@/lib/closing-refunds";
 
 const AT = "2024-06-20";
 /** The most late payments one try gives back (two calls each), the rest left for the next pass. */
@@ -43,8 +44,13 @@ export const LATE_REFUNDS_PER_TRY = 3;
 export const LATE_REFUND_CALLS = 2 + 2 * LATE_REFUNDS_PER_TRY;
 /** The metadata key a late payment's refund names its invoice under. */
 export const LATE_MARK = "plan_late_refund";
-/** The idempotency key of a late payment's refund: one per invoice, whatever pass makes it. */
-export const lateRefundKey = (invoice: string): string => `plan-late-refund:${invoice}`;
+/**
+ * The idempotency key of a late payment's refund: one per invoice, whatever pass makes it, moved on by the refunds
+ * Stripe confirms failed or canceled under that invoice (`failures`). Under the same key Stripe replays its first
+ * answer, so a refund that failed after answering would never be made again (Claude 6 on #3367; main's closings do the
+ * same, Codex X8 on #4480).
+ */
+export const lateRefundKey = (invoice: string, failures = 0): string => (failures === 0 ? `plan-late-refund:${invoice}` : `plan-late-refund:${invoice}:${failures}`);
 
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,128}$/;
 const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,128}$/;
@@ -190,6 +196,8 @@ export async function refundLatePayments(account: string, subscription: string, 
       else left = true;
       continue;
     }
+    // Confirmed failures under this invoice move the key on; with none it is the key used before.
+    const failures = failedRefunds(made, one.intent, one.invoice, one.currency, LATE_MARK);
     const cost = settledCost(one.give, one.charge);
     if ((funds.get(cost.cur) ?? 0) < cost.amount) {
       left = true;
@@ -204,7 +212,7 @@ export async function refundLatePayments(account: string, subscription: string, 
         "/refunds",
         new URLSearchParams({ payment_intent: one.intent, amount: String(one.give), [`metadata[${LATE_MARK}]`]: one.invoice, "metadata[plan_subscription]": subscription }),
         AT,
-        lateRefundKey(one.invoice),
+        lateRefundKey(one.invoice, failures),
       );
     } catch (error) {
       if (error instanceof StripeError && error.code === "balance_insufficient") {

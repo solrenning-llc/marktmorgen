@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
   await ensureStoreId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestDoorPerSet1", true);
+  await setStripeAccount(OWNER, "acct_1DoorPerSet01", true);
   await setSubscription(OWNER, { customerId: "cus_DoorPerSet01", subscriptionId: "sub_DoorPerSet01", active: true, period: paidPeriod() });
   const made = async (title: string) => {
     const added = await addProduct(OWNER, title, "", "49", null);

@@ -486,8 +486,11 @@ export function heldAnswer(holdings: Holdings, ids: readonly string[]): Ticket {
  * left one of `ids` unasked only because its refund questions were spent on other products (Holdings `short`), from a
  * reading of `ids` alone that stops at the first one held, with TICKET_REFUND_CHECKS questions of its own, its answer
  * kept under the door's own `cacheKey` with `version` five minutes when "yes" and one when "no", as every door was before
- * the shared reading (Claude 1 cloud's review of #3395). Read only when the shared one ran out of questions: at most one
- * reading (ACCESS_CHECK_READ) a door. `pay`, when given, is asked before Stripe is: refused, the answer stays not known.
+ * the shared reading (Claude 1 cloud's review of #3395). Read only when the shared one ran out of questions, and once a
+ * set of products for each reading (`holdings`) it answers from: every door kept for the same products in the same view
+ * (the events page asks all its events at once) waits on that one reading, as main's events page asked once a set
+ * (Claude 6's review of #3395, 150 calls for fifty events before). At most one reading (ACCESS_CHECK_READ) a set.
+ * `pay`, when given, is asked before Stripe is: refused, the answer stays not known.
  * Never throws; what could not be read is "unknown", never a "no".
  */
 export async function doorAnswer(
@@ -502,14 +505,26 @@ export async function doorAnswer(
   const shared = heldAnswer(holdings, ids);
   const short = holdings.short;
   if (shared !== "unknown" || !short || !ids.some((id) => short.has(id))) return shared;
-  try {
-    const answer = await ticketAnswer(store, [...ids], email, cacheKey, version, pay);
-    return "ok" in answer ? answer.ok : "unknown";
-  } catch (error) {
-    console.error("checking a community door on its own failed", error);
-    return "unknown";
-  }
+  const set = [...new Set(ids)].sort().join(",");
+  let asked = doorReadings.get(holdings);
+  if (!asked) doorReadings.set(holdings, (asked = new Map()));
+  const known = asked.get(set);
+  if (known) return known;
+  const reading = (async (): Promise<Ticket> => {
+    try {
+      const answer = await ticketAnswer(store, [...ids], email, cacheKey, version, pay, true);
+      return "ok" in answer ? answer.ok : "unknown";
+    } catch (error) {
+      console.error("checking a community door on its own failed", error);
+      return "unknown";
+    }
+  })();
+  asked.set(set, reading);
+  return reading;
 }
+
+/** The doors' own readings made from one shared reading, by their sorted set of products (doorAnswer): gone with it. */
+const doorReadings = new WeakMap<Holdings, Map<string, Promise<Ticket>>>();
 
 /**
  * Whether a "not known" answered from this reading will be the same however often it is asked (Holdings `lasting`):
@@ -670,8 +685,10 @@ async function ticketFor(store: Store, ids: string[], email: string, cacheKey: s
 
 /**
  * Stripe's answer for one address and these products, kept under `cacheKey` with `version`: `ok` when it is known,
- * `unread` (what went wrong) when it is not. Only a known answer is kept; keeping it is a saving only, so a failed
- * write leaves the answer just read to decide.
+ * `unread` (what went wrong) when it is not. A known answer is kept; a "not known" only for a door's own reading
+ * (`keepLasting`) and only when asking again will tell no more (more purchases than are read), a minute, as the shared
+ * reading keeps one; every other caller keeps no "not known". Keeping it is a saving only, so a failed write leaves the
+ * answer just read to decide.
  */
 async function ticketAnswer(
   store: Store,
@@ -680,20 +697,32 @@ async function ticketAnswer(
   cacheKey: string,
   version: number | string,
   pay?: () => Promise<boolean>,
+  /** A door's own reading (doorAnswer) only: a "more than is read" is kept a minute and read back as such. */
+  keepLasting = false,
 ): Promise<{ ok: boolean } | { unread: unknown }> {
   if (!ids.some((pid) => itemFor(store, pid))) return { ok: false };
   const [cached] = await redisPipeline([["GET", cacheKey]]);
   if (typeof cached === "string") {
     try {
-      const value = JSON.parse(cached) as { v?: unknown; ok?: unknown };
+      const value = JSON.parse(cached) as { v?: unknown; ok?: unknown; lasting?: unknown };
       if (value.v === version && typeof value.ok === "boolean") return { ok: value.ok };
+      if (keepLasting && value.v === version && value.lasting === true) return { unread: new UnreadPurchasesError("more than is read (kept a minute)", true) };
     } catch {}
   }
   // Paid for, when the caller pays its reads, only once nothing kept answers it.
   if (pay && !(await pay())) return { unread: new Error("the request for this check was refused") };
   const read = await readHoldings(store, email, ids, true);
   const answer = heldAnswer(read, ids);
-  if (answer === "unknown") return { unread: read.unread };
+  if (answer === "unknown") {
+    // More purchases than one reading takes in: asking again tells no more, so the "not known" is kept a minute, as the
+    // shared reading keeps one (holdingsOf), never asked of Stripe again on every view (Claude 6's review of #3395).
+    if (keepLasting && read.lasting && read.why === "volume") {
+      await redisPipeline([["SET", cacheKey, JSON.stringify({ v: version, lasting: true }), "EX", SHUT_SECONDS]]).catch((error) => {
+        console.error("keeping a community access answer failed", error);
+      });
+    }
+    return { unread: read.unread };
+  }
   await redisPipeline([["SET", cacheKey, JSON.stringify({ v: version, ok: answer }), "EX", answer ? OPEN_SECONDS : SHUT_SECONDS]]).catch((error) => {
     console.error("keeping a community access answer failed", error);
   });

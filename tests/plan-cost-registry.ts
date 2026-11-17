@@ -1214,9 +1214,11 @@ export function searchRead(size: { room: boolean; conversations: number }): numb
  * priced at three calls of 64 KB while it read up to twelve pages; then at 24 KB a checkout with nothing holding a page
  * to it; then for ten customers of 300 KB each, all side by side (round 2 of that pre-review: forty of 60 KB, four
  * groups, cost the same within a hundredth of a request). A door whose products that reading ran out of refund questions
- * for (lib/community-access.ts, doorAnswer) reads them on its own, at most one more such reading a door, kept under the
- * door's own key: paid as one more check (checkUnits(1)) on the search, and on the community's own page as each door's
- * reading was before the shared one (Claude 1 cloud's review of #3395).
+ * for (lib/community-access.ts, doorAnswer) reads them on its own, at most one more such reading a set of products in a
+ * view (every door kept for the same products waits on it, as main's events page asked once a set: Claude 6's review of
+ * #3395 measured 150 calls for fifty events before), kept under the first such door's own key, and a "more than is read"
+ * from it kept a minute: paid as one more check (checkUnits(1)) on the search, and on the community's own page as each
+ * set's reading was before the shared one (Claude 1 cloud's review of #3395).
  */
 export const ACCESS_CHECK_READ = 4 * COMMAND + TICKET_STRIPE_WAITS * EXPORT_PAGE_SECONDS * MEMORY_SECOND
   + searchBodyWork(2 * TICKET_SESSION_PAGES * TICKET_SESSION_PAGE_BYTES)

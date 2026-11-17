@@ -137,7 +137,7 @@ import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rul
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
-import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
+import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE, STORE_LOCK_TRIES } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
 
@@ -2154,28 +2154,29 @@ export const KEY_NAME_BYTES = 128;
  * (lib/closed-store-data.ts, prepareStore): for its owner and each of its
  * team as a host, fifty pages of their claims and their deletes, and the
  * stores they serve; and a hundred for its ids, team, keys for the API,
- * webhooks, email platform, phones, address, record and line in the walk,
- * with the one read of whether it is still due (eraseClosed, dueForErasure:
- * its closing day and the closing job's record, two commands). And the
- * store's lock (takeDue, Codex M on #3156): each of its TAKE_ATTEMPTS (3)
- * reads of its record and of whether it is due (three commands) and the
- * step that takes the lock (CLOSING_TAKE: the EVAL and its four commands),
- * the lock made to last again before each host's claims (the EVAL and its two
- * commands) and before the three other steps that delete, and let go of
- * (the same). What the walk deletes by an id a live store may hold, in the
- * same step as it reads that none does (CLOSING_UNHELD), is one step beside
- * each read the walk already makes of that id, bounded as those reads are,
- * by the keys it deletes for the store (closure, deletes). And every delete
- * of its last steps made only while the walk still holds the lock, read in
- * the same step (fencedBy, CLOSING_FENCED and the Path's FORGET_PATH_HELD,
- * Codex M's focal M1 on #3156): the same deletes, each step one EVAL and its
- * read of the lock beside them, for each page of a host's claims and for the
- * ten other steps (team, the two of its keys for the API, webhooks, email
- * platform, phones, Path, hosts' calendars and address, the closing day's
- * line, record), each in one step at the sizes counted here (LOG_SIZE,
- * MAX_KEYS, MAX_TEAM: fewer than FENCED_KEYS keys).
+ * webhooks, email platform, phones, address, record and line in the walk.
+ * Then the record's going (lib/store.ts, closeStoreRecord): the store's lock
+ * (SET NX, tried again for LOCK_WAIT_MS: at most STORE_LOCK_TRIES), the record
+ * read again (GET), the walk's entry written again, no longer pending (HSET),
+ * its id taken out of its account's list at the address the record read again
+ * names too (one more SREM: an account moved since), the record deleted only
+ * while the lock is still held (EVAL, GET, DEL) and the lock let go (EVAL,
+ * GET, DEL).
  */
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5 + 3) + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * 50 + 10);
+export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3;
+/**
+ * The walk's own read of a prepared store's record before it starts (lib/closed-store-data.ts startableBatch: one GET
+ * per entry), so it never walks a store whose record is still there (Codex L, Codex P and Claude 2 cloud L on #3643).
+ */
+export const WALK_START_READ_COMMANDS = 1;
+/**
+ * A closing store whose plan reads running (paid or in trial) has its place in the final closing line read before
+ * anything of it is touched (lib/closed-store-data.ts prepareStore: one ZSCORE), so a store whose plan runs again is
+ * never erased while its closing day has not begun (Claude 5's MEDIUM on #3643). Read again under the store's lock from
+ * the record closeStoreRecord already reads and the ZREM's own answer: no command more.
+ */
+export const PLAN_RUNS_READ_COMMANDS = 1;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command, each page with a read of the store's fields' values for its people a field (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {

@@ -81,7 +81,7 @@ export default async function MessageThreadPage({ params, searchParams }: Params
         <header className="flex items-center gap-3">
           <Face store={store} author={other} name={name} size={44} />
           <div className="min-w-0">
-            <h1 className="font-display truncate text-xl font-semibold tracking-[-0.02em]">{name}</h1>
+            <h1 className="font-display text-xl font-semibold tracking-[-0.02em] [overflow-wrap:anywhere]">{name}</h1>
             <p className="st-muted text-sm">{w.privateTwo}</p>
           </div>
         </header>

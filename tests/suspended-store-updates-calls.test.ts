@@ -4,7 +4,9 @@
  * - Product updates (lib/product-updates.ts) are the creator's own words sent to every buyer, from the store's
  *   monthly emails: they wait while the store is off. A new one is refused before anything is read or written; one
  *   already queued is held with nothing reserved, sent or counted, keeps its place and goes out once the store is back
- *   on. A switch-off value that is not "" (on) holds it too (rule 24).
+ *   on. A switch-off value that is not "" (on) holds it too (rule 24). A held send leaves the five-minute queue and is
+ *   looked at once a day (Claude 7 on #3403, MEDIUM 2); one that waited to the end of its 60 days ends with the creator
+ *   told by a company email, tried at most UPDATE_END_NOTICE_TRIES days (MEDIUM 1).
  * - Call reminders (lib/call-reminders.ts) are what a buyer needs for a call they paid for: they are kept, and carry
  *   only the booking's own details (its time, its room, its calendar file and the buyer's page to move it).
  *
@@ -12,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceUpdate, startUpdate } from "@/lib/product-updates";
+import { UPDATE_END_NOTICE_TRIES, UPDATE_HELD_LOOK_SECONDS, advanceUpdate, advanceUpdates, startUpdate } from "@/lib/product-updates";
 import { sendCallReminders } from "@/lib/call-reminders";
 import { REMINDER_QUEUE, reminderMember } from "@/lib/call-records";
 import { type CallListing, holdAndCheckout } from "@/lib/calls";
@@ -48,6 +50,8 @@ const mailed: { to: string; subject: string; text: string }[] = [];
 const rows: Record<string, unknown>[] = [];
 const heldMeta = new Map<string, Record<string, string>>();
 let sessions = 0;
+let refuseOwner = false;
+let ownerRefused = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -55,6 +59,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const list = Array.isArray(body) ? body : [body];
+    // The email service refusing what is sent to the store's owner, while `refuseOwner` is set.
+    if (refuseOwner && list.some((m: { to?: unknown }) => String(m.to).includes("offmail-owner@"))) {
+      ownerRefused += 1;
+      return Response.json({ name: "validation_error", message: "refused by the stand-in" }, { status: 422 });
+    }
     for (const m of list) mailed.push({ to: Array.isArray(m.to) ? m.to.join(",") : String(m.to), subject: String(m.subject ?? ""), text: String(m.text ?? "") });
     return Response.json(Array.isArray(body) ? { data: list.map((_: unknown, i: number) => ({ id: `synthetic_${i}` })) } : { id: "synthetic" });
   }
@@ -76,6 +85,8 @@ function reset() {
   redis.clear();
   mailed.length = 0;
   rows.length = 0;
+  refuseOwner = false;
+  ownerRefused = 0;
   heldMeta.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_switched_off_mail";
   // A literal the synthetic email fixture knows (tests/resend-fixture-credentials.ts).
@@ -109,6 +120,13 @@ async function updateStore() {
 }
 
 const queued = (id: string) => redis.run(["SISMEMBER", "nl:updq", id]);
+/** When a held send is looked at next (nl:updheld), in seconds; null when it is not held. */
+const heldAt = (id: string) => {
+  const score = redis.run(["ZSCORE", "nl:updheld", id]);
+  return score === null ? null : Number(score);
+};
+const toOwner = () => mailed.filter((m) => m.to === owner);
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 const recipients = (id: string) => redis.run(["LRANGE", `nl:upd:job:${id}:to`, 0, -1]);
 const toBuyer = () => mailed.filter((m) => m.to === buyer);
 
@@ -155,9 +173,16 @@ test("product update: one queued before the switch-off waits, then goes out once
   assert.deepEqual([held?.status, held?.done, held?.sent], ["waiting", 0, 0]);
   assert.match(held?.note ?? "", /switched off after notices about its content/);
   assert.match(held?.note ?? "", /Nothing more was sent/);
+  // The note says the day it ends unsent, and that the creator is told then (Claude 7 on #3403, MEDIUM 1).
+  const ends = new Date((started.job.createdAt + 60 * 86_400) * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  assert.match(held?.note ?? "", new RegExp(`until ${ends}`));
+  assert.match(held?.note ?? "", /we email you/);
   assert.equal(toBuyer().length, 0);
   assert.equal(await usedThisMonth(shop.listId, windowId(shop)), before);
-  assert.equal(queued(started.job.id), 1);
+  // Out of the five-minute queue, looked at again in a day (MEDIUM 2).
+  assert.equal(queued(started.job.id), 0);
+  const at = heldAt(started.job.id);
+  assert.ok(at !== null && Math.abs(at - (nowSeconds() + UPDATE_HELD_LOOK_SECONDS)) <= 5, String(at));
   assert.deepEqual(recipients(started.job.id), [buyer]);
   // Held again on the next run, still nothing sent.
   const again = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
@@ -166,6 +191,29 @@ test("product update: one queued before the switch-off waits, then goes out once
   const back = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
   assert.deepEqual([back?.status, back?.done, back?.sent, back?.note, toBuyer().length], ["sent", 1, 1, "", 1]);
   assert.equal(queued(started.job.id), 0);
+  assert.equal(heldAt(started.job.id), null);
+});
+
+test("product update: the mail job looks at a held send once a day, not every run (Claude 7 on #3403, MEDIUM 2)", async () => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok, JSON.stringify(started));
+  await noteTakedown(owner, null, true);
+  const held = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.equal(held?.status, "waiting");
+  // Back on, but its day is not over: the job's runs do not read it, so nothing goes out yet.
+  await noteTakedown(owner, null, false);
+  let loads = 0;
+  const counted = async (handle: string) => {
+    loads += 1;
+    return storeForHandle(handle);
+  };
+  assert.equal(await advanceUpdates(counted, Date.now() + 20_000), 0);
+  assert.deepEqual([loads, toBuyer().length, queued(started.job.id), heldAt(started.job.id) !== null], [0, 0, 0, true]);
+  // Its day over: the next run puts it back in the queue and it goes out.
+  redis.run(["ZADD", "nl:updheld", nowSeconds() - 1, started.job.id]);
+  assert.equal(await advanceUpdates(counted, Date.now() + 20_000), 1);
+  assert.deepEqual([toBuyer().length, queued(started.job.id), heldAt(started.job.id)], [1, 0, null]);
 });
 
 test("product update: a switch-off value that is not plainly on holds it too (rule 24)", async () => {
@@ -177,7 +225,7 @@ test("product update: a switch-off value that is not plainly on holds it too (ru
     return read ? { ...read, suspended: "unknown" } : null;
   };
   const held = await advanceUpdate(started.job.id, unknownOff, Date.now() + 20_000);
-  assert.deepEqual([held?.status, held?.done, held?.sent, toBuyer().length, queued(started.job.id)], ["waiting", 0, 0, 0, 1]);
+  assert.deepEqual([held?.status, held?.done, held?.sent, toBuyer().length, queued(started.job.id), heldAt(started.job.id) !== null], ["waiting", 0, 0, 0, 0, true]);
   assert.equal((await startUpdate({ ...shop, suspended: "unknown" }, product, "")).ok, false);
 });
 
@@ -195,7 +243,7 @@ test("product update: a send held by the switch-off ends after its 60 days even 
   // Day 59: still within its 60 days, so it keeps waiting.
   ageJob(started.job.id, 59);
   const held = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
-  assert.deepEqual([held?.status, queued(started.job.id)], ["waiting", 1]);
+  assert.deepEqual([held?.status, queued(started.job.id), heldAt(started.job.id) !== null, toOwner().length], ["waiting", 0, true, 0]);
   // Day 61: its 60 days are over (the recipient list's own life ends with them).
   ageJob(started.job.id, 2);
   redis.run(["DEL", `nl:upd:job:${started.job.id}:to`]);
@@ -204,10 +252,16 @@ test("product update: a send held by the switch-off ends after its 60 days even 
     [ended?.status, ended?.done, ended?.sent, ended?.note, queued(started.job.id)],
     ["failed", 0, 0, "The recipient list expired. Nothing more was sent.", 0],
   );
+  // The creator is told, once, by a company email naming the product and how many buyers got it (MEDIUM 1).
+  assert.equal(heldAt(started.job.id), null);
+  assert.equal(toOwner().length, 1);
+  assert.match(toOwner()[0].subject, /Field guide/);
+  assert.match(toOwner()[0].text, /0 of 1 buyers/);
+  assert.match(toOwner()[0].text, /switched off/);
   // The store comes back on afterward: nothing goes out and the send stays ended.
   await noteTakedown(owner, null, false);
   const after = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
-  assert.deepEqual([after?.status, queued(started.job.id), toBuyer().length], ["failed", 0, 0]);
+  assert.deepEqual([after?.status, queued(started.job.id), toBuyer().length, toOwner().length], ["failed", 0, 0, 1]);
 });
 
 test("product update: a send past its 60 days ends even if its recipient list is somehow still there, sending nothing", async () => {
@@ -238,6 +292,29 @@ test("product update: a send waiting for a plan with email also ends after its 6
   redis.run(["DEL", `nl:upd:job:${started.job.id}:to`]);
   const ended = await advanceUpdate(started.job.id, noMail, Date.now() + 20_000);
   assert.deepEqual([ended?.status, ended?.note, queued(started.job.id), toBuyer().length], ["failed", "The recipient list expired. Nothing more was sent.", 0, 0]);
+  // Told too (Claude 7's LEVE 2 on #3403), with its own reason.
+  assert.equal(toOwner().length, 1);
+  assert.match(toOwner()[0].text, /did not include email/);
+});
+
+test("product update: a creator's notice the email service refuses is tried again the next day, at most UPDATE_END_NOTICE_TRIES times", async () => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok, JSON.stringify(started));
+  await noteTakedown(owner, null, true);
+  await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  ageJob(started.job.id, 61);
+  refuseOwner = true;
+  for (let n = 1; n < UPDATE_END_NOTICE_TRIES; n += 1) {
+    const kept = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+    // Not told yet: still waiting, looked at again in a day, never in the five-minute queue.
+    assert.deepEqual([kept?.status, ownerRefused, queued(started.job.id), heldAt(started.job.id) !== null], ["waiting", n, 0, true]);
+  }
+  const last = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.deepEqual([last?.status, ownerRefused, queued(started.job.id), heldAt(started.job.id), toBuyer().length], ["failed", UPDATE_END_NOTICE_TRIES, 0, null, 0]);
+  // Ended: no further try.
+  await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.equal(ownerRefused, UPDATE_END_NOTICE_TRIES);
 });
 
 // ------------------------------------------------------------------ call reminders

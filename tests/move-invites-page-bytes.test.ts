@@ -92,6 +92,39 @@ async function main(): Promise<void> {
   });
   const left = (await redis.pipeline([["HLEN", key]]))[0];
   is("the rest refused: nothing on that page is deleted, and the removal says it was not paid for", [unpaid, left], [true, many]);
+
+  part("Codex G on #4831: the units for the most a read can answer are taken before the HSCAN, never after it");
+  // COUNT is only a hint: one HSCAN may answer with every invitation the store holds. Its bytes are moved the moment it
+  // is read, so the studio requests that pay for them are taken before it: at the first HSCAN, at least
+  // ceil(the store's invitations / INVITES_PER_UNIT) are already paid.
+  const real = redis.pipeline.bind(redis);
+  const taken: number[] = [];
+  const atScan: number[] = [];
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    if (batch.some((c) => c[0] === "HSCAN")) atScan.push(taken.reduce((a, b) => a + b, 0));
+    return real(batch);
+  }) as typeof redis.pipeline;
+  try {
+    is("control: all of them are dropped", await dropProductInvites(store, club, async (units) => (taken.push(units), true)), many);
+  } finally {
+    redis.pipeline = real as typeof redis.pipeline;
+  }
+  is(`at the first HSCAN, ${Math.ceil(many / INVITES_PER_UNIT)} studio requests are already paid`, atScan[0] >= Math.ceil(many / INVITES_PER_UNIT), true);
+  await write();
+  let scanned = false;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    if (batch.some((c) => c[0] === "HSCAN")) scanned = true;
+    return real(batch);
+  }) as typeof redis.pipeline;
+  let refusedFirst = false;
+  try {
+    await dropProductInvites(store, club, async () => false).catch((error: unknown) => {
+      refusedFirst = error instanceof Error && error.name === "InvitesUnpaidError";
+    });
+  } finally {
+    redis.pipeline = real as typeof redis.pipeline;
+  }
+  is("refused before reading: no HSCAN is sent, and the removal says it was not paid for", [refusedFirst, scanned], [true, false]);
   done();
 }
 

@@ -248,7 +248,8 @@ test("confirmed absence and healthy records are read as before", async () => {
   // A repeat of the finish is given the first one's answer (lib/vault.ts), the provider not asked.
   asked.length = 0;
   assert.deepEqual(await closeVaultUpload(pathname, ["a".repeat(32)]), { ok: true, file: { pathname, bytes: 10, contentType: "application/pdf" } });
-  assert.equal(await abortVaultUpload(pathname), true);
+  // A cancel after the finish never confirms the finished file canceled (Codex X6's MEDIUM on #3502), R2 not asked.
+  assert.equal(await abortVaultUpload(pathname), false);
   assert.deepEqual(asked, []);
   // A healthy cancellation asks the provider and gives the bytes back.
   const second = await openReservedVault(input(301), 10, measure(301));

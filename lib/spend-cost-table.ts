@@ -125,7 +125,9 @@ export const STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION = BLOB_ADVANCED_MICRO_US
  * CompleteMultipartUpload; AbortMultipartUpload and DeleteObject are free.
  * Class B: three file measurements (VAULT_MEASURE_REQUESTS each, a HEAD and a
  * ranged GET): the expired session admission retires, the completion, a
- * cancellation after a completion whose measurement could not be read, and
+ * cancellation after a completion whose measurement could not be read (no
+ * longer made since #3502: a cancel is confirmed only by R2's own yes and never
+ * measures the file; still priced, so it is room, never a missing cost), and
  * the read-back of an object a refused close deleted, to confirm it is gone
  * before its reserved bytes are given back (lib/vault-storage.ts, #4283). Each
  * signed piece is one Class A part upload. Vercel Blob: every page of the

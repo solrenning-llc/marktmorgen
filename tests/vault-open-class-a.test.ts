@@ -159,7 +159,9 @@ test("one upload start never costs more R2 operations than the cost table prices
   measureFails = 1;
   const closed = await closeReservedVault(opened.upload.pathname, ["0".repeat(32)]);
   assert.deepEqual(closed, { ok: false, reason: "unavailable" }, "the completion's measurement could not be read");
-  assert.equal(await abortReservedVault(opened.upload.pathname), true, "the cancellation finds the completed file and lets the start go");
+  // The completion joined the file: a cancel after it is not confirmed (Codex X6's MEDIUM on #3502), the finished file
+  // is kept and its bytes stay held for the expiry; it asks R2 no more than before.
+  assert.equal(await abortReservedVault(opened.upload.pathname), false, "the cancellation after a joined file confirms nothing");
 
   const seen = (op: Op) => `${count(op)} (${billed.filter(r => r.op === op).map(r => r.what).join(", ")})`;
   assert.deepEqual({ A: count("A") <= UPLOAD_OPEN_CLASS_A_OPS, B: count("B") <= UPLOAD_OPEN_CLASS_B_OPS }, { A: true, B: true },

@@ -489,10 +489,13 @@ export async function forgetFreshUpload(pathname: string): Promise<void> {
 
 /**
  * Forgets an upload only after the provider confirms its cancellation.
- * True when it is canceled or was never open; "tries" past the finish and
- * cancel requests one upload may make; "busy" while a cancel is still
- * running. A repeat after a confirmed cancel is given that answer, R2 not
- * asked; one after an unconfirmed cancel asks R2 again.
+ * True only for a cancel R2 confirmed (or a path that is not a vault file's);
+ * false when it is not confirmed, and also when there is neither an open
+ * upload nor a remembered cancel, since a finish may have taken the upload
+ * (Codex X6's MEDIUM on #3502: that absence never confirms a cancel). "tries"
+ * past the finish and cancel requests one upload may make; "busy" while a
+ * cancel is still running. A repeat after a confirmed cancel is given that
+ * answer, R2 not asked; one after an unconfirmed cancel asks R2 again.
  */
 export async function abortVaultUpload(pathname: string): Promise<boolean | "tries" | "busy"> {
   const config = vaultConfig();
@@ -500,15 +503,15 @@ export async function abortVaultUpload(pathname: string): Promise<boolean | "tri
   if (!isVaultPath(pathname)) return true;
   const before = await readControl(pathname, "abort");
   const upload = before ? null : await readUpload(pathname);
-  // Nothing open and nothing canceled here: nothing to count or keep.
-  if (!before && !upload) return true;
+  // Nothing open and nothing canceled here: not a confirmed cancel, since a finish may have taken it; nothing counted.
+  if (!before && !upload) return false;
   if (!(await countControl(pathname))) return "tries";
   if (before) {
     if (before.state === "pending") return Date.now() - before.at > CONTROL_PENDING_MS ? false : "busy";
     if (typeof before.answer !== "boolean") throw new UnknownReplyError("a vault upload's first abort");
     return before.answer;
   }
-  if (!upload) return true;
+  if (!upload) return false;
   // Only a confirmed cancel is final. One R2 did not confirm frees nothing
   // and is not written down: a retry, still counted above, asks R2 again
   // (AbortMultipartUpload and DeleteObject are free; a 404 is measured, which
@@ -524,12 +527,10 @@ async function cancelAtStore(config: Config, upload: Upload): Promise<boolean> {
     ? `${objectUrl(config, pathname)}?uploadId=${encodeURIComponent(upload.uploadId)}`
     : objectUrl(config, pathname);
   const answer = await ask(config, "DELETE", url);
-  if (![200, 204].includes(answer.status)) {
-    // A missing session may belong to an ambiguous completion. Only a
-    // positively observed completed object can then replace reserved bytes.
-    const completed = answer.status === 404 ? await headVault(pathname) : null;
-    if (!completed || completed === "unreachable") return false;
-  }
+  // Only R2's own yes confirms it. A missing session (404) may be a finish that won the race: the finished object is
+  // its, never canceled here, and its bytes stay held until the finish or the expiry settles them (Codex X6's MEDIUM
+  // on #3502: a 404 with the object there was answered as a cancel, and both calls said yes).
+  if (![200, 204].includes(answer.status)) return false;
   await redisPipeline([["DEL", uploadKey(pathname)]]);
   return true;
 }

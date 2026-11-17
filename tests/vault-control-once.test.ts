@@ -46,6 +46,8 @@ let made = 0;
 /** How the next answers go wrong: a measurement that cannot be read, a cancellation R2 does not confirm. */
 let measureFails = 0;
 let deleteFails = false;
+/** While set, a measurement's ranged read waits for it: a finish held mid-measurement (Codex X6's race on #3502). */
+let measureGate: Promise<void> | null = null;
 const sessions = new Map<string, string>();
 const completed = new Set<string>();
 
@@ -81,6 +83,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (!completed.has(key)) return new Response(null, { status: 404 });
     // No plain length: the measurement goes on to one ranged byte.
     if (method === "HEAD") return new Response(null, { status: 200, headers: { "content-type": "application/zip", "content-encoding": "gzip" } });
+    if (measureGate) await measureGate;
     if (measureFails > 0) { measureFails -= 1; return new Response(null, { status: 503 }); }
     return new Response(new Uint8Array(1), { status: 206, headers: { "content-range": "bytes 0-0/1", "content-type": "application/zip" } });
   }
@@ -142,7 +145,10 @@ test("a finish refused for its piece list asks R2 nothing and does not use up a 
   assert.equal(billed.length, 0, "R2 is not asked for a refused finish");
   measureFails = 1;
   assert.deepEqual(await closeReservedVault(pathname, ["0".repeat(32)]), { ok: false, reason: "unavailable" }, "the corrected finish joins it, and its measurement could not be read");
-  assert.equal(await abortReservedVault(pathname), true, "the cancel is still inside the priced requests, finds the file completed and measures it");
+  // The finish joined the file: a cancel after it is not confirmed (Codex X6's MEDIUM on #3502); R2's 404 for the
+  // session is all it gets, and the finished file stays, its bytes held for the expiry.
+  assert.equal(await abortReservedVault(pathname), false, "the cancel after a joined file confirms nothing");
+  assert.equal(completed.has(pathname), true, "and the finished file is kept");
 });
 
 test("no upload takes more finish-or-cancel requests than are priced for it, and past them R2 is not asked", async () => {
@@ -150,10 +156,12 @@ test("no upload takes more finish-or-cancel requests than are priced for it, and
   measureFails = 1;
   const answers: unknown[] = [];
   for (let i = 0; i < REPEATS; i += 1) answers.push(i % 2 ? await abortReservedVault(pathname) : await closeReservedVault(pathname, ["0".repeat(32)]));
-  // The priced worst start: one completion whose measurement fails, one
-  // cancellation that finds the file completed and measures it again.
-  assert.deepEqual({ A: count("CompleteMultipartUpload"), B: classB() }, { A: 1, B: 2 * VAULT_MEASURE_REQUESTS },
+  // The worst start: one completion whose measurement fails; the cancellation after it gets R2's 404 for the session
+  // and measures nothing since #3502's fix. The cost table still prices a second measurement (2 x
+  // VAULT_MEASURE_REQUESTS), so this stays inside it, with room.
+  assert.deepEqual({ A: count("CompleteMultipartUpload"), B: classB() }, { A: 1, B: VAULT_MEASURE_REQUESTS },
     `R2 asked: ${billed.map(row => row.what).join(", ")}`);
+  assert.ok(classB() <= 2 * VAULT_MEASURE_REQUESTS, "inside the measurements the cost table prices for one start");
   const past = answers.slice(CONTROL_REQUESTS);
   assert.ok(past.length > 0);
   for (const answer of past) assert.ok(answer === "tries" || (typeof answer === "object" && answer !== null && (answer as { reason?: string }).reason === "tries"),
@@ -163,4 +171,34 @@ test("no upload takes more finish-or-cancel requests than are priced for it, and
   await abortReservedVault(pathname);
   assert.equal(billed.length, asked, "a refused request asks R2 nothing");
   void store;
+});
+
+// Codex X6's MEDIUM on #3502 (finish against cancel), with Codex X5's two cases: a cancel is confirmed only by R2's own
+// yes. A session R2 no longer has may be a finish that won, so the finished file is never answered as canceled, and
+// both calls never say yes.
+test("a cancel cannot confirm success while a completed multipart object is being measured", async () => {
+  const pathname = await opened();
+  let open!: () => void;
+  measureGate = new Promise<void>((resolve) => { open = resolve; });
+  try {
+    const finishing = closeReservedVault(pathname, ["0".repeat(32)]);
+    for (let i = 0; i < 200 && count("GetObject") === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(count("GetObject"), 1, "the finish joined the file and is measuring it");
+    assert.equal(await abortReservedVault(pathname), false, "the cancel finds the session gone, and that confirms nothing");
+    open();
+    const finished = await finishing;
+    assert.equal(finished.ok, true, "the finish that won is answered as finished");
+  } finally { measureGate = null; }
+  assert.equal(count("AbortMultipartUpload"), 1, `R2 asked: ${billed.map(row => row.what).join(", ")}`);
+  assert.equal(completed.has(pathname), true, "the finished file is kept");
+});
+
+test("an abort after a successful finish does not confirm cancellation of the finished object", async () => {
+  const pathname = await opened();
+  assert.equal((await closeReservedVault(pathname, ["0".repeat(32)])).ok, true);
+  const asked = billed.length;
+  assert.equal(await abortReservedVault(pathname), false, "no open upload and no cancel remembered: not a confirmed cancel");
+  assert.equal(count("AbortMultipartUpload"), 0, "R2 is not asked to cancel a finished file");
+  assert.equal(billed.length, asked);
+  assert.equal(completed.has(pathname), true);
 });

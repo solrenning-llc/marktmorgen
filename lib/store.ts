@@ -160,12 +160,8 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { noteData, takeData } from "@/lib/store-data";
-import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
-import { PRODUCT_SIDE_BYTES } from "@/lib/store-data-rules";
-
-/** What a product keeps beside its own records: its page's reading and the rest (lib/store-data-rules.ts). */
-const BESIDE_PRODUCT = DEPTH_RECORD_BYTES + PRODUCT_SIDE_BYTES;
+import { besideHeld, giveBeside, noteData, takeBeside, takeData } from "@/lib/store-data";
+import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT } from "@/lib/store-data-rules";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
 import { type SitePage, parseSitePages, MAX_SITE_PAGES, slugProblem } from "@/lib/site-page-rules";
 import { type AnswersSetting, NO_ANSWERS, parseAnswers } from "@/lib/answers-rules";
@@ -1780,15 +1776,29 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   // already drawn can still write to, and its side records), which stays
   // counted (lib/store-data-rules.ts, PRODUCT_SIDE_BYTES). The record itself
   // is bounded by MAX_STORE_BYTES.
+  //
+  // Since C1-20261117 (2,000 products on every plan) what is kept beside a product is held, while the store pays,
+  // in its beside pool (lib/store-data-rules.ts, BESIDE_POOL_BYTES) and not in its room, so the room counts the
+  // product at its real size; a product whose share the pool holds keeps it there once deleted, and one the pool
+  // has no room for is counted in the room as before. A product saved before the pool moves to it here.
   const gone = [...drop].filter((id) => !put.some((product) => product.id === id));
+  const pooled = await besideHeld(before, [...put.map((product) => product.id), ...gone]);
+  if (!pooled) throw new StoreBusyError();
+  const toPool = put.map((product) => product.id).filter((id) => !pooled.has(id));
+  const moved = toPool.length > 0 && (await takeBeside(before, toPool, BESIDE_PRODUCT)) ? toPool : [];
+  for (const id of moved) pooled.add(id);
+  const goneInRoom = gone.filter((id) => !pooled.has(id));
   const room = [
-    ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + BESIDE_PRODUCT, set: true })),
+    ...put.map((product) => ({ slot: `p:${product.id}`, bytes: productBytes(product) + (pooled.has(product.id) ? 0 : BESIDE_PRODUCT), set: true })),
     ...gone.map((id) => ({ slot: `p:${id}`, bytes: 0, set: true })),
-    ...(gone.length ? [{ slot: "dp", bytes: gone.length * BESIDE_PRODUCT }] : []),
+    ...(goneInRoom.length ? [{ slot: "dp", bytes: goneInRoom.length * BESIDE_PRODUCT }] : []),
   ];
   if (room.length) {
     const taken = await takeData(before, room);
-    if (!taken.ok) throw taken.reason === "full" ? new StoreFullError() : new StoreBusyError();
+    if (!taken.ok) {
+      await giveBeside(before, moved);
+      throw taken.reason === "full" ? new StoreFullError() : new StoreBusyError();
+    }
   }
   // The lock is made to last another term before anything is written, and
   // the record is written only while it is still ours: a write held up past

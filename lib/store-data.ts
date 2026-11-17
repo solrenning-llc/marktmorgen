@@ -28,7 +28,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StoreFullError } from "@/lib/store-full";
 import { largerPlanFor } from "@/lib/larger-plan";
-import { type DataFields, contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
+import { type DataFields, besidePoolFor, contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 
 /** What a store is kept under, and what its room is measured by. */
 export type DataStore = DataFields & { sid?: string; statsId?: string | null; handle?: string };
@@ -216,15 +216,16 @@ export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.
   return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
 }
 
-async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number): Promise<DataTaken> {
+async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number, pool = false): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
   if (changes.length === 0) return { ok: true, used: 0 };
-  const key = dataKey(store);
+  const key = pool ? besideKey(store) : dataKey(store);
   const args = argsOf(changes, nowSeconds * 1000);
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
-    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, contentRoomFor(store, nowSeconds), always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
+    const limit = pool ? besidePoolFor(store, nowSeconds) : contentRoomFor(store, nowSeconds);
+    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
     return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
@@ -298,6 +299,42 @@ export async function giveData(store: DataStore, changes: DataChange[], now = Da
  */
 export async function noteData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
   await run(store, changes, true, now / 1000).catch(() => undefined);
+}
+
+/**
+ * The store's beside pool (lib/store-data-rules.ts, BESIDE_POOL_BYTES): the same TAKE_DATA count as its room, under
+ * a key of its own, a slot "b:<product>" a product whose share it holds.
+ */
+export function besideKey(store: Pick<DataStore, "sid" | "statsId" | "handle">): string | null {
+  const key = dataKey(store);
+  return key ? `${key}:b` : null;
+}
+
+/** Which of these products have their share in the pool; null when it cannot be read. */
+export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<string> | null> {
+  if (ids.length === 0) return new Set();
+  const key = besideKey(store);
+  if (!key || !isRedisConfigured()) return null;
+  try {
+    const [reply] = await redisPipeline([["HMGET", key, ...ids.map((id) => `b:${id}`)]]);
+    if (!Array.isArray(reply) || reply.length !== ids.length) return null;
+    return new Set(ids.filter((_, i) => Number(reply[i] ?? 0) > 0));
+  } catch {
+    return null;
+  }
+}
+
+/** Puts these products' shares in the pool, all or nothing: false when it is full, when it cannot be read, or when the store does not pay. */
+export async function takeBeside(store: DataStore, ids: string[], bytes: number, now = Date.now()): Promise<boolean> {
+  if (ids.length === 0) return true;
+  if (besidePoolFor(store, now / 1000) <= 0) return false;
+  return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), false, now / 1000, true)).ok;
+}
+
+/** Gives these products' shares back to the pool, after a write that took them failed. Never refuses and never throws. */
+export async function giveBeside(store: DataStore, ids: string[], now = Date.now()): Promise<void> {
+  if (ids.length === 0) return;
+  await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), true, now / 1000, true).catch(() => undefined);
 }
 
 /** One slot shrunk by `bytes`. Never refuses and never throws. */

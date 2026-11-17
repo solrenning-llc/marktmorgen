@@ -43,6 +43,8 @@ import { MAX_CART } from "@/lib/cart-rules";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { type PlanFields, type Standing, standingOf } from "@/lib/plan-standing";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 
 const MB = 1_000_000;
 
@@ -117,6 +119,24 @@ export function orderDataBytes(items: number): number {
  * (lib/store.ts): some are kept until they expire, some are never let go.
  */
 export const PRODUCT_SIDE_BYTES = 8_192;
+
+/** What a product keeps beside its own records at the most: its page's reading and its side records. */
+export const BESIDE_PRODUCT_BYTES = DEPTH_RECORD_BYTES + PRODUCT_SIDE_BYTES;
+
+/**
+ * The beside pool (C1-20261117, 2,000 products on every plan): a paying store holds what is kept beside each of
+ * its products, at its worst, in a pool of its own (lib/store-data.ts, besideKey) rather than in its data room, so
+ * the room counts a product at its real size and MAX_PRODUCTS fit on every plan. Bounded at MAX_PRODUCTS products'
+ * worth, each with the 64 bytes TAKE_DATA counts for its field; a deleted product's share stays held there, as it
+ * stayed held in the room, and once the pool is full a new product's share is counted in the room again. Priced in
+ * tests/plan-cost-registry.ts (database-storage) on its own, never inside the room.
+ */
+export const BESIDE_POOL_BYTES = MAX_PRODUCTS * (BESIDE_PRODUCT_BYTES + 64);
+
+/** The beside pool of this store, in bytes: BESIDE_POOL_BYTES while it pays, nothing otherwise. */
+export function besidePoolFor(store: DataFields, nowSeconds = Date.now() / 1000): number {
+  return standingOf(store, nowSeconds) === "paid" ? BESIDE_POOL_BYTES : 0;
+}
 
 /**
  * How long a booked call's line in the store's diary is kept after the call

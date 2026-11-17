@@ -163,13 +163,14 @@ async function main(): Promise<void> {
   is("the longest wait before a row is tried again is a named, exported time", typeof most === "number" && most >= (exported.CERTIFICATE_REFUND_RETRY_SECONDS as number), true);
   is("a wait never outlives the set of rows handled that keeps it (fifteen days after the last write)", typeof most === "number" && most < CERTIFICATE_REFUND_LOOKBACK_SECONDS * 2 + 86_400, true);
 
-  part("The line prices the part for rows tried again, and the Store plan's first year given back stays under US$ 65");
+  // The owner's US$ 66 (BROADCAST-262; coordinator's decision, option (a), #4827 6934185062); US$ 65 before.
+  part("The line prices the part for rows tried again, and the Store plan's first year given back stays under US$ 66");
   const line = COST_LINES.find((one) => one.id === "certificate-refund-pass");
   is("the line names the part for rows tried again and the longest wait", Boolean(line?.sources.some((s) => s.file === "lib/certificate-refunds.ts" && ["CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH", "CERTIFICATE_REFUND_RETRY_MAX_SECONDS"].every((name) => s.names.includes(name)))), true);
   {
     const kept = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + kept;
-    is(`the first year given back is under US$ 65 (US$ ${year.toFixed(4)})`, year < 65, true);
+    is(`the first year given back is under US$ 66 (US$ ${year.toFixed(4)})`, year < 66, true);
   }
 
   // Two Store stores: one where the row left unknown is a checkout of five courses, one where it is of one (the control).

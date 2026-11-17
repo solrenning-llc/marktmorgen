@@ -141,12 +141,14 @@ async function main(): Promise<void> {
   const counter = () => `nl:certrefunds:n:${shop.store.statsId}:${new Date(Date.now()).toISOString().slice(0, 7)}`;
   const checksTaken = async () => Number((await redis.pipeline([["GET", counter()]]))[0] ?? 0);
 
-  part("ALTO 2: the Store plan's first year given back stays under the US$ 65 the owner keeps, with the pass priced");
+  // The owner's ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), applied to every
+  // PR's honest cost by the coordinator's decision (option (a), #4827 6934185062); US$ 65 before. Nothing above US$ 66.
+  part("ALTO 2: the Store plan's first year given back stays under the owner's US$ 66, with the pass priced");
   {
     // As tests/plan-margin.test.ts and tests/read-ceilings.test.ts work it out.
     const kept = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + kept;
-    is(`the first year given back is under US$ 65 (US$ ${year.toFixed(2)})`, year < 65, true);
+    is(`the first year given back is under US$ 66 (US$ ${year.toFixed(2)})`, year < 66, true);
   }
 
   part("ALTO 2: the sweep runs a store's pass at most once every CERTIFICATE_PASS_EVERY_SECONDS");

@@ -55,6 +55,7 @@ def lock(extra=None):
         "node_modules/picomatch": {"version": "2.3.2", "dev": True},
         "node_modules/tinyglobby/node_modules/picomatch": {"version": "4.0.5", "dev": True},
         "node_modules/next": {"version": "16.4.5"},
+        "node_modules/eslint-config-next": {"version": "16.4.5", "dev": True},
     }
     packages.update(extra or {})
     return {"lockfileVersion": 3, "packages": packages}
@@ -126,6 +127,40 @@ class PicomatchExceptionTests(unittest.TestCase):
             values["picomatch"]["fixAvailable"] = fix
             with self.assertRaises(ValueError):
                 review(report(values), report(), lock(), ON_THE_LAST_DAY)
+
+    def test_any_step_back_npm_names_passes(self):
+        # npm names a different step back from one run to another with the same lock (Claude 3 R on #4843).
+        for version in ["14.2.35", "16.3.8", "15.5.29"]:
+            values = lint_chain()
+            values["picomatch"]["fixAvailable"] = {"name": "eslint-config-next", "version": version, "isSemVerMajor": True}
+            self.assertEqual(len(review(report(values), report(), lock(), ON_THE_LAST_DAY)), len(values))
+
+    def test_no_step_back_refuses(self):
+        for fix in [{"name": "eslint-config-next", "version": "16.4.5", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": "16.4.6", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": "16.3.8", "isSemVerMajor": False},
+                    {"name": "eslint-config-next", "version": "16.3", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": "16.3.8-canary.1", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": "v16.3.8", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": "\u0661\u0664.2.35", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": None, "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "isSemVerMajor": True},
+                    {"name": "eslint-config-next", "version": "14.2.35"},
+                    {"name": "picomatch", "version": "4.0.8", "isSemVerMajor": True},
+                    True, None, "14.2.35"]:
+            values = lint_chain()
+            values["picomatch"]["fixAvailable"] = fix
+            with self.assertRaises(ValueError):
+                review(report(values), report(), lock(), ON_THE_LAST_DAY)
+        values = lint_chain()
+        values["picomatch"]["fixAvailable"] = {"name": "eslint-config-next", "version": "16.3.8", "isSemVerMajor": True}
+        unlocked = lock()
+        del unlocked["packages"]["node_modules/eslint-config-next"]
+        with self.assertRaises(ValueError):
+            review(report(values), report(), unlocked, ON_THE_LAST_DAY)
+        for entry in ["16.4.5", {"version": "16.4"}, {"version": "16.4.5-canary.3"}, {}]:
+            with self.assertRaises(ValueError):
+                review(report(values), report(), lock({"node_modules/eslint-config-next": entry}), ON_THE_LAST_DAY)
 
     def test_a_clean_audit_needs_no_exception(self):
         self.assertEqual(review(report(), report()), [])

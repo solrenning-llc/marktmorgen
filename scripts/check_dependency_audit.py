@@ -12,8 +12,10 @@ every one of these is true, and any other finding, change or doubt refuses:
    ADVISORY on picomatch, range <=4.0.7, severity high;
 4. only the EXCEPTED packages are found;
 5. the lock holds picomatch only at LOCK_PICOMATCH (path and version), every copy `dev: true`;
-6. picomatch's finding offers no fix but ONLY_NPM_FIX (a semver-major step back of eslint-config-next):
-   a real fix refuses, so it is taken in a reviewed PR.
+6. picomatch's finding offers no fix but a semver-major step back of STEP_BACK_PACKAGE to a version strictly
+   below the one in the lock (npm names 14.2.35 or 16.3.8 from one run to another with the same lock; neither
+   brings a patched picomatch). `true`, another package, the same or a later version, `isSemVerMajor` not true,
+   or a version that is not plain MAJOR.MINOR.PATCH may be a real fix and refuses, so it is taken in a reviewed PR.
 """
 import datetime
 import json
@@ -43,7 +45,7 @@ LOCK_PICOMATCH = {
     "node_modules/picomatch": "2.3.2",
     "node_modules/tinyglobby/node_modules/picomatch": "4.0.5",
 }
-ONLY_NPM_FIX = {"name": "eslint-config-next", "version": "14.2.35", "isSemVerMajor": True}
+STEP_BACK_PACKAGE = "eslint-config-next"
 
 
 def findings(report):
@@ -99,6 +101,30 @@ def _lock_picomatch_is_reviewed(lock):
                for path, entry in copies.items())
 
 
+def _version(text):
+    """(major, minor, patch) for a plain ASCII MAJOR.MINOR.PATCH string; None for anything else (prerelease too)."""
+    if not isinstance(text, str):
+        return None
+    parts = text.split(".")
+    if len(parts) != 3 or not all(part.isascii() and part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def _only_a_step_back(fix, lock):
+    """True when npm's only offer is a semver-major step back of STEP_BACK_PACKAGE, below the version locked.
+
+    npm names a different step back from one run to another with the same lock (14.2.35 or 16.3.8); neither brings a
+    patched picomatch. Anything else (True, another package, the same or a later version) may be a real fix."""
+    if not isinstance(fix, dict) or fix.get("name") != STEP_BACK_PACKAGE or fix.get("isSemVerMajor") is not True:
+        return False
+    packages = lock.get("packages") if isinstance(lock, dict) else None
+    entry = packages.get("node_modules/" + STEP_BACK_PACKAGE) if isinstance(packages, dict) else None
+    locked = entry.get("version") if isinstance(entry, dict) else None
+    offered, current = _version(fix.get("version")), _version(locked)
+    return offered is not None and current is not None and offered < current
+
+
 def review(all_report, production_report, lock=None, today=None):
     """Refuse any production finding; refuse any development finding outside the one dated exception.
 
@@ -121,7 +147,7 @@ def review(all_report, production_report, lock=None, today=None):
     if not _lock_picomatch_is_reviewed(lock):
         raise ValueError("picomatch in the lock is not exactly the reviewed development-only copies: " + detail)
     fix = all_findings.get("picomatch", {}).get("fixAvailable")
-    if "picomatch" in found and fix != ONLY_NPM_FIX:
+    if "picomatch" in found and not _only_a_step_back(fix, lock):
         raise ValueError("A fix for GHSA-fc5q-39xc-vjpf is offered; update it in a reviewed PR: " + json.dumps(fix, sort_keys=True))
     return sorted(found)
 

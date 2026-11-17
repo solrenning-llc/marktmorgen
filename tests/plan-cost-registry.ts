@@ -46,6 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -54,6 +55,7 @@ import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
+import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
@@ -76,7 +78,6 @@ import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
-import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
@@ -119,10 +120,11 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
+import { WINBACK_OPEN_STRIPE_CALLS } from "@/lib/winback";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
@@ -441,6 +443,32 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
 /**
+ * Vercel Blob operations, from the official page read on 6 November 2026 (Claude 4, C4-20261106-0830-C5-39;
+ * https://vercel.com/docs/vercel-blob/usage-and-pricing, "Managed Infrastructure pricing", on-demand rates): an
+ * upload (put) is an Advanced Operation, $5.00 per million; a head or a read is a Simple Operation, $0.40 per million.
+ * The operations a plan includes are never counted as zero (rule MR).
+ */
+export const BLOB_ADVANCED_OP = 5 / 1e6;
+export const BLOB_SIMPLE_OP = 0.4 / 1e6;
+/**
+ * The puts one upload request may send: @vercel/blob tries a failed put again up to VERCEL_BLOB_RETRIES times (10 unless
+ * set; dist getRetries), and no official page says a put tried again, or refused, is not billed. Unknown is never zero:
+ * 1 + 10 (Revisor 1 on #2803; tests/picture-upload-costs.test.ts reads the installed SDK's default).
+ */
+export const BLOB_PUT_TRIES = 11;
+/**
+ * A head goes through the same request as a put (requestApi) and is tried again as often; a read through get() is one
+ * plain fetch, sent once (Codex S on #2801; tests/picture-upload-costs.test.ts reads the installed SDK).
+ */
+export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
+/**
+ * The signing requests one upload request may send: issueSignedToken is requestApi("/signed-token", POST) in the
+ * installed SDK, the same request as a put, tried again as often. No official page says a signed-token request is free,
+ * so each try is counted at the dearer Advanced Operation: unknown is never zero (Claude 1 on #2803, 6708192310;
+ * tests/picture-upload-costs.test.ts reads the installed SDK).
+ */
+export const BLOB_SIGN_TRIES = BLOB_PUT_TRIES;
+/**
  * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
  * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
  * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
@@ -605,6 +633,13 @@ export function affiliateLoadRead(size: AffiliateLoadSize): number {
 export function publicListingsRead(listings: number): number {
   return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
 }
+/**
+ * What reading whether a come-back link's person already has a membership that has not ended costs at the most
+ * (lib/winback-send.ts, openWinBack), besides the press itself (a public request, "come-back"): the units taken, and
+ * WINBACK_OPEN_STRIPE_CALLS calls to the creator's Stripe account, each waited on at 2 GB with a whole page's body.
+ * Taken as WINBACK_OPEN_REQUEST_UNITS public requests before it reads (tests/plan-cost-registry.test.ts).
+ */
+export const WINBACK_OPEN_READ = TAKE_COMMANDS * COMMAND + WINBACK_OPEN_STRIPE_CALLS * stripePage();
 /**
  * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
  * the request, the store's counts and the listings it reads, every page of
@@ -899,6 +934,13 @@ export function readShapeCost(shape: ReadShape): number {
   return CALL + shape.cpu * CPU_SECOND + (shape.seconds + shape.stripePages * EXPORT_PAGE_SECONDS) * MEMORY_SECOND
     + shape.commands * COMMAND + shape.dbBytes * DB_BYTE + shape.outBytes * ORIGIN_PER_BYTE;
 }
+
+/**
+ * A month's receipts in one ZIP at its worst (601 [KB22] U3, lib/receipt-batch.ts): the whole run at 2 GB and on the CPU,
+ * every receipt numbered, the fullest ZIP sent, every Stripe page waited on. Paid by RECEIPT_BATCH_UNITS studio requests,
+ * taken before Stripe is read (tests/kb22-receipt-batch.test.ts holds the units above this), so the "studio" line holds.
+ */
+export const RECEIPT_BATCH_COST = readShapeCost(RECEIPT_BATCH_SHAPE);
 
 /**
  * One reading of Marktmorgen Path's money and counts (lib/path.ts, visitPath):
@@ -1302,6 +1344,18 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
   },
   {
+    id: "picture-uploads",
+    feature: "Studio picture uploads (a product's, a link's and a page's picture): each copy's Blob puts, every try counted, and the checks of its name and bytes (6 November 2026; never counted before)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * ((BLOB_PUT_TRIES + BLOB_SIGN_TRIES) * BLOB_ADVANCED_OP + (3 * BLOB_HEAD_TRIES + 2) * BLOB_SIMPLE_OP + 2 * CDN_PER_REQUEST + 2 * MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE)),
+    sources: [
+      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor", "issueSignedToken"] },
+      { file: "lib/studio-route.ts", names: ["countStudio"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "lib/uploaded-image.ts", names: ["firstBytes", "reader.cancel()"] },
+    ],
+    basis: "Every copy of a picture (the picture and its smaller copy) is put through its own upload request, and attaching them is one more; each is a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling. Each request is counted at the dearest one may be: its put (an Advanced Operation) with every try again the SDK may send (BLOB_PUT_TRIES), Simple Operations: three heads (the one that checks a name is free; one for the picture and one for its smaller copy), each with its tries again (BLOB_HEAD_TRIES); its signing request (issueSignedToken, requestApi in the SDK), counted as an Advanced Operation with every try (BLOB_SIGN_TRIES), because no official page says it is free; and two reads, one plain fetch each, each a CDN request, with both copies' whole bytes (MAX_IMAGE_BYTES each) at the dearer Blob transfer rate kept here plus Fast Origin Transfer, since a private blob fetched on a miss pays both (as PICTURE_READ prices a private picture read; Claude 1 on #2803). The read is counted whole: firstBytes reads a stream it cancels after sixteen bytes, and no official page says the Blob honors a byte range with 206 or bills only the bytes sent (Claude 4, C4-20261106-1120-TODOS-63). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: a buyer's review photo (lib/review-photo.ts) and an email's picture (lib/mail-pictures.ts), each a Blob put of its own, reported apart to be bounded and counted.",
+  },
+  {
     id: "free-delivery",
     feature: "Downloads (sold and free)",
     monthlyUsd: () => (FREE_PAUSE_ABOVE_BYTES / GB) * FILE_DELIVERY_PER_GB,
@@ -1628,6 +1682,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A come-back link's checkout reads whether the person has a membership still running before it opens (R43, follow-up to #3371).
+      { file: "lib/winback-send.ts", names: ["takeBuyerRead(store, WINBACK_OPEN_REQUEST_UNITS)", "WINBACK_OPEN_STRIPE_CALLS - 2"] },
+      { file: "lib/winback.ts", names: ["WINBACK_OPEN_STRIPE_CALLS", "WINBACK_OPEN_REQUEST_UNITS"] },
       // A member's page and each action on it read one list of memberships for each customer of the address its link holds, side by side,
       // at most MANAGE_CUSTOMERS_MAX, the link's record within MANAGE_GRANT_BYTES (inside LINK_BYTES of tests/store-data-registry.ts):
       // Stripe bills no API call and no store command or byte is added, so the request's own cost is unchanged (R43 F1 on #2985, 9 November 2026).
@@ -2209,7 +2266,7 @@ export const ADD_ON_LINES: AddOnLine[] = [
     sources: [
       { file: "lib/store-assistant-rules.ts", names: ["ASSISTANT_PRICE_CENTS", "ASSISTANT_MESSAGES_MONTHLY", "ASSISTANT_INPUT_BYTES", "ASSISTANT_OUTPUT_TOKENS", "ASSISTANT_MESSAGE_COMMANDS", "ASSISTANT_MESSAGE_DB_BYTES", "ASSISTANT_PER_TEN_MINUTES", "ASSISTANT_PER_DAY", "ASSISTANT_STORE_PER_MINUTE", "ADD_ON_FEES", "DISPUTE_RESERVE_BPS", "REFUND_RESERVE_BPS", "REMITTANCE_BPS", "assistantMonthWorst"] },
       { file: "lib/store-assistant.ts", names: ["ASSISTANT_POOL", "pool(\"reserve\"", "pool(\"settle\"", "pool(\"release\"", "ASSISTANT_KEEP_SECONDS", "ASSISTANT_MISSED_KEPT"] },
-      { file: "app/api/store/assistant/route.ts", names: ["\"assist\"", "\"assist-day\"", "\"assist-store\"", "withinStore(\"assist-read\"", "withinStore(\"assist-handoff\""] },
+      { file: "app/api/store/assistant/route.ts", names: ["\"assist\"", "\"assist-day\"", "\"assist-store\"", "withinStore(\"assist-ask\"", "withinStore(\"assist-read\"", "withinStore(\"assist-handoff\""] },
       { file: "lib/opening.ts", names: ["ASSISTANT_ON_SALE"] },
       { file: "lib/next-offer.ts", names: ["pool(\"reserve\"", "pool(\"settle\"", "pool(\"release\"", "assistantMessageWorstMicroUsd()", "takeBuyerRead(store, NEXT_OFFER_REQUEST_UNITS)", "NEXT_OFFER_KEEP_SECONDS"] },
       { file: "lib/next-offer-rules.ts", names: ["NEXT_OFFER_PRODUCTS", "NEXT_OFFER_CHOICES", "NEXT_OFFER_OUTPUT_TOKENS", "NEXT_OFFER_COMMANDS", "NEXT_OFFER_REQUEST_UNITS", "withinAssistantReply"] },
@@ -2218,7 +2275,7 @@ export const ADD_ON_LINES: AddOnLine[] = [
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMIND_OUTPUT_TOKENS", "ASSIST_REMIND_PRODUCTS", "ASSIST_REMIND_COMMANDS", "ASSIST_REMIND_REQUEST_UNITS", "withinReminderReply"] },
       { file: "lib/checkout-recovery.ts", names: ["remindAssisted", "meter: { by: \"store\""] },
     ],
-    basis: "One payment: every reply of the month's pool at its worst (Haiku 5.5 at 24 KiB in and 320 tokens out, the 10% provider allowance, the 45-second wait at 2 GB, and the message's own commands, bytes and day of keeping), the dearer provider's fee on the whole amount charged, the price and the buyer's tax on top at 27% (6.6% + 30 cents, lib/receiving-costs.ts, the one model every plan and add-on is held to since 18 October 2026), a 1.5% remittance allowance, and reserves of one payment in a hundred refunded and one disputed with both $15 fees. The pool is reserved before each model call and settled at what was billed, so no month can spend past it; handed-over questions are inbox messages and store emails of the plan's own figures (lines inbox, store-email), refused past them. The next product after a purchase (lib/next-offer.ts) asks the model at most once an order, reserved from the same pool at the same worst cost (its request is inside a chat message's caps: withinAssistantReply), so the pool's month is unchanged; when the pool is spent it chooses by the creator's rules with no model. Its reads and Stripe calls are NEXT_OFFER_REQUEST_UNITS public requests of the plan's window, each priced as a later page (public-requests; NEXT_OFFER_READ in tests/plan-cost-registry.test.ts); its line in the confirmation email is two reads inside the order's ORDER_COMPUTE, and no email of its own. The checkout reminder (lib/assistant-reminder.ts) asks the model at most once a checkout, only for a buyer who checked its box, reserved from the same pool at the same worst cost (its request is inside a chat message's caps: withinReminderReply), settled at what was billed, so the pool's month is unchanged; a spent pool or a failed call sends the fixed reminder with no AI line. Its email is one of the store's own emails (line store-email), checked for room before the model is asked and taken before it is sent, refused past the figure; its reads and two Stripe calls are ASSIST_REMIND_REQUEST_UNITS public requests (ASSIST_REMIND_READ in tests/plan-cost-registry.test.ts); the yes it keeps is under a kilobyte for three days, at most ASSIST_REMINDERS_PER_STORE_DAY a store a day (tests/store-data-registry.ts).",
+    basis: "One payment: every reply of the month's pool at its worst (Haiku 5.5 at 24 KiB in and 320 tokens out, the 10% provider allowance, the 45-second wait at 2 GB, and the message's own commands, bytes and day of keeping), the dearer provider's fee on the whole amount charged, the price and the buyer's tax on top at 27% (6.6% + 30 cents, lib/receiving-costs.ts, the one model every plan and add-on is held to since 18 October 2026), a 1.5% remittance allowance, and reserves of one payment in a hundred refunded and one disputed with both $15 fees. The pool is reserved at a message's worst before the store's facts are read or the model is asked, and settled at what was billed (at what the reads cost when it stops before the model or the provider refused), so no month can spend past it; every question is also one public request of the plan's window (withinStore with the scope assist-ask, line public-requests), so a question refused for a spent pool, or handed over by its words with no model, reads nothing of the catalog and is a request of the plan's own figure; handed-over questions are inbox messages and store emails of the plan's own figures (lines inbox, store-email), refused past them. The next product after a purchase (lib/next-offer.ts) asks the model at most once an order, reserved from the same pool at the same worst cost (its request is inside a chat message's caps: withinAssistantReply), so the pool's month is unchanged; when the pool is spent it chooses by the creator's rules with no model. Its reads and Stripe calls are NEXT_OFFER_REQUEST_UNITS public requests of the plan's window, each priced as a later page (public-requests; NEXT_OFFER_READ in tests/plan-cost-registry.test.ts); its line in the confirmation email is two reads inside the order's ORDER_COMPUTE, and no email of its own. The checkout reminder (lib/assistant-reminder.ts) asks the model at most once a checkout, only for a buyer who checked its box, reserved from the same pool at the same worst cost (its request is inside a chat message's caps: withinReminderReply), settled at what was billed, so the pool's month is unchanged; a spent pool or a failed call sends the fixed reminder with no AI line. Its email is one of the store's own emails (line store-email), checked for room before the model is asked and taken before it is sent, refused past the figure; its reads and two Stripe calls are ASSIST_REMIND_REQUEST_UNITS public requests (ASSIST_REMIND_READ in tests/plan-cost-registry.test.ts); the yes it keeps is under a kilobyte for three days, at most ASSIST_REMINDERS_PER_STORE_DAY a store a day (tests/store-data-registry.ts).",
   },
 ];
 
@@ -2428,7 +2485,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   assist: guard("A burst limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-day": guard("A daily limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
-  "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
+  "assist-ask": PUBLIC, "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
   "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),

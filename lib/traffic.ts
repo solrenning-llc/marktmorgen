@@ -262,29 +262,40 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
  * requestLimitFor). A count that cannot be made is a request refused.
  */
 async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<boolean> {
+  return (await countRequestWhy(folder, store, window, who, now, units, client, giveBack)) === "ok";
+}
+
+/**
+ * A public request's take, said three ways (outage drill, 13 November 2026): "ok" counted within the window; "over"
+ * refused by a figure that was read (the window, the connection's share, a free store's place); "unknown" when the
+ * count could not be made, so a caller can say "not checked just now" instead of "too many". Both refuse.
+ */
+export type RequestTake = "ok" | "over" | "unknown";
+
+async function countRequestWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<RequestTake> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
-  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return false;
-  if (!Number.isSafeInteger(units) || units < 1) return false;
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return "unknown";
+  if (!Number.isSafeInteger(units) || units < 1) return "unknown";
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
-  if (!(await admitNonPaying(store, now))) return false;
+  if (!(await admitNonPaying(store, now))) return "over";
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
-  if (client && (await overShare(folder, window, whole, client, units, now))) return false;
+  if (client && (await overShare(folder, window, whole, client, units, now))) return "over";
   const key = requestsKey(folder, window.id);
   const reply = await redisPipeline([["INCRBY", key, units]]);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
   // one reply, an integer at least `units`. Anything else, a `true`, a text
   // or a second item, is a count that cannot be made: the request is refused.
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
-  if (!Number.isSafeInteger(n) || n < units) return false;
+  if (!Number.isSafeInteger(n) || n < units) return "unknown";
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
   // A window used up much faster than it passes tells the operator, once a mark; it changes nothing (lib/traffic-spike.ts).
   await alertSpike(store, folder, window, n, units, limit, now);
   // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
   // read for it. A request refused as a page resting stays counted, as it always has.
   if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
-  return n <= limit;
+  return n <= limit ? "ok" : "over";
 }
 
 /**
@@ -314,15 +325,25 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+  return (await takePublicWhy(store, who, now, units, shared, giveBack)) === "ok";
+}
+
+async function takePublicWhy(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<RequestTake> {
+  if (!isRedisConfigured()) return "unknown";
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return false;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
+    if (!window) return "unknown";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "over";
+    return await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
   } catch {
-    return false;
+    // Redis or the store's folder could not be reached: a count that was not made, never room, and never "too many".
+    return "unknown";
   }
+}
+
+/** takePublicRequest, said three ways (RequestTake): for a page that tells "too many" apart from "not checked just now". */
+export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now()): Promise<RequestTake> {
+  return takePublicWhy(store, who, now, 1, false, false);
 }
 
 /**

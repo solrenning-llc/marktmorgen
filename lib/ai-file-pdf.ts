@@ -40,15 +40,33 @@ export function wrapLines(font: Pick<PDFFont, "widthOfTextAtSize">, text: string
       continue;
     }
     if (line) out.push(line);
-    let rest = word;
-    while (!fits(rest)) {
-      const chars = Array.from(rest);
-      let cut = chars.length - 1;
-      while (cut > 1 && !fits(chars.slice(0, cut).join(""))) cut -= 1;
-      out.push(chars.slice(0, cut).join(""));
-      rest = chars.slice(cut).join("");
+    // The word's characters taken once, a line at a time: each line is the longest prefix that fits, found by halves
+    // among at most maxChars characters, and at least one character (Codex N1's MEDIUM on #3474: rebuilding every
+    // shorter prefix of the whole remainder took tens of seconds for a word of 14,000 characters). What is left that
+    // fits stays open as the line, so the next word may join it, as before.
+    const chars = Array.from(word);
+    let at = 0;
+    for (;;) {
+      const room = Math.min(maxChars, chars.length - at);
+      let cut = room;
+      if (!fits(chars.slice(at, at + room).join(""))) {
+        let lo = 1;
+        let hi = room - 1;
+        while (lo < hi) {
+          const mid = Math.ceil((lo + hi) / 2);
+          if (fits(chars.slice(at, at + mid).join(""))) lo = mid;
+          else hi = mid - 1;
+        }
+        cut = lo;
+      }
+      const piece = chars.slice(at, at + cut).join("");
+      at += cut;
+      if (at >= chars.length) {
+        line = piece;
+        break;
+      }
+      out.push(piece);
     }
-    line = rest;
   }
   if (line) out.push(line);
   return out;

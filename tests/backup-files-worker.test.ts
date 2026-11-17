@@ -651,12 +651,12 @@ async function main(): Promise<void> {
 
   part("a record named twice by the site is counted once");
   fresh();
-  const many = objects("blob", S, 100);
-  setListing("blob", S, many);
+  const namedTwiceObjects = objects("blob", S, 100);
+  setListing("blob", S, namedTwiceObjects);
   await runAt(0);
-  const twice = many.slice(0, 15).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" as const }));
+  const twice = namedTwiceObjects.slice(0, 15).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" as const }));
   world.records = [...twice, ...twice];
-  setListing("blob", S, many.slice(15));
+  setListing("blob", S, namedTwiceObjects.slice(15));
   report = await runAt(1);
   is("15 objects, 15%: under the 20% guard of the store and of the source", [has(report, "records_share"), has(report, "records_share_source")], [false, false]);
 

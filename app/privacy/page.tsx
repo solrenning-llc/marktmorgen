@@ -1892,7 +1892,10 @@ export default function PrivacyPage() {
             product&apos;s description, a course outline or an email), and
             which receives only what that creator typed into the box for it,
             the product&apos;s name, price and kind, and the store&apos;s
-            name; never anything about their buyers, members or list. For an
+            name; never anything about their buyers, members or list. When the
+            creator asks it to read a product&apos;s own PDF, it also receives
+            the first pages of that file and the product&apos;s description,
+            never the rest of the file. For an
             Outreach email it receives what the creator typed, the
             creator&apos;s name, the names of their products, and the name and
             description a business gives itself on its own website; never

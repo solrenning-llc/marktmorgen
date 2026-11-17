@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { cleanTag } from "@/lib/flow-rules";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readFileWhole } from "@/lib/file-store";
@@ -140,9 +143,22 @@ export async function POST(request: NextRequest) {
     if (!product) return fail("unknown", 404);
     const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
     if (refused) return fail(refused);
-    const pdf = await pdfPagesOf(product);
-    if (!pdf) return fail("file");
+    // The description first: one that cannot be read stops the job before the large file is read (Codex N1's LEVE 1
+    // on #3447).
     const about = product.about ? await readAbout(store.statsId, product.id) : "";
+    const file = readableFile(product);
+    if (!file || !store.statsId) return fail("file");
+    // A PDF that could not be read is not downloaded and parsed again for a day (UNREADABLE_PDF_SECONDS): reading it
+    // takes no job, since nothing can be written from it, so without the mark every request would read it again for
+    // free (Codex N1's MEDIUM on #3447). A mark that does not read exactly reads nothing either (rule 24).
+    const mark = unreadablePdfKey(store.statsId, file.pathname);
+    const noted = await unreadablePdfNoted(mark);
+    if (noted !== "no") return fail(noted === "yes" ? "file" : "failed", noted === "yes" ? 400 : 503);
+    const pdf = await pdfPagesOf(product);
+    if (!pdf) {
+      await redisPipeline([["SET", mark, "1", "EX", UNREADABLE_PDF_SECONDS]]).catch((error) => console.error("a PDF that could not be read could not be noted", error));
+      return fail("file");
+    }
     const run = text(body.run, 60);
     return inSteps((onStep) => writeFromPdf(store, { title: product.title, summary: product.summary, about, notes, pdf }, Date.now(), { run, onStep }), "a title and benefits from a PDF failed");
   }
@@ -388,6 +404,22 @@ export async function POST(request: NextRequest) {
     return answer(writeEmail(store, { goal, product: text(body.product, 200), link: text(body.link, 400), notes }));
   }
   return fail("invalid");
+}
+
+/** How long a product's PDF that could not be read is not read again for the AI assistance (Codex N1's MEDIUM on #3447). */
+const UNREADABLE_PDF_SECONDS = 86_400;
+
+/** The mark of a PDF that could not be read, by the store and the file's own path (a new upload is a new path). */
+function unreadablePdfKey(statsId: string, pathname: string): string {
+  return `nl:ai:pdfno:${statsId}:${createHash("sha256").update(pathname).digest("hex").slice(0, 24)}`;
+}
+
+/** Whether that mark is there, read exactly (rule 24): "yes", "no", or "unknown" for any other reply or a failed call. */
+async function unreadablePdfNoted(mark: string): Promise<"yes" | "no" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const read = repliesFor(await redisPipeline([["GET", mark]]).catch(() => null), 1);
+  if (!read) return "unknown";
+  return read[0] === null ? "no" : read[0] === "1" ? "yes" : "unknown";
 }
 
 /** A product's own PDF, its first pages only (lib/ai.ts, readPdfFacts), or null when it has none to read or it cannot be read. */

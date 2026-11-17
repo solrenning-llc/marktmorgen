@@ -20,6 +20,7 @@
  *     refused before the file is read (one read of the balance, nothing
  *     reserved).
  */
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { PDFDocument } from "pdf-lib";
@@ -220,6 +221,36 @@ async function main(): Promise<void> {
   is("the same for a title and benefits from the PDF", await json(await askSpent({ kind: "product-pdf", product: spentMade.product.id, run: "routerunspent004", notes: "" })), [400, { ok: false, error: "off" }]);
   unknownFor = null;
   is("and the file is never read for it, nor anything asked", [fileReads, calls], [0, 0]);
+
+  part("A PDF that cannot be read is not downloaded again for a day (Codex N1's MEDIUM on #3447)");
+  const BAD = "steps.route.bad@example.com";
+  await claimHandle(BAD, "stepsroutebad", "Bad File Route", "");
+  await ensureStatsId(BAD);
+  await setSubscription(BAD, { customerId: "cus_StepsRt0004", subscriptionId: "sub_StepsRt0004", active: true, tier: "scale", trialEnds: 0, period: paidPeriod() });
+  const badMade = await addProduct(BAD, "Broken Pack", "A pack whose file is not a PDF", "9", null);
+  if (!badMade.ok) throw new Error("no bad product");
+  const goodBook = book;
+  book = new TextEncoder().encode("this is not a PDF at all, only text that pdf-lib cannot open");
+  await setProductFile(BAD, badMade.product.id, { pathname: `vault/${"d".repeat(32)}/${badMade.product.id}/token0004/book.pdf`, name: "book.pdf", bytes: book.length, contentType: "application/pdf", addedAt: "2026-11-09" });
+  const badStore = (await storeForEmail(BAD))!;
+  const badSession = await openSession(BAD);
+  const askBad = (body: Record<string, unknown>) =>
+    POST(new NextRequest(`${ORIGIN}/api/store/ai`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${badSession}` }, body: JSON.stringify(body) }));
+  const badLeft = await aiLeft(badStore);
+  calls = 0;
+  fileReads = 0;
+  is("a PDF that cannot be read: refused as file", await json(await askBad({ kind: "product-pdf", product: badMade.product.id, run: "routerunbad00001", notes: "" })), [400, { ok: false, error: "file" }]);
+  is("its file read once, nothing asked, no job taken", [fileReads, calls, await aiLeft(badStore)], [1, 0, badLeft]);
+  is("asked again: refused as file without reading the file again", await json(await askBad({ kind: "product-pdf", product: badMade.product.id, run: "routerunbad00002", notes: "" })), [400, { ok: false, error: "file" }]);
+  is("still one read of the file, nothing asked, no job taken", [fileReads, calls, await aiLeft(badStore)], [1, 0, badLeft]);
+  const badPath = `vault/${"d".repeat(32)}/${badMade.product.id}/token0004/book.pdf`;
+  const badMark = `nl:ai:pdfno:${badStore.statsId}:${createHash("sha256").update(badPath).digest("hex").slice(0, 24)}`;
+  const badTtl = Number(redis.run(["TTL", badMark]));
+  is("its mark, kept a day at the most", [redis.run(["GET", badMark]), badTtl > 0 && badTtl <= 86_400], ["1", true]);
+  redis.run(["DEL", badMark]);
+  await askBad({ kind: "product-pdf", product: badMade.product.id, run: "routerunbad00003", notes: "" });
+  is("control: with the mark gone, the file is read again", fileReads, 2);
+  book = goodBook;
   globalThis.fetch = realFetch;
 
   part("Without steps, one answer as before");

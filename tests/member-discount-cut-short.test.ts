@@ -66,7 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     posted.push(path);
-    return answer({ id: path.split("/")[2] });
+    return answer({ id: path.split("/")[2], object: "subscription", discounts: ["di_test_member0001"] });
   }
   return answer({ error: { message: "no such" } }, 404);
 }) as typeof fetch;

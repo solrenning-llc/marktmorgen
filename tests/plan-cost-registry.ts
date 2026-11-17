@@ -491,6 +491,22 @@ export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
  * remembered, doubled, and stays a ceiling to be read and dated before any margin is certified.
  */
 export const BLOB_ADVANCED_OPERATION = 10 / 1e6;
+/**
+ * The daily sweep's commands for one community picture door never used (lib/community-files.ts,
+ * sweepCommunityUploads): its share of the list read, the ZREM, the GET of its note, the DECR that gives its place
+ * back and the SET when the count went below zero, and the ZADD when it is listed again.
+ */
+export const COMMUNITY_SWEEP_COMMANDS = 6;
+/**
+ * The most one community picture door costs (app/api/store/community/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the member, the store, its pace, the buyer action, the place, the note,
+ * its listing read back, and a place given back), twenty kilobytes through the database, one head of the file store
+ * to refuse a name it already has, the browser's upload through the door and the sweep's delete of it when it is never
+ * used (two Advanced Operations), and the sweep's commands for it. One buyer action is taken before the head;
+ * tests/community-door-cost.test.ts holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ */
+export const COMMUNITY_DOOR_COST =
+  request("wait", 40 + TAKE_COMMANDS, 20_000) + BLOB_SIMPLE_OPERATION + 2 * BLOB_ADVANCED_OPERATION + COMMUNITY_SWEEP_COMMANDS * COMMAND;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -2050,7 +2066,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/chat/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/messages/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
-      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
+      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "head(pathname)", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
       // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
       { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path)", "releaseTaskHold(file.path)"] },

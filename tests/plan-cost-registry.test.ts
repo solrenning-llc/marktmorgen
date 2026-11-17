@@ -12,7 +12,8 @@ import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
-import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
+import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
+import { BENEFIT_PAGE_UNITS, BENEFIT_STRIPE_PAGES } from "@/lib/tier-benefit-rules";
 import { TEST_SALES_PAGES, broadcastSizesBytes } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/person-agenda";
@@ -434,6 +435,14 @@ test("a companies request fits its studio requests, and each page that reads eve
  assert.ok(sentBytes(amp) <= SENT_TIMES * amp.length && sentBytes(amp) >= 8 * amp.length, `${sentBytes(amp)} for ${amp.length}`);
  assert.ok(sent >= 17, `the fullest companies page sends ${sent} studio requests' worth: never less than the review's 17`);
  console.log(`the fullest companies page: ${STUDIO_PAGE_UNITS} + ${COMPANIES_READ_UNITS} + ${sent} studio requests, and its reading of the buyers when Stripe is read`);
+});
+
+test("a reading of who is owed a membership benefit fits the studio requests counted before its pages, at every number of pages, and no fewer would do", () => {
+ // Claude 7's cost MEDIUM on #3014: every page load and every give or undo press reads Stripe and the marks owed.
+ for (let pages = 1; pages <= BENEFIT_STRIPE_PAGES; pages += 1) {
+  assert.ok(benefitsRead(pages) <= UNIT_COST.studio * BENEFIT_PAGE_UNITS * pages, `${pages} pages: ${benefitsRead(pages)} > ${pages} x ${BENEFIT_PAGE_UNITS} x ${UNIT_COST.studio}`);
+ }
+ assert.ok(benefitsRead(1) > UNIT_COST.studio * (BENEFIT_PAGE_UNITS - 1), `${benefitsRead(1)} <= ${BENEFIT_PAGE_UNITS - 1} x ${UNIT_COST.studio}: lower BENEFIT_PAGE_UNITS`);
 });
 
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {

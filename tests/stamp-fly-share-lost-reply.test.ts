@@ -50,7 +50,7 @@ async function shareTotal(window: string, counter: string): Promise<{ sum: numbe
 /**
  * Losing replies: "add" loses the reply of the pipeline that raised a share of copies (it is applied first, then the
  * reply throws); "all" also loses every reply after it in this hold, so nothing the hold sends next can be read;
- * "late" keeps the share's add back and throws, as a request still on its way, for the test to deliver afterwards.
+ * "late" keeps the share's add back and throws, as a request still on its way, for the test to deliver afterward.
  */
 let lose: "add" | "all" | "late" | null = null;
 let lost = false;
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
     is("what it sent on the share stays inside FLY_SHARE_COMMANDS", shareCommands > 0 && shareCommands <= FLY_SHARE_COMMANDS, true);
     is("the window is given back", await windowCount(), windowBefore);
     for (const commands of late) await pipeline(commands);
-    is("the add delivered afterwards does not raise the share", (await share()).sum, shareBefore);
+    is("the add delivered afterward does not raise the share", (await share()).sum, shareBefore);
     const next = flyHoldUnits(20 * MB);
     const again = await holdPublicRequests(store, next, now, "buyer", { shared: true });
     is("and the connection's next copy is held", again, true);

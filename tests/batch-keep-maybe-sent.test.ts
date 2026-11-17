@@ -19,6 +19,7 @@ import { windowId } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { createResendFallbackFixture } from "./resend-fallback-fixture";
 
 const OWNER = "owner@example.com";
 let resendAnswers = 200;
@@ -70,6 +71,18 @@ async function main(): Promise<void> {
   receipt = fresh();
   resendAnswers = 422;
   is("control: a batch the provider refused outright was not sent", [await sendBatchNoting([letter("c@example.com")], "k:refused", { by: "company" }, receipt), receipt.maybeSent], ["refused", false]);
+
+  // Codex N1 on #3827 (MEDIUM): the guard answers "unknown" with `posted: false` when it stopped before any POST
+  // (here the budget reservation's reply is lost before the provider is asked). Nothing can have gone, so the receipt
+  // does not say "maybe sent", and the caller gives its reservation back; a guard that may have posted still does.
+  const guard = await createResendFallbackFixture({ credential: String(process.env.RESEND_API_KEY) });
+  guard.loseNext("reserve");
+  receipt = fresh();
+  resendAnswers = 200;
+  const takenBeforeStop = taken;
+  const stopped = await sendBatchNoting([letter("d@example.com")], "k:stopped-before-post", { by: "company" }, receipt, guard.runtime);
+  is("a send the guard stopped before its POST is retried, and was not sent", [stopped, receipt.maybeSent, taken - takenBeforeStop], ["retry", false, 0]);
+  is("the guard never posted it (diagnostic)", guard.requests.some((r) => r.url.endsWith("/emails/batch")), false);
 
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);

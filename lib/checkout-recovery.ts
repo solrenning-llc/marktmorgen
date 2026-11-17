@@ -61,7 +61,7 @@ import { readListing, readListings } from "@/lib/catalog";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { cartable, readCartIds } from "@/lib/cart-rules";
 import { cartWords } from "@/lib/buyer-words/cart";
-import { saleOff, salePrice } from "@/lib/store-sale";
+import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { cartAskIds } from "@/lib/checkout-ask-cart";
 import type { Listing } from "@/lib/store";
 import { membershipLine, speech } from "@/lib/buyer-words";
@@ -99,6 +99,8 @@ const who = (email: string) => sha(`nimbus-recover:${normaliseEmail(email)}`).sl
 const sentKey = (session: string) => `nl:recover:sent:${session}`;
 const onceKey = (statsId: string, email: string, product: string) =>
   `nl:recover:once:${statsId}:${sha(`nimbus-recover-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
+/** That address's stop on checkout reminders, for the person's copy to read (lib/person-copy.ts). */
+export const recoveryStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:recover:off:${statsId}:${who(email)}`;
 /** What a reminder's stop mark can keep for good, counted in the store's data room before it is sent. */
 export const RECOVER_TRACE_BYTES = 192;
@@ -621,8 +623,9 @@ async function deliver(
     } else {
     const product = about.product;
     // The price as the store page says it: the floor of a price the buyer
-    // chooses, and a membership's trial and set number of payments with it.
-    const price = money(fromPriceCents(product));
+    // chooses, and a membership's trial and set number of payments with it;
+    // during a store-wide sale, its sale price, as the cart's reminder says it (DISC-S-2).
+    const price = money(salePrice(fromPriceCents(product), saleOff(store.sale, product, saleClock())));
     const from = (said: string) => (product.options.length > 1 ? w.fromPrice(said) : said);
     const priceWords = activePwyw(product)
       ? g.youChoosePrice(money(product.priceCents))

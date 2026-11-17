@@ -247,7 +247,9 @@ body {
   color: var(--violet-ink);
 }
 
-:where(a, button, [role="button"], input, select, textarea, summary):focus-visible,
+/* [tabindex="0"]: a box made focusable so the keyboard can scroll it (a wide table, a long text) gets the same ring
+   as a control, not only the browser's own (2.4.7, 2.4.13; tests/focus-ring-regions.test.ts). */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex="0"]):focus-visible,
 :where(input[type="radio"]):focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -5047,6 +5049,15 @@ fieldset:disabled .cm-poll-row {
   }
   .st-has-sticky {
     padding-bottom: 6.5rem;
+  }
+  /*
+   * WCAG 2.2 2.4.11/2.4.12: the browser keeps what has keyboard focus above the
+   * bar instead of under it (tests/sticky-buy-focus.test.ts). Held while the bar
+   * is away too: focus can scroll the buy box off screen, and the bar then comes
+   * back over what was just focused.
+   */
+  html:has(.st-sticky-buy) {
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
   }
 }
 .st-sticky-price {

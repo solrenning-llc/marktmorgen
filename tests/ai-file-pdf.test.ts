@@ -31,6 +31,27 @@ async function main(): Promise<void> {
   is("never longer than 80 characters, even where the width would allow more", [lines.every((l) => l.length <= MAX_LINE_CHARS), lines.some((l) => l.length > 70)], [true, true]);
   is("a word longer than a line is cut where it must be", wrapLines(font, "x".repeat(170), 12).map((l) => l.length), [80, 80, 10]);
 
+  // Codex N1's MEDIUM on #3474: a long word with no space was cut by rebuilding every shorter prefix of the whole
+  // remainder, from its full length down, for every line: for 14,000 characters, tens of seconds, past the render's
+  // time. The cut now works on the word's characters once, a line at a time, and finds the longest prefix that fits
+  // by halves, so the work grows with the word, not with its cube.
+  part("A very long word is cut in time");
+  let measured = 0;
+  const counting = { widthOfTextAtSize: (text: string, size: number) => (measured += 1, Array.from(text).length * size * 0.3) };
+  const long = Array.from({ length: 14_000 }, (_, i) => "abcdefghijklmnopqrstuvwxyzé"[i % 27]).join("");
+  const started = performance.now();
+  const cut = wrapLines(counting, long, 12);
+  const took = performance.now() - started;
+  is("the word comes back whole, in order", cut.join(""), long);
+  is("every line within 80 characters, all full but the last", [cut.every((l) => Array.from(l).length <= MAX_LINE_CHARS), cut.slice(0, -1).every((l) => Array.from(l).length === MAX_LINE_CHARS)], [true, true]);
+  is(`measured at most 20 times a character (${measured} for ${long.length})`, measured <= 20 * long.length, true);
+  // A wide margin over the few milliseconds it takes: the old cut took tens of seconds here.
+  is(`cut in well under 2 seconds (${Math.round(took)} ms)`, took < 2_000, true);
+  measured = 0;
+  const narrow = wrapLines(counting, long, 12, 12 * 0.3 * 37);
+  is("cut by the page's width too, where it is narrower than 80 characters", [narrow.join("") === long, narrow.slice(0, -1).every((l) => Array.from(l).length === 37)], [true, true]);
+  is(`still measured at most 20 times a character (${measured})`, measured <= 20 * long.length, true);
+
   part("A file of ten full parts");
   const draft = { title: "Weeknight Dinners for Busy Parents", sections: Array.from({ length: MAX_FILE_SECTIONS }, (_, i) => ({ title: `Part ${i + 1}: Week ${i + 1}`, body: body(i) })) };
   const made = await filePdf({ draft, storeName: "Harbor Kitchen", lang: "en", at: new Date("2026-11-09T12:00:00Z") });

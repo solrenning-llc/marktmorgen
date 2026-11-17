@@ -571,7 +571,9 @@ async function main(): Promise<void> {
     // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // C1-20261117 (2,000 products on every plan): the beside pool, 40 MB a paying store keeps beside its room, costs a
     // cent more on Studio and Scale; the figures are the model's (AC (n)).
-    is("11: Store, Studio and Scale keep 44.33, 309.83 and 694.41 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.33", "309.83", "694.41"]);
+    // C1-20261117-1500-c6c4-1, PR 2 (Claude 6 local, 17 November 2026): the beside pool's sweep, once in a store's life,
+    // priced whole in every month, costs Store's monthly worst month a cent: 44.32 where 44.33 was. Cost added, not lowered.
+    is("11: Store, Studio and Scale keep 44.32, 309.83 and 694.41 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.32", "309.83", "694.41"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's

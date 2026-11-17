@@ -331,6 +331,52 @@ export async function takeBeside(store: DataStore, ids: string[], bytes: number,
   return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), false, now / 1000, true)).ok;
 }
 
+/**
+ * The room's slots, in bytes (0 for a slot not there), read exactly; null when they cannot be read. The beside pool's
+ * sweep (lib/store.ts, moveBesideToPool) reads them so it moves only a share a slot really holds.
+ */
+export async function roomSlots(store: DataStore, slots: string[]): Promise<number[] | null> {
+  if (slots.length === 0) return [];
+  const key = dataKey(store);
+  if (!key || !isRedisConfigured()) return null;
+  try {
+    const [reply] = await redisPipeline([["HMGET", key, ...slots]]);
+    if (!Array.isArray(reply) || reply.length !== slots.length) return null;
+    const out: number[] = [];
+    for (const value of reply) {
+      if (value === null) out.push(0);
+      else if (typeof value === "string" && /^\d+$/.test(value)) out.push(Number(value));
+      else return null;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** The beside pool's field that says its sweep is done (not a slot: TAKE_DATA never counts it). */
+export const BESIDE_SWEPT_FIELD = "!swept";
+
+/** Whether the store's beside pool was swept to the end; null when it cannot be read. */
+export async function besideSwept(store: DataStore): Promise<boolean | null> {
+  const key = besideKey(store);
+  if (!key || !isRedisConfigured()) return null;
+  try {
+    const [reply] = await redisPipeline([["HGET", key, BESIDE_SWEPT_FIELD]]);
+    if (reply === null) return false;
+    return reply === "1" ? true : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Marks the store's beside pool as swept to the end. A mark that is lost only means the next sweep reads it again. */
+export async function markBesideSwept(store: DataStore): Promise<void> {
+  const key = besideKey(store);
+  if (!key || !isRedisConfigured()) return;
+  await redisPipeline([["HSET", key, BESIDE_SWEPT_FIELD, "1"]]).catch(() => undefined);
+}
+
 /** Gives these products' shares back to the pool, after a write that took them failed. Never refuses and never throws. */
 export async function giveBeside(store: DataStore, ids: string[], now = Date.now()): Promise<void> {
   if (ids.length === 0) return;

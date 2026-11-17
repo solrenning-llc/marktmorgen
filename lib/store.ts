@@ -160,8 +160,9 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { besideHeld, giveBeside, noteData, takeBeside, takeData } from "@/lib/store-data";
-import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT } from "@/lib/store-data-rules";
+import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, roomSlots, takeBeside, takeData } from "@/lib/store-data";
+import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor } from "@/lib/store-data-rules";
+import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
 import { type SitePage, parseSitePages, MAX_SITE_PAGES, slugProblem } from "@/lib/site-page-rules";
 import { type AnswersSetting, NO_ANSWERS, parseAnswers } from "@/lib/answers-rules";
@@ -2378,7 +2379,9 @@ export async function setSubscription(
   const source = expected ? { sid: expected.sid, statsId: expected.statsId,
     stripeCustomerId: expected.stripeCustomerId, subscriptionId: expected.subscriptionId,
     subscriptionActive: expected.subscriptionActive, tier: expected.tier, cycle: expected.cycle } : null;
+  let standingAtStart: ReturnType<typeof standingOf> | null = null;
   const result = await withStore<Store | null>(email, async (store, save) => {
+    standingAtStart = standingOf(store);
     if (source && (store.sid !== source.sid || store.statsId !== source.statsId ||
         store.stripeCustomerId !== source.stripeCustomerId || store.subscriptionId !== source.subscriptionId ||
         store.subscriptionActive !== source.subscriptionActive || store.tier !== source.tier || store.cycle !== source.cycle)) return null;
@@ -2468,6 +2471,10 @@ export async function setSubscription(
     }
     return saved;
   });
+  // A store that starts paying (from a trial, from nothing, back from an end): what its products keep beside them moves
+  // to its beside pool, after the lock is let go (moveBesideToPool takes it a batch at a time). Never on a write that
+  // finds it paying already, so opening the studio sweeps nothing; a sweep that fails leaves the room fuller.
+  if (result && standingAtStart !== "paid" && standingOf(result) === "paid") await moveBesideToPool(email);
   return result ?? null;
 }
 
@@ -3746,6 +3753,57 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
 }
 
 /** Takes something off the store. Returns the product as it was, for its files. */
+/** How many products the beside pool's sweep moves a lock at the most (C1-20261117-1500-c6c4-1, PR 2). */
+export const MOVE_BESIDE_BATCH = 250;
+/**
+ * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
+ * taken and let go, the store read (withStore), the pool's fields and the room's slots read (two HMGETs), the lock
+ * held on (holdLock), the pool's EVAL and the room's EVAL; and the sweep's mark read and written once a sweep.
+ */
+export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
+export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + 2;
+export const MOVE_BESIDE_SWEEP_COMMANDS = 2;
+
+/**
+ * Moves the beside share of a paying store's products that were counted whole in its room (saved before it paid) to
+ * its beside pool, MOVE_BESIDE_BATCH products a lock, letting the lock go between batches so no edit waits long.
+ * Only a product whose room slot holds the whole share moves, and its slot comes down by exactly that share, so the
+ * room never counts less than it holds. The pool is taken first and the room given back after: a give-back that is
+ * lost leaves both counting it, fuller, never emptier. Stops at a batch the pool cannot take (full or unknown) or the
+ * store cannot be read: what is left stays counted in the room, as before, and moves when it is saved again (lazily,
+ * in commit). A store sweeps once: a sweep that started is marked when it ends, however it ended, so a store that
+ * starts paying again reads one field and sweeps nothing (MOVE_BESIDE_SWEEP_COMMANDS); a mark that cannot be read is
+ * not "not swept". Returns how many products moved.
+ */
+export async function moveBesideToPool(email: string): Promise<number> {
+  const first = await storeForEmail(email);
+  if (!first || besidePoolFor(first) <= 0 || (await besideSwept(first)) !== false) return 0;
+  let moved = 0;
+  for (let batch = 0; batch < MOVE_BESIDE_BATCHES; batch += 1) {
+    const step = await withStore<number | "end" | "stop">(email, async (store, _save, held) => {
+      if (besidePoolFor(store) <= 0) return "stop";
+      const ids = store.catalog.items.slice(batch * MOVE_BESIDE_BATCH, (batch + 1) * MOVE_BESIDE_BATCH).map((item) => item.id);
+      if (ids.length === 0) return "end";
+      const pooled = await besideHeld(store, ids);
+      const slots = pooled ? await roomSlots(store, ids.map((id) => `p:${id}`)) : null;
+      if (!pooled || !slots) return "stop";
+      const toPool = ids.filter((id, i) => !pooled.has(id) && slots[i] > BESIDE_PRODUCT);
+      if (toPool.length === 0) return ids.length < MOVE_BESIDE_BATCH ? "end" : 0;
+      if (!(await holdLock(held))) return "stop";
+      if (!(await takeBeside(store, toPool, BESIDE_PRODUCT))) return "stop";
+      await giveData(store, toPool.map((id) => ({ slot: `p:${id}`, bytes: BESIDE_PRODUCT })));
+      moved += toPool.length;
+      return ids.length < MOVE_BESIDE_BATCH ? "end" : toPool.length;
+    }).catch((error) => {
+      console.error("moving a store's products beside its room stopped", error);
+      return "stop" as const;
+    });
+    if (step === null || step === "stop" || step === "end") break;
+  }
+  await markBesideSwept(first);
+  return moved;
+}
+
 export async function removeProduct(
   email: string,
   id: string,

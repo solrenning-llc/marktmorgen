@@ -84,7 +84,7 @@ import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES, MOVE_BESIDE_BATCH, MOVE_BESIDE_BATCHES, MOVE_BESIDE_BATCH_COMMANDS, MOVE_BESIDE_SWEEP_COMMANDS } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
@@ -790,6 +790,15 @@ export const COMMUNITY_DEVICES_READ = {
   deviceBytes: DEVICE_SENT_BYTES,
   bytes: (2 + MAX_MENTIONS) * MAX_MEMBER_DEVICES * DEVICE_SENT_BYTES,
 } as const;
+/**
+ * One sweep of a store's beside pool at its most (lib/store.ts, moveBesideToPool; C1-20261117-1500-c6c4-1, PR 2):
+ * MOVE_BESIDE_BATCHES batches, each a heavy request's time with MOVE_BESIDE_BATCH_COMMANDS commands, the store's
+ * record read at MAX_STORE_BYTES and each of its MOVE_BESIDE_BATCH products' pool field, room slot and two changes at
+ * 256 bytes, plus the sweep's mark read and written. A store sweeps once; priced whole in every month.
+ */
+export const BESIDE_SWEEP_USD =
+  MOVE_BESIDE_BATCHES * request("heavy", MOVE_BESIDE_BATCH_COMMANDS, MAX_STORE_BYTES + MOVE_BESIDE_BATCH * 256) + MOVE_BESIDE_SWEEP_COMMANDS * COMMAND;
+
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -2092,9 +2101,12 @@ export const COST_LINES: CostLine[] = [
     id: "database-storage",
     feature: "What a store keeps in the database: its data room, and every record kept outside it (18 October 2026: a room by plan)",
     // The beside pool (C1-20261117) is kept beside the room, never inside it: MAX_PRODUCTS products' worth, all held.
-    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reserveBytes(tier)) * DB_BYTE_MONTH,
+    // Its sweep (PR 2), once in a store's life, priced whole in every month: every batch reads the store and moves
+    // MOVE_BESIDE_BATCH products' fields, slots and shares (BESIDE_SWEEP_USD).
+    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reserveBytes(tier)) * DB_BYTE_MONTH + BESIDE_SWEEP_USD,
     sources: [
       { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "NON_PAYING_DATA_ROOM_BYTES", "ORDER_DATA_BYTES", "ITEM_DATA_BYTES", "orderReserveFor", "contentRoomFor", "BESIDE_POOL_BYTES"] },
+      { file: "lib/store.ts", names: ["moveBesideToPool", "MOVE_BESIDE_BATCH", "MOVE_BESIDE_BATCHES", "MOVE_BESIDE_BATCH_COMMANDS", "MOVE_BESIDE_SWEEP_COMMANDS"] },
       { file: "lib/store-data.ts", names: ["TAKE_DATA", "needData", "keepFor"] },
       { file: "lib/order-data.ts", names: ["ORDER_WRITE", "orderWrite", "ORDER_KEY_BYTES", "ORDER_ENTRY_BYTES"] },
       { file: "lib/order-admission.ts", names: ["used + holding + bytes > room", "orderDataBytes(items)"] },

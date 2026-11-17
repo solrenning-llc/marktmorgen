@@ -569,14 +569,38 @@ async function main(): Promise<void> {
     // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
     // figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 44.34, 311.91 and 697.49 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.34", "311.91", "697.49"]);
+    // Merge of main into #4246 (17 November 2026, Claude 3 cloud T): main's costs (#2803's picture uploads) and this PR's
+    // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 44.33, 309.84 and 694.42 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.33", "309.84", "694.42"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
+    // #4246 (claude7/decided-flow-ses-wait) counts the waits for room at Amazon SES in WORST_COMMANDS_PER_RUN
+    // (SES_WAITS_PER_RUN × (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY), lib/flow-limits.ts): a dearer
+    // workflows line, so each plan keeps less, every figure still above zero (MR). Figures as the model computes them.
+    // #4246 again (15 November 2026, reviews by clouds F and G): the mail job's look for parked SES steps
+    // (SES_WAKE_JOBS_PER_DAY × SES_WAKE_JOB_COMMANDS) priced whole on every plan that can run workflows, and
+    // SES_WAIT_COMMANDS_PER_TRY 60 → 64: Studio 312.40 → 311.87 and Scale 700.96 → 700.37; Store, with no runs a day,
+    // unchanged; every figure above zero (MR).
+    // And each counted wait priced at the dearer of an ordinary try and an SES try past its parks
+    // (SES_COUNTED_WAIT_COMMANDS_PER_TRY, review by cloud AA): Studio 311.87 → 311.76, Scale 700.37 → 700.20; Store unchanged.
+    // With main's erasure probe (#4542) and #4015 merged in: Store 45.10, Studio 311.76, Scale 700.19, every figure above
+    // zero (MR); cost is not lowered.
+    // Merge of main into #4246 (15 November 2026): this PR's costs and main's together cost Studio's monthly worst month
+    // one cent more (the sum crosses a rounding step): 311.75 where 311.76 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #4246 again (16 November 2026): with main's webhook outbox (#4319); figures as the model computes them.
+    // Merge of main into #4246 (17 November 2026, Claude 1 cloud c1-conflitos-5): with main's vault release line (#4291)
+    // and the rest of main's model; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
+    // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
+    // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.
+    // The same on the yearly month: Studio 256.74 and Scale 577.10 where 257.27 and 577.69 were; Store unchanged.
+    // The same on the yearly month: Studio 256.74 → 256.64, Scale 577.10 → 576.93; Store unchanged.
+    // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
     // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
     // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
-    is("11: and 36.28, 256.78 and 574.21 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.28", "256.78", "574.21"]);
+    is("11: and 36.28, 254.71 and 571.15 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.28", "254.71", "571.15"]);
   } finally {
     Date.now = realNow;
   }

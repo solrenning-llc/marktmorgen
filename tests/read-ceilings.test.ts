@@ -50,7 +50,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { takeAllowance } from "@/lib/store-allowance";
-import { COST_LINES, DAY_WINDOWS, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost, studioPictureWork } from "./plan-cost-registry";
+import { COST_LINES, DAY_WINDOWS, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -349,18 +349,12 @@ async function main(): Promise<void> {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allowed, with the room that existed: the first
     // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
     // The ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), US$ 65 before. The dollar more
-    // is room for the picture-uploads line (the Blob operations of every picture upload), not for more readings: the
-    // figure is still the one sized under US$ 65, where, without that line, one more heavy reading a day would pass it.
+    // is room for any honest cost up to US$ 66, not only the picture uploads (coordinator's decision 6934185062, option (a)).
+    // History: the readings figure was sized under US$ 65, where one more heavy reading a day would have passed it; that
+    // sizing is kept as a note, not as a second ceiling under the owner's.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
-    const oneMore = 32 * (heavyWorst - lightWorst);
-    // Rule 23 (#2801, the thumbnail copy; MR audit gap 1, one studio-blob line since C4-20261106-2790-C56-167): the US$ 66
-    // is room for the Blob operations of studio pictures; that line is left out to show the readings figure is still the
-    // one sized under 65.
-    // With a trial store's studio picture work, carried by each paying store (studioPictureWork; Claude 7 on #2852).
-    const uploads = studioPictureWork("creator");
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
-    is("the readings figure is still the one sized under US$ 65: without the picture-upload lines, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

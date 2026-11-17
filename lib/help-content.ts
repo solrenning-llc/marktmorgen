@@ -51,6 +51,13 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { MAX_BULK_ADDRESSES } from "@/lib/bulk-label-rules";
+import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
+import { MAX_FUNNEL_PAGES, MAX_PAGE_FUNNELS } from "@/lib/page-funnel";
+import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
+import { UNDO_DAYS, WAITING_DAYS } from "@/lib/agent-proposal-rules";
+import { REFUNDS_PER_REQUEST } from "@/lib/closing-buyers-rules";
+import { CHECK_HOURS as DISCORD_CHECK_HOURS } from "@/lib/discord-rules";
 
 /**
  * The help center's questions a feature page asks too, word for word, so
@@ -138,7 +145,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "Can I run more than one store, or have someone help me?",
         a: [
           "Both. One account runs up to five stores, each with its own address, products, buyers, Stripe account and plan, and you switch between them at the top of your studio. The 14-day free trial is for an account's first store; each other store is charged from the day its plan starts, and canceling one touches no other.",
-          "Each store can have a team of up to five people, invitations still waiting included, each signing in with their own email: an Admin runs everything except the plan, the Stripe connection, the team and deleting the store; an Editor looks after products, courses, calls, bundles, sales pages, the store page and the community's live events, moderates the community and reviews, and writes email drafts without sending them; Support reads orders and bookings, sends purchase emails again, sees who is coming to live events and moderates the community and reviews. What each role may do is checked on our server for every request. You are emailed when someone joins or changes role, and the activity log shows the last 500 changes and downloads your team made.",
+          "Each store can have a team of up to five people, invitations still waiting included, each signing in with their own email: an Admin runs everything except the plan, the Stripe connection, the team, deleting the store and, once the plan has ended, downloading the whole store's file, which is the owner's; an Editor looks after products, courses, calls, bundles, sales pages, the store page and the community's live events, moderates the community and reviews, and writes email drafts without sending them; Support reads orders and bookings, sends purchase emails again, sees who is coming to live events and moderates the community and reviews. What each role may do is checked on our server for every request. You are emailed when someone joins or changes role, and the activity log shows the last 500 changes and downloads your team made.",
           "Stan's help center, read on September 28, 2026, says the only way to give a team member admin access there is to share your login.",
         ],
       },
@@ -162,6 +169,14 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Contacts ClickFunnels marks Subscribed can be emailed here once you confirm they agreed; everyone else comes in as a contact you cannot email, and those marked Unsubscribed or Undeliverable stay unsubscribed here. Paid orders give past buyers what they bought; refunded, failed, canceled and pending ones are left out. Each saved page's headings, text, buttons, YouTube, Vimeo and Loom videos and form become one of your store's own pages, kept from visitors until you let it out, and the pages a funnel, switched off. A page you say was an order form becomes your product's own checkout, its order bumps boxes at that checkout, and pages you say were upsells or downsells offers after paying.",
           "What it does not do: we never sign in to ClickFunnels or fetch your pages, and pictures, design, scripts, tracking, countdown timers, workflows, courses and memberships are not brought over. Every page lists what was left out and why.",
           `How much a month: ${importAllowanceWords()} Moving funnels: ${IMPORT_ALLOWANCES.creator.pageReads}, ${IMPORT_ALLOWANCES.pro.pageReads} and ${IMPORT_ALLOWANCES.scale.pageReads} saved pages read, ${IMPORT_ALLOWANCES.creator.funnelChecks}, ${IMPORT_ALLOWANCES.pro.funnelChecks} and ${IMPORT_ALLOWANCES.scale.funnelChecks} funnel checks, and ${IMPORT_ALLOWANCES.creator.funnelSaves}, ${IMPORT_ALLOWANCES.pro.funnelSaves} and ${IMPORT_ALLOWANCES.scale.funnelSaves} funnels made, on Store, Studio and Scale. Dry runs: ${IMPORT_ALLOWANCES.creator.checks}, ${IMPORT_ALLOWANCES.pro.checks} and ${IMPORT_ALLOWANCES.scale.checks} batches of contacts or products, and ${IMPORT_ALLOWANCES.creator.buyerChecks}, ${IMPORT_ALLOWANCES.pro.buyerChecks} and ${IMPORT_ALLOWANCES.scale.buyerChecks} of past buyers (each batch is up to 1,000 rows). Each figure starts again with your billing month (for a store with no plan, on the 1st, UTC); past one, that step waits until the figure opens again${PLANS_ON_SALE ? ", or, for a store that pays for its plan with a larger one on sale, until it moves to that one" : ""}.`,
+        ],
+      },
+      {
+        q: "What is Your Path, and how do I start it?",
+        a: [
+          "Your Path is a guide of next steps for the store owner. Press \u201cPath\u201d at the top of your studio, or \u201cOpen your Path\u201d when the studio shows \u201cContinue your Path\u201d. The first time, answer four short questions, starting with \u201cWhat is your personal monthly goal?\u201d, then press \u201cStart your Path\u201d.",
+          "The page then shows \u201cYour next mission\u201d: why it matters, its steps, when it counts as done (\u201cRecorded when:\u201d), and a button to the right place in your studio. Progress comes from your store\u2019s records. Readings refresh at most once every ten minutes.",
+          "While the page says \u201cLive sales are not available yet\u201d, you can prepare your offer, but the first-sale mission needs a real paid Stripe order. To change or remove your answers, open \u201cYour answers and privacy\u201d and use \u201cSave your answers\u201d or \u201cDelete your Path\u201d.",
         ],
       },
       {
@@ -335,6 +350,13 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        q: "Where do I find my plan's invoices?",
+        a: [
+          "In your studio, under \u201cWhat you pay us\u201d, choose \u201cYour plan\u2019s invoices\u201d. It lists the most recent invoices Marktmorgen has made for this store\u2019s plan, newest first, read from Stripe when the page opens. Each one opens on Stripe\u2019s own page, where you can see it, download it and, if it is not paid yet, pay it.",
+          "The link is there once your store has a plan, and only the store\u2019s owner can open it. Only the plan your store has now is listed: invoices of an earlier one are not shown. It is read a few times a day at most, so that changing or canceling your plan always has room; if the page cannot read them now, nothing was changed.",
+        ],
+      },
+      {
         q: "Can I take a break instead of canceling?",
         a: [
           !PLAN_BREAKS_ENABLED ? "Plan breaks are not available. You can cancel at any time in your studio under What you pay us. Your subscription continues until the end of the period you paid for, and buyers keep access to what they bought." : `Yes, on a monthly plan that has been paid for at least ${PAID_MONTHS_BEFORE_PAUSE} months, once a year. In your studio, under What you pay us, choose Take a break instead and ${PAUSE_MONTHS.map((m) => (m === 1 ? "1 month" : `${m} months`)).join(" or ")}. Your store keeps taking payments until the end of the period you already paid for. Then nothing is charged and your checkout is closed, while your page stays up, everything you put up is kept and buyers can still download what they bought. On the last day your plan starts again by itself, at the price it had, on the card you pay with; we email you a week before, and you can say no in one click. To sell sooner, start your plan again from the studio on any day.`,
@@ -388,7 +410,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "When do my plan's monthly figures start again?",
         a: [
-          "With your billing month, not on the 1st. A paid plan's figures (visits, orders, emails, AI, uploads, imports and the rest) are counted from the day your plan renews until the next payment's month begins, so each payment buys one whole month of every figure. On a yearly plan they are monthly too, each month starting on the day of the month your year began. Your studio shows the dates.",
+          "With your billing month, not on the 1st. A paid plan's figures (visits, orders, emails, AI, uploads, imports and the rest) are counted from the day your plan renews until the next payment's month begins, so each payment buys one whole month of every figure. On a yearly plan they are monthly too, each month starting on the day of the month your year began. If you switch between monthly and yearly, your billing month keeps the day it had before the switch. If your plan stops because a renewal was not paid and you then pay a later one, it can go back to the day your plan renews. Your studio shows the dates.",
           "A free trial counts its figures for the trial as a whole. A store with no plan, before one starts or after it ends, counts them by calendar month (UTC).",
         ],
       },
@@ -419,6 +441,14 @@ export const HELP_SECTIONS: HelpSection[] = [
           `Before then, download your store's main data as one file from your studio: while your plan runs, each download is counted from your studio's requests by its size, and ${ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`} from the notice at the top of your studio once it has ended. It holds your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, and your contacts and orders as spreadsheet text. A store with more orders than one file reads gets a note in the file saying so: the rest are on your own Stripe account. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, funnels and CRM deals and tasks are not in it. Files and videos download from their own pages. Tell your students to download their course certificates, which they can until that day, and tell your buyers, and give them another way to what they bought if you sell elsewhere.`,
           `What we keep: no copy of your sales. Every sale, refund and payout is on your own Stripe account, and stays there. Our own records of your store are our invoices for your plan, which stay in our billing records. Your account and sign-in stay.`,
           `A plan that ended before ${new Date(KEEP_NOTHING_FROM).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })} keeps the rule it ended under: the store and its records stay, a store that keeps ${storageWords(SETUP_STORAGE_BYTES)} or less is not touched, and one that keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date for its files, which deleting enough to keep ${storageWords(SETUP_STORAGE_BYTES)} or less also stops.`,
+        ],
+      },
+      {
+        q: "How do I refund members for unused time when my store closes?",
+        a: [
+          `When your store is set to close and some members paid for time after the closing day, your studio shows \u201cReview and refund unused time now\u201d. It opens \u201cRefund unused time\u201d, which lists each \u201cMember\u201d, \u201cPaid for until\u201d, \u201cLast payment\u201d and their \u201cRefund\u201d: the unused part of their last payment.`,
+          `The money comes from your own Stripe account. Marktmorgen never pays it and never takes any of it. Press the refund button to make the refunds now, or \u201cGo back without refunding\u201d. If you do nothing, we try the same refunds on the closing day. A refund can fail, for example when your balance is too low.`,
+          `If someone paid for time after that day and is not listed, refund them in Stripe. Up to ${REFUNDS_PER_REQUEST} refunds are shown at a time; the rest are listed after these are done.`,
         ],
       },
       {
@@ -535,7 +565,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes, on any paid product sold once that hands over nothing else, at one price or at several for sizes or versions (S, M, L; signed or not). Under the product, choose \u201cShip it: a physical product, sent by you\u201d, then set the shipping cost per order (0 for free shipping), where it ships (the United States, the United States and Canada, the EU, Europe, everywhere Stripe ships, or only the countries you list) and, if you like, when it ships.",
           "Its page says what shipping costs and where it goes before anybody pays. Stripe's own page asks the buyer for an address in one of those countries and adds the shipping as its own line; with sales tax on, the product is taxed as goods and the shipping as shipping. The address is on the page after paying, in the buyer's confirmation email, on the sale in your studio and in your Stripe dashboard.",
-          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift or part of a bundle, have a payment plan or a price the buyer chooses. At one price, limited or not, it can go in a cart with other products you ship: the buyer gives one address, in a country everything in the cart ships to, and pays each product's shipping added together.",
+          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift or part of a bundle, or have a payment plan. It can have a price the buyer chooses, at or above your lowest price, with the shipping added on its own line. At one price, limited or not, it can go in a cart with other products you ship: the buyer gives one address, in a country everything in the cart ships to, and pays each product's shipping added together.",
         ],
       },
       {
@@ -576,6 +606,14 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Yes, on a call with weekly hours. Under the call in your studio, open \u201cAlso sell a package of sessions\u201d and choose how many sessions (2 to 20), the price for all of them, and how long the buyer has to use them: 30, 60, 90, 180 or 365 days, or no limit. The call's page then offers the package beside the single session, with what it saves when it saves anything.",
           "The buyer pays once, on your own Stripe account, and gets an email with a link of their own. Each time they open it, they pick a free time on the call's page and confirm it on Stripe's page with nothing to pay. Every session is a booking like any other: the calendar file, the reminders, the meeting link, moving it up to twice, and Upcoming calls in your studio. Their list of purchases shows how many sessions are left.",
           "A session counts from the moment its time is held; if the buyer leaves Stripe's page without confirming, it comes back within an hour. After the last day to use them, or after a full refund of the package, no more sessions can be booked; sessions already booked stay booked. A group call with weekly hours can be sold as a package too, one seat per session; live sessions on dates cannot. The box for a discount code is not shown when booking from a package.",
+        ],
+      },
+      {
+        q: "How do I keep my busy times out of the team calls I host?",
+        a: [
+          `If you host team calls, open \u201cYour calendar\u201d under \u201cMore in your studio\u201d, or \u201cYour own calendar\u201d in a call\u2019s team settings. Under \u201cWhere your busy times come from\u201d, choose where your busy times are read.`,
+          `To use a calendar from Google, Outlook or iCloud, paste its secret address into \u201cSecret address in iCal format\u201d under \u201cOr a private iCal address\u201d and press \u201cAdd and use it\u201d. It is only read, never written to. If the page offers \u201cConnect Google Calendar\u201d, you can connect Google instead, and the team calls you host are added to your Google Calendar with a Meet link.`,
+          `\u201cSync status\u201d shows the last good reading, and \u201cCheck now\u201d reads it again. If the last good reading is more than ${HOST_STALE_MINUTES} minutes old, or your calendar cannot be read, your times are hidden until it can be. Your hours and time zone are set on each call.`,
         ],
       },
       {
@@ -657,6 +695,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        q: "How do I choose a growth goal and see what to do next?",
+        a: [
+          "Choose \u201cGrowth\u201d under \u201cMore in your studio\u201d. Pick one goal: \u201cGrow my list\u201d, \u201cSell more products\u201d, \u201cClose service deals\u201d or \u201cKeep customers\u201d. Until you pick one, the page shows \u201cSell more products\u201d.",
+          "\u201cYour next steps\u201d lists actions in order, each linking to the tool you need. You only see steps your role can use. If your role can see your numbers, \u201cMeasure one change\u201d has \u201cPlan a fair comparison\u201d, a simple before-and-after plan; the page does not run a test or calculate a result. Some goals also show \u201cCampaigns for this goal\u201d, with \u201cExplore matching campaigns\u201d to see them in Funnels.",
+          "Lower on the page, \u201cYour template library\u201d lets you filter and preview templates. \u201cUse this template\u201d opens an unsaved draft or a setup preview. It does not publish or send anything.",
+        ],
+      },
+      {
         q: "Can I add my Meta, Google, TikTok or Pinterest pixel?",
         a: [
           `Yes, on the ${PLAN_AT.creator} plan. Paste the pixel ID in your studio and your store's pages tell that platform about every page view, every checkout started, every lead from a free product, and every purchase with its amount, so your ads can learn who buys.`,
@@ -700,6 +746,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        q: "How do I make a business card to share?",
+        a: [
+          "Open \u201cYour pages\u201d in your studio and press \u201cSet up your business card\u201d. Fill in \u201cName on the card\u201d and, if you like, \u201cWhat you do (optional)\u201d, \u201cEmail to show (optional)\u201d, \u201cPhone to show (optional)\u201d, \u201cYour website (optional)\u201d and \u201cA line under your name (optional)\u201d. \u201cHow visitors see it\u201d shows a preview in your store\u2019s look.",
+          "Your card stays off until you check \u201cShow my card\u201d and press \u201cSave the card\u201d. Then it is shown at your store\u2019s address followed by /contact, with a \u201cSave contact\u201d button that adds you to a phone\u2019s contacts. Anyone with the address can see it. \u201cDelete the card\u201d removes it.",
+          "If your store\u2019s contact form is on, visitors can also leave their name, email and a message under your card. If it is off, use \u201cTurn on the contact form\u201d.",
+        ],
+      },
+      {
         // 544 [SQ9]: the studio's "Bring in a sequence" (components/sequence-import-box.tsx, lib/sequence-import.ts), as it works.
         q: "Can I bring my email sequences from another service?",
         a: [
@@ -722,6 +776,13 @@ export const HELP_SECTIONS: HelpSection[] = [
           "A sequence can also follow your courses. It can start when someone who agreed to hear from you finishes a course, every lesson done, which is the moment to offer the next one; and any of its emails can go only to those who have, or have not, opened or finished a course. Wait three days after the purchase, send only to those who have not opened it, and the reminder reaches exactly the people who need it.",
           "You can also choose who gets an email by what your store knows about them: everyone who has spent at least an amount with you, everyone who first found you through one channel, like Instagram or a podcast, or everyone who has bought before but not in the last 30, 60, 90, 180 or 365 days. These are worked out from your own Stripe account when the email goes out, so they match buyers only, and nothing extra is recorded about anyone. Save any choice as a group with a name, up to 20, and pick it again for the next email.",
           "Someone on your team with the Editor role can write drafts, up to 20 per store; you or an Admin read them and send them. And, if you switch it on, one email asks each buyer for a review, 3 to 30 days after buying, counted in the same monthly emails.",
+        ],
+      },
+      {
+        q: "Can I put a label on many contacts at once?",
+        a: [
+          `Yes. On \u201cMoving from another platform\u201d in your studio, next to bringing contacts in, choose \u201cLabel several contacts at once\u201d. Paste their addresses, one per line or separated by commas, up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} at a time, type the label (up to ${MAX_TAG_LENGTH} characters), choose \u201cAdd the label\u201d or \u201cTake the label off\u201d, then \u201cReview the change\u201d.`,
+          `Before anything is saved you see how many contacts will change, how many already have it, how many addresses are not on your list and how many contacts already have ${MAX_CONTACT_TAGS} labels, the most a contact can have. Then press \u201cAdd it to\u201d or \u201cTake it off\u201d. No automation starts and no email is sent, and \u201cUndo\u201d puts back what the change did, and tells you if any contact could not go back, until you start another change or leave the page. Anyone on your team who may bring contacts in can do it.`,
         ],
       },
       {
@@ -759,6 +820,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        q: "How do I build a funnel?",
+        a: [
+          `Open your studio and choose \u201cFunnels\u201d under \u201cMore in your studio\u201d. The page includes \u201cStart from a kind of funnel\u201d, \u201cPages in order\u201d and \u201cOffers after they pay\u201d.`,
+          `To build one yourself, press \u201cNew funnel\u201d. Type a \u201cName, for you\u201d and an \u201cAddress\u201d, pick each step from your pages and your products\u2019 pages, and use \u201cAdd a step\u201d for more. A funnel can have up to ${MAX_FUNNEL_PAGES} steps, and a store up to ${MAX_PAGE_FUNNELS} funnels. Check \u201cOn: its address leads through the steps\u201d only when it is ready, then press \u201cMake the funnel\u201d. Or press \u201cChoose a kind\u201d, then \u201cUse this\u201d on one, name it, choose your products for its steps, press \u201cReview funnel\u201d, then \u201cCreate disabled funnel\u201d: the funnel is made with the pages it needs. It starts switched off, and its new pages stay hidden.`,
+          `To offer more right after a purchase, pick a paid one-off product under \u201cOffers after they pay\u201d, press \u201cAdd the first offer\u201d, choose it in \u201cOffer this\u201d and press \u201cSave the funnel\u201d. A product can have up to ${MAX_FUNNEL_STEPS} offers. Buyers see them on the thank-you page, one at a time. Nothing is offered while your store charges sales tax.`,
+        ],
+      },
+      {
         q: "Can I run a community or a webinar?",
         a: [
           "A community, yes, one per store. You choose which products open it: any paid product, a membership while it is being paid for, and free products if you want. Members come in with a link emailed to the address they bought with, and that browser stays in for 90 days. Who bought what is checked against your own Stripe account on every visit, so a membership that ends loses access within five minutes.",
@@ -769,6 +838,13 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Members choose the name they are seen by and whether to appear in the directory; other members never see their email address. They can report a post or a comment, and you hide or delete it, mute a member or take them out. Your announcements can also go by email to members who asked for them, on Studio.",
           "It also holds live events members RSVP to, with reminders, a private video room in the event's page or your own link, and replays \u2014 the next answer has the details. A webinar you want to sell to anyone, not only to members, you sell as a live session on the dates you set, with up to 500 seats each.",
           "What it does not have: search does not listen to what is said inside a video, only to titles and written text. Stan adds webinars to its community with Zoom or Google Meet links made automatically; ours makes Google Meet links once you connect your Google Calendar, and no Zoom links yet.",
+        ],
+      },
+      {
+        q: "Can my buyers get into my Discord server?",
+        a: [
+          "Yes, once your studio shows \u201cDiscord\u201d: it appears when the Discord connection is set up on Marktmorgen, for whoever may change the store\u2019s settings. Open it and, under \u201cConnect your server\u201d, press \u201cConnect a Discord server\u201d to add the bot on Discord\u2019s own page, then, under \u201cWhich products give which roles\u201d, choose the roles each product gives.",
+          `A buyer presses \u201cJoin the Discord\u201d after paying, or on their orders, says yes on Discord\u2019s own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, about every ${DISCORD_CHECK_HOURS} hours. You can also check \u201cRemove people from the server when their access ends.\u201d`,
         ],
       },
       {
@@ -798,6 +874,14 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Yes, with webhooks. Add up to five https addresses in your studio and choose the events each one hears: a sale, a membership started or canceled, a lead confirmed for a free product, a call booked or moved, a refund, and a step of a sequence that tells your webhooks. Each message is JSON, signed with an HMAC-SHA256 in its Marktmorgen-Signature header, and tried again over about forty hours if the address does not answer. Your studio keeps a log of the last deliveries for up to a week, and a button sends a test.",
           "There is no Marktmorgen app in Zapier's directory: in Zapier, use Webhooks by Zapier with a Catch Hook. Events read from your Stripe account can take up to about five minutes to arrive.",
           "To read your store from your own tools instead — your list, your community's members, a course's students, your affiliates and your bookings — make an API key in your studio, on every plan. A key reads unless you make it one that can also write: then it adds people who agreed to hear from you to your list, changes their labels, and gives or takes back products, as an import does. The developers page lists every address and what it returns.",
+        ],
+      },
+      {
+        q: "How do I approve changes my AI assistant prepared?",
+        a: [
+          `An AI assistant connected to your store with a key you allowed to prepare changes never changes your store by itself. What it prepares waits on \u201cWhat the AI proposes\u201d, at /studio/agent; there is no link to it in your studio yet. You or an admin can open it.`,
+          `Under \u201cWaiting for you\u201d, each proposal shows \u201cNow\u201d beside \u201cWould become\u201d. Press \u201cConfirm\u201d to make the change, or \u201cDecline\u201d and nothing changes. Proposals wait ${WAITING_DAYS} days.`,
+          `Every change you confirm is listed under \u201cWhat the AI did\u201d. You can put a change back with \u201cUndo\u201d for ${UNDO_DAYS} days, unless it was changed again since.`,
         ],
       },
       {

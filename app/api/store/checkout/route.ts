@@ -9,12 +9,11 @@ import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/stor
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import { type ReturningCode, readTypedCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
-import { releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan } from "@/lib/product-extras";
+import { giveBackHold, holdAdmission, refusedBeforeStripe, releaseStockHold, withStockHold } from "@/lib/stock";
+import { activePlan, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
-import { rememberPlan } from "@/lib/plans";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { BUYER_COOKIE, BUYER_COOKIE_SECONDS, newBuyerKey } from "@/lib/learn";
@@ -39,6 +38,8 @@ import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm, deliversDigitally } from "@/lib/digital-consent";
+import { ACCESS_END_FIELD, readCourseForSale, readShownAccessEnd } from "@/lib/course-access-end";
+import { accessEndForSale } from "@/lib/course";
 
 /** The checkout this browser last opened for a limited product. */
 const HOLD_COOKIE = "nl_stock_hold";
@@ -108,6 +109,9 @@ export async function POST(request: NextRequest) {
   let linkToken = "";
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
+  // The course's end the page showed beside this form (24 [E7], lib/course-access-end.ts): undefined when the form
+  // drew none (the sale then carries no end), null for "none", or the end; "bad" for any other value.
+  let shownEnd: number | null | undefined | "bad" = undefined;
   try {
     const form = await (await limited(request, 8_000)).formData();
     digitalConsent = consentFromForm(form);
@@ -145,6 +149,7 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
+    shownEnd = readShownAccessEnd(form.get(ACCESS_END_FIELD));
     // Only the field's own "Email me the link" button asks for a link (rask);
     // a code left typed in the field never stops the buy button from buying.
     typedCode = form.get("rask") === "1" ? read("rcode", 40).trim() : "";
@@ -153,7 +158,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return new Response("Bad request", { status: 400 });
   }
-  if (!handle || !productId) return new Response("Bad request", { status: 400 });
+  if (!handle || !productId || shownEnd === "bad") return new Response("Bad request", { status: 400 });
 
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
@@ -240,6 +245,22 @@ export async function POST(request: NextRequest) {
     returning = redeemed;
   }
 
+  // A course's end date (24 [E7]): only a buyer who was shown it is held to it. A form that drew the date sends the
+  // end it showed; the course is read again, exactly, and a sale whose end is no longer the one shown is refused, back
+  // to the page, before anything is written down or held. The one shown is stamped on the Stripe session, which the
+  // learner's gate reads (lib/learn.ts courseAccess). A gift, a group, a pre-order, a membership and a purchase paid
+  // through the payment plan carry none: like a membership, a plan is open while it is paid (C6's M-P on #3445).
+  let accessEnd: number | null = null;
+  const payingInPlan = plan && activePlan(product) !== null;
+  if (shownEnd !== undefined && product.course && !product.recurring && !payingInPlan && !giftTo.trim() && !people.trim() && !preorder) {
+    const read = await readCourseForSale(product.course.id);
+    if (read.unread) return away(`/@${store.handle}?status=error`);
+    accessEnd = read.course ? accessEndForSale(read.course) : null;
+    if (accessEnd !== shownEnd) {
+      return away(from === "course" ? `/@${store.handle}/course/${product.id}?terms=changed` : `/@${store.handle}/p/${product.id}?terms=changed#buy`);
+    }
+  }
+
   // A gift: written down before its checkout opens, and its checkout is one
   // plain payment with nothing added and no offer after it.
   let gift: string | undefined;
@@ -266,11 +287,23 @@ export async function POST(request: NextRequest) {
   const mark = markFromReferer(request.headers.get("referer"), new URL(origin).hostname);
   const funnel = mark ? ((await funnelHere(store, mark, "product", product.id).catch(() => null))?.funnel.id ?? null) : null;
 
+  // Whether this press took a hold count (holdAdmission), given back when no unit stays held.
+  let charged = false;
   try {
     // A buyer who went back from Stripe's page hands back the unit they held
     // before holding another.
     const previous = request.cookies.get(HOLD_COOKIE)?.value ?? "";
-    if (previous) await releaseStockHold(store, product, previous).catch(() => {});
+    const handedBack = previous ? await releaseStockHold(store, product, previous).catch(() => false) : false;
+    // A limited unit is held for the checkout's whole life, so holding has its own, smaller bound per connection
+    // (lib/stock.ts, HOLDS_PER_ADDRESS). Charged here, after every way back that holds nothing (consent, waitlist,
+    // bundle choice, gift or group), and not for a press that just handed back its own unit; a count that cannot be
+    // read holds nothing (tests/checkout-stock-hold-per-address.test.ts).
+    charged = limitedStock(product) !== null && !handedBack;
+    if (charged) {
+      const admitted = await holdAdmission(store, clientAddress(request));
+      if (admitted === "unknown") return away(`/@${store.handle}?status=error`);
+      if (admitted === "exceeded") return away(`/@${store.handle}?status=slow`);
+    }
 
     // When offers follow the payment, this browser gets a secret, and only
     // its fingerprint travels with the charge.
@@ -338,7 +371,14 @@ export async function POST(request: NextRequest) {
         // And, with the buyer's yes to ad measurement, where the request that
         // opened it is kept, so the purchase is sent to the creator's ad
         // platforms when it is paid (lib/ad-events.ts).
-        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...ads },
+        //
+        // With them, the course's end the buyer was shown (24 [E7]): written on the session as metadata, as these are.
+        // A membership never carries one (above), so it never reaches a subscription either.
+        channel: {
+          ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays),
+          ...ads,
+          ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
+        },
         // A code that came in a link to this store (lib/code-link.ts), applied
         // by Stripe only if it is one of the creator's live codes.
         code: readLinkCode(request.cookies.get(codeCookieName(store.handle))?.value) || undefined,
@@ -355,8 +395,13 @@ export async function POST(request: NextRequest) {
         // code's coupon, and the checkout opens for that email.
         ...(returning ? { returning: returning.code, email: returning.email } : {}),
       }),
+      // A refused returning code made no checkout: either refused before Stripe
+      // was asked, or Stripe's 400 on the code's coupon. Its unit comes back at
+      // once, as the hold count does below, so a refused code holds nothing.
+      (error) => refusedBeforeStripe(error) || error instanceof ReturningCodeRefused,
     );
     if (!held.ok) {
+      if (charged) await giveBackHold(store, clientAddress(request));
       // No checkout opened: the link's claim is let go, so it can be used again.
       if (returning) await releaseReturningLink(linkToken);
       return away(`/@${store.handle}?status=${held.reason}`);
@@ -364,11 +409,9 @@ export async function POST(request: NextRequest) {
     // The link is spent only once its checkout exists: going back from Stripe's
     // page and pressing buy again before that still has it.
     if (returning) await spendReturningLink(linkToken);
-    // Written down before the buyer leaves, so the plan — or a membership that
-    // ends after a set number of payments — is given its end whether or not
-    // they come back from paying.
-    const ends = inPlan || (product.recurring !== null && product.recurring.payments > 0);
-    if (ends && store.stripeAccountId) await rememberPlan(store.stripeAccountId, held.value.id);
+    // A plan, or a membership that ends after a set number of payments, was
+    // written down to be given its end by createCheckout itself (rememberPlan),
+    // as for every other door that opens a checkout.
     // The buyer's yes, kept with the sentence, its version and the time, before they leave for Stripe.
     if (reminding) await keepAssistReminder({ store, session: held.value.id, email: remindEmail, version: remindVersion });
     // Counted once the buyer is on their way, so the count never slows them.
@@ -387,6 +430,9 @@ export async function POST(request: NextRequest) {
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {
+    // Refused before a checkout opened (Stripe not asked, or its 400 refusal of the code's coupon): no unit stays
+    // held, so the hold count is given back.
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof ReturningCodeRefused)) await giveBackHold(store, clientAddress(request));
     // No checkout opened: the link's claim is let go, so it can be used again.
     if (returning) await releaseReturningLink(linkToken);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.

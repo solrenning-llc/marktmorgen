@@ -376,3 +376,55 @@ test("a batch that may have gone whose give-back throws keeps its claims and is 
     assert.equal(r.batches.flat().length, 1, "the provider was given the email once");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });
+
+// Codex V on #4360 (MEDIUM): the stretch can land with its acknowledgement lost. Before, the run then took the claim
+// as not held, did not send, and tried to let it go; with that release lost too, the claim stayed stretched to
+// SENT_MARK_SECONDS, and the next run read it as an email that may have gone and dropped an order never sent. The
+// claim is read again first: still this run's token, before and after its TTL, and stretched past a short claim, it
+// is this run's to send, once.
+test("a lost stretch acknowledgement is reconciled before a first email is discarded", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:extend:v1") && c[3] === SENT)) {
+        await r.original(commands);
+        throw new Error("synthetic lost stretch acknowledgement");
+      }
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:release:v1") && c[3] === SENT)) throw new Error("synthetic release lost before Redis ran it");
+      return r.original(commands);
+    };
+    const first = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    assert.ok(Number(redis.run(["TTL", SENT])) > 3600, "the stretch landed (diagnostic)");
+    assert.deepEqual([first.sent, r.batches.flat().length], [1, 1], "this run, still holding its claim, sends it once");
+    redis.pipeline = r.original;
+    for (const at of [r.now + 1800 + 60, r.now + 6 * 3600]) {
+      const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, at);
+      assert.equal(after.sent, 0, "no later run sends it again");
+    }
+    assert.equal(r.batches.flat().length, 1, "the provider was given the email once");
+    assert.equal(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "and the order leaves the list, sent");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+// The re-read never sends on a claim that is not this run's, nor on one still short.
+test("a stretch not acknowledged on another run's claim or a short one sends nothing", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:extend:v1") && c[3] === SENT)) {
+        // Another run took the claim over in the meantime, stretched: not this run's token.
+        redis.run(["SET", SENT, "sending:another-run", "EX", 120 * 86400]);
+        throw new Error("synthetic lost stretch acknowledgement");
+      }
+      return r.original(commands);
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    assert.deepEqual([run.sent, r.batches.flat().length], [0, 0], "another run's claim: nothing sent here");
+    assert.equal(redis.run(["GET", SENT]), "sending:another-run", "and that run's claim is left as it is");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});

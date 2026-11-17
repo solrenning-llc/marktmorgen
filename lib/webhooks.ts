@@ -2426,7 +2426,9 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     // leave the older ones, still inside Stripe's thirty days, unread for good (#4285). Once the walk reaches the
     // oldest event, the pages of this run are sent oldest first and the anchor is set: the events newer than them,
     // read on earlier runs of the walk, are read forward from it as on every later run.
-    const [backRaw] = await redisPipeline([["GET", backKey(statsId)]]);
+    // An unread reply is not an absent cursor (Codex V on #3446): textsOrNull throws on any other shape, so the walk
+    // stays where it was until the cursor can be read, and the run says it could not read the store's events.
+    const [backRaw] = textsOrNull(await redisPipeline([["GET", backKey(statsId)]]), 1, "a Stripe read's cursor");
     const back = typeof backRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(backRaw) ? backRaw : "";
     const pages: StripeEvent[][] = [];
     let older = back;

@@ -249,6 +249,21 @@ type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "f
 /** Where a ready order's claim is kept: the first's mark, or its reminder's own claim. */
 const claimKeyOf = (stage: "first" | "again", reference: string) => (stage === "first" ? sentKey(reference) : againKey(reference));
 
+
+/**
+ * Whether a stretch holdLock did not confirm landed all the same, its acknowledgement lost (Codex V on #4360): the
+ * claim still this run's token on two reads around its TTL, and that TTL past a short claim (CLAIM_SECONDS) and no
+ * longer than the stretch itself. Then the claim is this run's to send, once: let go it would not be (a release can be
+ * lost too), and the next run would read the long mark as an email that may have gone and drop an order never sent.
+ * Another run's token, a short claim or a reply not read exactly answer false, and nothing is sent on them. Read only
+ * when the stretch did not confirm: three commands for each such claim.
+ */
+async function stretchLanded(key: string, claim: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GET", key], ["TTL", key], ["GET", key]]).catch(() => null), 3);
+  if (!replies) return false;
+  const [before, ttl, after] = replies;
+  return before === claim && after === claim && typeof ttl === "number" && Number.isSafeInteger(ttl) && ttl > CLAIM_SECONDS && ttl <= SENT_MARK_SECONDS;
+}
 /**
  * Sends the review requests that are due, until the deadline or fifty
  * orders, whichever comes first. Safe to run from two places: each order is
@@ -486,7 +501,7 @@ export async function sendReviewRequests(
     ready = [];
     for (const item of prepared) {
       const key = claimKeyOf(item.stage, item.entry.reference);
-      if (await holdLock({ key, token: item.claim, ttlSeconds: SENT_MARK_SECONDS }).catch(() => false)) {
+      if ((await holdLock({ key, token: item.claim, ttlSeconds: SENT_MARK_SECONDS }).catch(() => false)) || (await stretchLanded(key, item.claim))) {
         ready.push(item);
         continue;
       }

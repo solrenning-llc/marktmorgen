@@ -53,7 +53,7 @@ import {
   stateOf,
   subscriptionRecord,
 } from "@/lib/billing";
-import { addPeriods } from "@/lib/plans";
+import { addPeriods } from "@/lib/plan-periods";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";

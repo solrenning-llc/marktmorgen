@@ -37,9 +37,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     checkouts.push(new URLSearchParams(String(init?.body)));
     return new Response(JSON.stringify({ id: `cs_test_${"p".repeat(20)}${checkouts.length}`, url: "https://checkout.stripe.com/c/pay/test" }));
   }
+  // Nobody here has a membership still running (lib/winback-send.ts reads it before a come-back checkout opens).
   // Altered 2026-11-12: a move link now asks whether the member already kept it (lib/move-members.ts, openMove);
   // nobody here has, so the creator's account lists no customer for the address.
   if (path === "/customers" && (init?.method ?? "GET") === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  if (path === "/customers/search") return new Response(JSON.stringify({ object: "search_result", data: [], has_more: false, next_page: null }));
+  if (path === "/subscriptions") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;
 

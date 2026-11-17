@@ -38,7 +38,11 @@ export type VersionState = { key: string; etag: string; size: number; name: stri
 export type PendingRecord = { key: string; recordedAt: number; reason: BackupDeletionReason; receivedAt: number };
 export type DayCount = { day: number; objects: number; bytes: number };
 export type PartState = { partNumber: number; etag: string };
-export type UploadState = { key: string; etag: string; size: number; name: string; uploadId: string; parts: PartState[]; next: number };
+/**
+ * `charged`: the source bytes already charged and saved for this upload, from 0; the part at `next` is paid when
+ * `charged` is past it. The charge of the next part rides on the save after a part (Claude 5's MEDIUM 2 on #3340).
+ */
+export type UploadState = { key: string; etag: string; size: number; name: string; uploadId: string; parts: PartState[]; next: number; charged: number };
 export type SourceState = {
   objects: Map<string, ObjectState>;
   versions: VersionState[];
@@ -80,6 +84,8 @@ export type Cycle = {
   storesPages: number;
   storeList: { store: string; roomBytes: number }[];
   steps: Record<string, StepState>;
+  /** Sources the route refused 429 "day_ceiling" this UTC day: not asked again until the next day (BACKUP_FILES_DAY_CEILING_REFUSALS). */
+  dayCeiling: BackupFilesSource[];
   sums: Record<BackupFilesSource, DayCount & { stores: number }>;
   alarms: Alarm[];
   sent: string[];
@@ -161,13 +167,13 @@ function pendingRecord(v: unknown, what: string): PendingRecord {
   return { key: text(o.key, `${what}.key`), recordedAt: whole(o.recordedAt, `${what}.recordedAt`, 1), reason: reason(o.reason, `${what}.reason`), receivedAt: whole(o.receivedAt, `${what}.receivedAt`, 1) };
 }
 function uploadState(v: unknown, what: string): UploadState {
-  const o = exact(v, ["key", "etag", "size", "name", "uploadId", "parts", "next"], what);
+  const o = exact(v, ["key", "etag", "size", "name", "uploadId", "parts", "next", "charged"], what);
   const parts = list(o.parts, `${what}.parts`).map((p, i) => {
     const part = exact(p, ["partNumber", "etag"], `${what}.parts[${i}]`);
     return { partNumber: whole(part.partNumber, `${what}.parts[${i}].partNumber`, 1), etag: text(part.etag, `${what}.parts[${i}].etag`) };
   });
   if (!parts.every((p, i) => p.partNumber === i + 1)) fail(`${what}.parts are not numbered from 1`);
-  return { key: text(o.key, `${what}.key`), etag: text(o.etag, `${what}.etag`, 256), size: whole(o.size, `${what}.size`), name: text(o.name, `${what}.name`), uploadId: text(o.uploadId, `${what}.uploadId`), parts, next: whole(o.next, `${what}.next`) };
+  return { key: text(o.key, `${what}.key`), etag: text(o.etag, `${what}.etag`, 256), size: whole(o.size, `${what}.size`), name: text(o.name, `${what}.name`), uploadId: text(o.uploadId, `${what}.uploadId`), parts, next: whole(o.next, `${what}.next`), charged: whole(o.charged, `${what}.charged`) };
 }
 function sourceState(v: unknown, what: string): SourceState {
   const o = exact(v, ["objects", "versions", "pending", "listings", "received", "upload"], what);
@@ -246,7 +252,7 @@ function stepState(v: unknown, what: string): StepState {
   return { status: o.status as StepState["status"], pending: whole(o.pending, `${what}.pending`), pages: list(o.pages, `${what}.pages`).map((c, i) => cursor(c, `${what}.pages[${i}]`)), asked: whole(o.asked, `${what}.asked`) };
 }
 function cycle(v: unknown): Cycle {
-  const o = exact(v, ["day", "records", "recordsCursor", "recordsPages", "stores", "storesCursor", "storesPages", "storeList", "steps", "sums", "alarms", "sent", "done"], "cycle");
+  const o = exact(v, ["day", "records", "recordsCursor", "recordsPages", "stores", "storesCursor", "storesPages", "storeList", "steps", "dayCeiling", "sums", "alarms", "sent", "done"], "cycle");
   const steps: Record<string, StepState> = {};
   const rawSteps = o.steps;
   if (!rawSteps || typeof rawSteps !== "object" || Array.isArray(rawSteps) || Object.getPrototypeOf(rawSteps) !== Object.prototype) fail("cycle.steps is not an object");
@@ -267,6 +273,11 @@ function cycle(v: unknown): Cycle {
       return { store: store(room.store, `cycle.storeList[${i}].store`), roomBytes: whole(room.roomBytes, `cycle.storeList[${i}].roomBytes`, 1) };
     }),
     steps,
+    dayCeiling: list(o.dayCeiling, "cycle.dayCeiling").map((v, i, all) => {
+      const named = source(v, `cycle.dayCeiling[${i}]`);
+      if (all.indexOf(v) !== i) fail("cycle.dayCeiling names a source twice");
+      return named;
+    }),
     sums: bySource(o.sums, "cycle.sums", (s, what) => {
       const sum = exact(s, ["day", "objects", "bytes", "stores"], what);
       return { day: whole(sum.day, `${what}.day`), objects: whole(sum.objects, `${what}.objects`), bytes: whole(sum.bytes, `${what}.bytes`), stores: whole(sum.stores, `${what}.stores`) };

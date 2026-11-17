@@ -48,7 +48,10 @@ import {
   runBackupFiles,
   type RunReport,
 } from "../workers/backup-files/src/run";
-import { BACKUP_FILES_OBJECTS_PER_MONTH, BACKUP_FILES_SOURCES, parseStoresPage, BackupFilesContractError, type BackupFilesSource } from "@/lib/backup-files-contract";
+import { BACKUP_FILES_OBJECTS_PER_MONTH, BACKUP_FILES_ROOM_MOST, BACKUP_FILES_SOURCES, parseStoresPage, BackupFilesContractError, type BackupFilesSource } from "@/lib/backup-files-contract";
+import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
+import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { COMMUNITY_PICTURES, PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ALARM, BEAT, DAY, DAY0, FakeBucket, ROUTE, SECRET, fakeFetch, listingKey, objects, resetWorld, world, type SourceObject } from "./backup-files-worker-world";
 import { done, is, part } from "./check";
 
@@ -413,6 +416,98 @@ async function main(): Promise<void> {
   is("the whole file, byte for byte, then the heartbeat", [bytesEqual(files.objects.get(videoName)?.bytes, video.bytes), report.finished, report.heartbeat], [true, true, true]);
   is("each part is read with an exact Range", world.calls.filter((c) => c.url.startsWith("https://src.test/")).map((c) => c.range), [`bytes=0-${BACKUP_FILES_PART_BYTES - 1}`, `bytes=${BACKUP_FILES_PART_BYTES}-${2 * BACKUP_FILES_PART_BYTES - 1}`, `bytes=${2 * BACKUP_FILES_PART_BYTES}-${video.bytes.byteLength - 1}`]);
 
+  part("a multipart upload that cannot be started is charged as an attempt, and tried once a day (Claude 5's HIGH on #3340)");
+  fresh([{ store: S, roomBytes: 1_000_000_000 }]);
+  const larges = [0, 1, 2].map((i) => ({ key: `stores/${S}/large-${i}.bin`, etag: `"l${i}"`, bytes: big(BACKUP_FILES_PART_BYTES + 1, i) }));
+  setListing("blob", S, larges);
+  files.createFault = () => true;
+  for (let hour = 1; hour <= 10; hour++) report = await runAt(0, hour);
+  const creates = files.log.filter((l) => l.startsWith("mpu-create")).length;
+  const readState = files.json(`state/stores/${S}.json`) as { read?: { objects?: number }[] } | null;
+  is("each object's start is tried once in the day, never again on each run", creates, 3);
+  is("each attempt is charged to the store's objects before it is made", (readState?.read ?? []).reduce((n, d) => n + (d.objects ?? 0), 0) >= 3, true);
+  is("and alarmed, never taken as copied", [has(report, "copy_unverified"), copies().length], [true, 0]);
+  files.createFault = () => false;
+
+  part("a part's charge rides on the save after the part before: one state write a part (Claude 5's MEDIUM 2 on #3340)");
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  const threeParts = { key: `stores/${S}/three.mp4`, etag: '"t1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000, 3) };
+  setListing("blob", S, [threeParts]);
+  report = await runAt(0);
+  const stateKey = `put state/stores/${S}.json`;
+  const createAt = files.log.findIndex((l) => l.startsWith("mpu-create"));
+  const completeAt = files.log.findIndex((l) => l.startsWith("mpu-complete"));
+  const between = files.log.slice(createAt, completeAt).filter((l) => l === stateKey).length;
+  const nextOther = files.log.findIndex((l, i) => i > completeAt && l !== stateKey);
+  const after = files.log.slice(completeAt + 1, nextOther < 0 ? undefined : nextOther).filter((l) => l === stateKey).length;
+  is("copied whole", [report.finished, bytesEqual(files.objects.get(await copyName("blob", S, threeParts.key, threeParts.etag, threeParts.bytes.byteLength))?.bytes, threeParts.bytes)], [true, true]);
+  is("from the start of the upload to its end, one state write a part", between, 3);
+  is("and one after it is complete", after, 1);
+  is("no state write before the start: the first part's charge is saved with the upload", files.log.slice(0, createAt).filter((l) => l === stateKey).length <= 1, true);
+
+  part("a part read in a run cut before its save is charged again in the next run, never read uncharged (Claude 3's MEDIUM on #3340)");
+  {
+    fresh([{ store: S, roomBytes: 100_000_000 }]);
+    const cut = { key: `stores/${S}/cut.mp4`, etag: '"c1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000, 5) };
+    setListing("blob", S, [cut]);
+    // The store's state write fails once each time part 2 has just gone in: the run stops before the part is saved.
+    const stateKey = `state/stores/${S}.json`;
+    let armed = false;
+    const partFault = files.partFault;
+    files.partFault = (n) => {
+      if (n === 2) armed = true;
+      return partFault(n);
+    };
+    files.putFault = (key) => {
+      if (key === stateKey && armed) {
+        armed = false;
+        return "throw";
+      }
+      return undefined;
+    };
+    for (let hour = 1; hour <= 6; hour++) report = await runAt(0, hour);
+    files.putFault = () => undefined;
+    files.partFault = partFault;
+    const read = world.calls
+      .filter((c) => c.url.startsWith("https://src.test/") && c.range)
+      .reduce((n, c) => {
+        const m = /bytes=(\d+)-(\d+)/.exec(c.range ?? "");
+        return n + (m ? Number(m[2]) - Number(m[1]) + 1 : 0);
+      }, 0);
+    const state = files.json(stateKey) as { read?: { bytes?: number }[] } | null;
+    const charged = (state?.read ?? []).reduce((n, d) => n + (d.bytes ?? 0), 0);
+    is("every byte read from the source was charged before it was read", charged >= read, true);
+  }
+
+  part("a listing cut short by the run's budget while deleting is not listed again the same day (Claude 5's MEDIUM 3 on #3340)");
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  const many = objects("blob", S, 1000);
+  setListing("blob", S, many);
+  report = await runAt(0, 0);
+  for (let hour = 1; hour < 24 && !report.finished; hour++) report = await runAt(0, hour);
+  world.records = many.slice(0, 200).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 1_800_000, reason: "creator_deleted" as const }));
+  setListing("blob", S, many.slice(200));
+  report = await runAt(1, 0);
+  for (let hour = 1; hour < 24 && !report.finished; hour++) report = await runAt(1, hour);
+  world.calls = [];
+  for (let hour = 1; hour <= 24; hour++) report = await runAt(32, hour, { maxSubrequests: 30 });
+  const pagesAsked = world.calls.filter((c) => c.url.startsWith(`${ROUTE}?source=blob`)).length;
+  is("at most the 10 pages a store-source a day", pagesAsked <= 10, true);
+
+  part("a store's R past the dearest plan's is refused (Claude 5's LOW 4 on #3340)");
+  const roomPage = (roomBytes: number) => JSON.stringify({ version: 1, kind: "stores", stores: [{ store: S, roomBytes }], cursor: null, complete: true, reason: "done" });
+  const refusedRoom = (roomBytes: number) => {
+    try {
+      parseStoresPage(roomPage(roomBytes));
+      return false;
+    } catch (error) {
+      return error instanceof BackupFilesContractError;
+    }
+  };
+  is("Scale's R reads", refusedRoom(BACKUP_FILES_ROOM_MOST), false);
+  is("one byte more is refused", refusedRoom(BACKUP_FILES_ROOM_MOST + 1), true);
+  is("the bound is the dearest plan's R, from the plans' own constants", BACKUP_FILES_ROOM_MOST, Math.max(...(["creator", "pro", "scale"] as const).map((t) => PAID_STORAGE_BYTES[t] + TASK_ROOM_BYTES[t] + COMMUNITY_PICTURES[t] * PICTURE_BYTES)));
+
   part("an origin that ignores Range, sends no ETag or changes mid-copy is never taken as copied");
   fresh([{ store: S, roomBytes: 100_000_000 }]);
   setListing("blob", S, [video, ...objects("blob", S, 1, 64)]);
@@ -500,6 +595,24 @@ async function main(): Promise<void> {
   await runAt(0);
   await runAt(0, 2);
   is("an alarm goes to the hook once a day, not every run", world.calls.filter((c) => c.url === ALARM).length, 1);
+
+  part("the route's day ceiling: the source is not asked again until the next UTC day (Codex N1's LOW 1 on #3313)");
+  {
+    const U = "00112233445566778899aabbccddeeff";
+    fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }, { store: U, roomBytes: 100_000_000 }]);
+    for (const store of [S, T, U]) setListing("blob", store, objects("blob", store, 2));
+    world.listingFault.set(listingKey("blob", S), { status: 429, error: "day_ceiling" });
+    const asked = (store: string) => world.calls.filter((c) => c.url.includes("source=blob") && c.url.includes(`store=${store}`)).length;
+    report = await runAt(0);
+    is("one refused call for the source that day, the first store's", [asked(S), asked(T), asked(U)], [1, 0, 0]);
+    is("alarmed as the day's ceiling", has(report, "files_day_ceiling"), true);
+    is("nothing of the source copied that day, nothing claimed done", [copies(S).length, copies(T).length, copies(U).length], [0, 0, 0]);
+    report = await runAt(0, 2);
+    is("a later run the same day asks the source nothing more", [asked(S), asked(T), asked(U)], [1, 0, 0]);
+    world.listingFault.delete(listingKey("blob", S));
+    report = await runAt(1);
+    is("the next UTC day every store of the source is listed and copied", [copies(S).length, copies(T).length, copies(U).length], [2, 2, 2]);
+  }
 
   part("a run keeps inside its subrequest budget and goes on in the next run");
   fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }]);

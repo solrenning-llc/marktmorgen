@@ -204,6 +204,12 @@ type Ctx = {
   sources: readonly BackupFilesSource[];
   stores: Map<string, StoreState>;
   dirty: Set<string>;
+  /**
+   * The uploads whose `charged` this run wrote and saved. A charge that rode on a save is honored only in the run that
+   * made it: a run cut after a part's read and before its save leaves `charged` past `next`, and the next run charges
+   * that part again before reading it (Claude 3's MEDIUM on #3340), so no byte is ever read uncharged.
+   */
+  chargedHere: Set<string>;
   fresh: Map<string, Fresh>;
   recordsHold: boolean;
   /** The journal's archive names, once read in this run (JOURNAL_KEY). */
@@ -295,7 +301,7 @@ const shrunk = (earlier: DayCount, now: { objects: number; bytes: number }) =>
 function newCycle(day: number, recordsFrom: string | null): Cycle {
   const sum = () => ({ day, objects: 0, bytes: 0, stores: 0 });
   // The day's read of the records resumes where the last complete one ended: each record is received once.
-  return { day, records: "pending", recordsCursor: recordsFrom, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
+  return { day, records: "pending", recordsCursor: recordsFrom, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, dayCeiling: [], sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
 }
 
 const bucketOf = (ctx: Ctx, source: BackupFilesSource) => (source === "bunny" ? ctx.env.VIDEOS_BUCKET : ctx.env.FILES_BUCKET);
@@ -308,6 +314,18 @@ function storeOfKey(source: BackupFilesSource, key: string): string | null {
 
 type RouteReply = { ok: true; text: string } | { ok: false; why: string };
 
+/** Whether a 429 is the route's own day ceiling, read exactly: `{ "version": 1, "error": "day_ceiling" }` and nothing else. */
+function dayCeilingReply(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const keys = Object.keys(value).sort();
+    return keys.length === 2 && keys[0] === "error" && keys[1] === "version" && (value as Record<string, unknown>).version === 1 && (value as Record<string, unknown>).error === "day_ceiling";
+  } catch {
+    return false;
+  }
+}
+
 async function routeGet(ctx: Ctx, query: [string, string][]): Promise<RouteReply> {
   const url = new URL(ctx.route.href);
   for (const [name, value] of query) url.searchParams.set(name, value);
@@ -315,7 +333,10 @@ async function routeGet(ctx: Ctx, query: [string, string][]): Promise<RouteReply
   try {
     const reply = await ctx.opts.fetch(url.href, { method: "GET", headers: { Authorization: `Bearer ${ctx.secret}` }, redirect: "manual", signal: AbortSignal.timeout(BACKUP_FILES_FETCH_MS) });
     const text = await reply.text();
-    return reply.status === 200 ? { ok: true, text } : { ok: false, why: `status_${reply.status}` };
+    if (reply.status === 200) return { ok: true, text };
+    // The route's day ceiling is told apart from every other refusal: the source is not asked again that UTC day.
+    if (reply.status === 429 && dayCeilingReply(text)) return { ok: false, why: "day_ceiling" };
+    return { ok: false, why: `status_${reply.status}` };
   } catch {
     return { ok: false, why: "unreachable" };
   }
@@ -714,7 +735,7 @@ async function readStores(ctx: Ctx): Promise<void> {
   }
 }
 
-type Listing = { status: "complete" | "failed" | "incomplete"; entries: { entry: BackupFilesEntry; page: number }[]; pages: (string | null)[] };
+type Listing = { status: "complete" | "failed" | "incomplete"; ceiling?: true; entries: { entry: BackupFilesEntry; page: number }[]; pages: (string | null)[] };
 
 async function listAll(ctx: Ctx, source: BackupFilesSource, store: string): Promise<Listing> {
   const listing: Listing = { status: "incomplete", entries: [], pages: [] };
@@ -723,6 +744,7 @@ async function listAll(ctx: Ctx, source: BackupFilesSource, store: string): Prom
   for (let i = 0; i < BACKUP_FILES_PAGES_PER_STORE; i++) {
     listing.pages.push(cursor);
     const reply = await routeGet(ctx, cursor === null ? [["source", source], ["store", store]] : [["source", source], ["store", store], ["cursor", cursor]]);
+    if (!reply.ok && reply.why === "day_ceiling") return { ...listing, status: "failed", ceiling: true };
     try {
       if (!reply.ok) throw new Error(reply.why);
       const page = parseFilesPage(reply.text);
@@ -753,6 +775,10 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
   const where = { source, store };
   const today = ctx.day;
   const listing = await listAll(ctx, source, store);
+  if (listing.ceiling && !ctx.cycle.dayCeiling.includes(source)) {
+    ctx.cycle.dayCeiling.push(source);
+    raise(ctx, "files_day_ceiling", { source });
+  }
   const fresh: Fresh = new Map(listing.entries.map((e) => [e.entry.key, e]));
   ctx.fresh.set(stepKey(source, store), fresh);
 
@@ -826,8 +852,9 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
   const etagHeld = etagChanged > 0 && over(etagChanged, storeObjects);
   if (etagHeld) raise(ctx, "etag_mass_change", { store, count: etagChanged });
 
-  await applyDeletions(ctx, state, source, { held: holds.length > 0 || ctx.recordsHold, etagHeld, orphans: listing.status === "complete", forcedOnly: false });
-
+  // The step is recorded before the deletions (Claude 5's MEDIUM 3 on #3340): a run cut short while deleting keeps
+  // it, so the next run does not list this store-source again, and the day's pages stay within the 10 it is priced at
+  // (reask counts on from `asked`). Deletions left undone are applied by the next day's step; none is lost.
   if (listing.status === "complete") {
     const sum = ctx.cycle.sums[source];
     sum.objects += objects;
@@ -835,7 +862,11 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
     sum.stores += 1;
   }
   const status: StepState["status"] = listing.status !== "complete" ? "failed" : holds.length ? "held" : "listed";
-  ctx.cycle.steps[stepKey(source, store)] = { status, pending: pendingOf(state, source), pages: listing.pages, asked: listing.pages.length };
+  const step: StepState = { status, pending: pendingOf(state, source), pages: listing.pages, asked: listing.pages.length };
+  ctx.cycle.steps[stepKey(source, store)] = step;
+
+  await applyDeletions(ctx, state, source, { held: holds.length > 0 || ctx.recordsHold, etagHeld, orphans: listing.status === "complete", forcedOnly: false });
+  step.pending = pendingOf(state, source);
 }
 
 async function passList(ctx: Ctx): Promise<void> {
@@ -843,6 +874,13 @@ async function passList(ctx: Ctx): Promise<void> {
   for (const { store, roomBytes } of ctx.cycle.storeList) {
     for (const source of ctx.sources) {
       if (ctx.cycle.steps[stepKey(source, store)]) continue;
+      // The route refused this source past its day ceiling: no other store of it is asked until the next UTC day, so
+      // the route is refused at most once a source a day (BACKUP_FILES_DAY_CEILING_REFUSALS; Codex N1's LOW 1 on #3313).
+      // The step fails, so nothing of it is claimed listed or copied, and no deletion runs on it.
+      if (ctx.cycle.dayCeiling.includes(source)) {
+        ctx.cycle.steps[stepKey(source, store)] = { status: "failed", pending: 0, pages: [], asked: 0 };
+        continue;
+      }
       ctx.run.boundary(BACKUP_FILES_PAGES_PER_STORE + 4);
       const state = await loadStore(ctx, store);
       state.roomBytes = roomBytes;
@@ -946,14 +984,18 @@ const isPart = (reply: unknown, partNumber: number): reply is PartState =>
  * so the charge is never refunded; past the ceiling nothing is read.
  */
 async function chargeRead(ctx: Ctx, state: StoreState, source: BackupFilesSource, bytes: number): Promise<boolean> {
-  const room = state.roomBytes;
-  if (room === null || readSince(ctx, state) + bytes > BACKUP_FILES_COPY_TIMES * room) {
-    raise(ctx, room === null ? "files_room" : "files_copy_ceiling", { source, store: state.store, bytes });
-    return false;
-  }
+  if (!fitsRead(ctx, state, source, bytes)) return false;
   state.read = addDay(state.read, ctx.day, 1, bytes);
   await saveStore(ctx, state);
   return true;
+}
+
+/** Whether `bytes` more of a source read fit the store's 4R in 32 days; alarms when they do not, unless told not to. */
+function fitsRead(ctx: Ctx, state: StoreState, source: BackupFilesSource, bytes: number, alarm = true): boolean {
+  const room = state.roomBytes;
+  if (room !== null && readSince(ctx, state) + bytes <= BACKUP_FILES_COPY_TIMES * room) return true;
+  if (alarm) raise(ctx, room === null ? "files_room" : "files_copy_ceiling", { source, store: state.store, bytes });
+  return false;
 }
 
 function copied(ctx: Ctx, state: StoreState, object: ObjectState): void {
@@ -992,7 +1034,14 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
   }
 
   if (src.upload && src.upload.key !== object.key) return;
+  const partEnd = (from: number) => Math.min(from + BACKUP_FILES_PART_BYTES, object.size) - 1;
   if (!src.upload) {
+    // The start is an attempt (Claude 5's HIGH on #3340): it counts toward the store's objects and its first part's
+    // bytes are charged with it, both checked before the call. A start that fails is saved as charged, alarmed, and
+    // not tried again for this object today, so a bucket that refuses starts costs at most one a large object a day,
+    // inside the 10,000 objects a store in 30 days.
+    const first = partEnd(0) + 1;
+    if (!fitsRead(ctx, state, source, first)) return;
     ctx.run.spend();
     let made: unknown;
     try {
@@ -1001,9 +1050,17 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
       made = null;
     }
     const id = (made as { uploadId?: unknown } | null)?.uploadId;
-    if (!made || typeof made !== "object" || typeof id !== "string" || !id || (made as { key?: unknown }).key !== object.name) return refuse("copy_unverified");
-    src.upload = { key: object.key, etag: object.etag, size: object.size, name: object.name, uploadId: id, parts: [], next: 0 };
+    if (!made || typeof made !== "object" || typeof id !== "string" || !id || (made as { key?: unknown }).key !== object.name) {
+      state.read = addDay(state.read, ctx.day, 1, 0);
+      object.refusedDay = ctx.day;
+      await saveStore(ctx, state);
+      return refuse("copy_unverified");
+    }
+    // One save: the upload, with its first part's charge (Claude 5's MEDIUM 2 on #3340).
+    state.read = addDay(state.read, ctx.day, 1, first);
+    src.upload = { key: object.key, etag: object.etag, size: object.size, name: object.name, uploadId: id, parts: [], next: 0, charged: first };
     await saveStore(ctx, state);
+    ctx.chargedHere.add(id);
   }
   const upload = src.upload;
   if (upload.etag !== object.etag || upload.size !== object.size || upload.name !== object.name) return refuse("changed");
@@ -1012,9 +1069,18 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
   while (upload.next < object.size) {
     ctx.run.boundary(4);
     if (entry.expiresAt - ctx.opts.now() < BACKUP_FILES_URL_MARGIN_MS) return;
-    const end = Math.min(upload.next + BACKUP_FILES_PART_BYTES, object.size) - 1;
+    const end = partEnd(upload.next);
+    // Paid already only when its charge rode on a save of this run; otherwise (a resumed upload, or none carried)
+    // charged and saved now, so a part read again after a cut run is charged again: more, never less, than was read.
     // Past the ceiling the upload is kept, its parts already paid; it resumes when the 32 days allow.
-    if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) return;
+    if (upload.charged <= upload.next || !ctx.chargedHere.has(upload.uploadId)) {
+      upload.charged = end + 1;
+      if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) {
+        upload.charged = upload.next;
+        return;
+      }
+      ctx.chargedHere.add(upload.uploadId);
+    }
     const body = await readPart(ctx, entry, object, upload.next, end);
     if (typeof body === "string") return refuse(body);
     const partNumber = upload.parts.length + 1;
@@ -1028,6 +1094,15 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
     if (!isPart(part, partNumber)) return refuse("copy_unverified");
     upload.parts.push({ partNumber, etag: part.etag });
     upload.next = end + 1;
+    // The last part's state rides on the save after complete. A run cut between them reads that part again, charged
+    // again: more, never less, than was read.
+    if (upload.next >= object.size) break;
+    // The next part's charge rides on this save when it fits: one state write a part (Claude 5's MEDIUM 2 on #3340).
+    const nextBytes = partEnd(upload.next) - upload.next + 1;
+    if (fitsRead(ctx, state, source, nextBytes, false)) {
+      state.read = addDay(state.read, ctx.day, 1, nextBytes);
+      upload.charged = upload.next + nextBytes;
+    }
     await saveStore(ctx, state);
   }
   ctx.run.spend();
@@ -1185,6 +1260,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     sources: opts.sources ?? BACKUP_FILES_SOURCES,
     stores: new Map(),
     dirty: new Set(),
+    chargedHere: new Set(),
     fresh: new Map(),
     recordsHold: false,
     journal: null,

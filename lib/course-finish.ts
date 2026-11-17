@@ -37,6 +37,9 @@ import { MIN_REACHED_SHARE, REACHED_SHARE_STEP, reachedShare } from "@/lib/flow-
 import { takeBuyerAction } from "@/lib/buyer-actions";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
+import { FINISH_KEEP_SECONDS } from "@/lib/course-finish-rules";
+
+export { FINISH_KEEP_SECONDS };
 
 const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
 const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;
@@ -48,7 +51,6 @@ const openedKey = (courseId: string, email: string) => openedKeyOf(courseId, ema
  */
 export const finishMarkProbes = (courseId: string, learner: string): (string | number)[][] => [["EXISTS", openedKeyOf(courseId, learner)], ["EXISTS", finishedKeyOf(courseId, learner)]];
 const reachedKey = (courseId: string, email: string) => `nl:course:${courseId}:reach:${emailKey(email)}`;
-const KEEP_SECONDS = 400 * 86_400;
 
 /**
  * Starts what a share of the course starts, when the student has passed a step they had not passed before: the
@@ -62,7 +64,7 @@ async function noteReached(store: Store, productId: string, courseId: string, em
   const before = kept === null ? 0 : typeof kept === "string" && /^\d{1,3}$/.test(kept) ? Number(kept) : NaN;
   if (!Number.isFinite(before) || step <= before) return;
   if (!(await takeBuyerAction(store))) return;
-  await redisPipeline([["SET", reachedKey(courseId, email), String(step), "EX", KEEP_SECONDS]]);
+  await redisPipeline([["SET", reachedKey(courseId, email), String(step), "EX", FINISH_KEEP_SECONDS]]);
   await enroll(store, email, { joined: false, reached: { productId, share } });
 }
 
@@ -81,7 +83,7 @@ function confirmedClaim(reply: unknown): boolean {
 export async function noteIfOpened(store: Store, productId: string, courseId: string, email: string): Promise<boolean> {
   try {
     if (!email || !isRedisConfigured()) return false;
-    const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
+    const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", FINISH_KEEP_SECONDS]]);
     if (!confirmedClaim(claim)) return false;
     await enroll(store, email, { joined: false, started: productId });
     return true;
@@ -109,7 +111,7 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
       await noteReached(store, productId, courseId, email, share);
       return false;
     }
-    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", KEEP_SECONDS]]);
+    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", FINISH_KEEP_SECONDS]]);
     if (!confirmedClaim(claim)) return false;
     // Finishing is also every share reached, for a student who got here without one starting (one read of the sequences for both).
     await enroll(store, email, { joined: false, finished: productId, reached: { productId, share } });

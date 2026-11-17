@@ -564,8 +564,23 @@ export const INVITE_RUN_COMMANDS = INVITE_WALK_COMMANDS + INVITE_OWED_COMMANDS +
 const INVITE_WALK_STORES = INVITE_WALK_COMMANDS;
 const INVITE_OWED_READ = INVITE_OWED_COMMANDS;
 
+/**
+ * The job runs every second UTC day, on an even day since the epoch (owner, 17 November 2026, "A cada 2 dias"): it
+ * halves the runs a month can hold, so its cost line keeps the Store's refunded first year under the owner's US$66
+ * (tests/plan-cost-registry.ts, INVITE_JOB_RUNS_PER_MONTH). A credit comes at most a day later; it already waits
+ * INVITE_HOLD_DAYS before it is earned.
+ */
+export const INVITE_EVERY_DAYS = 2;
+
+/** Whether the invite-credit job runs on the UTC day of `now`. */
+export function inviteRunDay(now: number): boolean {
+  return Math.floor(now / 86_400_000) % INVITE_EVERY_DAYS === 0;
+}
+
 export async function settleInvites(deadline: number, now = Date.now()): Promise<InviteCounts> {
   const counts: InviteCounts = { invited: 0, earned: 0, added: 0, failed: 0, complete: false };
+  // Not its day: nothing read, nothing written, nothing failed; the next run day does the work (INVITE_EVERY_DAYS).
+  if (!inviteRunDay(now)) return { ...counts, complete: true };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
   return withCommandCeiling(INVITE_RUN_COMMANDS, () => settleWithin(deadline, now, counts));
 }

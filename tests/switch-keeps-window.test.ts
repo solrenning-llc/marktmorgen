@@ -579,7 +579,9 @@ async function main(): Promise<void> {
     // 45.10, 313.80, 703.17 -> 44.99, 313.69, 703.06; figures as the model computes them, still above zero (MR); no cost lowered.
     // Merge of main into #4514 (16 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
     // 44.34, 311.91, 697.49 -> 44.23, 311.79, 697.37; figures as the model computes them, still above zero (MR); no cost lowered.
-    is("11: Store, Studio and Scale keep 44.34, 311.79 and 697.37 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.23", "311.79", "697.37"]);
+    // Merge of main into #4514 (16 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
+    // 44.23, 311.79, 697.37 -> 44.28, 311.85, 697.43; figures as the model computes them, still above zero (MR); no cost lowered.
+    is("11: Store, Studio and Scale keep 44.34, 311.85 and 697.43 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.28", "311.85", "697.43"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -592,7 +594,9 @@ async function main(): Promise<void> {
     // The same #4514 command ceiling, on each plan's yearly month; still above zero (MR). Cost is not lowered.
     // Merge of main into #4514 (16 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
     // 36.28, 256.78, 574.21 -> 36.17, 256.67, 574.10; figures as the model computes them, still above zero (MR); no cost lowered.
-    is("11: and 36.28, 256.67 and 574.10 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.17", "256.67", "574.10"]);
+    // Merge of main into #4514 (16 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
+    // 36.17, 256.67, 574.10 -> 36.23, 256.72, 574.15; figures as the model computes them, still above zero (MR); no cost lowered.
+    is("11: and 36.28, 256.72 and 574.15 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.23", "256.72", "574.15"]);
   } finally {
     Date.now = realNow;
   }

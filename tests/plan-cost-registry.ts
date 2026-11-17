@@ -65,7 +65,7 @@ import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
-import { INVITE_OWED_COMMANDS, INVITE_RUN_COMMANDS, INVITE_WALK_COMMANDS } from "@/lib/creator-invite-credit";
+import { INVITE_EVERY_DAYS, INVITE_OWED_COMMANDS, INVITE_RUN_COMMANDS, INVITE_WALK_COMMANDS } from "@/lib/creator-invite-credit";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
@@ -306,8 +306,11 @@ const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCT
 export const ORDER_LIBRARY = 2 * ENTRY_BYTES * PERSON_RECORD_MONTHS * DB_BYTE_MONTH;
 /** How long one round of renewals stopped at Stripe, and one page of a store's memberships found there, is waited on at the most, held at 2 GB. */
 export const STRIPE_WAIT_SECONDS = 2;
-/** The plans cron that runs the invite-credit job (app/api/cron/plans): once a day, ended at its maxDuration. */
-export const INVITE_JOB_RUNS_PER_MONTH = 31;
+/**
+ * The plans cron that runs the invite-credit job (app/api/cron/plans) once a day, ended at its maxDuration; the job
+ * works only every INVITE_EVERY_DAYS days (owner, 17 November 2026), so a 31-day month holds at most 16 runs.
+ */
+export const INVITE_JOB_RUNS_PER_MONTH = Math.ceil(31 / INVITE_EVERY_DAYS);
 export const INVITE_JOB_MAX_SECONDS = 60;
 /**
  * The bytes the job's two list reads bring back at the most, a run (#4514): a window of the invited list and a draw of
@@ -1352,7 +1355,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/cron/plans/route.ts", names: ["maxDuration = 60", "settleInvites(deadline)"] },
       { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
     ],
-    basis: `Every read the job makes waits on Stripe inside the plans cron (app/api/cron/plans), which runs once a day and is ended at maxDuration (60 s): the invited stores' paid invoices (INVOICE_PAGES pages), each new payment's refunds and disputes, a credit's invoice read again with its refunds and disputes before it is sent, and the balance history (HISTORY_PAGES pages) and POST it is sent with. However many invoices, payments or credits there are, the whole job holds at most ${INVITE_JOB_RUNS_PER_MONTH} runs of ${INVITE_JOB_MAX_SECONDS} s a month at 2 GB, at the registry's function-memory rate (STRIPE_WAIT_SECONDS a call, the same rate): counted whole on every plan, as if one store took all of it. Its Redis commands (Claude 7 and Claude 5 on #4514) are held in code to INVITE_RUN_COMMANDS (${INVITE_RUN_COMMANDS}) a run, whatever module sends them (lib/redis-ceiling.ts: a pipeline that would pass it is refused before it is sent), at the registry's COMMAND rate, and its two list reads to a window of ${INVITE_WALK_COMMANDS} invited stores and a draw of ${INVITE_OWED_COMMANDS} owed credits, at 255 bytes a member and DB_BYTE. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search.`,
+    basis: `Every read the job makes waits on Stripe inside the plans cron (app/api/cron/plans), which runs once a day and is ended at maxDuration (60 s), the job working only every ${INVITE_EVERY_DAYS} days (owner, 17 November 2026): the invited stores' paid invoices (INVOICE_PAGES pages), each new payment's refunds and disputes, a credit's invoice read again with its refunds and disputes before it is sent, and the balance history (HISTORY_PAGES pages) and POST it is sent with. However many invoices, payments or credits there are, the whole job holds at most ${INVITE_JOB_RUNS_PER_MONTH} runs of ${INVITE_JOB_MAX_SECONDS} s a month at 2 GB, at the registry's function-memory rate (STRIPE_WAIT_SECONDS a call, the same rate): counted whole on every plan, as if one store took all of it. Its Redis commands (Claude 7 and Claude 5 on #4514) are held in code to INVITE_RUN_COMMANDS (${INVITE_RUN_COMMANDS}) a run, whatever module sends them (lib/redis-ceiling.ts: a pipeline that would pass it is refused before it is sent), at the registry's COMMAND rate, and its two list reads to a window of ${INVITE_WALK_COMMANDS} invited stores and a draw of ${INVITE_OWED_COMMANDS} owed credits, at 255 bytes a member and DB_BYTE. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search.`,
   },
   {
     id: "storage",

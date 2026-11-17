@@ -23,7 +23,7 @@
 import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { PATH_MONEY_SECONDS, readPathMoney, soldOf } from "@/lib/path-facts";
-import { parsePath, pathJson, startPath, visitPath } from "@/lib/path";
+import { parsePath, pathJson, readPath, startPath, visitPath } from "@/lib/path";
 import { readAnswers } from "@/lib/path-rules";
 import { payPalSale } from "@/lib/stats";
 import { captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
@@ -427,6 +427,36 @@ async function main(): Promise<void> {
     const after = await visitPath(store, second.record, day + PATH_MONEY_SECONDS * 1000, charge);
     bend = null;
     is("once PATH_MONEY_SECONDS have passed, money and counts are tried again", [charged, Boolean(after.record.moneyTriedAt)], [2, true]);
+  }
+
+  part("Codex L and Codex U: the first reading, with no money kept before, also waits when it ends unknown");
+  {
+    // Codex L (21:24) and Codex U (16:38) on b007bbdf73: with no money before, the unknown reading was taken as the
+    // money and the attempt was not written down, so a minute later the stale counts charged and read again.
+    const cases: [string, (commands: (string | number)[][], replies: unknown[]) => unknown[]][] = [
+      ["refunds unknown, counts unread", (commands, replies) => commands[0]?.[0] === "HLEN" ? ["x"] : bendFirst("nl:ppsell:refunded:", "ZRANGEBYSCORE", () => ["1"])(commands, replies) as unknown[]],
+      ["sales unread (no money at all), counts unread", (commands, replies) => commands[0]?.[0] === "HLEN" ? ["x"] : bendFirst("nl:ppsell:sales:", "ZREVRANGEBYSCORE", () => { throw new Error("synthetic: Redis request failed"); })(commands, replies) as unknown[]],
+      ["money known, counts unread", (commands, replies) => commands[0]?.[0] === "HLEN" ? ["x"] : replies],
+    ];
+    for (const [name, bent] of cases) {
+      const { store } = await setup();
+      const answers = readAnswers({ goalCents: 100_000, skills: "baking", subject: "sourdough", minutes: 30, audience: "instagram", timeZone: "America/Sao_Paulo" }, store.currency);
+      if (!answers.ok) throw new Error("answers");
+      const started = await startPath(store, answers.answers, now * 1000);
+      if (!started.ok) throw new Error("path");
+      let charged = 0;
+      const charge = async () => { charged += 1; return true; };
+      bend = bent;
+      const first = await visitPath(store, started.record, now * 1000, charge);
+      const second = await visitPath(store, first.record, now * 1000 + 60_000, charge);
+      const inside = charged;
+      const kept = await readPath(store);
+      await visitPath(store, second.record, now * 1000 + PATH_MONEY_SECONDS * 1000, charge);
+      bend = null;
+      is(`${name}: one charged reading inside the wait`, inside, 1);
+      is(`${name}: the attempt is kept on the record`, Boolean(kept?.moneyTriedAt), true);
+      is(`${name}: tried and charged again once the wait is over`, charged, 2);
+    }
   }
 
   done();

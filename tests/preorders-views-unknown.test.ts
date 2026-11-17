@@ -224,13 +224,13 @@ async function main(): Promise<void> {
   part("The studio says the pre-orders could not be read");
   {
     const html = renderToStaticMarkup(
-      createElement(WaitlistPanel, { productId: a, initial: { soon: true, confirmed: 0, waiting: 0, launch: null }, suggestedAddress: "", preorders: null, preordersUnread: true, price: "$29.00" }),
+      createElement(WaitlistPanel, { productId: a, initial: { soon: true, confirmed: 0, waiting: 0, launch: null, switchedOff: false }, suggestedAddress: "", preorders: null, preordersUnread: true, price: "$29.00" }),
     );
     is("it says so", html.includes("Pre-orders could not be read just now"), true);
     is("it does not offer to take pre-orders as if none were ever taken", html.includes("Take pre-orders"), false);
     is("putting it on sale still says waiting buyers get it", html.includes("Any pre-orders are handed over the moment it goes on sale"), true);
     const read = renderToStaticMarkup(
-      createElement(WaitlistPanel, { productId: a, initial: { soon: true, confirmed: 0, waiting: 0, launch: null }, suggestedAddress: "", preorders: null, price: "$29.00" }),
+      createElement(WaitlistPanel, { productId: a, initial: { soon: true, confirmed: 0, waiting: 0, launch: null, switchedOff: false }, suggestedAddress: "", preorders: null, price: "$29.00" }),
     );
     is("control: read, with none, it offers to take pre-orders", [read.includes("Take pre-orders"), read.includes("could not be read")], [true, false]);
   }

@@ -588,6 +588,24 @@ async function main(): Promise<void> {
   await runAt(0, 2);
   is("an alarm goes to the hook once a day, not every run", world.calls.filter((c) => c.url === ALARM).length, 1);
 
+  part("the route's day ceiling: the source is not asked again until the next UTC day (Codex N1's LOW 1 on #3313)");
+  {
+    const U = "00112233445566778899aabbccddeeff";
+    fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }, { store: U, roomBytes: 100_000_000 }]);
+    for (const store of [S, T, U]) setListing("blob", store, objects("blob", store, 2));
+    world.listingFault.set(listingKey("blob", S), { status: 429, error: "day_ceiling" });
+    const asked = (store: string) => world.calls.filter((c) => c.url.includes("source=blob") && c.url.includes(`store=${store}`)).length;
+    report = await runAt(0);
+    is("one refused call for the source that day, the first store's", [asked(S), asked(T), asked(U)], [1, 0, 0]);
+    is("alarmed as the day's ceiling", has(report, "files_day_ceiling"), true);
+    is("nothing of the source copied that day, nothing claimed done", [copies(S).length, copies(T).length, copies(U).length], [0, 0, 0]);
+    report = await runAt(0, 2);
+    is("a later run the same day asks the source nothing more", [asked(S), asked(T), asked(U)], [1, 0, 0]);
+    world.listingFault.delete(listingKey("blob", S));
+    report = await runAt(1);
+    is("the next UTC day every store of the source is listed and copied", [copies(S).length, copies(T).length, copies(U).length], [2, 2, 2]);
+  }
+
   part("a run keeps inside its subrequest budget and goes on in the next run");
   fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }]);
   setListing("blob", S, objects("blob", S, 40));

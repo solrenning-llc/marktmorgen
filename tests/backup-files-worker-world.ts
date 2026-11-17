@@ -136,7 +136,7 @@ export const world = {
   recordsStatus: 200,
   listings: new Map<string, SourceObject[]>(),
   /** A listing answered otherwise: a status, or a JSON value to send as the page. */
-  listingFault: new Map<string, { status?: number; body?: unknown; afterPages?: number }>(),
+  listingFault: new Map<string, { status?: number; body?: unknown; afterPages?: number; error?: string }>(),
   pageSize: 1000,
   /** Listings whose last page ends "unsignable": a key the route could not sign was left out (Claude 5's MEDIUM on #3313). */
   unsignableEnd: new Set<string>(),
@@ -204,7 +204,7 @@ function routeAnswer(url: URL): Response {
   const fault = world.listingFault.get(listingKey(source, store));
   if (fault && pageIndex >= (fault.afterPages ?? 0)) {
     if (fault.body !== undefined) return json(fault.body);
-    return json({ version: 1, error: "listing_unavailable" }, fault.status ?? 503);
+    return json({ version: 1, error: fault.error ?? "listing_unavailable" }, fault.status ?? 503);
   }
   if (source === "bunny") return json({ version: 1, error: "source_off", source, why: "bunny_signing_unconfirmed" }, 503);
   const all = world.listings.get(listingKey(source, store)) ?? [];

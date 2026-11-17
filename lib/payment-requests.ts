@@ -65,6 +65,13 @@ export function requestsOpen(store: Store): boolean {
   return canSell(store) && !isHouseStore(store);
 }
 
+/** The request without its open attempt mark (PaymentRequest.sendingAt). */
+function withoutAttempt(request: PaymentRequest): PaymentRequest {
+  const rest = { ...request };
+  delete rest.sendingAt;
+  return rest;
+}
+
 /**
  * Emails a request, or a reminder of it, to the person it is for, from the
  * store's name, with replies going to the creator. Taken from the store's
@@ -72,6 +79,21 @@ export function requestsOpen(store: Store): boolean {
  * did not, and when the next reminder is due.
  */
 export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; request: PaymentRequest }> {
+  // The attempt is written onto the request before the email goes (Codex L, MEDIUM, review of #4501): an outcome
+  // whose write then fails leaves it there, and the next try records that email as sent at its attempt, handing
+  // nothing over again, since the senders forget the idempotency key after a day. Only a certain refusal, written
+  // down, lets the same email go again. A write that fails here throws before anything is handed over.
+  const begun = await changeRequest(store, request.id, (current) => {
+    if (current.sendingAt) return { next: { ...withoutAttempt(current), sent: [...current.sent, current.sendingAt], failed: "" }, answer: "recorded" as const };
+    if (current.sent.length !== request.sent.length) return { next: null, answer: "moved" as const };
+    return { next: { ...current, sendingAt: now, failed: "" }, answer: "go" as const };
+  }, now);
+  if (begun?.answer === "recorded") {
+    console.error("a payment request email may have gone before its outcome was written; recorded as sent, not sent again", request.id, request.sent.length);
+    return { sent: true, request: begun.request };
+  }
+  // Another send of the same email got there first and wrote its outcome: nothing more goes.
+  if (begun?.answer === "moved") return { sent: begun.request.sent.length > request.sent.length, request: begun.request };
   const reminder = request.sent.length > 0;
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
@@ -117,7 +139,7 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
   // Written onto the record as it is now, not as it was read before the email
   // went: a payment made while it was being sent stays paid (MM-SA-02).
   const failed = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
-  const done = await changeRequest(store, request.id, (current) => ({ next: sent ? { ...current, sent: [...current.sent, now], failed: "" } : { ...current, failed }, answer: null }), now);
+  const done = await changeRequest(store, request.id, (current) => ({ next: sent ? { ...withoutAttempt(current), sent: [...current.sent, now], failed: "" } : { ...withoutAttempt(current), failed }, answer: null }), now);
   return { sent, request: done?.request ?? request };
 }
 

@@ -89,6 +89,13 @@ export type PaymentRequest = {
    * a note of theirs. Absent for every request paid through its checkout.
    */
   outside?: { method: OutsideMethod; note: string };
+  /**
+   * When the next email about it (the request or a reminder, number sent.length) was about to be handed to the
+   * sender, written before it goes and taken off with its outcome (lib/payment-requests.ts, sendRequestEmail).
+   * Absent at rest. Found still there, the email may have gone and its outcome was never written: it is recorded
+   * as sent at this time and never handed over again (Codex L, review of #4501).
+   */
+  sendingAt?: number;
 };
 
 /** How a request was paid outside Stripe. */
@@ -328,6 +335,7 @@ export function parseRequest(raw: unknown): PaymentRequest | null {
       const outside = state === "paid" ? readOutside(v.outside) : null;
       return outside ? { outside } : {};
     })(),
+    ...(typeof v.sendingAt === "number" && Number.isFinite(v.sendingAt) && v.sendingAt > 0 ? { sendingAt: v.sendingAt } : {}),
   };
 }
 

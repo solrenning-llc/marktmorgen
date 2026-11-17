@@ -2182,6 +2182,16 @@ export class MemoryRedis {
           return 1;
         }
         // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
+        // lib/discount-schedule.ts TELL_STEP: a failed code's record written over only while it is the one read, and its
+        // member taken off or put back on the line in the same step.
+        if (key.startsWith("-- marktmorgen:dsched-tell-step:v1\n") && args[0] === "2" && (args.length === 8 || args.length === 9)) {
+          const [, hash, line, field, read, next, op, member, score] = args;
+          if (this.run(["HGET", hash, field]) !== read) return 0;
+          this.run(["HSET", hash, field, next]);
+          if (op === "ZREM") this.run(["ZREM", line, member]);
+          else this.run(["ZADD", line, score, member]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:call-confirm-step:v1\n") && args[0] === "1") {
           const held = this.run(["GET", args[1]]);
           if (typeof held !== "string") return [0];

@@ -1113,8 +1113,12 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
 async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
   if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) throw new Error("an affiliate's record needs a store and an affiliate id");
   const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
-  if (reply && reply[0] === null) return null;
-  const affiliate = reply ? parseAffiliate(reply[0]) : null;
+  const raw = reply?.[0];
+  if (reply && raw === null) return null;
+  // The commitment is read exactly from the text, before parseAffiliate, which drops an end it cannot read: a dated
+  // share would read as one until revoked, and a write over it would lose which one was in force (Codex X4 on #1924).
+  if (!reply || typeof raw !== "string" || !commitmentReads(raw)) throw new UnknownReplyError("an affiliate's record");
+  const affiliate = parseAffiliate(raw);
   if (!affiliate) throw new UnknownReplyError("an affiliate's record");
   return affiliate;
 }

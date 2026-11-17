@@ -47,7 +47,23 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 const PIC = "https://marktmorgen.com/api/image/" + "a".repeat(24) + "/" + "1".repeat(32) + ".jpg";
 const START = ["Hello bakers", `![](${PIC})`, "[Click here](https://example.com/guide)", "https://example.com/plan"].join("\n\n");
 
-const browser = await driver.launch(engine === "chromium" && process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
+// The same browser selection as tests/e2e/agreements.mjs: CHROMIUM when given, else Playwright's own browser, else (for
+// chromium) the runner's own Chrome. Never a download. tests/mail-access-review-browser.test.ts runs this file from the
+// regular suite, on the runner's Chrome, so no workflow file needs a step of its own for it.
+async function launch() {
+  if (engine === "chromium" && process.env.CHROMIUM) return driver.launch({ executablePath: process.env.CHROMIUM });
+  try {
+    return await driver.launch();
+  } catch (first) {
+    if (engine !== "chromium") throw first;
+    try {
+      return await driver.launch({ channel: "chrome" });
+    } catch {
+      throw first;
+    }
+  }
+}
+const browser = await launch();
 const errors = [];
 try {
   for (const width of [320, 1280]) {

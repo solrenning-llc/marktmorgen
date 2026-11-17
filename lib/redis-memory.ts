@@ -217,17 +217,6 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
-        // lib/closed-store-data.ts CLOSING_TAKE: a closing store's lock taken for the walk only while its record, the
-        // closing job's record and its closing day are what the walk's check read.
-        if (key.startsWith("-- marktmorgen:closing-take:v1\n") && args[0] === "4" && args.length === 13) {
-          const [, owner, lock, closing, finals, raw, hasClosing, closingRaw, hasScore, scoreRaw, ref, token, seconds] = args;
-          if (this.run(["GET", owner]) !== raw) return 0;
-          const now = this.run(["GET", closing]);
-          if (hasClosing === "1" ? now !== closingRaw : now !== null && now !== undefined) return 0;
-          const score = this.run(["ZSCORE", finals, ref]);
-          if (hasScore === "1" ? score === null || score === undefined || Number(score) !== Number(scoreRaw) : score !== null && score !== undefined) return 0;
-          return this.run(["SET", lock, token, "NX", "EX", seconds]) === "OK" ? 1 : -1;
-        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

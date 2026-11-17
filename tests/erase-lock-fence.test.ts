@@ -3,22 +3,21 @@
  * anything of a store whose plan runs again once the walk's lock on it ran out (Codex M's focal M1 on #3156, whose
  * proof is tests/m-3156-expired-delete-observed.proof.ts, SHA256 4cabdc83...).
  *
- * The walk takes the store's own lock (lib/store.ts) when it sees the store still due, and makes it last again before
- * each step that deletes (keep). A step's deletes were then sent as a separate pipeline, without the lock: when the
- * lock ran out between the renewal and the delete (a paused function, a slow network), the plan could start again in
- * that moment, through the real writer, and the delete still landed on the store that runs again: its team, its
- * hosts' claims, its keys for the API, its webhooks, its email platform, its phones, its Path, its hosts' calendars,
- * and at the last step its record itself.
+ * On #3643's design (#3156 rebuilt on it) the walk holds no lock of its own: the store's own lock (lib/store.ts) is
+ * taken by closeStoreRecord, which reads the record again under it and only then hands it to prepareStore's callback
+ * (forgetLive), and every delete of every step there, and the record's closing itself (its addresses held back, its id
+ * and places released, the record deleted), is made only while that lock is still held, read in the same step
+ * (fencedBy, applyIfHeld, CLOSING_FENCED in lib/redis-lock.ts). Before, those deletes were bare pipelines: when the
+ * lock ran out between a renewal and a delete (a paused function, a slow network), the plan could start again in that
+ * moment, through the real writer, and the delete still landed on the store that runs again: its team, its hosts'
+ * claims, its keys for the API, its webhooks, its email platform, its phones, its Path, its hosts' calendars, and at
+ * the last step its address and its id.
  *
- * Here, every pipeline the preparation sends that changes the database is found on a first run (the census), and then,
- * one at a time, the lock runs out on the stand-in's own clock just before that pipeline is sent and the real
+ * Here, every pipeline the record's lock covers that changes the database is found on a first run (the census), and
+ * then, one at a time, the lock runs out on the stand-in's own clock just before that pipeline is sent and the real
  * setSubscription starts the plan again. What the database holds once the plan runs again must be exactly what it
- * holds after the walk: nothing of the store that runs again is deleted or changed, and the walk stops with
- * LockBusyError. No lock key is deleted by hand, no reply is forged.
- *
- * The record's last step is made by the walk from closingRecordChanges, lib/store.ts's closeStoreRecord spelled in
- * lib/closed-store-data.ts so it can be fenced: the last part here closes one store both ways, from the same database,
- * and fails if what is left ever differs.
+ * holds after the walk, the walk's own keys aside: nothing of the store that runs again is deleted or changed; the
+ * walk goes on, and the store waits a walk. No lock key is deleted by hand, no reply is forged.
  */
 import { eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail, storeRef } from "@/lib/store";

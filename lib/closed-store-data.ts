@@ -58,7 +58,7 @@
  * payments (tests/plan-cost-registry.ts, closure), and the renewals it stops
  * with the orders that sold them (ORDER_COST).
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -66,14 +66,13 @@ import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/
 import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
-import { ENDED_INDEX, standingOf } from "@/lib/plan-standing";
-import { SHARING_INDEX } from "@/lib/platform-share";
+import { standingOf } from "@/lib/plan-standing";
 import { idsIn } from "@/lib/data-recount";
 import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
-import { accountStores, closeStoreRecord, handleLeadsToStore, RELEASE_QUARANTINE_DAYS, saleHandles, settleDeletedStore, type Store, STORE_ID_PATTERN, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef, STRIPE_ACCOUNT_PATTERN } from "@/lib/store";
+import { accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, settleDeletedStore, type Store, STORE_ID_PATTERN, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef, STRIPE_ACCOUNT_PATTERN } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -314,86 +313,6 @@ async function dueForErasure(store: Store, now: number): Promise<{ due: "due" | 
   return seen(closesStore(endedAt) && removedFor(endedAt) ? "due" : "live");
 }
 
-/**
- * A store's record and its lock (lib/store.ts, ownerKey and lockKeyOf), spelled as lib/store.ts spells them: it does
- * not export them. tests/m-reactivation-during-check.proof.ts and tests/erase-race-final-check.test.ts change a store
- * with the real setSubscription and claimHandle around the walk, and fail if the spellings ever differ.
- */
-const ownerKeyOf = (ref: string) => `nl:store:owner:${createHash("sha256").update(`nimbus-store:${ref.toLowerCase()}`).digest("hex").slice(0, 40)}`;
-const lockKeyOf = (owner: string) => owner.replace("nl:store:owner:", "nl:store:lock:");
-
-/** How long the walk holds a closing store's lock at a time; made to last as long again before each step that deletes. */
-export const CLOSING_LOCK_SECONDS = 120;
-/** How many times the walk reads a store in line again when its record or its closing changed after its check. */
-export const TAKE_ATTEMPTS = 3;
-
-/**
- * The store's lock taken for the walk only while its record, the closing job's record and its closing day are exactly
- * what the walk's check read (KEYS: record, lock, closing record, FINAL_INDEX; ARGV: the record read, whether the
- * closing record was there and what it was, whether the closing day was there and what it was, the store's key, the
- * walk's token, the lock's seconds). 1 taken; 0 something changed, nothing taken; -1 another write holds the lock.
- */
-const CLOSING_TAKE = `-- marktmorgen:closing-take:v1
-if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-local closing = redis.call("GET", KEYS[3])
-if ARGV[2] == "1" then
-  if closing ~= ARGV[3] then return 0 end
-elseif closing then
-  return 0
-end
-local score = redis.call("ZSCORE", KEYS[4], ARGV[6])
-if ARGV[4] == "1" then
-  if not score or tonumber(score) ~= tonumber(ARGV[5]) then return 0 end
-elseif score then
-  return 0
-end
-if not redis.call("SET", KEYS[2], ARGV[7], "NX", "EX", ARGV[8]) then return -1 end
-return 1`;
-
-type Taken = { due: "gone" | "live" | "hold" } | { due: "due"; store: Store; held: LockHeld };
-
-/**
- * Whether a store in line is due now (dueForErasure), and when it is, the store's own lock (lib/store.ts) taken for
- * the walk in the same step as the walk sees that nothing its check read has changed (CLOSING_TAKE, rule 30, Codex M
- * on #3156): every write to a store's record is made under that lock and only while it holds it (lib/store.ts,
- * withStore, setIfHeld), so from then on no plan can start the store again while the walk prepares it, and once
- * prepared its record is closed and no plan can reach it (lib/closing-plan-guard.ts). A record or a closing that
- * changed after the check (a plan started again while the check waited on its reads) is read and checked again, at
- * most TAKE_ATTEMPTS times; a lock another write holds keeps the store in line for the next run, untouched. Until
- * then the check and the first delete were separate steps: a store whose plan ran again while the check waited was
- * prepared from what was read before, closed and erased with its contacts.
- *
- * "gone" when no store is kept under the key, as before. A read that does not answer throws UnknownReplyError: the
- * run stops and the store stays in line untouched.
- */
-async function takeDue(ref: string, now: number): Promise<Taken> {
-  for (let attempt = 0; attempt < TAKE_ATTEMPTS; attempt += 1) {
-    let reply: unknown;
-    const store = await storeForEmailSeen(ref, (_, answer) => void (reply = answer));
-    const read = repliesFor(reply, 1);
-    if (!read) throw new UnknownReplyError("a closing store's record (GET)");
-    // Gone only when Redis answers nil for the key; a record there that does not read, or reads as another owner's,
-    // is never "no store" (rule 24, as storeForRefExact in lib/store.ts): it throws, and the store stays in line.
-    if (read[0] === null) return { due: "gone" };
-    if (typeof read[0] !== "string" || !store) throw new UnknownReplyError("a closing store's record (unreadable, or another owner's)");
-    const seen = await dueForErasure(store, now);
-    if (seen.due !== "due") return { due: seen.due };
-    const owner = ownerKeyOf(ref);
-    const id = storeRef(store);
-    const held: LockHeld = { key: lockKeyOf(owner), token: randomUUID(), ttlSeconds: CLOSING_LOCK_SECONDS };
-    const replies = repliesFor(await redisPipeline([[
-      "EVAL", CLOSING_TAKE, 4, owner, held.key, closingStateKey(id), FINAL_INDEX,
-      read[0], seen.closing === null ? "0" : "1", seen.closing ?? "", seen.score === null ? "0" : "1", seen.score ?? "", id, held.token, CLOSING_LOCK_SECONDS,
-    ]]), 1);
-    const answer = replies?.[0];
-    if (answer === 1) return { due: "due", store, held };
-    if (answer === -1) return { due: "hold" };
-    if (answer !== 0) throw new UnknownReplyError("whether a closing store is as its check read it (EVAL)");
-  }
-  return { due: "hold" };
-}
-
-
 type Command = (string | number)[];
 /** Sends a closing store's changes: a pipeline, or the same changes made only while the walk holds the lock (fencedBy). */
 type Apply = (commands: Command[]) => Promise<unknown>;
@@ -429,24 +348,12 @@ export function fencedBy(held: LockHeld | undefined): Apply {
 }
 
 /**
- * What closing a store's record changes (lib/store.ts, closeStoreRecord), spelled as lib/store.ts spells it, so the
- * walk can make it only while it holds the store's lock (fencedBy): its addresses held back from anyone else for
- * RELEASE_QUARANTINE_DAYS, its record and its copy from before a move, its id, its place among its account's stores,
- * in the line of ended plans and among the stores that share. tests/erase-lock-fence.test.ts closes one store with
- * the real closeStoreRecord and an identical one with these, and fails if what is left ever differs.
+ * A store's record key (lib/store.ts, ownerKey), spelled as lib/store.ts spells it: it does not export it. The checks
+ * that no live store holds an id (CLOSING_UNHELD) read it; tests/m-reactivation-during-check.proof.ts and
+ * tests/erase-race-final-check.test.ts change a store with the real setSubscription and claimHandle around the walk,
+ * and fail if the spellings ever differ.
  */
-export function closingRecordChanges(store: Store, now = Date.now()): Command[] {
-  const ref = storeRef(store);
-  const owner = ownerKeyOf(ref);
-  const released = `released:${new Date(now).toISOString()}`;
-  return [
-    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", storeHandleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
-    ["DEL", owner, owner.replace("nl:store:owner:", "nl:store:before-catalog:")],
-    ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", `nl:store:id:${store.sid}`], ["SREM", accountStoresKey(store.email), store.sid]] : []),
-    ["ZREM", ENDED_INDEX, ref],
-    ["SREM", SHARING_INDEX, ref],
-  ];
-}
+const ownerKeyOf = (ref: string) => `nl:store:owner:${createHash("sha256").update(`nimbus-store:${ref.toLowerCase()}`).digest("hex").slice(0, 40)}`;
 
 /**
  * On a closing store's day, before its files go (lib/plan-closing.ts): what
@@ -1584,10 +1491,10 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     // None due still reads the batch below: a store prepared by a run that stopped before its walk started is walked.
     for (const ref of refs) {
       if (Date.now() > deadline) break;
-      // Still due, read again just before the first destructive step, and the store's lock taken in the same step as
-      // the walk sees nothing it read changed (takeDue): a store whose plan runs again leaves the line untouched, one
-      // that cannot be said stays in it untouched. While the walk holds the lock no plan can start the store again;
-      // once prepared, its record is closed and no plan can reach it any more (lib/closing-plan-guard.ts).
+      // The store's record, read exactly; then whether it is still due (dueForErasure, below). What it holds is deleted
+      // only under its own lock, once its record read again there says its plan does not run (prepareStore,
+      // closeStoreRecord), each delete fenced by that lock; once prepared, its record is closed and no plan can reach
+      // it any more (lib/closing-plan-guard.ts).
       let store: Store | null;
       try {
         store = await storeForRefExact(ref);

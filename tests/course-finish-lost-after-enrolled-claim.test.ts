@@ -92,6 +92,17 @@ async function main() {
         is(`${kind}, ${what}: the failure was injected`, failed, true);
         is(`${kind}, ${what}: nothing was queued`, await queuedFor(email), 0);
         is(`${kind}, ${what}: the person's claim holds an hour at the most, never 400 days`, (await ttlOf(enrolled(kind, email))) <= 3_600, true);
+        if (hit === isQueueing) {
+          // The queue's entry: nothing was queued and the run never moved, which is proven (firstStepNeverQueued, #4307),
+          // so the claim was given back at once and the moment again starts the sequence without waiting the hour.
+          await note(store, product.id, course.id, email);
+          is(`${kind}, ${what}: the moment again starts the sequence at once`, await queuedFor(email), 1);
+          is(`${kind}, ${what}: the started run keeps its claim 400 days`, (await ttlOf(enrolled(kind, email))) > 399 * 86_400, true);
+          await original([["DEL", mark]]);
+          await note(store, product.id, course.id, email);
+          is(`${kind}, ${what}: and never twice`, await queuedFor(email), 1);
+          continue;
+        }
         // The moment again within that hour: nothing starts yet, and its own mark is not kept 400 days for it.
         await note(store, product.id, course.id, email);
         is(`${kind}, ${what}: a pending claim is not a start`, await queuedFor(email), 0);

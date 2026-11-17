@@ -7,7 +7,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -886,11 +886,23 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     await openRuns(flow.id, fresh, now);
     // Its place in the queue and its 400-day mark in one atomic step: both or neither. A start whose claim is gone
     // (the person was erased meanwhile) is not queued. Exactly the number queued, from 0 to all, confirms it.
-    const queued = countOf(repliesFor(await redisPipeline([[
+    const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
+    const queued = await redisPipeline([[
       "EVAL", FLOW_QUEUED, 2 + fresh.length, QUEUE, statsKey(flow.id), ...fresh.map((address) => enrolledKey(flow.id, address)),
-      now + flow.steps[0].delayHours * 3600, ENROLLED_KEEP_SECONDS, PENDING_START, ...fresh.map((address) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`),
-    ]]), 1)?.[0]);
+      now + flow.steps[0].delayHours * 3600, ENROLLED_KEEP_SECONDS, PENDING_START, ...fresh.map(member),
+    ]]).then((replies) => countOf(repliesFor(replies, 1)?.[0]), () => null);
     if (queued === null || queued < 0 || queued > fresh.length) {
+      // Not confirmed: the script may still have run, its answer lost. The start is given back, with the day's place,
+      // only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued), so the same
+      // event starts it again at once instead of after the pending claim lapses. Anywhere else the start stays: a start
+      // given back after its step went out would send that step twice (Codex X5 and Codex P on #4307).
+      const never = await firstStepNeverQueued(flow.id, QUEUE, fresh.map((address) => ({ email: address, member: member(address) })));
+      const back = fresh.filter((_, i) => never[i] === true);
+      if (back.length) {
+        await redisPipeline(back.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
+        await giveBackRuns(store.listId, back.length, now);
+      }
+      started += never.filter((answer) => answer === false).length;
       unknown = true;
       continue;
     }
@@ -1679,6 +1691,15 @@ export async function sendDueSteps(
         ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
         ...refused,
       ];
+      // Whoever the sender left out because they left the list after sendGroup read them (sendTo reads each row again:
+      // unsubscribed, bounced, removed) is in none of its lists: nothing went to them, and their run ends as left, so
+      // no attempt stays open for good (Claude 2 (nuvem D) bug hunt).
+      // Each is written only where their run still exists: one erased meanwhile leaves nothing behind (Claude 7 on #4307).
+      // Refused address by address (sendTo's fourth list, #3489) is accounted for: settled failed above, never also
+      // "left" (Claude 1 on #4307).
+      const accounted = new Set([...result.done, ...result.rest, ...uncertain, ...(result.refused ?? []).map((r) => r.email)]);
+      const gone = going.filter((email) => !accounted.has(email));
+      if (gone.length) counts.dropped += gone.length;
       if (waiting) {
         const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
         outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
@@ -1687,6 +1708,7 @@ export async function sendDueSteps(
       }
       queued = true;
       await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
+      await settleLeftIfRun(flow.id, index, step.id, kind, gone, "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", now);
     } catch (error) {
       // Something after the attempt could not be confirmed. The attempts stay
       // open, so nothing is repeated by itself; when nothing was queued after

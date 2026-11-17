@@ -33,7 +33,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/promotion_codes") {
     const code = url.searchParams.get("code");
-    return new Response(JSON.stringify({ object: "list", data: code === "SPRING" ? [{ id: "promo_spring0001", active: true, code }] : [] }));
+    return new Response(JSON.stringify({ object: "list", data: code === "SPRING" ? [{ id: "promo_spring0001", object: "promotion_code", active: true, code }] : [] }));
   }
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/checkout/sessions") {
     const body = new URLSearchParams(String(init?.body));

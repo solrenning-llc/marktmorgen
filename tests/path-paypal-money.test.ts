@@ -326,6 +326,32 @@ async function main(): Promise<void> {
     is("the next look settles it: counted again", await money(store), [2, 4400]);
   }
 
+  part("Codex U's MEDIUM: the blind mark and the order's new place both not known written still leave the money unknown");
+  {
+    // U-20261117-0033 on 4a6f735fe6: the order is due now (not already late), PayPal refuses the capture (403), and every
+    // write after PayPal's answer is lost: the blind mark (SET XX of the paid record) and the order's new place in the
+    // watch (ZADD). Nothing the Path reads may then say the sale is known.
+    const { store, statsId } = await setup();
+    const at = Math.floor(Date.now() / 1000);
+    redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, String(at), order(1)]);
+    captureRefused.set("CAPTURE1", 403);
+    let asked = false;
+    const fetchBefore = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/v2/payments/captures/")) asked = true;
+      return fetchBefore(input, init);
+    }) as typeof fetch;
+    lost = (commands) => asked && commands.some((c) => (c[0] === "SET" && c[1] === `nl:ppsell:paid:${order(1)}`) || (c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${statsId}`));
+    try {
+      await watchPayPal(store, Date.now() + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
+    } finally {
+      lost = null;
+      globalThis.fetch = fetchBefore;
+    }
+    is("PayPal was asked", asked, true);
+    is("the blind mark and the new place unconfirmed: the money is unknown, no sale counted as kept", await money(store), [0, null]);
+  }
+
   part("L2: a PayPal refund of a sale the Path did not count is never taken off another sale");
   {
     const { store, statsId } = await setup();

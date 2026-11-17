@@ -2,16 +2,21 @@
  * PayPal's refund.issued names nobody the store deleted at or after the payment (R38, rule 30; review of #3491): the
  * same deletion print as the Stripe events (lib/suppression.ts, nl:erased:), read by emitEvent only for an event about
  * to be kept for a live endpoint. A person deleted before they paid, or never deleted, is named as before; the rest
- * of the refund is unchanged. Synthetic only: PayPal and the sender are stand-ins for fetch, Redis is
+ * of the refund is unchanged. A print that does not read when the refund is seen leaves the refund owed, never lost:
+ * the order stays on the watch and the refund is told when it is looked at again, once (review of #3491, MEDIUM).
+ * Synthetic only: PayPal and the sender are stand-ins for fetch, Redis is
  * lib/redis-memory.ts, and the endpoint's name resolves to a private address, so nothing leaves this machine.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setPayPalSeller, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { captureOrder, openOrder } from "@/lib/paypal-sales";
+import * as paypalSales from "@/lib/paypal-sales";
+import { captureOrder, openOrder, ownKey, refundedKey } from "@/lib/paypal-sales";
+import { importedKey } from "@/lib/imported-purchases";
 import { handOverPayPal, sweepPayPal } from "@/lib/paypal-delivery";
 import { addEndpoint, recentMessages, setSendHooksForTests } from "@/lib/webhooks";
-import { suppressCommand } from "@/lib/suppression";
+import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { PAYPAL_REFUND_TOLD, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -65,6 +70,9 @@ console.error = (...args: unknown[]) => {
   logged(...args);
 };
 
+/** The replies of a pipeline, as an array (a stand-in's answer). */
+const repliesOf = (replies: unknown) => (Array.isArray(replies) ? replies : null);
+
 async function main(): Promise<void> {
   redis.clear();
   const OWNER = "paypal-erased@example.com";
@@ -108,6 +116,78 @@ async function main(): Promise<void> {
   const kept = await refunded("pp-kept@example.com", null);
   is("never deleted: named as before", kept?.buyer, { email: "pp-kept@example.com", name: null });
   is("the address appears nowhere in what is kept for the endpoint", JSON.stringify(await recentMessages(store, "refund.issued", 50)).includes("pp-gone@example.com"), false);
+
+  part("A deletion print with no answer when the refund is seen: the refund is owed, told at the next look, once");
+  // Claude 7's MEDIUM 1 and Claude 1's review on #3491: emitEvent's read of the print throws UnknownReplyError and takes
+  // the event's mark back; the watch used to only log it and let the order go, so the refund was never told.
+  const UNREAD = "pp-unread@example.com";
+  const statsId = store.statsId as string;
+  const watch = `nl:ppsell:watch:${statsId}`;
+  payer = UNREAD;
+  const openedU = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+  if (!openedU.ok) throw new Error("no order");
+  const paidU = await captureOrder(store, openedU.order);
+  if (!paidU.ok) throw new Error(`not paid: ${paidU.reason}`);
+  await handOverPayPal(store, paidU.paid);
+  captures.set(paidU.paid.capture, "REFUNDED");
+  await redis.pipeline([["ZADD", watch, "0", openedU.order]]);
+  const toldU = async () => (await recentMessages(store, "refund.issued", 50)).filter((m) => (m.data as Record<string, unknown>).paypal_capture === paidU.paid.capture);
+  // The print's HGET (lib/webhooks.ts erasedSincePaid) answered with nothing while `unread`; every command recorded.
+  const field = suppressionPrint(listId, UNREAD);
+  const realPipeline = redis.pipeline.bind(redis);
+  let unread = true;
+  let printReads = 0;
+  let seen: (string | number)[][] = [];
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    seen.push(...commands);
+    if (commands.some((c) => c[0] === "HGET" && c[1] === suppressedKey(listId) && c[2] === field)) {
+      printReads += 1;
+      if (unread) return [];
+    }
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const realNow = Date.now;
+  let shift = 0;
+  Date.now = () => realNow() + shift;
+  const hourLater = () => {
+    shift += (PAYPAL_REFUND_TOLD.tellAgainAfterSeconds + 1) * 1000;
+    redis.advance((PAYPAL_REFUND_TOLD.tellAgainAfterSeconds + 1) * 1000);
+  };
+  try {
+    is("before the refund is seen, the payment's purchase is there", typeof repliesOf(await realPipeline([["HGET", importedKey(statsId, UNREAD), product.id]]))?.[0], "string");
+    const firstAt = Math.floor(Date.now() / 1000);
+    await sweepPayPal(store, Date.now() + 10_000);
+    is("the sweep that saw the refund read the print and had no answer", printReads >= 1, true);
+    is("nothing was told on a print that did not read", (await toldU()).length, 0);
+    is("what the payment gave is still taken back", repliesOf(await realPipeline([["HGET", importedKey(statsId, UNREAD), product.id]])), [null]);
+    const score = Number((await realPipeline([["ZSCORE", watch, openedU.order]]))[0]);
+    is("the order stays on the watch, looked at again an hour later", score >= firstAt + PAYPAL_REFUND_TOLD.tellAgainAfterSeconds && score <= Math.floor(Date.now() / 1000) + PAYPAL_REFUND_TOLD.tellAgainAfterSeconds, true);
+    is("the hour is the code's (REFUND_TELL_AGAIN_SECONDS)", (paypalSales as unknown as Record<string, unknown>).REFUND_TELL_AGAIN_SECONDS, PAYPAL_REFUND_TOLD.tellAgainAfterSeconds);
+    is("an owed order is looked at no more often than the watch's line prices", 86_400 / PAYPAL_REFUND_TOLD.tellAgainAfterSeconds <= PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost, true);
+
+    unread = false;
+    hourLater();
+    seen = [];
+    await sweepPayPal(store, Date.now() + 10_000);
+    const told = await toldU();
+    is("the next look tells the refund to the endpoint, once", told.length, 1);
+    is("named, never having been deleted", (told[0]?.data as Record<string, unknown> | undefined)?.buyer, { email: UNREAD, name: null });
+    is("told, the order leaves the watch", (await realPipeline([["ZSCORE", watch, openedU.order]]))[0], null);
+    const marks = seen.filter((c) => c[1] === refundedKey(statsId) && (c[0] === "ZADD" || c[0] === "EXPIRE")).length;
+    is("the owed look writes the refund mark again as the cost line says", marks, PAYPAL_REFUND_TOLD.markCommandsPerOwedLook);
+    is("and reads the purchase again as the cost line says", seen.filter((c) => c[0] === "HGET" && c[1] === importedKey(statsId, UNREAD)).length, PAYPAL_REFUND_TOLD.recordReadsPerOwedLook);
+    const rewrites = seen.filter((c) => (c[0] === "SREM" || c[0] === "HSET") && (c[1] === importedKey(statsId, UNREAD) || c[1] === ownKey(statsId, UNREAD, product.id))).length;
+    is("and writes what was taken back no more than the cost line says", rewrites <= PAYPAL_REFUND_TOLD.writesPerOwedLookAtMost, true);
+
+    // Looked at again anyway (another way that keeps it watched): still told once.
+    hourLater();
+    await realPipeline([["ZADD", watch, "0", openedU.order]]);
+    await sweepPayPal(store, Date.now() + 10_000);
+    is("a later look never tells it twice", (await toldU()).length, 1);
+  } finally {
+    redis.pipeline = realPipeline;
+    Date.now = realNow;
+  }
 
   console.error = logged;
   done();

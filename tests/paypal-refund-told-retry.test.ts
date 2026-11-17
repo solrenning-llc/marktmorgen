@@ -1,7 +1,8 @@
 /**
  * PayPal's refund.issued, when telling it fails (Claude 5's L4 on #3491): the order stays under the refund watch and
  * the telling is tried again an hour later, for a bounded time (REFUND_TELL_RETRY_SECONDS in lib/paypal-sales.ts),
- * never dropped at the first failure. Past that time the store's webhook log says "Not sent" for each endpoint that
+ * never dropped at the first failure. What the payment gave is taken back at once, on the first look, while the telling
+ * is owed (option A of #3499, with #3491's owed refund: a refunded buyer never keeps access while a webhook retries). Past that time the store's webhook log says "Not sent" for each endpoint that
  * hears refunds, once, and the event is never sent after it; a refund already told is never told twice, and a telling
  * that works first time writes nothing more. The mark of the first failed try is read in its exact shape (CX-123 rule
  * 24). Synthetic only: PayPal and the sender are stand-ins for fetch, Redis is lib/redis-memory.ts with a clock moved
@@ -172,7 +173,7 @@ async function main(): Promise<void> {
   is("not told yet", await told(flaky.capture), 0);
   is("the order stays watched, looked at again in an hour", await watchedAt(flaky.order), firstLook + 3600);
   is("nothing is said not sent yet", (await notSent()).length, 0);
-  is("the purchase waits with it: taken back once the refund is told", await holds(flaky.email), 1);
+  is("the purchase is taken back at once, while the telling is owed (option A of #3499)", await holds(flaky.email), 0);
   hour();
   await sweep();
   is("an hour later, still failing: still watched, still not said", [await told(flaky.capture), (await watchedAt(flaky.order)) !== null, (await notSent()).length], [0, true, 0]);
@@ -227,7 +228,7 @@ async function main(): Promise<void> {
     oddMark = odd;
     await sweep();
     const at = Math.floor(Date.now() / 1000);
-    is(`${name}: unknown, so the order stays watched an hour, nothing said not sent`, [await watchedAt(unsure.order), (await notSent()).length, await holds(unsure.email)], [at + 3600, 1, 1]);
+    is(`${name}: unknown, so the order stays watched an hour, nothing said not sent, the purchase taken back at once`, [await watchedAt(unsure.order), (await notSent()).length, await holds(unsure.email)], [at + 3600, 1, 0]);
     oddMark = undefined;
     failing = false;
     hour();
@@ -273,7 +274,7 @@ async function main(): Promise<void> {
     const unsure = await triesOver(12, odd.order);
     is(`${name}: twelve hourly looks try the telling at most REFUND_TELL_TRIES_AT_MOST times`, unsure <= (triesAtMost as number), true);
     is(`${name}: a look while unknown sends the own commands the registry prices for a failed try, and tells nothing`, [unsure, ownLooks.every((n) => n === PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry)], [1, true]);
-    is(`${name}: unknown, so still watched, not told, nothing said not sent, the purchase held`, [(await watchedAt(odd.order)) !== null, await told(odd.capture), (await notSent()).length, await holds(odd.email)], [true, 0, linesBefore, 1]);
+    is(`${name}: unknown, so still watched, not told, nothing said not sent, the purchase taken back at once`, [(await watchedAt(odd.order)) !== null, await told(odd.capture), (await notSent()).length, await holds(odd.email)], [true, 0, linesBefore, 0]);
     oddMark = undefined;
     markWrites = undefined;
     const after = await triesOver(48, odd.order);

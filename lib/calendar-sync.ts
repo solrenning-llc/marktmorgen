@@ -47,7 +47,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
@@ -60,7 +60,7 @@ import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/c
 import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR, CALENDAR_RETRIES_PER_DAY } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
-import { MEET_STORES } from "@/lib/meet-links";
+import { keepMeetStore } from "@/lib/meet-links";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -1012,9 +1012,11 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  */
 export async function forgetFeedCopyPerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", outKey(statsId)]]);
-  if (Number(gone) > 0) await giveCounted(buildsKey(statsId, new Date(now).toISOString().slice(0, 10)), 2 * 86_400);
-  return Number(gone) || 0;
+  // DEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", outKey(statsId)]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the calendar feed copy deleted");
+  if (gone > 0) await giveCounted(buildsKey(statsId, new Date(now).toISOString().slice(0, 10)), 2 * 86_400);
+  return gone;
 }
 
 export async function forgetStoreCalendar(statsId: string | null | undefined): Promise<void> {
@@ -1160,13 +1162,9 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
   // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.
-  // Never lowered: a meeting further ahead keeps the score its booking gave (lib/meet-links.ts).
-  if (owner.callsId) {
-    const storeEntry = `${owner.callsId}|${owner.handle}`;
-    const until = now + FEED_REFUNDS_SECONDS * 1000;
-    await redisPipeline([["ZSCORE", MEET_STORES, storeEntry]])
-      .then(([score]) => (Number(score) >= until ? undefined : redisPipeline([["ZADD", MEET_STORES, until, storeEntry]])))
-      .catch(() => {});
-  }
+  // Never lowered: a meeting further ahead keeps the score its booking gave, in one ZADD GT (lib/meet-links.ts,
+  // keepMeetStore), where a ZSCORE then a ZADD could lower it when a booking came in between (pre-review of
+  // claude5/call-refund-stores-cursor).
+  if (owner.callsId) await keepMeetStore({ callsId: owner.callsId, handle: owner.handle }, now + FEED_REFUNDS_SECONDS * 1000);
   return { state: "made", ics };
 }

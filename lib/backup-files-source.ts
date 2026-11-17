@@ -424,13 +424,21 @@ export async function backupFilesPage(
     if (!refused) console.error("backup files: a key could not be handed out as itself and is left out", input.source);
     refused = true;
   };
+  // The last object looked at, handed out or left out: a page cut off goes on after it. Left out is carried in the
+  // cursor (refused), so it is never looked at again and its end is still "unsignable".
+  let looked = state.after;
   for (const object of objects) {
-    const resume = carry({ page: state.page, provider: state.provider, after: entries.length ? entries[entries.length - 1].key : state.after });
-    if (now() >= options.stopAt) return answer(entries, "cutoff", resume);
+    const resume = carry({ page: state.page, provider: state.provider, after: looked });
+    // The cutoff is kept only once this call has looked at one object: a listing slow enough to pass it would
+    // otherwise answer an empty page with the cursor it was given, and a Worker repeating it would never move
+    // (Codex N1's LOW 2 on #3313). A call that runs past the request's own limit (BACKUP_FILES_REQUEST_MS) still ends
+    // there, unanswered, and its page is counted.
+    if (looked !== state.after && now() >= options.stopAt) return answer(entries, "cutoff", resume);
     // The contract's own key rule first (a C0 control, DEL, or more than 1,024 characters: Claude 3's MEDIUM on
     // #3313): such a key would make parseFilesPage refuse the whole page, so it is left out alone, as below.
     if (!isContractKey(object.key)) {
       refuse();
+      looked = object.key;
       continue;
     }
     let signed: { url: string; expiresAt: number };
@@ -439,12 +447,14 @@ export async function backupFilesPage(
     } catch (error) {
       if (!(error instanceof UnsignableKey)) throw error;
       refuse();
+      looked = object.key;
       continue;
     }
     // The contract's own address rule too (Claude 3's second MEDIUM on #3313): an address past it would make
     // parseFilesPage refuse the whole page, so its key is left out alone, as above.
     if (!isContractUrl(signed.url)) {
       refuse();
+      looked = object.key;
       continue;
     }
     const entry: BackupFilesEntry = { source: input.source, key: object.key, etag: object.etag, size: object.size, url: signed.url, expiresAt: signed.expiresAt };
@@ -452,6 +462,7 @@ export async function backupFilesPage(
     if (bytes + weight > BACKUP_FILES_PAGE_BYTES) return answer(entries, "page_bytes", resume);
     bytes += weight;
     entries.push(entry);
+    looked = object.key;
   }
   if (listed.next === null) return answer(entries, refused ? "unsignable" : "done", null);
   if (state.page + 1 >= BACKUP_FILES_PAGES_PER_STORE) return answer(entries, "over_bound", null);

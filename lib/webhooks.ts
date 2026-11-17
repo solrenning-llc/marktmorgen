@@ -2429,7 +2429,10 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     // An unread reply is not an absent cursor (Codex V on #3446): textsOrNull throws on any other shape, so the walk
     // stays where it was until the cursor can be read, and the run says it could not read the store's events.
     const [backRaw] = textsOrNull(await redisPipeline([["GET", backKey(statsId)]]), 1, "a Stripe read's cursor");
-    const back = typeof backRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(backRaw) ? backRaw : "";
+    // Only an event id read from Stripe is ever written there: another text is a corrupted cursor, as unread as any
+    // other shape, never an absent one (Claude 4 and Claude 5 on #3446 @f86b21895b).
+    if (typeof backRaw === "string" && !/^evt_[A-Za-z0-9]+$/.test(backRaw)) throw new UnknownReplyError("a Stripe read's cursor");
+    const back = backRaw ?? "";
     const pages: StripeEvent[][] = [];
     let older = back;
     let reachedEnd = false;

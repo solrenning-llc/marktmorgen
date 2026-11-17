@@ -574,6 +574,17 @@
       ]
     },
     {
+      "source": "app/[handle]/policies/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/policies",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/renew/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/renew/[product]",
@@ -1380,6 +1391,7 @@
     "components/call-editor.tsx",
     "components/campaign-qr.tsx",
     "components/campaign-results.tsx",
+    "components/captions-refunds-owed.tsx",
     "components/cart-deal-editor.tsx",
     "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
@@ -1711,6 +1723,7 @@
     "components/test-counts-notice.tsx",
     "components/thanks-note-editor.tsx",
     "components/thanks-note-view.tsx",
+    "components/tier-benefits.tsx",
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
     "components/toast.tsx",
@@ -1983,6 +1996,7 @@
     "app/api/store/numbers-links/route.ts",
     "app/api/store/numbers/ask/route.ts",
     "app/api/store/option/route.ts",
+    "app/api/store/order-problem/route.ts",
     "app/api/store/order/route.ts",
     "app/api/store/orders/bundle/route.ts",
     "app/api/store/orders/older/route.ts",
@@ -2056,6 +2070,7 @@
     "app/api/store/tax/route.ts",
     "app/api/store/team/route.ts",
     "app/api/store/thanks-note/route.ts",
+    "app/api/store/tier-benefits/route.ts",
     "app/api/store/tiers/route.ts",
     "app/api/store/tip/route.ts",
     "app/api/store/tips/route.ts",

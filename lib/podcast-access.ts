@@ -51,7 +51,10 @@ const okKey = (sid: string, pid: string, email: string) => `nl:pod:ok:${sid}:${p
 /**
  * The store's products that ever had a private feed, noted with each new grant in the same counted write, so a
  * person's deletion still finds a product's feeds after the catalog forgot it (nuvem I privacy audit, 13 November
- * 2026). A removed product stays: its grants are reached by every deletion and by the walk at store closing.
+ * 2026). A removed product stays: its grants are reached by every deletion and by the walk at store closing. Its
+ * member is one a product, written once, so its room is the room held with the product from the day it is made and
+ * kept after it is removed (PRODUCT_SIDE_BYTES, lib/store-data-rules.ts), not a share of each order's ITEM_DATA_BYTES;
+ * the order write still charges it to the room as it lands, so the room looks fuller, never emptier.
  */
 const pidsKey = (sid: string) => `nl:pod:pids:${sid}`;
 

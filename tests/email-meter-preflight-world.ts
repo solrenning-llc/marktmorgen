@@ -57,7 +57,7 @@ export async function auditMeterPreflight(){
   }finally{process.env.RESEND_API_KEY=credential;for(const k of ['RESEND_CREATORS_API_KEY','RESEND_READ_API_KEY','MARKETING_FROM_DOMAIN'])delete process.env[k];}
 
  }finally{fixture.restore();}
- for(const by of ['company','order','monthly'] as const){redis.clear();assert.equal(await sendEmail({...message,meter:{by}}),false);output.push({name:'external_meter_'+by,keys:redis.keys()});}
+ for(const by of ['company','order','monthly'] as const){redis.clear();assert.equal(await sendEmail({...message,meter:by==='order'?{by,store:{}}:{by}}),false);output.push({name:'external_meter_'+by,keys:redis.keys()});}
  assert.equal(forbidden,0);
  return {source:'e1105b3cc38df24264128cad0865d8f5d2110d59',review:CURRENT_RESEND_FALLBACK_REVIEW,binding:CURRENT_RESEND_CREDENTIAL_BINDING,providerBoundary:'real sendEmail/sendBatch/sendListBatch/guard; synthetic HTTP and actual MemoryRedis app ledger; budget ACK fixture is separate and not a Lua proof',scenarios:output,positiveSinglePosts:positive.requests.filter(r=>r.method==='POST').length,positiveBatchPosts:positiveBatch.requests.filter(r=>r.method==='POST').length,forbiddenExternalFetch:forbidden};
 }

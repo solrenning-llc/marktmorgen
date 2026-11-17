@@ -468,7 +468,7 @@ async function sendOut(store: Store, product: Listing, to: string, deps: HandOve
   const p = preorderWords(store.language);
   const g = givingWords(store.language);
   const link = product.course ? `${deps.base}/course/${product.id}` : ((await deps.ordersLink(to)) ?? `${deps.base}/orders`);
-  return sendEmail({ meter: { by: "order" },
+  return sendEmail({ meter: { by: "order", store },
     from: deps.from,
     to,
     subject: p.outSubject(product.title).slice(0, 200),
@@ -501,7 +501,7 @@ async function sendReceipt(store: Store, product: Listing, session: Session, to:
     return false;
   }
   const said = speech(store);
-  return sendEmail({ meter: { by: "order" },
+  return sendEmail({ meter: { by: "order", store },
     from: deps.from,
     to,
     subject: p.receiptSubject(product.title).slice(0, 200),

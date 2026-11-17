@@ -349,7 +349,7 @@ async function sendReceipt(input: {
     ? formatMoney(Number(amount), currency, speech(store).lang.locale)
     : null;
   const g = givingWords(store.language);
-  return sendEmail({ meter: input.again ? { by: "store", store, kind: "email" } : { by: "order" },
+  return sendEmail({ meter: input.again ? { by: "store", store, kind: "email" } : { by: "order", store },
     from: input.from,
     to: buyer,
     subject: g.groupReceiptSubject(group.people, title).slice(0, 200),

@@ -348,7 +348,7 @@ async function tellGift(input: Parameters<typeof deliverGift>[0], gift: Gift, se
   const label = gift.o ? product.options.find((o) => o.id === gift.o)?.label ?? "" : "";
   const title = label ? `${product.title} (${label})` : product.title;
   const link = (await input.ordersLink(gift.to)) ?? `${base}/orders`;
-  await sendEmail({ meter: { by: "order" },
+  await sendEmail({ meter: { by: "order", store },
     from: input.from,
     to: gift.to,
     subject: g.giftSubject(who, title).slice(0, 200),
@@ -376,7 +376,7 @@ async function tellGift(input: Parameters<typeof deliverGift>[0], gift: Gift, se
     const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
       ? formatMoney(Number(amount), currency, speech(store).lang.locale)
       : null;
-    await sendEmail({ meter: { by: "order" },
+    await sendEmail({ meter: { by: "order", store },
       from: input.from,
       to: buyer,
       subject: g.giftReceiptSubject(title).slice(0, 200),

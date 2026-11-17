@@ -597,7 +597,7 @@ export async function sendReceipt(input: { store: Store; request: PaymentRequest
   // lines: shown, with the total, so the lines add up to what was paid. Without it the receipt is as before.
   const taxed = request.amountPaid > request.total ? [w.receiptTax(said.money(request.amountPaid - request.total)), w.emailTotal(amount)] : [];
   return sendEmail({
-    meter: { by: "order" },
+    meter: { by: "order", store },
     from: input.from,
     to: request.email,
     replyTo: store.email,

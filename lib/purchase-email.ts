@@ -655,7 +655,7 @@ async function confirmOnce(
 
   let sent = false;
   try {
-    sent = await sendEmail({ meter: { by: "order" }, tags: stopTags(store),
+    sent = await sendEmail({ meter: { by: "order", store }, tags: stopTags(store),
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,
@@ -868,7 +868,7 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   if (claimed === null) return "already";
   let sent = false;
   try {
-    sent = await sendEmail({ meter: { by: "order" }, tags: stopTags(store),
+    sent = await sendEmail({ meter: { by: "order", store }, tags: stopTags(store),
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,

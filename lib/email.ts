@@ -52,7 +52,10 @@ import { stopTags } from "@/lib/mail-health-rules";
  */
 export type EmailMeter =
   | { by: "company" }
-  | { by: "order" }
+  // A buyer's email paid inside its order's own cost. `store` names the store it is about, so a bounce for good or a
+  // complaint on it takes the address off that store's list (messageTags; Codex C2's HIGH on #4245): required, so a new
+  // order email can never be sent without it.
+  | { by: "order"; store: { listId?: string | null } }
   | { by: "monthly" }
   | { by: "store"; store: AllowanceStore; kind: "email" | "transactional"; asked?: boolean };
 
@@ -314,15 +317,18 @@ type OneMessage = {
   idempotencyKey?: string;
   /**
    * Labels the sender gives back with what became of it (BatchMessage.tags).
-   * Left out, a store's email (meter `by: "store"`) carries its store's list
-   * (stopTags), so a bounce for good or a complaint takes the address off it.
+   * Left out, a store's email (meter `by: "store"` or `by: "order"`) carries
+   * its store's list (stopTags), so a bounce for good or a complaint takes the
+   * address off it. A company or monthly email names no store, so none.
    */
   tags?: Record<string, string>;
 };
 
 /** The tags one email goes with: its own, or, for a store's, the store's list (ALL-160). Never shown to the reader. */
 function messageTags(message: OneMessage): { name: string; value: string }[] {
-  return cleanTags(message.tags ?? (message.meter.by === "store" ? stopTags(message.meter.store) : undefined));
+  const meter = message.meter;
+  const store = meter.by === "store" || meter.by === "order" ? meter.store : undefined;
+  return cleanTags(message.tags ?? (store ? stopTags(store) : undefined));
 }
 
 const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;

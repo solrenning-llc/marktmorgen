@@ -214,7 +214,7 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   // the date written its way, in the currency actually paid.
   const b = bookingWords(store.language);
   const said = speechFor(store.language, currency);
-  await sendEmail({ meter: { by: "order" },
+  await sendEmail({ meter: { by: "order", store },
     from: input.from,
     to: email,
     subject: b.packageSubject(total, product.title).slice(0, 200),

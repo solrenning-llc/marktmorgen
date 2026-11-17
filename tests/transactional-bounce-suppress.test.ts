@@ -101,14 +101,17 @@ async function main(): Promise<void> {
   await transactional("spam@example.com", "Tell us how it went");
   const spam = await POST(announce("email.complained", { email_id: "tx_spam", to: ["spam@example.com"], tags: tagsTo("spam@example.com") }));
   is("heard", spam.status, 200);
-  is("off the list after a complaint on a review request", await isMailable(list, "spam@example.com"), false);
+  // The webhook side, with a store email sent here. That each real sender (review requests, update notices, community
+  // announcements) carries the same tag is held in its own test (Claude 1 cloud's MEDIUM 2 on #4245):
+  // tests/l9-review-request-exact.test.ts, tests/product-updates.test.ts, tests/community-mail-list-gone.test.ts.
+  is("off the list after a complaint on a store email", await isMailable(list, "spam@example.com"), false);
   const later = await sendTo(store, ["spam@example.com", "soft@example.com"], "News", "New prints are in.", "tx:news");
   is("the next list email leaves the complainer out", later.done.includes("spam@example.com"), false);
 
   part("A permanent bounce through Amazon SES does the same");
   await transactional("sesbounce@example.com", "An update to your download");
   await recordSesEvent({ kind: "bounced", permanent: true, recipients: ["sesbounce@example.com"], tags: tagsTo("sesbounce@example.com"), messageId: "ses_tx_hard", occurredAt: Date.now() });
-  is("off the list after a hard bounce on an update notice", await isMailable(list, "sesbounce@example.com"), false);
+  is("off the list after a hard bounce on a store email", await isMailable(list, "sesbounce@example.com"), false);
 
   part("A batch of non-list email (announcements, update notices) carries the same tag");
   await transactional("batch@example.com", "warm-up");
@@ -117,7 +120,7 @@ async function main(): Promise<void> {
   const batch = await sendBatch([{ from: "Quayside Prints <hello@marktmorgen.com>", to: "batch@example.com", subject: "A new post in the community", text: "Hello.", html: "<p>Hello.</p>", tags: batchTags }], "tx:batch", { by: "monthly" });
   is("the batch goes", batch, "sent");
   await recordSesEvent({ kind: "complained", permanent: false, recipients: ["batch@example.com"], tags: tagsTo("batch@example.com"), messageId: "ses_tx_batch", occurredAt: Date.now() });
-  is("off the list after a complaint on a community announcement", await isMailable(list, "batch@example.com"), false);
+  is("off the list after a complaint on a batch of store email", await isMailable(list, "batch@example.com"), false);
 
   part("A soft bounce takes nobody off");
   await transactional("soft@example.com", "Your cart");
@@ -131,7 +134,10 @@ async function main(): Promise<void> {
   is("no bounce or complaint counted for the store", [(await listHealth(id)).bounced, (await listHealth(id)).complained], [0, 0]);
 
   part("A later receipt still follows the existing rule");
-  is("the complainer's receipt still goes (legal necessity)", await sendEmail({ meter: { by: "order" }, from: "Quayside Prints <hello@marktmorgen.com>", to: "spam@example.com", subject: "Your receipt", text: "Thank you for your order." }), true);
+  is("the complainer's receipt still goes (legal necessity)", await sendEmail({ meter: { by: "order", store }, from: "Quayside Prints <hello@marktmorgen.com>", to: "spam@example.com", subject: "Your receipt", text: "Thank you for your order." }), true);
+  // Codex C2's HIGH on #4245: an email paid inside its order (receipts, shipments, gifts, calls, keys, pre-orders, PayPal)
+  // names its store's list too, so a complaint or a hard bounce on it takes the address off that list.
+  is("the order-metered receipt names the store list", tagsTo("spam@example.com").nl_stop, list);
   is("and they stay off the list", await isMailable(list, "spam@example.com"), false);
 
   done();

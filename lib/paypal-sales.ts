@@ -1039,7 +1039,7 @@ export async function deliverPayPal(input: {
   });
   const receipted = go && await (async () => {
     const receipt = input.keep ? await input.keep(made()) : made();
-    return receipt !== null && (await sendEmailPinned({ meter: { by: "order" }, ...receipt }));
+    return receipt !== null && (await sendEmailPinned({ meter: { by: "order", store }, ...receipt }));
   })().catch((error) => {
     console.error("a PayPal purchase email failed", error);
     return false;

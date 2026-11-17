@@ -23,7 +23,7 @@ const credential = "re_SYNTHETIC_TRANSPORT_ONLY";
 process.env.RESEND_API_KEY = credential;
 for (const name of ["RESEND_READ_API_KEY", "RESEND_CREATORS_API_KEY", "AWS_SES_ROLE_ARN", "AWS_SES_REGION", "AWS_SES_CONFIGURATION_SET", "AWS_SES_TOPIC_ARN", "VERCEL_OIDC_TOKEN", "VERCEL"]) delete process.env[name];
 
-const message = { meter: { by: "order" as const }, from: "Shop <shop@example.test>", to: "buyer@example.test", subject: "Tomorrow: a call", text: "Synthetic reminder" };
+const message = { meter: { by: "order" as const, store: {} }, from: "Shop <shop@example.test>", to: "buyer@example.test", subject: "Tomorrow: a call", text: "Synthetic reminder" };
 type Fixture = Awaited<ReturnType<typeof createResendFallbackFixture>>;
 const posts = (f: Fixture) => f.requests.filter((r) => r.method === "POST").length;
 const reply = (status: number): typeof fetch => async () => (status === 200 ? Response.json({ id: "synthetic_accepted" }) : Response.json({ message: "synthetic" }, { status }));

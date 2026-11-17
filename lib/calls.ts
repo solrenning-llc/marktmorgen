@@ -2075,7 +2075,7 @@ export async function confirmBooking(input: {
     const b = bookingWords(store.language);
     const locale = LANGUAGES[parseLanguage(store.language)].locale;
     const hours = Math.max(setup.noticeHours, 1);
-    await sendEmail({ meter: { by: "order" },
+    await sendEmail({ meter: { by: "order", store },
       idempotencyKey: confirmEmailKey(session, "buyer"),
       from: storeSender(store),
       to: buyerEmail,
@@ -2117,7 +2117,7 @@ export async function confirmBooking(input: {
   const theirs = onTheirCalendar(meeting, creatorSide, store.email);
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
-  await sendEmail({ meter: { by: "order" },
+  await sendEmail({ meter: { by: "order", store },
     idempotencyKey: confirmEmailKey(session, "creator"),
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: creatorSide,

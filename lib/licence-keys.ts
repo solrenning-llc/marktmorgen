@@ -1227,7 +1227,7 @@ async function serveWaiting(store: Store, product: Listing, origin: string): Pro
     served += 1;
     if (!email) continue;
     const g = givingWords(store.language);
-    await sendEmail({ meter: { by: "order" },
+    await sendEmail({ meter: { by: "order", store },
       from: `"${displayName(store.name)}" <${senderAddress()}>`,
       to: email,
       replyTo: store.email,

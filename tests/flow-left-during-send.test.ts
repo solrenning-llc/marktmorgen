@@ -115,6 +115,21 @@ async function main(): Promise<void> {
   is("nothing was sent to them", sentTo("erased2@example.com"), 0);
   is("no attempt or history of theirs is written back, with no cleanup to depend on", await readRun(flowId, personOf("erased2@example.com")), null);
 
+  part("A run that keeps stepping never expires in the middle of its sequence (Claude 5 on #2287, LEVE)");
+  // A run's record and history are kept RUN_KEEP_SECONDS from when they were last renewed, and a sequence can last
+  // longer than that (20 steps of up to 35 days). Each attempt written renews them, and the run's place in the list
+  // of runs, in the same step: a run near its end that takes one more step is kept, never dropped as erased.
+  await upsertContact(list, "longrun@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "longrun@example.com", { joined: false, tag: "welcome" });
+  const long = personOf("longrun@example.com");
+  const opened = Math.floor(Date.now() / 1000) - 399 * 86_400;
+  await real([["EXPIRE", `nl:wf:run:${flowId}:${long}`, 60], ["EXPIRE", `nl:wf:log:${flowId}:${long}`, 60], ["ZADD", `nl:wf:runs:${flowId}`, opened, long]]);
+  await run();
+  is("the step was sent to them", sentTo("longrun@example.com"), 1);
+  const [runTtl, logTtl, listed] = await real([["TTL", `nl:wf:run:${flowId}:${long}`], ["TTL", `nl:wf:log:${flowId}:${long}`], ["ZSCORE", `nl:wf:runs:${flowId}`, long]]);
+  is("their record and history are kept again for the full time", [Number(runTtl) > 300 * 86_400, Number(logTtl) > 300 * 86_400], [true, true]);
+  is("and their place in the list of runs is renewed with them", Number(listed) > opened, true);
+
   part("Refused by the email service, address by address: failed with the service's words, never also 'left' (Claude 1 on #4307)");
   // On main since #3489, sendTo answers a fourth list, `refused`, in neither done nor rest. The PR's rule (whoever is
   // in none of done, rest and uncertain left the list) took them as left too: written twice, the run's status and

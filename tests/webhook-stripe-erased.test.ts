@@ -11,7 +11,7 @@
  * cannot take. A checkout is paid when its session completes, not when it was opened. The PayPal sibling is lib/paypal-delivery.ts (#3449). Synthetic Stripe
  * answers only; the endpoint's name resolves to a private address, so nothing leaves this machine.
  */
-import { addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
+import { addEndpoint, emitEvent, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { forceAllowance } from "@/lib/store-allowance";
@@ -253,6 +253,21 @@ async function main() {
   redis.pipeline = counting;
   is("a store that hears only refunds: no read for a sale, a membership, an offer or a cancellation", reads, []);
   is("and nothing sent for them", (await recentMessages((await storeForEmail(OWNER))!, "sale.completed", 50)).length, 0);
+
+  part("No deletion print can be read: the event goes out with no address and no name (Codex L on #3491, MEDIUM)");
+  // A refund with a name but no address: the print is kept by address, so whether this person was deleted cannot be
+  // read. The financial event still goes out, with no address and no name.
+  await setup(["refund.issued"]);
+  redis.pipeline = counting;
+  const nameOnly = { ...refund("ch_nameonly", "unused@example.com"), billing_details: { email: null, name: "Name with no address" }, receipt_email: null };
+  timeline = [evt("evt_RfNameOnly", "charge.refunded", PAID + 700, nameOnly)];
+  await watchStripe(Date.now() + 10_000);
+  is("a refund with a name and no address: sent, with no name", await buyerOf("refund.issued", "charge", "ch_nameonly"), { email: null, name: null });
+  // A store with no list (no deletion hash to read): an event naming a buyer goes out with no address and no name.
+  const listless = { ...(await storeForEmail(OWNER))!, listId: undefined } as unknown as Parameters<typeof emitEvent>[0];
+  await emitEvent(listless, "refund.issued", "seed-listless", { charge: "ch_listless", buyer: { email: "listless@example.com", name: "Listless Buyer" } }, Date.now(), { email: "listless@example.com", paidAt: PAID });
+  is("a store with no list: sent, with no address and no name", await buyerOf("refund.issued", "charge", "ch_listless"), { email: null, name: null });
+  is("its address appears nowhere in what is kept", JSON.stringify(await recentMessages((await storeForEmail(OWNER))!, "refund.issued", 50)).includes("listless@example.com"), false);
 
   console.error = logged;
   done();

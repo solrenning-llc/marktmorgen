@@ -1766,13 +1766,14 @@ const num = (value: unknown) => (typeof value === "number" && Number.isFinite(va
  * event's mark back, so the event is read again next run (review of #3491): an address is never sent, and a person
  * never deleted is never sent without one, on a read that is not known. A payment whose time does not read counts any
  * print; a print in the second before the payment counts too (two clocks, as namesErased reads a purchase's notice).
- * A store with no list has deleted nobody (suppressedCommand). Called by emitEvent only for an event about to
+ * With no address, or a store with no list, the print cannot be read at all, and nothing proves this person was not
+ * deleted: the event still goes out, with no address and no name (Codex L on #3491, MEDIUM). Called by emitEvent only for an event about to
  * be kept for a live endpoint (WEBHOOK_ERASED_READ_COMMANDS), for the Stripe events below and PayPal's refund.issued
  * (lib/paypal-delivery.ts).
  */
 async function erasedSincePaid(store: Store, email: string | null, paidAt: unknown): Promise<boolean> {
   const listId = store.listId;
-  if (!email || !listId) return false;
+  if (!email || !listId) return true;
   const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
   const mark = replies ? replies[0] : undefined;
   if (mark === undefined) throw new UnknownReplyError("a person's deletion print");

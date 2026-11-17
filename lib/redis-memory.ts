@@ -308,6 +308,13 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/flow-runs.ts FORGET_IF_ERASED: a run with no address (written again after an erasure) is deleted; any other is left.
+        if (key.startsWith("-- marktmorgen:flow-forget-if-erased:v1\n") && args[0] === "2" && args.length === 3) {
+          const [, run, log] = args;
+          if (this.run(["HEXISTS", run, "email"]) === 1) return 0;
+          this.run(["DEL", run, log]);
+          return 1;
+        }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v1\n") && args[0] === "3" && args.length === 9) {
           const [, run, log, index, email, now, entry, keep, person] = args;

@@ -7,7 +7,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, forgetRunsIfErased, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -1665,6 +1665,11 @@ export async function sendDueSteps(
     // generation, in its own script (lib/crm.ts, SET_CRM_VALUE); an email cannot be sent in the same step as a check.
     const going = await stillHeld(group, claim.claimed, score);
     counts.dropped += claim.claimed.length - going.length;
+    // Someone erased after their row was read lost their lease with everything else of theirs; claimAttempts wrote
+    // their run again just above (the open attempt, with no address). That is deleted here, and a run a later run took
+    // over keeps its record (flow-runs.ts, FORGET_IF_ERASED; Claude 7 on #4307, Claude 1 c1-conflitos-3 on #2287).
+    const outOfHand = claim.claimed.filter((email) => !going.includes(email));
+    if (outOfHand.length) await forgetRunsIfErased(flow.id, outOfHand).catch((error) => console.error("clearing an erased person's run failed", error));
     if (!going.length) return;
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>

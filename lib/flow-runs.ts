@@ -386,6 +386,28 @@ export async function settleLeftIfRun(flowId: string, index: number, stepId: str
   }));
 }
 
+/**
+ * Deletes, each in one Redis step, what claimAttempts wrote again for someone erased after their row was read and before
+ * the step acted (the open attempt and its event, with no address): the run of a person erased meanwhile
+ * (forgetWorkflowPerson) went with them, and nothing of theirs is written back (Claude 7 on #4307). A run that still
+ * holds its address, such as one a later run took over (lib/flows.ts, stillHeld), is left exactly as it is.
+ * KEYS: the run, its history.
+ */
+const FORGET_IF_ERASED = `-- marktmorgen:flow-forget-if-erased:v1
+if redis.call('HEXISTS', KEYS[1], 'email') == 0 then
+  redis.call('DEL', KEYS[1], KEYS[2])
+  return 1
+end
+return 0`;
+
+export async function forgetRunsIfErased(flowId: string, emails: string[]): Promise<void> {
+  if (!emails.length) return;
+  await redisPipeline(emails.map((email) => {
+    const person = personOf(email);
+    return ["EVAL", FORGET_IF_ERASED, 2, runKey(flowId, person), logKey(flowId, person)];
+  }));
+}
+
 /** What happened at a step without an attempt: a condition that did not hold, the goal reached, the run ended. */
 export async function noteRuns(
   flowId: string,

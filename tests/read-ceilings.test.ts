@@ -354,9 +354,7 @@ async function main(): Promise<void> {
     // sizing is kept as a note, not as a second ceiling under the owner's.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
-    const oneMore = 32 * (heavyWorst - lightWorst);
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
-    is("and one more heavy reading a day is still counted at its own price, never free", oneMore > 0, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

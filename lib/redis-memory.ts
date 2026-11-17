@@ -869,6 +869,17 @@ export class MemoryRedis {
           this.run(["SET", record, to, "EX", seconds]);
           return 1;
         }
+        // lib/auto-captions.ts: close the settled record and its listings only while it is still current.
+        if (key.startsWith("-- marktmorgen:captions-close-owed:v1\n") &&
+            ((args[0] === "2" && args.length === 5) || (args[0] === "3" && args.length === 6))) {
+          const [count, record, queue] = args;
+          const [from, id] = args.slice(Number(count) + 1);
+          if (this.run(["GET", record]) !== from) return 0;
+          if (count === "3") this.run(["SREM", args[3], id]);
+          this.run(["ZREM", queue, id]);
+          this.run(["DEL", record]);
+          return 1;
+        }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
         if (key.startsWith("-- marktmorgen:sns-receipt-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, receipt, from, to, seconds] = args;

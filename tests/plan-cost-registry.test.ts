@@ -60,6 +60,8 @@ import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits } from "@/lib/drip-start-rules";
+import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
+import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_PROGRESS_COMMANDS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -311,6 +313,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
     assert.equal(COST_LINES.find((line) => line.id === "drip-start-read")?.monthlyUsd(tier), month, `the drip job's start reads are a ${tier} plan line`);
     console.log(`the drip job's start reads for one ${tier} store: $${month.toFixed(4)} a month at most (plan line drip-start-read)`);
   }
+  // Opening a come-back link's checkout reads whether the person has a membership still running (lib/winback-send.ts): WINBACK_OPEN_REQUEST_UNITS
+  // public requests, taken before it, more than its calls to the creator's Stripe account cost.
+  assert.ok(WINBACK_OPEN_REQUEST_UNITS * laterPageCost() >= WINBACK_OPEN_READ, `${WINBACK_OPEN_REQUEST_UNITS} x ${laterPageCost()} < ${WINBACK_OPEN_READ}`);
+  console.log(`a come-back link's running-membership reading: $${WINBACK_OPEN_READ.toFixed(6)} at most, counted as ${WINBACK_OPEN_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
   // at every size, from an empty program or store to the largest, the requests cost more than the reads.
   const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 1_000, 5_000, 50_000, 1_000_000];

@@ -1,4 +1,5 @@
-import {waitForReactChangeHandler,waitForReactHydrated} from "./react-hydration.mjs";
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+import {waitForReactHydrated} from "./react-hydration.mjs";
 
 /** Only synthetic intercepted allowlist settings; never visits the listed origins or opens checkout. */
 export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){

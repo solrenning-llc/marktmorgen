@@ -313,6 +313,14 @@ export const STRIPE_WAIT_SECONDS = 2;
  */
 export const ORDER_RENEWAL_STOP = (STRIPE_WAIT_SECONDS / RENEWALS_AT_ONCE + STRIPE_WAIT_SECONDS / 100) * MEMORY_SECOND;
 /**
+ * A purchase for several's settlement (lib/group-buy.ts settleGroup; Claude 7's cost MEDIUM on #4494): before any place
+ * is handed out, its payment is read on the creator's account with its charge expanded, and givenBack may then read the
+ * payment's dispute: GROUP_SETTLE_STRIPE_CALLS waits at the most, each STRIPE_WAIT_SECONDS held at 2 GB, once per group
+ * order. Held inside ORDER_COMPUTE beside the cart's stock share (tests/group-refunded-before-settle.test.ts).
+ */
+export const GROUP_SETTLE_STRIPE_CALLS = 2;
+export const GROUP_SETTLE_STRIPE_WAIT = GROUP_SETTLE_STRIPE_CALLS * STRIPE_WAIT_SECONDS * MEMORY_SECOND;
+/**
  * Queue item 307 [EC1]: not a line of any plan. What telling a closing
  * store's buyers and settling its members costs at the most, for each buyer
  * its cap allows (queue item 307 [EC1],

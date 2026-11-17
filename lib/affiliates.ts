@@ -3175,17 +3175,19 @@ const exactSeconds = (value: unknown): number | null => (typeof value === "numbe
 
 /**
  * The time a partner's dated end is compared with (Codex G on #1924): the settled charge's (paidAtOf). Without it, a
- * partner whose share of this product ends after the checkout opened may have been paid for after the end, so the
- * sale is not known: UnknownReplyError, and the sweep leaves it for the next run (failOrder), never credited on the
- * checkout's time. A checkout opened after every such end was paid after it too, so the checkout's time serves.
+ * partner whose share of any of the order's products ends after the checkout opened may have been paid for after the
+ * end, so the sale is not known: UnknownReplyError, and the sweep leaves it for the next run (failOrder), never
+ * credited on the checkout's time. A checkout opened after every such end was paid after it too, so the checkout's
+ * time serves.
  */
-async function paidForPartners(store: Store, session: SessionLike, opened: number | null, fallback: number, base: number, product: string, partners?: Affiliate[]): Promise<number> {
+async function paidForPartners(store: Store, session: SessionLike, opened: number | null, fallback: number, base: number, products: string[], partners?: Affiliate[]): Promise<number> {
   const proven = paidAtOf(session);
   if (proven !== null) return proven;
-  if (base > 0 && product) {
+  if (base > 0 && products.length) {
     const listed = partners ?? (await listPartners(store));
-    // A checkout with no exact opening time is never taken as opened after an end (Codex G on #1924).
-    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.includes(product) && (opened === null || opened < a.share.until));
+    // A checkout with no exact opening time is never taken as opened after an end (Codex G on #1924). Every product of
+    // the order counts, the lines added at checkout too (orderLines), not only its main one (Codex G on #1924, point 1).
+    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.some((p) => products.includes(p)) && (opened === null || opened < a.share.until));
     if (straddles) throw new UnknownReplyError("when a sale near a partner's end was paid");
   }
   return opened ?? fallback;
@@ -3256,7 +3258,8 @@ export async function noteSession(
   const base = total - tax;
   const opened = exactSeconds(session.created);
   const at = opened ?? Math.floor(Date.now() / 1000);
-  const paidAt = await paidForPartners(store, session, opened, at, base, meta.product ?? "", partners);
+  const orderProducts = [meta.product ?? "", ...bumpsFromMeta(meta).map((b) => b.id)].filter(Boolean);
+  const paidAt = await paidForPartners(store, session, opened, at, base, orderProducts, partners);
 
   // Partners first, and whatever happens next. A partner shares in the
   // product, so how the buyer arrived is beside the point — and this is the

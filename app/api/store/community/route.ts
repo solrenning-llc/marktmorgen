@@ -30,7 +30,7 @@ import {
   within,
   withPin,
 } from "@/lib/community";
-import { communityViewer, spaceAnswer, unknownForGood } from "@/lib/community-access";
+import { communityViewer, maySeeSpace, spaceAnswer, unknownForGood } from "@/lib/community-access";
 import { approvalFor, holdComment, holdPost, mustHold, withdrawHeld } from "@/lib/community-approval";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";

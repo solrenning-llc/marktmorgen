@@ -451,6 +451,9 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // (fencedBy, CLOSING_FENCED), and the lock made to last again before each step: a lock that ran out (a paused
     // function, a slow network) stops here with LockBusyError before anything more is deleted, the record still there,
     // so a plan started once it ran out keeps everything of its store (Codex M's focal M1 on #3156, on #3643's design).
+    // The two mail outboxes (forgetShipmentMail, forgetOrderConfirmationMail) are the exception: they delete nothing
+    // while CURRENT_SHIPMENT_MAIL_LIFECYCLE is "never_activated", and they take the same `apply` before it changes
+    // (Claude 5's LOW on #3156); tests/erase-lock-fence.test.ts fails the day it changes without them.
     const apply = fencedBy(held);
     const keep = async () => {
       if (!(await holdLock(held))) throw new LockBusyError("a closing store's lock ran out while its live data was deleted");

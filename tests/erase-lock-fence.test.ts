@@ -19,6 +19,7 @@
  * holds after the walk, the walk's own keys aside: nothing of the store that runs again is deleted or changed; the
  * walk goes on, and the store waits a walk. No lock key is deleted by hand, no reply is forged.
  */
+import { readFileSync } from "node:fs";
 import { eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail, storeRef } from "@/lib/store";
 import { putMember } from "@/lib/team";
@@ -27,6 +28,7 @@ import { hostCalendarKeys } from "@/lib/host-calendar";
 import { makeKey } from "@/lib/api-keys";
 import { startPath } from "@/lib/path";
 import { readAnswers } from "@/lib/path-rules";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { store as redis } from "./redis-stub";
 import { closeForErasure, reactivate } from "./closed-for-erasure";
 import { done, is, part } from "./check";
@@ -188,6 +190,18 @@ async function main() {
   }
   // The record's last step needs no check of its own here any more: on #3643's design the walk closes the record with
   // lib/store.ts's closeStoreRecord itself, so it closes it exactly as closeStoreRecord does.
+
+  part("What is not fenced yet, and the order of the record's last step (Claude 5's two LOWs on #3156)");
+  {
+    const walkSource = readFileSync("lib/closed-store-data.ts", "utf8");
+    // forgetShipmentMail and forgetOrderConfirmationMail send their own pipelines, outside the store's lock. They delete
+    // nothing today; the day the mail outboxes go live they take the same `apply` as the other deletes.
+    is("the two mail outboxes delete nothing outside the lock: they are never activated", CURRENT_SHIPMENT_MAIL_LIFECYCLE, "never_activated");
+    is("and the walk names them as the exception", [walkSource.includes("await forgetShipmentMail(store.statsId);"), walkSource.includes("await forgetOrderConfirmationMail(store.statsId);"), walkSource.includes("The two mail outboxes (forgetShipmentMail, forgetOrderConfirmationMail) are the exception")], [true, true, true]);
+    // applyIfHeld splits the changes past FENCED_KEYS or FENCED_WORDS; a lock lost between two steps leaves the earlier
+    // ones made. The record is the last change, so it is never deleted while a later step could still be refused.
+    is("closeStoreRecord deletes the record as its very last change", readFileSync("lib/store.ts", "utf8").includes("...[beforeMoveKeyOf(owner), ...extraKeys, owner].map((key) => ({ op: \"DEL\", key, words: [] }))"), true);
+  }
   done();
 }
 

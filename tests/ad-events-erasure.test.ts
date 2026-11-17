@@ -238,6 +238,14 @@ async function main(): Promise<void> {
   is("a lead of somebody not deleted still goes", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "lead@example.com", product: "guide00001" }, NOW), true);
   is("to Meta", toMeta, 1);
 
+  part("A lead whose typed address is never sent (a waitlist or a free copy, main's routes): asked by that address, never carrying it");
+  toMeta = 0;
+  is("a typed address that was deleted: not sent", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "", typed: LATE, product: "guide00001" }, NOW), false);
+  is("Meta asked nothing", toMeta, 0);
+  is("a typed address not deleted: the lead goes", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "", typed: "typed@example.com", product: "guide00001" }, NOW), true);
+  is("to Meta", toMeta, 1);
+  is("no address typed at all: nothing to ask, so nothing goes", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "", product: "guide00001" }, NOW), false);
+
   part("What a checkout kept goes once its sale is sent: the address is known then, and nothing reads it after");
   const T3 = "e".repeat(24);
   const T4 = "f".repeat(24);

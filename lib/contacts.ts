@@ -40,7 +40,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { DataRoomError, type DataStore, dataKey, giveData, needData, noteData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, countData, dataKey, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, fieldReleaseBytes, orderWriteIfSame, releaseOrderData } from "@/lib/order-data";
 import { DATA_STEP_BYTES, dataBytes, utf8Length } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
@@ -213,15 +213,31 @@ async function settleContacts(room: ContactRoom, pairs: ContactPair[], written: 
 }
 
 /**
- * An order's write to a contact counted in the contacts' slot: written as it
- * is, never refused (the order's room was held at its checkout and what it
- * did not use is let go), and counted there at what it changed.
+ * An order's write to a contact counted in the contacts' slot: never refused
+ * (the order's room was held at its checkout and what it did not use is let
+ * go), and counted there at what it changes. What it grows by is counted
+ * BEFORE the write, and the write is made only once that count is confirmed
+ * (Codex X6 on #2576: counted after, a lost count left the stored growth
+ * uncounted): an unknown count throws UnknownReplyError, nothing written,
+ * the slot erring fuller if it landed after all. Returns the growth, for
+ * settleOrderWrite. A store with no room's key has nothing to count.
  */
-async function orderWriteCounted(owner: DataStore, before: Contact, next: Contact, commands: (string | number)[][]): Promise<void> {
-  if (commands.length) await redisPipeline(commands);
+async function countOrderWrite(owner: DataStore, before: Contact, next: Contact): Promise<number> {
   const grown = contactBytes(next) - contactBytes(before);
-  if (grown > 0) await noteData(owner, [{ slot: CONTACTS_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(owner, [{ slot: CONTACTS_SLOT, bytes: -grown }]);
+  if (grown > 0 && dataKey(owner) && !(await countData(owner, [{ slot: CONTACTS_SLOT, bytes: grown }])).ok) {
+    throw new UnknownReplyError("the contacts' room, counted before an order's write");
+  }
+  return grown;
+}
+
+/**
+ * After that write: written smaller, the slot gives back what it shrank by;
+ * not written, what was counted before goes back. A give-back that is lost
+ * leaves the slot fuller, never emptier.
+ */
+async function settleOrderWrite(owner: DataStore, grown: number, written: boolean): Promise<void> {
+  const back = written ? -grown : grown;
+  if (back > 0 && dataKey(owner)) await giveData(owner, [{ slot: CONTACTS_SLOT, bytes: back }]);
 }
 
 // The list's key lives in lib/contact-rules.ts (no imports), so a sender that only needs to read a row, such as the
@@ -419,11 +435,10 @@ export async function upsertContact(
     // An order's write to a row counted in the contacts' slot is not charged to the order (writeContactIf, inContacts):
     // the slot is counted at what it changed once written.
     const inContacts = Boolean(room && isOrderRoom(room) && before?.r === "c");
+    const counted = inContacts && room && isOrderRoom(room) && before ? { owner: room.order, grown: await countOrderWrite(room.order, before, placedNext) } : null;
     const written = await writeContactIf(listId, email, raw, mark, placedNext, deleted && ownYes, counts, joined, room, fence, inContacts);
-    if (written === true) {
-      if (inContacts && room && isOrderRoom(room) && before) await orderWriteCounted(room.order, before, placedNext, []);
-      return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
-    }
+    if (counted) await settleOrderWrite(counted.owner, counted.grown, written === true);
+    if (written === true) return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
     // Changed meanwhile, or refused by its fence: what it took of the room goes back. Changed is read again; a fence
     // gone (or a print it cannot lift) stays refused, never retried.
     await settleContacts(room, [{ before, next: placedNext }], [false]);
@@ -700,11 +715,10 @@ export async function noteProduct(listId: string, rawEmail: string, productId: s
     // (casWrite) and its slot counted at what it changed. Any other is an order's: counted at what the record grew by
     // (lib/order-data.ts), in the same step as the check.
     if (before.r === "c") {
+      const grown = await countOrderWrite(order, before, next);
       const [written] = await casWrite(key, [{ email, value, was: sha1(raw) }]);
-      if (written) {
-        await orderWriteCounted(order, before, next, []);
-        return mailable(before);
-      }
+      await settleOrderWrite(order, grown, Boolean(written));
+      if (written) return mailable(before);
       continue;
     }
     const written = dataKey(order)

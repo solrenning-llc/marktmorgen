@@ -142,7 +142,7 @@ async function main() {
     // One partial pipeline answer for the store-id read ([{}] from Upstash reads as undefined): unknown, not "gone".
     redis.pipeline = (async (commands: (string | number)[][]) =>
       commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:store:id:${SID}` ? [undefined] : realPipeline(commands)) as typeof redis.pipeline;
-    let r3: Record<string, number>;
+    let r3: Awaited<ReturnType<typeof sched.activateScheduledCodes>>;
     try {
       r3 = await sched.activateScheduledCodes(Date.now() + 10_000, start);
     } finally {

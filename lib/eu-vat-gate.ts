@@ -12,6 +12,7 @@ import { EU_VAT_COUNTRIES, type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-
 import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { type EuVatRate, type VatOnTop } from "@/lib/eu-vat-amount";
 import { type EuCheckoutRefusal, euCheckout } from "@/lib/eu-vat-checkout";
+import { SHIP_COUNTRIES } from "@/lib/shipping";
 
 /** Said when the two items of evidence are missing or name different countries (docs/art9a-sources-and-build-spec, 2.3). */
 export const EU_PLACE_REFUSED =
@@ -72,10 +73,20 @@ function onlyHuman(product: EuSupplyFields, members?: ReadonlyMap<string, EuSupp
   });
 }
 
-/** A two-letter country code as Vercel's edge or the buyer's choice names one, or null for anything else. */
-// XK (Kosovo) is user-assigned but is a place the billing field offers (lib/shipping.ts SHIP_COUNTRIES): read as a
-// country, never asked for again (Claude 7 on #4572). Every other user-assigned code is not a country.
-const country = (value: string | null): string | null => (value && /^[A-Z]{2}$/.test(value) && !/^(AA|Q[M-Z]|X[A-JL-Z]|ZZ)$/.test(value) ? value : null);
+/**
+ * Names a buyer or a header may give for a place REFUSED_PLACES writes otherwise: UK for the United Kingdom (GB) and
+ * EL, Greece's VAT prefix, for Greece (GR). Read before REFUSED_PLACES, so neither escapes the refusal (Codex X3 on
+ * #4820: billing_country=UK with a US IP went on).
+ */
+const PLACE_ALIASES: Readonly<Record<string, string>> = { UK: "GB", EL: "GR" };
+const place = (value: string | null): string | null => (value === null ? null : (PLACE_ALIASES[value] ?? value));
+
+/**
+ * The countries the billing field offers (lib/shipping.ts SHIP_COUNTRIES, the list components/billing-country-field.tsx
+ * draws), Kosovo (XK) among them (Claude 7 on #4572). A billing country is given only when it is one of these, so a
+ * code the field never offers is asked for again, never read as a country outside the EU and the UK.
+ */
+const OFFERED: ReadonlySet<string> = new Set(SHIP_COUNTRIES);
 
 /**
  * The checkout's question before any charge (C2-20261113-1320-ABRIR-1, 2b): may this buyer go on to pay for this
@@ -107,11 +118,11 @@ export function consumerGate(input: {
   };
   if ([{ product: input.product, members: input.members }, ...(input.boxes ?? [])].every(exempt)) return { ok: true };
   const items = checkoutEvidence(input.headers, input.form);
-  const ip = country(items.ip);
-  const billing = country(items.billing);
+  const ip = place(items.ip);
+  const billing = place(items.billing);
   if ((ip !== null && REFUSED_PLACES.has(ip)) || (billing !== null && REFUSED_PLACES.has(billing))) {
     return { ok: false, reason: "refused", message: EU_UK_REFUSED };
   }
-  if (billing === null) return { ok: false, reason: "billing", message: BILLING_COUNTRY_NEEDED };
+  if (billing === null || !OFFERED.has(billing)) return { ok: false, reason: "billing", message: BILLING_COUNTRY_NEEDED };
   return { ok: true };
 }

@@ -585,7 +585,10 @@ export async function waitlistMarks(sid: string | null): Promise<{ ids: string[]
   const members = repliesFor(await redisPipeline([["SMEMBERS", soonKey(sid)], ["SMEMBERS", droppingKey(sid)]]), 2);
   const marked = stringList(members?.[0]);
   const held = stringList(members?.[1]);
-  if (!marked || !held || marked.length + held.length > MAX_WAITLIST_MARKS) throw new UnknownReplyError(what);
+  // The counts were just read and paid for: a list of another length is not the whole set, so it is unknown (Codex X4).
+  if (!marked || !held || marked.length !== soon || held.length !== dropping || marked.length + held.length > MAX_WAITLIST_MARKS) {
+    throw new UnknownReplyError(what);
+  }
   return { ids: [...new Set([...marked, ...held])], read: marked.length + held.length };
 }
 

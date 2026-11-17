@@ -1040,7 +1040,14 @@ export function newLeadId(): string {
  * A sign-up for something free, a waitlist or the list, as a lead, from the
  * route that took it — only with the yes, and once. Answers whether it went.
  */
-export async function sendServerLead(copy: Store, request: Requested, lead: { id: string; email: string; product: string }, now = Date.now()): Promise<boolean> {
+export async function sendServerLead(
+  copy: Store,
+  request: Requested,
+  // `typed`: the address typed in the form when `email` is left empty so it is never sent (a waitlist, a free copy):
+  // only asked whether it was deleted from the store, never carried to a platform.
+  lead: { id: string; email: string; product: string; typed?: string },
+  now = Date.now(),
+): Promise<boolean> {
   if (!LEAD_ID.test(lead.id) || !copy.statsId || !sendsFromServer(copy) || !isRedisConfigured()) return false;
   if (!allowedBy(request, copy, now / 1000)) return false;
   const store = await withList(copy);
@@ -1058,10 +1065,11 @@ export async function sendServerLead(copy: Store, request: Requested, lead: { id
   };
   if (!targets(store, stored, c).length) return false;
   // Claimed with whether the address was deleted from the store: a lead of a deleted person goes nowhere.
-  const asked = erasureAsk(store, lead.email || null);
+  const person = lead.email || lead.typed || null;
+  const asked = erasureAsk(store, person);
   const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS], ...asked]), 1 + asked.length);
   if (!claimed || !markIsOurs(claimed[0])) return false;
-  if (!mayGo(store, lead.email || null, claimed[claimed.length - 1])) return false;
+  if (!mayGo(store, person, claimed[claimed.length - 1])) return false;
   const buyer: BuyerRequest = {
     ip: addressOf(request),
     userAgent: (request.headers.get("user-agent") ?? "").slice(0, 500),

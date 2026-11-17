@@ -7,7 +7,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, forgetRunsIfErased, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -1646,9 +1646,12 @@ export async function sendDueSteps(
 
     // The attempt is written down before anything is done (lib/flow-runs.ts).
     // Whoever already has an attempt open here is held, never tried again.
-    let claim: { claimed: string[]; open: string[] };
+    // It is written only while this take still holds the person's lease, in the same Redis step (CLAIM_IF_LEASED):
+    // someone erased, taken out or taken over after their row was read is `gone`, and nothing of theirs is written
+    // back, so no cleanup that could fail is left to do (Codex L on #2287; before, FORGET_IF_ERASED after the fact).
+    let claim: { claimed: string[]; open: string[]; gone: string[] };
     try {
-      claim = await claimAttempts(flow.id, mine, index, step.id, kind, now);
+      claim = await claimAttempts(flow.id, mine, index, step.id, kind, { key: LEASE, member: (email) => `${group}|${email}`, score }, now);
     } catch {
       // Nothing was attempted: back in the queue, as before history existed, unless taken out meanwhile.
       const out = await queueHeld(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
@@ -1656,6 +1659,7 @@ export async function sendDueSteps(
       counts.dropped += out.size;
       return;
     }
+    counts.dropped += claim.gone.length;
     if (claim.open.length) {
       await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), now).catch(() => {});
     }
@@ -1663,13 +1667,10 @@ export async function sendDueSteps(
     // over by a later run that took the same entry) is that run's, and this one does nothing for them, not even a
     // note in the run's history (Codex G2 on #2287, C3-141). A write about a person also checks it, or their
     // generation, in its own script (lib/crm.ts, SET_CRM_VALUE); an email cannot be sent in the same step as a check.
+    // Someone erased after the claim lost their run, its history and their lease in that erasure, so nothing of theirs
+    // is left to clear here.
     const going = await stillHeld(group, claim.claimed, score);
     counts.dropped += claim.claimed.length - going.length;
-    // Someone erased after their row was read lost their lease with everything else of theirs; claimAttempts wrote
-    // their run again just above (the open attempt, with no address). That is deleted here, and a run a later run took
-    // over keeps its record (flow-runs.ts, FORGET_IF_ERASED; Claude 7 on #4307, Claude 1 c1-conflitos-3 on #2287).
-    const outOfHand = claim.claimed.filter((email) => !going.includes(email));
-    if (outOfHand.length) await forgetRunsIfErased(flow.id, outOfHand).catch((error) => console.error("clearing an erased person's run failed", error));
     if (!going.length) return;
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>

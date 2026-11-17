@@ -232,26 +232,55 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
 }
 
 /**
- * Claims an attempt of step `index` for each person, before anything is done
- * for them. `claimed` may go ahead; `open` already had an attempt with no
- * known outcome and must not be tried again. Throws when the claim cannot be
- * confirmed, so nothing is attempted on an unknown claim.
+ * One person's attempt, written only while the take that read them still holds their lease at its own score and their
+ * run still holds its address (Codex L on #2287): -1 when either is gone, so nothing of someone erased meanwhile is
+ * written back and no later cleanup is needed; otherwise HSETNX's 1 or 0, with the "attempted" event in the same step
+ * when it is 1. The erasure deletes the run before it takes the lease out (lib/flows.ts, forgetWorkflowPerson: one
+ * pipeline, not one step), so the address check closes the moment between the two.
+ * KEYS: the lease, the run, its history. ARGV: the lease member, its score, the open attempt, the event.
  */
-export async function claimAttempts(flowId: string, emails: string[], index: number, stepId: string, kind: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ claimed: string[]; open: string[] }> {
-  if (!emails.length) return { claimed: [], open: [] };
+const CLAIM_IF_LEASED = `-- marktmorgen:flow-claim-if-leased:v1
+local held = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if held == false or tonumber(held) ~= tonumber(ARGV[2]) then return -1 end
+if redis.call('HEXISTS', KEYS[2], 'email') == 0 then return -1 end
+local claimed = redis.call('HSETNX', KEYS[2], 'open', ARGV[3])
+if claimed == 1 then redis.call('RPUSH', KEYS[3], ARGV[4]) end
+return claimed`;
+
+/**
+ * Claims an attempt of step `index` for each person, before anything is done
+ * for them, only while `lease` still holds them (CLAIM_IF_LEASED). `claimed`
+ * may go ahead; `open` already had an attempt with no known outcome and must
+ * not be tried again; `gone` are no longer this take's (erased, taken out or
+ * taken over meanwhile), and nothing was written for them. Throws when the
+ * claim cannot be confirmed, so nothing is attempted on an unknown claim.
+ */
+export async function claimAttempts(
+  flowId: string,
+  emails: string[],
+  index: number,
+  stepId: string,
+  kind: string,
+  lease: { key: string; member: (email: string) => string; score: number },
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<{ claimed: string[]; open: string[]; gone: string[] }> {
+  if (!emails.length) return { claimed: [], open: [], gone: [] };
+  const attempted = event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" });
   let reply: unknown;
   try {
-    reply = await redisPipeline(emails.map((email) => ["HSETNX", runKey(flowId, personOf(email)), "open", `${index}:${stepId}`]));
+    reply = await redisPipeline(emails.map((email) => {
+      const person = personOf(email);
+      return ["EVAL", CLAIM_IF_LEASED, 3, lease.key, runKey(flowId, person), logKey(flowId, person), lease.member(email), lease.score, `${index}:${stepId}`, attempted];
+    }));
   } catch {
     throw new FlowRunUnavailable("A workflow step's attempt could not be recorded");
   }
-  if (!replied(reply, emails.length) || reply.some((r) => r !== 0 && r !== 1)) throw new FlowRunUnavailable("A workflow step's attempt could not be confirmed");
-  const claimed = emails.filter((_, i) => reply[i] === 1);
-  const open = emails.filter((_, i) => reply[i] === 0);
-  if (claimed.length) {
-    await redisPipeline(claimed.map((email) => ["RPUSH", logKey(flowId, personOf(email)), event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" })])).catch(() => {});
-  }
-  return { claimed, open };
+  if (!replied(reply, emails.length) || reply.some((r) => r !== 0 && r !== 1 && r !== -1)) throw new FlowRunUnavailable("A workflow step's attempt could not be confirmed");
+  return {
+    claimed: emails.filter((_, i) => reply[i] === 1),
+    open: emails.filter((_, i) => reply[i] === 0),
+    gone: emails.filter((_, i) => reply[i] === -1),
+  };
 }
 
 /**
@@ -383,28 +412,6 @@ export async function settleLeftIfRun(flowId: string, index: number, stepId: str
   await redisPipeline(emails.map((email) => {
     const person = personOf(email);
     return ["EVAL", LEFT_IF_RUN, 3, runKey(flowId, person), logKey(flowId, person), indexKey(flowId), normaliseEmail(email), nowSeconds, event({ at: nowSeconds, step: index, stepId, kind, state: "failed", note }), RUN_KEEP_SECONDS, person];
-  }));
-}
-
-/**
- * Deletes, each in one Redis step, what claimAttempts wrote again for someone erased after their row was read and before
- * the step acted (the open attempt and its event, with no address): the run of a person erased meanwhile
- * (forgetWorkflowPerson) went with them, and nothing of theirs is written back (Claude 7 on #4307). A run that still
- * holds its address, such as one a later run took over (lib/flows.ts, stillHeld), is left exactly as it is.
- * KEYS: the run, its history.
- */
-const FORGET_IF_ERASED = `-- marktmorgen:flow-forget-if-erased:v1
-if redis.call('HEXISTS', KEYS[1], 'email') == 0 then
-  redis.call('DEL', KEYS[1], KEYS[2])
-  return 1
-end
-return 0`;
-
-export async function forgetRunsIfErased(flowId: string, emails: string[]): Promise<void> {
-  if (!emails.length) return;
-  await redisPipeline(emails.map((email) => {
-    const person = personOf(email);
-    return ["EVAL", FORGET_IF_ERASED, 2, runKey(flowId, person), logKey(flowId, person)];
   }));
 }
 

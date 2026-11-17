@@ -176,13 +176,16 @@ async function writeOver(pathname: string, bytes: Uint8Array, contentType: strin
   }
 }
 
-/** Whether the store holding `original` was found without room lately (noRoomKey). Unknown reads as no note. */
+/**
+ * Whether the store holding `original` was found without room lately (noRoomKey). Only the "1" the note is written
+ * with, as the one reply, is a note (CX-123 rule 24; Codex X4's LOW on #3899). Unknown reads as no note, a reply in
+ * another shape as a reply that throws: the store is then measured, which is paid for before it lists.
+ */
 export async function roomNotedOut(original: Pick<ProductFile, "pathname">): Promise<boolean> {
   const folder = folderFromPathname(original.pathname);
   if (!folder || !isRedisConfigured()) return false;
   try {
-    const [noted] = await redisPipeline([["GET", noRoomKey(folder)]]);
-    return noted !== null && noted !== undefined;
+    return repliesFor(await redisPipeline([["GET", noRoomKey(folder)]]), 1)?.[0] === "1";
   } catch {
     return false;
   }

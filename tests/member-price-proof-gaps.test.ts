@@ -105,6 +105,36 @@ async function main(): Promise<void> {
   is("the imported read unknown, but the club's 20% is the most the guide itself can get: still 20%", await memberPriceFor(store, allRule, proved), { state: "member", percent: 20, email: MEMBER });
   reply = null;
 
+  // Codex V's review of #2999 (MEDIUM): a row whose expanded fields come in another shape cannot be decided, so it is
+  // unreadable (lib/stripe-list.ts): past it a "no" is not known, and a larger rule that may rest on it makes the
+  // answer unknown, never a smaller rule or none.
+  part("L3: a row the decision cannot read is unreadable, not a no");
+  await redis.pipeline([["DEL", imported]]);
+  const bought = (pi: unknown) => ({
+    id: "cs_test_c5guide0000001",
+    object: "checkout.session",
+    mode: "payment",
+    status: "complete",
+    payment_status: "paid",
+    metadata: { store: HANDLE, product: guide.product.id },
+    payment_intent: pi,
+    subscription: null,
+  });
+  const kept = { id: "pi_C5Guide0001", status: "succeeded", latest_charge: { id: "ch_C5Guide0001", paid: true, refunded: false, amount_refunded: 0, disputed: false } };
+  rows = [joined(club.product.id), bought(kept)];
+  is("control: the guide's purchase read whole proves the 30%", await memberPriceFor(store, product, proved), { state: "member", percent: 30, email: MEMBER });
+  for (const [label, pi] of [
+    ["its payment not expanded (an id)", "pi_C5Guide0001"],
+    ["its charge not expanded (an id)", { ...kept, latest_charge: "ch_C5Guide0001" }],
+    ["its charge's refund in another shape", { ...kept, latest_charge: { ...kept.latest_charge, refunded: "no" } }],
+  ] as const) {
+    rows = [joined(club.product.id), bought(pi)];
+    is(`club member, the guide's row with ${label}: unknown (the 30% may rest on it), not 20%`, await memberPriceFor(store, product, proved), { state: "unknown" });
+  }
+  rows = [{ ...joined(club.product.id), subscription: "sub_C1Member0001" }];
+  is("the club's row with its subscription not expanded: unknown, not none", await memberPriceFor(store, product, proved), { state: "unknown" });
+  rows = [];
+
   part("L2: a proved session behind a pass for some courses only");
   await redis.pipeline([["DEL", imported]]);
   rows = [joined(club.product.id)];

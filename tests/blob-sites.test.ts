@@ -96,6 +96,9 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   // Its fallback to Blob goes through the door above, which production closes.
   "lib/sold-file-upload.ts": { uploadPresigned: { notInProduction: 'handleUploadUrl: "/api/store/file"' } },
   "lib/takedown.ts": { del: DELETE_IS_FREE },
+  // A delivery check (479 [SB2], unit 2) heads each file at most twice, priced inside its DELIVERY_CHECK_UNITS studio
+  // requests (lib/delivery-check-rules.ts, held by tests/delivery-check.test.ts).
+  "lib/delivery-check.ts": { head: { line: "studio" } },
   "lib/demo-seed.ts": { put: { open: "audit 10: the demo store's seed pictures, a company cost not in the fixed costs" }, del: DELETE_IS_FREE },
 };
 

@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$179 / $1,790** | every #553 figure, none cut | 60.59% / 60.39% | 12.21% | 168 | $69 / $690 |
+| Store | **$179 / $1,790** | every #553 figure, none cut | 60.59% / 60.39% | 12.21% | 169 | $69 / $690 |
 | Studio | **$809 / $8,090** | every #553 figure, none cut | 61.22% / 60.93% | 12.46% | 16 | $449 / $4,490 |
 | Scale | **$1,639 / $16,390** | every #553 figure, none cut | 61.34% / 61.04% | 12.50% | 8 | $999 / $9,990 |
 
@@ -142,7 +142,7 @@ R² 0.635 (adjusted 0.552), main; 0.678 (adjusted 0.620), robustness. Each step 
 
 **Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to twice today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).
 
-**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 2¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
+**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 3¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
 
 **Objective.** Demand at each price is q = (price ÷ the band's median price)^ε, one scenario for each ε in −0.5, −1, −1.5 and −2; the objective is the sum over plans of q times the monthly payment's net at full use: **a profit index in dollars per customer the band's median price would bring**, comparable within a scenario only. No scenario is a measurement: no sale has ever been open.
 
@@ -152,9 +152,9 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
-| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (60.90% / 60.73%; 62.20% / 62.02%; 62.40% / 62.23%) | yes |
+| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (60.90% / 60.72%; 62.20% / 62.02%; 62.40% / 62.23%) | yes |
 | ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.50% / 61.39%; 63.00% / 62.92%; 63.18% / 63.12%) | yes |
-| ε = -1 | A | $199 | $1,339 | $2,989 | yes (60.90% / 60.73%; 62.20% / 62.02%; 62.40% / 62.23%) | yes |
+| ε = -1 | A | $199 | $1,339 | $2,989 | yes (60.90% / 60.72%; 62.20% / 62.02%; 62.40% / 62.23%) | yes |
 | ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.50% / 61.39%; 63.00% / 62.92%; 63.18% / 63.12%) | yes |
 | ε = -1.5 | A | $169 | $609 | $1,179 | yes (60.41% / 60.20%; 60.41% / 60.03%; 60.43% / 60.00%) | yes |
 | ε = -1.5 | C | $129 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $289 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $469 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.32% / 60.15%; 60.49% / 60.15%; 60.47% / 60.05%) | yes |
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $179 | 5.7% | 5.7% / 0.5% / 2.5% / 5.3% | 168 |
+| Store | $179 | 5.7% | 5.7% / 0.5% / 2.5% / 5.3% | 169 |
 | Studio | $809 | 23.7% | 23.5% / 1.6% / 12.1% / 23.7% | 16 |
 | Scale | $1,639 | 27.2% | 27.2% / 1.7% / 13.9% / 27.0% | 8 |
 

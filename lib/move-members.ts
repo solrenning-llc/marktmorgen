@@ -613,8 +613,9 @@ export class InvitesUnpaidError extends Error {
  * Deletes every invitation to one membership, its link and its reminder, as the membership is removed (sibling of
  * audit A1, 9 November 2026): kept under the product's id, they would otherwise outlive it, and a person's erasure,
  * which reads only the products the store holds, would never reach them. The store's invitations are read a page at
- * a time (HSCAN), each page paid for first in one studio request (`pay`, false when the studio will not:
- * InvitesUnpaidError, nothing more read). Every reply is read exactly (rule 24): an unknown one throws
+ * a time (HSCAN), the studio requests for the most the whole scan can answer taken before the first page (the store's
+ * invitations counted by HLEN, INVITES_PER_UNIT a request; `pay`, false when the studio will not: InvitesUnpaidError,
+ * nothing read). Every reply is read exactly (rule 24): an unknown one throws
  * UnknownReplyError, and what is left is found again by the next try. The first studio request pays for the removal's
  * mark, the count and the first page; a store with no invitations takes that one request and reads one count. With
  * `firstPaid`, that request was already taken by notePendingInvites, which noted the membership before its removal.
@@ -641,20 +642,28 @@ export async function dropProductInvites(
     await settlePendingInvites(store.statsId, productId);
     return 0;
   }
+  // COUNT is only a hint in Redis: one HSCAN may answer with every invitation the store holds, and its bytes are moved
+  // the moment it is read. So the studio requests for the most the whole scan can answer, the store's invitations
+  // counted just above (HLEN), INVITES_PER_UNIT a request, are taken before the first HSCAN, never after it (Codex G
+  // on #4831): the first request is the one already paid, the rest here. Refused, nothing is read.
+  const covered = Math.ceil(size / INVITES_PER_UNIT);
+  if (covered > 1 && !(await pay(covered - 1))) throw new InvitesUnpaidError();
+  let budget = covered * INVITES_PER_UNIT;
+  let answered = 0;
   const suffix = `:${productId}`;
   let dropped = 0;
   let cursor = "0";
-  let paid = true;
   do {
-    if (!paid && !(await pay(1))) throw new InvitesUnpaidError();
-    paid = false;
     const page = scanPage(await redisPipeline([["HSCAN", key, cursor, "MATCH", `*${suffix}`, "COUNT", INVITES_PER_UNIT]]));
     if (!page || page.items.length % 2 !== 0) throw new UnknownReplyError("a page of a store's invitations");
-    // COUNT is only a hint in Redis: a page answered with more than INVITES_PER_UNIT invitations pays one more studio
-    // request for each further INVITES_PER_UNIT before anything on it is deleted (Claude 1's review of #4831, MEDIUM);
-    // refused, nothing on it is deleted, and the same removal asked again finds it again.
-    const extra = Math.ceil(page.items.length / 2 / INVITES_PER_UNIT) - 1;
+    // More answered than the store held when counted (an invitation written since, or one HSCAN hands back twice while
+    // the hash grows): those are paid for, a request each INVITES_PER_UNIT, before anything on the page is deleted
+    // (Claude 1's review of #4831, MEDIUM); refused, nothing on it is deleted, and the same removal asked again finds
+    // it again.
+    answered += page.items.length / 2;
+    const extra = answered > budget ? Math.ceil((answered - budget) / INVITES_PER_UNIT) : 0;
     if (extra > 0 && !(await pay(extra))) throw new InvitesUnpaidError();
+    budget += extra * INVITES_PER_UNIT;
     const held: { field: string; token: string }[] = [];
     for (let i = 0; i < page.items.length; i += 2) {
       const field = page.items[i];

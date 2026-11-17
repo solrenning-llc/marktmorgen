@@ -312,22 +312,9 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   }
   const { marks } = await marksOf(store);
   const extra: string[] = [];
-  // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
   // Read whole or not at all: a team not read is never "no teammates" (rule 24); it throws, and the walk waits.
   const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
-  for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
-    // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
-    // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
-    // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
-    await scanAll("HSCAN", claimsKey(host), async (flat) => {
-      const mine: string[] = [];
-      for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (!mine.length) return;
-      const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
-      if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
-    });
-  }
   // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
   // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
   for (const email of [store.email, ...team.members.map((m) => m.email)]) {
@@ -335,17 +322,37 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       || (await accountStores(email)).some((other) => other.sid !== store.sid);
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
-  await dropTeam(store);
-  if (store.sid) await revokeAllKeys(store.sid);
-  await forgetStoreWebhooks(store.statsId);
-  await forgetStoreSync(store.statsId);
-  await forgetShipmentMail(store.statsId);
-  await forgetOrderConfirmationMail(store.statsId);
-  await forgetStorePhones(store.statsId);
-  // The owner's path: their answers and the days they showed up (lib/path.ts).
-  await forgetPath(store);
   if (store.domain?.name) extra.push(domainKey(store.domain.name));
-  await del(extra);
+  // What the live store holds (its hosts' claims for it, its team, API keys, webhooks, email sync, mail outboxes, phones,
+  // its owner's path, its hosts' calendars and its domain) is deleted only under the store's lock, once the record read
+  // there again says its plan does not run (below). Deleted here, before that read, a plan started in between kept the
+  // record but left the store partly wiped (Codex X4's MEDIUM on #3643). Any of these that fails throws there, before
+  // the record goes: the record stays, its entry stays pending, and the walk tries the store again later.
+  const forgetLive = async () => {
+    // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
+    for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
+      // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
+      // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
+      // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
+      await scanAll("HSCAN", claimsKey(host), async (flat) => {
+        const mine: string[] = [];
+        for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
+        if (!mine.length) return;
+        const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
+        if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
+      });
+    }
+    await dropTeam(store);
+    if (store.sid) await revokeAllKeys(store.sid);
+    await forgetStoreWebhooks(store.statsId);
+    await forgetStoreSync(store.statsId);
+    await forgetShipmentMail(store.statsId);
+    await forgetOrderConfirmationMail(store.statsId);
+    await forgetStorePhones(store.statsId);
+    // The owner's path: their answers and the days they showed up (lib/path.ts).
+    await forgetPath(store);
+    await del(extra);
+  };
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
@@ -398,6 +405,8 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       if (finalGone === 0) throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
       throw new UnknownReplyError("a closing store's place in the final closing line (ZREM)");
     }
+    // Only now, past that read and with the lock held (a plan's start waits on it), is anything of the live store deleted.
+    await forgetLive();
     if (fresh) {
       const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
       const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));

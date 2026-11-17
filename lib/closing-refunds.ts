@@ -60,9 +60,10 @@ export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
 /**
  * The refund made here before under this invoice, from Stripe's list read exactly: null when the whole list holds
  * none that stands (failed and canceled ones do not), or "unknown" when the list is not whole or a row under this
- * invoice does not read as a refund of this payment.
+ * invoice does not read as a refund of this payment. `mark` is the metadata key the refund names its invoice under:
+ * a closing's (closing_refund) or a payment plan's late payment (plan_late_refund, lib/plan-late-refunds.ts).
  */
-export function priorRefund(list: unknown, intent: string, invoice: string, currency: string): { state: "done" | "pending"; amount: number } | null | "unknown" {
+export function priorRefund(list: unknown, intent: string, invoice: string, currency: string, mark = "closing_refund"): { state: "done" | "pending"; amount: number } | null | "unknown" {
   if (!list || typeof list !== "object" || Array.isArray(list)) return "unknown";
   const field = (value: unknown, key: string): unknown =>
     value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
@@ -76,9 +77,9 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
     const meta = field(row, "metadata");
     if (typeof id !== "string" || !REFUND_ID.test(id)) return "unknown";
     if (meta !== null && (!meta || typeof meta !== "object" || Array.isArray(meta))) return "unknown";
-    const mark = field(meta, "closing_refund");
-    if (mark !== undefined && typeof mark !== "string") return "unknown";
-    if (mark !== invoice) continue;
+    const named = field(meta, mark);
+    if (named !== undefined && typeof named !== "string") return "unknown";
+    if (named !== invoice) continue;
     const amount = field(row, "amount");
     if (!Number.isSafeInteger(amount) || (amount as number) <= 0) return "unknown";
     const state = refundState(row, intent, amount as number, currency);
@@ -94,15 +95,16 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
  * after priorRefund found none that stands, so every row already reads. A confirmed failure gave nothing back, and
  * the next attempt goes under a key of its own: under the same key Stripe would replay the failed (or earlier
  * pending) answer instead of trying again. An unknown outcome is never counted, so its retry keeps the same key.
+ * `mark` is the metadata field naming the invoice, as priorRefund's (a plan's late refunds use plan_late_refund).
  */
-export function failedRefunds(list: unknown, intent: string, invoice: string, currency: string): number {
+export function failedRefunds(list: unknown, intent: string, invoice: string, currency: string, mark = "closing_refund"): number {
   const field = (value: unknown, key: string): unknown =>
     value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
   const rows = field(list, "data");
   if (!Array.isArray(rows)) return 0;
   let failed = 0;
   for (const row of rows) {
-    if (field(field(row, "metadata"), "closing_refund") !== invoice) continue;
+    if (field(field(row, "metadata"), mark) !== invoice) continue;
     if (refundState(row, intent, field(row, "amount") as number, currency) === "failed") failed += 1;
   }
   return failed;
@@ -231,7 +233,7 @@ const CURRENCY = /^[a-z]{3}$/;
  * twice throws, so the run counts its members failed and tries again; it is never an empty balance, which on the
  * closing day would record every member as a final "short" and tell them the creator's balance did not cover it.
  */
-async function available(account: string): Promise<Map<string, number>> {
+export async function available(account: string): Promise<Map<string, number>> {
   const balance = objectOf(await onAccount("GET", account, "/balance"));
   if (!balance || balance.object !== "balance" || !Array.isArray(balance.available)) throw new Error("the account's balance did not read");
   const out = new Map<string, number>();

@@ -37,3 +37,7 @@ export function spendCommands(count: number): void {
   }
   for (let budget: Budget | null = inner; budget; budget = budget.outer) budget.left -= count;
 }
+
+// The meter lib/redis.ts (and the tests' Redis stand-in) spend through: registered here, never imported there, so this
+// server-only module stays out of every browser bundle.
+(globalThis as Record<symbol, unknown>)[Symbol.for("marktmorgen.redis.spendCommands")] = spendCommands;

@@ -3,10 +3,20 @@
 // Each pipeline is given up after REDIS_TIMEOUT_MS (lib/fetch-timeout.ts),
 // failing as a network failure does, so no page or job hangs on Redis.
 import { REDIS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
-import { spendCommands } from "@/lib/redis-ceiling";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
 type Command = (string | number)[];
+
+/**
+ * Spends `count` commands of the command ceiling around the caller (lib/redis-ceiling.ts), through the meter that
+ * module registers when it is loaded. It is server-only (node:async_hooks) and browser bundles reach this file, so it is
+ * never imported here (a static import broke the build of /[handle]/community). Unset, nothing is counted, as outside
+ * any ceiling.
+ */
+function spendCommands(count: number): void {
+  const meter = (globalThis as Record<symbol, unknown>)[Symbol.for("marktmorgen.redis.spendCommands")];
+  if (typeof meter === "function") (meter as (n: number) => void)(count);
+}
 
 function getConfig() {
   const url =

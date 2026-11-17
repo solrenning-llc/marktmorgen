@@ -8,13 +8,14 @@
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
-import { readWinBack, sendWinBacks } from "@/lib/winback-send";
+import { UNWRITTEN_LINK_COMMANDS, readWinBack, sendWinBacks } from "@/lib/winback-send";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { readFileSync } from "node:fs";
 import { RELEASE } from "@/lib/redis-lock";
+import { COME_BACK_RUNS_PER_MONTH, COMMAND, COST_LINES } from "./plan-cost-registry";
 
 const DAY = 86_400;
 const now = Date.now();
@@ -53,6 +54,22 @@ const original = redis.pipeline.bind(redis);
 let afterOdd: Cmd[][] = [];
 let collecting = 0;
 /** While `work` runs, the first pipeline that writes a come-back link answers as `odd` says (after running for real). */
+/**
+ * While `work` runs, every pipeline goes to `answer`, which runs it for real with `real()` (or not at all) and may
+ * change its replies; each is also kept in `seen`.
+ */
+const seen: Cmd[][] = [];
+async function answering<T>(answer: (commands: Cmd[], real: () => Promise<unknown[]>) => Promise<unknown[]>, work: () => Promise<T>): Promise<T> {
+  redis.pipeline = (async (commands: Cmd[]) => {
+    seen.push(commands);
+    return answer(commands, () => original(commands));
+  }) as typeof redis.pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
 async function oddLinkWrite<T>(odd: (out: unknown[], commands: Cmd[]) => unknown[], work: () => Promise<T>): Promise<T> {
   let used = false;
   redis.pipeline = (async (commands: Cmd[]) => {
@@ -124,14 +141,17 @@ async function main(): Promise<void> {
 
   // Claude 7's MÉDIO on #3889 (cost criterion): the failure path's commands are charged, so they are stated and
   // priced. Upstash bills a script as one command plus every redis.call it runs (lib/capped-count.ts).
-  const source = readFileSync("lib/winback-send.ts", "utf8");
-  const stated = Number(source.match(/export const UNWRITTEN_LINK_COMMANDS = (\d+);/)?.[1] ?? NaN);
-  const releaseCalls = (RELEASE.match(/redis\.call\(/g) ?? []).length;
-  const billed = (cmds: Cmd[][]) => cmds.flat().reduce((sum, cmd) => sum + (cmd[0] === "EVAL" ? 1 + (String(cmd[1]) === RELEASE ? releaseCalls : 1000) : 1), 0);
+  // Claude 5 on #3889 @c3db0ed78f: what repeats on every run is the whole offer, from its first mark to the end, not
+  // only the end, so UNWRITTEN_LINK_COMMANDS states the whole offer at its worst.
+  const stated = UNWRITTEN_LINK_COMMANDS;
+  // A script is billed as one command and each redis.call it runs; each here runs each of its calls at most once (one
+  // key, one member), so its calls are counted from its own text. A script not one of these is not known: priced high.
+  const scriptCalls = (source: string) => (source === RELEASE || source.startsWith("-- marktmorgen:contact-cas-hset:v1") ? (source.match(/redis\.call\(/g) ?? []).length : 1000);
+  const billed = (cmds: Cmd[][]) => cmds.flat().reduce((sum, cmd) => sum + (cmd[0] === "EVAL" ? 1 + scriptCalls(String(cmd[1])) : 1), 0);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   part("The failure path's commands are stated and priced");
   is("lib/winback-send.ts states UNWRITTEN_LINK_COMMANDS", Number.isSafeInteger(stated), true);
-  is("tests/plan-cost-registry.ts prices them for lib/winback-send.ts", /file: "lib\/winback-send\.ts", names: \[[^\]]*"UNWRITTEN_LINK_COMMANDS"[^\]]*"OFFERS_PER_RUN"/.test(registry), true);
+  is("tests/plan-cost-registry.ts prices them for lib/winback-send.ts, at most UNWRITTEN_LINKS_PER_RUN a store a run", /file: "lib\/winback-send\.ts", names: \[[^\]]*"UNWRITTEN_LINK_COMMANDS"[^\]]*"UNWRITTEN_LINKS_PER_RUN"/.test(registry), true);
 
   for (const [name, how, odd] of cases) {
     part(`${how}: no email with a link that may lead nowhere, and the next run sends it once`);
@@ -153,6 +173,70 @@ async function main(): Promise<void> {
     is("its link opens the offer", (await readWinBack(store, club.product.id, tokenOf(to(`${name}@example.com`)[0])))?.email, `${name}@example.com`);
     await run();
     is(`a further run does not write to ${name} again`, to(`${name}@example.com`).length, 1);
+  }
+
+  // Claude 5 on #3889 @c3db0ed78f (cost MÉDIO): a come-back offer whose link is not written as asked is looked at again
+  // on every run, from its first mark to the end, with no email, so nothing of it is inside the store's email figure.
+  // Every step at its worst: each mark answered in another shape and read back (lib/claim-mark.ts), the unsubscribe
+  // token lost twice to a change and written the third time with its answer read back (lib/contacts.ts tokensFor), the
+  // link and its three erasure notes, the link taken back and the two marks let go.
+  part("A failing offer, every step at its worst, bills exactly the UNWRITTEN_LINK_COMMANDS stated");
+  {
+    const id = "cus_FayLinkW001";
+    customers.set(id, "fay@example.com");
+    await upsertContact(store.listId as string, "fay@example.com", { agreed: true, explicit: true, source: "buyer" }, ROOM);
+    const subId = "sub_FayLinkW0001";
+    ended(subId, id, meta);
+    const sentMark = `nl:wb:acct_1TestWbLinkW:${subId}`;
+    let cas = 0;
+    seen.length = 0;
+    const first = await answering(async (commands, real) => {
+      const [cmd] = commands;
+      // A mark's SET NX answered in another shape: read back.
+      if (commands.length === 1 && cmd[0] === "SET" && cmd.includes("NX") && (cmd[1] === sentMark || String(cmd[1]).startsWith("nl:wb:once:"))) {
+        await real();
+        return ["QUEUED"];
+      }
+      if (commands.length === 1 && cmd[0] === "EVAL" && String(cmd[1]).startsWith("-- marktmorgen:contact-cas-hset:v1")) {
+        cas += 1;
+        // Lost twice to a change made meanwhile (not run), then written with an answer in another shape (read back).
+        if (cas <= 2) return [[0]];
+        await real();
+        return ["QUEUED"];
+      }
+      const out = await real();
+      return commands.some((one) => one[0] === "SET" && String(one[1]).startsWith("nl:wb:link:")) ? out.map((reply, i) => (i === 0 ? "QUEUED" : reply)) : out;
+    }, run);
+    is("fay's offer is not sent", [first.sent, to("fay@example.com").length], [0, 0]);
+    is("the token was lost twice and written the third time", cas, 3);
+    const start = seen.findIndex((cmds) => cmds.length === 1 && cmds[0][0] === "SET" && cmds[0][1] === sentMark);
+    const end = seen.findIndex((cmds) => cmds.length === 1 && cmds[0][0] === "EVAL" && cmds[0][1] === RELEASE && cmds[0][3] === sentMark);
+    const offer = start >= 0 && end > start ? seen.slice(start, end + 1) : [];
+    is("the offer runs from its own mark to that mark let go", offer.length > 0, true);
+    is(`and bills exactly the ${stated} commands stated (measured ${billed(offer)})`, billed(offer), stated);
+    const line = COST_LINES.find((one) => one.id === "come-back-unwritten-links");
+    is("the registry's line holds one such offer a store on every run of the month", (line?.monthlyUsd("creator") ?? 0) >= COME_BACK_RUNS_PER_MONTH * billed(offer) * COMMAND, true);
+    is("the next run sends fay's offer once", [(await run()).sent, to("fay@example.com").length], [1, 1]);
+  }
+
+  // The bound (Claude 5 on #3889 @c3db0ed78f): a link write answered in another shape says Redis is not answering as
+  // asked, so the store's run stops there and the offers after it wait for the next run, as those past OFFERS_PER_RUN
+  // do. One failing offer a store a run, never a hundred.
+  part("A link not written as asked stops the store's run: one failing offer a store a run");
+  {
+    for (const name of ["gus", "hal"]) {
+      const id = `cus_${name[0].toUpperCase()}${name.slice(1)}LinkW001`;
+      customers.set(id, `${name}@example.com`);
+      await upsertContact(store.listId as string, `${name}@example.com`, { agreed: true, explicit: true, source: "buyer" }, ROOM);
+      ended(`sub_${name[0].toUpperCase()}${name.slice(1)}LinkW0001`, id, meta);
+    }
+    // Read newest first and turned oldest first: hal, the last written, is looked at first here (same second).
+    const first = await oddLinkWrite((out) => out.map((reply, i) => (i === 0 ? "QUEUED" : reply)), run);
+    is("nothing is sent on that run", first.sent, 0);
+    is("neither gus nor hal is written to", [to("gus@example.com").length, to("hal@example.com").length], [0, 0]);
+    is("the other offer's mark is not even taken on that run", redis.keys().filter((key) => key.startsWith("nl:wb:acct_1TestWbLinkW:sub_")).filter((key) => key.endsWith("GusLinkW0001") || key.endsWith("HalLinkW0001")).length, 0);
+    const second = await run();
+    is("the next run sends both", [second.sent, to("gus@example.com").length, to("hal@example.com").length], [2, 1, 1]);
   }
   done();
 }

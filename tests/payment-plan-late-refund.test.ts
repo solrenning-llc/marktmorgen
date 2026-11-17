@@ -117,7 +117,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     (refunds[intent] ??= []).push(made);
     if (!chargeLags) charge.amount_refunded += amount;
     balance -= amount;
-    if (key) keyed.set(key, made);
+    // Stripe keeps the first answer under its key and replays it as it was, whatever the refund became since.
+    if (key) keyed.set(key, { ...made, metadata: { ...made.metadata } });
     if (refundReply !== null) {
       const reply = refundReply;
       refundReply = null;
@@ -291,6 +292,40 @@ async function main(): Promise<void> {
   keyed.clear();
   refundStatus = "succeeded";
   is("failed later: made again, and settled once it reads succeeded", [await finishPlan(ACCOUNT, p.session), madeFor(p.invoices[2]).map((one) => one.status)], ["done", ["failed", "succeeded"]]);
+
+  part("A refund Stripe fails after answering is made again under a key of its own (Claude 6 on #3367)");
+  reset();
+  // Two late payments: A refunded, B refused this pass, so the plan stays owed.
+  const fa = plan(2, 100, 4);
+  const [lateA, lateB] = [fa.invoices[2], fa.invoices[3]];
+  refusedFor.set(lateB.charge.payment_intent, "charge_expired_for_refund");
+  await rememberPlan(ACCOUNT, fa.session);
+  is("A refunded, B refused: the plan stays owed", [await finishPlan(ACCOUNT, fa.session), madeFor(lateA).map((one) => one.status), madeFor(lateB).length], ["owed", ["succeeded"], 0]);
+  // Stripe fails A's refund later and still keeps A's key, replaying its first answer ("succeeded") under it.
+  const failedA = madeFor(lateA)[0];
+  failedA.status = "failed";
+  lateA.charge.amount_refunded = 0;
+  balance += failedA.amount;
+  refusedFor.clear();
+  posts.length = 0;
+  is(
+    "A is made again and B refunded before the plan settles: no buyer told of money that never went back",
+    [await finishPlan(ACCOUNT, fa.session), madeFor(lateA).map((one) => one.status), madeFor(lateB).length],
+    ["done", ["failed", "succeeded"], 1],
+  );
+  is("A's second refund goes under a key of its own", posts.filter((one) => one.body.get("metadata[plan_late_refund]") === lateA.id).map((one) => one.key), [`plan-late-refund:${lateA.id}:1`]);
+  // A first answer of pending that fails later, the key still kept: made again, never owed for as long as Stripe keeps it.
+  reset();
+  const q = plan(2, 70, 3);
+  refundStatus = "pending";
+  await rememberPlan(ACCOUNT, q.session);
+  is("control: pending, the plan is owed", await finishPlan(ACCOUNT, q.session), "owed");
+  const failedQ = madeFor(q.invoices[2])[0];
+  failedQ.status = "failed";
+  q.invoices[2].charge.amount_refunded = 0;
+  balance += failedQ.amount;
+  refundStatus = "succeeded";
+  is("pending, then failed, the key still kept: made again and settled", [await finishPlan(ACCOUNT, q.session), madeFor(q.invoices[2]).map((one) => one.status)], ["done", ["failed", "succeeded"]]);
 
   part("A try stays within the registry's Stripe calls");
   reset();

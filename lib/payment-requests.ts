@@ -515,6 +515,71 @@ export type OutsideRefusal = "gone" | "busy" | "paid_online" | "processing" | "e
 /** Stripe keeps a checkout open a day at most: one opened longer ago than this cannot be paid any more. */
 const CHECKOUT_LIFE_MS = 25 * 3_600 * 1000;
 
+/** Why a request could not be withdrawn. */
+export type WithdrawRefusal = "gone" | "not_open" | "busy" | "paid_online" | "processing" | "error";
+
+/**
+ * Withdraws an open request (the studio's "cancel"): its link stops taking payment and no reminder goes. Never a
+ * withdrawal with a checkout still payable: under the same hold as opening its checkout, the checkout already opened
+ * for it on the creator's Stripe is read first, as markPaidOutside reads it. Paid there, it is written down as paid
+ * online and the withdrawal is refused; still being paid, it is refused; open, it is closed on Stripe first, and if it
+ * cannot be closed nothing is withdrawn. Otherwise a buyer could pay the withdrawn request in a tab still open, and
+ * then the corrected one sent in its place.
+ */
+export async function withdrawRequest(store: Store, id: string, now = Date.now()): Promise<{ ok: true; request: PaymentRequest } | { ok: false; reason: WithdrawRefusal }> {
+  const request = await requestOf(store, id);
+  if (!request) return { ok: false, reason: "gone" };
+  if (statusOf(request, now) !== "open") return { ok: false, reason: "not_open" };
+  const held = await holdForCheckout(request.id);
+  if (!held) return { ok: false, reason: "busy" };
+  try {
+    // Read again under the hold (Claude 7 on #4513): a checkout the buyer opened between the first read and the hold
+    // is written by then, and opening another one waits on this hold, so the session read here is the one to close.
+    const current = await requestOf(store, id);
+    if (!current) return { ok: false, reason: "gone" };
+    if (statusOf(current, now) !== "open") return { ok: false, reason: "not_open" };
+    if (SESSION_ID.test(current.session) && now - current.sessionAt < CHECKOUT_LIFE_MS) {
+      if (!store.stripeAccountId) return { ok: false, reason: "error" };
+      // A 404 is not "closed" (Claude 5 on #4513): the request does not keep which Stripe account its checkout was
+      // opened on, so after the creator connects another account the read goes there and Stripe answers that it does
+      // not know the checkout, which stays payable on the first one. Stripe has no way to delete a checkout, so it
+      // throws to the catch below ("error", still open); once CHECKOUT_LIFE_MS has gone by, no read is made and the
+      // withdrawal goes through, so it is never stuck for good.
+      const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(current.session)}`)) as Record<string, unknown>;
+      // Only this request's own checkout decides (rule 30; Claude 1's money review of #4513, the class of #4447): a
+      // reply that does not name it, an empty one included (Claude 4 on #4513), says nothing about it.
+      if (known.id !== current.session || !ownRequestCheckout(known, current, store)) return { ok: false, reason: "error" };
+      // A reply in a state Stripe does not document says nothing about whether the checkout is still payable.
+      if (!CHECKOUT_STATES.has(String(known.status))) return { ok: false, reason: "error" };
+      if (isSettled(known)) {
+        await markPaid(store, current.id, known, now);
+        return { ok: false, reason: "paid_online" };
+      }
+      if (known.status === "complete") return { ok: false, reason: "processing" };
+      if (known.status === "open") {
+        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(current.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+        // Closed only on Stripe's receipt for this very checkout (Codex L on #4455, the same class).
+        if (closed.id !== current.session || closed.status !== "expired") return { ok: false, reason: "error" };
+      }
+    }
+    // Withdrawn only while its checkout is still the one read and closed (Claude 5 on #4513): past the hold's term,
+    // another "Pay" may have written a new checkout, still payable; then nothing is withdrawn ("busy").
+    const done = await changeRequest(store, current.id, (request) => {
+      if (statusOf(request, now) !== "open") return { next: null, answer: "not_open" as const };
+      if (request.session !== current.session || request.sessionAt !== current.sessionAt) return { next: null, answer: "busy" as const };
+      return { next: { ...request, state: "canceled", closedAt: now }, answer: "canceled" as const };
+    }, now);
+    if (done === null) return { ok: false, reason: "gone" };
+    if (done.answer !== "canceled") return { ok: false, reason: done.answer };
+    return { ok: true, request: done.request };
+  } catch (error) {
+    console.error("withdrawing a payment request failed", error);
+    return { ok: false, reason: "error" };
+  } finally {
+    await letGo(held);
+  }
+}
+
 /**
  * Marks an open request as paid outside Stripe, in cash, by transfer or
  * otherwise (639 [GL7](30)), on the day the creator says. Nothing is charged

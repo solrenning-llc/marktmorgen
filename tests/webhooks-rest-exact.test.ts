@@ -176,6 +176,22 @@ async function main(): Promise<void> {
   await watchStripe(Date.now() + 10_000);
   is("control: the exact anchor reads on from it and sends the next sale", [listed, await get(anchorKey()), await sessionsSent(store)], [1, "evt_Anchor02", ["cs_Anchor02"]]);
 
+  // Codex V on #3446 (V-20261117-0112-fix-pr-3446.md): the backfill walk's cursor read in another shape is not an
+  // absent cursor; read as one, the walk would restart from the newest events and leave the older ones unread.
+  part("An unreadable backfill cursor never restarts the Stripe walk");
+  const cursor = "evt_Backfill01";
+  for (const [name, reply] of OFF_SHAPES) {
+    store = await setup();
+    timeline = [evt("evt_Backfill02", "cs_Backfill02")];
+    const backKey = `${anchorKey()}:back`;
+    await real([["SET", backKey, cursor, "EX", 3600]]);
+    swap = (command) => (command[0] === "GET" && command[1] === backKey ? { reply } : undefined);
+    await watchStripe(Date.now() + 10_000);
+    swap = null;
+    is(`${name}: no provider reads, no anchor and the cursor stays where it was`, [listed, await get(anchorKey()), await get(backKey)], [0, null, cursor]);
+    is(`${name}: the unknown cursor read is reported`, said.some((line) => line.startsWith("reading a store's Stripe events failed")), true);
+  }
+
   part("Read again from far back: a passed-over mark in another shape is never taken as passed over");
   for (const [name, value] of OFF_SHAPES) {
     store = await setup();

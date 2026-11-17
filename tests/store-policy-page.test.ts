@@ -63,6 +63,8 @@ const studioWords = studio.replace(/\s+/g, " ");
 const privacyWords = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
 is("the address field says it is shown on the policies page only with the box checked", studioWords.includes("It is shown publicly on your store&apos;s policies page only if you check"), true);
 is("the privacy policy says so too", /public policies page too only if you check the box/.test(privacyWords), true);
+// Codex N1's LEVE on #1824: unchecking alone changes nothing until the settings are saved (app/api/store/mail/route.ts).
+is("the privacy policy says the address comes off once the box is unchecked and saved", [privacyWords.includes("as soon as you uncheck it and save"), /as soon as you uncheck it\.(?! and save)/.test(privacyWords)], [true, false]);
 
 part("Self-cancel is promised only where the store's emails carry the link (Claude 1's LOW on #1824)");
 // lib/purchase-email.ts sends the /manage link only when canManage(store); otherwise the buyer cancels by reply.

@@ -52,6 +52,19 @@ const ERASED_MARK = "erased";
 const LINE_SLACK_MS = 60_000;
 /** Records deleted, and lines taken out of the index, per pipeline: no pipeline nears the database's request size. */
 export const ERASE_BATCH = 500;
+/**
+ * The fingerprint a record holds: an HMAC of the request's plain fingerprint (method, path and body) under a key
+ * derived from the server's secret, as personIndexName is. A claim that is held, never kept as an answer, stays 24 hours
+ * outside the person's index, where an erasure cannot find it, and its body may say an address; keyed, it cannot be
+ * matched offline against a list of addresses (Claude 7's MÉDIO on #3542, Claude 4's 6938014656). Without the secret
+ * there is no key, and the plain fingerprint is kept as before (the coordinator's decision of 13/11/2026 14h09 for such
+ * a deployment: the write still runs and no answer about a person is kept).
+ */
+const FINGERPRINT_LABEL = "api-idempotency-fingerprint/v1";
+function keptFingerprint(plain: string): string {
+  const key = deriveKey(FINGERPRINT_LABEL);
+  return key ? createHmac("sha256", key).update(plain).digest("hex") : plain;
+}
 const isHash = (m: unknown): m is string => typeof m === "string" && /^[0-9a-f]{64}$/.test(m);
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Type": "application/json" };
 const answer = (status: number, error: string, message: string) => Response.json({ error, message }, { status, headers });
@@ -72,7 +85,7 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
   if (!sid) return answer(503, "unavailable", UNKNOWN_WORDS);
   const hash = keyHash(read.key);
   const rk = recordName(sid, hash);
-  const fp = requestFingerprint(request.method, path, JSON.stringify(body ?? null));
+  const fp = keptFingerprint(requestFingerprint(request.method, path, JSON.stringify(body ?? null)));
   let decision = decide(await getRecord(rk), fp, now);
   if (decision.kind === "run" && decision.replaces !== undefined) {
     // Past its 24 hours yet still held: the database drops it within a second (it is kept exactly 24 hours from when

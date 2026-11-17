@@ -236,15 +236,24 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
  * run still holds its address (Codex L on #2287): -1 when either is gone, so nothing of someone erased meanwhile is
  * written back and no later cleanup is needed; otherwise HSETNX's 1 or 0, with the "attempted" event in the same step
  * when it is 1. The erasure deletes the run before it takes the lease out (lib/flows.ts, forgetWorkflowPerson: one
- * pipeline, not one step), so the address check closes the moment between the two.
- * KEYS: the lease, the run, its history. ARGV: the lease member, its score, the open attempt, the event.
+ * pipeline, not one step), so the address check closes the moment between the two. An attempt written also keeps
+ * the run and its history RUN_KEEP_SECONDS again, and renews its place in the list of runs: a sequence can last longer
+ * than that (20 steps of up to 35 days), and a run that keeps stepping never expires in the middle of it, to be taken
+ * for an erased one (Claude 5 on #2287). In the same step, so no command is added.
+ * KEYS: the lease, the run, its history, the list of runs. ARGV: the lease member, its score, the open attempt, the
+ * event, RUN_KEEP_SECONDS, the person, now.
  */
-const CLAIM_IF_LEASED = `-- marktmorgen:flow-claim-if-leased:v1
+const CLAIM_IF_LEASED = `-- marktmorgen:flow-claim-if-leased:v2
 local held = redis.call('ZSCORE', KEYS[1], ARGV[1])
 if held == false or tonumber(held) ~= tonumber(ARGV[2]) then return -1 end
 if redis.call('HEXISTS', KEYS[2], 'email') == 0 then return -1 end
 local claimed = redis.call('HSETNX', KEYS[2], 'open', ARGV[3])
-if claimed == 1 then redis.call('RPUSH', KEYS[3], ARGV[4]) end
+if claimed == 1 then
+  redis.call('RPUSH', KEYS[3], ARGV[4])
+  redis.call('EXPIRE', KEYS[2], ARGV[5])
+  redis.call('EXPIRE', KEYS[3], ARGV[5])
+  redis.call('ZADD', KEYS[4], ARGV[7], ARGV[6])
+end
 return claimed`;
 
 /**
@@ -270,7 +279,7 @@ export async function claimAttempts(
   try {
     reply = await redisPipeline(emails.map((email) => {
       const person = personOf(email);
-      return ["EVAL", CLAIM_IF_LEASED, 3, lease.key, runKey(flowId, person), logKey(flowId, person), lease.member(email), lease.score, `${index}:${stepId}`, attempted];
+      return ["EVAL", CLAIM_IF_LEASED, 4, lease.key, runKey(flowId, person), logKey(flowId, person), indexKey(flowId), lease.member(email), lease.score, `${index}:${stepId}`, attempted, RUN_KEEP_SECONDS, person, nowSeconds];
     }));
   } catch {
     throw new FlowRunUnavailable("A workflow step's attempt could not be recorded");

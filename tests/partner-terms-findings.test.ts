@@ -9,7 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { affiliateCookieName, changeIdentity, decideMany, noteSession, notePartners, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
+import { affiliateCookieName, changeIdentity, decideMany, noteCharge, noteSession, notePartners, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
 import { offerWords } from "@/lib/partner-invites";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { POST as answerRoute } from "@/app/api/store/affiliates/partner-answer/route";
@@ -141,6 +141,31 @@ async function main(): Promise<void> {
   is("the bump line charged before the end earns", (await earned()).includes(`cs_test_bump_before:${q2}`), true);
   is("opened after the end, the intent not expanded: no share and no wait", await bumpAt("cs_test_bump_after", end2 + 60, "pi_bump_after"), "noted");
   is("and it earned nothing", (await earned()).includes(`cs_test_bump_after:${q2}`), false);
+  // Codex G on #1924, point 2: an offer taken after paying (noteCharge) is dated by its settled charge too, never by the
+  // intent's own `created` nor the clock; without that time, near a partner's end, it is unknown, and a partner's step
+  // that fails is thrown so the five-minute job credits it again (lib/upsell.ts creditCharge), never only logged.
+  const paidOffer = (id: string, created: unknown, latest_charge: unknown) => ({ id, object: "payment_intent", status: "succeeded", amount: 1000, currency: "usd", created, latest_charge, metadata: { product: A, title: "Book" } });
+  const settledCharge = (id: string, settled: number, chargeCreated: number) => charged(id, chargeCreated, settled, chargeCreated).latest_charge;
+  const offerAt = async (pi: Record<string, unknown>) => noteCharge(await store(), pi).then(() => "noted", (error: Error) => error.name);
+  is("an offer made before the end and settled after it: noted", await offerAt(paidOffer("pi_offer_after", end - 7000, settledCharge("pi_offer_after", end + 600, end - 6000))), "noted");
+  is("and it earns nothing, whatever the intent's own time", (await earned()).includes(`pi_offer_after:${q}`), false);
+  is("an offer settled before the end earns", [await offerAt(paidOffer("pi_offer_before", end - 7000, settledCharge("pi_offer_before", end - 3600, end - 6000))), (await earned()).includes(`pi_offer_before:${q}`)], ["noted", true]);
+  is("an offer near the end whose charge was not read: unknown", await offerAt(paidOffer("pi_offer_unk", end - 120, "ch_only_id")), "UnknownReplyError");
+  is("an offer with no time at all near the end: unknown, never the clock", await offerAt(paidOffer("pi_offer_no_time", undefined, "ch_only_id")), "UnknownReplyError");
+  is("and nothing of them was credited", (await earned()).filter((key) => key.startsWith("pi_offer_unk") || key.startsWith("pi_offer_no_time")).length, 0);
+  is("an offer made after the end, its charge not read: no share and no wait", [await offerAt(paidOffer("pi_offer_late", end + 60, "ch_only_id")), (await earned()).includes(`pi_offer_late:${q}`)], ["noted", false]);
+  {
+    const failing = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c.some((w) => String(w).includes(`nl:aff:${statsId}:shares`)))) throw new Error("synthetic: the share's write failed");
+      return failing(commands);
+    }) as typeof redis.pipeline;
+    const failed = await offerAt(paidOffer("pi_offer_failed", end - 7000, settledCharge("pi_offer_failed", end - 3600, end - 6000)));
+    redis.pipeline = failing;
+    is("a partner's step that fails is thrown, so the job credits it again", failed, "Error");
+    is("and the next try credits it once", [await offerAt(paidOffer("pi_offer_failed", end - 7000, settledCharge("pi_offer_failed", end - 3600, end - 6000))), (await earned()).filter((key) => key === `pi_offer_failed:${q}`).length], ["noted", 1]);
+  }
+  is("the job reads the offer's payment with its settled charge, so the time is there", readFileSync("lib/upsell.ts", "utf8").includes("expand[]=latest_charge.balance_transaction"), true);
 
 
   part("4. An answer whose write may have landed is never said to have changed nothing");

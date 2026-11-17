@@ -171,13 +171,14 @@ async function main(): Promise<void> {
   await pastItsDay(E, Date.parse(e.planEndedAt), TE - 1000);
   let inWindow: MoveResult | string = "not reached";
   onBatchWrite = async (ref) => {
-    // Under the walk's lock (#3156, takeDue) the store's record cannot change at all: the move asks for the store's
-    // lock and is refused as busy, before anything of it is read or written. Only that refusal is accepted here.
+    // The walk holds no lock here (#3643's design): the store's record is read again under the store's own lock right
+    // before it goes (closeStoreRecord), and an address it moved to since becomes one of the entry's. So the move may be
+    // refused (busy, or by the closing guard) or made; either way nothing of the store may be left at either address.
     if (ref === E) inWindow = await moveAccount(E, E2).catch((error: unknown) => (error instanceof Error && error.message === "store_busy" ? "refused: store busy" : Promise.reject(error)));
   };
   const walkedE = await walk(TE);
   onBatchWrite = null;
-  is("the move in the window is refused: the walk holds the store's lock", outcome(inWindow), "refused: store busy");
+  is("the move in the window was tried, refused or made", outcome(inWindow) !== "not reached", true);
   is("the walk takes the store, and finishes", [walkedE.stores, walkedE.done], [1, true]);
   is("its record is gone, at both addresses; its id names nothing; its address is held back", traces(E, E2, e.sid, e.handle), { atOld: false, atNew: false, id: null, handle: "released" });
 

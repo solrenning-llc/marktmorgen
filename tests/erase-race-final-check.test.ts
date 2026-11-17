@@ -5,9 +5,9 @@
  *
  * - The check that a store is still due and the walk's first delete were two steps: a store whose plan ran again while
  *   the check waited on its reads was prepared from what was read before, closed and erased with its contacts. Now
- *   the store's own lock (lib/store.ts) is taken in the same step as the walk sees that nothing it read changed
- *   (CLOSING_TAKE), and held, made to last again before each step that deletes, until the record is closed: a plan
- *   that starts again in between waits and is refused, never landed on a store being erased.
+ *   the store is read again under its own lock (lib/store.ts, closeStoreRecord) right before anything of the live
+ *   store goes, and a plan that started again in between keeps the whole store (PlanRunsAgainError, #3643); every
+ *   delete made there is fenced by that lock (#3156 on #3643).
  * - A key or a list's member named by an id a live store may hold (a first store's key and folder, an address it let
  *   go of, its Stripe account) went once a read had found nobody holding it, a step before the delete: a store that
  *   took the id in between lost what it wrote under it. Now it goes only while no live store holds the id, read in
@@ -20,7 +20,7 @@ import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from 
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { leadsKey } from "@/lib/contacts";
 import { claimsKey, hostId } from "@/lib/host-claims";
-import { StoreBusyError, claimHandle, createStore, releaseHandle, renameHandle, setStripeAccount, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { claimHandle, createStore, releaseHandle, renameHandle, setStripeAccount, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { closeForErasure, closingStateKey, reactivate, sentCommands } from "./closed-for-erasure";
@@ -248,25 +248,16 @@ async function main(): Promise<void> {
     is("the next run reads the owner's stores again, finds none selling through it, and deletes it", [await run(), finished, (await original([["EXISTS", taxKey]]))[0]], ["done:true begun:0 finished:1", [ref], 0]);
   }
 
-  part("The walk holds the store's own lock while it prepares it: a plan started again meanwhile is refused, and the store is erased whole");
+  part("A plan started again while the store is prepared keeps the whole store (#3643's design: read again under its lock)");
   {
+    // The walk holds no lock of its own (#3156 on #3643): the plan's start is not refused. The store's record is read
+    // again under its own lock right before anything of the live store goes (closeStoreRecord, PlanRunsAgainError), so
+    // the store whose plan runs again keeps everything, and leaves the line.
     await fresh();
     const listId = await closedStore();
-    const recordKey = await recordKeyOf(OWNER);
-    let lock: unknown = null;
-    let refused = "";
-    before("ZREM", (k) => k === FINAL_INDEX, async () => {
-      [lock] = await original([["GET", recordKey.replace("nl:store:owner:", "nl:store:lock:")]]);
-      try {
-        await reactivate(OWNER);
-        refused = "landed";
-      } catch (error) {
-        refused = error instanceof StoreBusyError ? "busy" : String(error);
-      }
-    });
-    is("the walk erases the store once", [await run(), finished], ["done:true begun:1 finished:1", [OWNER]]);
-    is("while it was prepared the store's lock was the walk's, and the plan's write waited and was refused", [typeof lock === "string" && lock !== "", refused], [true, "busy"]);
-    is("nothing of it is left, and its lock is let go of", [await state(listId), (await original([["EXISTS", recordKey.replace("nl:store:owner:", "nl:store:lock:")]]))[0]], [ERASED, 0]);
+    before("ZREM", (k) => k === FINAL_INDEX, () => reactivate(OWNER));
+    is("nothing erased, the store runs, out of line", [await run(), finished, await state(listId)], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: false }]);
+    is("and the next day nothing again", [await nextDay(), finished, await state(listId)], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: false }]);
   }
 
   part("Another write holds the store's lock when the walk would take it: nothing touched, still in line");
@@ -278,7 +269,8 @@ async function main(): Promise<void> {
     is("the walk prepares nothing", [await run(), finished, await state(listId)], ["done:true begun:0 finished:0", [], UNTOUCHED]);
     is("the other write's lock is still its own", (await original([["GET", lockKey]]))[0], "another-write");
     await original([["DEL", lockKey]]);
-    is("once it is let go of, the next run erases the store once", [await run(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
+    // Moved back a walk (closeStoreRecord waited for the lock, then refused): the run a walk later erases it once.
+    is("once it is let go of, the run a walk later erases the store once", [await aWalkLater(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
   }
 
   part("The store's record changes after the walk's check: read and checked again");
@@ -306,8 +298,9 @@ async function main(): Promise<void> {
       }
       return reply;
     }) as typeof redis.pipeline;
-    is("changed after every check: after three checks it is kept in line, untouched", [await run(), checks, finished, await state(listId)], ["done:true begun:0 finished:0", 3, [], UNTOUCHED]);
-    is("and the next run, with nothing changing, erases it once", [await run(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
+    // The record is read again under the store's lock right before it goes (closeStoreRecord): a change that leaves it
+    // due (no plan running) does not keep it, and the walk never acts on what it read before (#3156 on #3643).
+    is("changed after every read, still due: erased once, from the record read again under its lock", [await run(), checks >= 1, finished, await state(listId)], ["done:true begun:1 finished:1", true, [OWNER], ERASED]);
   }
 
   part("A plan started again after the walk's check is seen: the store leaves the line, untouched");
@@ -319,28 +312,32 @@ async function main(): Promise<void> {
     is("and the next day nothing again", [await nextDay(), finished, await state(listId)], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: false }]);
   }
 
-  part("The walk's lock runs out while it prepares the store: it stops before anything more is deleted");
+  part("The store's lock runs out while its live data is deleted: it stops before anything more is deleted");
   {
     await fresh();
     const listId = await closedStore();
     const lockKey = (await recordKeyOf(OWNER)).replace("nl:store:owner:", "nl:store:lock:");
     const teamless = claimsKey(hostId(OWNER));
     after("HSCAN", (k) => k === teamless, async () => void (await original([["DEL", lockKey]])));
-    is("the run stops; the store's record, its contacts and its place in line are there", [await run(), finished, await state(listId)], ["threw", [], UNTOUCHED]);
-    is("the next run prepares it again and erases it once", [await run(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
+    // The lock closeStoreRecord holds is gone (LockBusyError at the next fenced step): the preparation stops, the store
+    // waits a walk (moved back), and its record, its contacts and its place in line are there.
+    is("the preparation stops; the store's record, its contacts and its place in line are there", [await run(), finished, await state(listId)], ["done:true begun:0 finished:0", [], UNTOUCHED]);
+    is("the run a walk later prepares it again and erases it once", [await aWalkLater(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
   }
 
-  part("The step that takes the lock answers what does not read: the store waits a walk, nothing touched");
+  part("The step that takes the store's lock answers what does not read: the store waits a walk, nothing touched");
   {
     for (const [label, reply] of [["a number it never answers", 42], ["nothing", null], ["a list", [1]]] as [string, unknown][]) {
       await fresh();
       const listId = await closedStore();
       const lockKey = (await recordKeyOf(OWNER)).replace("nl:store:owner:", "nl:store:lock:");
-      answering("EVAL", reply, isScript("closing-take"));
+      // The store's lock is taken by closeStoreRecord (lib/store.ts takeLock, SET NX EX): an answer that does not read is
+      // never "taken" (#3156 on #3643).
+      answering("SET", reply, (k) => k === lockKey);
       const at = Date.now();
       is(`answers ${label}: nothing prepared, the store untouched and in line`, [await run(), finished, await state(listId)], ["done:true begun:0 finished:0", [], UNTOUCHED]);
       is(`answers ${label}: moved back a walk, so it does not hold the head of the line`, await movedBack(at), true);
-      // A step whose answer was lost may have taken the lock: it runs out at its own expiry (CLOSING_LOCK_SECONDS).
+      // A step whose answer was lost may have taken the lock: it runs out at its own expiry (lib/store.ts LOCK_SECONDS).
       await original([["DEL", lockKey]]);
       is(`answers ${label}: once its lock is gone, the run a walk later erases it once`, [await aWalkLater(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
     }

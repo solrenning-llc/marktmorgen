@@ -152,6 +152,18 @@ async function main(): Promise<void> {
   is("one read was answered 404, and none after it", reads.filter((r) => r.status === 404).length, 1);
   is("the list is read to its end, so the anchor moves to its newest refund", await anchor(), String(now - 5));
 
+  part("A refund dated ahead of the clock cannot advance the store's anchor");
+  await clean();
+  const beforeFuture = now - 3 * 86_400;
+  await redis.pipeline([["SET", anchorKey, String(beforeFuture)]]);
+  const recovered = await paidGroup("pi_GCurTimeOurs0014", 14);
+  lists.set(ACCOUNT_B, [refund("re_GCurTimeOther014", "pi_GCurTimeOther014", now + 86_400)]);
+  await run();
+  is("a future timestamp leaves the previous anchor in place", await anchor(), String(beforeFuture));
+  lists.set(ACCOUNT_B, [refund("re_GCurTimeOurs0014", "pi_GCurTimeOurs0014", now - 5)]);
+  await run();
+  is("the next valid refund still reaches its purchase", await openGroup(await owner(), recovered), null);
+
   part("A row that is not readable never holds back the pages after it");
   await clean();
   await redis.pipeline([["SET", anchorKey, String(now - 3 * 86_400)]]);

@@ -26,6 +26,7 @@ import { PATH_MONEY_SECONDS, readPathMoney, soldOf } from "@/lib/path-facts";
 import { parsePath, pathJson, readPath, startPath, visitPath } from "@/lib/path";
 import { readAnswers } from "@/lib/path-rules";
 import { payPalSale } from "@/lib/stats";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { WATCH_LATE_SECONDS, captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -365,11 +366,16 @@ async function main(): Promise<void> {
 
   part("L1: PayPal's sales read off their shape are partial, never 'no sales'");
   {
-    const { statsId } = await setup();
+    const { store: store0, statsId } = await setup();
+    // Since main's #2854 (paypal-sales-exact) a reply in another shape throws UnknownReplyError, never "no sales";
+    // the Path's reader (readPaidSales, lib/stats.ts) takes it as a reading with a PayPal gap, so the money is unknown.
+    const shape = async () => readPayPalSales(statsId, 0, 300).then((read) => read.partial, (error) => (error instanceof UnknownReplyError ? "unknown" : error));
     bend = bendFirst("nl:ppsell:sales:", "ZREVRANGEBYSCORE", () => ["1"]);
-    is("the range not a list: partial", (await readPayPalSales(statsId, 0, 300)).partial, true);
+    is("the range not a list: unknown, never 'no sales'", await shape(), "unknown");
     bend = bendFirst("nl:ppsell:paid:", "MGET", () => [[JSON.stringify(paid(statsId, 1, 2900, now - 300))]]);
-    is("fewer records than orders: partial", (await readPayPalSales(statsId, 0, 300)).partial, true);
+    is("fewer records than orders: unknown", await shape(), "unknown");
+    bend = bendFirst("nl:ppsell:sales:", "ZREVRANGEBYSCORE", () => ["1"]);
+    is("and the Path's money with it is unknown, no sale counted as kept", await money(store0), [0, null]);
     bend = null;
     redis.run(["SET", `nl:ppsell:paid:${order(3)}`, "{not json"]);
     const read = await readPayPalSales(statsId, 0, 300);

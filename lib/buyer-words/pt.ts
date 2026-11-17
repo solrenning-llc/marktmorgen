@@ -150,6 +150,7 @@ export const pt: BuyerWords = {
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
   chooseOne: "Escolha uma",
+  optionFromLink: (label) => `Abriu esta página para ${label}, por isso essa opção já está escolhida abaixo. Pode escolher outra.`,
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -189,8 +190,9 @@ export const pt: BuyerWords = {
   whoAnswers: (store) =>
     `${store} é o vendedor e responde pelo que compra, pelos reembolsos e por qualquer direito de livre resolução que tenha. A Marktmorgen aloja as páginas da loja e não é parte na venda.`,
   noPaymentsTitle: "Esta loja ainda não pode receber pagamentos.",
-  noPaymentsBody: (store) => `Os preços acima são reais, mas nada aqui pode cobrar um cartão. Para comprar, escreva diretamente a ${store}.`,
-  noPaymentsBodyOne: (store) => `O preço acima é real, mas nada aqui pode cobrar um cartão. Para comprar, escreva diretamente a ${store}.`,
+  noPaymentsBody: "Os preços acima são reais, mas nada aqui pode cobrar um cartão.",
+  noPaymentsBodyOne: "O preço acima é real, mas nada aqui pode cobrar um cartão.",
+  noPaymentsWrite: (store) => `Escrever a ${store}`,
 
   notices: {
     soldout: { title: "Acabou de esgotar", body: "O último foi vendido momentos antes de carregar em comprar. Nada foi cobrado." },
@@ -287,6 +289,8 @@ export const pt: BuyerWords = {
   openFullSize: "Abrir esta imagem em tamanho real",
   countdownUnits: { days: "dias", hours: "horas", min: "min", sec: "seg" },
   until: (when) => `Até ${when}`,
+  countdownPause: "Pausar a contagem decrescente",
+  countdownResume: "Retomar a contagem decrescente",
 
   restingTitle: "Esta página está em pausa por agora",
   restingBody: (store) =>

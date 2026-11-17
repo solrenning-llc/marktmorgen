@@ -151,7 +151,9 @@ async function main(): Promise<void> {
   const given = await keyForSale(store, app, "cs_test_keyrefund0001", "buyer@example.com");
   if (given?.state !== "issued") throw new Error("no key");
   sessionsByPayment.pi_TestKeyRefund1 = [{ id: "cs_test_keyrefund0001", metadata: { store: "kilnworks", product: tool.product.id } }];
-  refunds = [{ id: "re_TestKeyRefund1", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
+  // Regra 23: the row now carries its own amount, as every refund Stripe sends does: a refund of the whole charge is whole
+  // on its own. Without it the job reads the charge's refunds first (Claude 2's focal money review of #2868, HIGH).
+  refunds = [{ id: "re_TestKeyRefund1", object: "refund", amount: 2900, created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
   eventsStatus = 403;
   const ran = await revokeRefunded(store, Date.now() + 10_000).then((n) => n, () => "stopped");
   is("a full refund still revokes its key", [ran, await checkKey(store, app, given.key)], [1, "revoked"]);
@@ -226,7 +228,7 @@ async function main(): Promise<void> {
   const callStore: Store = { ...store, callsId };
   const callStart = Date.now() + 86_400_000;
   await redis.pipeline([["ZADD", MEET_STORES, callStart, `${callsId}|kilnworks`]]);
-  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
+  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, payment_intent: pi, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
   // Each booking's meeting, as confirmBooking leaves it before the provider made it: ending it needs no provider call.
   const scopeOf = (pi: string) => callScope(callsId, { group: false, session: `cs_test_${pi.slice(3)}`, product: guide.product.id, start: callStart });
   const meeting = (pi: string): MeetRecord => ({
@@ -257,7 +259,9 @@ async function main(): Promise<void> {
   const plainStore: Store = { ...store, callsId: plainId };
   const plainFor = async (handle: string) => (handle === "kilnworks" ? plainStore : null);
   sessionsByPayment.pi_TestCallRefd01 = call("pi_TestCallRefd01");
-  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestCallRefd01", charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } };
+  // The refund's own amount and its charge's id, as Stripe lists them: a succeeded refund is known to cover its charge
+  // only from them (the owner's decision 18; rule 23 on claude5/call-refunds-confirmed).
+  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", amount: 4900, payment_intent: "pi_TestCallRefd01", charge: { object: "charge", id: "ch_TestCallRefd01", amount: 4900, amount_refunded: 4900, refunded: true } };
   is("the store is not in MEET_STORES by its bookings", await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]), [null]);
   refunds = [refund];
   await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");

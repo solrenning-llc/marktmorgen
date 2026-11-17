@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   const again = await settlePayPal(store, { press: true });
   is("a second press within a minute asks nothing and says PayPal was not asked", [again.asked, tokens, again.waiting], [false, 2, 1]);
   const button = readFileSync("components/paypal-payouts.tsx", "utf8");
-  is("the button never says \"Nothing new\" for a check not made", button.includes('data.asked === false\n                        ? "PayPal was asked less than a minute ago. Try again in a minute."'), true);
+  is("the button never says \"Nothing new\" for a check not made", button.includes('data.asked === false\n                          ? "PayPal was asked less than a minute ago. Try again in a minute."'), true);
 
   part("A mark that cannot be confirmed asks nothing");
   await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]);

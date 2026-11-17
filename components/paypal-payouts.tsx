@@ -184,11 +184,13 @@ export function PayPalPayouts({
                   const data = await act("settle");
                   if (data) {
                     toast(
-                      data.asked === false
-                        ? "PayPal was asked less than a minute ago. Try again in a minute."
-                        : Number(data.paid)
-                          ? `${data.paid} confirmed as paid.`
-                          : "Nothing new from PayPal yet.",
+                      data.unavailable
+                        ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
+                        : data.asked === false
+                          ? "PayPal was asked less than a minute ago. Try again in a minute."
+                          : Number(data.paid)
+                            ? `${data.paid} confirmed as paid.`
+                            : "Nothing new from PayPal yet.",
                     );
                     router.refresh();
                   }

@@ -538,8 +538,13 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   }
 }
 
-/** `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within PRESS_PACE_SECONDS, an unknown mark, or no token). */
-export type Settled = { paid: number; released: number; waiting: number; asked?: boolean };
+/**
+ * `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within
+ * PRESS_PACE_SECONDS, an unknown mark, or no token). `unavailable`: true, and only then present, when it was not asked
+ * because nothing could be checked (no token, or a pace mark that could not be confirmed), not because it was asked
+ * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212).
+ */
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -589,13 +594,15 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
   // A press is held back only by its own mark; a view by the view's. An unknown mark asks nothing.
   const pace = options.press ? { key: pressKey(statsId), seconds: PRESS_PACE_SECONDS } : options.paced ? { key: paceKey(statsId), seconds: SETTLE_PACE_SECONDS } : null;
   const mark = pace ? claimValue() : "";
-  if (pace && (await claimMark(pace.key, pace.seconds, mark)) !== "ours") return onTheirWayNow();
+  const claimed = pace ? await claimMark(pace.key, pace.seconds, mark) : "ours";
+  if (claimed === "taken") return onTheirWayNow();
+  if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true };
   const token = await bearer(store).catch(() => null);
   if (!token) {
     // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
     // press asks again (review of #4212, LEVE).
     if (pace) await releaseMark(pace.key, mark);
-    return onTheirWayNow();
+    return { ...onTheirWayNow(), unavailable: true };
   }
   const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);

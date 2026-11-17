@@ -79,7 +79,7 @@ export default function PrivacyPage() {
           postal address you type for the bottom of your emails goes in those
           emails only; it is shown on your store&apos;s public policies page too only
           if you check the box for that where you type it, and comes off the
-          page as soon as you uncheck it.
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When

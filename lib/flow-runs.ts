@@ -125,8 +125,30 @@ export const KEPT_AFTER_CHOICE = MAX_RUN_EVENTS - (2 + 2 * MAX_STEPS);
 const event = (e: RunEvent) => JSON.stringify({ ...e, note: e.note.slice(0, 300) });
 /** The most one event of a run's history weighs: its note of 300 characters, at three bytes each, and the rest. */
 export const RUN_EVENT_BYTES = dataBytes([event({ at: 9_999_999_999, step: 99, stepId: "x".repeat(16), kind: "x".repeat(16), state: "uncertain", note: "€".repeat(300) })], 1);
-/** The bytes a run's record may hold: its address, its note at three bytes a character, and its fields. */
-export const RUN_RECORD_CHARS = 254 + 900 + 200;
+/**
+ * The bytes a run's record may hold: its address, its note at three bytes a character, and its other fields, names
+ * and values at their longest (RUN_RECORD_FIELDS, with the names "email" and "note"): 230 with this PR's gen and longer open and main's SES fields
+ * (Claude 3 local's LOW on #4234: 200 was passed by about 30), held at 300 for the next field.
+ */
+export const RUN_RECORD_CHARS = 254 + 900 + 300;
+/**
+ * Every field of a run's record but its address and note, at its longest value, held against RUN_RECORD_CHARS by
+ * tests/flow-run-record-budget.test.ts: a new field must be added here, or the room it takes is not priced.
+ */
+export const RUN_RECORD_FIELDS: Readonly<Record<string, number>> = {
+  status: 7, // "running", "waiting", the longest RunStatus
+  step: 2,
+  startedAt: 10,
+  updatedAt: 10,
+  gen: 32,
+  open: 2 + 1 + 16 + 1 + 32, // "step:stepId:token"
+  waits: 2,
+  offLooks: 2,
+  retries: 2,
+  waitAt: 2 + 1 + 10, // "step:second"
+  sesParks: 2,
+  sesAt: 2 + 1 + 10, // "step:second"
+};
 const replied = (value: unknown, length: number): value is unknown[] => Array.isArray(value) && value.length === length;
 
 /**
@@ -388,34 +410,45 @@ export async function letGoWaitClock(flowId: string, emails: string[]): Promise<
  * Counts one more park for room at Amazon SES on each of these runs, lets go of the step's day clock (letGoWaitClock),
  * and answers each run's parks so far and the second it was first parked at step `index` (lib/flows.ts, waitOrStop):
  * the parks are bounded per run (SES_PARKS_PER_RUN), and a step parked again keeps its first place. Null for anyone
- * whose answer was not read exactly (rule 24): an unknown count is never room for one more park.
+ * whose answer was not read exactly (rule 24): an unknown count is never room for one more park. One script a person
+ * (PARK_IF_RUN), counted only while the run is there and is the run this step was taken for (`gens`, as countWaits):
+ * a park after an erasure never makes the record again, and a late park of one run never counts on the run the person
+ * started again (Claude 3 local's HIGH on #4234: three commands and an HSET did both).
  */
-export async function countSesParks(flowId: string, emails: string[], index: number, nowSeconds: number): Promise<Map<string, { parks: number; since: number } | null>> {
+export async function countSesParks(flowId: string, emails: string[], index: number, nowSeconds: number, gens?: Map<string, string>): Promise<Map<string, { parks: number; since: number } | null>> {
   const out = new Map<string, { parks: number; since: number } | null>();
   if (!emails.length) return out;
-  const reply = await redisPipeline(emails.flatMap((email) => {
-    const run = runKey(flowId, personOf(email));
-    return [["HINCRBY", run, "sesParks", 1], ["HDEL", run, "waitAt"], ["HGET", run, "sesAt"]];
-  })).catch(() => null);
-  const firsts: (string | number)[][] = [];
+  const reply = await redisPipeline(emails.map((email) => ["EVAL", PARK_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN])).catch(() => null);
   emails.forEach((email, i) => {
-    const parks = replied(reply, emails.length * 3) ? reply[i * 3] : null;
-    const at = replied(reply, emails.length * 3) ? reply[i * 3 + 2] : undefined;
-    if (typeof parks !== "number" || !Number.isSafeInteger(parks) || parks < 1 || (at !== null && typeof at !== "string")) {
+    const one = replied(reply, emails.length) ? reply[i] : null;
+    const [parks, since] = Array.isArray(one) && one.length === 2 ? one : [null, null];
+    // A run that is gone or another run ({-1}), or a reply in another shape: unknown, never room for one more park.
+    if (typeof parks !== "number" || !Number.isSafeInteger(parks) || parks < 1 || typeof since !== "number" || !Number.isSafeInteger(since) || since < 1 || since > nowSeconds) {
       out.set(email, null);
       return;
     }
-    const [atIndex, atSince] = typeof at === "string" ? at.split(":").map(Number) : [NaN, NaN];
-    if (atIndex === index && Number.isSafeInteger(atSince) && atSince > 0 && atSince <= nowSeconds) {
-      out.set(email, { parks, since: atSince });
-      return;
-    }
-    firsts.push(["HSET", runKey(flowId, personOf(email)), "sesAt", `${index}:${nowSeconds}`]);
-    out.set(email, { parks, since: nowSeconds });
+    out.set(email, { parks, since });
   });
-  if (firsts.length) await redisPipeline(firsts).catch((error) => console.error("noting when a workflow step was first parked failed", error));
   return out;
 }
+
+/**
+ * One more park for room at Amazon SES on one run, only while the run is there (KEYS: the run's record; ARGV: the
+ * step, now, the run's generation or ANY_GEN): the parks counted, the step's day clock let go (waitAt), and {parks,
+ * since}, `since` the second the step was first parked at this step (kept in sesAt as "step:second"), started now
+ * on its first park there; {-1} when the run is gone or is another run (another generation). Priced at its own call
+ * and its six inside (SES_WAIT_COMMANDS_PER_TRY, lib/flow-limits.ts). Modelled by lib/redis-memory.ts.
+ */
+export const PARK_IF_RUN = `-- marktmorgen:flow-ses-park:v1
+if redis.call("EXISTS", KEYS[1]) == 0 then return {-1} end
+if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return {-1} end
+local parks = redis.call("HINCRBY", KEYS[1], "sesParks", 1)
+redis.call("HDEL", KEYS[1], "waitAt")
+local at = redis.call("HGET", KEYS[1], "sesAt") or ""
+local step, since = string.match(at, "^(%-?%d+):(%d+)$")
+if step == ARGV[1] and tonumber(since) > 0 and tonumber(since) <= tonumber(ARGV[2]) then return {parks, tonumber(since)} end
+redis.call("HSET", KEYS[1], "sesAt", ARGV[1] .. ":" .. ARGV[2])
+return {parks, tonumber(ARGV[2])}`;
 
 /**
  * Counts the creator's "try it again" on a run, and answers whether it is
@@ -690,28 +723,40 @@ export async function listHeld(listId: string | null, limit = 50): Promise<{ flo
 
 /**
  * Takes a held run out of its hold, for the creator's choice (lib/flows.ts,
- * resolveHeldRun). Only one caller can: the attempt is cleared with HDEL, and
- * only the caller whose HDEL removed it goes on.
+ * resolveHeldRun). Only one caller can: one script (RELEASE_IF_OPEN) checks
+ * the record's exact `open` and, only then, clears it and writes the choice,
+ * so only the caller that found it goes on; a run erased in between answers
+ * no `open` and nothing is written, so its record, history and index never
+ * come back (Claude 3 local's MEDIUM on #4234: three round trips did).
  */
 export async function releaseHold(listId: string, flowId: string, person: string, open: string, note: string, status: RunStatus, step: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<boolean> {
-  const run = runKey(flowId, person);
-  const reply = await redisPipeline([["HGET", run, "open"]]).catch(() => null);
-  if (!replied(reply, 1) || reply[0] !== open) return false;
-  const removed = await redisPipeline([["HDEL", run, "open"]]).catch(() => null);
-  if (!replied(removed, 1) || removed[0] !== 1) return false;
-  await redisPipeline([
-    ["RPUSH", logKey(flowId, person), event({ at: nowSeconds, step: Number(open.split(":")[0]) || 0, stepId: open.split(":")[1] ?? "", kind: "run", state: "resolved", note })],
-    // Room for whatever the run does after this choice (above): the history never passes MAX_RUN_EVENTS.
-    ["LTRIM", logKey(flowId, person), -KEPT_AFTER_CHOICE, -1],
-    ["HSET", run, "status", status, "step", step, "note", "", "updatedAt", nowSeconds],
-    ["ZREM", heldKey(listId), `${flowId}|${person}`],
-    ["ZADD", indexKey(flowId), nowSeconds, person],
-    // Kept for RUN_KEEP_SECONDS more at every write, live or ended (as settleAttempts and noteRuns).
-    ["EXPIRE", run, RUN_KEEP_SECONDS],
-    ["EXPIRE", logKey(flowId, person), RUN_KEEP_SECONDS],
-  ]);
-  return true;
+  const resolved = event({ at: nowSeconds, step: Number(open.split(":")[0]) || 0, stepId: open.split(":")[1] ?? "", kind: "run", state: "resolved", note });
+  const reply = await redisPipeline([[
+    "EVAL", RELEASE_IF_OPEN, 4, runKey(flowId, person), logKey(flowId, person), heldKey(listId), indexKey(flowId),
+    open, resolved, KEPT_AFTER_CHOICE, status, step, nowSeconds, `${flowId}|${person}`, person, RUN_KEEP_SECONDS,
+  ]]).catch(() => null);
+  return replied(reply, 1) && reply[0] === 1;
 }
+
+/**
+ * The creator's choice on a held run, in one step (KEYS: the run's record, its history, the held list, the
+ * workflow's index; ARGV: the exact `open`, the "resolved" event, the events kept, status, step, now, the held
+ * member, the person, how long it is kept): 1 when it was this hold and is now released; 0 when the record holds
+ * no such `open` (taken by another caller, or the run erased), with nothing written. The history keeps room for
+ * whatever follows (KEPT_AFTER_CHOICE), and the record and history are kept RUN_KEEP_SECONDS more, as every write
+ * does. Modelled by lib/redis-memory.ts.
+ */
+export const RELEASE_IF_OPEN = `-- marktmorgen:flow-release-hold:v1
+if redis.call("HGET", KEYS[1], "open") ~= ARGV[1] then return 0 end
+redis.call("HDEL", KEYS[1], "open")
+redis.call("RPUSH", KEYS[2], ARGV[2])
+redis.call("LTRIM", KEYS[2], -tonumber(ARGV[3]), -1)
+redis.call("HSET", KEYS[1], "status", ARGV[4], "step", ARGV[5], "note", "", "updatedAt", ARGV[6])
+redis.call("ZREM", KEYS[3], ARGV[7])
+redis.call("ZADD", KEYS[4], ARGV[6], ARGV[8])
+redis.call("EXPIRE", KEYS[1], ARGV[9])
+redis.call("EXPIRE", KEYS[2], ARGV[9])
+return 1`;
 
 /** The commands that erase one person's run of one workflow: its record, its history and both indexes. */
 export function forgetPersonCommands(listId: string, flowId: string, person: string): (string | number)[][] {

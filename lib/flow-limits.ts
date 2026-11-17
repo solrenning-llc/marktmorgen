@@ -136,6 +136,10 @@ export const WAIT_COMMANDS_PER_TRY = 32;
  *     step parks without a bound only then) and counts the park on the run
  *     with the time it was first parked (lib/flow-runs.ts, countSesParks):
  *     measured at 61 with Amazon's 24 hours read in full; 64 with room.
+ *     Since 17 November 2026 the park is one script counted only while the
+ *     run is there (PARK_IF_RUN, Claude 3 local's HIGH on #4234), priced as
+ *     its call and its six inside: three more than the four commands it
+ *     replaced, so 67.
  *   - SES_WAKE_COMMANDS_PER_TRY: the step woken (1).
  *   - SES_WAITS_PER_RUN: every try a run can make other than a woken one can
  *     meet no room once: each step's first try, each "try it again", each
@@ -153,7 +157,7 @@ export const WAIT_COMMANDS_PER_TRY = 32;
  *     read (lib/flows.ts, waitOrStop): otherwise nothing could ever wake the
  *     step, and the wait is counted as before (review of #4246, cloud B).
  */
-export const SES_WAIT_COMMANDS_PER_TRY = 64;
+export const SES_WAIT_COMMANDS_PER_TRY = 67;
 export const SES_WAKE_COMMANDS_PER_TRY = 1;
 export const SES_WAITS_PER_RUN = MAX_STEPS + MAX_RETRIES_BY_YOU + MAX_WAITS_PER_RUN;
 export const SES_PARKS_PER_RUN = SES_WAITS_PER_RUN;
@@ -174,10 +178,11 @@ export const SES_WAKE_JOBS_PER_DAY = 288;
  * One counted wait whose try was for room at Amazon SES, past SES_PARKS_PER_RUN or with SES not ready (lib/flows.ts,
  * waitOrStop): the try reads Amazon's state and its 24 hours as any SES try does, and the wait is counted as any other.
  * Measured at 65 in tests/flow-ses-over-cap.test.ts (15 November 2026, review of #4246 by Claude 4 cloud AA); 68 with
- * room. WORST_COMMANDS_PER_RUN prices each of the MAX_WAITS_PER_RUN counted waits at the dearer of this and
+ * room; 71 since the park is one guarded script priced with its six inside (PARK_IF_RUN, #4234), three more than the
+ * four commands it replaced. WORST_COMMANDS_PER_RUN prices each of the MAX_WAITS_PER_RUN counted waits at the dearer of this and
  * WAIT_COMMANDS_PER_TRY, since any of them may be such a try.
  */
-export const SES_COUNTED_WAIT_COMMANDS_PER_TRY = 68;
+export const SES_COUNTED_WAIT_COMMANDS_PER_TRY = 71;
 /**
  * A look at a step waiting while its store is switched off (lib/flow-retry.ts) reads only the queue, the store, its
  * workflows and the run's count, and puts the step back: measured at 13 commands for a batch of one person, the step's

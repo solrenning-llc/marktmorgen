@@ -244,6 +244,32 @@ export class MemoryRedis {
           this.run(["HSET", runK, "waitAt", `${step}:${now}`]);
           return [n, kept, Number(now)];
         }
+        // lib/flow-runs.ts PARK_IF_RUN: one SES park counted only while the run is there and is this run.
+        if (key.startsWith("-- marktmorgen:flow-ses-park:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, runK, step, now, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
+          const parks = this.run(["HINCRBY", runK, "sesParks", 1]);
+          this.run(["HDEL", runK, "waitAt"]);
+          const at = this.run(["HGET", runK, "sesAt"]);
+          const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;
+          if (found && found[1] === step && Number(found[2]) > 0 && Number(found[2]) <= Number(now)) return [parks, Number(found[2])];
+          this.run(["HSET", runK, "sesAt", `${step}:${now}`]);
+          return [parks, Number(now)];
+        }
+        // lib/flow-runs.ts RELEASE_IF_OPEN: the creator's choice on a held run, only over its exact open.
+        if (key.startsWith("-- marktmorgen:flow-release-hold:v1\n") && args[0] === "4" && args.length === 14) {
+          const [, runK, logK, heldK, indexK, open, resolved, kept, status, step, now, member, person, keep] = args;
+          if (this.run(["HGET", runK, "open"]) !== open) return 0;
+          this.run(["HDEL", runK, "open"]);
+          this.run(["RPUSH", logK, resolved]);
+          this.run(["LTRIM", logK, String(-Number(kept)), "-1"]);
+          this.run(["HSET", runK, "status", status, "step", step, "note", "", "updatedAt", now]);
+          this.run(["ZREM", heldK, member]);
+          this.run(["ZADD", indexK, now, person]);
+          this.run(["EXPIRE", runK, keep]);
+          this.run(["EXPIRE", logK, keep]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:flow-retry:v1\n") && args[0] === "1" && args.length === 3) {
           const [, runK, by] = args;
           if (this.run(["EXISTS", runK]) !== 1) return -1;

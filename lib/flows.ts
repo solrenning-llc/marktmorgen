@@ -1332,7 +1332,8 @@ async function waitOrStop(
     // Each park counted on the run, at most SES_PARKS_PER_RUN (lib/flow-limits.ts); a step parked again keeps the
     // second it was first parked at this step, so the longest waiting email stays first. Past the bound, or with a
     // count not read exactly, the step waits as any other wait does, and the run stops when that runs out.
-    const parks = await countSesParks(flowId, waitingForAmazon.map((p) => p.email), index, nowSeconds);
+    // Counted only on the run this step was taken for (its generation), as the waits below (Claude 3 local on #4234).
+    const parks = await countSesParks(flowId, waitingForAmazon.map((p) => p.email), index, nowSeconds, gens);
     for (const p of waitingForAmazon) {
       const park = parks.get(p.email) ?? null;
       if (!park || park.parks > SES_PARKS_PER_RUN) {

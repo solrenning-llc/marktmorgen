@@ -9,7 +9,7 @@
  * Fast Origin Transfer US$0.06 to US$0.43 a GB on a miss. The figures are typed here, not imported, so this check
  * cannot agree with the registry by sharing its number.
  *
- * Then a refunded first year of the Store plan, with that logo, must stay under the owner's US$66 ceiling (US$65 until BROADCAST-262, 16 November 2026)
+ * Then a refunded first year of the Store plan, with that logo, must stay under the owner's US$65 ceiling
  * (tests/plan-margin.test.ts). The ceiling is never raised to pass: if the logo cannot fit, it is not drawn.
  */
 import { render } from "@/lib/mail";
@@ -67,14 +67,14 @@ for (const tier of ["creator", "pro", "scale"] as const) {
     priced >= floor, true);
 }
 
-part("A refunded first year stays under the owner's US$66 with the logo at the dearest region");
+part("A refunded first year stays under the owner's US$65 with the logo at the dearest region");
 {
   const tier = "creator" as const;
   const kept = (paidStorageBytes(tier) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
   const year = worstCost(tier) + providerFeeUsd(PRICES_WITHOUT_COMMISSION[tier].year) + kept;
   const extra = Math.max(0, floorFor(tier) - (line ? line.monthlyUsd(tier) : 0));
-  is(`a refunded Store first year, repriced at the dearest region, is under US$66 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
-    year + extra < 66, true);
+  is(`a refunded Store first year, repriced at the dearest region, is under US$65 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
+    year + extra < 65, true);
 }
 
 done();

@@ -176,15 +176,38 @@ const EVENT_PAGES = 10;
  * is read whole to decide, but no more than this is spent on it in one run, as when only its first page was read;
  * the rest wait for the next run.
  */
-export const OFFERS_PER_RUN = 100;
+const OFFERS_PER_RUN = 100;
 
 /**
- * The most commands a come-back link not written as asked costs, with nothing sent (Claude 7 on #3889): the link taken
- * back (DEL, 1) and this run's two marks let go (releaseMark: lib/redis-lock.ts RELEASE, one EVAL and its GET and DEL,
- * 3 each, as Upstash bills a script). At most OFFERS_PER_RUN offers a store a run; priced in tests/plan-cost-registry.ts
- * (come-back-unwritten-links) and held in tests/winback-link-write-exact.test.ts.
+ * At most this many come-back links not written as asked a store a run (Claude 5 on #3889): a link write answered in
+ * another shape says Redis is not answering as asked, so the store's run stops there, nothing more is sent on it, and
+ * the offers after it wait for the next run, as those past OFFERS_PER_RUN do. Without it every offer a run looks at
+ * could fail the same way, each spending UNWRITTEN_LINK_COMMANDS with no email, on every run.
  */
-export const UNWRITTEN_LINK_COMMANDS = 7;
+export const UNWRITTEN_LINKS_PER_RUN = 1;
+
+/** A mark taken (lib/claim-mark.ts claimMark): its SET NX and, answered in another shape, the GET that reads it back. */
+const MARK_COMMANDS = 2;
+/**
+ * One address's unsubscribe token (lib/contacts.ts tokensFor) at its worst: its three rounds, each the contact's
+ * HMGET, the deleted-addresses HMGET, the token record's SET, the compare-and-set script (one, and its HGET and HSET,
+ * as Upstash bills a script) and either the read-back HMGET of a write answered in another shape or the DEL of a
+ * token lost to a change made meanwhile.
+ */
+const TOKEN_COMMANDS = 3 * (1 + 1 + 1 + 3 + 1);
+/** The link's SET and its three erasure notes (lib/erasure-index.ts noteForErasure: ZADD, ZREMRANGEBYSCORE, EXPIRE). */
+const LINK_WRITE_COMMANDS = 1 + 3;
+/** The link taken back (DEL) and this run's two marks let go (releaseMark: lib/redis-lock.ts RELEASE, one EVAL and its GET and DEL). */
+const TAKE_BACK_COMMANDS = 1 + 2 * 3;
+
+/**
+ * The most commands a come-back offer whose link was not written as asked costs, with nothing sent, from its first
+ * mark to the end (Claude 7 and Claude 5 on #3889): the membership's mark and the once-mark, the unsubscribe token,
+ * the link and its notes, and the take-back. The whole offer is looked at again on the next run, so all of it repeats
+ * outside the store's email figure. At most UNWRITTEN_LINKS_PER_RUN a store a run; priced in tests/plan-cost-registry.ts
+ * (come-back-unwritten-links) and held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.
+ */
+export const UNWRITTEN_LINK_COMMANDS = 2 * MARK_COMMANDS + TOKEN_COMMANDS + LINK_WRITE_COMMANDS + TAKE_BACK_COMMANDS;
 
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;
@@ -210,6 +233,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
   }
   let sent = 0;
   let lookedAt = 0;
+  let unwritten = 0;
 
   // Oldest first (Claude 4 on #2714): Stripe lists events newest first, and the window is two days wide with one run
   // a day, so the offers a run can look at go to the ended memberships about to leave the window, not the newest.
@@ -281,6 +305,8 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         await releaseMark(onceKey(statsId, email, product.id), onceValue);
         await releaseMark(sentKey(account, subId), claim);
         console.error("a come-back link was not written as asked; nothing sent", store.handle);
+        unwritten += 1;
+        if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;
         continue;
       }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;

@@ -99,7 +99,7 @@ import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
-import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
+import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, REMIND_DAYS_BEFORE, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
 
 export type ImportKind = "contacts" | "products" | "purchases" | "members";
@@ -286,6 +286,18 @@ export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COM
  * email and reminder in tests/import-moved-email-commands.test.ts.
  */
 export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 1 + 3;
+/**
+ * A member's reminder held because the creator's postal address is missing (review of #3476, Claude 7's cost MEDIUM 1)
+ * is tried again once a day (MOVE_HELD_RETRY_MS), not every hour, and only while the renewal date is still more than a
+ * day away. It first comes due REMIND_DAYS_BEFORE days before that date, so it is held at most MOVE_HELD_PASSES times.
+ * A held pass reads nothing beside its share of the line's lease (one ZRANGEBYSCORE and one ZADD at most, when it is
+ * the only one due: dueReminders), the store (two GETs: storeForId), its invitation (one HGET: readInvite) and its
+ * put-back or its drop (one ZADD or one ZREM): MOVE_HELD_PASS_COMMANDS. Priced on every moved email in
+ * tests/plan-cost-registry.ts (MOVED_EMAIL_COMMANDS_PRICED) and held in tests/import-moved-held-passes.test.ts.
+ */
+export const MOVE_HELD_RETRY_MS = 86_400_000;
+export const MOVE_HELD_PASSES = REMIND_DAYS_BEFORE;
+export const MOVE_HELD_PASS_COMMANDS = 2 + 2 + 1 + 1;
 /**
  * What an upload holding the month's emails costs the five-minute job until it is given up (priced per start in
  * tests/plan-cost-registry.ts): its SADD to the active set when it starts, one GET each pass while it receives

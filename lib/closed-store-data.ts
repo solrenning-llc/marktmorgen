@@ -306,10 +306,9 @@ async function dueForErasure(store: Store, now: number): Promise<{ due: "due" | 
   const removedFor = (endedAt: number) => record.of === endedAt && typeof record.removed === "number" && Number.isFinite(record.removed);
   const standing = standingOf(store, now / 1000);
   const seen = (due: "due" | "live" | "hold") => ({ due, score: score === null ? null : String(score), closing: raw as string | null });
-  if (score !== null) {
-    if (standing === "paid" || standing === "trial") return seen("hold");
-    return seen(removedFor(Number(score)) ? "due" : "hold");
-  }
+  // A closing day that has begun is seen through, whatever the plan says since (closeOne, and #3643's prepareStore, which
+  // erases it under the store's lock): due once the record says what it kept was removed for that day's ending.
+  if (score !== null) return seen(removedFor(Number(score)) ? "due" : "hold");
   const endedAt = Date.parse(store.planEndedAt);
   if (standing !== "ended" || !Number.isFinite(endedAt)) return seen("live");
   return seen(closesStore(endedAt) && removedFor(endedAt) ? "due" : "live");

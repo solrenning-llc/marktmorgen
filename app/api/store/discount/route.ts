@@ -122,7 +122,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Listed last on every path, so the answer the creator gets back is what
-    // Stripe says now rather than what we believe we just did.
+    // Stripe says now rather than what we believe we just did. One page of
+    // MAX_CODES, and whether Stripe holds more, for the studio to say so (unit 2).
     const list = await listCodes(account);
     // The schedules beside them, read exactly: a code waiting for its start is never shown as simply off.
     const kept = await readSchedules(store.statsId);

@@ -75,6 +75,20 @@ async function main(): Promise<void> {
   is("the walk ends; the key that cannot be signed is never handed out, the others are", [leftOut.error, leftOut.handed], ["", [`${PREFIX}a.pdf`, `${PREFIX}b.pdf`]]);
   is("and its end says so: unsignable, never complete", leftOut.last, { complete: false, reason: "unsignable" });
   is("in no more calls than objects", leftOut.calls <= 3, true);
+
+  part("a key the contract refuses, looked at first, never goes into the cursor (Claude 6's MEDIUM on #4840)");
+  // A tab is legal in raw XML and in an S3 key, but the cursor refuses it (decodeFilesCursor), as it refuses a key
+  // past 1,024 characters: a page cut off right after such a key must not carry it, or the next call is refused and
+  // that store's walk never goes on.
+  for (const [label, bad] of [
+    ["a tab", `${PREFIX}b\tc.pdf`],
+    ["a key past 1,024 characters", `${PREFIX}${"k".repeat(1100)}.pdf`],
+  ] as const) {
+    const walked = await walk([bad, `${PREFIX}a.pdf`, `${PREFIX}d.pdf`]);
+    is(`${label}: the walk ends, the refused key never handed out, the others are`, [walked.error, walked.handed], ["", [`${PREFIX}a.pdf`, `${PREFIX}d.pdf`]]);
+    is(`${label}: and its end says so: unsignable, never complete`, walked.last, { complete: false, reason: "unsignable" });
+    is(`${label}: in no more calls than objects`, walked.calls <= 3, true);
+  }
 }
 
 main()

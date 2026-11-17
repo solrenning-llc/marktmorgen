@@ -3768,7 +3768,7 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" }, paid.email);
     // Not for a person deleted at their own request (lib/paypal-delivery.ts): the bond names them, the referral does not.
-    if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
+    if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule, paid.at).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
 }
 
@@ -4057,7 +4057,7 @@ export async function noteSession(
   // after the sale, so a bond that fails costs a future commission rather than
   // one already earned (lib/affiliate-bond.ts).
   if (buyer) {
-    await rememberBuyer(store, buyer, aff, store.affiliates.rule).catch((error) =>
+    await rememberBuyer(store, buyer, aff, store.affiliates.rule, at).catch((error) =>
       console.error("remembering an affiliate's buyer failed", error),
     );
   }

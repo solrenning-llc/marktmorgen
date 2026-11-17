@@ -178,6 +178,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/review-requests.ts": { how: "within", in: "lib/suppression.ts", what: "If you pressed stop on review requests, that is in your no" },
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
+  "lib/batch-count.ts": { how: "passing", days: 1, what: "If the email service's answer to a batch of the store's emails to you was lost, a mark that the batch's count is already kept, named by a one-way fingerprint of the batch and its addresses, with no address in it" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
   "lib/imports.ts": { how: "copied", what: "Rows of a file the store imported from another platform that name you, kept 14 days from the import, and whether an email to you from that import still waits" },

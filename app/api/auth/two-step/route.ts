@@ -85,6 +85,8 @@ export async function POST(request: NextRequest) {
       const canceled = await cancelReset(email, "studio");
       // Passkey removals stay: only "Keep it", next to the passkey, calls one off (lib/passkeys.ts).
       // Canceled either way; browsers that could not be logged out are said as such (review of #2556).
+      // Not kept either (review of #4491): never said to stay locked.
+      if (canceled === "not-kept") return Response.json({ ok: true, loggedOut: false, locked: false });
       return Response.json({ ok: true, loggedOut: canceled !== "kept-locked" });
     }
     if (body.action === "off") {

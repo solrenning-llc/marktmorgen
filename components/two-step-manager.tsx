@@ -28,10 +28,13 @@ const MESSAGES: Record<string, string> = {
   sessions: "Two-step login was not turned on: we could not check your other browsers just now. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[]; loggedOut?: boolean };
+type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[]; loggedOut?: boolean; locked?: boolean };
 
 /** Said when the request is canceled but the browsers let in without the second step could not be logged out (review of #2556). */
 export const CANCEL_NOT_LOGGED_OUT = "Canceled. Two-step login stays on, but the browsers let in without it could not be logged out just now. They stay locked until they are. Choose “Log out of all devices” at the bottom of your studio.";
+
+/** Said instead when they could not be kept locked either (review of #4491): never that they stay locked. */
+export const CANCEL_NOT_LOCKED = "Canceled. Two-step login stays on, but the browsers let in without it could not be logged out just now, and we could not confirm that they are still locked. Choose “Log out of all devices” at the bottom of your studio now.";
 
 /** Said when the app is off but the browsers it let in could not be logged out (audit SG2, finding 6). */
 export const OFF_NOT_LOGGED_OUT = "Two-step login is off, but the browsers it let in could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
@@ -205,7 +208,8 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
               void run({ action: "cancel" }, (answer) => {
                 setReset(0);
                 // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
-                if (answer.loggedOut === false) setError(CANCEL_NOT_LOGGED_OUT);
+                if (answer.locked === false) setError(CANCEL_NOT_LOCKED);
+                else if (answer.loggedOut === false) setError(CANCEL_NOT_LOGGED_OUT);
                 else toast("Canceled. Two-step login stays on.");
               })
             }

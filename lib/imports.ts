@@ -1536,6 +1536,10 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
     if (field === false) {
       skipped.push({ line: fresh[i].line, column: "email", problem: DELETED, value: "" });
       unseen.push(`m:${fresh[i].email}|${fresh[i].productId}`);
+    } else if (field === "gone") {
+      // Its membership was removed from the store after this step read the catalog (Claude 7, MEDIUM on #3473): nothing was written.
+      problems.push({ line: fresh[i].line, column: "product", problem: "This membership was removed from your store while the file was being brought in", value: fresh[i].productId });
+      unseen.push(`m:${fresh[i].email}|${fresh[i].productId}`);
     } else if (field) {
       job.counts.added += 1;
       toMail.push(field);

@@ -14,7 +14,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { saleHandles, type Store } from "@/lib/store";
-import { listCodes } from "@/lib/discount";
+import { findCode } from "@/lib/discount";
 
 /** The Stripe version lib/discount.ts reads codes with, so `discounts[0][promotion_code]` means the same here. */
 const API_VERSION = "2025-09-30.clover";
@@ -23,6 +23,7 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PROMO_PATTERN = /^promo_[A-Za-z0-9]{6,64}$/;
 /** The statuses of a membership still running, as lib/membership-manage.ts counts them. */
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+const STATES = new Set([...LIVE, "incomplete", "incomplete_expired", "canceled"]);
 const MAX_CUSTOMERS = 20;
 /**
  * The most Stripe pages one find (or one apply) waits on, the customers' page
@@ -33,6 +34,8 @@ const MAX_CUSTOMERS = 20;
  * is followed while the budget lasts; past it the answer is unknown.
  */
 const STRIPE_PAGES = 1 + MAX_CUSTOMERS;
+/** Memberships asked for per Stripe page, Stripe's largest. */
+const MEMBERSHIPS_PER_PAGE = 100;
 
 /** A Stripe list that cannot be read whole: the answer is unknown, never what the rows read so far suggest. */
 class UnreadListError extends Error {}
@@ -47,6 +50,11 @@ export type MemberSub = {
   amount: number;
   currency: string;
   interval: string;
+  /**
+   * How many of those one renewal covers, as Stripe bills it (interval_count, 609 [WP8]): 3 with "month" is every 3
+   * months. 1 when Stripe sends none; null when it sends one out of shape, so nothing is said rather than a guess.
+   */
+  every: number | null;
   /** Whether a discount already comes off it. */
   discounted: boolean;
 };
@@ -58,39 +66,65 @@ const list = (value: unknown): Raw[] => (value && typeof value === "object" && A
  * One page of a Stripe list in its exact shape (CX-123 rule 24): a list of
  * rows and a has_more, or it throws. An empty or malformed answer is never
  * read as "none", and more said to come after an empty page is malformed.
+ * More rows than asked for, or a row whose id is unreadable or repeated, is
+ * unknown too: a skipped row could be a running membership.
  */
-function page(value: unknown, what: string): { rows: Raw[]; more: boolean } {
+function page(value: unknown, what: string, most: number, pattern: RegExp, seen: Set<string>): { rows: Raw[]; more: boolean } {
   const listed = value && typeof value === "object" ? (value as Raw) : {};
   const rows = listed.data;
   if (!Array.isArray(rows) || typeof listed.has_more !== "boolean") throw new UnreadListError(`Stripe answered ${what} in a shape that cannot be read`);
   if (rows.some((row) => !row || typeof row !== "object" || Array.isArray(row))) throw new UnreadListError(`Stripe answered ${what} with a row that cannot be read`);
   if (listed.has_more && rows.length === 0) throw new UnreadListError(`Stripe said more ${what} come after an empty page`);
+  // Only a bounded page of rows each with a readable, unrepeated id proves what it lists.
+  if (rows.length > most) throw new UnreadListError(`Stripe answered more ${what} than the page asked for`);
+  for (const row of rows as Raw[]) {
+    if (typeof row.id !== "string" || !pattern.test(row.id) || seen.has(row.id)) throw new UnreadListError(`Stripe answered ${what} with a row id that cannot be read`);
+    seen.add(row.id);
+  }
   return { rows: rows as Raw[], more: listed.has_more };
 }
 
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
 export function hasDiscount(sub: Raw): boolean {
-  if (sub.discount && typeof sub.discount === "object") return true;
-  return Array.isArray(sub.discounts) && sub.discounts.length > 0;
+  if (Object.hasOwn(sub, "discount") && sub.discount !== null) {
+    if (!sub.discount || typeof sub.discount !== "object" || Array.isArray(sub.discount) || typeof (sub.discount as Raw).id !== "string" || !(sub.discount as Raw).id) throw Error("Member discount is unknown");
+    return true;
+  }
+  if (Object.hasOwn(sub, "discounts")) {
+    if (!Array.isArray(sub.discounts)) throw Error("Member discounts are unknown");
+    for (const discount of sub.discounts) {
+      if (typeof discount === "string" && discount) continue;
+      if (discount && typeof discount === "object" && !Array.isArray(discount) && typeof (discount as Raw).id === "string" && (discount as Raw).id) continue;
+      throw Error("Member discount row is unknown");
+    }
+    return sub.discounts.length > 0;
+  }
+  if (Object.hasOwn(sub, "discount") && sub.discount === null) return false;
+  throw Error("Member discount evidence is missing");
 }
 
 /** A subscription row made safe for the studio, or null when it is not a running membership of this store. */
 export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null {
   const meta = sub.metadata && typeof sub.metadata === "object" ? (sub.metadata as Record<string, string>) : {};
   if (typeof sub.id !== "string" || !SUB_PATTERN.test(sub.id)) return null;
-  if (typeof sub.status !== "string" || !LIVE.has(sub.status)) return null;
+  if (typeof sub.status !== "string" || !STATES.has(sub.status)) throw Error("Member state is unknown");
+  if (!LIVE.has(sub.status)) return null;
   // Only this store's, and never a payment plan: it pays for something already delivered.
   if (!handles.has(meta.store ?? "") || meta.kind === "plan") return null;
   const item = list(sub.items)[0] ?? {};
   const price = item.price && typeof item.price === "object" ? (item.price as Raw) : {};
   const recurring = price.recurring && typeof price.recurring === "object" ? (price.recurring as Raw) : {};
+  if (typeof price.unit_amount !== "number" || !Number.isSafeInteger(price.unit_amount) || price.unit_amount < 0 ||
+      typeof price.currency !== "string" || !/^[a-z]{3}$/.test(price.currency) ||
+      typeof recurring.interval !== "string" || !["day", "week", "month", "year"].includes(recurring.interval)) throw Error("Member renewal price is unknown");
   return {
     id: sub.id,
     status: sub.status,
     product: typeof meta.product === "string" ? meta.product : "",
-    amount: typeof price.unit_amount === "number" ? price.unit_amount : 0,
-    currency: typeof price.currency === "string" ? price.currency : "",
-    interval: typeof recurring.interval === "string" ? recurring.interval : "",
+    amount: price.unit_amount,
+    currency: price.currency,
+    interval: recurring.interval,
+    every: recurring.interval_count === undefined || recurring.interval_count === null ? 1 : typeof recurring.interval_count === "number" && Number.isSafeInteger(recurring.interval_count) && recurring.interval_count >= 1 ? recurring.interval_count : null,
     discounted: hasDiscount(sub),
   };
 }
@@ -109,19 +143,21 @@ export async function memberSubs(store: Store, email: string): Promise<MemberSub
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = page(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers");
+    const customers = page(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers", MAX_CUSTOMERS, CUSTOMER_PATTERN, new Set());
     if (customers.more) throw new UnreadListError(`more than ${MAX_CUSTOMERS} customers under one address`);
     const out: MemberSub[] = [];
     // One budget for the whole find, the customers' page already spent.
     let pages = 1;
     for (const customer of customers.rows) {
+      // A membership id repeated on a later page of the same customer's list is a list that cannot be read.
+      const seenSubs = new Set<string>();
       if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) throw new UnreadListError("Stripe answered a customer with no id that can be read");
       let after = "";
       for (;;) {
         if (pages === STRIPE_PAGES) throw new UnreadListError(`more than ${STRIPE_PAGES} Stripe pages for one address's memberships`);
         pages += 1;
-        const query = `customer=${encodeURIComponent(customer.id)}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
-        const subs = page(await onAccount("GET", account, `/subscriptions?${query}`, undefined, API_VERSION), "memberships");
+        const query = `customer=${encodeURIComponent(customer.id)}&status=all&limit=${MEMBERSHIPS_PER_PAGE}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
+        const subs = page(await onAccount("GET", account, `/subscriptions?${query}`, undefined, API_VERSION), "memberships", MEMBERSHIPS_PER_PAGE, SUB_PATTERN, seenSubs);
         for (const sub of subs.rows) {
           const row = readMemberSub(sub, handles);
           if (row) out.push(row);
@@ -154,11 +190,18 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   const sub = subs.find((s) => s.id === subscription);
   if (!sub) return { ok: false, reason: "not_member" };
   if (sub.discounted) return { ok: false, reason: "discounted" };
-  const codes = await listCodes(account);
-  if (codes.state !== "ok") return { ok: false, reason: "stripe" };
-  if (!codes.codes.some((c) => c.id === promotion && c.active)) return { ok: false, reason: "code" };
+  // That one code, asked for by its id, so it is found on any page of the
+  // list; only Stripe's "no such code" or a code switched off is "code".
+  const code = await findCode(account, promotion);
+  if (code.state === "error") return { ok: false, reason: "stripe" };
+  if (code.state === "none" || !code.active) return { ok: false, reason: "code" };
   try {
-    await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    const row = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    // Applied only on Stripe's answer for this membership, its own id, showing a discount on it (rule 30, DISC-C-3):
+    // any other answer is not known to have put it on, so the creator is never told the renewals are discounted.
+    if (!row || !Object.hasOwn(row, "id") || row.id !== subscription) return { ok: false, reason: "stripe" };
+    // Read as the member list reads it (hasDiscount): a discount that does not read throws, and is "stripe" below.
+    if (!hasDiscount(row)) return { ok: false, reason: "stripe" };
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.

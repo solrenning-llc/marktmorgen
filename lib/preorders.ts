@@ -6,7 +6,7 @@
  *   nl:pre:pi:<payment>           string  "<store>|<product>|<checkout>", so a refund finds its pre-order
  *   nl:pre:<store>:any            string  present once the store has taken a pre-order
  *   nl:pre:<store>:refunds        string  how far the refunds were read for pre-orders
- *   nl:pre:<store>:seen           set     refunds already handled
+ *   nl:pre:<store>:seen           set     refunds already handled, thirty days from the last
  *   nl:pre:jobs                   set     "<store>|<product>|<handle>": products put on sale with pre-orders to hand over
  *
  * <store> is the store's statsId, which stays through a change of handle.
@@ -55,6 +55,10 @@ const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
  */
 export const PREORDER_REFUND_PAGES_PER_STORE = 3;
 const seenKey = (sid: string) => `nl:pre:${sid}:seen`;
+/** The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts): each mark
+ * gives the set its expiry again. Past it a row is only read again, and handling it again changes nothing (the record
+ * it took back is marked revoked and kept on its own). */
+const SEEN_KEEP_SECONDS = 30 * 86_400;
 /** Where a pass over the refunds stands between runs (revokeRefundedPreorders), in the store's nl:pre: keys (erased with it). */
 const passKey = (sid: string) => `nl:pre:${sid}:refunds:pass`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
@@ -120,7 +124,10 @@ function heldAt(refund: Record<string, unknown>): number | null {
 /** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
 /** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
-const markRead = async (sid: string, id: string): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+const markRead = async (sid: string, id: string): Promise<boolean> => {
+  const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
+  return !!marked && oneWrite(marked[0]) && marked[1] === 1;
+};
 const giveKey = (session: string) => `nl:pre:give:${session}`;
 const JOBS = "nl:pre:jobs";
 /** How long a pre-order is kept after it was last changed: past any refund window, as a gift is. */
@@ -257,15 +264,33 @@ export async function waitingCount(store: Store, productId: string): Promise<num
 /**
  * The product went on sale: its expected day is let go, and its pre-orders
  * still waiting are queued for the five-minute job to hand over
- * (runPreorderReleases).
+ * (runPreorderReleases). A count that cannot be read queues the job all the
+ * same, never "nobody waits": the job reads the pre-orders again and keeps
+ * itself in line until it can (sweep APP3). It still throws that unknown read
+ * afterwards (main's preorder-release-exact: a release is not left on a
+ * guess), so the caller says it was not done while the job is already in line.
+ * The job's SADD answered in another shape throws, so the caller says it was
+ * not done.
  */
 export async function queueRelease(store: Store, productId: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
-  const waiting = await waitingCount(store, productId);
-  await redisPipeline([
+  let waiting: number;
+  let unknown: UnknownReplyError | null = null;
+  try {
+    waiting = await waitingCount(store, productId);
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    console.error("could not read a product's pre-orders going on sale; its hand-over job is queued to read them again", error);
+    unknown = error;
+    waiting = Number.POSITIVE_INFINITY;
+  }
+  const queue = waiting > 0;
+  const replies = await redisPipeline([
     ["HDEL", dayKey(store.statsId), productId],
-    ...(waiting > 0 ? [["SADD", JOBS, `${store.statsId}|${productId}|${store.handle}`]] : []),
+    ...(queue ? [["SADD", JOBS, `${store.statsId}|${productId}|${store.handle}`]] : []),
   ]);
+  if (queue && !oneWrite(repliesFor(replies, 2)?.[1])) throw new UnknownReplyError("a pre-order hand-over job");
+  if (unknown) throw unknown;
 }
 
 // ------------------------------------------------------------------ one pre-order
@@ -465,8 +490,16 @@ async function sendOut(store: Store, product: Listing, to: string, deps: HandOve
 /** The receipt: what was pre-ordered, what it cost, and the day it is expected. */
 async function sendReceipt(store: Store, product: Listing, session: Session, to: string, reference: string, day: string | null, deps: HandOverDeps, idempotencyKey?: string): Promise<boolean> {
   const p = preorderWords(store.language);
-  const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else sends nothing and answers false, never the catalog's current price or the
+  // store's own currency: the confirmation lets its mark go (confirmPreorderOnce) and a later pass, reading the
+  // checkout again, sends the receipt under the same idempotency key.
+  const amount = session.amount_total;
+  const currency = session.currency;
+  if (!Number.isSafeInteger(amount) || Number(amount) < 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
+    console.error("a pre-order's receipt waits: the amount charged is unknown");
+    return false;
+  }
   const said = speech(store);
   return sendEmail({ meter: { by: "order" },
     from: deps.from,
@@ -476,7 +509,7 @@ async function sendReceipt(store: Store, product: Listing, session: Session, to:
       p.receiptLead(store.name),
       "",
       p.receiptWhat(product.title),
-      p.receiptPaid(formatMoney(amount, currency, said.lang.locale)),
+      p.receiptPaid(formatMoney(Number(amount), currency, said.lang.locale)),
       p.receiptRef(reference),
       ...consentEmailLines(store, session.metadata),
       "",
@@ -748,7 +781,9 @@ export async function revokeRefundedPreorders(
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`);
+      const latest = now() + 300;
+      return readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
     } catch (error) {
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading refunds for pre-orders: a page in another shape", error);

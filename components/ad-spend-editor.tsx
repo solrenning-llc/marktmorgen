@@ -45,7 +45,16 @@ const REASONS: Record<string, string> = {
   channel: "Choose where the ad ran.",
   amount: "Type what you spent, more than zero.",
   days: "Check the days: the first before the last, not in the future, and no more than 400 days apart.",
+  // A removal the server could not confirm: the line may still be saved and counted.
+  unconfirmed: "We could not confirm this line was removed. It may still count. Try again.",
 };
+
+/** What the editor says while saved entries cannot be read (lib/ad-spend.ts, UnreadableSpendsError): never a guessed amount. */
+function unreadableWords(count: number): string {
+  return count === 1
+    ? "1 saved entry could not be read, so its amount is unknown. Until it is removed, nothing new can be added and the figures that use ad spend are incomplete."
+    : `${count} saved entries could not be read, so their amounts are unknown. Until they are removed, nothing new can be added and the figures that use ad spend are incomplete.`;
+}
 
 /** "October 13", for a day in UTC. */
 function longDay(seconds: number): string {
@@ -145,10 +154,12 @@ function MetaAds({
             {read?.problem === "currency"
               ? `Not read: this ad account pays in ${meta.account.currency.toUpperCase()} and your store sells in ${meta.currency.toUpperCase()}, and no exchange rate is guessed.${meta.accounts.length > 1 ? " Choose an account in your store's currency below." : ""}`
               : read?.day
-                ? `Read ${longDay(read.at)}: ${money(read.cents)} over the last 30 days${read.campaigns ? `, ${read.campaigns === 1 ? "1 campaign" : `${read.campaigns} campaigns`}` : ""}.${meta.readPaused ? ` ${READ_PAUSED}` : " Read again once a day."}${!meta.readPaused && read.problem ? " The last try did not reach Meta; it tries again within a few hours." : ""}`
+                ? `Read ${longDay(read.at)}: ${money(read.cents)} over the last 30 days${read.campaigns ? `, ${read.campaigns === 1 ? "1 campaign" : `${read.campaigns} campaigns`}` : ""}.${meta.readPaused ? ` ${READ_PAUSED}` : " Read again once a day."}${!meta.readPaused && read.problem === "big" ? " The last try found more ad lines over 30 days than one reading can take; it tries again tomorrow." : !meta.readPaused && read.problem ? " The last try did not reach Meta; it tries again within a few hours." : ""}`
                 : meta.readPaused
                   ? READ_PAUSED
-                  : read?.problem
+                  : read?.problem === "big"
+                    ? "Not read yet: this ad account has more ad lines over 30 days than one reading can take. It tries again tomorrow."
+                    : read?.problem
                     ? "Meta could not be read yet; it tries again within a few hours."
                     : "Read for the first time within the hour."}
           </p>
@@ -253,20 +264,25 @@ export function AdSpendEditor({
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
   const [busy, setBusy] = useState(false);
+  // Saved entries that could not be read, as the server counted them; removed only by their keys, on the creator's word.
+  const [unreadable, setUnreadable] = useState(0);
   const money = (cents: number) => formatMoney(cents, currency);
 
   async function send(body: Record<string, unknown>, done: string) {
     setBusy(true);
     try {
       const response = await fetch("/api/store/spend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; spends?: AdSpend[]; spendsUnread?: boolean; error?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; spends?: AdSpend[]; spendsUnread?: boolean; error?: string; unreadable?: unknown };
       if (answer.ok && answer.spends) {
         onChange(answer.spends, answer.spendsUnread === true);
         setMetaUnread(answer.spendsUnread === true);
+        setUnreadable(0);
         toast(done);
         return true;
       }
-      toast(REASONS[answer.error ?? ""] ?? "That did not save. Try again.");
+      const count = typeof answer.unreadable === "number" && Number.isSafeInteger(answer.unreadable) && answer.unreadable > 0 ? answer.unreadable : 0;
+      setUnreadable(count);
+      toast(count ? "That did not save, because a saved entry could not be read. See the note in this section." : (REASONS[answer.error ?? ""] ?? "That did not save. Try again."));
     } catch {
       toast("That could not be confirmed. Check your connection and try again without changing anything.");
     } finally {
@@ -304,6 +320,14 @@ export function AdSpendEditor({
         <p className="mt-2 text-xs text-ink" role="status" data-meta-unread>
           {META_UNREAD}
         </p>
+      ) : null}
+      {unreadable ? (
+        <div className="mt-2 text-xs text-ink" role="status" data-spend-unreadable>
+          <p>{unreadableWords(unreadable)}</p>
+          <button type="button" className="btn btn-secondary btn-sm mt-2" disabled={busy} onClick={() => void send({ action: "remove-unreadable" }, "Removed.")}>
+            {unreadable === 1 ? "Remove the entry that could not be read" : "Remove the entries that could not be read"}
+          </button>
+        </div>
       ) : null}
       {overlap.length ? (
         <p className="mt-2 text-xs text-ink" role="status">

@@ -1034,7 +1034,7 @@ export function StatsPanel({
       {beside ? <BesideStores band={beside.band} rows={beside.rows} /> : null}
 
       {range !== "all" && salesKnown && data.discounts?.rows ? (
-        <DiscountImpact rows={data.discounts.rows} refundsRead={data.discounts.refundsRead} currency={data.currency ?? "usd"} />
+        <DiscountImpact rows={data.discounts.rows} refundsRead={data.discounts.refundsRead} currency={data.currency ?? "usd"} elsewhere={data.discounts.elsewhere ?? []} codes={data.discounts.codes ?? []} />
       ) : null}
 
       {channels.length ? (

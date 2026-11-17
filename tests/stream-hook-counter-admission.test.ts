@@ -16,7 +16,7 @@ function request(raw = body, ip = "198.51.100.1", valid = true) {
   return new Request("https://example.com/api/stream/hook", { method: "POST", headers: { "x-forwarded-for": ip, "x-bunnystream-signature-version": "v1", "x-bunnystream-signature-algorithm": "hmac-sha256", "x-bunnystream-signature": valid ? signature : "0".repeat(64) }, body: raw }) as NextRequest;
 }
 async function main() {
-  for (const [label, reply] of [["missing", undefined], ["empty", []], ["partial", ["OK"]], ["extra", ["OK", 1, true]], ["numeric text", ["OK", "1"]], ["null", ["OK", null]], ["zero", ["OK", 0]], ["negative", ["OK", -1]], ["fraction", ["OK", 0.5]], ["unknown SET", [false, 1]]] as [string, unknown][]) {
+  for (const [label, reply] of [["missing", undefined], ["empty", []], ["partial", [1]], ["extra", [1, 1, true]], ["numeric text", ["1", 1]], ["null", [null, 1]], ["zero", [0, 1]], ["negative", [-1, 1]], ["fraction", [0.5, 1]], ["unknown EXPIRE", [1, false]]] as [string, unknown][]) {
     await check(`unknown ${label} stops before video and caption helpers`, async () => {
       reset(); state.inject = true; state.reply = reply;
       const response = await POST(request());
@@ -37,13 +37,13 @@ async function main() {
     assert.equal((await POST(request())).status, 429);
     assert.deepEqual([state.heard, state.captions], [600, 600]);
     const hash = createHash("sha256").update("nimbus-stream-hook:198.51.100.1").digest("hex").slice(0, 32);
-    assert.deepEqual(state.commands[0], ["SET", `nl:rl:stream-hook:${hash}`, "0", "EX", 60, "NX"]);
-    assert.deepEqual(state.commands[1], ["INCR", `nl:rl:stream-hook:${hash}`]);
+    assert.deepEqual(state.commands[0], ["INCR", `nl:rl:stream-hook:${hash}`]);
+    assert.deepEqual(state.commands[1], ["EXPIRE", `nl:rl:stream-hook:${hash}`, 60, "NX"]);
     redis.advance(61000);
     assert.equal((await POST(request())).status, 200);
   });
-  await check("confirmed null SET acknowledgement is a valid existing key", async () => {
-    reset(); state.inject = true; state.reply = [null, 1];
+  await check("an EXPIRE NX answered 0 (the window already had its expiry) is a valid existing key", async () => {
+    reset(); state.inject = true; state.reply = [1, 0];
     assert.equal((await POST(request())).status, 200);
     assert.deepEqual([state.commands.length, state.heard, state.captions], [2, 1, 1]);
   });

@@ -61,7 +61,7 @@ import { readListing, readListings } from "@/lib/catalog";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { cartable, readCartIds } from "@/lib/cart-rules";
 import { cartWords } from "@/lib/buyer-words/cart";
-import { saleOff, salePrice } from "@/lib/store-sale";
+import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { cartAskIds } from "@/lib/checkout-ask-cart";
 import type { Listing } from "@/lib/store";
 import { membershipLine, speech } from "@/lib/buyer-words";
@@ -99,6 +99,8 @@ const who = (email: string) => sha(`nimbus-recover:${normaliseEmail(email)}`).sl
 const sentKey = (session: string) => `nl:recover:sent:${session}`;
 const onceKey = (statsId: string, email: string, product: string) =>
   `nl:recover:once:${statsId}:${sha(`nimbus-recover-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
+/** That address's stop on checkout reminders, for the person's copy to read (lib/person-copy.ts). */
+export const recoveryStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:recover:off:${statsId}:${who(email)}`;
 /** What a reminder's stop mark can keep for good, counted in the store's data room before it is sent. */
 export const RECOVER_TRACE_BYTES = 192;
@@ -231,8 +233,9 @@ async function paidSince(store: Store, email: string, productIds: string[], sinc
   const paid = rows.some(
     (row) => isSettled(row) && handles.has(row.metadata?.store ?? "") && bought(row).some((id) => id && productIds.includes(id)),
   );
-  // A page cut short is not "not paid", as lib/discount.ts codesMayTakeOff reads Stripe's lists.
-  if (!paid && listed.has_more === true) throw new Error("Stripe answered an address's checkouts cut short");
+  // A page cut short is not "not paid", as lib/discount.ts codesMayTakeOff reads Stripe's lists; and only a boolean
+  // has_more: false says the list ended (#4425): absent or in another shape is not known to be whole, never "not paid".
+  if (!paid && listed.has_more !== false) throw new Error("Stripe answered an address's checkouts cut short or not known to be whole");
   return paid;
 }
 
@@ -283,6 +286,19 @@ async function someLeftOrUnlimited(store: Store, product: Listing): Promise<bool
     () => undefined,
   );
   return left !== undefined && left !== 0;
+}
+
+/** A list row read as a contact only when it is a JSON object whose `unsub`, when present, is true or false; else null. */
+function contactExact(raw: string): ReturnType<typeof parseContact> {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if ("unsub" in value && typeof (value as { unsub?: unknown }).unsub !== "boolean") return null;
+  return parseContact(raw);
 }
 
 /**
@@ -500,6 +516,9 @@ async function deliver(
   if (erased) return "skip";
   // Someone who left the creator's list has said no to their email, and a
   // reminder is their email.
+  // A contact text that does not read as a contact is unknown (rule 24), never "has not left the list"
+  // (tests/recovery-marks-exact.test.ts), as the review requests and product updates read it.
+  if (store.listId && typeof contact === "string" && contactExact(contact) === null) throw new UnknownReplyError("the list contact for the checkout reminder");
   if (store.listId && parseContact(contact)?.unsub) return "skip";
 
   if (await paidSince(store, email, ids, how.since)) {
@@ -604,8 +623,9 @@ async function deliver(
     } else {
     const product = about.product;
     // The price as the store page says it: the floor of a price the buyer
-    // chooses, and a membership's trial and set number of payments with it.
-    const price = money(fromPriceCents(product));
+    // chooses, and a membership's trial and set number of payments with it;
+    // during a store-wide sale, its sale price, as the cart's reminder says it (DISC-S-2).
+    const price = money(salePrice(fromPriceCents(product), saleOff(store.sale, product, saleClock())));
     const from = (said: string) => (product.options.length > 1 ? w.fromPrice(said) : said);
     const priceWords = activePwyw(product)
       ? g.youChoosePrice(money(product.priceCents))

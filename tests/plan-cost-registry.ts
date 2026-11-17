@@ -65,7 +65,7 @@ import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
-import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
@@ -1539,9 +1539,12 @@ export const COST_LINES: CostLine[] = [
   {
     id: "workflows",
     feature: "Workflow runs (#507)",
-    monthlyUsd: (tier) => DAILY_RUNS_BY_TIER[tier] * DAY_WINDOWS * WORST_COMMANDS_PER_RUN * COMMAND,
-    sources: [{ file: "lib/flow-limits.ts", names: ["DAILY_RUNS_BY_TIER", "WORST_COMMANDS_PER_RUN", "TRIAL_DAILY_RUNS", "ACTIVE_FLOWS_BY_TIER", "WORKFLOW_LIMITS"] }],
-    basis: "Every new run of every UTC day a billing month touches (32) at the run ceiling of commands. Steps run in the five-minute job, whose time the schedule bounds (a company fixed cost); emails and the owner's notices come out of the monthly emails.",
+    // The five-minute job's look for steps parked for room at Amazon SES (SES_WAKE_JOB_COMMANDS, every run of every day a
+    // billing month touches) is a company cost; until it has a line of its own it is priced whole on every plan that can
+    // run workflows, and so park a step (#4246). A plan with no runs a day parks nothing.
+    monthlyUsd: (tier) => (DAILY_RUNS_BY_TIER[tier] * WORST_COMMANDS_PER_RUN + (DAILY_RUNS_BY_TIER[tier] > 0 ? SES_WAKE_JOBS_PER_DAY * SES_WAKE_JOB_COMMANDS : 0)) * DAY_WINDOWS * COMMAND,
+    sources: [{ file: "lib/flow-limits.ts", names: ["DAILY_RUNS_BY_TIER", "WORST_COMMANDS_PER_RUN", "TRIAL_DAILY_RUNS", "ACTIVE_FLOWS_BY_TIER", "WORKFLOW_LIMITS", "SES_WAKE_JOBS_PER_DAY", "SES_WAKE_JOB_COMMANDS"] }],
+    basis: "Every new run of every UTC day a billing month touches (32) at the run ceiling of commands, and the scheduled mail job's look for steps parked for room at Amazon SES, every run of every such day, priced whole on each plan that can run workflows (a company cost with no line of its own yet; a plan with no runs a day parks nothing). Steps run in the five-minute job, whose time the schedule bounds (a company fixed cost); emails and the owner's notices come out of the monthly emails.",
   },
   {
     id: "imports",

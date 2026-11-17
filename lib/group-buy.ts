@@ -1340,7 +1340,10 @@ export async function revokeRefundedGroups(
     if (from) query.set("starting_after", from);
     try {
       const raw = await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION);
-      const page = readStripePage(raw, refundRowKnown);
+      const latest = now() + 300;
+      const timeInWindow = (created: unknown): created is number =>
+        typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= latest;
+      const page = readStripePage(raw, (row) => timeInWindow(ownField(row, "created")) && refundRowKnown(row));
       // A page that read is a plain object whose own data is a list: its rows are looked at again, slot by slot.
       const data = ownField(raw as Record<string, unknown>, "data") as unknown[];
       const readable = new Set<unknown>(page.rows);
@@ -1354,7 +1357,7 @@ export async function revokeRefundedGroups(
         if (readable.has(row)) continue;
         const created = plainObject(row) ? ownField(row, "created") : undefined;
         // A time Stripe could have given this list (inside its window, not ahead of now); otherwise the pass's start.
-        const at = typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= now() + 300 ? created : since + 300;
+        const at = timeInWindow(created) ? created : since + 300;
         holdAt = holdAt === null ? at : Math.min(holdAt, at);
       }
       const last = data.length > 0 ? slot(data.length - 1) : undefined;

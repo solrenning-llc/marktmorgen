@@ -64,7 +64,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const ADDRESS = "1 Main St, Portland, OR 97201";
 const JOBS = "nl:wl:jobs";
 const people = ["dana@example.com", "hal@example.com"];
-const place = (i: number, ok: number, c = false) => JSON.stringify({ at: 1, ok, c, t: String(i).repeat(48) });
+// A place as joinWaitlist writes it since #2576 (w: 1, its room counted at its join).
+const place = (i: number, ok: number, c = false) => JSON.stringify({ at: 1, ok, c, t: String(i).repeat(48), w: 1 });
 const ownerKey = (email: string) => `nl:store:owner:${createHash("sha256").update(`nimbus-store:${email.toLowerCase()}`).digest("hex").slice(0, 40)}`;
 
 let stores = 0;

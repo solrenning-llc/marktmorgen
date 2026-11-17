@@ -15,7 +15,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
+import { type DataStore, countData, dataKey, giveData, noteData, takeData } from "@/lib/store-data";
 import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -213,20 +213,22 @@ export async function joinWaitlist(input: {
     const asked = Boolean(before.c) || consent;
     // How its link was counted stays with the place (WaitEntry.w): an older place is never counted again as a new one.
     const value = JSON.stringify({ at: before.at, ok: before.ok, c: asked, ...(asked && (before.k || (consent && input.clicks)) ? { k: true } : {}), t, ...(before.w ? { w: 1 } : {}) } satisfies WaitEntry);
+    // Its growth counted before it is written (countEntryGrowth): a count not confirmed writes nothing, and a link to
+    // confirm this request already wrote goes, as for a place that does not read.
+    const grown = await countEntryGrowth(store, sid, product.id, email, existing, value);
+    if (grown === null) {
+      if (mustExist) await redisPipeline([["DEL", tokenKey(confirm)]]);
+      return "error";
+    }
     await links(t);
     lastLink = t;
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
+    await settleEntryWrite(store, product.id, grown, swapped);
     if (swapped === 1) {
-      await settleEntry(store, sid, product.id, email, existing, value);
       leave = t;
       break;
     }
-    if (swapped !== 0) {
-      // Not known whether it was written: what it would grow by is counted, never given back, and it reads again.
-      await noteGrowth(store, sid, product.id, email, existing, value);
-      mustExist = true;
-      continue;
-    }
+    // Not known whether it was written: what was counted for it stays, never given back, and it reads again.
     mustExist = true;
   }
   if (!leave) {
@@ -342,14 +344,17 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
       break;
     }
     const next = JSON.stringify({ ...read, ok: now() });
+    // Its growth counted before it is written (countEntryGrowth): a count not confirmed writes nothing, and the press
+    // is said not done, so it is pressed again.
+    const grown = await countEntryGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
+    if (grown === null) return { ok: false };
     const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, next, raw as string]]);
+    // Written: a shrink goes back; an exact 0: what was counted goes back; anything else may have landed: it stays.
+    await settleEntryWrite(store, grant.p, grown, written);
     if (written === 1) {
-      await settleEntry(store, grant.s, grant.p, grant.e, raw as string, next);
       entry = read;
       break;
     }
-    // Not known whether it was written (not an exact 0): what it would grow by is counted, never given back.
-    if (written !== 0) await noteGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
   }
   if (!entry) return { ok: false };
   if (entry.c && store.listId) {
@@ -375,18 +380,23 @@ export const LONGEST_HANDLE = 24;
 /**
  * What a place's link to leave is counted at, the same when it is taken and
  * whenever it is given back: as if the store had the longest handle, so a
- * store renamed afterwards never has more given back than was taken. A
- * place written before #2576 (no WaitEntry.w) took it with the store's real
- * handle, so it gives it back at the shortest (`handle` 0): never more than
- * it took, the room erring fuller (Codex N1, #2576).
+ * store renamed afterwards never has more given back than was taken.
  */
-const leaveBytes = (sid: string, productId: string, email: string, token: string, handle = LONGEST_HANDLE) =>
-  dataBytes([tokenKey(token), JSON.stringify({ s: sid, h: "x".repeat(handle), p: productId, e: email, k: "leave" } satisfies TokenGrant)], 1);
+const leaveBytes = (sid: string, productId: string, email: string, token: string) =>
+  dataBytes([tokenKey(token), JSON.stringify({ s: sid, h: "x".repeat(LONGEST_HANDLE), p: productId, e: email, k: "leave" } satisfies TokenGrant)], 1);
 
-/** What one place, as it is kept, gives back when it goes: itself and its link to leave. */
+/**
+ * What one place, as it is kept, gives back when it goes: itself and its link to leave. A place written before #2576
+ * (no WaitEntry.w) stays counted and gives back nothing, as a community member without its room's origin does
+ * (lib/community.ts): main counted it only at its join, with its link at the store's real handle, and its confirmation
+ * and asking again rewrote it without counting what it grew by, so what it holds now was never what the slot holds for
+ * it (Codex N1, and Claude 6's MEDIUM on #2576). The room only errs fuller.
+ */
 function placeBytes(sid: string, productId: string, email: string, raw: string): number {
   const entry = parseEntry(raw);
-  return dataBytes([email, raw], 1) + (entry ? leaveBytes(sid, productId, email, entry.t, entry.w ? LONGEST_HANDLE : 0) : 0);
+  // A place that does not read held no link counted, and was counted as it is (#4792), as before.
+  if (!entry) return dataBytes([email, raw], 1);
+  return entry.w ? dataBytes([email, raw], 1) + leaveBytes(sid, productId, email, entry.t) : 0;
 }
 
 /**
@@ -410,7 +420,8 @@ async function takeList(room: DataStore, sid: string, productId: string, at = Da
   const freed = places.reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
   const kept = places.reduce((sum, [email, raw]) => {
     const entry = parseEntry(raw);
-    return sum + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
+    // An older place's link stays counted in the slot (placeBytes), so it is not counted again here.
+    return sum + (entry?.w ? leaveBytes(sid, productId, email, entry.t) : 0);
   }, 0);
   if (freed > 0) await giveData(room, [{ slot: waitSlot(productId), bytes: freed }], at);
   if (kept > 0) await noteData(room, [{ until: at + WAIT_SECONDS * 1000, bytes: kept }], at);
@@ -418,21 +429,26 @@ async function takeList(room: DataStore, sid: string, productId: string, at = Da
 }
 
 /**
- * Counts what rewriting a place changed (confirmed, or asked again with the
- * boxes checked), as it is and never refused, so the room always holds what
- * each place weighs and a deletion gives back exactly that.
+ * What rewriting a place (confirmed, or asked again with the boxes checked) grows it by, counted BEFORE it is written,
+ * never refused (Claude 6's MEDIUM on #2576, as lib/contacts.ts countOrderWrite): counted after, with noteData, a lost
+ * count left the growth stored and never counted, and every later give-back returned it. null when the count is not
+ * confirmed: nothing is written, the slot erring fuller if it landed after all. A store with no room key has nothing to
+ * count.
  */
-/** A change of a place that may or may not have been written: its growth is counted, a shrink is never given back. */
-async function noteGrowth(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
+async function countEntryGrowth(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<number | null> {
   const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
-  if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
+  if (grown > 0 && dataKey(store) && !(await countData(store, [{ slot: waitSlot(productId), bytes: grown }])).ok) return null;
+  return grown;
 }
 
-async function settleEntry(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
-  // Its link to leave too: a place that could not be read held none counted.
-  const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
-  if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
-  else if (grown < 0) await giveData(store, [{ slot: waitSlot(productId), bytes: -grown }]);
+/**
+ * After that write, by its exact answer: written (1), what a place shrank by goes back; not written (0), what was
+ * counted for it goes back; any other answer may have landed, so what was counted stays and a shrink is never given
+ * back.
+ */
+async function settleEntryWrite(store: DataStore, productId: string, grown: number, written: unknown): Promise<void> {
+  const back = written === 1 ? -grown : written === 0 ? grown : 0;
+  if (back > 0 && dataKey(store)) await giveData(store, [{ slot: waitSlot(productId), bytes: back }]);
 }
 
 /**
@@ -786,7 +802,8 @@ async function holdLaunch(room: DataStore, sid: string, pid: string, member: str
   const freed = places.reduce((sum, [email, raw]) => sum + placeBytes(sid, pid, email, raw), 0);
   const kept = places.reduce((sum, [email, raw]) => {
     const entry = parseEntry(raw);
-    return sum + (entry ? leaveBytes(sid, pid, email, entry.t) : 0);
+    // An older place's link stays counted in the slot (placeBytes), so it is not counted again here.
+    return sum + (entry?.w ? leaveBytes(sid, pid, email, entry.t) : 0);
   }, 0);
   if (freed > 0) await giveData(room, [{ slot: waitSlot(pid), bytes: freed }], at * 1000);
   if (kept > 0) await noteData(room, [{ until: at * 1000 + WAIT_SECONDS * 1000, bytes: kept }], at * 1000);

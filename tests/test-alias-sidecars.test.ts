@@ -80,6 +80,20 @@ try {
     writeFileSync(join(here, "aliases", "zz-sim-broken.test.ts.json"), "{ not json");
     is("a file that does not parse is refused", thrown(() => testAliases("zz-sim-broken.test.ts", root, here)) !== "", true);
   }
+
+  part("#3717's test keeps its alias in its own file, never in the central list (Codex U's LOW on #3717)");
+  {
+    const central = readFileSync(join(root, "tests/test-config.mjs"), "utf8");
+    is("the central list does not name purchase-move-podcast.test.ts", central.includes("purchase-move-podcast.test.ts"), false);
+    let own: unknown = null;
+    try {
+      own = JSON.parse(readFileSync(join(root, "tests/aliases/purchase-move-podcast.test.ts.json"), "utf8"));
+    } catch {
+      own = null;
+    }
+    is("its own file gives next/headers the shared stand-in", own, { "next/headers": "security/next-headers.ts" });
+    is("and the test gets the same stand-in as before", (testAliases("purchase-move-podcast.test.ts", root, join(root, "tests")) as Record<string, string>)["next/headers"], join(root, "tests/security/next-headers.ts"));
+  }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

@@ -241,18 +241,26 @@ async function applyWarning(
 ): Promise<Outcome> {
   const id = idOf(warning.id);
   if (known === "final" || known === "unmatched") return "skipped";
+  // Only the booleans are known states (Codex U, Claude 3 on #4168, MEDIUM): a missing or other-shaped `actionable`
+  // read as "not actionable" would end the subscription with no refund and close the warning as final, so the
+  // payment the issuer flagged would never go back. Not acted on; read again next run.
+  if (typeof warning.actionable !== "boolean") throw new Error("the warning's actionable state could not be read");
+  const charge = chargeOf(warning);
+  // A charge not expanded or not readable: not acted on, read again next run.
+  if (!charge) throw new Error("the warning's charge could not be read");
   // Already decided: refund what may still be left and end the subscription, whatever the warning says now.
   if (known?.startsWith("act:")) {
     const subscription = decidedSubscription(known);
     if (!subscription) throw new Error("the stored early fraud warning decision is invalid");
+    // The decision acts only on the subscription that made this warning's own charge (Codex U, Codex X2, Claude 3 on
+    // #4168, MEDIUM): a well-formed id of another one would refund this charge and end someone else's plan, or read
+    // a 404 as ended and close the warning while the real subscription keeps billing the flagged card.
+    if (charge.subscriptionId !== subscription) throw new Error("the stored early fraud warning decision names another subscription");
     return settle(id, warning, subscription, budget, deadline);
   }
   // A warning first seen when it is no longer actionable (disputed, or fully refunded, before we acted) goes the same
   // way: settle refunds only an actionable warning, so nothing is refunded, but the subscription that charged the card
   // the issuer called stolen still ends (review of #4168, second round, MEDIUM): otherwise the next renewal charges it again.
-  const charge = chargeOf(warning);
-  // A charge not expanded or not readable: not acted on, read again next run.
-  if (!charge) throw new Error("the warning's charge could not be read");
   if (!SUBSCRIPTION_ID.test(charge.subscriptionId)) {
     await remember(id, "unmatched");
     return "unmatched";

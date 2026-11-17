@@ -347,6 +347,27 @@ const WALK_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
  */
 const affiliateSettledKey = (account: string, store: Store) => `nl:sweep:aff:${account}:${store.sid || store.handle}`;
 /**
+ * The settled checkouts written with their trim and their expiry in one script (Codex X4's MEDIUM on #4413): as three
+ * commands of a pipeline, a ZADD that went through with its EXPIRE lost left the ids kept for good, and the next run,
+ * finding them settled, never wrote the expiry again. The script's reply is how many ids it was given; any other reply
+ * is unknown. KEYS[1] the set; ARGV[1] the score (the second it was settled), ARGV[2] how long it is kept, then the ids.
+ */
+export const KEEP_AFFILIATE_SETTLED = `-- marktmorgen:sweep-affiliate-settled:v1
+local at = ARGV[1]
+local keep = tonumber(ARGV[2])
+local scored = {}
+for i = 3, #ARGV do
+  scored[#scored + 1] = at
+  scored[#scored + 1] = ARGV[i]
+end
+redis.call("ZADD", KEYS[1], unpack(scored))
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", tonumber(at) - keep - 1)
+redis.call("EXPIRE", KEYS[1], keep)
+return #ARGV - 2`;
+/** A score the settled set holds: the whole second it was written, as Redis gives it back (text) or a stand-in (number). */
+const settledScore = (score: unknown): boolean =>
+  (typeof score === "string" && /^\d{1,12}$/.test(score)) || (typeof score === "number" && Number.isSafeInteger(score) && score >= 0);
+/**
  * A walk that has taken longer than this to reach the end of the day's checkouts is said in the log, every run it
  * goes on: an order paid in the last part of its checkout's day may then be read late, or leave the day before the
  * walk reaches it (an hour is twelve runs, at most 3,600 sessions of one kind, when the store is reached every run).
@@ -569,7 +590,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         .catch(() => null);
       paid.forEach((row, i) => {
         const score = scores?.[i];
-        if (typeof score === "string" || typeof score === "number") settledBefore.add(row.id as string);
+        // Only a whole second, as written below; anything else is unknown and settles nobody (Codex X4's LOW on #4413).
+        if (settledScore(score)) settledBefore.add(row.id as string);
       });
     }
     if (affiliatesOn(store) && paid.some((row) => !settledBefore.has(row.id as string))) {
@@ -611,15 +633,16 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           }
         } else settledNow.push(id);
       }
-      // Written once the page's step is done; a write that fails leaves them unsettled, passed on again next run,
-      // where noteSession's writes (HSETNX) record nothing twice.
+      // Written once the page's step is done, with its trim and its expiry in one script (KEEP_AFFILIATE_SETTLED): a
+      // write that fails leaves them unsettled, passed on again next run, where noteSession's writes (HSETNX) record
+      // nothing twice; it can never leave them settled without the day's expiry.
       if (settledNow.length && settledKey) {
         const at = Math.floor(Date.now() / 1000);
-        await redisPipeline([
-          ["ZADD", settledKey, ...settledNow.flatMap((id) => [at, id])],
-          ["ZREMRANGEBYSCORE", settledKey, "-inf", at - CONFIRM_WITHIN_SECONDS - 1],
-          ["EXPIRE", settledKey, CONFIRM_WITHIN_SECONDS],
-        ]).catch((error) => console.error("noting the checkouts whose affiliate step is settled failed; read again next run", store.handle, describe(error)));
+        await redisPipeline([["EVAL", KEEP_AFFILIATE_SETTLED, 1, settledKey, at, CONFIRM_WITHIN_SECONDS, ...settledNow]])
+          .then((reply) => {
+            if (countOf(repliesFor(reply, 1)?.[0]) !== settledNow.length) throw new UnknownReplyError("the checkouts whose affiliate step is settled");
+          })
+          .catch((error) => console.error("noting the checkouts whose affiliate step is settled failed; read again next run", store.handle, describe(error)));
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered

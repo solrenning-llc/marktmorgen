@@ -13,6 +13,7 @@ import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { readBook } from "@/lib/affiliates";
 import { rememberBuyer } from "@/lib/affiliate-bond";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
+import { CONFIRM_WITHIN_SECONDS } from "@/lib/purchase-email";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
@@ -93,6 +94,43 @@ async function main(): Promise<void> {
   redis.pipeline = real as typeof redis.pipeline;
   is("the next pass reads no buyer's bond again for sessions already settled", bondReads, 0);
   is("and nothing failed", again.failed, 0);
+  const settledKey = `nl:sweep:aff:${store.stripeAccountId}:${store.sid || store.handle}`;
+  const ttlOf = async () => (await real([["TTL", settledKey]]))[0];
+  const kept = await ttlOf();
+  is("the settled checkouts are kept a day at most", typeof kept === "number" && kept > 0 && kept <= CONFIRM_WITHIN_SECONDS, true);
+
+  // Codex X4 on #4413 (MEDIUM): written as ZADD, trim and EXPIRE in one pipeline, a write that stopped after the ZADD
+  // left the ids settled with no expiry, and the next run, finding them settled, never wrote it again. The write that
+  // marks them is cut here after its first command; whatever it was, the ids must never be left without their expiry.
+  await real([["DEL", settledKey]]);
+  let cut = false;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    const first = batch[0];
+    const marks = first && ((first[0] === "ZADD" && first[1] === settledKey) || (first[0] === "EVAL" && first[3] === settledKey));
+    if (!cut && marks) {
+      cut = true;
+      await real([first]);
+      throw new Error("synthetic stop after the first command");
+    }
+    return real(batch);
+  }) as typeof redis.pipeline;
+  await sweepCheckouts(Date.now() + 20_000);
+  redis.pipeline = real as typeof redis.pipeline;
+  const after = await ttlOf();
+  is("a write cut after its first command never leaves the settled ids without their expiry", [cut, after === -2 || (typeof after === "number" && after > 0 && after <= CONFIRM_WITHIN_SECONDS)], [true, true]);
+
+  // Codex X4 on #4413 (LOW): only a whole second, as written, is a settled checkout; a reply in another shape settles
+  // nobody, so every paid checkout is passed on again (and noteSession's HSETNX writes nothing twice).
+  bondReads = 0;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    for (const c of batch) if (c[0] === "HGET" && String(c[1]) === `nl:aff:${statsId}:bond`) bondReads += 1;
+    if (batch.length === 1 && batch[0][0] === "ZMSCORE" && batch[0][1] === settledKey) return [batch[0].slice(2).map(() => "unknown")];
+    return real(batch);
+  }) as typeof redis.pipeline;
+  const odd = await sweepCheckouts(Date.now() + 20_000);
+  redis.pipeline = real as typeof redis.pipeline;
+  is("a score that is not a whole second settles nobody: every buyer's bond is read again", bondReads, many.length);
+  is("and still nothing failed or was written twice", [odd.failed, (await readBook(store)).lines.filter((l) => l.ref === BACK).length], [0, 1]);
   done();
 }
 

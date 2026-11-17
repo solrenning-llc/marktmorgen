@@ -217,6 +217,16 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/checkout-sweep.ts KEEP_AFFILIATE_SETTLED: the settled checkouts, their trim and their expiry, one write.
+        if (key.startsWith("-- marktmorgen:sweep-affiliate-settled:v1\n") && args[0] === "1" && args.length >= 5) {
+          const [, settled, at, keep, ...ids] = args;
+          if (!/^\d+$/.test(at) || !/^[1-9]\d*$/.test(keep) || ids.some((id) => !id)) throw new Error("ERR invalid settled checkouts");
+          this.run(["ZADD", settled, ...ids.flatMap((id) => [at, id])]);
+          this.run(["ZREMRANGEBYSCORE", settled, "-inf", String(Number(at) - Number(keep) - 1)]);
+          this.run(["EXPIRE", settled, keep]);
+          this.scriptCalls += 3;
+          return ids.length;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

@@ -36,7 +36,7 @@ import { KIND } from "@/lib/catalog";
 import {saleHandles,type Store} from "@/lib/store";
 import {pathGrowthMoney,type PathGrowthMoney} from "@/lib/path-growth-money";
 import { readLifeRecord, readPaidSales, readStoreRefunds, readsSales } from "@/lib/stats";
-import { paypalPaymentId, paypalRefundWatch, readPayPalRefundsDetail } from "@/lib/paypal-sales";
+import { paypalPaymentId, paypalRefundWatch, readPayPalRefundsDetail, readPayPalWatchLate } from "@/lib/paypal-sales";
 import { countLinks } from "@/lib/short-links";
 import { sellsInTestMode } from "@/lib/stripe-connect";
 import { type PathFacts, SOCIAL_SOURCES } from "@/lib/path-rules";
@@ -163,7 +163,9 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
   if (refunds !== null && livePayPal.length) {
     try {
       // PayPal's refunds in full, as its refund watch wrote them down; any it could not all read leaves the money unknown.
-      const read = await readPayPalRefundsDetail(store.statsId, since(livePayPal));
+      // With them, the orders the refund watch is late on: a sale whose blind mark or PayPal's word could not be written
+      // is put back late, so its refund state is not known now (Codex X4 on #3443).
+      const [read, late] = await Promise.all([readPayPalRefundsDetail(store.statsId, since(livePayPal)), readPayPalWatchLate(store.statsId, Math.floor(now / 1000))]);
       // A PayPal refund names its own payment, so one whose sale the path did not count gives nothing back of a sale it
       // did: it is left out, never taken off a Stripe sale that names no payment (Claude 6's L2 on #3443).
       const counted = new Set(livePayPal.map((s) => s.paymentIntent));
@@ -172,7 +174,7 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
       // leaves the money known. One of a sale it counts, or a reading cut short, leaves it unknown (cloud I's
       // MEDIUM 1 on #3443).
       const countedOrders = new Set(livePayPal.map((s) => String(s.row.id ?? "").replace(/^paypal:/, "")));
-      const unknown = read.cut || read.gone.some((order) => countedOrders.has(order));
+      const unknown = read.cut || late.cut || read.gone.some((order) => countedOrders.has(order)) || late.orders.some((order) => countedOrders.has(order));
       refunds = unknown ? null : [...refunds, ...own];
     } catch (error) {
       console.error("reading a store's PayPal refunds for its path failed", store.handle, error);

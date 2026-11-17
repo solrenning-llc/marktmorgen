@@ -111,7 +111,7 @@ import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_WATCH_BATCH } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
@@ -1003,9 +1003,14 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - ordersPerStoreRun: at most REFUND_WATCH_BATCH due orders read from it a run;
  * - payPalReadsPerOrderLook: one GET of the order's capture at PayPal each time it is looked at (inside the job's run
  *   deadline; no dated source here gives PayPal's price per API call, so it is an open gap, never zero);
- * - ownCommandsPerOrderLook: the paid record's GET, one write of the list (ZADD for the next look, or ZREM) and, when
- *   PayPal's word changes the record, its one SET XX (a partial refund's or a reversal's takenOff, or the blind mark
- *   taken off: the Path's money, #3443): 3;
+ * - ownCommandsPerOrderLook: the paid record's GET, one write of the list (ZADD for the next look, or ZREM) and at
+ *   most two SET XX of the paid record (the Path's money, #3443): PayPal's word when it changes the record (a partial
+ *   refund's or a reversal's takenOff, or the blind mark taken off), then the blind mark when a reversal's refund mark
+ *   is not known written: 4;
+ * - lateLooksPerOrderPerDayAtMost: a look whose word could not be written on the paid record puts the order back
+ *   already late (WATCH_LATE_SECONDS in lib/paypal-sales.ts, Codex X4 on #3443), so it is looked at on every run of
+ *   the five-minute job, 288 a day, for as long as the record cannot be written, instead of hourly; bounded still by
+ *   the job's REFUND_WATCH_BATCH orders a run;
  * - looksPerOrderPerDayAtMost: nextLook asks hourly the first week (24 a day), every six hours until day 30 (4 a day)
  *   and daily until PayPal's 180 days (looksPerOrderPerDayAfter30Days); a capture in a status not known here is asked
  *   daily until its paid record ends (daysWatchedAtMost, PAID_KEPT_SECONDS).
@@ -1019,7 +1024,8 @@ export const PAYPAL_REFUND_WATCH = {
   listReadsPerStoreRun: 1,
   ordersPerStoreRun: 25,
   payPalReadsPerOrderLook: 1,
-  ownCommandsPerOrderLook: 3,
+  ownCommandsPerOrderLook: 4,
+  lateLooksPerOrderPerDayAtMost: 288,
   looksPerOrderPerDayAtMost: 24,
   looksPerOrderPerDayAfter30Days: 1,
   daysWatchedAtMost: 400,
@@ -1119,10 +1125,12 @@ export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
  * Claude 6's M4 on #3443): its PayPal sales (readPaidSales: a range of PATH_SALE_PAGES hundred and one, then their
  * records in one MGET) and its PayPal refunds in full (readPayPalRefundsWithCoverage: a range of PAYPAL_REFUNDS_READ
  * and one with their scores, then their records in one MGET), each record at MAX_PAID_BYTES and each listed order
- * and score at 64 bytes. Four commands, read by a PayPal-only store as by one that also sells through Stripe.
+ * and score at 64 bytes. Four commands, read by a PayPal-only store as by one that also sells through Stripe. A fifth,
+ * since Codex X4's MEDIUM on #3443: the refund watch's late orders (readPayPalWatchLate, a range of REFUND_WATCH_BATCH
+ * and one, each listed order at 64 bytes), whose refund state is not known now.
  */
-export const PATH_PAYPAL_COMMANDS = 4;
-export const PATH_PAYPAL_BYTES = (PATH_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES + (PATH_SALE_PAGES * 100 + 1 + 2 * (PAYPAL_REFUNDS_READ + 1)) * 64;
+export const PATH_PAYPAL_COMMANDS = 5;
+export const PATH_PAYPAL_BYTES = (PATH_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES + (PATH_SALE_PAGES * 100 + 1 + 2 * (PAYPAL_REFUNDS_READ + 1) + REFUND_WATCH_BATCH + 1) * 64;
 export const PATH_READ = request("heavy", 26 + PATH_PAYPAL_COMMANDS, LIFE_WRITE_MAX * 96 + 20_480 + PATH_PAYPAL_BYTES) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
 /**

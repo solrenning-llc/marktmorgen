@@ -26,7 +26,7 @@ import { PATH_MONEY_SECONDS, readPathMoney, soldOf } from "@/lib/path-facts";
 import { parsePath, pathJson, readPath, startPath, visitPath } from "@/lib/path";
 import { readAnswers } from "@/lib/path-rules";
 import { payPalSale } from "@/lib/stats";
-import { captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
+import { WATCH_LATE_SECONDS, captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -293,7 +293,8 @@ async function main(): Promise<void> {
     await look(1);
     is("completed again: counted", await money(store), [2, 4400]);
 
-    // The write that would count it again is lost, its reply off its shape: the sale stays out, looked at again in an hour.
+    // The write that would count it again is lost, its reply off its shape: the sale stays out, and the order goes back
+    // already late (WATCH_LATE_SECONDS), looked at again on the next run (Codex X4 on #3443; it was an hour on before).
     ({ store, statsId } = await setup());
     captureRefused.set("CAPTURE1", 403);
     await look(1);
@@ -302,7 +303,7 @@ async function main(): Promise<void> {
     await look(1);
     lost = null;
     const score = Number(redis.run(["ZSCORE", `nl:ppsell:watch:${statsId}`, order(1)]));
-    is("the clearing write unknown: still not counted, asked again within the hour", [await money(store), score > now && score <= now + 3700], [[1, 1500], true]);
+    is("the clearing write unknown: still not counted, asked again on the next run", [await money(store), score <= Math.floor(Date.now() / 1000) + 60 - WATCH_LATE_SECONDS], [[1, 1500], true]);
   }
 
   part("Codex X4's MEDIUM: the blind mark not known written leaves the sale's money unknown, never counted");

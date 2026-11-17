@@ -77,7 +77,9 @@ export type PathRecord = {
 
 /**
  * The PayPal records one reading of the money moves at the most (Claude 6's M4 on #3443): PATH_SALE_PAGES hundred
- * sales (readPaidSales) and PAYPAL_REFUNDS_READ refunds (readPayPalRefundsWithCoverage), each at MAX_PAID_BYTES.
+ * sales (readPaidSales) and PAYPAL_REFUNDS_READ refunds (readPayPalRefundsWithCoverage), each at MAX_PAID_BYTES. The
+ * refund watch's late orders read with them (readPayPalWatchLate, Codex X4) are order ids only, priced in
+ * tests/plan-cost-registry.ts (PATH_PAYPAL_BYTES).
  */
 const PATH_PAYPAL_BYTES = (PATH_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
 /** Bytes of those records one studio request covers. */

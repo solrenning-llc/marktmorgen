@@ -369,6 +369,35 @@ async function main(): Promise<void> {
     }
   }
 
+  part("A reversal whose refund mark is not known written: the paid record's two writes are the watch line's own");
+  {
+    // Codex U (U-20261116-2208) on #3443: PayPal's word (takenOff) and then the blind mark are each one SET XX of the
+    // paid record in the same look; with the list reads, the GET, the list write and the marks, the whole look stays
+    // within the lines (PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook counts both writes).
+    await setup();
+    captures.set(CAPTURE, "REVERSED");
+    const sent: (string | number)[][] = [];
+    const original = redis.pipeline;
+    redis.pipeline = async (commands) => { sent.push(...commands); return original.call(redis, commands); };
+    try {
+      await answering("ZADD", `nl:ppsell:refunded:${SID}`, "garbled", () => watch());
+    } finally {
+      redis.pipeline = original;
+    }
+    const writes = sent.filter((c) => c[0] === "SET" && c[1] === `nl:ppsell:paid:${ORDER}` && c.includes("XX"));
+    const record = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${ORDER}`]))) as Record<string, unknown>;
+    is("two writes of the paid record: PayPal's word, then the blind mark", writes.length, 2);
+    is("the blind mark keeps PayPal's word written before it", [record.takenOff, typeof record.blind], ["REVERSED", "number"]);
+    const marks = new Set([`nl:ppsell:refunded:${SID}`, `nl:ppsell:reversed:${SID}`]);
+    const own = sent.filter((c) => !((c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))));
+    is(
+      "the whole look is within the lines' sum",
+      own.length <= PAYPAL_PENDING_SWEEP.listReadsPerStoreRun + PAYPAL_REFUND_WATCH.listReadsPerStoreRun + PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook
+        && sent.length - own.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost,
+      true,
+    );
+  }
+
   part("The refund seen twice, in the lasting record and in the set, counts once");
   await setup();
   captures.set(CAPTURE, "REFUNDED");

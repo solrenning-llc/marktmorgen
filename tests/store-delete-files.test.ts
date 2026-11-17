@@ -3,8 +3,9 @@
  * the pictures in its picture folder (images/<imageFolder>/: its links', its pages', its emails' pictures) and
  * whatever is left in its own folder (stores/<storeFolder>/: an upload never attached). Before, they stayed in the
  * file store for good: the store's record is gone, so no page, job or closing (lib/plan-closing.ts removeStored reads
- * the record first) ever finds them again, and they were kept, and paid for, for ever. A delete that fails goes to
- * the daily job that deletes uploads nobody keeps (sweepTaskUploads), never lost. Synthetic only.
+ * the record first) ever finds them again, and they were kept, and paid for, for ever. A folder that cannot be listed,
+ * or a delete that fails, puts the store in the daily line (lib/store-forget-retry.ts), which lists every folder
+ * again, never lost. Synthetic only.
  */
 import { NextRequest } from "next/server";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
@@ -60,12 +61,28 @@ async function main(): Promise<void> {
   if (!second.ok) throw new Error("no second extra store");
   const otherPicture = `images/${await imageFolder(storeRef(second.store))}/page-picture.webp`;
   files.set(otherPicture, 40_000);
+  // Claude 5's MEDIUM on #4348 @9f5c3bc5b2: a delete that failed handed each path, one by one, to the uploads sweep
+  // (a ZADD each, unpriced, its failure only logged) and still noted the store's files as seen to, so a round the
+  // walk started later never listed them again. Now the store goes in the line, with its community, which lists every
+  // folder again under its priced ceiling, and nothing is noted over files that are still there.
   state.failing = true;
   const failed = await deleteFromStudio(owner, "filesother", second.store.sid);
   state.failing = false;
   is("the store is still deleted", [failed.status, failed.headers.get("Location")?.includes("stores=deleted")], [303, true]);
+  const [handed, noted, queued] = (await redis.pipeline([
+    ["ZSCORE", "nl:tasks:doors", otherPicture],
+    ["HEXISTS", "nl:forget:files", second.store.sid],
+    ["HGETALL", "nl:forget:q"],
+  ])) as [string | null, number, string[]];
+  is(
+    "nothing is handed to the uploads sweep path by path, its files are not noted as seen to, and the store is in the line",
+    [handed, noted, queued.some((field) => field.endsWith(`|${second.store.sid}`))],
+    [null, 0, true],
+  );
   const swept = await sweepTaskUploads(deleteFile, Date.now() + 2 * 86_400_000);
-  is("its picture goes with the daily job", [swept.includes(otherPicture), files.has(otherPicture)], [true, false]);
+  is("the uploads sweep has nothing of it", swept.includes(otherPicture), false);
+  const again = await retryStoreForgets(Date.now() + 30_000);
+  is("the line's next try lists it again and deletes its picture", [again.done, files.has(otherPicture)], [1, false]);
 
   // Merge of main into #4348 (16 November 2026): a folder that cannot be listed at the delete was only said in the
   // log, and kept for good; it now puts the store in the daily line (lib/store-forget-retry.ts), which lists again.

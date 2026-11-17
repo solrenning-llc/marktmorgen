@@ -6,14 +6,17 @@
 import { NOT_ADVICE, type PolicyFactsInput, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { done, is, part } from "./check";
 
-const base: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: false, paypal: false, pixels: [], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
+const base: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: false, stripe: true, paypal: false, pixels: [], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
 const ids = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).map((s) => s.id);
 const text = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).flatMap((s) => s.sentences).join(" ");
 
-part("Who sells: always, with Stripe, and PayPal only when connected");
+part("Who sells: always; the money goes only into the accounts the store takes it with (Codex N1's MEDIUM on #1824)");
 is("the creator is the seller, Marktmorgen is not the merchant of record", text({}).includes("Harbor Kitchen is the seller") && text({}).includes("is not the merchant of record"), true);
-is("Stripe, not PayPal", [text({}).includes("own Stripe account"), text({}).includes("PayPal")], [true, false]);
-is("PayPal when connected", text({ paypal: true }).includes("its own PayPal account when you pay with PayPal"), true);
+const seller = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).find((s) => s.id === "seller")?.sentences ?? [];
+is("Stripe only: Stripe, not PayPal", seller({ stripe: true, paypal: false })[2], "Payments go into Harbor Kitchen's own Stripe account.");
+is("Stripe and PayPal: both", seller({ stripe: true, paypal: true })[2], "Payments go into Harbor Kitchen's own Stripe account, or its own PayPal account when you pay with PayPal.");
+is("PayPal only: PayPal, never a Stripe account it may not have", seller({ stripe: false, paypal: true })[2], "Payments go into Harbor Kitchen's own PayPal account.");
+is("neither: no account named, the seller still said", [seller({ stripe: false, paypal: false }).length, /Stripe|PayPal|Payments go/.test(seller({ stripe: false, paypal: false }).join(" "))], [2, false]);
 
 part("Only what the store sells");
 is("digital only: the digital rule, no membership rule", [text({}).includes("For digital content"), text({}).includes("A membership is at least partly a service")], [true, false]);

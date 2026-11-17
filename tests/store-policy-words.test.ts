@@ -9,7 +9,7 @@ import { POLICY_WORDS } from "@/lib/buyer-words/policies";
 import { type PolicyFactsInput, notAdvice, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { done, is, part } from "./check";
 
-const all: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: true, paypal: true, pixels: ["Meta", "Google", "TikTok"], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
+const all: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: true, stripe: true, paypal: true, pixels: ["Meta", "Google", "TikTok"], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
 
 part("Every language says every part");
 for (const code of LANGUAGE_CODES) {
@@ -21,6 +21,16 @@ for (const code of LANGUAGE_CODES) {
   is(`${code}: titles all set`, sections.every((s) => s.title.trim().length > 2), true);
   is(`${code}: no word left in English where another language is spoken`, code === "en" ? true : !/\b(the seller|membership|checkout|nothing is measured)\b/i.test(text), true);
   is(`${code}: says it is not legal advice`, notAdvice(code).length > 60, true);
+}
+
+part("Every language names only the accounts the store takes money into (Codex N1's MEDIUM on #1824)");
+for (const code of LANGUAGE_CODES) {
+  const seller = (stripe: boolean, paypal: boolean) => (policyFacts({ ...all, stripe, paypal }, code).find((s) => s.id === "seller")?.sentences ?? []).join(" ");
+  is(`${code}: Stripe only`, [seller(true, false).includes("Stripe"), seller(true, false).includes("PayPal")], [true, false]);
+  is(`${code}: Stripe and PayPal`, [seller(true, true).includes("Stripe"), seller(true, true).includes("PayPal")], [true, true]);
+  is(`${code}: PayPal only, never Stripe`, [seller(false, true).includes("Stripe"), seller(false, true).includes("PayPal"), seller(false, true).includes("Harbor Kitchen")], [false, true, true]);
+  is(`${code}: neither, no account named`, [seller(false, false).includes("Stripe"), seller(false, false).includes("PayPal"), policyFacts({ ...all, stripe: false, paypal: false }, code)[0].sentences.length], [false, false, 2]);
+  is(`${code}: the four are four different sentences`, new Set([seller(true, false), seller(true, true), seller(false, true), seller(false, false)]).size, 4);
 }
 
 part("Translation gaps from Claude 1's LOW on #1824");

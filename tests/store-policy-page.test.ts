@@ -21,28 +21,38 @@ const ebook = { priceCents: 1900, file: { pathname: "x" } };
 const free = { priceCents: 0, file: { pathname: "y" } };
 const club = { priceCents: 900, recurring: { interval: "month" } };
 const call = { priceCents: 9900, call: { minutes: 30 } };
+const STRIPE = { stripe: true, paypal: false };
+const BOTH = { stripe: true, paypal: true };
 
 part("What the store sells, counting only what is paid for");
-is("an ebook: digital", policyInputFrom(store, [ebook], false, true).sellsDigital, true);
-is("a free download alone: nothing sold", [policyInputFrom(store, [free], false, true).sellsDigital, policyInputFrom(store, [free], false, true).sellsMemberships], [false, false]);
-is("a membership: memberships, not digital content", [policyInputFrom(store, [club], false, true).sellsMemberships, policyInputFrom(store, [club], false, true).sellsDigital], [true, false]);
-is("a call: neither", [policyInputFrom(store, [call], false, true).sellsDigital, policyInputFrom(store, [call], false, true).sellsMemberships], [false, false]);
+is("an ebook: digital", policyInputFrom(store, [ebook], STRIPE, true).sellsDigital, true);
+is("a free download alone: nothing sold", [policyInputFrom(store, [free], STRIPE, true).sellsDigital, policyInputFrom(store, [free], STRIPE, true).sellsMemberships], [false, false]);
+is("a membership: memberships, not digital content", [policyInputFrom(store, [club], STRIPE, true).sellsMemberships, policyInputFrom(store, [club], STRIPE, true).sellsDigital], [true, false]);
+is("a call: neither", [policyInputFrom(store, [call], STRIPE, true).sellsDigital, policyInputFrom(store, [call], STRIPE, true).sellsMemberships], [false, false]);
 
 part("Settings flow into the page, and change it");
-const before = policyFacts(policyInputFrom(store, [ebook], false, true), "en");
-const withPixel = policyFacts(policyInputFrom({ ...store, pixels: { ...NO_PIXELS, meta: "123456789012345" } } as typeof store, [ebook], false, true), "en");
+const before = policyFacts(policyInputFrom(store, [ebook], STRIPE, true), "en");
+const withPixel = policyFacts(policyInputFrom({ ...store, pixels: { ...NO_PIXELS, meta: "123456789012345" } } as typeof store, [ebook], STRIPE, true), "en");
 is("a pixel switched on: the measurement section, named by its platform", withPixel.find((s) => s.id === "measurement")?.sentences[0], "Harbor Kitchen measures its ads with Meta.");
 is("and a new version", policyFingerprint(withPixel) === policyFingerprint(before), false);
-is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true, true), "en")[0].sentences[2].includes("PayPal"), true);
-is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false, true), "en").some((s) => s.id === "contact"), false);
+is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], BOTH, true), "en")[0].sentences[2].includes("PayPal"), true);
+// Codex N1's MEDIUM on #1824: a store can take money by PayPal alone (sellsThroughPayPal without canSell), and then
+// the page never says the money goes into a Stripe account it may not have.
+const paypalOnly = policyFacts(policyInputFrom({ name: "PayPal Only", pixels: {}, mail: null } as unknown as typeof store, [{ priceCents: 900 }], { stripe: false, paypal: true }), "en");
+is("PayPal only: the PayPal account, no Stripe account", paypalOnly[0].sentences[2], "Payments go into PayPal Only's own PayPal account.");
+is("neither: no account named", JSON.stringify(policyFacts(policyInputFrom(store, [ebook], { stripe: false, paypal: false }, true), "en")[0].sentences).match(/Stripe|PayPal/), null);
+const inputSource = readFileSync("lib/store-policy-input.ts", "utf8").replace(/\s+/g, " ");
+is("read from the same checks the store's pages use (canSell, sellsThroughPayPal)", inputSource.includes("{ stripe: canSell(store), paypal: sellsThroughPayPal(store) }"), true);
+is("no position quietly takes Stripe for granted: the methods are named", /policyInputFrom\(store, products, (true|false)\b/.test(inputSource), false);
+is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], STRIPE, true), "en").some((s) => s.id === "contact"), false);
 
 part("The email footer's postal address is on the page only by the creator's own choice (Claude 1's MEDIUM on #1824)");
 // Typed for the footer of list emails (CAN-SPAM), often where the creator lives, so it is never published on a public page unless the
 // creator chose it, where they type it.
 const footerOnly = { ...store, mail: { fromName: "Harbor Kitchen", address: "12 Elm St, Apt 3, Leeds" } } as typeof store;
 const chosen = { ...store, mail: { fromName: "Harbor Kitchen", address: "12 Elm St, Apt 3, Leeds", onPolicies: true } } as typeof store;
-is("typed for the emails only: no contact section, the address nowhere on the page", [policyFacts(policyInputFrom(footerOnly, [ebook], false), "en").some((s) => s.id === "contact"), JSON.stringify(policyFacts(policyInputFrom(footerOnly, [ebook], false), "en")).includes("Elm St")], [false, false]);
-is("chosen for the page: the contact section with it", policyFacts(policyInputFrom(chosen, [ebook], false), "en").find((s) => s.id === "contact")?.sentences.some((t) => t.includes("12 Elm St, Apt 3, Leeds")), true);
+is("typed for the emails only: no contact section, the address nowhere on the page", [policyFacts(policyInputFrom(footerOnly, [ebook], STRIPE), "en").some((s) => s.id === "contact"), JSON.stringify(policyFacts(policyInputFrom(footerOnly, [ebook], STRIPE), "en")).includes("Elm St")], [false, false]);
+is("chosen for the page: the contact section with it", policyFacts(policyInputFrom(chosen, [ebook], STRIPE), "en").find((s) => s.id === "contact")?.sentences.some((t) => t.includes("12 Elm St, Apt 3, Leeds")), true);
 const studio = readFileSync("components/email-studio.tsx", "utf8");
 is("the choice is made where the address is typed, unchecked until the creator checks it", [studio.includes("Also show this address on my store's policies page"), studio.includes("useState(mail?.onPolicies === true)"), studio.includes('type="checkbox"')], [true, true, true]);
 is("the settings route saves the choice only when it is exactly yes", readFileSync("app/api/store/mail/route.ts", "utf8").includes("body.onPolicies === true"), true);
@@ -56,7 +66,7 @@ is("the privacy policy says so too", /public policies page too only if you check
 
 part("Self-cancel is promised only where the store's emails carry the link (Claude 1's LOW on #1824)");
 // lib/purchase-email.ts sends the /manage link only when canManage(store); otherwise the buyer cancels by reply.
-const membersOf = (selfCancel: boolean) => policyFacts(policyInputFrom(store, [club], false, selfCancel), "en").find((s) => s.id === "memberships")?.sentences ?? [];
+const membersOf = (selfCancel: boolean) => policyFacts(policyInputFrom(store, [club], STRIPE, selfCancel), "en").find((s) => s.id === "memberships")?.sentences ?? [];
 is("emails carry the cancel link: said", membersOf(true).some((t) => t.includes("cancel a membership yourself")), true);
 is("they do not: never promised, the end of the paid period still said", [membersOf(false).some((t) => t.includes("yourself")), membersOf(false).some((t) => t.includes("end of the period"))], [false, true]);
 is("read from the same check the purchase email uses", readFileSync("lib/store-policy-input.ts", "utf8").includes("canManage(store)"), true);

@@ -237,8 +237,11 @@ export function mapHoldMicroUsd(model: string = MAP_MODEL): number | null {
  */
 export function readMapAnswer(kind: MapKind, columns: number, text: string): Guess | null {
   let value: unknown;
+  // One code fence around the object is taken off (```json ... ```); text around it, or a second fence, is not.
+  const trimmed = text.trim();
+  const fenced = /^```[a-z]*\n?([^`]*?)\n?```$/i.exec(trimmed);
   try {
-    value = JSON.parse(text.trim());
+    value = JSON.parse(fenced ? fenced[1].trim() : trimmed);
   } catch {
     return null;
   }
@@ -259,6 +262,15 @@ export function readMapAnswer(kind: MapKind, columns: number, text: string): Gue
     out[field] = column;
   }
   return out;
+}
+
+/**
+ * What the browser sends to ask for suggestions: only the first MAX_COLUMNS names, the ones the model can see, so a
+ * wide header is not refused for its size and no cell past them reaches the server; a choice past them is sent as open.
+ */
+export function askBody(header: readonly string[], guess: Guess): { header: string[]; guess: Guess } {
+  const seen = header.slice(0, MAX_COLUMNS);
+  return { header: seen, guess: Object.fromEntries(Object.entries(guess).map(([k, v]) => [k, v < seen.length ? v : -1])) };
 }
 
 export type Source = "name" | "ai" | "none";

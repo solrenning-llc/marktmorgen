@@ -76,7 +76,9 @@ part("A refunded first year stays under the owner's ceiling with the logo at the
   // BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), as tests/read-ceilings.test.ts and tests/plan-margin.test.ts hold it: the owner's
   // ceiling is US$ 66, the dollar over US$ 65 room for every picture upload's Blob operations only
   // (the picture-uploads line, #2803). So the year with that line stays under US$ 66, and without it, under US$ 65 as before.
-  const uploads = COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd(tier) ?? 0;
+  // Owner, 17 November 2026 ("Usar o dólar 65–66", on #4514): the invite-credit job's line may use that dollar too.
+  const uploads = (COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd(tier) ?? 0)
+    + (COST_LINES.find((l) => l.id === "invite-credit-reads")?.monthlyUsd(tier) ?? 0);
   is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the picture uploads' line and US$66 with it (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, that line ${uploads.toFixed(4)})`,
     year + extra - uploads < 65 && year + extra < 66, true);
 }

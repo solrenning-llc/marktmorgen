@@ -2,14 +2,18 @@
  * AutoDM rules (480 [SB3]; lib/autodm-rules.ts; added 4 November 2026). Pure:
  * nothing is read, sent or kept here. Checked:
  *
- *   - matching forgives case, accents, simple English plurals and a small
- *     typo (none on 4 letters or fewer, one on 5 to 8, two on 9 or more),
- *     never a digit, and never matches inside a longer word;
+ *   - by default (759 [STN6]) only the exact word matches: case, accents,
+ *     styled letters and punctuation are ignored, a similar word or phrase
+ *     never fires, and a choice that is not one of the two is read as exact;
+ *   - "forgiving", when the creator chooses it, also forgives simple English
+ *     plurals and a small typo (none on 4 letters or fewer, one on 5 to 8,
+ *     two on 9 or more); either way never a digit, and never inside a longer
+ *     word;
  *   - a keyword of several words matches the same words in a row, across
  *     punctuation; the first keyword in the creator's order wins;
  *   - a post's keyword list is refused when empty, too long, too wordy, made
  *     of punctuation or emoji only, or holding two keywords that cover each
- *     other, with the index of each;
+ *     other under the rule's match choice, with the index of each;
  *   - only the first COMMENT_MAX_CHARS characters of a comment are read;
  *   - the repeat interval at its exact boundaries and with a clock ahead;
  *   - test mode reaches only the creator's test accounts, live mode nobody
@@ -19,9 +23,11 @@
 import {
   AUTODM_LIVE,
   COMMENT_MAX_CHARS,
+  DEFAULT_MATCH,
   DEFAULT_MODE,
   DEFAULT_REPEAT,
   KEYWORD_MAX_CHARS,
+  MATCH_CHOICES,
   MAX_KEYWORDS_PER_POST,
   MAX_TESTERS,
   REPEAT_CHOICES,
@@ -36,11 +42,15 @@ import {
   normalizeForMatch,
   pluralForms,
   readKeywords,
+  readMatch,
   readRepeat,
   readTesters,
   typoDistance,
 } from "@/lib/autodm-rules";
 import { done, is, part } from "./check";
+
+/** The creator's "forgiving" choice: plurals and small typos match too. */
+const forgivingMatch = (comment: string, keyword: string) => matchesKeyword(comment, keyword, "forgiving");
 
 part("Nothing is live");
 is("AUTODM_LIVE is false", AUTODM_LIVE, false);
@@ -67,14 +77,14 @@ is("café matches cafe, both ways", [matchesKeyword("love this café", "cafe"), 
 is("crème brûlée matches creme brulee", matchesKeyword("Crème Brûlée recipe?", "creme brulee"), true);
 
 part("Plurals");
-is("guide / guides, both ways", [matchesKeyword("guides", "guide"), matchesKeyword("guide", "guides")], [true, true]);
-is("box / boxes", [matchesKeyword("boxes", "box"), matchesKeyword("box", "boxes")], [true, true]);
-is("story / stories", [matchesKeyword("stories", "story"), matchesKeyword("story", "stories")], [true, true]);
-is("class / classes", [matchesKeyword("classes", "class"), matchesKeyword("class", "classes")], [true, true]);
-is("wish / wishes, church / churches", [matchesKeyword("wishes", "wish"), matchesKeyword("churches", "church")], [true, true]);
-is("case / cases", [matchesKeyword("cases", "case"), matchesKeyword("case", "cases")], [true, true]);
+is("guide / guides, both ways", [forgivingMatch("guides", "guide"), forgivingMatch("guide", "guides")], [true, true]);
+is("box / boxes", [forgivingMatch("boxes", "box"), forgivingMatch("box", "boxes")], [true, true]);
+is("story / stories", [forgivingMatch("stories", "story"), forgivingMatch("story", "stories")], [true, true]);
+is("class / classes", [forgivingMatch("classes", "class"), forgivingMatch("class", "classes")], [true, true]);
+is("wish / wishes, church / churches", [forgivingMatch("wishes", "wish"), forgivingMatch("churches", "church")], [true, true]);
+is("case / cases", [forgivingMatch("cases", "case"), forgivingMatch("case", "cases")], [true, true]);
 is("glass is not stripped to glas", pluralForms("glass"), ["glass"]);
-is("glass / glasses", [matchesKeyword("glasses", "glass"), matchesKeyword("glass", "glasses")], [true, true]);
+is("glass / glasses", [forgivingMatch("glasses", "glass"), forgivingMatch("glass", "glasses")], [true, true]);
 is("a 3-letter word keeps its s", pluralForms("bus"), ["bus"]);
 is("plural forms of stories, boxes, guides", [pluralForms("stories"), pluralForms("boxes"), pluralForms("guides")], [
   ["stories", "story", "storie"],
@@ -84,20 +94,20 @@ is("plural forms of stories, boxes, guides", [pluralForms("stories"), pluralForm
 
 part("Typos");
 is("5 letters: one swapped, missing, extra or wrong letter", [
-  matchesKeyword("giude", "guide"),
-  matchesKeyword("gude", "guide"),
-  matchesKeyword("guidee", "guide"),
-  matchesKeyword("guido", "guide"),
+  forgivingMatch("giude", "guide"),
+  forgivingMatch("gude", "guide"),
+  forgivingMatch("guidee", "guide"),
+  forgivingMatch("guido", "guide"),
 ], [true, true, true, true]);
-is("5 letters: two typos do not match", matchesKeyword("gidue", "guide"), false);
-is("8 letters: one typo matches, two do not", [matchesKeyword("templtae", "template"), matchesKeyword("tmpltae", "template")], [true, false]);
+is("5 letters: two typos do not match", forgivingMatch("gidue", "guide"), false);
+is("8 letters: one typo matches, two do not", [forgivingMatch("templtae", "template"), forgivingMatch("tmpltae", "template")], [true, false]);
 is("9+ letters: two typos match, three do not", [
-  matchesKeyword("checklsit", "checklist"),
-  matchesKeyword("chcklsit", "checklist"),
-  matchesKeyword("chklsit", "checklist"),
+  forgivingMatch("checklsit", "checklist"),
+  forgivingMatch("chcklsit", "checklist"),
+  forgivingMatch("chklsit", "checklist"),
 ], [true, true, false]);
-is("4 letters or fewer: no typo at all (link / lynk)", [matchesKeyword("lynk", "link"), matchesKeyword("lnik", "link")], [false, false]);
-is("the keyword's word decides the allowance", [matchesKeyword("guid", "guide"), matchesKeyword("linkk", "link")], [true, false]);
+is("4 letters or fewer: no typo at all (link / lynk)", [forgivingMatch("lynk", "link"), forgivingMatch("lnik", "link")], [false, false]);
+is("the keyword's word decides the allowance", [forgivingMatch("guid", "guide"), forgivingMatch("linkk", "link")], [true, false]);
 is("distance stops early above its bound", typoDistance("abcdefghij", "zyxwvutsrq", 2), 3);
 is("distance counts a swap once", typoDistance("abcd", "abdc", 2), 1);
 is("distance with a large length gap returns at once", typoDistance("a", "abcdefgh", 1), 2);
@@ -116,17 +126,66 @@ is("a word inside punctuation still counts", matchesKeyword("(guide)", "guide"),
 
 part("Several words");
 is("free guide matches 'free, guide!'", matchesKeyword("free, guide!", "free guide"), true);
-is("and 'I want the FREE-GUIDES'", matchesKeyword("I want the FREE-GUIDES", "free guide"), true);
+is("and, forgiving, 'I want the FREE-GUIDES'", forgivingMatch("I want the FREE-GUIDES", "free guide"), true);
 is("not when the words are apart", matchesKeyword("free stuff and a guide", "free guide"), false);
 is("not in the other order", matchesKeyword("guide free", "free guide"), false);
 is("not when the comment is shorter", matchesKeyword("free", "free guide"), false);
-is("no typo in a 4-letter word of the keyword", matchesKeyword("send the freee guide", "free guide"), false);
-is("a typo in a 5+ letter word of the keyword", matchesKeyword("send the mini cheklist", "mini checklist"), true);
+is("no typo in a 4-letter word of the keyword, even forgiving", forgivingMatch("send the freee guide", "free guide"), false);
+is("forgiving: a typo in a 5+ letter word of the keyword", forgivingMatch("send the mini cheklist", "mini checklist"), true);
 is("first keyword in the creator's order", matchingKeyword("I want the recipes and the guide", ["guide", "recipe"]), "guide");
-is("returned as the creator typed it", matchingKeyword("recipe please", ["Guide", "Recipes!"]), "Recipes!");
+is("returned as the creator typed it", matchingKeyword("Recipes please", ["Guide", "Recipes!"]), "Recipes!");
 is("no keyword matches", matchingKeyword("nice photo", ["guide", "recipe"]), null);
 is("an empty comment matches nothing", [matchesKeyword("", "guide"), matchesKeyword("🔥", "guide")], [false, false]);
 is("an emoji-only keyword matches nothing", matchesKeyword("🔥", "🔥"), false);
+
+part("Exact word by default (759 [STN6])");
+is("a new rule matches the exact word", DEFAULT_MATCH, "exact");
+is("the two choices, exact first", MATCH_CHOICES, ["exact", "forgiving"]);
+is("only those ids", [readMatch("exact"), readMatch("forgiving"), readMatch("fuzzy"), readMatch(""), readMatch(1), readMatch(undefined)], [
+  "exact",
+  "forgiving",
+  null,
+  null,
+  null,
+  null,
+]);
+is("by default a similar word does not fire (guided, curse, news, gude, guides)", [
+  matchesKeyword("a guided tour", "guide"),
+  matchesKeyword("what a curse", "course"),
+  matchesKeyword("any news?", "new"),
+  matchesKeyword("send the gude", "guide"),
+  matchesKeyword("guides please", "guide"),
+], [false, false, false, false, false]);
+is("by default a similar phrase does not fire", [
+  matchesKeyword("I want the FREE-GUIDES", "free guide"),
+  matchesKeyword("send the mini cheklist", "mini checklist"),
+], [false, false]);
+is("exact still ignores case, accents, styled letters and punctuation", [
+  matchesKeyword("GUIDE!!", "guide"),
+  matchesKeyword("love this café", "cafe"),
+  matchesKeyword("𝐆𝐔𝐈𝐃𝐄 please", "guide"),
+  matchesKeyword("free, guide!", "free guide"),
+], [true, true, true, true]);
+is("exact is still whole words only", [matchesKeyword("my guidebook", "guide"), matchesKeyword("party time", "art")], [false, false]);
+is("exact by name gives the same answers as the default", [
+  matchesKeyword("guides please", "guide", "exact"),
+  matchesKeyword("GUIDE!!", "guide", "exact"),
+], [false, true]);
+is("forgiving, chosen by the creator, keeps plurals and typos", [
+  matchesKeyword("guides please", "guide", "forgiving"),
+  matchesKeyword("send the gude", "guide", "forgiving"),
+], [true, true]);
+is("a choice that is not one of the two is read as exact, the stricter", [
+  matchesKeyword("guides please", "guide", "fuzzy" as never),
+  matchesKeyword("guide please", "guide", "fuzzy" as never),
+], [false, true]);
+is("the first keyword matched exactly, by default", matchingKeyword("recipes and the guide", ["recipe", "guide"]), "guide");
+is("nothing matched exactly, by default", matchingKeyword("recipe please", ["Guide", "Recipes!"]), null);
+is("forgiving finds the plural", matchingKeyword("recipe please", ["Guide", "Recipes!"], "forgiving"), "Recipes!");
+is("by default a plural or a typo is its own keyword", [readKeywords(["guide", "guides"]).ok, readKeywords(["guide", "gude", "giude"]).ok], [true, true]);
+is("by default the same word in another case is still a duplicate", readKeywords(["guide", "Guide"]), { ok: false, problem: "duplicate", index: 1, other: 0 });
+is("by default one covered by a shorter one is still a duplicate", readKeywords(["guide", "free guide"]), { ok: false, problem: "duplicate", index: 1, other: 0 });
+is("forgiving refuses the plural as a duplicate", readKeywords(["guide", "guides"], "forgiving"), { ok: false, problem: "duplicate", index: 1, other: 0 });
 
 part("Comment length cap");
 const padding = "x ".repeat(COMMENT_MAX_CHARS / 2);
@@ -159,11 +218,11 @@ is("emoji or punctuation only", [readKeywords(["🔥🔥"]), readKeywords(["guid
   { ok: false, problem: "no_letters", index: 1 },
 ]);
 is("the same word in another case", readKeywords(["guide", "Guide"]), { ok: false, problem: "duplicate", index: 1, other: 0 });
-is("a plural of an earlier one", readKeywords(["recipe", "guide", "guides"]), { ok: false, problem: "duplicate", index: 2, other: 1 });
-is("a typo of an earlier one", readKeywords(["checklist", "cheklist"]), { ok: false, problem: "duplicate", index: 1, other: 0 });
+is("forgiving: a plural of an earlier one", readKeywords(["recipe", "guide", "guides"], "forgiving"), { ok: false, problem: "duplicate", index: 2, other: 1 });
+is("forgiving: a typo of an earlier one", readKeywords(["checklist", "cheklist"], "forgiving"), { ok: false, problem: "duplicate", index: 1, other: 0 });
 is("one already covered by a shorter one", readKeywords(["guide", "free guide"]), { ok: false, problem: "duplicate", index: 1, other: 0 });
 is("and the other way round", readKeywords(["free guide", "guide"]), { ok: false, problem: "duplicate", index: 1, other: 0 });
-is("different words are fine", readKeywords(["link", "lynk", "code10", "code11"]).ok, true);
+is("different words are fine, even forgiving", readKeywords(["link", "lynk", "code10", "code11"], "forgiving").ok, true);
 
 part("Repeat interval");
 is("the choices", REPEAT_CHOICES.map((c) => [c.id, c.seconds]), [["once", null], ["1h", 3600], ["12h", 43200], ["24h", 86400], ["7d", 604800]]);

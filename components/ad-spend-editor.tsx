@@ -45,6 +45,8 @@ const REASONS: Record<string, string> = {
   channel: "Choose where the ad ran.",
   amount: "Type what you spent, more than zero.",
   days: "Check the days: the first before the last, not in the future, and no more than 400 days apart.",
+  // A removal the server could not confirm: the line may still be saved and counted.
+  unconfirmed: "We could not confirm this line was removed. It may still count. Try again.",
 };
 
 /** What the editor says while saved entries cannot be read (lib/ad-spend.ts, UnreadableSpendsError): never a guessed amount. */

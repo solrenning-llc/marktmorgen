@@ -32,6 +32,8 @@ import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 import { COMMAND, ORDER_COMPUTE, PAYPAL_CAPTURE_WATCH } from "./plan-cost-registry";
 import * as paypalSales from "@/lib/paypal-sales";
+import { wordsIn } from "@/lib/buyer-words";
+import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const SELLER = "7KNGBPH2U58GQ";
@@ -570,8 +572,11 @@ async function main(): Promise<void> {
   // that took the last try may not have written it yet), so it is told it did not go through, never sent to the thanks
   // page; the three admitted ones, each with its capture in pending, are.
   const thanks = eight.shown.filter((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=")).length;
-  const told = eight.shown.filter((shown) => shown.status === 303 && shown.location.includes("status=paypal-error")).length;
-  is("the admitted returns land on the thanks page, the refused ones on the store's notice", [thanks, told], [PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost, 8 - PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost]);
+  // Claude 5's LOW on #3411 (6947339002): a refused return is usually the same buyer's second load while the admitted
+  // try is being taken, so it is told the payment is being confirmed, never that it could not be matched and that
+  // nothing was handed over, which can be untrue a moment later.
+  const told = eight.shown.filter((shown) => shown.status === 303 && shown.location.includes("status=paypal-confirming")).length;
+  is("the admitted returns land on the thanks page, the refused ones on the notice that it is being confirmed", [thanks, told], [PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost, 8 - PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost]);
   is("the order stands in pending, never written down as paid", [await pending(raced), Boolean(await readPaid(raced))], [true, false]);
 
   part("Codex X2's MEDIUM 2: two returns at once with one try left, PayPal declines: only the admitted one adds to pending, and the order is not put back");
@@ -593,7 +598,8 @@ async function main(): Promise<void> {
   is("both read the count with one try left", unrecorded.read, 2);
   is("PayPal is asked nothing, nothing is in pending or paid", [captures.get(lostWrite) ?? 0, await pending(lostWrite), Boolean(await readPaid(lostWrite))], [0, false, false]);
   is("neither return is sent to the thanks page", unrecorded.shown.some((shown) => shown.location.includes("/thanks?paypal=")), false);
-  is("the refused one is told it did not go through", unrecorded.shown.some((shown) => shown.status === 303 && shown.location.includes("status=paypal-error")), true);
+  is("the refused one is told it is being confirmed, never that it went through or that nothing was handed over", unrecorded.shown.some((shown) => shown.status === 303 && shown.location.includes("status=paypal-confirming")), true);
+  is("and that notice exists in every buyer language, never sent as paid", (Object.keys(LANGUAGES) as LanguageCode[]).every((lang) => Boolean(wordsIn(lang).notices["paypal-confirming"]?.title)), true);
 
   part("Codex X2's MEDIUM 1 (Claude 5: LEVE): past the bound after confirmed refusals, the return does not say PayPal is still taking it");
   captureWith = "decline";

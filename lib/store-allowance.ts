@@ -92,8 +92,10 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     const counted = acknowledgedAllowanceCount(reply, n);
     if (counted === null) return refuse("unknown", "This can't be counted right now. Try again in a minute.");
     if (counted <= limit) return { ok: true, left: limit - counted };
-    // Over: what this asked for is given back, so a refused use costs the figure nothing.
-    await redisPipeline([["DECRBY", k, n]]).catch(() => {});
+    // Over: what this asked for is given back, so a refused use costs the figure nothing. Through GIVE_ALLOWANCE_BACK,
+    // never a bare DECRBY: a counter gone between the count and this (its expiry, the store erased) is not made again
+    // below zero with no expiry (Codex L on #4072).
+    await redisPipeline([["EVAL", GIVE_ALLOWANCE_BACK, 1, k, n]]).catch(() => {});
     const reset = resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0);
     return { ok: false, reason: "used", limit, message: usedWords(kind, limit, reset, standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")), left: Math.max(0, limit - (counted - n)), reset };
   } catch {
@@ -192,7 +194,8 @@ export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind
     const counted = acknowledgedAllowanceCount(reply, n);
     if (counted === null) return unknown;
     if (counted <= limit) return { ok: true, window: target.id };
-    await redisPipeline([["DECRBY", k, n]]).catch(() => {});
+    // Given back as takeAllowance gives back a refused use: one script, a missing counter never made again (Codex L on #4072).
+    await redisPipeline([["EVAL", GIVE_ALLOWANCE_BACK, 1, k, n]]).catch(() => {});
     const left = Math.max(0, limit - (counted - n));
     return { ok: false, reason: "used", message: `This needs ${n.toLocaleString("en-US")} of your ${KIND_WORDS[kind].many} in the month it is set for (from ${from}, UTC), and ${left === 0 ? "none are left" : left === 1 ? "only 1 is left" : `only ${left.toLocaleString("en-US")} are left`} for that month after what is already set aside in it. Choose another day.` };
   } catch {

@@ -50,9 +50,8 @@ async function main(): Promise<void> {
   const previous = monthKey(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)));
 
   part("A store told last month goes over again this month");
-  // As the watch left things after last month's notice: the one list of all months (before) and last month's own.
+  // As the watch leaves things after last month's notice: last month's own list.
   await redis.pipeline([
-    ["SET", "nl:usage-watch:told", JSON.stringify([folder("a")]), "EX", 40 * 86_400],
     ["SET", `nl:usage-watch:told:${previous}`, JSON.stringify([folder("a")]), "EX", 40 * 86_400],
   ]);
   await overAllowance(folder("a"), "again@example.com");
@@ -64,6 +63,54 @@ async function main(): Promise<void> {
   is("not written to twice in the month", [second.status, second.told, second.emails], [200, 0, []]);
   const [raw] = await redis.pipeline([["GET", `nl:usage-watch:told:${month}`]]);
   is("this month's own list names the store", typeof raw === "string" && (JSON.parse(raw) as string[]).includes(folder("a")), true);
+
+  // The one list of all months (nl:usage-watch:told) is what the watch wrote before the lists were per month. A store
+  // it names may already have been told this month, and nothing in it says which month: the first run after the
+  // change copies it into this month's list and confirms that write before anyone is written to, then deletes it, so
+  // nobody is told twice in the month of the change (Codex X4 and N4 on #4502). There is no separate "migrated" mark:
+  // the old list is deleted only after the copy was confirmed, so no state says "done" while the copy is missing.
+  part("A store named in the old list of all months is not told twice in the month of the change");
+  redis.clear();
+  fixture.reset();
+  await redis.pipeline([
+    ["SET", "nl:usage-watch:told", JSON.stringify([folder("m")]), "EX", 40 * 86_400],
+  ]);
+  await overAllowance(folder("m"), "already-told@example.com");
+  const migrated = await run();
+  is("its owner is not written to again", [migrated.status, migrated.told, migrated.emails], [200, 0, []]);
+  const [monthRaw, legacyAfter] = await redis.pipeline([
+    ["GET", `nl:usage-watch:told:${month}`],
+    ["GET", "nl:usage-watch:told"],
+  ]);
+  is("the old list was copied into this month's", typeof monthRaw === "string" && (JSON.parse(monthRaw) as string[]).includes(folder("m")), true);
+  is("the old list is gone once the copy was confirmed", legacyAfter, null);
+
+  part("The copy into this month's list fails: nobody is written to and the old list is kept");
+  redis.clear();
+  fixture.reset();
+  await redis.pipeline([
+    ["SET", "nl:usage-watch:told", JSON.stringify([folder("n")]), "EX", 40 * 86_400],
+  ]);
+  await overAllowance(folder("n"), "kept-told@example.com");
+  const real = redis.pipeline;
+  // The month's write answers an error while every other command in the same call goes through, as a partial failure.
+  redis.pipeline = async (commands) => {
+    const replies = await real(commands);
+    return commands.map((c, i) => c[0] === "SET" && c[1] === `nl:usage-watch:told:${month}` ? "ERR synthetic write refused" : replies[i]);
+  };
+  let failed: Awaited<ReturnType<typeof run>>;
+  try {
+    failed = await run();
+  } finally {
+    redis.pipeline = real;
+  }
+  is("nobody is written to while the copy is unconfirmed", [failed.status === 200, failed.emails], [false, []]);
+  const [legacyKept] = await redis.pipeline([["GET", "nl:usage-watch:told"]]);
+  is("the old list is kept for the next run", legacyKept, JSON.stringify([folder("n")]));
+  const retried = await run();
+  is("the next run copies it and still writes to nobody", [retried.status, retried.told, retried.emails], [200, 0, []]);
+  const [legacyGone] = await redis.pipeline([["GET", "nl:usage-watch:told"]]);
+  is("then the old list is gone", legacyGone, null);
   done();
 }
 

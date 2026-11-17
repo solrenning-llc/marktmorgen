@@ -20,9 +20,9 @@
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
  *   nl:csa:files:<store>:<product>     JSON     where its held files are, 400 days (unit 3b)
- *   nl:csa:hide                        zset     held products whose taking off the store is not confirmed yet, by
- *                                               when each is next tried (hideHeldProducts); KEEP_SECONDS from the
- *                                               last one added
+ *   nl:csa:hide                        zset     held products whose taking off the store is not confirmed yet
+ *                                               ([store id, tag, product id]), by when each is next tried
+ *                                               (hideHeldProducts); KEEP_SECONDS from the last one added
  *
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
  * taken off, and while the mark is there no studio route removes, edits,
@@ -55,9 +55,9 @@ import { createHash } from "node:crypto";
 import { emailForSession, normaliseEmail } from "@/lib/auth";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, setProductHidden, storeForEmail, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, type Store, ensureStatsId, ensureStoreId, setProductHidden, storeForId, storeRef } from "@/lib/store";
 import { productIdFromAddress, productIds, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { MAX_VAULT_PATH_BYTES } from "@/lib/vault-rules";
@@ -126,7 +126,7 @@ async function listHeldFiles(store: Pick<Store, "statsId" | "handle">, productId
   return replies?.[0] === "OK";
 }
 
-export type HoldOutcome = "held" | "files_unconfirmed" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
+export type HoldOutcome = "held" | "files_unconfirmed" | "no_product" | "not_held" | "outside" | "capped" | "unknown" | "failed";
 
 const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
 const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
@@ -173,7 +173,8 @@ export async function contentOpenTo(store: Pick<Store, "statsId" | "handle" | "e
 /**
  * The answer a studio route gives instead of changing or deleting anything of
  * a product kept for a report, or null to go on: 409 `on_hold` while it is
- * held, 503 when the hold cannot be read, never the change. The id may name
+ * held, 503 `hold_unread` when the hold cannot be read (never `unavailable`, which the studio reads as stores
+ * not being switched on: cloud P's LEVE on #3471), never the change. The id may name
  * the product or one of its price options, whose product is the one held; an
  * id the store does not have reads nothing, since nothing of it can change.
  */
@@ -185,7 +186,7 @@ export async function heldRefusal(store: Store, id: string): Promise<Response | 
     return null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    return Response.json({ ok: false, error: "hold_unread" }, { status: 503 });
   }
 }
 
@@ -202,7 +203,7 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
     return held ? Response.json({ ok: false, error: "on_hold" }, { status: 409 }) : null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    return Response.json({ ok: false, error: "hold_unread" }, { status: 503 });
   }
 }
 
@@ -237,7 +238,7 @@ export async function heldPictureRefusal(store: Store, path: string): Promise<Re
     return null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    return Response.json({ ok: false, error: "hold_unread" }, { status: 503 });
   }
 }
 
@@ -281,6 +282,9 @@ export async function heldInSale(store: Store, product: Listing, bumps: readonly
  */
 export async function holdReported(report: { kind: ReportKind; url: string }, store: Store, now = Date.now()): Promise<HoldOutcome> {
   if (report.kind !== "child_safety") return "not_held";
+  // Only an address on Marktmorgen itself names content it hosts: another host whose path imitates a store's route
+  // (https://evil.example/@victim/p/<id>) never takes a real product off (Codex U and Codex L on #3587).
+  if (!onMarktmorgen(report.url)) return "outside";
   try {
     // Read exactly (rule 24): an address that names no product of this store is no_product; a read that fails or
     // answers off its shape is unknown, never "names nothing" (lib/takedown.ts reportedProduct swallows it).
@@ -307,16 +311,24 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
       if (added === 1) await redisPipeline([["SREM", key, product.id]]).catch(() => console.error("a capped child-safety hold could not be taken out of the day's count"));
       return "capped";
     }
+    // The hold is keyed by the store's list id (lib/child-safety-holds.ts): an old store without one gets it first,
+    // so the key never moves to another one later (Claude 3's LEVE 3 on #3471). No list id given is unknown.
+    const tagged = store.statsId ? store : await ensureStatsId(storeRef(store));
+    if (!tagged?.statsId) return "unknown";
+    // The queue below names the store by its id, never by its owner's address (Claude 2 cloud L's MEDIUM on #3588):
+    // an old store without one gets it first. No id given is unknown.
+    const keyed = STORE_ID_PATTERN.test(tagged.sid) ? tagged : await ensureStoreId(storeRef(tagged));
+    if (!keyed?.statsId || !STORE_ID_PATTERN.test(keyed.sid)) return "unknown";
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
-    const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
+    const kept = repliesFor(await redisPipeline([["SET", keepKey(keyed, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
     // Waiting to be taken off before anything else is done: should the files below or the hide not go through (or the
     // request be cut short), the hourly job takes it off (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
-    const member = hideMember(store, product.id);
+    const member = hideMember(keyed, product.id);
     await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
     // Its files are kept and closed to everyone before it is taken off (unit 3b, lib/held-files.ts).
-    const files = await productFilePaths(product, store.statsId || undefined)
-      .then(async ({ paths, complete }) => (await holdFiles(paths)) && (await listHeldFiles(store, product.id, paths)) && complete)
+    const files = await productFilePaths(product, keyed.statsId || undefined)
+      .then(async ({ paths, complete }) => (await holdFiles(paths)) && (await listHeldFiles(keyed, product.id, paths)) && complete)
       .catch(() => false);
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
@@ -333,6 +345,12 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 export const HIDE_DUE = "nl:csa:hide";
 /** How long a held product whose taking off did not go through waits before the next try: the job's own hour. */
 export const HIDE_RETRY_MS = 3_600_000;
+/**
+ * How much earlier than HIDE_RETRY_MS a product tried and not confirmed off is due again: the next hourly run may
+ * start a little before a full hour after this one's `now` (cron jitter, a faster claim), and it must find it due,
+ * never leave it visible a second hour.
+ */
+export const HIDE_RETRY_SLACK_MS = 300_000;
 /** The most held products one run tries to take off; the rest wait for the next run, by when each is due. */
 export const HIDES_PER_RUN = 25;
 /**
@@ -344,8 +362,11 @@ export const HIDE_BUDGET_MS = 5_000;
 /** How long the step waits for a store's lock another write holds, against the write's own 8 s: a busy store is tried again an hour later. */
 export const HIDE_LOCK_WAIT_MS = 500;
 
-/** One waiting product: the store's ref (lib/store.ts storeRef), the tag its mark is kept under, and the product. */
-const hideMember = (store: Store, productId: string) => JSON.stringify([storeRef(store), storeTag(store), productId]);
+/**
+ * One waiting product: the store's id (never its owner's address, which no erasure of a company key reaches and which
+ * changes when the owner moves: Claude 2 cloud L on #3588), the tag its mark is kept under, and the product.
+ */
+const hideMember = (store: Store, productId: string) => JSON.stringify([store.sid, storeTag(store), productId]);
 
 /**
  * Takes one waiting product off its store, if it still has to be: "hidden" once it is confirmed off (it was, or the
@@ -363,26 +384,30 @@ async function hideOne(member: string, lockWaitMs: number): Promise<"hidden" | "
     console.error("a waiting child-safety hide is not one of ours; let go");
     return "gone";
   }
-  const [ref, tag, productId] = parsed as [string, string, string];
+  const [sid, tag, productId] = parsed as [string, string, string];
+  if (!STORE_ID_PATTERN.test(sid)) {
+    console.error("a waiting child-safety hide is not one of ours; let go");
+    return "gone";
+  }
   // The hold first, read exactly under the tag it was kept under: over is "gone", unknown is "waiting".
   const held = await heldIdsAmong({ statsId: tag, handle: "" }, [productId]).then((ids) => ids.has(productId), () => null);
   if (held === null) return "waiting";
   if (!held) return "gone";
-  const store = await storeForEmail(ref).catch(() => null);
-  // A store that cannot be read now, or under another tag (its record was written again under the same ref), is tried again.
+  const store = await storeForId(sid).catch(() => null);
+  // A store that cannot be read now, or under another tag (its record was written again under the same id), is tried again.
   if (!store || storeTag(store) !== tag) return "waiting";
   const listing = await readListingExactly(store, productId);
   if (listing === "unknown") return "waiting";
   if (!listing) return "gone";
   if (listing.hidden) return "hidden";
-  const done = await setProductHidden(storeRef(store), productId, true, { lockWaitMs });
+  const done = await setProductHidden(storeRef(store), productId, true, undefined, { lockWaitMs });
   return done.ok && done.product.hidden ? "hidden" : "waiting";
 }
 
 /**
  * The hourly job's step (app/api/cron/quiet): tries to take off the store each held product whose taking off did not
  * go through (holdReported), up to HIDES_PER_RUN of those due, and lets each go only once it is confirmed off or has
- * nothing left to take off; anything else is tried again an hour later. It tries no product once `until` (by the clock,
+ * nothing left to take off; anything else is tried again by the next hourly run. It tries no product once `until` (by the clock,
  * HIDE_BUDGET_MS from the call unless the caller gives less) is past, and waits at most HIDE_LOCK_WAIT_MS, and never
  * past `until`, for a busy store: what it did not reach stays due as it was, for the next run. Never throws: a queue
  * that cannot be read is left for the next run.
@@ -408,8 +433,8 @@ export async function hideHeldProducts(now = Date.now(), until = Date.now() + HI
       return "waiting" as const;
     });
     out[done] += 1;
-    // Tried again in an hour (only while it is still there: XX); if this write is lost it is simply due again sooner.
-    const next: (string | number)[] = done === "waiting" ? ["ZADD", HIDE_DUE, "XX", now + HIDE_RETRY_MS, member] : ["ZREM", HIDE_DUE, member];
+    // Tried again by the next hourly run (only while it is still there: XX); if this write is lost it is simply due again sooner.
+    const next: (string | number)[] = done === "waiting" ? ["ZADD", HIDE_DUE, "XX", now + HIDE_RETRY_MS - HIDE_RETRY_SLACK_MS, member] : ["ZREM", HIDE_DUE, member];
     await redisPipeline([next]).catch(() => console.error("a waiting child-safety hide could not be moved on"));
   }
   if (out.waiting) console.error(`child safety: ${out.waiting} held product(s) still waiting to be taken off the store`);
@@ -417,10 +442,11 @@ export async function hideHeldProducts(now = Date.now(), until = Date.now() + HI
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, and handed to nobody, buyers included. Two things the site cannot take back: a download address issued before the report works until it expires (up to 4 hours), and a picture of it fetched before may still be served from the CDN's and browsers' caches for up to a year; purge the CDN cache in the hosting dashboard now, as docs/incident-response.md section 9 says.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist, pre-orders, call setup or package, offer after paying, description or buyers' reviews, from the studio or the AI agent, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, even when the store closes or the creator's data is erased, and handed to nobody, buyers included. Closing the store, or its plan ending, still deletes its other records, and so does erasing the creator's data: to keep them, suspend the store instead of closing it. Two things the site cannot take back: a download address issued before the report works until it expires (up to 4 hours), and a picture of it fetched before may still be served from the CDN's and browsers' caches for up to a year; purge the CDN cache in the hosting dashboard now, as docs/incident-response.md section 9 says.",
   files_unconfirmed: "The product it points at was taken off the store at once (unpublished), but keeping its files from deletion and download could not be confirmed. Suspend the store now, as docs/incident-response.md section 9 says.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
+  outside: "The address is not a Marktmorgen address, so nothing was taken off automatically, even if its path looks like a store's. Act on it by hand, as docs/incident-response.md section 9 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 9 says.`,
   unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 9 says.",
   failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 9 says.",
@@ -437,6 +463,17 @@ function productIdIn(url: string, store: Store): string | null {
     return segment ? productIdFromAddress(store, segment) : null;
   } catch {
     return null;
+  }
+}
+
+/** Whether an address is on Marktmorgen itself, over https: the only kind a report may act on automatically. */
+function onMarktmorgen(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return parsed.protocol === "https:" && (host === "marktmorgen.com" || host === "www.marktmorgen.com");
+  } catch {
+    return false;
   }
 }
 
@@ -500,19 +537,19 @@ export async function alertOwner(
   // opens a second reminder; a new request on the same address, by another person or about another image, does both.
   const request = `${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`;
   // Repeated every 24 hours until it is marked handled, with the link that does so (lib/child-safety-alerts.ts).
-  return withReminders({ kind: report.kind, url: report.url, handle: handle || "", outcome, request }, now, (more) =>
-    sendEmail({
+  return withReminders({ kind: report.kind, url: report.url, handle: handle || "", outcome, request }, now, async (more) => {
+    // False only when certainly refused: an answer that is not known may have gone, and counts as sent (rule 30), so
+    // the route never asks the reporter to try again for an email the guard would not send twice.
+    const delivery = await sendEmailOutcome({
       meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
       subject: subject.slice(0, 200),
       text: [...lines, ...more].join("\n"),
       idempotencyKey: `report-urgent-${request}`,
-    }),
-  )
-    .catch(() => false)
-    .then((sent) => {
-      if (!sent) console.error("the urgent report email was not sent", report.kind);
-      return sent;
-    });
+    }).catch((): SendOutcome => "refused");
+    if (delivery === "refused") console.error("the urgent report email was not sent", report.kind);
+    else if (delivery === "uncertain") console.error("the urgent report email may not have been sent", report.kind);
+    return delivery !== "refused";
+  });
 }

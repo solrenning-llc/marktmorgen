@@ -169,6 +169,22 @@ export default function TermsPage() {
           is told when you do not publish it, and it is not published if you do
           not answer within {HELD_DAYS} days.
         </p>
+        <p id="course-access-end" className="scroll-mt-24">
+          <strong className="text-black">A course&apos;s end date.</strong>{" "}
+          You may set a day when access to a course ends. The course&apos;s
+          own page and its sales page show the date and time before anyone
+          pays, and the date applies only to people who buy the course there
+          while it is shown. People who bought before it was set, or another
+          way (your store page, the cart, a bundle, a gift, a group, a
+          pre-order or PayPal), keep the course with no end. Where the
+          course is sold only through PayPal, the date is not shown. In the last 24 hours
+          before the date, it is no longer shown, and people who buy then
+          keep the course with no end too. You can move the date later or
+          remove it, but not earlier, and doing either reaches everyone it
+          applied to. A course sold as a membership has no end date: members
+          keep it while they pay. People who pay in a payment plan
+          keep the course with no end too.
+        </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}
           In the European Union, the United Kingdom and some other places, a
@@ -407,8 +423,9 @@ export default function TermsPage() {
           You may never upload, sell, share or link to any material that
           sexually exploits a child, or any intimate image of a person shared
           without their consent. When we learn of material that appears to be
-          child sexual abuse material, we take it off the store at once, keep it as the
-          law requires, and report it, with the account behind it, to the
+          child sexual abuse material, we take it off the store as soon as we
+          can, usually at once (when it does not come off by itself, we act on
+          it by hand), keep it as the law requires, and report it, with the account behind it, to the
           National Center for Missing &amp; Exploited Children (NCMEC), as
           United States law requires (18 U.S.C. § 2258A). The account is closed.
           We remove an intimate image shared without consent within 48 hours of

@@ -82,7 +82,8 @@ async function main(): Promise<void> {
   const queue = (at: number) => {
     for (const id of ids.slice(0, WAITING)) {
       redis.run(["SET", keepKey(store, id), "1", "EX", 400 * 86_400]);
-      redis.run(["ZADD", QUEUE, at, JSON.stringify([storeRef(store), tag, id])]);
+      // Named by the store's id, as holdReported queues it since the base's fix (Claude 2 cloud L's MEDIUM on #3588).
+      redis.run(["ZADD", QUEUE, at, JSON.stringify([store.sid, tag, id])]);
     }
   };
   const makeDue = () => redis.run(["ZADD", ALERTS_DUE, "XX", Date.now() - 60_000, open[0]]);

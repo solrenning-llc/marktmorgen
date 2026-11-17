@@ -248,6 +248,7 @@ function reminderText(alert: Alert, n: number, now: number, link: string, last: 
     files_unconfirmed: "When it came in, the product it points at was taken off the store, but keeping its files could not be confirmed: suspend the store, as docs/incident-response.md section 8 says.",
     no_product: "When it came in, nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 8 says.",
     not_held: "Nothing was taken off automatically: act on it by hand, as docs/incident-response.md section 8 says.",
+    outside: "When it came in, nothing was taken off automatically (the address is not a Marktmorgen address): act on it by hand, as docs/incident-response.md section 8 says.",
     capped: "When it came in, nothing was taken off automatically (the store's daily cap was reached): act on it by hand, as docs/incident-response.md section 8 says.",
     unknown: "When it came in, taking it off the store could not be confirmed: act on it by hand, as docs/incident-response.md section 8 says.",
     failed: "When it came in, taking it off the store did not work: act on it by hand, as docs/incident-response.md section 8 says.",

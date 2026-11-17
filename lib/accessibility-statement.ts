@@ -99,4 +99,4 @@ export function statementDigest(): string {
  * tests/accessibility-statement.test.ts fails when the records change and this
  * is not reviewed again (DA1 (b)).
  */
-export const STATEMENT_REVIEW = { date: "November 14, 2026", digest: "cb089de927d33ff9" } as const;
+export const STATEMENT_REVIEW = { date: "November 17, 2026", digest: "d93532a15d8d115d" } as const;

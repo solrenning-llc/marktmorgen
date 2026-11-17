@@ -92,7 +92,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const product = await readListing(store, productId);
   if (!product?.course) redirect(`/@${store.handle}`);
   const jar = await cookies();
-  const access = await courseAccess(store, product, jar);
+  const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, jar, course);
   // A product held for a child-safety report is read by the store's owner only (lib/child-safety.ts): not its
   // students, not the team, not a visitor on a preview; a hold that cannot be read refuses the same way. They go
   // where an id that does not exist goes.
@@ -101,7 +102,6 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // in, see anything of it, a free preview included (MM-SA-30). Anyone else
   // goes where an id that does not exist goes, before its lessons are read.
   if (product.hidden && access.state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
-  const course = await readCourse(product.course.id);
   const base = `/@${store.handle}/course/${product.id}`;
   const found = course ? findLesson(course, lessonId) : null;
   if (!course || !found) redirect(base);

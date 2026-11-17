@@ -910,9 +910,10 @@ async function dispatchBatch(
         };
       })),
     }, runtime);
-    // Only a refusal Resend answered and the guard settled as not accepted, or no POST at all ("blocked"), is known
-    // not to have gone; an accepted answer, or an unknown one, may have.
-    if (result.kind === "unknown" || result.kind === "accepted_receipt" || (result.kind === "response" && result.response.ok)) receipt.maybeSent = true;
+    // Only a refusal Resend answered and the guard settled as not accepted, or no POST at all ("blocked", or "unknown"
+    // with `posted: false`: the guard stopped before asking Resend), is known not to have gone; an accepted answer, or
+    // an unknown one after a POST may have been made, may have (Codex N1 on #3827).
+    if ((result.kind === "unknown" && result.posted !== false) || result.kind === "accepted_receipt" || (result.kind === "response" && result.response.ok)) receipt.maybeSent = true;
     return result.kind === "accepted_receipt" ? "accepted_receipt" : result.kind === "response" ? result.response : null;
   };
   try {

@@ -60,6 +60,7 @@ import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
 import { pointsRecordOf } from "@/lib/community-points";
 import { allNoticesOf } from "@/lib/community-notify";
+import { benefitMarksOf } from "@/lib/tier-benefits";
 import { deviceCount } from "@/lib/community-push";
 import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
@@ -68,6 +69,7 @@ import { challengesOf } from "@/lib/community-challenges";
 import { votesOf } from "@/lib/community-polls";
 import { heldCopy, heldOf } from "@/lib/community-approval";
 import { keysOf } from "@/lib/licence-keys";
+import { activationsOf } from "@/lib/licence-activations";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
@@ -141,6 +143,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
   "lib/paypal-sales.ts": { how: "copied", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
   "lib/licence-keys.ts": { how: "copied", what: "License keys you bought, and the sale each came from" },
+  "lib/licence-activations.ts": { how: "copied", what: "The devices your license keys run on, as the codes kept for them, and when you freed one" },
   "lib/gifts.ts": { how: "copied", what: "Gifts you bought or were given" },
   "lib/group-buy.ts": { how: "copied", what: "Places bought for a group that you bought or were given" },
   "lib/preorders.ts": { how: "copied", what: "Your pre-orders and what became of them" },
@@ -151,6 +154,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/closing-holds.ts": { how: "copied", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
   "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
+  "lib/tier-benefits.ts": { how: "copied", what: "Which membership benefits the store marked as handed to you, and for which month or year" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
 };
 
@@ -470,6 +474,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/tier-benefits.ts": async (s) => (await benefitMarksOf(s.store, s.person)).map((m) => ({ benefit: m.benefit, period: m.period, markedGiven: iso(m.at) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
@@ -516,6 +521,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {

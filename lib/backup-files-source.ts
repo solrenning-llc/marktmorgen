@@ -91,7 +91,7 @@ import {
   parseFilesPage,
   sourcePrefix,
 } from "@/lib/backup-files-contract";
-import { backupFilesR2Config, listR2Page, presignR2Get } from "@/lib/backup-files-r2";
+import { R2UnsignableKey, backupFilesR2Config, listR2Page, presignR2Get } from "@/lib/backup-files-r2";
 import type { BackupFilesRouteReview } from "@/lib/backup-files-review";
 import { redisPipeline } from "@/lib/redis";
 import { windowCount, windowCountOf } from "@/lib/window-count";
@@ -359,7 +359,16 @@ function sourceOf(source: BackupFilesSource, now: () => number): { list: (prefix
     list: (prefix, cursor) => listR2Page(config, prefix, cursor),
     sign: async (key) => {
       const at = now();
-      return { url: presignR2Get(config, key, BACKUP_FILES_URL_SECONDS, new Date(at)), expiresAt: Math.floor(at / 1000) * 1000 + BACKUP_FILES_URL_SECONDS * 1000 };
+      let url: string;
+      try {
+        url = presignR2Get(config, key, BACKUP_FILES_URL_SECONDS, new Date(at));
+      } catch (error) {
+        // A key R2's signer would not lead to (a dot segment, or an address that does not decode back to it) is that
+        // one object left out, as a Blob key is, never the page (Codex N1's LOW 3 on #3313).
+        if (error instanceof R2UnsignableKey) throw new UnsignableKey();
+        throw error;
+      }
+      return { url, expiresAt: Math.floor(at / 1000) * 1000 + BACKUP_FILES_URL_SECONDS * 1000 };
     },
   };
 }

@@ -582,6 +582,57 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/community.ts LIKE_PRESS: the like, its trace entry and the author's point in one step, only while the
+        // like's lock is the press's and the like is as it was read.
+        if (key.startsWith("-- marktmorgen:community-like-press:v1\n") && Number(args[0]) >= 7 && args.length >= 1 + Number(args[0]) + 6) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const [author, token, who, ref, expect, point] = argv.splice(argv.length - 6, 6);
+          const [lock, likes, trace, members] = keys.slice(-4);
+          if (this.run(["GET", lock]) !== token) return [0];
+          const held = this.run(["SISMEMBER", likes, who]);
+          if (String(held) !== expect) return [2];
+          if (held === 0) {
+            let charged = 0;
+            if (point === "1") {
+              const raw = this.run(["HGET", members, author]);
+              let still = false;
+              if (typeof raw === "string") {
+                try {
+                  const record = JSON.parse(raw) as { k?: unknown; e?: unknown; removed?: unknown; muted?: unknown } | null;
+                  still = !!record && typeof record === "object" && record.k === author && typeof record.e === "string" && record.removed === false && typeof record.muted === "boolean";
+                } catch {
+                  still = false;
+                }
+              }
+              if (still) {
+                const out = this.orderWrite([String(count), ...keys, ...argv]) as unknown[];
+                if (out[0] === -1) return [-1];
+                charged = Number(out[0]);
+              }
+            }
+            this.run(["SADD", likes, who]);
+            return [1, 1, this.run(["SADD", trace, ref]), charged];
+          }
+          if (point === "1") {
+            const score = (board: string): number | false => {
+              const raw = this.run(["ZSCORE", board, author]);
+              if (raw === null) return 0;
+              const value = Number(raw);
+              return Number.isSafeInteger(value) ? value : false;
+            };
+            const total = score(keys[1]);
+            const today = score(keys[2]);
+            if (total === false || today === false) return [-1];
+            for (const [board, value] of [[keys[1], total], [keys[2], today]] as [string, number][]) {
+              if (value < 0) this.run(["ZADD", board, "0", author]);
+              else if (value > 0) this.run(["ZINCRBY", board, "-1", author]);
+            }
+          }
+          this.run(["SREM", likes, who]);
+          return [1, 0, this.run(["SREM", trace, ref]), 0];
+        }
         // lib/order-data.ts ORDER_WRITE_IF_SAME: each check, then ORDER_WRITE as it is on the rest.
         if (key.startsWith("-- marktmorgen:order-write-if-same:v1\n")) {
           const count = Number(args[0]);
@@ -879,6 +930,17 @@ export class MemoryRedis {
           const [, record, from, to, seconds] = args;
           if (this.run(["GET", record]) !== from) return 0;
           this.run(["SET", record, to, "EX", seconds]);
+          return 1;
+        }
+        // lib/auto-captions.ts: close the settled record and its listings only while it is still current.
+        if (key.startsWith("-- marktmorgen:captions-close-owed:v1\n") &&
+            ((args[0] === "2" && args.length === 5) || (args[0] === "3" && args.length === 6))) {
+          const [count, record, queue] = args;
+          const [from, id] = args.slice(Number(count) + 1);
+          if (this.run(["GET", record]) !== from) return 0;
+          if (count === "3") this.run(["SREM", args[3], id]);
+          this.run(["ZREM", queue, id]);
+          this.run(["DEL", record]);
           return 1;
         }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
@@ -1343,6 +1405,19 @@ export class MemoryRedis {
           // Match SET KEEPTTL: no expiry extension or removal.
           this.data.set(record, next);
           return 1;
+        }
+        // lib/closed-store-data.ts REWRITE_ENTRY: a closing store's walk entry rewritten only while it holds exactly the bytes read.
+        if (key.startsWith("-- marktmorgen:closing-rewrite-entry:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, batch, field, expected, next] = args;
+          if (this.run(["HGET", batch, field]) !== expected) return 0;
+          this.run(["HSET", batch, field, next]);
+          return 1;
+        }
+        // lib/closed-store-data.ts WITHDRAW_ENTRY: a closing store's walk entry taken out only while it holds exactly the bytes written.
+        if (key.startsWith("-- marktmorgen:closing-withdraw-entry:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, batch, field, expected] = args;
+          if (this.run(["HGET", batch, field]) !== expected) return 0;
+          return this.run(["HDEL", batch, field]);
         }
         // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
         // over exactly the text read.

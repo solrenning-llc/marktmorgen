@@ -185,7 +185,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | ε -0.5: C over A | ε -1: C over A | ε -1.5: C over A | ε -2: C over A |
 | --- | --- | --- | --- | --- |
-| Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.12× ($149 against $189) | 1.27× ($149 against $189) |
+| Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.13× ($149 against $189) | 1.27× ($149 against $189) |
 | Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.40× ($339 against $659) | 1.95× ($339 against $659) |
 | Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.46× ($629 against $1,339) | 2.13× ($629 against $1,339) |
 

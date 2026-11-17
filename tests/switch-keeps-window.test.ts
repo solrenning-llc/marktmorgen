@@ -602,7 +602,7 @@ async function main(): Promise<void> {
     // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #4026 (17 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
     // 36.28, 254.71, 571.15 -> 36.27, 254.71, 571.14; figures as the model computes them, still above zero (MR); no cost lowered.
-    is("11: and 36.28, 254.71 and 571.14 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.27", "254.71", "571.14"]);
+    is("11: and 36.27, 254.71 and 571.14 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.27", "254.71", "571.14"]);
   } finally {
     Date.now = realNow;
   }

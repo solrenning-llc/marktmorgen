@@ -247,6 +247,29 @@ async function main(): Promise<void> {
   for (let d = C + 1; d <= C + SILENT + 2; d += 1) for (const made of many) if ((await quietly(() => closeOne(made.email, made.ended + d * DAY, hands))).state === "removed") removed += 1;
   is("none removed", [removed, ...many.map(filesOf)], [0, 1, 1, 1]);
 
+  // Codex T's review of #3463 (HIGH): the note that a creator account refused or was silent today is what the
+  // joint-failure lock counts (lib/held-stores.ts). A note that cannot be confirmed was logged and the run went on,
+  // so the lock read counts that missed it as "not together" and the store lapsed. Now a note not confirmed holds.
+  const real = redis.pipeline.bind(redis);
+  let spoilNote = "";
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    if (spoilNote && commands.some((c) => c[0] === "HSET" && String(c[1]).startsWith(spoilNote))) return commands.map(() => null);
+    return replies;
+  }) as typeof redis.pipeline;
+  for (const [how, prefix, as] of [["silent", "nl:held:silent:", "down"], ["refusing us", "nl:held:refused:", "revoked"]] as const) {
+    part(`The creator's account ${how} to the deadline, today's note of it not confirmed: held, nothing removed`);
+    fresh();
+    const s = await withMember(`note${as}`, as === "down" ? "acct_1NoteSilent00001" : "acct_1NoteRefused0001", false);
+    connected = as;
+    for (let d = C + 1; d <= C + SILENT; d += 1) await quietly(() => closeOne(s.email, s.ended + d * DAY, hands));
+    spoilNote = prefix;
+    const kept = await quietly(() => closeOne(s.email, s.ended + (C + SILENT + 1) * DAY, hands));
+    spoilNote = "";
+    is(`${how}: the deciding run's note not confirmed: held, nothing removed, not lapsed`, [kept.state, filesOf(s), typeof (await record(s))?.lapsed], ["held", 1, "undefined"]);
+  }
+  redis.pipeline = real;
+
   done();
 }
 

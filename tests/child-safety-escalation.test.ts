@@ -328,6 +328,12 @@ async function main(): Promise<void> {
   is("which runs every hour", /"path": "\/api\/cron\/quiet",\s*"schedule": "50 \* \* \* \*"/.test(readFileSync("vercel.json", "utf8")), true);
   const doc = readFileSync("docs/incident-response.md", "utf8");
   is("docs/incident-response.md says how to mark it handled", [/a cada 24 horas/.test(doc), /Mark this report handled/.test(doc)], [true, true]);
+  // The reminders and the handled page name the section they send the owner to by its number: it must be the one on
+  // child sexual exploitation and intimate images, never the backup restore section just before it (they said 8; it is 9).
+  const section = /^## (\d+)\. Exploração sexual infantil/m.exec(doc)?.[1];
+  const cited = [readFileSync("lib/child-safety-alerts.ts", "utf8"), readFileSync("app/report/handled/[token]/page.tsx", "utf8")]
+    .flatMap((source) => [...source.matchAll(/docs\/incident-response\.md section (\d+)/g)].map((m) => m[1]));
+  is("every section the reminders and the handled page cite is the child-safety one", [section, cited.length > 0, [...new Set(cited)]], ["9", true, ["9"]]);
 
   done();
 }

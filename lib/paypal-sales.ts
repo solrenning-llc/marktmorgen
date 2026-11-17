@@ -1077,8 +1077,10 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   if (watched === "gone") return { ok: false, reason: "unknown" };
   // Two returns at once can both read a count under the bound; the count this step took decides (the INCR), so PayPal
   // is never asked more than CAPTURE_TRIES_PER_ORDER times an order, as above, and a refused one wrote nothing past its
-  // count. A try admitted at the same moment is being asked right now, so the thanks page reads where it stands.
-  if (watched === "spent") return { ok: false, reason: "pending" };
+  // count. A refused return proves no capture is under watch: the one that took the last try may not have written the
+  // order to pending yet, or may never (Codex X5 on #3411). So it is told it did not go through, never sent to the
+  // thanks page; the path that read the count at the bound keeps asking where the order stands (standing).
+  if (watched === "spent") return { ok: false, reason: "unknown" };
   const watchedHere = watched === "added";
   let done: Record<string, unknown>;
   try {

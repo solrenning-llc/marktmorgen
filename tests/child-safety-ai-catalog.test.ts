@@ -13,7 +13,7 @@ import { NextRequest } from "next/server";
 import { POST as aiRoute } from "@/app/api/store/ai/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { keepKey } from "@/lib/child-safety-holds";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductBundle, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -22,6 +22,7 @@ const OWNER = "catalog-held@example.com";
 const BASE = "https://marktmorgen.com";
 const HELD = "QZXHELDMARKER";
 const OPEN = "Plain Open Guide";
+const BUNDLE = "QZXBUNDLEMARK";
 
 async function main(): Promise<void> {
   redis.clear();
@@ -32,7 +33,14 @@ async function main(): Promise<void> {
   await setSubscription(OWNER, { customerId: "cus_catheld001", subscriptionId: "sub_catheld001", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
   const heldMade = await addProduct(OWNER, `${HELD} Guide`, `${HELD} summary words`, "29", null);
   const openMade = await addProduct(OWNER, OPEN, "An open summary", "19", null);
-  if (!heldMade.ok || !openMade.ok) throw new Error("no products");
+  // A bundle holding the held product is not sold (lib/child-safety-holds.ts, heldInSale), so no writing help names it.
+  const bundleMade = await addProduct(OWNER, `${BUNDLE} Pack`, "Both guides together", "39", null);
+  if (!heldMade.ok || !openMade.ok || !bundleMade.ok) throw new Error("no products");
+  // A product goes into a bundle only when it hands something over: a link each (lib/bundle-rules.ts, canBeInBundle).
+  await setProductLink(OWNER, heldMade.product.id, "https://example.com/held-guide");
+  await setProductLink(OWNER, openMade.product.id, "https://example.com/open-guide");
+  const bundled = await setProductBundle(OWNER, bundleMade.product.id, [heldMade.product.id, openMade.product.id]);
+  if (!bundled.ok) throw new Error("no bundle");
   const store = (await storeForEmail(OWNER))!;
   // The keep mark went in and the hide did not: the product is still listed (hidden false).
   redis.run(["SET", keepKey(store, heldMade.product.id), "1"]);
@@ -74,6 +82,7 @@ async function main(): Promise<void> {
       const sent = await ask(body);
       is(`${name}: the model was asked, with the store's other product`, sent.includes(OPEN), true);
       is(`${name}: the held title and summary did not cross to the model`, sent.includes(HELD), false);
+      is(`${name}: nor did a bundle holding it`, sent.includes(BUNDLE), false);
     }
 
     part("A hold that cannot be read leaves out every product it was read for");
@@ -83,7 +92,7 @@ async function main(): Promise<void> {
     try {
       for (const [name, body] of modes) {
         const sent = await ask(body);
-        is(`${name}: neither product crossed to the model`, [sent.includes(HELD), sent.includes(OPEN)], [false, false]);
+        is(`${name}: no product crossed to the model`, [sent.includes(HELD), sent.includes(OPEN), sent.includes(BUNDLE)], [false, false, false]);
       }
     } finally {
       redis.pipeline = real;

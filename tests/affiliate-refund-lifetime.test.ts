@@ -324,7 +324,8 @@ async function main(): Promise<void> {
     // taken-back path again before the lasting write: the refund mark's ZADD and EXPIRE, and for a capture reversed,
     // failed or declined also its own mark's. The WHOLE command list of a failed look is held to the lines' sum, so
     // no step in that path can go uncounted: the run's two list reads (the pending sweep's and the watch's), the watch
-    // line's own two (the paid record's GET and the list write), the one script, and the marks (PAYPAL_REFUND_KEPT).
+    // line's own three (the paid record's GET, its one write when PayPal's word changes it, and the list write), the one
+    // script, and the marks (PAYPAL_REFUND_KEPT).
     // The sibling retry (rule 30): a buyer's record read whose reply is not exact also puts the order back an hour on,
     // after the marks and the script; its one HGET is the buyer's record of PAYPAL_REFUND_WATCH's open gap (main's).
     const failures = [
@@ -342,6 +343,8 @@ async function main(): Promise<void> {
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:pending:${SID}`,
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:watch:${SID}`,
         (c: (string | number)[]) => c[0] === "GET" && c[1] === `nl:ppsell:paid:${ORDER}`,
+        // A reversal's takenOff written once on the paid record (#3443, the Path's money), in the watch line's own.
+        (c: (string | number)[]) => c[0] === "SET" && c[1] === `nl:ppsell:paid:${ORDER}`,
         (c: (string | number)[]) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}` && c[c.length - 1] === ORDER,
         (c: (string | number)[]) => look.kept.includes(c),
       ];

@@ -18,7 +18,7 @@
  *   - a purchases import saved before files could say they have no status column reads its rows as before (LOW 3).
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
+import { MOVE_HELD_RETRY_MS, addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { store as redis } from "./redis-stub";
@@ -180,7 +180,8 @@ async function main(): Promise<void> {
     const none = await sendMoveReminders(Date.now() + 30_000, at);
     is("no postal address: no reminder", [none.sent, sentTo(member, before).length], [0, 0]);
     await setMailSettings(LATER, { fromName: "Harbor Kitchen", address: POSTAL });
-    const back = await sendMoveReminders(Date.now() + 30_000, at + 3_601 * 1000);
+    // Held for a missing address, it is tried again a day later, not an hour (review of #3476, Claude 7's cost MEDIUM 1).
+    const back = await sendMoveReminders(Date.now() + 30_000, at + MOVE_HELD_RETRY_MS + 1_000);
     is("the address saved again, the reminder goes, once", [back.sent >= 1, sentTo(member, before).length], [true, 1]);
   }
 

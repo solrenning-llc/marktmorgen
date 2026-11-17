@@ -1567,13 +1567,14 @@ export const COST_LINES: CostLine[] = [
       const reports = a.reports * request("light", 4, MAX_REPORT_ROWS * 400);
       // Each email to somebody brought over, Store's own or (Studio, Scale) one of the monthly emails, with the store's
       // deleted people, the list's rows, the stop mark and its own stop link read and written before it goes
-      // (MOVED_EMAIL_EXTRA_COMMANDS).
-      const movedExtra = Math.max(a.movedEmails, monthlyEmails(tier)) * MOVED_EMAIL_EXTRA_COMMANDS * COMMAND;
+      // (MOVED_EMAIL_EXTRA_COMMANDS), and its invitation's reminder held for a missing postal address at most
+      // MOVE_HELD_PASSES times (MOVED_EMAIL_COMMANDS_PRICED).
+      const movedExtra = Math.max(a.movedEmails, monthlyEmails(tier)) * MOVED_EMAIL_COMMANDS_PRICED * COMMAND;
       return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL + movedExtra;
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
-      { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS", "MOVED_EMAIL_EXTRA_COMMANDS"] },
+      { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS", "MOVED_EMAIL_EXTRA_COMMANDS", "MOVE_HELD_PASSES", "MOVE_HELD_PASS_COMMANDS", "MOVE_HELD_RETRY_MS"] },
       // The store's deleted people, the list's rows, the stop mark and the stop link read and written before each email
       // to somebody brought over.
       { file: "lib/suppression.ts", names: ["suppressedAmong"] },

@@ -2169,6 +2169,14 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      // It carries the creator's postal address: with none, it is not sent now. Checked before any other read (review
+      // of #3476, Claude 7's cost MEDIUM 1), and tried again once a day while the renewal date is still more than a day
+      // away, so a creator who saves the address again still has it sent (review of #3476, LOW 2); after that there is
+      // nothing left for it to help with. Held so at most MOVE_HELD_PASSES times, MOVE_HELD_PASS_COMMANDS each.
+      if (!movePostal(store)) {
+        if (invite.r * 1000 > now + MOVE_HELD_RETRY_MS) await putBack(now + MOVE_HELD_RETRY_MS - 3_600_000);
+        continue;
+      }
       // A sending pause is temporary (Codex G on #4359): the reminder waits in line for its end while that is still
       // before the renewal date, and only a pause running past it lets the reminder go (reminderEmail would have nothing
       // to send by then). A pause read in an unknown shape is not "no pause" (CX-123 rule 24): tried again later.
@@ -2187,13 +2195,6 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if ((await deletedAmong(store.listId, [invite.e])).size) continue;
       if ((await leftListAmong(store.listId, [invite.e])).size) continue;
       if ((await remindersStoppedAmong(store, [invite.e])).size) continue;
-      // It carries the creator's postal address: with none, it is not sent now, and is put back in line for an hour
-      // later while that is still before the renewal date, so a creator who saves the address again still has it sent
-      // (review of #3476, LOW 2); after that date there is nothing left for it to help with.
-      if (!movePostal(store)) {
-        if (invite.r * 1000 > now + 3_600_000) await putBack(now);
-        continue;
-      }
       if (await keptAlready(store, invite.e, invite.p)) {
         await noteKept(store, invite.e, invite.p, now);
         counts.kept += 1;

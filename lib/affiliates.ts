@@ -3395,14 +3395,21 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
   const amount = paidCents(pi.amount, "a paid offer's amount");
   const currency = paidCurrency(pi.currency, "a paid offer's money");
   const buyer = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
-  const at = typeof pi.created === "number" ? pi.created : Math.floor(Date.now() / 1000);
+  const made = exactSeconds(pi.created);
+  const at = made ?? Math.floor(Date.now() / 1000);
+  // A partner's dated end is compared with when the offer was paid: its settled charge's time, never the intent's own
+  // `created` (made before the charge) nor the clock (Codex G on #1924, point 2). Without it, near an end, the offer
+  // is unknown and thrown, so the five-minute job reads its payment again with the charge (lib/upsell.ts creditAgain).
+  const paidAt = await paidForPartners(store, { payment_intent: pi } as SessionLike, made, at, amount, meta.product ? [meta.product] : []);
 
   // A partner shares in the product whether or not an affiliate's link was
-  // involved, and an offer taken after paying is a sale of a product.
+  // involved, and an offer taken after paying is a sale of a product. A partner step that fails is thrown once the
+  // affiliate's step is done, so the job credits the offer again (creditCharge); both writes are once (HSETNX).
+  let partnerFailure: { error: unknown } | null = null;
   await notePartners(store, {
     ref: pi.id,
     pi: pi.id,
-    at,
+    at: paidAt,
     product: meta.product ?? "",
     title: `${(meta.title ?? "").slice(0, 180)} (added after paying)`,
     // A one-click charge never carries tax: the whole amount is the base.
@@ -3410,10 +3417,16 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     total: amount,
     currency,
     buyer,
-  }).catch((error) => console.error("noting a partner's share failed", error));
+  }).catch((error) => {
+    console.error("noting a partner's share failed; the offer is credited again by the job", error);
+    partnerFailure = { error };
+  });
+  const settle = (): void => {
+    if (partnerFailure) throw (partnerFailure as { error: unknown }).error;
+  };
 
   const aff = meta.via ?? "";
-  if (!AFFILIATE_ID_PATTERN.test(aff)) return;
+  if (!AFFILIATE_ID_PATTERN.test(aff)) return settle();
   // Read before anything is written: a share that does not read throws, and no 0% sale is set down (linkShare).
   const rate = linkShare(meta.via_rate);
   await writeReferral(store, {
@@ -3434,6 +3447,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     // order is only ever reached through a link.
     how: "click",
   });
+  settle();
 }
 
 // ---- The book ------------------------------------------------------------

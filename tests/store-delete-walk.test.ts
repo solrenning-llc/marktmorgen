@@ -21,7 +21,7 @@ import { BATCH_KEY, WALK_KEY, eraseClosed } from "@/lib/closed-store-data";
 import { CLOSING, closingFamilyOf } from "@/lib/data-families";
 import { finishClosed } from "@/lib/plan-closing";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { type Store, claimHandle, createStore, ensureListId, ensureStatsId, setPhotoId, storeForEmail, storeForId, storeRef } from "@/lib/store";
+import { type Store, claimHandle, createStore, ensureListId, ensureStatsId, setCommunity, setPhotoId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { readPhoto, writePhoto } from "@/lib/store-photo";
 import { makeKey, resolveKey } from "@/lib/api-keys";
 import { retryStoreForgets } from "@/lib/store-forget-retry";
@@ -274,8 +274,12 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "keepshome", "Keeps Home", "");
   const thrice = await createStore(OWNER, "keepsthrice", "Keeps Thrice", "");
   if (!thrice.ok) throw new Error("no thrice store");
+  // With a community, whose pictures (community/<folder>/) only a round that knows its id can list (Claude 5's LEVE 1
+  // on #4348 @9f5c3bc5b2).
+  await setCommunity(storeRef(thrice.store), true);
   const thriceStore = await furnished(storeRef(thrice.store));
   const thriceRef = storeRef(thriceStore);
+  if (!thriceStore.community) throw new Error("no community");
   const thriceKey = await makeKey(thriceStore.sid, "Synthetic key");
   if (!thriceKey.ok) throw new Error("no key");
   // The same double fault at the delete as above, so nothing was forgotten there.
@@ -299,6 +303,9 @@ async function main(): Promise<void> {
   is("that read was in fact garbled", keysGarbled, true);
   is("the run is not done and the store still waits in the line, not walked", [firstWalk.done, typeof (await inBatch(thriceRef))], [false, "string"]);
   is("its API keys' list, the only way to its lookups, is still there", (await allKeys()).includes(`nl:api:keys:${thriceStore.sid}`), true);
+  const [line] = (await pipe([["HGETALL", "nl:forget:q"]])) as [string[]];
+  const lineEntry = line[line.findIndex((field, at) => at % 2 === 0 && field.endsWith(`|${thriceStore.sid}`)) + 1] ?? "";
+  is("the round the walk put in line knows its community, so it lists its pictures too", (JSON.parse(lineEntry || "{}") as { community?: string }).community, thriceStore.community.id);
   // The daily job's retry and the next walk, in either order, then forget everything.
   await retryStoreForgets(deadline(), Date.now() + HOUR);
   await eraseClosed(deadline(), finishClosed, Date.now() + 21 * HOUR);

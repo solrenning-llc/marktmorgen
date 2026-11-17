@@ -137,7 +137,7 @@ import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rul
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
-import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
+import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE, STORE_LOCK_TRIES } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
@@ -1074,6 +1074,47 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  */
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 76, takeBackCommands: 22 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
+/**
+ * The daily plans job (lib/plans.ts, settlePlans, from app/api/cron/plans/route.ts), per run, at the most:
+ * - readCommandsPerRun: one pipeline reads both lines (SRANDMEMBER of the new plans, ZRANGEBYSCORE ... LIMIT of
+ *   the plans tried and due), each bounded by plansPerRun;
+ * - plansPerRun: PLANS_PER_RUN plans tried, none started after the run's deadline;
+ * - ownCommandsPerPlanTried: settled or gone, SREM and ZREM; kept, ZADD and then SREM; moved to another time or
+ *   mark (watched for an earlier end, a failure not its account's, its creator told), ZADD, SREM and ZREM;
+ * - stripeCallsPerPlanTried: the checkout, the subscription and at most one update (or the end at once, DELETE), and,
+ *   for a plan past its own end, its late payments given back (lib/plan-late-refunds.ts, LATE_REFUND_CALLS): the
+ *   subscription's paid invoices from its end on (one list, its charges expanded), the account's balance, and for at
+ *   most lateRefundsPerTry payments the refunds already made on it and the refund itself; no Redis command of its own
+ *   (each refund's mark and idempotency key live at Stripe), and a plan with more to give back is kept for the next
+ *   day (ZADD, SREM, ZREM, inside ownCommandsPerPlanTried);
+ * - runMs: the share of the run the route gives the plans (PLANS_MS), every request given up by then;
+ * - tellCommandsPerPlan: per try of the telling (sent once a plan; while it stays unsent, tried again at each of the
+ *   plan's tries, weekly for a stuck plan and daily for an owed one, each try these commands again and, on the Amazon
+ *   SES path, one of the store's emails taken before sending and not given back when both providers fail; each
+ *   notice goes under an idempotency key of its own plan, lib/plan-stuck-notice.ts, noticeKey), when its account has
+ *   refused us for PLAN_GIVE_UP_DAYS, telling its creator
+ *   (lib/plan-stuck-notice.ts): the store read by its id (two GETs and the free-account check storeForEmail makes,
+ *   five, as measured in tests/payment-plan-stuck.test.ts), the product's listing (at most one read), the email's
+ *   meter and send on the Resend path measured there (four; on Amazon SES that path's own commands, priced with
+ *   every store email in lib/email.ts), and, when it could not be sent, the mark given back (ZADD, SREM, ZREM).
+ *   The email itself is the store's own, taken from its email figure before it is sent (EMAIL_SITES). The same
+ *   figure bounds the once-a-plan email to the creator about a payment after the plan's end still owed back for
+ *   PLAN_OWED_TELL_DAYS (lib/plan-stuck-notice.ts, tellPlanOwed: the same reads, meter and send, and the mark given
+ *   back when it could not be sent);
+ * - lateTellsPerTry and lateTellCommandsPerPlan: a plan past its end whose late payments are given back tells each
+ *   buyer once (lib/plan-late-notice.ts): one read of every late payment's claim (HEXISTS, at most the 100 the list
+ *   holds), the store read by its id (five) and the product's listing (one), and for at most lateTellsPerTry payments
+ *   the claim (HSETNX, HINCRBY, EXPIRE), the email's meter and send on the Resend path (four, as measured in
+ *   tests/payment-plan-late-notice.test.ts) and, when it could not be sent, the claim given back (HDEL): at most
+ *   100 + 6 + 3 x 8 = 130. Each email is the store's own, taken from its transactional figure before it is sent
+ *   (EMAIL_SITES), so it is inside the plan's worst month; a payment's email is tried at most LATE_TELL_TRIES (7)
+ *   times, and a plan with a buyer still to tell is tried again the next day, inside plansPerRun.
+ * A plan its account refuses is tried at growing intervals for PLAN_GIVE_UP_DAYS (about ten tries), then once
+ * every PLAN_STUCK_RETRY_DAYS until the account answers; a failure not its account's (Stripe down, our key) is
+ * tried at the next run. Every try is inside plansPerRun. Why this is the company's, not a plan's:
+ * NOT_A_COST.PLANS_PER_RUN.
+ */
+export const PLAN_SETTLE_RUN = { readCommandsPerRun: 2, plansPerRun: 200, ownCommandsPerPlanTried: 4, stripeCallsPerPlanTried: 3 + 2 + 2 * 3, lateRefundsPerTry: 3, runMs: 25_000, tellCommandsPerPlan: 15, lateTellsPerTry: 3, lateTellCommandsPerPlan: 130 } as const;
 /**
  * The PayPal refund watch (lib/paypal-sales.ts, watchPayPal; C4-13 and its pre-review), run by the five-minute job's
  * sweep of a store with PayPal, which until now had no line here:
@@ -2162,8 +2203,28 @@ export const KEY_NAME_BYTES = 128;
  * team as a host, fifty pages of their claims and their deletes, and the
  * stores they serve; and a hundred for its ids, team, keys for the API,
  * webhooks, email platform, phones, address, record and line in the walk.
+ * Then the record's going (lib/store.ts, closeStoreRecord): the store's lock
+ * (SET NX, tried again for LOCK_WAIT_MS: at most STORE_LOCK_TRIES), the record
+ * read again (GET), the walk's entry written again, no longer pending (HSET),
+ * its id taken out of its account's list at the address the record read again
+ * names too (one more SREM: an account moved since), the record deleted only
+ * while the lock is still held (EVAL, GET, DEL) and the lock let go (EVAL,
+ * GET, DEL).
  */
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100;
+export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3;
+/**
+ * The walk's own read of a prepared store's record before it starts (lib/closed-store-data.ts startableBatch: one GET
+ * per entry), so it never walks a store whose record is still there (Codex L, Codex P and Claude 2 cloud L on #3643).
+ */
+export const WALK_START_READ_COMMANDS = 1;
+/**
+ * A closing store whose plan reads running (paid or in trial) has its place in the final closing line read before
+ * anything of it is touched (lib/closed-store-data.ts prepareStore: one ZSCORE), so a store whose plan runs again is
+ * never erased while its closing day has not begun (Claude 5's MEDIUM on #3643). Read again under the store's lock from
+ * the record closeStoreRecord already reads and the ZREM's own answer: no command more.
+ */
+export const PLAN_RUNS_READ_COMMANDS = 1;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command, each page with a read of the store's fields' values for its people a field (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {
@@ -2465,6 +2526,7 @@ export const NOT_A_COST: Record<string, string> = {
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   LAUNCH_HOLD_SECONDS: "How long a waitlist launch may wait, from its start, while its store is switched off after notices (lib/waitlist.ts, runLaunches and holdLaunch): a scheduled job, bounded by its schedule (a company fixed cost), adding no email (nothing is reserved or sent while held). Each held run takes, beyond the GET of the launch's record and the store read it already made, one pipeline of two EXPIRE (its send list and its record), read exactly; once the bound passes (or a renewal reads in another shape in the hold's last week), one LRANGE of the addresses already handled and one pipeline of SET, HDEL, DEL and SREM, once a launch. While a launch sends, every batch after a run's first reads the store again (storeForHandle, two GET), so a switch-off stops the rest of the run: at most one read per LAUNCH_BATCH emails, inside the same deadline; each batch's record write renews its send list in the same pipeline (one EXPIRE per LAUNCH_BATCH emails), so the list never lapses while the record lives. Like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones on a store with reminders or a list, never the open ones. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
+  PLANS_PER_RUN: "Payment plans the daily plans job tries in one run (lib/plans.ts, settlePlans; app/api/cron/plans/route.ts): two read commands a run and, for each plan tried, at most four Redis commands of its own and three calls to the creator's Stripe account (eleven for a plan past its own end with payments to give back: its paid invoices from the end on, the balance, and for at most three of them the refunds made and the refund, lib/plan-late-refunds.ts), inside a 25-second share of the run (PLAN_SETTLE_RUN, held by tests/payment-plan-stuck.test.ts). A plan its account refuses is tried at growing intervals for PLAN_GIVE_UP_DAYS, then once every PLAN_STUCK_RETRY_DAYS until the account answers (never let go), its creator emailed once (tellCommandsPerPlan; the email is the store's own, from its email figure); a payment after its end owed back for PLAN_OWED_TELL_DAYS tells its creator once the same way, and each buyer whose late payment was given back is emailed once from the store's transactional figure (lateTellCommandsPerPlan, at most lateTellsPerTry a try, lib/plan-late-notice.ts); a failure not its account's is tried at the next run, every try inside the limit. A scheduled job that keeps buyers from being charged past their last payment, bounded by its schedule and the limit: a company fixed cost, not a plan's allowance; Stripe bills no API call, and its Redis commands are not yet a line of lib/llc-fixed-costs.ts, so they are not certified, never zero.",
   REFUND_WATCH_BATCH: "Paid PayPal orders the refund watch looks at for a store in one run of the five-minute job (lib/paypal-sales.ts, watchPayPal; C4-13): one ZRANGEBYSCORE of the store's watch list a run, of PAYPAL_WATCH_BATCH orders (the one batch, priced as a read in NOT_A_COST.PAYPAL_WATCH_BATCH), then for each due order one GET of its capture at PayPal (no dated source here gives PayPal's price per API call: an open gap, never zero), the paid record's GET and one write of the list, each order no more often than nextLook (hourly the first week, then every six hours, then daily; daily until the paid record ends, 400 days, only for a status not known here) (PAYPAL_REFUND_WATCH, held by tests/paypal-reversed-access.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like HAND_OVER_BATCH, not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   PENDING_SWEEP_BATCH: "Pending PayPal orders the sweep asks PayPal about for a store in one run of the five-minute job (lib/paypal-sales.ts, watchPayPal; Claude 6's second money review of #3392): one ZRANGEBYSCORE of the store's pending list a run, of PAYPAL_WATCH_BATCH orders (the one batch, priced as a read in NOT_A_COST.PAYPAL_WATCH_BATCH), then for each order the opened record's and the paid record's GET, one GET of the order at PayPal (no dated source here gives PayPal's price per API call: an open gap, never zero) and at most one write of the list, ZREM or ZADD XX to its back; each order at most 30 days, its opened record's life (PAYPAL_PENDING_SWEEP, held by tests/paypal-reversed-access.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like REFUND_WATCH_BATCH, not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A receipt the sender did not accept reruns its order's hand-over at most receiptTriesPerOrder times in its window, each try at most commandsPerReceiptTry commands (PAYPAL_RECEIPT_RETRY_COMMANDS an order), and at most one request a sender attempt through the one sender kept for it. The same sweep's watch of PayPal refunds (watchPayPal, lib/paypal-sales.ts) reads, for each payment refunded in full that it tells the store's webhooks of, the person's own-deletion note once (PAYPAL_REFUND_TOLD); its other per-order commands are REFUND_WATCH_BATCH and PAYPAL_REFUND_WATCH. A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
@@ -2647,7 +2709,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/paypal-cancel.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
-  "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,
+  "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE, "lib/plan-stuck-notice.ts": STORE, "lib/plan-late-notice.ts": STORE,
   "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,
   "lib/payment-recovery.ts": STORE, "lib/podcast-access.ts": STORE, "lib/quiet-sales.ts": STORE, "lib/store-contact.ts": STORE,

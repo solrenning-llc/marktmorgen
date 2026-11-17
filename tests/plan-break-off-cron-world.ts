@@ -6,3 +6,5 @@ export async function sendReminders(){calls.push("renewal");world.onRenewal();re
 export async function sendFailedPlanNotices(){calls.push("failed");return 0;}
 export async function sendTrialNudges(_now?:number,deadline=0){calls.push("trial");world.trialDeadline=deadline;if(world.trialThrows)throw Error("the subscription list page is not a complete bounded observation");return {sent:0,failed:0,seen:0,complete:true};}
 export async function sendDueReminders(deadline=0){calls.push("requests");world.requestsDeadline=deadline;return {sent:0,skipped:0};}
+export async function withinLimit(){return true;}
+export async function essentialLimitState(){return "within" as const;}

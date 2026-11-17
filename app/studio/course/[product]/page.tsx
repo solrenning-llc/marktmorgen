@@ -35,6 +35,7 @@ import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
+import { CaptionsRefundsOwed } from "@/components/captions-refunds-owed";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
@@ -85,12 +86,12 @@ export default async function StudioCoursePage({
   const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
   const streams = await streamStates(videoPaths).catch(() => ({}));
   // And the languages each one has captions in.
-  const captions = await streamCaptions(videoPaths).catch(() => ({}));
+  const captions = await streamCaptions(videoPaths).catch(() => null);
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card. A read that
-  // failed is null and is said on the page, never shown as no refund owed (CX-123 rule 30).
+  const writing = await autoWriting(videoPaths).catch(() => null);
+  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card; null when they
+  // could not be read (rule 24), so the section says so instead of hiding as if nothing were owed.
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
@@ -198,22 +199,9 @@ export default async function StudioCoursePage({
               We could not read whether a refund for AI captions is still waiting for Stripe. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
             </p>
           </section>
-        ) : owedRows.length ? (
-          <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
-            <h2 id="captions-refunds" className="text-base font-bold text-ink">
-              Refunds for AI captions not confirmed yet
-            </h2>
-            <ul className="mt-2 space-y-1 text-sm text-ink">
-              {owedRows.map((row) => (
-                <li key={row.id}>
-                  {row.stuck
-                    ? `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was not confirmed by Stripe, and we have stopped checking it on our own. Write to ${SUPPORT_EMAIL} about it.`
-                    : `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was asked for, and Stripe has not confirmed it yet. We check it again on our own; you do not need to do anything.`}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+        ) : (
+          <CaptionsRefundsOwed rows={owedRows} />
+        )}
         <CourseAccessCheck
           check={lessonCaptionCheck(course, streams, captions, writing)}
           productId={product.id}
@@ -229,8 +217,9 @@ export default async function StudioCoursePage({
           draft={product.hidden === true}
           folder={folder}
           streams={streams}
-          captions={captions}
-          writing={writing}
+          // The editor's own lesson Captions part still reads a missing entry as none (a leftover; the check above says unknown).
+          captions={captions ?? {}}
+          writing={writing ?? {}}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}

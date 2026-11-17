@@ -235,6 +235,10 @@ export const en = {
       title: "PayPal did not take the payment",
       body: "Nothing was charged. Try again with another card or account in PayPal, or pay with a card here.",
     },
+    "paypal-confirming": {
+      title: "This PayPal payment is being confirmed",
+      body: "Another tab or a second press is finishing it now. Check your email for the receipt before you pay again. If PayPal shows money taken and no receipt comes, write to the store by replying to PayPal's receipt.",
+    },
     "paypal-error": {
       title: "That PayPal payment could not be matched to this store",
       body: "Nothing was handed over for it. If PayPal shows money taken, write to the store by replying to PayPal's receipt.",

@@ -664,7 +664,10 @@ export type Paid = {
    */
   m?: string;
 };
-export type CaptureResult = { ok: true; paid: Paid; fresh: boolean } | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" };
+export type CaptureResult =
+  | { ok: true; paid: Paid; fresh: boolean }
+  /** "confirming": another return of the same order holds its last try right now (captureOrder's "spent"). */
+  | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" | "confirming" };
 
 /** Whether PayPal is still being waited on for an order this store opened. */
 export async function stillPending(store: Store, order: string): Promise<boolean> {
@@ -1080,7 +1083,9 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   // count. A refused return proves no capture is under watch: the one that took the last try may not have written the
   // order to pending yet, or may never (Codex X5 on #3411). So it is told it did not go through, never sent to the
   // thanks page; the path that read the count at the bound keeps asking where the order stands (standing).
-  if (watched === "spent") return { ok: false, reason: "unknown" };
+  // The buyer is told it is being confirmed, never that it could not be matched or that nothing was handed over: the
+  // return that took the last try is usually this buyer's own other load, taking the payment now (Claude 5's LOW).
+  if (watched === "spent") return { ok: false, reason: "confirming" };
   const watchedHere = watched === "added";
   let done: Record<string, unknown>;
   try {

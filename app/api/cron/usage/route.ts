@@ -79,6 +79,14 @@ export const maxDuration = 60;
  */
 const TOLD = "nl:usage-watch:told:";
 const toldKey = (month: string) => `${TOLD}${month}`;
+const TOLD_SECONDS = 40 * 86_400;
+/**
+ * The one told list of all months the watch wrote before the lists were per month. It says nothing of the month a
+ * store was told in, so a store it names may already have been told this month: the first run after the change
+ * copies it into the month's own list, confirms that write, and only then deletes it (readTold). Nothing writes it
+ * any more; left alone it expires 40 days after its last write.
+ */
+const LEGACY_TOLD = "nl:usage-watch:told";
 
 type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
 
@@ -389,7 +397,7 @@ export async function GET(request: NextRequest) {
 
 
   await redisPipeline([
-    ["SET", toldList, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
+    ["SET", toldList, JSON.stringify([...new Set([...seen, ...given])]), "EX", TOLD_SECONDS],
   ]);
 
   if (unreadOwners > 0) {
@@ -402,11 +410,31 @@ export async function GET(request: NextRequest) {
   );
 }
 
-/** The stores already told about the delivery allowance this month: nil is none; any other shape throws. */
+/**
+ * The stores already told about the delivery allowance this month: the month's own list, joined with the old list of
+ * all months while that one is still there (LEGACY_TOLD), each read in its own call. The join is written to the month's list and that write is
+ * confirmed before the old list is deleted, each in its own call, and before anyone is written to: an unconfirmed
+ * write or delete throws, so the delivery part sends nothing that run and the old list is still read the next run
+ * (Codex X4 and N4 on #4502). There is no separate "migrated" mark that could be kept while the copy was lost.
+ * Nil is none; any other shape throws.
+ */
 async function readTold(key: string): Promise<Set<string>> {
   const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
   if (!replies) throw new UnknownReplyError("the stores told about the delivery allowance");
-  const raw = replies[0];
+  const month = toldNames(replies[0]);
+  const legacy = repliesFor(await redisPipeline([["GET", LEGACY_TOLD]]), 1);
+  if (!legacy) throw new UnknownReplyError("the old told list of all months");
+  if (legacy[0] === null) return month;
+  const joined = new Set([...month, ...toldNames(legacy[0])]);
+  const wrote = repliesFor(await redisPipeline([["SET", key, JSON.stringify([...joined]), "EX", TOLD_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") throw new UnknownReplyError("the copy of the old told list into this month's");
+  const removed = repliesFor(await redisPipeline([["DEL", LEGACY_TOLD]]), 1);
+  if (!removed || (removed[0] !== 0 && removed[0] !== 1)) throw new UnknownReplyError("the removal of the old told list");
+  return joined;
+}
+
+/** One told list as Redis answered it: nil is none; any other shape than a JSON list of strings throws. */
+function toldNames(raw: unknown): Set<string> {
   if (raw === null) return new Set();
   if (typeof raw !== "string") throw new UnknownReplyError("the stores told about the delivery allowance");
   let parsed: unknown;

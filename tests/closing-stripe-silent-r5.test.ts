@@ -260,7 +260,7 @@ async function main(): Promise<void> {
   for (const [how, prefix, as] of [["silent", "nl:held:silent:", "down"], ["refusing us", "nl:held:refused:", "revoked"]] as const) {
     part(`The creator's account ${how} to the deadline, today's note of it not confirmed: held, nothing removed`);
     fresh();
-    const s = await withMember(`note${as}`, as === "down" ? "acct_1NoteSilent00001" : "acct_1NoteRefused0001", false);
+    const s = await withMember(`note${as}`, as === "down" ? "acct_1NoteSilent0001" : "acct_1NoteRefuse0001", false);
     connected = as;
     for (let d = C + 1; d <= C + SILENT; d += 1) await quietly(() => closeOne(s.email, s.ended + d * DAY, hands));
     spoilNote = prefix;

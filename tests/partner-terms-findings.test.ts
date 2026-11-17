@@ -121,6 +121,26 @@ async function main(): Promise<void> {
   is("no opening time, the intent not expanded: unknown, never 'opened after the end'", [await noOpening("cs_test_no_created", undefined), await noOpening("cs_test_frac_created", end - 0.5), await noOpening("cs_test_zero_created", 0)], ["UnknownReplyError", "UnknownReplyError", "UnknownReplyError"]);
   is("and nothing of them was written", (await earned()).filter((key) => /cs_test_(no|frac|zero)_created/.test(key)).length, 0);
   is("the sweep reads each charge with its balance transaction, so the settlement time is there", readFileSync("lib/checkout-sweep.ts", "utf8").includes("expand[]=data.payment_intent.latest_charge.balance_transaction"), true);
+  // Codex G on #1924, point 1: the dated end is checked on every product of the order, not only its main one. A partner
+  // whose share is on a product added at checkout (a bump line) and ends after the checkout opened may have been paid
+  // for after the end too: unknown without a settled charge's time, never credited on the checkout's time.
+  const B = "prodbbbbbb";
+  const q2 = "cccccccccccc";
+  await put(person(q2));
+  const end2 = T + 10 * DAY;
+  await proposePartnerShare(await store(), q2, { percent: 15, products: [B], until: end2 }, T);
+  const bumpOrder = (ref: string, created: number, payment_intent: unknown) => ({
+    ...session(ref, created, payment_intent), amount_subtotal: 1000, total_details: { amount_tax: 0, amount_shipping: null },
+    metadata: { store: handle, product: A, title: "Book", bump: B, bump_cents: "400" },
+  });
+  const bumpAt = async (ref: string, created: number, payment_intent: unknown) => noteSession(await store(), bumpOrder(ref, created, payment_intent)).then(() => "noted", (error: Error) => error.name);
+  is("a bump line under a dated share, opened before its end, no settled charge: unknown", await bumpAt("cs_test_bump_unk", end2 - 60, "pi_bump_not_expanded"), "UnknownReplyError");
+  is("and nothing of it was credited", (await earned()).filter((key) => key.startsWith("cs_test_bump_unk")).length, 0);
+  // Controls: the same order charged before the end earns on its bump line; opened after the end, nothing and no wait.
+  await noteSession(await store(), bumpOrder("cs_test_bump_before", end2 - 7200, charged("pi_bump_before", end2 - 7000, end2 - 3600)));
+  is("the bump line charged before the end earns", (await earned()).includes(`cs_test_bump_before:${q2}`), true);
+  is("opened after the end, the intent not expanded: no share and no wait", await bumpAt("cs_test_bump_after", end2 + 60, "pi_bump_after"), "noted");
+  is("and it earned nothing", (await earned()).includes(`cs_test_bump_after:${q2}`), false);
 
 
   part("4. An answer whose write may have landed is never said to have changed nothing");

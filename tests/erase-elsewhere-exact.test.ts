@@ -300,6 +300,35 @@ async function main(): Promise<void> {
     }
   }
 
+  part("MEDIUM (Codex N1 on #3660 at 772df66aeb): an id in an owner's account set that is not a store's id is never read as no other store");
+  {
+    const junk = "not-a-confirmed-store-id";
+    for (const [what, withClosing] of [["only an id that is not a store's", false], ["the closing store's id and one that is not a store's", true]] as const) {
+      fresh();
+      let sid = "";
+      const at = await closing(OWNER, "badaccount", async () => {
+        sid = (await storeForEmail(OWNER))?.sid ?? "";
+      });
+      if (!sid) throw new Error("setup: the closing store has no id");
+      const list = withClosing ? [sid, junk] : [junk];
+      replaced = [{ word: "SMEMBERS", key: accountStoresKey(OWNER), reply: [...list] }];
+      for (let k = 0; k <= 2; k += 1) await walkAt(walkTime(at, k));
+      replaced = [];
+      is(`${what}: the store erased, the owner's calendar kept, still to decide`, [(await storeForEmail(OWNER)) === null, calendarKept(OWNER), batchLeft()], [true, [1, 1, 1, 1], 1]);
+    }
+    {
+      fresh();
+      let sid = "";
+      const at = await closing(OWNER, "goodaccount", async () => {
+        sid = (await storeForEmail(OWNER))?.sid ?? "";
+      });
+      replaced = [{ word: "SMEMBERS", key: accountStoresKey(OWNER), reply: [sid] }];
+      await walkAt(walkTime(at, 0));
+      replaced = [];
+      is("control, only the closing store's own id: decided, the calendar gone", [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
+    }
+  }
+
   part("LOW: a page of a host's claims that does not read is never their end");
   async function claimed(): Promise<{ at: number; key: string }> {
     fresh();

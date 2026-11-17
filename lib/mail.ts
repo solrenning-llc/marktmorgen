@@ -417,16 +417,19 @@ export async function giveBackToMonth(store: Store, n: number): Promise<void> {
 }
 
 /**
- * Gives back what was taken for a batch that was not sent. True when there was nothing to give back or both counters
- * answered a whole number (rule 24); false when the give-back could not be confirmed, so a caller that must know
- * (lib/product-updates.ts) does not take it as done. Throws when the pipeline does.
+ * Gives back what was taken for a batch that was not sent, never below zero on the month or the day (GIVE_BACK_FLOOR):
+ * a give-back that lands on a window or day holding less than it (the window turned between the reserve and this,
+ * or it came twice) once left the count negative, and later batches could send past the plan by that much.
+ * True when there was nothing to give back or both counters answered a whole number (rule 24); false when the
+ * give-back could not be confirmed, so a caller that must know (lib/product-updates.ts) does not take it as done.
+ * Throws when the pipeline does.
  */
 export async function release(store: Store, n: number): Promise<boolean> {
   const window = windowOf(store);
-  if (!store.listId || !window || !(n > 0)) return true;
+  if (!store.listId || !window || !Number.isSafeInteger(n) || !(n > 0)) return true;
   const replies = repliesFor(await redisPipeline([
-    ["DECRBY", usedKey(store.listId, window), n],
-    ["DECRBY", dayKey(), n],
+    ["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n],
+    ["EVAL", GIVE_BACK_FLOOR, 1, dayKey(), n],
   ]), 2);
   return !!replies && replies.every((r) => typeof r === "number" && Number.isSafeInteger(r));
 }
@@ -496,7 +499,7 @@ export function render(
   const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:${t.bodyFont};font-size:16px;line-height:1.6;color:${t.text};background:${t.page}">
 ${header}
-<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, t.button.fill, t)}</div>
+<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => { const tagged = taggedLink(href, store, tag, counting ? readerKey : undefined); return tag.via ? tag.via(href, tagged) : tagged; } : undefined, t.button.fill, t)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:${t.muted}">
 <p style="margin:0 0 8px">${escape(why)}</p>
 <p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:${t.muted};text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
@@ -574,6 +577,14 @@ export type SendOutcome = {
    */
   refused?: { email: string; removed: boolean }[];
 };
+
+/**
+ * What a send says in the studio when the service that sends our email did not take a batch just now (a "retry":
+ * down, slow, or not confirmed): never that it "asked us to slow down", which it may not have (outage drill,
+ * 13 November 2026). Nothing of the batch was sent; it is tried again by the scheduled job.
+ */
+export const SENDER_RETRY_NOTE =
+  "Paused for a moment: the service that sends our email did not take this batch just now. It is tried again by itself.";
 
 /** What a send that met the sender's ceiling says in the studio. */
 export const SENDER_WAIT_NOTE =

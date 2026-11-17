@@ -975,8 +975,9 @@ async function accountHeld(email: string, account: string): Promise<boolean> {
   const replies = repliesFor(await redisPipeline([["SMEMBERS", accountStoresKey(email)]]), 1);
   const ids = replies?.[0];
   if (!replies || !Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
+  // An id that is not a store's does not prove that no store holds the account: unknown, as in ownsAnother.
+  if ((ids as string[]).some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
   for (const id of ids as string[]) {
-    if (!STORE_ID_PATTERN.test(id)) continue;
     const other = await storeUnder(`#${id}`, "whether the owner's other store sells through a closing store's account (GET)");
     if (other && other.email.toLowerCase() === email.toLowerCase() && other.stripeAccountId === account) return true;
   }
@@ -1089,8 +1090,9 @@ async function unlessHeld(one: Held, change: Unheld): Promise<boolean> {
     const replies = repliesFor(await redisPipeline([["SMEMBERS", accountStoresKey(one.email)]]), 1);
     const ids = replies?.[0];
     if (!replies || !Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
+    if ((ids as string[]).some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
     known = ids as string[];
-    checks = [ownerKeyOf(one.email), accountStoresKey(one.email), ...known.filter((id) => STORE_ID_PATTERN.test(id)).map((id) => ownerKeyOf(`#${id}`))];
+    checks = [ownerKeyOf(one.email), accountStoresKey(one.email), ...known.map((id) => ownerKeyOf(`#${id}`))];
   }
   const targets = change.op === "DEL" ? change.keys : [change.key];
   const replies = repliesFor(await redisPipeline([[

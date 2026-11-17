@@ -90,6 +90,28 @@ function paidAndKept(payment: unknown): boolean {
 }
 
 /**
+ * Whether heldFromSessions can decide on this row: every field it reads, in a shape Stripe gives with the two
+ * expansions asked (Codex V's review of #2999, MEDIUM). A row that cannot be decided is unreadable
+ * (lib/stripe-list.ts): it proves nothing, and past it a "no" is not known, so a larger rule that may rest on it
+ * makes the answer unknown, never a smaller rule or none. A row that cannot qualify whatever its other fields
+ * (not complete, or sold as something else) needs nothing more read.
+ */
+export function sessionDecidable(row: Record<string, unknown>): boolean {
+  if (typeof row.status !== "string" || typeof row.mode !== "string" || typeof row.payment_status !== "string") return false;
+  const meta = row.metadata;
+  if (!plainObject(meta) || !Object.values(meta).every((value) => typeof value === "string")) return false;
+  if (row.status !== "complete" || meta.kind !== undefined) return true;
+  if (row.mode === "subscription") return plainObject(row.subscription) && typeof row.subscription.status === "string";
+  if (row.mode !== "payment" || row.payment_status !== "paid") return true;
+  const payment = row.payment_intent;
+  if (!plainObject(payment) || typeof payment.status !== "string") return false;
+  if (payment.status !== "succeeded") return true;
+  const charge = payment.latest_charge;
+  return plainObject(charge) && typeof charge.paid === "boolean" && typeof charge.refunded === "boolean"
+    && typeof charge.disputed === "boolean" && typeof charge.amount_refunded === "number";
+}
+
+/**
  * The qualifying products this address's completed checkouts prove it holds
  * now, from Stripe's rows. Pure: rows in another shape are passed over and
  * prove nothing.
@@ -143,8 +165,9 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
           const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
           query.append("expand[]", "data.subscription");
           query.append("expand[]", "data.payment_intent.latest_charge");
-          // A "yes" stands from any readable row; a page in another shape throws (lib/stripe-list.ts).
-          return readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), plainObject, SESSION_ROW);
+          // A "yes" stands from any readable row; a row it cannot decide is unreadable (sessionDecidable); a page in another
+          // shape throws (lib/stripe-list.ts).
+          return readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), sessionDecidable, SESSION_ROW);
         }),
       ),
       readImported ? redisPipeline([readImported]).then((replies) => repliesFor(replies, 1)?.[0]) : Promise.resolve(null),

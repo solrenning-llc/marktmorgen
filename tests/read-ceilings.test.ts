@@ -54,6 +54,7 @@ import { COST_LINES, DAY_WINDOWS, PER_PAYMENT_LINES, nonPayingWorst, readShapeCo
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { sharedDollarMonthlyUsd } from "./ceiling-shared-dollar";
 
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 const OWNER = "feed@example.com";
@@ -354,7 +355,8 @@ async function main(): Promise<void> {
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
-    const uploads = COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd("creator") ?? Number.NaN;
+    // The lines the owner lets use the dollar between 65 and 66 (tests/ceiling-shared-dollar.ts), the uploads among them.
+    const uploads = sharedDollarMonthlyUsd(COST_LINES, "creator");
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
     is("the readings figure is still the one sized under US$ 65: without the upload line, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);

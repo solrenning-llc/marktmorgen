@@ -33,7 +33,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   if (path === "/promotion_codes" && method === "GET") {
     const id = live[url.searchParams.get("code") ?? ""];
-    return new Response(JSON.stringify({ object: "list", data: id ? [{ id, active: true }] : [] }));
+    return new Response(JSON.stringify({ object: "list", data: id ? [{ id, object: "promotion_code", active: true, code: url.searchParams.get("code") }] : [] }));
   }
   if (path === "/checkout/sessions" && method === "POST") {
     const body = new URLSearchParams(String(init?.body));

@@ -12,7 +12,7 @@
  * Synthetic store and people; Redis is the in-memory stand-in (tests/redis-stub.ts), which answers HSCAN with every
  * field at once, as a real server may.
  */
-import { MAX_EMAIL_LENGTH } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { addressHash } from "@/lib/imported-purchases";
 import { INVITES_PER_UNIT, INVITE_DROP_BYTES_MAX, INVITE_READ_BYTES_MAX, INVITES_FIRST_REQUEST_BYTES, type Invite, dropProductInvites, inviteField, linkKey } from "@/lib/move-members";
 import { OPTION_ID } from "@/lib/product-option";
@@ -45,6 +45,21 @@ async function main(): Promise<void> {
   const page = INVITES_PER_UNIT * (INVITE_READ_BYTES_MAX + INVITE_DROP_BYTES_MAX) + INVITES_FIRST_REQUEST_BYTES;
   is(`a page of ${INVITES_PER_UNIT} with the first request's own commands fits in ${STUDIO_BYTES} bytes`, page <= STUDIO_BYTES, true);
   console.log(`a page at its heaviest: ${page} bytes of ${STUDIO_BYTES}`);
+
+  part("A page of addresses heavier in bytes than in characters still fits (Codex P on #4831)");
+  // The importer takes an address by its length in UTF-16 code units (MAX_EMAIL_LENGTH, lib/imports.ts isEmail), and
+  // the database moves its record's UTF-8 bytes: three for a character such as "界", and six for a control character,
+  // which EMAIL_PATTERN lets through and JSON.stringify writes as \u0001. The page is measured in those bytes.
+  const bytes = (text: string) => Buffer.byteLength(text, "utf8");
+  for (const [label, unit] of [["CJK characters", "界"], ["control characters", "\u0001"]] as const) {
+    const heavy = `${unit.repeat(MAX_EMAIL_LENGTH - "@example.com".length)}@example.com`;
+    is(`the importer takes an address of ${label} at MAX_EMAIL_LENGTH`, [EMAIL_PATTERN.test(heavy), heavy.length <= MAX_EMAIL_LENGTH, normaliseEmail(heavy) === heavy], [true, true, true]);
+    const heavyField = inviteField(heavy, product);
+    const heavyRecord = JSON.stringify({ e: heavy, p: product, o: option, r: 9_999_999_999_999, job: "f".repeat(24), at: 9_999_999_999_999, t: "0".repeat(40), kept: 9_999_999_999_999 } satisfies Invite);
+    const heavyRead = bytes(heavyField) + FRAME + bytes(heavyRecord) + FRAME;
+    is(`INVITE_READ_BYTES_MAX covers an invitation of ${label} in bytes (${heavyRead})`, INVITE_READ_BYTES_MAX >= heavyRead, true);
+    is(`a page of ${INVITES_PER_UNIT} such invitations fits in ${STUDIO_BYTES} bytes`, INVITES_PER_UNIT * (heavyRead + drop) + INVITES_FIRST_REQUEST_BYTES <= STUDIO_BYTES, true);
+  }
 
   part("A page answered with more than asked pays for the rest before anything on it is deleted");
   const OWNER = "page-bytes@example.com";

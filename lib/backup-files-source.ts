@@ -82,6 +82,7 @@ import {
   BACKUP_FILES_PAGE_ENTRIES,
   BACKUP_FILES_PAGES_PER_STORE,
   BACKUP_FILES_URL_SECONDS,
+  BACKUP_FILES_DAY_CEILING_REFUSALS,
   type BackupFilesEntry,
   type BackupFilesPage,
   type BackupFilesReason,
@@ -146,8 +147,9 @@ const ROOM = 1.1;
 
 /**
  * The route's worst month in micro-dollars, a company cost (the company's backup, 100% Marktmorgen under FX275): the
- * review's maxPagesPerDay, which takeDayPage counts before any provider call, for each source that is on, every UTC day
- * of the month, plus R2's rounding block, with room. No review: 0, since the route answers 404 before any command.
+ * review's maxPagesPerDay, which takeDayPage counts before any provider call, and the day's one refused call past it
+ * (BACKUP_FILES_DAY_CEILING_REFUSALS), for each source that is on, every UTC day of the month, plus R2's rounding block,
+ * with room. No review: 0, since the route answers 404 before any command.
  * Null (unknown, never zero) for a review that is not a whole page count, or when Bunny Stream, whose listing price is
  * not read, is turned on.
  */
@@ -156,7 +158,8 @@ export function backupFilesRouteWorstMonth(review: BackupFilesRouteReview | null
   if (!Number.isSafeInteger(review.maxPagesPerDay) || review.maxPagesPerDay < 1) return null;
   if (SOURCE_OFF.bunny === null) return null;
   const on = (["blob", "r2"] as const).filter((source) => SOURCE_OFF[source] === null).length;
-  const pages = on * review.maxPagesPerDay * ROUTE_DAYS_PER_MONTH;
+  // And the day's refused call past the ceiling (BACKUP_FILES_DAY_CEILING_REFUSALS), priced as a whole page.
+  const pages = on * (review.maxPagesPerDay + BACKUP_FILES_DAY_CEILING_REFUSALS) * ROUTE_DAYS_PER_MONTH;
   return Math.ceil((pages * BACKUP_FILES_PAGE_MICRO_USD + (SOURCE_OFF.r2 === null ? R2_BLOCK_MICRO_USD : 0)) * ROOM);
 }
 

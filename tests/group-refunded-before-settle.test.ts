@@ -116,6 +116,38 @@ async function main(): Promise<void> {
   payments[own] = { ...paymentOf(own, false), latest_charge: charge(false, "pi_GroupRefForeign1") };
   const foreignCharge = await run(own);
   is("another payment's expanded charge cannot decide this group", [foreignCharge.settled, foreignCharge.open], ["threw", false]);
+
+  part("An own charge also needs readable refund and dispute flags");
+  for (const field of ["refunded", "disputed"] as const) {
+    const id = `pi_GroupRefUnknown${field}`;
+    const { latest_charge } = paymentOf(id, false);
+    payments[id] = { ...paymentOf(id, false), latest_charge: { ...latest_charge, [field]: undefined } };
+    const unresolved = await run(id);
+    is(`an unreadable ${field} flag leaves the group pending`, [unresolved.settled, unresolved.open], ["threw", false]);
+  }
+
+  part("A revocation write needs an exact acknowledgement before it is final");
+  const refunded = "pi_GroupRefWriteLost";
+  payments[refunded] = paymentOf(refunded, true);
+  const unconfirmed = await startGroup(store, product, "5");
+  if (!unconfirmed.ok) throw new Error("revocation test group did not start");
+  const recordKey = `nl:grp:${unconfirmed.group.id}`;
+  const input = { store, product, session: sessionFor(unconfirmed.group.id, refunded),
+    base: "https://x.test/@group-ref", from: "store@x.test" };
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === recordKey) return [null];
+    return pipeline(commands);
+  };
+  try {
+    const answer = await settleGroup(input).catch(() => "threw");
+    is("an unconfirmed revocation cannot return already", answer, "threw");
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the retry keeps the revocation without handing out places", await settleGroup(input), "already");
+  const saved = JSON.parse(String(redis.run(["GET", recordKey]))) as { revoked?: unknown };
+  is("the retried revocation was stored", typeof saved.revoked, "number");
   const noAccountStart = await startGroup(store, product, "5");
   if (!noAccountStart.ok) throw new Error("no-account group did not start");
   const noAccount = await settleGroup({

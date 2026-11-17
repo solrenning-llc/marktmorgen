@@ -53,3 +53,13 @@ test("the DEL under the tasks lock answered unknown: throws, never done", async 
   answer((c) => c.length === 2 && c[1] === TASKS, []);
   await assert.rejects(() => forgetCrm(STATS), UnknownReplyError);
 });
+
+test("the main DEL's reply unreadable: the DEL under the tasks lock is still sent, then it throws (Claude 6 on #4693)", async () => {
+  seed();
+  // The main DEL never reaches the store here, as if a change read before it had written the tasks back: only the
+  // locked DEL can take them, and it must still be sent although the main DEL's reply could not be read.
+  answer((c) => c.includes(DEALS), ["OK"]);
+  await assert.rejects(() => forgetCrm(STATS), UnknownReplyError);
+  redis.pipeline = real;
+  assert.equal(redis.run(["EXISTS", TASKS]), 0);
+});

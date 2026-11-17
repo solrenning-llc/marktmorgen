@@ -579,8 +579,24 @@ async function settlePendingInvites(statsId: string, productId: string): Promise
   if (taken !== 1 && taken !== 0) throw new UnknownReplyError("the note of a membership whose invitations were deleted");
 }
 
-/** The invitations one studio request reads and deletes when their membership is removed: a page of the store's invitations. */
-export const INVITES_PER_UNIT = 100;
+/**
+ * The invitations one studio request reads and deletes when their membership is removed: a page of the store's
+ * invitations. A studio request pays for 50,000 bytes through the database (tests/plan-cost-registry.ts,
+ * UNIT_COST.studio), and a page at its heaviest, read and deleted, with the first request's own commands, fits in
+ * them: INVITES_PER_UNIT x (INVITE_READ_BYTES_MAX + INVITE_DROP_BYTES_MAX) + INVITES_FIRST_REQUEST_BYTES, held by
+ * tests/move-invites-page-bytes.test.ts against the real field and record (Claude 1's review of #4831, MEDIUM).
+ */
+export const INVITES_PER_UNIT = 50;
+/**
+ * The most one invitation weighs as HSCAN returns it: its field (an address's 32-character print, a colon and a
+ * product id of 40) and its record as inviteMembers writes it (an address of MAX_EMAIL_LENGTH, ids at their longest,
+ * every number at 13 digits: about 500 bytes), each in RESP's framing, rounded up.
+ */
+export const INVITE_READ_BYTES_MAX = 620;
+/** The most deleting one weighs in the request: its field again (HDEL), its reminder (ZREM: a store id, "|" and the field) and its link (DEL). */
+export const INVITE_DROP_BYTES_MAX = 300;
+/** The first request's own commands besides its page: the removal's mark, the count, and the note's SISMEMBER, SCARD, SADD and SREM. */
+export const INVITES_FIRST_REQUEST_BYTES = 1_000;
 
 /** Thrown when a page of a store's invitations could not be paid for in studio requests: nothing of it was read. */
 export class InvitesUnpaidError extends Error {
@@ -631,6 +647,11 @@ export async function dropProductInvites(
     paid = false;
     const page = scanPage(await redisPipeline([["HSCAN", key, cursor, "MATCH", `*${suffix}`, "COUNT", INVITES_PER_UNIT]]));
     if (!page || page.items.length % 2 !== 0) throw new UnknownReplyError("a page of a store's invitations");
+    // COUNT is only a hint in Redis: a page answered with more than INVITES_PER_UNIT invitations pays one more studio
+    // request for each further INVITES_PER_UNIT before anything on it is deleted (Claude 1's review of #4831, MEDIUM);
+    // refused, nothing on it is deleted, and the same removal asked again finds it again.
+    const extra = Math.ceil(page.items.length / 2 / INVITES_PER_UNIT) - 1;
+    if (extra > 0 && !(await pay(extra))) throw new InvitesUnpaidError();
     const held: { field: string; token: string }[] = [];
     for (let i = 0; i < page.items.length; i += 2) {
       const field = page.items[i];

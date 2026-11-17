@@ -2,9 +2,17 @@ import { MemoryRedis } from "@/lib/redis-memory";
 import { spendCommands } from "@/lib/redis-ceiling";
 export const store = new MemoryRedis();
 export const isRedisConfigured = () => true;
-/** Held to the command ceiling of the work it runs in (lib/redis-ceiling.ts), as lib/redis.ts is. */
-export const redisPipeline = async (commands: (string | number)[][]) => {
-  spendCommands(commands.length);
+/**
+ * Held to the command ceiling of the work it runs in (lib/redis-ceiling.ts), as lib/redis.ts is: a refusal is a
+ * rejected promise, as it is there. Not an async function: one more await layer would read the reply's `then` once
+ * more, which tests/redis-reply-envelope.test.ts counts as transport probing.
+ */
+export const redisPipeline = (commands: (string | number)[][]): Promise<unknown[]> => {
+  try {
+    spendCommands(commands.length);
+  } catch (error) {
+    return Promise.reject(error);
+  }
   return store.pipeline(commands);
 };
 /** Moves the test clock, for a cooldown that has to be outlasted. */

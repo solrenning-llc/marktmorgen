@@ -569,6 +569,8 @@ async function main(): Promise<void> {
     // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #4246 (17 November 2026, Claude 3 cloud T): main's costs (#2803's picture uploads) and this PR's
     // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // #4514's command ceiling (Claude 7's and Claude 5's MEDIUM): the invite job's Redis commands and list bytes priced,
+    // about ten cents more a month on each plan; figures as the model computes them, still above zero (MR).
     // Merge of main into #4514 (17 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
     // 44.33, 309.84, 694.42 -> 44.27, 309.78, 694.36; figures as the model computes them, still above zero (MR); no cost lowered.
     is("11: Store, Studio and Scale keep 44.27, 309.78 and 694.36 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.27", "309.78", "694.36"]);
@@ -600,6 +602,7 @@ async function main(): Promise<void> {
     // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
     // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
     // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
+    // The same #4514 command ceiling, on each plan's yearly month; still above zero (MR). Cost is not lowered.
     // Merge of main into #4514 (17 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
     // 36.28, 254.71, 571.15 -> 36.22, 254.65, 571.09; figures as the model computes them, still above zero (MR); no cost lowered.
     is("11: and 36.22, 254.65 and 571.09 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.22", "254.65", "571.09"]);

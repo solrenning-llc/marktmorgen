@@ -7,6 +7,8 @@
  * and leaves Marktmorgen with nothing to hold, skim or lose. The 0% on the home
  * page is this file.
  */
+import { everyOf } from "@/lib/product-recurring";
+import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
@@ -301,7 +303,7 @@ export async function createCheckout(
   } = {},
   /** Internal integration dependency; never populated from HTTP or environment flags. */
   confirmationRuntime: ConfirmationOriginRuntime = {},
-): Promise<{ url: string; id: string }> {
+): Promise<{ url: string; id: string; closesAt?: number | null }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
   if (extras.gift) extras = { ...extras, bumps: [], plan: false, upsellKey: undefined, group: undefined };
   if (extras.preorder) {
@@ -638,15 +640,20 @@ export async function createCheckout(
   if (membership) {
     // The subscription is created on the creator's own account, like every
     // other charge here, so the member is their customer and not ours.
-    body.set("line_items[0][price_data][recurring][interval]", membership.interval);
+    // How often, as the page says it (609 [WP8]): the interval, and its count only when it is more than one.
+    for (const [key, value] of stripeEveryFields("line_items[0][price_data][recurring]", membership.interval, everyOf(membership))) body.set(key, value);
     // Paid yearly, where the creator offers it: the year's price, once a year (lib/yearly-price.ts).
     const yearlyNow = extras.yearly ? activeYearly(product, store.tiers) : null;
     if (yearlyNow) {
       body.set("line_items[0][price_data][unit_amount]", String(yearlyNow.cents));
       body.set("line_items[0][price_data][recurring][interval]", "year");
+      body.delete("line_items[0][price_data][recurring][interval_count]");
       body.set("metadata[every]", "year");
       body.set("subscription_data[metadata][every]", "year");
     }
+    // Kept on the order for the words after paying, which say it as charged even if the product changes meanwhile.
+    const paidEvery = yearlyNow ? null : paidEveryValue(membership.interval, everyOf(membership));
+    if (paidEvery) body.set(`metadata[${PAID_EVERY_KEY}]`, paidEvery);
     body.set("subscription_data[metadata][store]", store.handle);
     body.set("subscription_data[metadata][product]", product.id);
     if (chosen) body.set("subscription_data[metadata][option]", chosen.id);
@@ -817,6 +824,7 @@ export async function createCheckout(
     if (!reserved.ok) throw new Error("The payment page could not be opened");
     const ready = await openConfirmationOrigin(reserved.id, confirmationRuntime);
     if (!ready) throw new Error("The payment page could not be confirmed");
+    // The confirmed origin's own answer, as it is kept (no closing time is read back on this path).
     return ready;
   }
 
@@ -912,7 +920,14 @@ export async function createCheckout(
   // rememberPlan throws unless the write is confirmed, and on an id the job could not follow (Codex X4 on #4493), so a
   // checkout whose end is not on that list is never handed out; the open session then expires unpaid.
   if (plan || (membership && membership.payments > 0)) await rememberPlan(store.stripeAccountId ?? "", session.id);
-  return { url: session.url, id: session.id };
+  // When Stripe closes it, in Unix seconds: its own expires_at, else the one this checkout was opened with (a held unit,
+  // the reminders' hour), else null (Stripe's default day). A caller that keeps the address keeps it no longer
+  // (lib/winback-send.ts; Claude 7's review of #3482, MEDIUM).
+  const told = Number(body.get("expires_at"));
+  const closesAt = Number.isSafeInteger(session.expires_at) && Number(session.expires_at) > 0
+    ? Number(session.expires_at)
+    : body.has("expires_at") && Number.isSafeInteger(told) && told > 0 ? told : null;
+  return { url: session.url, id: session.id, closesAt };
 }
 
 /** A product added at checkout, as an order hands it over. */

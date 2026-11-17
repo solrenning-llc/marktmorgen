@@ -11,7 +11,7 @@
  * an invoice; lib/usage-billing.ts is kept for lesson video's legacy line
  * (lib/watch-billing.ts), which paid playback admission never reaches.
  */
-import { type Meter, firstWordOf } from "@/lib/usage-billing";
+import { type Meter, firstWordOf, giveFirstWordBack, takeFirstWordOf } from "@/lib/usage-billing";
 import { visitedFolders, visitsIn } from "@/lib/traffic";
 import { SETUP_VISITS, VISITS_INCLUDED } from "@/lib/traffic-rules";
 
@@ -28,4 +28,14 @@ const VISITS: Meter = {
 /** Whether the creator still has to be written to about this month's visits: true the first time it is asked, and never again. */
 export function firstWordOnVisits(folder: string, month: string): Promise<boolean> {
   return firstWordOf(VISITS, folder, month);
+}
+
+/** firstWordOnVisits, keeping the mark's value: given back with giveVisitsWordBack when the notice was certainly not sent. */
+export function takeVisitsWord(folder: string, month: string): Promise<string | null> {
+  return takeFirstWordOf(VISITS, folder, month);
+}
+
+/** Gives the month's mark back after a certain refusal, while it still holds this run's value (lib/usage-billing.ts). */
+export function giveVisitsWordBack(folder: string, month: string, value: string): Promise<void> {
+  return giveFirstWordBack(VISITS, folder, month, value);
 }

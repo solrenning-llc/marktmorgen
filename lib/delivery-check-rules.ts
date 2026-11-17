@@ -130,9 +130,10 @@ export type AddressAnswer = { status: number } | { problem: SafeFetchProblem };
 export function addressVerdict(what: string, where: string, answer: AddressAnswer): DeliveryVerdict {
   if ("problem" in answer) {
     switch (answer.problem) {
-      // A long answer is an answer: the page is there.
+      // Too long to read whole, and its status not known (lib/delivery-check.ts passes it on when it is): an error
+      // page can be long too, so this is never called fine (Codex C2 on #3623).
       case "too_big":
-        return { state: "ok", found: `${what} answers.` };
+        return { state: "not-checked", found: `${what} answered with more than we read, and we could not tell whether it opens. Open it yourself to check.` };
       case "scheme":
         return { state: "problem", found: `${what}, ${where}, is not a secure web address (https), so buyers' browsers may warn about it or not open it.`, fix: "Change it to the https address of the page." };
       case "address":
@@ -176,4 +177,31 @@ export function verdictFor(target: DeliveryTarget, read: { size: number } | "mis
   // A file's answer, or none, for an address: nothing was asked of it.
   if (!read || read === "missing" || "size" in read) return { state: "not-checked", found: `${what} could not be checked just now. It is checked again tomorrow.` };
   return addressVerdict(what, target.url, read);
+}
+
+// ---- The reading (479 [SB2], unit 2; added 10 November 2026) -----------------
+// lib/delivery-check.ts reads what deliveryItems names and hands each answer to the verdicts above. These are its
+// ceilings, here so the help and the studio can read them without the database.
+
+/** At most this many things of one product are read in one check; the rest are counted and said as not checked. */
+export const MAX_DELIVERY_ITEMS = 16;
+/** Each thing is given at most this long, whatever reads it; an answer later is "not checked", never fine. */
+export const DELIVERY_ITEM_MS = 20_000;
+/** An address is read this far and no further: a longer page is judged by its status (too_big, above). */
+export const ADDRESS_READ_BYTES = 16_384;
+/** How long an address is waited on, redirects included. */
+export const ADDRESS_TIMEOUT_MS = 8_000;
+/** Redirects followed before an address is said to send visitors on too far. */
+export const ADDRESS_REDIRECTS = 5;
+/**
+ * The studio requests one check takes, before anything is read: what a check of MAX_DELIVERY_ITEMS things costs at
+ * its worst, held in tests/delivery-check.test.ts (the function waiting DELIVERY_ITEM_MS at 2 GB, each file looked at
+ * twice at the dearer storage, each address's bytes). From the store's own studio figure, so no new limit is made.
+ */
+export const DELIVERY_CHECK_UNITS = 5;
+
+/** What is said of the things past MAX_DELIVERY_ITEMS: counted, not read, never said to be fine. */
+export function leftWords(left: number): string {
+  if (!Number.isSafeInteger(left) || left <= 0) return "";
+  return `${left} more ${left === 1 ? "thing this product hands over was" : "things this product hands over were"} not checked this time: we check ${MAX_DELIVERY_ITEMS} at a time.`;
 }

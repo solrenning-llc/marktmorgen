@@ -407,7 +407,10 @@ function updateDay(seconds: number): string {
 
 /** Out of the five-minute queue, looked at again in UPDATE_HELD_LOOK_SECONDS (advanceUpdates puts it back then). */
 async function hold(id: string, nowSeconds: number): Promise<void> {
-  await redisPipeline([["ZADD", HELD, nowSeconds + UPDATE_HELD_LOOK_SECONDS, id], ["SREM", QUEUE, id]]);
+  // Keep the source until the destination is confirmed; commands in one pipeline can fail independently.
+  const added = repliesFor(await redisPipeline([["ZADD", HELD, nowSeconds + UPDATE_HELD_LOOK_SECONDS, id]]), 1)?.[0];
+  if (added !== 0 && added !== 1) throw new UnknownReplyError("holding a product update");
+  await redisPipeline([["SREM", QUEUE, id]]);
 }
 
 /**
@@ -665,7 +668,11 @@ export async function advanceUpdates(load: (handle: string) => Promise<Store | n
   // UPDATE_HELD_PER_RUN a run; a list that does not read in its exact shape is unknown, and nothing is moved.
   const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", HELD, "-inf", Math.floor(Date.now() / 1000), "LIMIT", 0, UPDATE_HELD_PER_RUN]]), 1)?.[0]);
   if (!due) throw new UnknownReplyError("the held product updates");
-  if (due.length > 0) await redisPipeline([["SADD", QUEUE, ...due], ["ZREM", HELD, ...due]]);
+  if (due.length > 0) {
+    const added = countOf(repliesFor(await redisPipeline([["SADD", QUEUE, ...due]]), 1)?.[0]);
+    if (added === null || added > due.length) throw new UnknownReplyError("requeueing held product updates");
+    await redisPipeline([["ZREM", HELD, ...due]]);
+  }
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", QUEUE]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("the queue of product updates");
   let touched = 0;

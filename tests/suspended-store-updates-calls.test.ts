@@ -216,6 +216,50 @@ test("product update: the mail job looks at a held send once a day, not every ru
   assert.deepEqual([toBuyer().length, queued(started.job.id), heldAt(started.job.id)], [1, 0, null]);
 });
 
+test("product update: a failed move into the held set leaves the job in the mail queue", async (t) => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok);
+  await noteTakedown(owner, null, true);
+
+  const run = redis.pipeline.bind(redis);
+  const fault = t.mock.method(redis, "pipeline", async (commands: Parameters<typeof redis.pipeline>[0]) => {
+    if (commands[0]?.[0] !== "ZADD" || commands[0]?.[1] !== "nl:updheld") return run(commands);
+    await run(commands.slice(1));
+    throw new Error("held-set write unavailable");
+  });
+
+  await assert.rejects(advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000), /held-set write unavailable/);
+  assert.deepEqual([queued(started.job.id), heldAt(started.job.id), toBuyer().length], [1, null, 0]);
+  fault.mock.restore();
+  assert.equal(await advanceUpdates(storeForHandle, Date.now() + 20_000), 1);
+  assert.deepEqual([queued(started.job.id), heldAt(started.job.id) !== null, toBuyer().length], [0, true, 0]);
+});
+
+test("product update: a failed return to the mail queue leaves the job held for retry", async (t) => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok);
+  await noteTakedown(owner, null, true);
+  await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  await noteTakedown(owner, null, false);
+  const due = nowSeconds() - 1;
+  redis.run(["ZADD", "nl:updheld", due, started.job.id]);
+
+  const run = redis.pipeline.bind(redis);
+  const fault = t.mock.method(redis, "pipeline", async (commands: Parameters<typeof redis.pipeline>[0]) => {
+    if (commands[0]?.[0] !== "SADD" || commands[0]?.[1] !== "nl:updq") return run(commands);
+    await run(commands.slice(1));
+    throw new Error("queue write unavailable");
+  });
+
+  await assert.rejects(advanceUpdates(storeForHandle, Date.now() + 20_000), /queue write unavailable/);
+  assert.deepEqual([queued(started.job.id), heldAt(started.job.id), toBuyer().length], [0, due, 0]);
+  fault.mock.restore();
+  assert.equal(await advanceUpdates(storeForHandle, Date.now() + 20_000), 1);
+  assert.deepEqual([queued(started.job.id), heldAt(started.job.id), toBuyer().length], [0, null, 1]);
+});
+
 test("product update: a switch-off value that is not plainly on holds it too (rule 24)", async () => {
   const { shop, product } = await updateStore();
   const started = await startUpdate(shop, product, "A new chapter");

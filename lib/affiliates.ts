@@ -3183,7 +3183,8 @@ const exactSeconds = (value: unknown): number | null => (typeof value === "numbe
 async function paidForPartners(store: Store, session: SessionLike, opened: number | null, fallback: number, base: number, products: string[], partners?: Affiliate[]): Promise<number> {
   const proven = paidAtOf(session);
   if (proven !== null) return proven;
-  if (base > 0 && products.length) {
+  // A store with no partners' records (notePartners writes none) has no end to wait on.
+  if (base > 0 && products.length && store.statsId && isRedisConfigured()) {
     const listed = partners ?? (await listPartners(store));
     // A checkout with no exact opening time is never taken as opened after an end (Codex G on #1924). Every product of
     // the order counts, the lines added at checkout too (orderLines), not only its main one (Codex G on #1924, point 1).
@@ -3400,7 +3401,10 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
   // A partner's dated end is compared with when the offer was paid: its settled charge's time, never the intent's own
   // `created` (made before the charge) nor the clock (Codex G on #1924, point 2). Without it, near an end, the offer
   // is unknown and thrown, so the five-minute job reads its payment again with the charge (lib/upsell.ts creditAgain).
-  const paidAt = await paidForPartners(store, { payment_intent: pi } as SessionLike, made, at, amount, meta.product ? [meta.product] : []);
+  // The partners are read once, for both the end's check and the shares, and only when that check needs them.
+  const paid = { payment_intent: pi } as SessionLike;
+  const partners = paidAtOf(paid) === null && amount > 0 && meta.product && store.statsId && isRedisConfigured() ? await listPartners(store) : undefined;
+  const paidAt = await paidForPartners(store, paid, made, at, amount, meta.product ? [meta.product] : [], partners);
 
   // A partner shares in the product whether or not an affiliate's link was
   // involved, and an offer taken after paying is a sale of a product. A partner step that fails is thrown once the
@@ -3417,7 +3421,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     total: amount,
     currency,
     buyer,
-  }).catch((error) => {
+  }, partners).catch((error) => {
     console.error("noting a partner's share failed; the offer is credited again by the job", error);
     partnerFailure = { error };
   });

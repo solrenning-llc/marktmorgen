@@ -175,7 +175,7 @@ export async function joinWaitlist(input: {
       }
       if (size >= MAX_WAITLIST) return "full";
       const t = newToken();
-      const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t } satisfies WaitEntry);
+      const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t, w: 1 } satisfies WaitEntry);
       // A new address takes room in the store's data room, with its link to leave
       // (kept as long as the list); with no room the list is full for it.
       const taken = placeBytes(sid, product.id, email, value);
@@ -211,7 +211,8 @@ export async function joinWaitlist(input: {
     }
     const t = before.t;
     const asked = Boolean(before.c) || consent;
-    const value = JSON.stringify({ at: before.at, ok: before.ok, c: asked, ...(asked && (before.k || (consent && input.clicks)) ? { k: true } : {}), t } satisfies WaitEntry);
+    // How its link was counted stays with the place (WaitEntry.w): an older place is never counted again as a new one.
+    const value = JSON.stringify({ at: before.at, ok: before.ok, c: asked, ...(asked && (before.k || (consent && input.clicks)) ? { k: true } : {}), t, ...(before.w ? { w: 1 } : {}) } satisfies WaitEntry);
     await links(t);
     lastLink = t;
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
@@ -374,15 +375,18 @@ export const LONGEST_HANDLE = 24;
 /**
  * What a place's link to leave is counted at, the same when it is taken and
  * whenever it is given back: as if the store had the longest handle, so a
- * store renamed afterwards never has more given back than was taken.
+ * store renamed afterwards never has more given back than was taken. A
+ * place written before #2576 (no WaitEntry.w) took it with the store's real
+ * handle, so it gives it back at the shortest (`handle` 0): never more than
+ * it took, the room erring fuller (Codex N1, #2576).
  */
-const leaveBytes = (sid: string, productId: string, email: string, token: string) =>
-  dataBytes([tokenKey(token), JSON.stringify({ s: sid, h: "x".repeat(LONGEST_HANDLE), p: productId, e: email, k: "leave" } satisfies TokenGrant)], 1);
+const leaveBytes = (sid: string, productId: string, email: string, token: string, handle = LONGEST_HANDLE) =>
+  dataBytes([tokenKey(token), JSON.stringify({ s: sid, h: "x".repeat(handle), p: productId, e: email, k: "leave" } satisfies TokenGrant)], 1);
 
 /** What one place, as it is kept, gives back when it goes: itself and its link to leave. */
 function placeBytes(sid: string, productId: string, email: string, raw: string): number {
   const entry = parseEntry(raw);
-  return dataBytes([email, raw], 1) + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
+  return dataBytes([email, raw], 1) + (entry ? leaveBytes(sid, productId, email, entry.t, entry.w ? LONGEST_HANDLE : 0) : 0);
 }
 
 /**

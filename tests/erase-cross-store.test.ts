@@ -335,7 +335,7 @@ async function main(): Promise<void> {
 
   part("MEDIUM (Codex G on #3660 at 0c2b79fc9d): an id in the owner's account set that is not a store's is never read as no store holding the closed store's account");
   {
-    const ACCOUNT = "acct_1damaged0account0";
+    const ACCOUNT = "acct_1damaged0acct0";
     const taxKey = `nl:taxreg:${ACCOUNT}`;
     const junk = "not-a-confirmed-store-id";
     const accountSet = `nl:account:stores:${createHash("sha256").update(`nimbus-account-stores:${OWNER}`).digest("hex").slice(0, 40)}`;

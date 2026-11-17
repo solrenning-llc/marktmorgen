@@ -24,6 +24,7 @@
  * file's fix the walk deleted every key named by the closed store's key, folder or handles whenever it came to it,
  * whoever held them now.
  */
+import { createHash } from "node:crypto";
 import { BATCH_KEY, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { leadsKey } from "@/lib/contacts";
 import { claimHandle, createStore, releaseHandle, renameHandle, setStripeAccount, storeFolder, storeForEmail, storeRef } from "@/lib/store";
@@ -329,6 +330,37 @@ async function main(): Promise<void> {
         [stopped, finished, (await original([["SMEMBERS", weeklyKey("oldname")]]))[0]], ["unknown", [], ["other@example.com"]]);
       is(`answers ${label}: the next run, whose replies read, finishes it and keeps the team`,
         [await run(), finished, (await original([["SMEMBERS", weeklyKey("oldname")]]))[0]], ["done:true begun:0 finished:1", [OWNER], ["other@example.com"]]);
+    }
+  }
+
+  part("MEDIUM (Codex G on #3660 at 0c2b79fc9d): an id in the owner's account set that is not a store's is never read as no store holding the closed store's account");
+  {
+    const ACCOUNT = "acct_1damaged0account0";
+    const taxKey = `nl:taxreg:${ACCOUNT}`;
+    const junk = "not-a-confirmed-store-id";
+    const accountSet = `nl:account:stores:${createHash("sha256").update(`nimbus-account-stores:${OWNER}`).digest("hex").slice(0, 40)}`;
+    for (const [label, where] of [["the account's first read (accountHeld)", "first"], ["only the read in the same step as the delete (unlessHeld)", "last"]] as const) {
+      await fresh();
+      is(`${label}: the owner has a first store`, (await claimHandle(OWNER, "owners-home", "Home store", "")).ok, true);
+      const made = await createStore(OWNER, "closing", "Closing store", "");
+      if (!made.ok) throw new Error(`no other store: ${made.reason}`);
+      const ref = storeRef(made.store);
+      await setStripeAccount(ref, ACCOUNT, true);
+      await original([["SET", taxKey, "must-stay"]]);
+      await closeForErasure(ref);
+      await markDue(ref, Date.now() - 1_000);
+      dyingAt("SCAN");
+      is(`${label}: the walk prepares the closed store and stops at its first page`, [await outcome(walk), (await original([["HLEN", BATCH_KEY]]))[0]], ["threw", 1]);
+      await original([["SADD", accountSet, junk]]);
+      if (where === "last") {
+        // The account's first read sees the set without the id that is not a store's; the read in the same step as the delete sees it.
+        answering("SMEMBERS", (call, real) => (call === 0 && Array.isArray(real) ? real.filter((id) => id !== junk) : REAL), (k) => k.startsWith("nl:account:stores:"));
+      }
+      is(`${label}: an id that is not a store's stops the run, nothing finished, the account's records kept`,
+        [await run(), finished, (await original([["GET", taxKey]]))[0]], ["unknown", [], "must-stay"]);
+      await original([["SREM", accountSet, junk]]);
+      is(`${label}: once the set reads, the walk finishes the closed store and its account's records go`,
+        [await run(), finished, (await original([["GET", taxKey]]))[0]], ["done:true begun:0 finished:1", [ref], null]);
     }
   }
 

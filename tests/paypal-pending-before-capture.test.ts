@@ -513,7 +513,7 @@ async function main(): Promise<void> {
    * read it (Claude 5's probe on #3411, Codex X2's MEDIUM 2): every one reads the count before any try is counted.
    * Returns what each return was shown and every pipeline sent meanwhile with its replies.
    */
-  const together = async (order: string, count: number) => {
+  const together = async (order: string, count: number, losePendingWrite = false) => {
     const pipeline: Pipeline = redis.pipeline.bind(redis);
     const sent: { commands: Commands; replies: unknown[] }[] = [];
     const waiting: (() => void)[] = [];
@@ -521,6 +521,10 @@ async function main(): Promise<void> {
     const isRead = (commands: Commands) =>
       commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === `nl:ppsell:o:${order}` && commands[1][0] === "GET" && commands[1][1] === `nl:ppsell:try:${order}`;
     redis.pipeline = (async (commands: Commands) => {
+      // The admitted return's write of the order to pending fails before Redis has it (Codex X5 on #3411).
+      if (losePendingWrite && commands.some((c) => c[0] === "ZADD" && String(c[1]).startsWith("nl:ppsell:pending:")) && !commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:o:"))) {
+        throw new Error("synthetic failure before recording pending");
+      }
       const replies = await pipeline(commands);
       sent.push({ commands, replies });
       if (isRead(commands)) {
@@ -562,7 +566,12 @@ async function main(): Promise<void> {
   is("the admitted tries together send at most what the registry prices for the order (3 x 4 = 12)", watchWrites + PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.countCommandsPerTry <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, true);
   is("each refused return sends only its count, the refused path the registry prices per return", tryWrites, 8 * PAYPAL_CAPTURE_WATCH.countCommandsPerTry);
   is("every watch and count command of the eight together: 3 x 4 + 5 x 2, not 8 x 4", watchWrites + tryWrites <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked + 5 * PAYPAL_CAPTURE_WATCH.commandsPerRefusedReturnAtMost, true);
-  is("every return lands on the thanks page: a capture PayPal holds is under watch", eight.shown.every((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=")), true);
+  // Codex X5 on #3411: a return refused because the others took every try proves no capture is under watch (the one
+  // that took the last try may not have written it yet), so it is told it did not go through, never sent to the thanks
+  // page; the three admitted ones, each with its capture in pending, are.
+  const thanks = eight.shown.filter((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=")).length;
+  const told = eight.shown.filter((shown) => shown.status === 303 && shown.location.includes("status=paypal-error")).length;
+  is("the admitted returns land on the thanks page, the refused ones on the store's notice", [thanks, told], [PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost, 8 - PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost]);
   is("the order stands in pending, never written down as paid", [await pending(raced), Boolean(await readPaid(raced))], [true, false]);
 
   part("Codex X2's MEDIUM 2: two returns at once with one try left, PayPal declines: only the admitted one adds to pending, and the order is not put back");
@@ -575,6 +584,16 @@ async function main(): Promise<void> {
   is("PayPal is asked once", captures.get(lastSlot), 1);
   is("only one return sends the order to pending", adds, 1);
   is("declined: the order is not left in pending, nothing paid", [await pending(lastSlot), Boolean(await readPaid(lastSlot))], [false, false]);
+
+  part("Codex X5's MEDIUM on #3411: two returns read the last try, the admitted one never records pending: neither is sent to the thanks page");
+  captureWith = "pending";
+  const lostWrite = await open("lost-write@example.com");
+  await redis.pipeline([["SET", `nl:ppsell:try:${lostWrite}`, String(PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost - 1), "EX", 86_400]]);
+  const unrecorded = await together(lostWrite, 2, true);
+  is("both read the count with one try left", unrecorded.read, 2);
+  is("PayPal is asked nothing, nothing is in pending or paid", [captures.get(lostWrite) ?? 0, await pending(lostWrite), Boolean(await readPaid(lostWrite))], [0, false, false]);
+  is("neither return is sent to the thanks page", unrecorded.shown.some((shown) => shown.location.includes("/thanks?paypal=")), false);
+  is("the refused one is told it did not go through", unrecorded.shown.some((shown) => shown.status === 303 && shown.location.includes("status=paypal-error")), true);
 
   part("Codex X2's MEDIUM 1 (Claude 5: LEVE): past the bound after confirmed refusals, the return does not say PayPal is still taking it");
   captureWith = "decline";

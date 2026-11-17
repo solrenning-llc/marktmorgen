@@ -23,7 +23,7 @@ import { claimsKey, hostId } from "@/lib/host-claims";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
-import { closeForErasure } from "./closed-for-erasure";
+import { closeForErasure, recordRemoved } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 // The addresses' hold and the id's release before the record goes answered [] with nothing done.
@@ -43,9 +43,14 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     withdrawUnknown -= 1;
     return [null];
   }
-  if (finalUnknown && commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === FINAL_INDEX) {
+  // The walk reads the store's place in the final line first in dueForErasure (beside its closing record), and
+  // prepareStore reads it again: the first such read is the one answered with what ZSCORE never says.
+  const finalAt = commands.findIndex((c) => c[0] === "ZSCORE" && c[1] === FINAL_INDEX);
+  if (finalUnknown && finalAt >= 0) {
     finalUnknown = false;
-    return ["QUEUED"];
+    const replies = await realPipeline(commands);
+    replies[finalAt] = "QUEUED";
+    return replies;
   }
   if (onTeamRead && commands.some((c) => c[0] === "GET" && /^nl:team:[^:]+$/.test(String(c[1])))) {
     const run = onTeamRead;
@@ -57,7 +62,12 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     inWindow = null;
     await run();
   }
-  if (releaseLost && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:"))) {
+  // The addresses' hold, made bare before, or as one of the record's closing changes in the step that reads the store's
+  // lock (lib/redis-lock.ts applyIfHeld, CLOSING_FENCED, on #3156): answered with nothing, and not run.
+  const holdsAddress = (c: (string | number)[]) =>
+    (c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:")) ||
+    (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).some((k) => String(k).startsWith("nl:store:handle:")));
+  if (releaseLost && commands.some(holdsAddress)) {
     releaseLost = false;
     return [];
   }
@@ -211,7 +221,7 @@ async function main(): Promise<void> {
     const T = Date.now();
     redis.run(["ZADD", FINAL_INDEX, T - 5000, email]);
     await setSubscription(email, { customerId: "cus_restart0003", subscriptionId: "sub_restart0003", active: true });
-    await closeForErasure(email);
+    await recordRemoved(email, T - 5000);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("it is prepared, walked and finished", [report.stores, report.finished], [1, 1]);
@@ -227,7 +237,6 @@ async function main(): Promise<void> {
     await setSubscription(email, { customerId: "cus_restart0004", subscriptionId: "sub_restart0004", active: true });
     finalUnknown = true;
     const T = Date.now();
-    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     const score = redis.run(["ZSCORE", DUE_KEY, email]);

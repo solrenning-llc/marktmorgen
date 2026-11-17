@@ -68,6 +68,13 @@ export function sentCommands(commands: Command[]): Command[] {
   const out: Command[] = [];
   for (const c of commands) {
     out.push(c);
+    // A record deleted under the store's lock (lib/store.ts closeStoreRecord, lib/redis-lock.ts deleteIfHeldOnly): its
+    // keys, after the lock's, are read as DELs, so a test that stops the record's delete finds it in either design.
+    if (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-del:")) {
+      const count = Number(c[2]);
+      for (const key of c.slice(4, 3 + count)) out.push(["DEL", String(key)]);
+      continue;
+    }
     if (c[0] !== "EVAL" || !String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n")) continue;
     const count = Number(c[2]);
     const keys = c.slice(3, 3 + count).map(String);
@@ -79,4 +86,13 @@ export function sentCommands(commands: Command[]): Command[] {
     }
   }
   return out;
+}
+
+/**
+ * Only the closing job's record, saying what it kept was removed for the ending `of`: for a test whose store's plan is
+ * set by the test itself (a plan paid again on a begun closing day), which closeForErasure would end.
+ */
+export async function recordRemoved(email: string, of: number): Promise<void> {
+  const at = Date.now();
+  await redis.pipeline([["SET", closingStateKey(email), JSON.stringify({ of, renewals: at, refunds: at, removed: at, due: at })]]);
 }

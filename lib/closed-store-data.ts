@@ -63,7 +63,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
-import { type Held as LockHeld, LockBusyError, holdLock, releaseLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
 import { ENDED_INDEX, standingOf } from "@/lib/plan-standing";
@@ -393,53 +393,6 @@ async function takeDue(ref: string, now: number): Promise<Taken> {
   return { due: "hold" };
 }
 
-/**
- * A closing store's deletes, made only while the walk still holds the store's lock, read in the same step (Codex M's
- * focal M1 on #3156). KEYS: the lock, then the keys changed. ARGV: the walk's token, then each change as its word, the
- * place of its key in KEYS and how many words of it follow: DEL (none), SREM, ZREM or HDEL (its members), SETEX (the
- * value and its seconds). Every change is read before any is made. 1 done; 0 the lock is not the walk's any more,
- * nothing done; -1 a change it does not make, nothing done.
- */
-const CLOSING_FENCED = `-- marktmorgen:closing-fenced:v1
-local i, plan = 2, {}
-while i <= #ARGV do
-  local op, at, n = ARGV[i], tonumber(ARGV[i + 1]), tonumber(ARGV[i + 2])
-  if not at or not n or at < 2 or at > #KEYS or n < 0 or i + 2 + n > #ARGV then return -1 end
-  if op == "DEL" then
-    if n ~= 0 then return -1 end
-  elseif op == "SREM" or op == "ZREM" or op == "HDEL" then
-    if n < 1 then return -1 end
-  elseif op == "SETEX" then
-    if n ~= 2 or not tonumber(ARGV[i + 4]) then return -1 end
-  elseif op == "HSET" then
-    if n ~= 2 then return -1 end
-  else
-    return -1
-  end
-  plan[#plan + 1] = {op, at, i + 3, n}
-  i = i + 3 + n
-end
-if #plan == 0 then return -1 end
-if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-for _, step in ipairs(plan) do
-  local op, key, from, n = step[1], KEYS[step[2]], step[3], step[4]
-  if op == "DEL" then
-    redis.call("DEL", key)
-  elseif op == "SETEX" then
-    redis.call("SET", key, ARGV[from], "EX", ARGV[from + 1])
-  elseif op == "HSET" then
-    redis.call("HSET", key, ARGV[from], ARGV[from + 1])
-  else
-    for j = from, from + n - 1, 500 do
-      redis.call(op, key, unpack(ARGV, j, math.min(j + 499, from + n - 1)))
-    end
-  end
-end
-return 1`;
-
-/** The most keys, and the most words beside them, one CLOSING_FENCED step carries. */
-const FENCED_KEYS = 1000;
-const FENCED_WORDS = 4000;
 
 type Command = (string | number)[];
 /** Sends a closing store's changes: a pipeline, or the same changes made only while the walk holds the lock (fencedBy). */
@@ -459,8 +412,7 @@ type Apply = (commands: Command[]) => Promise<unknown>;
 export function fencedBy(held: LockHeld | undefined): Apply {
   if (!held) return redisPipeline;
   return async (commands) => {
-    type Change = { op: string; key: string; words: string[] };
-    const changes: Change[] = [];
+    const changes: FencedChange[] = [];
     for (const command of commands) {
       const [word, ...rest] = command.map(String);
       if (word === "DEL" && rest.length) for (const key of rest) changes.push({ op: "DEL", key, words: [] });
@@ -471,26 +423,7 @@ export function fencedBy(held: LockHeld | undefined): Apply {
       else if (word === "HSET" && rest.length === 3) changes.push({ op: "HSET", key: rest[0], words: [rest[1], rest[2]] });
       else throw new Error(`not a closing store's change: ${word}`);
     }
-    for (let at = 0; at < changes.length; ) {
-      const keys: string[] = [];
-      const place = new Map<string, number>();
-      const argv: string[] = [];
-      while (at < changes.length) {
-        const { op, key, words } = changes[at];
-        const fresh = !place.has(key);
-        if (argv.length && ((fresh && keys.length >= FENCED_KEYS) || argv.length + 3 + words.length > FENCED_WORDS)) break;
-        if (fresh) {
-          keys.push(key);
-          place.set(key, keys.length + 1);
-        }
-        argv.push(op, String(place.get(key)), String(words.length), ...words);
-        at += 1;
-      }
-      const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_FENCED, 1 + keys.length, held.key, ...keys, held.token, ...argv]]), 1);
-      const answer = replies?.[0];
-      if (answer === 0) throw new LockBusyError("a closing store's lock ran out before its deletes");
-      if (answer !== 1) throw new UnknownReplyError("a closing store's deletes, made only while the walk holds its lock (EVAL)");
-    }
+    if (!(await applyIfHeld(held, changes))) throw new LockBusyError("a closing store's lock ran out before its deletes");
     return [];
   };
 }
@@ -587,30 +520,43 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // there again says its plan does not run (below). Deleted here, before that read, a plan started in between kept the
   // record but left the store partly wiped (Codex X4's MEDIUM on #3643). Any of these that fails throws there, before
   // the record goes: the record stays, its entry stays pending, and the walk tries the store again later.
-  const forgetLive = async () => {
+  const forgetLive = async (held: LockHeld) => {
+    // Every delete made only while the store's lock closeStoreRecord holds is still held, read in the same step
+    // (fencedBy, CLOSING_FENCED), and the lock made to last again before each step: a lock that ran out (a paused
+    // function, a slow network) stops here with LockBusyError before anything more is deleted, the record still there,
+    // so a plan started once it ran out keeps everything of its store (Codex M's focal M1 on #3156, on #3643's design).
+    const apply = fencedBy(held);
+    const keep = async () => {
+      if (!(await holdLock(held))) throw new LockBusyError("a closing store's lock ran out while its live data was deleted");
+    };
     // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
     for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
-      // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
-      // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
-      // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
+      // Every page read exactly and the walk to cursor zero (scanAll; rule 24, #4391). The lock is made to last once for
+      // a host's claims, before the first of them goes, and each HDEL is made through it (fencedBy). Anything else throws
+      // before the record is closed, and the next run removes what is left: a claim left here would keep the host's slot
+      // taken for a store declared erased.
+      let kept = false;
       await scanAll("HSCAN", claimsKey(host), async (flat) => {
         const mine: string[] = [];
         for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
         if (!mine.length) return;
-        const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
-        if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
+        if (!kept) await keep();
+        kept = true;
+        await apply([["HDEL", claimsKey(host), ...mine]]);
       });
     }
-    await dropTeam(store);
-    if (store.sid) await revokeAllKeys(store.sid);
-    await forgetStoreWebhooks(store.statsId);
-    await forgetStoreSync(store.statsId);
+    await keep();
+    await dropTeam(store, apply);
+    if (store.sid) await revokeAllKeys(store.sid, apply);
+    await forgetStoreWebhooks(store.statsId, apply);
+    await forgetStoreSync(store.statsId, apply);
     await forgetShipmentMail(store.statsId);
     await forgetOrderConfirmationMail(store.statsId);
-    await forgetStorePhones(store.statsId);
+    await forgetStorePhones(store.statsId, apply);
     // The owner's path: their answers and the days they showed up (lib/path.ts).
-    await forgetPath(store);
-    await del(extra);
+    await forgetPath(store, held);
+    await keep();
+    await del(extra, apply);
   };
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
@@ -654,7 +600,7 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // delete) or a rewrite whose answer is lost leaves the entry as it is: whether the record went is not known here, since
   // a delete or a rewrite may land with its answer lost (Codex L and Codex P on #3643). It is never taken out for it: the
   // walk reads the record before it starts (startableBatch) and walks the entry only once the record is confirmed gone.
-  const closed = await closeStoreRecord(store, [], async (fresh) => {
+  const closed = await closeStoreRecord(store, [], async (fresh, held) => {
     // A plan started since the read above, seen under the lock before the record goes (Claude 5's MEDIUM on #3643):
     // unless its closing day had begun (the ZREM above took it out of that line), the record stays and the store leaves
     // the line; its entry, still pending, is never walked and is taken out by the idle pass (withdrawPending). That
@@ -665,7 +611,7 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       throw new UnknownReplyError("a closing store's place in the final closing line (ZREM)");
     }
     // Only now, past that read and with the lock held (a plan's start waits on it), is anything of the live store deleted.
-    await forgetLive();
+    await forgetLive(held);
     if (fresh) {
       const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
       const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));

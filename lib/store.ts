@@ -49,7 +49,7 @@ import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held, LockBusyError, applyIfHeld, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -2152,7 +2152,7 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
 export async function closeStoreRecord(
   store: Store,
   extraKeys: string[] = [],
-  beforeDelete?: (fresh: Store | null) => Promise<void>,
+  beforeDelete?: (fresh: Store | null, held: Held) => Promise<void>,
 ): Promise<boolean> {
   const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
@@ -2178,27 +2178,27 @@ export async function closeStoreRecord(
     // made once and never changed, says so (Claude 7's LEVE on #3643). Only then is a different sid read as the same store.
     const sameLegacy = store.sid === "" && Boolean(store.statsId) && fresh?.statsId === store.statsId;
     if (fresh && fresh.sid !== store.sid && !sameLegacy) return false;
-    await beforeDelete?.(fresh);
-    // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
-    // go first, and the record last. Its id leaves its account's list at both addresses read, as one moved since is the
-    // account's now (Claude 6 on #3643). Only "OK" for each hold and a count for each removal is done (rule 24): any
-    // other answer throws before the record goes, so the record stays, the closing walk prepares the store again and
-    // every step is run again (Claude 6's MEDIUM on #3643).
+    // The lock held is passed on, so what the caller deletes here is made only while it is still held (lib/closed-store-data.ts, fencedBy).
+    await beforeDelete?.(fresh, held);
+    // Its addresses are held back (those it has now too: one moved to since is its own), its id and places go, and the
+    // record last, all in the steps that read the store's lock as still ours (applyIfHeld, CLOSING_FENCED): a lock that
+    // ran out before them (a paused function, a slow network) lets none of them land on a store whose plan started
+    // again in that moment, which kept its address and its id (Codex M's focal M1 on #3156, on #3643's design). Its id
+    // leaves its account's list at both addresses read, as one moved since is the account's now (Claude 6 on #3643). An
+    // answer that is not "done" or "not ours" throws before anything is said closed (rule 24): the closing walk reads the
+    // record before it walks the store, and prepares it again while it is there.
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
     const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
-    const holds = [...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
     // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
     const sid = sameLegacy && fresh ? fresh.sid : store.sid;
-    const removals = [
-      ...(STORE_ID_PATTERN.test(sid) ? [["DEL", storeIdKey(sid)], ...[...accounts].map((account) => ["SREM", account, sid])] : []),
-      ["ZREM", ENDED_INDEX, storeRef(store)],
-      ["SREM", SHARING_INDEX, storeRef(store)],
+    const changes: FencedChange[] = [
+      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(RELEASE_QUARANTINE_DAYS * 24 * 60 * 60)] })),
+      ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
+      { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
+      { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
+      ...[owner, beforeMoveKeyOf(owner), ...extraKeys].map((key) => ({ op: "DEL", key, words: [] })),
     ];
-    const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
-    if (!replies || replies.some((reply, i) => (i < holds.length ? reply !== "OK" : countOf(reply) === null))) {
-      throw new UnknownReplyError("a closing store's addresses held back and its places released");
-    }
-    if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner), ...extraKeys]))) throw new StoreBusyError();
+    if (!(await applyIfHeld(held, changes))) throw new StoreBusyError();
     return true;
   } finally {
     await releaseLock(held);

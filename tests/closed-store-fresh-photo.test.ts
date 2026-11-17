@@ -50,7 +50,12 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     dueAddLost = false;
     return [null];
   }
-  if (deleteAckLost && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:fenced-del:v1")) {
+  // The record's delete: bare under the lock before (fenced-del), or among the record's closing changes in the step that
+  // reads the lock (CLOSING_FENCED, on #3156). It lands, and its answer is lost.
+  const deletesRecord = (c: (string | number)[]) =>
+    c[0] === "EVAL" && (String(c[1]).startsWith("-- marktmorgen:fenced-del:v1") ||
+      (String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).some((k) => String(k).startsWith("nl:store:owner:"))));
+  if (deleteAckLost && commands.length === 1 && deletesRecord(commands[0])) {
     deleteAckLost = false;
     await realPipeline(commands);
     return [null];
@@ -72,7 +77,12 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     rewriteUnconfirmed = false;
     return [null];
   }
-  if (releaseLost && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:"))) {
+  // The addresses' hold, made bare before, or as one of the record's closing changes in the step that reads the store's
+  // lock (lib/redis-lock.ts applyIfHeld, CLOSING_FENCED, on #3156): answered with nothing, and not run.
+  const holdsAddress = (c: (string | number)[]) =>
+    (c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:")) ||
+    (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).some((k) => String(k).startsWith("nl:store:handle:")));
+  if (releaseLost && commands.some(holdsAddress)) {
     releaseLost = false;
     return [];
   }
@@ -475,6 +485,8 @@ async function main(): Promise<void> {
     const email = "lostdue@example.com";
     const store = await makeStore(email, "lostdue");
     redis.run(["SET", `nl:zz:${store.statsId}:data`, "w"]);
+    // Really closed: its plan ended and the closing job removed what it kept (dueForErasure, #3156).
+    await closeForErasure(email);
     const now = Date.now();
     // As a run leaves it after the store was prepared and its ref taken out of line (ZREM), with its record written
     // again by a late writer: a confirmed entry in the batch, the record there, and the ref out of the due line.
@@ -543,6 +555,7 @@ async function main(): Promise<void> {
     const made = await createStore(from, "moveextra", "Extra", "");
     if (!made.ok) throw new Error("setup: the extra store");
     const ref = storeRef(made.store);
+    await closeForErasure(ref);
     let moved = false;
     inWindow = async () => {
       moved = (await moveAccount(from, to)).ok;

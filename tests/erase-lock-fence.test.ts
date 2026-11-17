@@ -20,10 +20,8 @@
  * lib/closed-store-data.ts so it can be fenced: the last part here closes one store both ways, from the same database,
  * and fails if what is left ever differs.
  */
-import { closingRecordChanges, eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
-import { claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, renameHandle, storeForEmail, storeRef } from "@/lib/store";
-import { ENDED_INDEX } from "@/lib/plan-standing";
-import { SHARING_INDEX } from "@/lib/platform-share";
+import { eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
+import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail, storeRef } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -65,46 +63,6 @@ async function everything(): Promise<Map<string, string>> {
       : type === "zset" ? ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES"] : type === "list" ? ["LRANGE", key, 0, -1] : ["TYPE", key];
     const [value] = await original([read]);
     out.set(key, JSON.stringify(Array.isArray(value) && type === "set" ? [...value].map(String).sort() : value));
-  }
-  return out;
-}
-
-/** Every key with its type, to put the database back as it was. */
-async function dump(): Promise<[string, string, unknown][]> {
-  const out: [string, string, unknown][] = [];
-  const [[, keys]] = (await original([["SCAN", "0", "MATCH", "*", "COUNT", 1_000_000]])) as [string, string[]][];
-  for (const key of [...new Set(keys)].sort()) {
-    const [type] = (await original([["TYPE", key]])) as string[];
-    const read: Command = type === "string" ? ["GET", key] : type === "hash" ? ["HGETALL", key] : type === "set" ? ["SMEMBERS", key]
-      : type === "zset" ? ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES"] : ["LRANGE", key, 0, -1];
-    const [value] = await original([read]);
-    out.push([key, type, value]);
-  }
-  return out;
-}
-
-async function restore(rows: [string, string, unknown][]): Promise<void> {
-  redis.clear();
-  const flat = (value: unknown) => (Array.isArray(value) ? value.map(String) : Object.entries(value as Record<string, string>).flat());
-  for (const [key, type, value] of rows) {
-    if (type === "string") await original([["SET", key, String(value)]]);
-    else if (type === "hash") await original([["HSET", key, ...flat(value)]]);
-    else if (type === "set") await original([["SADD", key, ...flat(value)]]);
-    else if (type === "zset") {
-      const pairs = flat(value);
-      const scored: string[] = [];
-      for (let i = 0; i + 1 < pairs.length; i += 2) scored.push(pairs[i + 1], pairs[i]);
-      await original([["ZADD", key, ...scored]]);
-    } else await original([["RPUSH", key, ...flat(value)]]);
-  }
-}
-
-/** What is left, the moment an address was let go of written as the same word, and each key's expiry as whether it has one within the quarantine. */
-async function left(): Promise<Map<string, string>> {
-  const out = await everything();
-  for (const [key, value] of out) {
-    const [ttl] = (await original([["TTL", key]])) as number[];
-    out.set(key, `${value.replace(/released:[0-9TZ:.-]+/g, "released:*")} ttl:${ttl < 0 ? ttl : ttl > 29 * 86_400 && ttl <= 30 * 86_400 ? "quarantine" : "other"}`);
   }
   return out;
 }
@@ -155,7 +113,10 @@ async function walk(at: (index: number, commands: Command[]) => Promise<void>): 
       }
     }
     const reply = await original(commands);
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-take:v1")) && (reply as unknown[])[0] === 1) holding = true;
+    // The store's own lock, taken by closeStoreRecord (lib/store.ts) right before the live store's data and its record
+    // go, on #3643's design (the walk itself holds no lock): from its "OK" until its release, every change is counted.
+    const take = commands.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:lock:") && c.includes("NX"));
+    if (take >= 0 && (reply as unknown[])[take] === "OK") holding = true;
     return reply;
   }) as typeof redis.pipeline;
   try {
@@ -176,7 +137,8 @@ async function main() {
   const control = await walk(async () => {});
   const after = await everything();
   is("the walk leaves it", control, "completed");
-  // The walk's own line and its record of the walk change: the store that runs again leaves the line.
+  // The walk's own line and its record of the walk change (the store that runs again leaves the line, or waits a walk
+  // with its entry pending, #3643): not the store's.
   const ours = (key: string) => key.startsWith("nl:closed:");
   is("nothing of it is deleted or changed", [...untouched.keys()].filter((key) => !ours(key) && after.get(key) !== untouched.get(key)), []);
 
@@ -219,29 +181,14 @@ async function main() {
     const now = await everything();
     const current = await storeForEmail(owner);
     is("the plan started again at that step", reached, true);
-    is("the walk stops there", outcome, "LockBusyError");
+    // On #3643's design the preparation stops there (LockBusyError, or StoreBusyError at the record's fenced delete), the
+    // walk moves the store back a walk and goes on; the next walk sees the plan running and leaves it alone.
+    is("the walk goes on, and the store's record is still there", [outcome, Boolean(current)], ["completed", true]);
     is("the store runs", Boolean(current?.subscriptionActive), true);
-    is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => now.get(key) !== running.get(key)), []);
+    is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => !ours(key) && now.get(key) !== running.get(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);
   }
-  part("The record's last step: what the walk sends closes the record exactly as lib/store.ts's closeStoreRecord does");
-  redis.pipeline = original;
-  redis.clear();
-  await claimHandle(owner, "fenceshop", "Synthetic fence shop", "");
-  await ensureStoreId(owner);
-  await ensureStatsId(owner);
-  if (!(await renameHandle(owner, "fenceshop-two")).ok) throw new Error("Synthetic rename failed");
-  const closing = (await storeForEmail(owner))!;
-  await original([["ZADD", ENDED_INDEX, 1, storeRef(closing)], ["SADD", SHARING_INDEX, storeRef(closing)]]);
-  const base = await dump();
-  await closeStoreRecord(closing);
-  const byStore = await left();
-  await restore(base);
-  await original(closingRecordChanges(closing));
-  const byWalk = await left();
-  is("the store had two addresses, an id and a place in both lists", [closing.previousHandles.length, /^[0-9a-f]{32}$/.test(closing.sid)], [1, true]);
-  is("what is left is the same", [...new Set([...byStore.keys(), ...byWalk.keys()])].filter((key) => byStore.get(key) !== byWalk.get(key)), []);
-  is("and the record is gone", byWalk.has([...byStore.keys()].find((key) => key.startsWith("nl:store:owner:")) ?? "none"), false);
-  is("its addresses are held back for the quarantine", [...byWalk].filter(([key]) => key.startsWith("nl:store:handle:")).map(([, value]) => value.endsWith("ttl:quarantine")), [true, true]);
+  // The record's last step needs no check of its own here any more: on #3643's design the walk closes the record with
+  // lib/store.ts's closeStoreRecord itself, so it closes it exactly as closeStoreRecord does.
   done();
 }
 

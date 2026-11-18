@@ -153,7 +153,10 @@ async function main(): Promise<void> {
     is("their open upload is given up at the vault", calls, [`abort ${open.path}`]);
     is("every file of theirs goes to the erasure to be deleted", [...files].sort(), [first.path, second.path, open.path].sort());
     is("their records are gone", [await readSubmission(FOLDER, first.id), await readSubmission(FOLDER, second.id)], [null, null]);
-    is("their files are off the sweep's list", (await due()).filter((p) => p !== bobs.path), []);
+    // Left due at once on the sweep's list (Claude 6 on #3570): the next daily sweep deletes them if the erasure's own
+    // delete does not happen.
+    const dueScores = await redis.pipeline([first.path, second.path, open.path].map((p) => ["ZSCORE", "nl:sub:due", `${FOLDER}|${p}`]));
+    is("their files stay on the sweep's list, due at once", dueScores.every((score) => score !== null && Number(score) <= NOW), true);
     is("their places are let go", await liveCount(FOLDER, COURSE, lesson(1), ANA, NOW), 0);
     is("their room slots are emptied, so the store's room keeps nothing of them", await Promise.all([1, 2, 3].map((n) => slotOf(ANA, lesson(n)))), [null, null, null]);
     is("another buyer's slot stays", (await slotOf(BOB, lesson(1))) !== null, true);
@@ -343,7 +346,8 @@ async function main(): Promise<void> {
     is("after an erasure said done, no record of the erased buyer remains", await readSubmission(FOLDER, id), null);
     // An empty index counts as none (Redis drops a sorted set with no member; the stand-in may keep the key).
     const left = await redis.pipeline([["ZCARD", `nl:sub:who:${FOLDER}:${who}`], ["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]);
-    is("nor their index, nor a sweep entry written again by the close", [left[0], left[1]], [0, null]);
+    // The erasure leaves the file due at once on the sweep's list (Claude 6 on #3570); the close does not push it later.
+    is("nor their index; the file's sweep entry stays due at once", [left[0], left[1] !== null && Number(left[1]) <= NOW], [0, true]);
     is("and the completed file is deleted", racing.calls.includes(`delete ${path}`), true);
 
     // Control: with no erasure, a close still keeps its record.

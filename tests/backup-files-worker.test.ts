@@ -606,6 +606,43 @@ async function main(): Promise<void> {
     is("the next UTC day every store of the source is listed and copied", [copies(S).length, copies(T).length, copies(U).length], [2, 2, 2]);
   }
 
+  part("signed URL refresh shares the source's daily stop with the initial listing");
+  {
+    const twoStores = [{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }];
+    const calls = () => world.calls.filter((c) => c.url.includes("source=blob")).map((c) => new URL(c.url).searchParams.get("store"));
+    const shortSignedUrls = () => {
+      fresh(twoStores);
+      for (const store of [S, T]) setListing("blob", store, objects("blob", store, 2));
+      world.signedForMs = 30_000;
+    };
+
+    shortSignedUrls();
+    world.listingFault.set(listingKey("blob", T), { status: 429, error: "day_ceiling" });
+    report = await runAt(0);
+    is("a later store's day ceiling prevents a refresh for an earlier listed store", calls(), [S, T]);
+    await runAt(0, 2);
+    is("the stop survives another run on the same UTC day", calls(), [S, T]);
+    is("no copy needed a signing request after the refusal", [copies(S).length, copies(T).length], [0, 0]);
+
+    shortSignedUrls();
+    const fetchWithCeiling: typeof fakeFetch = async (input, init) => {
+      const reply = await fakeFetch(input, init);
+      if (reply.status === 200 && String(input).includes(`source=blob&store=${S}`)) {
+        world.listingFault.set(listingKey("blob", S), { status: 429, error: "day_ceiling" });
+      }
+      return reply;
+    };
+    report = await runAt(0, 1, { fetch: fetchWithCeiling });
+    is("only one refresh reaches the route when that refresh first reports the day ceiling", calls(), [S, T, S]);
+    is("the refresh refusal reports the source's day ceiling", has(report, "files_day_ceiling"), true);
+    await runAt(0, 2);
+    is("the refresh refusal is remembered on the next run", calls(), [S, T, S]);
+    world.listingFault.clear();
+    world.signedForMs = 900_000;
+    await runAt(1);
+    is("the next day restores normal copies for both stores", [copies(S).length, copies(T).length], [2, 2]);
+  }
+
   part("a run keeps inside its subrequest budget and goes on in the next run");
   fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }]);
   setListing("blob", S, objects("blob", S, 40));

@@ -434,7 +434,7 @@ async function main(): Promise<void> {
   ], [true, true, true]);
   is("courses, the community and podcasts rest only at the whole figure", [/isResting\(store, undefined, "buyer"\)/.test(readDir("app/[handle]/course")), /isResting\(store, Date\.now\(\), "buyer"\)/.test(read("lib/community-page.ts")), /isResting\(store, Date\.now\(\), "buyer", \{ shared: true \}\)/.test(read("app/api/store/podcast/feed/[token]/route.ts"))], [true, true, true]);
   const job = read("app/api/cron/usage/route.ts");
-  is("the daily job writes and never bills visits, and it is scheduled", [/settleAllVisits/.test(job), /firstWordOnVisits\(folder, month\)/.test(job), /\/api\/cron\/usage/.test(read("vercel.json"))], [false, true, true]);
+  is("the daily job writes and never bills visits, and it is scheduled", [/settleAllVisits/.test(job), /takeVisitsWord\(folder, month\)/.test(job), /\/api\/cron\/usage/.test(read("vercel.json"))], [false, true, true]);
 
   part("What the pages say");
   const terms = read("app/terms/page.tsx");

@@ -29,6 +29,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, noteTakedown, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { dataUsed, noteData } from "@/lib/store-data";
 import { confirmSpot, joinWaitlist, launch, runLaunches, setSoon, waitlistViews } from "@/lib/waitlist";
 import { waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { POST as confirmRoute } from "@/app/api/store/waitlist/confirm/route";
@@ -63,7 +64,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const ADDRESS = "1 Main St, Portland, OR 97201";
 const JOBS = "nl:wl:jobs";
 const people = ["dana@example.com", "hal@example.com"];
-const place = (i: number, ok: number, c = false) => JSON.stringify({ at: 1, ok, c, t: String(i).repeat(48) });
+// A place as joinWaitlist writes it since #2576 (w: 1, its room counted at its join).
+const place = (i: number, ok: number, c = false) => JSON.stringify({ at: 1, ok, c, t: String(i).repeat(48), w: 1 });
 const ownerKey = (email: string) => `nl:store:owner:${createHash("sha256").update(`nimbus-store:${email.toLowerCase()}`).digest("hex").slice(0, 40)}`;
 
 let stores = 0;
@@ -286,12 +288,19 @@ async function main(): Promise<void> {
     }
     is("still held at 100 days", inJobs(s.sid, s.pid), 1);
     later(21);
+    // The places' room, counted as joinWaitlist counts it (merge of main into #2576): the stop takes the emailed
+    // address's place in one step and gives its room back, its link to leave kept counted until it lapses.
+    await noteData(await s.current(), [{ slot: `wl:${s.pid}`, bytes: 4_000 }]);
+    const roomBefore = (await dataUsed(await s.current()))?.used ?? null;
     await run();
     is("at 121 days it is off the queue", inJobs(s.sid, s.pid), 0);
     const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
     is("its record says it stopped unfinished: 1 of 2", [Boolean(view?.launch?.finished), Boolean(view?.launch?.stopped), view?.launch?.sent, view?.launch?.total], [true, true, 1, 2]);
     is("its send list is gone", redis.keys().includes(`nl:wl:${s.sid}:${s.pid}:send`), false);
     is("whoever had it is off the waitlist; the other is kept, confirmed", [redis.run(["HKEYS", `nl:wl:${s.sid}:${s.pid}`]), view?.confirmed], [["hal@example.com"], 1]);
+    const roomAfter = (await dataUsed(await s.current()))?.used ?? null;
+    is("(control) the room was read before and after", [roomBefore !== null, roomAfter !== null], [true, true]);
+    is("the emailed address's place gives its room back", roomBefore !== null && roomAfter !== null && roomAfter < roomBefore, true);
     is("nobody was emailed", batches.flat().length, 0);
     await noteTakedown(s.owner, null, false);
     is("back on: the stopped launch sends nothing by itself", [await run(), batches.flat().length], [0, 0]);

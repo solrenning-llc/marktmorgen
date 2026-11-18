@@ -1,6 +1,6 @@
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
-import { DATA_ROOM_BYTES } from "@/lib/store-data-rules";
+import { BESIDE_POOL_BYTES, DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { UPSTASH_MICRO_USD_PER_GB_MONTH } from "@/lib/spend-cost-table";
@@ -23,6 +23,7 @@ export function heldStoreFundingFloorCents(): number {
   const tiers = ["creator", "pro", "scale"] as const;
   const kept = Math.max(...tiers.map(tier =>
     (PAID_STORAGE_BYTES[tier] + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES) / (1024 ** 3) * HELD_FILE_MICRO_USD_PER_GB_MONTH / 1e6 +
-    DATA_ROOM_BYTES[tier] / 1e9 * UPSTASH_MICRO_USD_PER_GB_MONTH / 1e6));
+    // The room and the beside pool (C1-20261117), which a held store keeps outside its room (Claude 4 Z on #4846).
+    (DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES) / 1e9 * UPSTASH_MICRO_USD_PER_GB_MONTH / 1e6));
   return Math.ceil((kept + 31 * heldRecheckMemoryUsd()) * 100);
 }

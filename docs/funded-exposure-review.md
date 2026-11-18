@@ -30,7 +30,8 @@ files; its refund worker remains responsible after deletion.
 
 `HELD_EXPOSURE` and `heldStoreMonthlyExposure` in `tests/plan-cost-registry.ts`
 count the full paid-tier file/task/community ceiling and the full data room
-plus **peak** outside-room keys and a4096-byte index allowance per held store,
+plus its beside pool (`BESIDE_POOL_BYTES`, the products' worst page readings
+and side records kept outside the room since C1-20261117) plus **peak** outside-room keys and a4096-byte index allowance per held store,
 for31days. They add up to31 two-read timeout waits per store,128 bookkeeping
 commands and MAX_STORE_BYTES+128KiB of database replies per retry. The global
 model uses at most1550 attempts/month, the reviewed simultaneous case cap,

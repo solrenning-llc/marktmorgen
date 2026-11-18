@@ -710,10 +710,11 @@ export default function PrivacyPage() {
           While a student answers a lesson&apos;s quiz, their own browser keeps
           the choices they made, so leaving the page, closing the browser or
           losing the connection loses nothing: in its storage, under{" "}
-          <code>mm:quiz:</code> followed by the store, the course, the lesson
-          and a code made on our server from the course and their email
-          address, which cannot be worked out from the address, so another
-          student on the same browser never gets it back. It holds which
+          <code>mm:quiz:</code> followed only by a code made on our server
+          from the course, the lesson and their email address. The code
+          cannot be worked out from the address and does not name the store,
+          the course or the lesson, so another student on the same browser
+          never gets it back. It holds which
           choices were picked for which questions, the questions that try
           showed, how many tries were already recorded, and when, and is never
           sent to us: pressing the quiz&apos;s own button sends the answers as

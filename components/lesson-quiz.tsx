@@ -48,7 +48,7 @@ export function LessonQuiz({
   /** Came back because the questions sent were no longer this try's: nothing was counted. */
   stale?: boolean;
   language?: LanguageCode;
-  /** The server's code for this student's drafts in their own browser (lib/quiz-keep-key.ts); null keeps none. */
+  /** The server's code for this student's draft of this lesson in their own browser (lib/quiz-keep-key.ts); null keeps none. */
   keeper?: string | null;
 }) {
   const w = coursesWords(language);
@@ -137,9 +137,6 @@ export function LessonQuiz({
         {/* 297 [SQ8]: the answers are kept in the student's own browser until they press the button, and put back if they leave. */}
         {canAnswer && keeper && hidden.handle && hidden.product && hidden.lesson ? (
           <QuizKeep
-            handle={hidden.handle}
-            product={hidden.product}
-            lesson={hidden.lesson}
             who={keeper}
             shown={quiz.questions.map((q) => q.id).join(",")}
             tries={used}
@@ -149,7 +146,7 @@ export function LessonQuiz({
         ) : null}
         {/* While it cannot be answered, a draft a recorded try made useless is removed, even on the result-only view (review of #4324). */}
         {mode === "student" && !canAnswer && keeper && hidden.handle && hidden.product && hidden.lesson ? (
-          <QuizForget handle={hidden.handle} product={hidden.product} lesson={hidden.lesson} who={keeper} tries={used} final={passed || left === 0} />
+          <QuizForget who={keeper} tries={used} final={passed || left === 0} />
         ) : null}
         <ol className="space-y-6">
           {quiz.questions.map((question, qi) => {

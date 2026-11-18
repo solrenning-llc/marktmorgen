@@ -43,7 +43,7 @@ part("What is kept");
   const draft = draftOf(inputs, shown, 0, NOW);
   is("every question of the try, answered or not; never a hidden field or a value that is not a choice", draft, { at: NOW, shown, tries: 0, version: "", answers: { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] } });
   is("worth keeping only with an answer", [hasAnswers(draft), hasAnswers(draftOf(inputs.map((i) => ({ ...i, checked: false })), shown, 0, NOW))], [true, false]);
-  is("kept per store, course, lesson and student", quizKeepKey("shop", "prod", "lesson", "abc"), "mm:quiz:shop:prod:lesson:abc");
+  is("kept under the server's code for the course, lesson and student, and nothing else", quizKeepKey("abc"), "mm:quiz:abc");
 }
 
 part("When it is put back");
@@ -67,10 +67,10 @@ part("One student's draft is never another's (review of #4324)");
   const keyBefore = process.env.NIMBUS_DATA_KEY;
   process.env.NIMBUS_DATA_KEY = "k".repeat(64);
   try {
-    const ada = deviceQuizKey("course1", "ada@example.com"), bo = deviceQuizKey("course1", "bo@example.com");
-    is("a code per student, made on the server, the same each visit", [Boolean(ada && /^[0-9a-f]{32}$/.test(ada)), ada === deviceQuizKey("course1", " ADA@example.com "), ada !== bo], [true, true, true]);
-    is("so the two students' drafts live under different keys", quizKeepKey("shop", "prod", "lesson", ada ?? "") !== quizKeepKey("shop", "prod", "lesson", bo ?? ""), true);
-    is("never the address, nor the video place's code", [ada?.includes("ada"), ada === devicePlaceKey("course1", "ada@example.com"), ada === deviceQuizKey("course2", "ada@example.com")], [false, false, false]);
+    const ada = deviceQuizKey("course1", "lesson1", "ada@example.com"), bo = deviceQuizKey("course1", "lesson1", "bo@example.com");
+    is("a code per student, made on the server, the same each visit", [Boolean(ada && /^[0-9a-f]{32}$/.test(ada)), ada === deviceQuizKey("course1", "lesson1", " ADA@example.com "), ada !== bo], [true, true, true]);
+    is("so the two students' drafts live under different keys", quizKeepKey(ada ?? "") !== quizKeepKey(bo ?? ""), true);
+    is("never the address, nor the video place's code", [ada?.includes("ada"), ada === devicePlaceKey("course1", "ada@example.com"), ada === deviceQuizKey("course2", "lesson1", "ada@example.com")], [false, false, false]);
   } finally {
     if (keyBefore === undefined) delete process.env.NIMBUS_DATA_KEY;
     else process.env.NIMBUS_DATA_KEY = keyBefore;
@@ -79,7 +79,7 @@ part("One student's draft is never another's (review of #4324)");
   const dataBefore = process.env.NIMBUS_DATA_KEY;
   delete process.env.STRIPE_SECRET_KEY;
   delete process.env.NIMBUS_DATA_KEY;
-  is("no server key: no code, so nothing is kept", deviceQuizKey("course1", "ada@example.com"), null);
+  is("no server key: no code, so nothing is kept", deviceQuizKey("course1", "lesson1", "ada@example.com"), null);
   if (stripeBefore !== undefined) process.env.STRIPE_SECRET_KEY = stripeBefore;
   if (dataBefore !== undefined) process.env.NIMBUS_DATA_KEY = dataBefore;
 }
@@ -136,7 +136,7 @@ part("Offered only while the student may answer");
   is("without the server's code for the student, nothing is kept", draw("student").includes("data-quiz-keep"), false);
   keeper = "c".repeat(32);
   const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
-  is("the lesson page makes the code for the signed-in student only, and hands it to the quiz", [/const quizKeeper = student \? deviceQuizKey\(course\.id, student\.email\) : null;/.test(page), /keeper=\{quizKeeper\}/.test(page)], [true, true]);
+  is("the lesson page makes the code for the signed-in student only, and hands it to the quiz", [/const quizKeeper = student \? deviceQuizKey\(course\.id, lesson\.id, student\.email\) : null;/.test(page), /keeper=\{quizKeeper\}/.test(page)], [true, true]);
   is("pressing the quiz's button forgets nothing: only a recorded try does", /addEventListener\("submit"/.test(readFileSync("components/quiz-keep.tsx", "utf8")), false);
   is("the owner, a visitor: no", [draw("owner").includes("data-quiz-keep"), draw("visitor").includes("data-quiz-keep")], [false, false]);
   is("before scripts run it draws nothing visible: the quiz is the plain form it was", /<span class="block" data-quiz-keep="true"><\/span>/.test(draw("student")), true);
@@ -156,17 +156,17 @@ part("Old or unreadable drafts go whenever a lesson or the library opens, and al
   const stale = JSON.stringify(draftOf(inputs, shown, 0, NOW - (QUIZ_KEEP_DAYS * 86_400_000 + 1)));
   const future = JSON.stringify(draftOf(inputs, shown, 0, NOW + 86_400_000));
   const { kept, storage } = storageOf([
-    ["mm:quiz:shop:prod:one:" + "a".repeat(32), fresh],
-    ["mm:quiz:shop:prod:two:" + "a".repeat(32), stale],
-    ["mm:quiz:gone:prod:one:" + "b".repeat(32), "not json"],
-    ["mm:quiz:shop:prod:three:" + "c".repeat(32), future],
-    ["mm:quiz:shop:prod:four:" + "c".repeat(32), "[1,2]"],
+    ["mm:quiz:" + "a".repeat(32), fresh],
+    ["mm:quiz:" + "1".repeat(32), stale],
+    ["mm:quiz:" + "b".repeat(32), "not json"],
+    ["mm:quiz:" + "c".repeat(32), future],
+    ["mm:quiz:" + "d".repeat(32), "[1,2]"],
     ["mm:place:other", "kept"],
   ]);
   is("the sweep exists", typeof sweep, "function");
   if (sweep) {
     is("removes the four old, unreadable or impossible drafts", sweep(storage, NOW), 4);
-    is("and keeps the fresh draft and what is not a quiz draft", [...kept.keys()], ["mm:quiz:shop:prod:one:" + "a".repeat(32), "mm:place:other"]);
+    is("and keeps the fresh draft and what is not a quiz draft", [...kept.keys()], ["mm:quiz:" + "a".repeat(32), "mm:place:other"]);
   }
   is("signing out removes them all", typeof forgetAll === "function" ? [forgetAll(storage), [...kept.keys()]] : null, [1, ["mm:place:other"]]);
   const lesson = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");

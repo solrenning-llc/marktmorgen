@@ -180,8 +180,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
-  // 297 [SQ8]: the code this student's quiz drafts are kept under in their own browser, so no one else's comes back.
-  const quizKeeper = student ? deviceQuizKey(course.id, student.email) : null;
+  // 297 [SQ8]: the code this student's draft of this lesson's quiz is kept under in their own browser, the whole key
+  // after its prefix, so the key names no course and no one else's comes back (review of #4324, MEDIUM 6).
+  const quizKeeper = student ? deviceQuizKey(course.id, lesson.id, student.email) : null;
   // This lesson kept on the student's device as the last one they opened, offered back in their library (650 [WG10],
   // unit 2, components/library-continue.tsx), under a key made from their address alone; never for the creator or a visitor.
   const lastPerson = student ? deviceLastKey(student.email) : null;

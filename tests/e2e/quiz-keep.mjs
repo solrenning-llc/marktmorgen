@@ -18,7 +18,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
       <form action="https://quiz.test/sent" method="post">
         <input type="hidden" name="handle" value="shop" />
         <input type="hidden" name="shown" value={shown} />
-        <QuizKeep handle="shop" product="prod" lesson="lessonaaaaa1" who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }} />
+        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }} />
         <fieldset><legend>One?</legend>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" /> A</label>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="1" /> B</label>
@@ -50,7 +50,7 @@ function is(name, got, expected) {
   if (!ok) failures++;
   console.log(`${ok ? "ok" : "FAIL"} ${name}${ok ? "" : `: expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`}`);
 }
-const ADA = `mm:quiz:shop:prod:lessonaaaaa1:${"a".repeat(32)}`;
+const ADA = `mm:quiz:${"a".repeat(32)}`;
 const BACK = "Your answers from last time are back. They are not checked until you press the button below.";
 try {
   const context = await browser.newContext();

@@ -5,10 +5,12 @@
  * answers again. Nothing here is ever sent to us before the student presses
  * the quiz's own button; sending forgets it. Pure rules: no storage, no DOM.
  *
- *   - Kept per student and lesson, under QUIZ_KEEP_PREFIX with the store, the
- *     course, the lesson and a code made on our server from the course and the
- *     student's address (lib/quiz-keep-key.ts), so on a shared browser one
- *     student's draft is never put back for another (review of #4324).
+ *   - Kept per student and lesson, under QUIZ_KEEP_PREFIX and a code made on
+ *     our server from the course, the lesson and the student's address
+ *     (lib/quiz-keep-key.ts), and nothing else: the key names no store, course
+ *     or lesson, and on a shared browser one student's draft is never put back
+ *     for another (review of #4324, MEDIUM 6). A key in the older readable
+ *     shape is removed by the sweep.
  *   - Kept with the number of tries already recorded for that student
  *     (`tries`): pressing the quiz's button forgets nothing, so a send that
  *     fails (offline, refused, an allowance used up) loses nothing; once the
@@ -30,8 +32,11 @@ export const QUIZ_KEEP_PREFIX = "mm:quiz:";
 export const QUIZ_KEEP_DAYS = 7;
 const KEEP_MS = QUIZ_KEEP_DAYS * 86_400_000;
 
-/** Where one student's draft of one lesson's quiz is kept in this browser; `who` is the server's code for the student. */
-export const quizKeepKey = (handle: string, product: string, lesson: string, who: string) => `${QUIZ_KEEP_PREFIX}${handle}:${product}:${lesson}:${who}`;
+/** Where one student's draft of one lesson's quiz is kept in this browser; `who` is the server's code for the course, lesson and student. */
+export const quizKeepKey = (who: string) => `${QUIZ_KEEP_PREFIX}${who}`;
+
+/** A key in today's shape: the prefix and the server's code, nothing else; any other mm:quiz: key is from before (MEDIUM 6). */
+const OPAQUE_KEY = /^mm:quiz:[0-9a-f]{32}$/;
 
 /** One question's choices as the student left them: every question of the try, even one left unanswered; `tries` is how many tries were recorded then. */
 export type QuizDraft = { at: number; shown: string; tries: number; version: string; answers: Record<string, number[]> };
@@ -144,7 +149,8 @@ function quizKeys(storage: SweepStorage): string[] {
 
 /**
  * Removes every quiz draft in this browser that is unreadable, from the
- * future or older than QUIZ_KEEP_DAYS, whichever lesson or student it is for
+ * future, older than QUIZ_KEEP_DAYS or under a key in the older readable
+ * shape, whichever lesson or student it is for
  * (review of #4324): run each time a lesson or the library opens, so a draft
  * for a lesson never opened again does not stay. Answers how many went.
  * Storage that cannot be read or written is left alone, without an error.
@@ -153,6 +159,12 @@ export function sweepQuizDrafts(storage: SweepStorage, now: number): number {
   let removed = 0;
   try {
     for (const name of quizKeys(storage)) {
+      // A key in the older readable shape names the store, the course and the lesson: removed whatever it holds.
+      if (!OPAQUE_KEY.test(name)) {
+        storage.removeItem(name);
+        removed += 1;
+        continue;
+      }
       let kept: unknown = null;
       try {
         kept = JSON.parse(storage.getItem(name) ?? "");

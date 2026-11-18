@@ -8,8 +8,8 @@ import { type ChoiceInput, checkedAfter, draftOf, draftToRestore, forgetClosedDr
  * Keeps a quiz's answers in the student's own browser while they answer
  * (297 [SQ8]), by the rules of lib/quiz-keep-rules.ts. Drawn inside the quiz
  * form, only for a signed-in student who may answer, under the code the
- * server made for them (`who`, lib/quiz-keep-key.ts), so another student on
- * the same browser never gets it back.
+ * server made for this lesson and them (`who`, lib/quiz-keep-key.ts), so the
+ * key names no course and another student on the same browser never gets it back.
  *
  * When they come back to the lesson with a draft for the same questions and
  * the same number of recorded tries, their choices are put back and the
@@ -21,18 +21,12 @@ import { type ChoiceInput, checkedAfter, draftOf, draftToRestore, forgetClosedDr
  * happens without scripts: the quiz is the plain form it always was.
  */
 export function QuizKeep({
-  handle,
-  product,
-  lesson,
   who,
   shown,
   tries,
   version,
   words,
 }: {
-  handle: string;
-  product: string;
-  lesson: string;
   who: string;
   shown: string;
   tries: number;
@@ -41,7 +35,7 @@ export function QuizKeep({
   words: { quizKeptBack: string; quizKeptClear: string; quizKeptCleared: string };
 }) {
   const mark = useRef<HTMLSpanElement>(null);
-  const key = quizKeepKey(handle, product, lesson, who);
+  const key = quizKeepKey(who);
   const ready = useHydrated();
   const [back, setBack] = useState(false);
   const [said, setSaid] = useState("");
@@ -129,8 +123,8 @@ export function QuizKeep({
  * the draft a recorded try made useless, by forgetClosedDraft, the moment the
  * lesson opens (Codex L's review of #4324). Draws nothing visible.
  */
-export function QuizForget({ handle, product, lesson, who, tries, final }: { handle: string; product: string; lesson: string; who: string; tries: number; final: boolean }) {
-  const key = quizKeepKey(handle, product, lesson, who);
+export function QuizForget({ who, tries, final }: { who: string; tries: number; final: boolean }) {
+  const key = quizKeepKey(who);
   useEffect(() => {
     let storage: Storage | null = null;
     try {

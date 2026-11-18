@@ -23,7 +23,7 @@ import { done, is, part } from "./check";
 
 const NOW = Date.UTC(2026, 10, 18, 12);
 const shown = "aaaaaaaaaaa1,aaaaaaaaaaa2";
-const key = quizKeepKey("shop", "prod", "lessonaaaaa1", "c".repeat(32));
+const key = quizKeepKey("c".repeat(32));
 const kept = (tries: number) => JSON.stringify(draftOf([{ name: "q_aaaaaaaaaaa1", value: "1", checked: true }], shown, tries, NOW - 60_000));
 
 /** A synthetic browser storage holding one entry. */

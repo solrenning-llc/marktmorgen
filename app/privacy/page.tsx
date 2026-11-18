@@ -29,7 +29,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -75,7 +75,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you type for the bottom of your emails goes in those
+          emails only; it is shown on your store&apos;s public policies page too only
+          if you check the box for that where you type it, and comes off the
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When
@@ -425,7 +429,11 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}

@@ -14,6 +14,7 @@ import { importedFor } from "@/lib/imported-purchases";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
@@ -24,7 +25,10 @@ const restore = () => {
 /** What a call came to: its outcome, or "threw" when it refused by throwing. */
 const outcome = <T extends { outcome: string }>(p: Promise<T>): Promise<string> => p.then((v) => v.outcome, () => "threw");
 
-globalThis.fetch = (async (input: string | URL | Request) => {
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup, #4494): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   if (new URL(String(input)).hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
   return new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 });
 }) as typeof fetch;

@@ -30,6 +30,7 @@ import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 const ACCOUNT_A = "acct_1GrpCursorA01";
 const ACCOUNT_B = "acct_1GrpCursorB01";
@@ -37,6 +38,9 @@ const ACCOUNT_B = "acct_1GrpCursorB01";
 const lists = new Map<string, unknown[]>();
 const reads: { account: string; after: string | null; status: number }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -151,6 +155,18 @@ async function main(): Promise<void> {
   is("the pass starts again from the top in that run, and the refund on its second page takes the purchase back", await openGroup(await owner(), lost), null);
   is("one read was answered 404, and none after it", reads.filter((r) => r.status === 404).length, 1);
   is("the list is read to its end, so the anchor moves to its newest refund", await anchor(), String(now - 5));
+
+  part("A refund dated ahead of the clock cannot advance the store's anchor");
+  await clean();
+  const beforeFuture = now - 3 * 86_400;
+  await redis.pipeline([["SET", anchorKey, String(beforeFuture)]]);
+  const recovered = await paidGroup("pi_GCurTimeOurs0014", 14);
+  lists.set(ACCOUNT_B, [refund("re_GCurTimeOther014", "pi_GCurTimeOther014", now + 86_400)]);
+  await run();
+  is("a future timestamp leaves the previous anchor in place", await anchor(), String(beforeFuture));
+  lists.set(ACCOUNT_B, [refund("re_GCurTimeOurs0014", "pi_GCurTimeOurs0014", now - 5)]);
+  await run();
+  is("the next valid refund still reaches its purchase", await openGroup(await owner(), recovered), null);
 
   part("A row that is not readable never holds back the pages after it");
   await clean();

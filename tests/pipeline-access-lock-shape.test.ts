@@ -18,13 +18,23 @@ type Shape = "real" | "ok-and-more" | "empty" | "sparse" | "undefined" | "number
 const realPipeline = redis.pipeline.bind(redis);
 let setShape: Shape = "real";
 let getShape: "real" | "token-and-more" | "nonlist" = "real";
+let writeShape: "real" | "getter" = "real";
+let getterRuns = 0;
 let sets = 0;
 let writes = 0;
 let dels = 0;
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const [verb, key] = [String(commands[0]?.[0]), String(commands[0]?.[1])];
   const isLock = commands.length === 1 && key.startsWith("nl:crm:pacc:lock:");
-  if (!isLock && (verb === "HSET" || verb === "HDEL") && key.startsWith("nl:crm:pacc:")) writes += 1;
+  if (!isLock && (verb === "HSET" || verb === "HDEL") && key.startsWith("nl:crm:pacc:")) {
+    writes += 1;
+    // The write is NOT applied: the answer is one slot whose index accessor runs code (Codex N1 on #2036 @48a58ec955).
+    if (writeShape === "getter") {
+      const trap: unknown[] = [];
+      Object.defineProperty(trap, "0", { enumerable: true, get() { getterRuns += 1; throw new Error("the reply's accessor ran"); } });
+      return trap;
+    }
+  }
   if (isLock && verb === "DEL") dels += 1;
   if (isLock && verb === "SET") {
     sets += 1;
@@ -110,6 +120,13 @@ async function main(): Promise<void> {
     is("the lock is not deleted on an unknown reply (it runs out by itself)", [sets, dels, typeof (await lockValue(lockOf("kim@example.com")))], [1, 0, "string"]);
     await lockDrop(lockOf("kim@example.com"));
   }
+  part("The write's answer is one slot with an index accessor (Codex N1 on #2036 @48a58ec955)");
+  writeShape = "getter";
+  getterRuns = 0;
+  is("one change: refused as unconfirmed, the accessor never runs", [await outcome(() => setPipelineAccess(statsId, "kim@example.com", pipelines, "coach1", "none", store)), getterRuns], ["unconfirmed", 0]);
+  is("Save: refused as unconfirmed, the accessor never runs", [await outcome(() => setPipelineChoices(statsId, "kim@example.com", pipelines, { coach1: "none" }, store)), getterRuns], ["unconfirmed", 0]);
+  writeShape = "real";
+  is("the record is unchanged", await readPipelineAccess(statsId, "kim@example.com"), { sales0: "view" });
   done();
 }
 main();

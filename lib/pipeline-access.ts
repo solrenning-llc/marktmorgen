@@ -127,9 +127,14 @@ export class PipelineAccessWriteUnconfirmed extends Error {
   }
 }
 
-/** The answer of a pipeline of one HSET or HDEL when it is exactly one 0 or 1; null for anything else. */
+/**
+ * The answer of a pipeline of one HSET or HDEL when it is exactly one 0 or 1; null for anything else. Read once from
+ * the reply's own data slot (repliesFor), so an accessor, a Proxy or a hole is unknown and never runs (Codex N1 on
+ * #2036 @48a58ec955): the caller then throws PipelineAccessWriteUnconfirmed, never a raw error.
+ */
 function oneAnswer(reply: unknown): 0 | 1 | null {
-  return Array.isArray(reply) && reply.length === 1 && (reply[0] === 0 || reply[0] === 1) ? reply[0] : null;
+  const answer = repliesFor(reply, 1)?.[0];
+  return answer === 0 || answer === 1 ? answer : null;
 }
 
 /**

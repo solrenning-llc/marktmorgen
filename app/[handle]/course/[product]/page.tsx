@@ -1,6 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { countDay } from "@/lib/day-visit";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { BillingCountryField } from "@/components/billing-country-field";
 import { isResting } from "@/lib/traffic";
 import { forVisitor } from "@/lib/visitor";
 import { activeIntro } from "@/lib/intro-price";
@@ -356,6 +357,16 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   {/* A course is handed over at once: the box to start access first (lib/digital-consent.ts). */}
                   {/* Sent back here, not to the product's page, when the box was not checked (app/api/store/checkout, `from`). */}
                   <input type="hidden" name="from" value="course" />
+                  {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and why it was asked again. */}
+                  {query.status === "abroad" || query.status === "country" ? (
+                    <div className="st-note mb-5" role="alert">
+                      <p className="font-bold">{said.w.notices[query.status].title}</p>
+                      <p className="mt-1 text-sm">{said.w.notices[query.status].body}</p>
+                    </div>
+                  ) : null}
+                  <div className="mb-5">
+                    <BillingCountryField id={`bc-course-${product.id}`} locale={said.lang.locale} label={said.w.billingCountry} choose={said.w.chooseCountry} />
+                  </div>
                   {/* The end this page says (24 [E7]), for the checkout to check and stamp; never for a membership. */}
                   {product.recurring ? null : <input type="hidden" name={ACCESS_END_FIELD} value={shownAccessEnd(course)} />}
                   <DigitalConsentBox id={`dc-course-${product.id}`} lang={store.language} refused={query.consent === "needed"} className="mb-5" />

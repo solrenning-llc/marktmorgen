@@ -579,6 +579,16 @@ async function readHoldings(store: Store, email: string, ids: readonly string[],
 }
 
 const holdingsKey = (id: string, email: string) => `nl:cm:${id}:h:${emailKey(email)}`;
+/**
+ * The most one kept reading (holdingsKey) holds, in bytes (Codex X6 on #3395, LOW: it was registered at 512 bytes, while
+ * a community's access products with a search page's measure about 5.8 KB with ten-character ids). Its JSON is the
+ * version, the products asked, the ones held and, when not whole, the ones passed over (held and passed over are apart,
+ * so together no more than those asked): the community's 200 access products of at most 40 characters (lib/community.ts)
+ * and a search page's SEARCH_PAGE (lib/community-search.ts) of at most 64 (lib/catalog.ts SAFE_ID), each quoted with
+ * its comma, twice, with the rest of the record, is 19,956 bytes at the most (tests/community-holdings-size.test.ts).
+ * A reading that would take more is not kept, so no key ever holds more; tests/store-data-registry.ts counts it here.
+ */
+export const HOLDINGS_RECORD_BYTES = 20_480;
 /** A course's own answer for one reader, read by the search when the shared reading ran out of refund questions for it (doorAnswer). */
 export const courseDoorKey = (id: string, product: string, email: string) => `nl:cm:${id}:sg:${product}:${emailKey(email)}`;
 
@@ -655,8 +665,14 @@ export async function holdingsOf(
   // A reading not whole (more purchases than are read) is kept a minute only, as a "no" is.
   const open = read.whole && heldAnswer(read, config.access) === true;
   const record = { v: config.v, ids: asked, held: [...read.held], ...(read.whole ? {} : { lasting: true, why: read.why, ...(read.short?.size ? { s: [...read.short] } : {}) }) };
-  // Keeping it is a saving only: a failed write leaves the reading just made to decide.
-  await redisPipeline([["SET", holdingsKey(id, email), JSON.stringify(record), "EX", open ? OPEN_SECONDS : SHUT_SECONDS]]).catch(
+  // Keeping it is a saving only: a failed write leaves the reading just made to decide. One over its bound is not kept
+  // (HOLDINGS_RECORD_BYTES): the next page reads it again, paid for as any reading not kept.
+  const value = JSON.stringify(record);
+  if (new TextEncoder().encode(value).length > HOLDINGS_RECORD_BYTES) {
+    console.error("what a community member holds is more than a kept reading holds; not kept");
+    return read;
+  }
+  await redisPipeline([["SET", holdingsKey(id, email), value, "EX", open ? OPEN_SECONDS : SHUT_SECONDS]]).catch(
     (error) => console.error("keeping what a community member holds failed", error),
   );
   return read;

@@ -73,6 +73,7 @@ import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
 import { MAX_DRAFTS } from "@/lib/mail-drafts";
 import { MAX_MAIL_BODY } from "@/lib/mail";
 import { MAX_SEGMENTS } from "@/lib/segments-rules";
+import { HOLDINGS_RECORD_BYTES } from "@/lib/community-access";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
@@ -465,8 +466,9 @@ export const FAMILIES: Record<string, Family> = {
   // its search request's part moved to this file with it. A course's, a space's or an event's own answer (`:sg:`,
   // `:sp:ok:`, `:ev:...:ok:`) is written here too (doorAnswer, courseDoorKey) only when that shared reading ran out of
   // refund questions for its products (Claude 1 cloud's review of #3395), 512 bytes kept minutes, as before the shared
-  // reading, and deleted with the person here (forgetAccessPerson).
-  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered (also for the community search), the welcome sent", parts: [per("request", 1, 512, "Stripe's answer cached for minutes.", REQ("page")), per("request", 1, 512, "What a member holds, read once for a community search, cached for minutes.", REQ("search")), item(MARK, "The welcome's mark, once per member.", "membership")] },
+  // reading, and deleted with the person here (forgetAccessPerson). The shared reading itself is counted at its bound,
+  // HOLDINGS_RECORD_BYTES (Codex X6 on #3395, LOW: it was 512 bytes), which also covers a door's own answer.
+  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered (also for the community search), the welcome sent", parts: [per("request", 1, HOLDINGS_RECORD_BYTES, "Stripe's answer cached for minutes.", REQ("page")), per("request", 1, HOLDINGS_RECORD_BYTES, "What a member holds, read once for a community search, cached for minutes.", REQ("search")), item(MARK, "The welcome's mark, once per member.", "membership")] },
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),

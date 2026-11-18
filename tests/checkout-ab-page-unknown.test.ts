@@ -75,6 +75,7 @@ async function main(): Promise<void> {
     const start = sent.length;
     const f = new FormData();
     f.set("handle", "abpageshop");
+    f.set("billing_country", "US");
     f.set("product", id);
     const held = afterTasks.length;
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com", cookie: `${AB_COOKIE}=7` } }));

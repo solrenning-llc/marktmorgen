@@ -23,7 +23,11 @@ export async function POST(request: NextRequest) {
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   // The month's AI jobs first, as askNumbers checks them (lib/ai.ts): with none left, nothing is counted or read.
   if (!isAiConfigured()) return Response.json({ ok: false, error: "off" }, { status: 400 });
-  if ((await aiLeft(store).catch(() => 0)) < 1) return Response.json({ ok: false, error: "used" }, { status: 400 });
+  // A balance that cannot be read is unknown, never "used up" (rule 24; lib/ai.ts aiLeft throws): nothing is counted,
+  // read or asked, and the panel says to try again (audit of the API routes, 11 November 2026).
+  const left = await aiLeft(store).catch(() => null);
+  if (left === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (left < 1) return Response.json({ ok: false, error: "used" }, { status: 400 });
   // The numbers are read from Stripe again, as the studio's home page draws them, which counts STUDIO_PAGE_UNITS:
   // the rest of those are counted before they are read, besides the one this request already took.
   const counted = await countUnits(store, STUDIO_PAGE_UNITS - 1).catch(() => null);

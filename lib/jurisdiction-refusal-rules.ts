@@ -108,7 +108,8 @@ const ASSIGNED: ReadonlySet<string> = new Set<string>(ASSIGNED_COUNTRY_CODES);
 /** Every jurisdiction a country code may belong to; null when it is not a country code at all. */
 export function candidateJurisdictions(code: unknown): readonly DeemedSupplierJurisdiction[] | null {
   if (typeof code !== "string" || !/^[A-Z]{2}$/.test(code)) return null;
-  if (code === "EU" || (EU_MEMBER_STATES as readonly string[]).includes(code)) return ["EU"];
+  // "EU" is no country (Codex C2 on #3681): a sale in the EU needs the member state, so it is not a piece of location.
+  if ((EU_MEMBER_STATES as readonly string[]).includes(code)) return ["EU"];
   if (code === "GB" || code === "UK") return ["UK"];
   if (code === "US") return ["US"];
   // ISO's exceptionally reserved codes for parts of a country (EA, IC, FX, CP, AC, TA, DG) are named one by one there.
@@ -211,6 +212,10 @@ export function checkoutLocationDecision(evidence: LocationEvidence, records: un
     if (candidates === null) return refuse("location-unknown", []);
     for (const j of candidates) if (!found.includes(j)) found.push(j);
   }
+  // The pieces must name one country (art. 24b of Regulation 282/2011: two pieces that do not contradict each other;
+  // Claude 4 nuvem AH on #3681): DE and FR, or US and DE, confirm no country. UK is ISO's reserved code for GB.
+  const country = (piece: unknown) => (piece === "UK" ? "GB" : piece);
+  if (new Set(pieces.map(country)).size !== 1) return refuse("location-unknown", []);
   if (found.some((j) => treatment.get(j) !== "collect")) return refuse("refused-jurisdiction", found);
   return Object.freeze({ allowed: true, jurisdictions: Object.freeze(found) });
 }

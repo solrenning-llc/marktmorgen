@@ -321,9 +321,12 @@ test("a store nobody can charge cannot be visited past the visits it has", () =>
   // its free trial has no invoice yet, and one with no plan has none at
   // all, so the visits themselves are the limit there: its pages rest at
   // them (lib/traffic.ts; tests/traffic.test.ts holds where and for whom).
-  for (const page of ["app/[handle]/page.tsx", "app/[handle]/p/[product]/page.tsx"]) {
-    assert.match(readFileSync(join(process.cwd(), page), "utf8"), /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/, `${page} must rest with its store`);
-  }
+  assert.match(readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8"), /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/, "app/[handle]/page.tsx must rest with its store");
+  // Rule 23 (traffic audit, 9 November 2026): the product page now counts itself inside the load its title shares,
+  // before the product is read, and draws the resting page from it; the same rest, one admission a request.
+  const product = readFileSync(join(process.cwd(), "app/[handle]/p/[product]/page.tsx"), "utf8");
+  assert.match(product, /if \(await isResting\(store\)\) return \{ store, asked, resting: true \};/, "the product page must rest with its store");
+  assert.match(product, /if \(found\.resting\) return <StoreResting store=\{found\.store\} \/>;/, "the product page must draw the resting page");
   assert.ok(TRIAL_VISITS <= VISITS_INCLUDED.creator, "a trial of any plan has no more than the smallest plan's visits: it has paid for none");
 });
 
@@ -473,8 +476,8 @@ test("the one exposure is the first payment refunded in full: bounded, once per 
     // the card fee Stripe keeps grows with the charge: it is a funded exposure (docs/funded-exposure-review.md).
     assert.ok(month < 15, `${schedule}: a first month given back can cost $${month.toFixed(2)} on one account`);
     // The owner's ceiling for it, US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"); US$ 65 before, never above 66: the dollar
-    // more is room for every picture upload's Blob operations (the picture-uploads line), not for any price, visible
-    // limit or commission, which do not move.
+    // more is room for any honest cost up to it (coordinator's decision 6934185062, option (a)), not for any price,
+    // visible limit or commission, which do not move.
     assert.ok(year < 66, `${schedule}: a first year given back can cost $${year.toFixed(2)} on one account`);
   }
   const policy = readFileSync(join(process.cwd(), "app/refunds/page.tsx"), "utf8");

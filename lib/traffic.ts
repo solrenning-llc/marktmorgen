@@ -235,22 +235,47 @@ export async function trafficForAdmission(folder: string, month = calendarWindow
  * (lib/traffic-rules.ts).
  */
 export async function isResting(store: Store, now = Date.now(), who: "public" | "buyer" = "public", from: { shared?: boolean } = {}): Promise<boolean> {
+  return (await admitPage(store, now, who, from.shared === true, 0)) !== "all";
+}
+
+/**
+ * A public page drawn, counted as isResting counts it, with `hold` requests of
+ * the work it may go on to do set aside in the same count (one INCRBY of the
+ * store's window, not two): the calendar embedded on a creator's site, whose
+ * frame and a weekly call's times are one request of the browser
+ * (app/embed/[handle]/[product], tests/embed-card-metered.test.ts). "all": the
+ * page and its hold fit. "page": the page fits and the hold did not; the hold
+ * was given back, as holdPublicRequests gives back a refused hold, since
+ * nothing was read for it. "resting": the page rests, its own request counted
+ * as a resting page's always is, its hold given back. `release` gives back,
+ * in the same window, a hold the page then does not use (givePublicRequests).
+ */
+export async function admitPageAndHold(store: Store, hold: number, now = Date.now()): Promise<{ admitted: "all" | "page" | "resting"; release: () => Promise<void> }> {
+  const nothing = async () => {};
+  if (!Number.isSafeInteger(hold) || hold < 0) return { admitted: "resting", release: nothing };
+  const counted = await admitPage(store, now, "public", false, hold);
+  const admitted = counted === "none" ? "resting" : counted === "base" ? "page" : "all";
+  return { admitted, release: admitted === "all" && hold > 0 ? () => givePublicRequests(store, hold, now) : nothing };
+}
+
+/** isResting's count, with `hold` more units set aside in it (admitPageAndHold). */
+async function admitPage(store: Store, now: number, who: "public" | "buyer", shared: boolean, hold: number): Promise<Counted> {
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return true;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return true;
+    if (!window) return "none";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "none";
     const month = visitLimitFor(store, now / 1000);
     const limit = who === "buyer" ? month : publicVisitLimit(month);
-    if (!Number.isSafeInteger(limit) || limit < 0) return true;
+    if (!Number.isSafeInteger(limit) || limit < 0) return "none";
     const folder = await storeFolder(storeRef(store));
     const traffic = await trafficForAdmission(folder, window.id);
-    if (traffic === null || traffic.visits >= limit) return true;
+    if (traffic === null || traffic.visits >= limit) return "none";
     // The page about to be drawn is one of the window's requests, and one of
     // its connection's share of the day, unless it is asked for by a service
     // many people's apps share (a podcast app's servers), which is bounded
     // by its own feed instead.
-    return !(await countRequest(folder, store, window, who, now, 1, from.shared ? null : await askingConnection()));
-  } catch { return true; }
+    return await countRequests(folder, store, window, who, now, 1 + hold, shared ? null : await askingConnection(), hold);
+  } catch { return "none"; }
 }
 
 /**
@@ -260,7 +285,7 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
  * requestLimitFor). A count that cannot be made is a request refused.
  */
 async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<boolean> {
-  return (await countRequestWhy(folder, store, window, who, now, units, client, giveBack)) === "ok";
+  return (await countRequests(folder, store, window, who, now, units, client, giveBack ? units : 0)) === "all";
 }
 
 /**
@@ -278,12 +303,36 @@ export type RequestTake = "ok" | "over" | "unknown";
  */
 export type PublicRequestRefusal = "store" | "connection" | "unknown";
 
-/** countRequest, saying why a refusal was one. The same commands, in the same order, as countRequest has always sent. */
+/** countRequest, saying why a refusal was one: the same count, a refused hold (`giveBack`) given back. */
 async function countRequestWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<"ok" | PublicRequestRefusal> {
+  const counted = await countRequestsWhy(folder, store, window, who, now, units, client, giveBack ? units : 0);
+  // With every unit a hold (giveBack) or none, "base" cannot be answered; read as the store's own refusal if it were.
+  return counted === "all" ? "ok" : counted === "base" ? "store" : counted;
+}
+
+/**
+ * What fits of `units` requests counted in one INCRBY, of which the last
+ * `hold` are a hold (a reading set aside at its worst): "all" when every unit
+ * fits; past the window, the hold is not left counted, since nothing was read
+ * for it, and "base" when the units before it still fit, "none" when they do
+ * not. A request refused as a page resting stays counted, as it always has.
+ */
+type Counted = "all" | "base" | "none";
+async function countRequests(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units: number, client: string | null, hold: number): Promise<Counted> {
+  const counted = await countRequestsWhy(folder, store, window, who, now, units, client, hold);
+  return counted === "all" || counted === "base" ? counted : "none";
+}
+
+/**
+ * countRequests, saying why nothing fits (PublicRequestRefusal): "store" for the store's own figure that was read (or
+ * its month's free places taken), "connection" for the asking connection's share of the day, "unknown" for a count
+ * not made. The same commands, in the same order, as countRequest has always sent.
+ */
+async function countRequestsWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units: number, client: string | null, hold: number): Promise<"all" | "base" | PublicRequestRefusal> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
   if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return "unknown";
-  if (!Number.isSafeInteger(units) || units < 1) return "unknown";
+  if (!Number.isSafeInteger(units) || units < 1 || !Number.isSafeInteger(hold) || hold < 0 || hold > units) return "unknown";
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
   const place = await poolPlace(store, now);
   if (place !== "in") return place === "full" ? "store" : "unknown";
@@ -301,10 +350,11 @@ async function countRequestWhy(folder: string, store: Store, window: AllowanceWi
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
   if (!Number.isSafeInteger(n) || n < units) return "unknown";
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
-  // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
-  // read for it. A request refused as a page resting stays counted, as it always has.
-  if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
-  return n <= limit ? "ok" : "store";
+  if (n <= limit) return "all";
+  // A hold refused over the window (a reading set aside at its worst) is not left counted: nothing was read for it.
+  // A request refused as a page resting stays counted, as it always has.
+  if (hold > 0) await redisPipeline([["DECRBY", key, hold]]).catch(() => {});
+  return hold > 0 && hold < units && n - hold <= limit ? "base" : "store";
 }
 
 /**

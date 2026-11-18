@@ -183,12 +183,11 @@ const MESSAGES: Record<string, string> = {
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
-  shipped: "This is a physical product you ship: sold once, at one price, with nothing else to hand over. Under Shipping, stop shipping it first to change that.",
+  shipped: "This is a physical product you ship: it is sold once, for a price, with nothing else to hand over. Under Shipping, stop shipping it first to change that.",
   ship_free: "A product you ship needs a price.",
   ship_membership: "A product you ship is sold once, not as a membership.",
   ship_call: "A call delivers a time, so it cannot be shipped.",
   ship_options: "A product you ship has one price. Take its options off first.",
-  ship_pwyw: "A product you ship has a set price, so buyers cannot choose it.",
   ship_plan: "A product you ship is paid in full. Stop its payment plan first.",
   ship_delivery: "This product already hands over a file, a link, a course, a podcast or a bundle. Take that off first, or make a new product to ship.",
   ship_price: "Type a shipping cost of 0 for free shipping, or at least the least your currency can charge.",
@@ -1205,6 +1204,7 @@ function OptionsBlock({
       )}
 
       <ul className="mt-3 space-y-2">
+        {/* oxlint-disable-next-line react/refs -- the ref is read only inside ref callbacks and event handlers, not during render; oxlint's port flags the enclosing callback */}
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
             {editingId === option.id ? (() => {
@@ -1458,6 +1458,7 @@ function OptionsBlock({
       {adding
         ? form(
             "Add this price",
+            // oxlint-disable-next-line react/refs -- run() reads its in-flight ref only when the form is submitted, not during render; oxlint's port flags the callback
             () =>
               run(
                 { action: "add", id: product.id, label, price, details, best, ...(shipped ? { sku } : {}) },
@@ -1892,6 +1893,7 @@ export function ProductEditor({
   ownHosts = [],
   tiers = [],
   taxOnTop,
+  canSend = true,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1947,12 +1949,24 @@ export function ProductEditor({
   tiers?: readonly string[];
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
+  /** Whether this role may send to the list (lib/team-roles.ts "send"): putting a waitlisted product on sale emails its waitlist. */
+  canSend?: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
   const editorReady = useSyncExternalStore(subscribeEditorReady, editorClientReady, editorServerReady);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // The focus follows a card's edit form (WCAG 2.4.3): into its first field when it opens, and back to that product's
+  // Edit when it closes, by Cancel or a save; not when it closed because a new product is being added.
+  const editedLast = useRef<string | null>(null);
+  useEffect(() => {
+    const was = editedLast.current;
+    editedLast.current = editingId;
+    if (was === editingId) return;
+    if (editingId !== null) requestAnimationFrame(() => document.getElementById(`product-title-${editingId}`)?.focus());
+    else if (was !== null && !adding) requestAnimationFrame(() => document.getElementById(`product-edit-${was}`)?.focus());
+  }, [editingId, adding]);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   // The form as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
@@ -2452,6 +2466,7 @@ export function ProductEditor({
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
                   <button
+                    id={`product-edit-${product.id}`}
                     type="button"
                     onClick={() => startEditing(product)}
                     className={quiet}
@@ -2609,6 +2624,7 @@ export function ProductEditor({
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}
+                    canLaunch={canSend}
                   />
                 ) : null}
                 {product.call || product.course || product.shipping ? null : <BundleToggle product={product} />}

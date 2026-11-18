@@ -6,6 +6,7 @@ import { readOrder } from "@/lib/store-checkout";
 import { isCallProduct, moveBooking } from "@/lib/calls";
 import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
+import { bookedHere, payBookTimes } from "@/lib/book-page-admission";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -67,10 +68,18 @@ export async function POST(request: NextRequest) {
   const room = await withinStore("book-move", `${clientAddress(request)}|${store.handle}`, 10, 600, store, "buyer").catch(unknownLimit);
   if (room === "unknown") return back("error");
   if (!room) return back("slow");
+  // Only a booking in this store's diary is asked about at Stripe (review of #3478; one HEXISTS, lib/book-page-admission.ts).
+  const inDiary = await bookedHere(store, session);
+  // A diary that could not be read is "error" (try again), never "unknown" (no such booking): rule 24, Claude 3 on #3478.
+  if (inDiary === null) return back("error");
+  if (!inDiary) return back("unknown");
   const order = await readOrder(store, session);
   if (order.state !== "paid" || !order.call || order.product.id !== product.id) {
     return back(order.state === "error" || order.state === "unavailable" ? "error" : "unknown");
   }
+  // The times the move reads (moveBooking: readBusy) are paid for before they are read, from the whole window: the booking is the buyer's.
+  // Times that do not fit the store's window, or a count not made, are not the buyer's tries: "unavailable" (Claude 3 on #3478).
+  if (!(await payBookTimes(store, "buyer"))) return back("unavailable");
 
   const result = await moveBooking({
     store,

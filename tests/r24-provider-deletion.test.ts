@@ -41,6 +41,15 @@ function inject(match: (c: Command) => boolean, reply: unknown) {
   }) as typeof redis.pipeline;
 }
 /**
+ * Changed with #3333's merge (rule 23): a meeting account's deletion marks it gone in the same pipeline as, and before,
+ * the read of its stores (lib/meet-connect.ts forgetUser), so the mark is answered "OK" and the store list's reply is
+ * the one bent, at its own place in that pipeline.
+ */
+function injectZoomStores(reply: unknown[]) {
+  // The same pipeline shape as a Meta user's deletion (SET of the gone mark, then SMEMBERS of the stores).
+  injectMetaStores(reply);
+}
+/**
  * Changed with #3322's merge (rule 23): a Meta user's deletion now marks them gone in the same pipeline as, and before,
  * the read of their stores (lib/meta-ads.ts forgetMetaUser), so the mark is answered "OK" and the store list's reply is
  * the one bent, at its own place in that pipeline.
@@ -83,7 +92,7 @@ for (const [label, reply] of UNKNOWN_LISTS) {
   test(`Zoom: a user's store list answered with ${label} is not "no store", and the index is kept`, async () => {
     redis.clear();
     seedZoom("zu-1", "zstats1");
-    inject((c) => c[0] === "SMEMBERS", reply);
+    injectZoomStores(reply as unknown[]);
     try {
       await assert.rejects(() => forgetUser("zoom", "zu-1"));
       assert.equal(sent.some((c) => c[0] === "DEL"), false, "nothing deleted");
@@ -161,7 +170,9 @@ test("healthy controls: a known user's stores are forgotten, and the index with 
   const zoom = await forgetUser("zoom", "zu-5");
   assert.deepEqual(zoom.map((f) => f.statsId), ["zstats5"]);
   assert.equal(redis.run(["EXISTS", zoomConnKey("zstats5")]), 0);
-  assert.equal(redis.run(["EXISTS", zoomUserKey("zu-5")]), 0);
+  // Changed with #3333's merge (rule 23): each store leaves the index on its own (SREM), so the index lists nothing
+  // after; Redis drops a set left empty, which the in-memory double keeps, so it is read by how many it lists.
+  assert.equal(redis.run(["SCARD", zoomUserKey("zu-5")]), 0);
   seedMeta("10150000000000005", "mstats5");
   const meta = await forgetMetaUser("10150000000000005");
   assert.deepEqual(meta.map((f) => f.statsId), ["mstats5"]);
@@ -176,7 +187,9 @@ test("confirmed absence: a user with no store, or a store whose connection is go
   // The index names a store whose connection was already removed: nothing to forget there, and the index goes.
   redis.run(["SADD", zoomUserKey("zu-7"), "zstats7"]);
   assert.deepEqual(await forgetUser("zoom", "zu-7"), []);
-  assert.equal(redis.run(["EXISTS", zoomUserKey("zu-7")]), 0);
+  // Changed with #3333's merge (rule 23): each store leaves the index on its own (SREM), so the index lists nothing
+  // after; Redis drops a set left empty, which the in-memory double keeps, so it is read by how many it lists.
+  assert.equal(redis.run(["SCARD", zoomUserKey("zu-7")]), 0);
   redis.run(["SADD", metaUserKey("10150000000000007"), "mstats7"]);
   assert.deepEqual(await forgetMetaUser("10150000000000007"), []);
   assert.equal(redis.run(["EXISTS", metaUserKey("10150000000000007")]), 0);

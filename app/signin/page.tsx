@@ -15,6 +15,7 @@ import { formatMoney } from "@/lib/money";
 import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
 import { ForgetInboxDrafts } from "@/components/forget-inbox-drafts";
+import { ForgetQuizDrafts } from "@/components/quiz-sweep";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
 const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
@@ -304,6 +305,8 @@ export default async function SignInPage({
           ) : null}
 
           {confirmation ? <ToastOnLoad message={confirmation} param="status" /> : null}
+          {/* Signing out, of this browser or every device, removes every quiz draft kept in this browser (review of #4324). */}
+          {status.startsWith("out") ? <ForgetQuizDrafts /> : null}
           {/* Every log-out and every ended session lands here: the unsent inbox answers kept on this device go (lib/inbox-drafts.ts). */}
           <ForgetInboxDrafts />
           {notice ? (

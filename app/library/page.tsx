@@ -12,6 +12,7 @@ import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
 import { LibraryContinue } from "@/components/library-continue";
+import { QuizSweep } from "@/components/quiz-sweep";
 import { deviceLastKey } from "@/lib/lesson-position";
 import { WAITING_LATER, waitingFor, waitingLine } from "@/lib/buyer-waiting";
 import { LIBRARY_WAITING_UNITS } from "@/lib/public-read-rules";
@@ -115,6 +116,8 @@ export default async function LibraryPage({ searchParams }: Params) {
           </div>
         </section>
         <section className="container-page py-12 sm:py-16" data-library>
+          {/* Old or unreadable quiz drafts in this browser go each time the library opens (review of #4324). */}
+          <QuizSweep />
           {email ? (
             <>
               <p className="text-ink-soft">{`For ${email}. This page works for 24 hours from the email.`}</p>

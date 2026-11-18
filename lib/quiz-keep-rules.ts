@@ -19,7 +19,11 @@
  *     draft for other questions is never put back, and is forgotten.
  *   - Only the quiz's choices are kept (q_ followed by a question id, and a
  *     choice's number), never the form's hidden fields.
- *   - Forgotten after QUIZ_KEEP_DAYS, unreadable data is forgotten too.
+ *   - Forgotten after QUIZ_KEEP_DAYS, unreadable data is forgotten too: not
+ *     only when the same lesson opens again, but every time a lesson or the
+ *     library opens in that browser, every quiz draft there is looked at and
+ *     the old or unreadable ones removed (sweepQuizDrafts), and signing out
+ *     removes all of them (forgetAllQuizDrafts; review of #4324).
  */
 
 export const QUIZ_KEEP_PREFIX = "mm:quiz:";
@@ -118,4 +122,59 @@ export function forgetClosedDraft(storage: DraftStorage, key: string, tries: num
   } catch {
     // Storage closed: nothing to forget.
   }
+}
+
+/** The part of the browser's storage the sweep needs: its keys, so a test can hand in a synthetic one. */
+export type SweepStorage = DraftStorage & { readonly length: number; key(index: number): string | null };
+
+/** Every quiz draft's key in this browser's storage, read before any is removed. */
+function quizKeys(storage: SweepStorage): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const name = storage.key(i);
+    if (name?.startsWith(QUIZ_KEEP_PREFIX)) keys.push(name);
+  }
+  return keys;
+}
+
+/**
+ * Removes every quiz draft in this browser that is unreadable, from the
+ * future or older than QUIZ_KEEP_DAYS, whichever lesson or student it is for
+ * (review of #4324): run each time a lesson or the library opens, so a draft
+ * for a lesson never opened again does not stay. Answers how many went.
+ * Storage that cannot be read or written is left alone, without an error.
+ */
+export function sweepQuizDrafts(storage: SweepStorage, now: number): number {
+  let removed = 0;
+  try {
+    for (const name of quizKeys(storage)) {
+      let kept: unknown = null;
+      try {
+        kept = JSON.parse(storage.getItem(name) ?? "");
+      } catch {
+        kept = null;
+      }
+      const at = kept && typeof kept === "object" && !Array.isArray(kept) ? (kept as Partial<QuizDraft>).at : undefined;
+      if (typeof at === "number" && Number.isFinite(at) && at <= now && now - at <= KEEP_MS) continue;
+      storage.removeItem(name);
+      removed += 1;
+    }
+  } catch {
+    // Storage closed: nothing to sweep.
+  }
+  return removed;
+}
+
+/** Removes every quiz draft in this browser, for every lesson and student: on signing out (review of #4324). Answers how many went. */
+export function forgetAllQuizDrafts(storage: SweepStorage): number {
+  let removed = 0;
+  try {
+    for (const name of quizKeys(storage)) {
+      storage.removeItem(name);
+      removed += 1;
+    }
+  } catch {
+    // Storage closed: nothing kept there either.
+  }
+  return removed;
 }

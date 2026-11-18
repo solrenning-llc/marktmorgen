@@ -34,6 +34,7 @@ import { LessonPlayer } from "@/components/lesson-player";
 import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
 import { deviceQuizKey } from "@/lib/quiz-keep-key";
 import { RememberLastLesson } from "@/components/remember-last-lesson";
+import { QuizSweep } from "@/components/quiz-sweep";
 import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
@@ -196,6 +197,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
+        {/* Old or unreadable quiz drafts in this browser go each time a lesson opens (review of #4324). */}
+        <QuizSweep />
         {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
         {/* 295 [SQ6]: "Focus mode" hides everything here marked group-data-[focus=on]/focus:hidden. */}
         <LessonFocus words={{ focusOn: w.focusOn, focusOff: w.focusOff, focusOnSaid: w.focusOnSaid, focusOffSaid: w.focusOffSaid }}>

@@ -17,12 +17,12 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.92 | $31.86 | $5.41 | 9.95% | $0.25 | positive | no |
+| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.93 | $31.85 | $5.41 | 9.95% | $0.25 | positive | no |
 | Store yearly ($690) | $690.00 | $543.30 | $85.65 | $91.73 | $313.25 | $52.67 | 9.69% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $29.60 | $227.18 | $40.79 | 11.53% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $339.43 | $2,242.32 | $399.70 | 11.30% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $60.03 | $510.63 | $92.19 | 11.71% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $690.16 | $5,040.46 | $903.70 | 11.48% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $29.61 | $227.18 | $40.78 | 11.53% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $339.44 | $2,242.31 | $399.70 | 11.30% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $60.04 | $510.62 | $92.19 | 11.71% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $690.17 | $5,040.45 | $903.70 | 11.48% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |

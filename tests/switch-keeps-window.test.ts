@@ -586,7 +586,7 @@ async function main(): Promise<void> {
     // about ten cents more a month on each plan; figures as the model computes them, still above zero (MR).
     // Merge of main into #4514 after HOTSPOT #3013 (18 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
     // 44.33, 309.83, 694.40 -> 44.27, 309.77, 694.34; figures as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main into #4514 (17 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
+    // Merge of main into #4514 (18 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
     // 44.31, 309.77, 694.18 -> 44.25, 309.71, 694.12; figures as the model computes them, still above zero (MR); no cost lowered.
     is("11: Store, Studio and Scale keep 44.25, 309.71 and 694.12 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.25", "309.71", "694.12"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
@@ -629,7 +629,7 @@ async function main(): Promise<void> {
     // The same #4514 command ceiling, on each plan's yearly month; still above zero (MR). Cost is not lowered.
     // Merge of main into #4514 after HOTSPOT #3013 (18 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
     // 36.27, 254.70, 571.13 -> 36.22, 254.64, 571.07; figures as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main into #4514 (17 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
+    // Merge of main into #4514 (18 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
     // 36.25, 254.65, 570.91 -> 36.20, 254.59, 570.85; figures as the model computes them, still above zero (MR); no cost lowered.
     is("11: and 36.20, 254.59 and 570.85 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.20", "254.59", "570.85"]);
   } finally {

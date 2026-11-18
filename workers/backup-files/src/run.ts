@@ -297,6 +297,12 @@ function storeOfKey(source: BackupFilesSource, key: string): string | null {
 
 type RouteReply = { ok: true; text: string } | { ok: false; why: string };
 
+function stopSourceForDay(ctx: Ctx, source: BackupFilesSource): void {
+  if (ctx.cycle.dayCeiling.includes(source)) return;
+  ctx.cycle.dayCeiling.push(source);
+  raise(ctx, "files_day_ceiling", { source });
+}
+
 /** Whether a 429 is the route's own day ceiling, read exactly: `{ "version": 1, "error": "day_ceiling" }` and nothing else. */
 function dayCeilingReply(text: string): boolean {
   try {
@@ -671,10 +677,7 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
   const where = { source, store };
   const today = ctx.day;
   const listing = await listAll(ctx, source, store);
-  if (listing.ceiling && !ctx.cycle.dayCeiling.includes(source)) {
-    ctx.cycle.dayCeiling.push(source);
-    raise(ctx, "files_day_ceiling", { source });
-  }
+  if (listing.ceiling) stopSourceForDay(ctx, source);
   const fresh: Fresh = new Map(listing.entries.map((e) => [e.entry.key, e]));
   ctx.fresh.set(stepKey(source, store), fresh);
 
@@ -1016,10 +1019,15 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
 
 /** A fresh signed URL for an object listed earlier today: its page asked again, inside the 10 pages a store-source a day. */
 async function reask(ctx: Ctx, state: StoreState, source: BackupFilesSource, step: StepState, object: ObjectState): Promise<{ entry: BackupFilesEntry; page: number } | null> {
+  if (ctx.cycle.dayCeiling.includes(source)) return null;
   if (object.page === null || object.page >= step.pages.length || step.asked >= BACKUP_FILES_PAGES_PER_STORE) return null;
   const cursor = step.pages[object.page];
   step.asked += 1;
   const reply = await routeGet(ctx, cursor === null ? [["source", source], ["store", state.store]] : [["source", source], ["store", state.store], ["cursor", cursor]]);
+  if (!reply.ok && reply.why === "day_ceiling") {
+    stopSourceForDay(ctx, source);
+    return null;
+  }
   try {
     if (!reply.ok) throw new Error(reply.why);
     const page = parseFilesPage(reply.text);

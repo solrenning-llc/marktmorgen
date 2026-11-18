@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $137.65 | $1,437.65 | $69 / $690 |
-| Studio | $277.60 | $3,088.18 | $449 / $4,490 |
-| Scale | $502.75 | $5,750.65 | $999 / $9,990 |
+| Store | $137.65 | $1,438.30 | $69 / $690 |
+| Studio | $277.65 | $3,088.85 | $449 / $4,490 |
+| Scale | $502.75 | $5,751.00 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -44,7 +44,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | 10.0% | 60.28% | 60.05% | $89.83 | 0.42 |
-| $169 / $1,690 **(recommended)** | 64.0% | 60.30% | 60.04% | $101.91 | 0.37 |
+| $169 / $1,690 **(recommended)** | 62.7% | 60.30% | 60.04% | $101.91 | 0.37 |
 | $199 / $1,990 | 100.0% | 60.56% | 60.31% | $120.52 | 0.31 |
 
 ### Studio
@@ -88,8 +88,8 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **14 + 93** · 40 + 250 · 40 + 250 | **41 + 200** · 80 + 400 · 80 + 400 |
 | Storage: included · #553 · before #553 | **3 GB** · 5 GB · 5 GB | **14.5 GB** · 40 GB · 40 GB | **41.5 GB** · 80 GB · 80 GB |
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
-| Access emails a month: included · #553 · before #553 | **95** · 150 · 150 | **140** · 400 · 400 | **520** · 1,000 · 1,000 |
-| Store emails a month: included · #553 · before #553 | **47** · 75 · 75 | **110** · 300 · 300 | **410** · 800 · 800 |
+| Access emails a month: included · #553 · before #553 | **93** · 150 · 150 | **140** · 400 · 400 | **520** · 1,000 · 1,000 |
+| Store emails a month: included · #553 · before #553 | **46** · 75 · 75 | **110** · 300 · 300 | **410** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.30% | 60.43% | 60.49% |
 | Net at full included use, yearly (sizing reading) | 60.04% | 60.02% | 60.03% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.09% | 12.15% | 12.18% |

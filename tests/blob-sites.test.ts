@@ -100,6 +100,13 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   // A delivery check (479 [SB2], unit 2) heads each file at most twice, priced inside its DELIVERY_CHECK_UNITS studio
   // requests (lib/delivery-check-rules.ts, held by tests/delivery-check.test.ts).
   "lib/delivery-check.ts": { head: { line: "studio" } },
+  // The backup files route (273 [BK1], #3313): its Blob listing is a company cost, priced by backupFilesRouteWorstMonth
+  // (lib/backup-files-source.ts), not by a plan line; the route answers 404 while BACKUP_FILES_ROUTE_REVIEW is null.
+  "lib/backup-files-source.ts": {
+    list: { open: "BK1: the backup files route lists a store's Blob folder page by page, every try; a company cost priced by backupFilesRouteWorstMonth, no cost line of its own yet (it joins LLC_FIXED_COST_IDS with #3481)" },
+    issueSignedToken: { open: "BK1: the backup files route's Blob signing token for a page, every try; priced with its listing by backupFilesRouteWorstMonth, no cost line of its own yet" },
+    presignUrl: SIGNS_LOCALLY,
+  },
   "lib/demo-seed.ts": { put: { open: "audit 10: the demo store's seed pictures, a company cost not in the fixed costs" }, del: DELETE_IS_FREE },
 };
 
@@ -207,5 +214,7 @@ test("the open Blob costs are exactly the ones the audit names, so none is added
   const open = Object.entries(BLOB_SITES).flatMap(([file, ops]) => Object.entries(ops).filter(([, paid]) => "open" in paid).map(([op, paid]) => `${(paid as { open: string }).open.split(":")[0]} ${file} ${op}`));
   console.log(`open Blob costs (${open.length}):\n  ${open.sort().join("\n  ")}`);
   // Rule 23: this list only shrinks, as each audit unit prices its operations; a new entry needs Claude 4's decision.
-  assert.equal(open.length, 25);
+  // 27 since the merge of main after #3313: the backup files route's Blob listing and signing token (BK1), a company cost not yet
+  // in a cost line.
+  assert.equal(open.length, 27);
 });

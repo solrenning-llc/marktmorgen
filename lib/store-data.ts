@@ -310,6 +310,23 @@ export function besideKey(store: Pick<DataStore, "sid" | "statsId" | "handle">):
   return key ? `${key}:b` : null;
 }
 
+/**
+ * What one TAKE_DATA on the beside pool bills at the most: Upstash bills a script's inner commands beside its EVAL
+ * (lib/receipt-number.ts). The pool key never lists expiring months, so the script reaches its EVAL, HGET "#",
+ * HGET "~", an HGET and a write a slot, and HSET "#" (held in tests/beside-pool-commands.test.ts).
+ */
+export function poolTakeCommands(slots: number): number {
+  return 4 + 2 * slots;
+}
+
+/**
+ * What a product save while the store pays adds at the most: the pool's fields read (one HMGET), the new share taken,
+ * and, when the room then refuses the write, given back (lib/store.ts, commit). Priced on every studio request in
+ * tests/plan-cost-registry.ts (besideSaveUsd); a store copy's step, a studio request at least COPY_MIN_UNITS times
+ * over, adds 1 + 2 * poolTakeCommands(COPY_STEP_PRODUCTS) for its units, under this a unit.
+ */
+export const BESIDE_SAVE_COMMANDS = 1 + 2 * poolTakeCommands(1);
+
 /** Which of these products have their share in the pool; null when it cannot be read. */
 export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<string> | null> {
   if (ids.length === 0) return new Set();

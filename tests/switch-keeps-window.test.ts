@@ -573,7 +573,9 @@ async function main(): Promise<void> {
     // cent more on Studio and Scale; the figures are the model's (AC (n)).
     // C1-20261117-1500-c6c4-1, PR 2 (Claude 6 local, 17 November 2026): the beside pool's sweep, once in a store's life,
     // priced whole in every month, costs Store's monthly worst month a cent: 44.32 where 44.33 was. Cost added, not lowered.
-    is("11: Store, Studio and Scale keep 44.32, 309.83 and 694.41 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.32", "309.83", "694.41"]);
+    // The beside pool's inner commands on product saves (BESIDE_SAVE_COMMANDS, Claude 4 on #4847), priced on every studio
+    // request: a cost added, not lowered (Claude 6 local, 18 November 2026): 44.28, 309.72 and 694.08.
+    is("11: Store, Studio and Scale keep 44.28, 309.72 and 694.08 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.28", "309.72", "694.08"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -602,7 +604,8 @@ async function main(): Promise<void> {
     // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
     // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
     // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
-    is("11: and 36.27, 254.70 and 571.14 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.27", "254.70", "571.14"]);
+    // The same on the yearly month: 36.22, 254.59 and 570.81.
+    is("11: and 36.22, 254.59 and 570.81 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.22", "254.59", "570.81"]);
   } finally {
     Date.now = realNow;
   }

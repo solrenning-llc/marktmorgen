@@ -1891,6 +1891,7 @@ export function ProductEditor({
   ownHosts = [],
   tiers = [],
   taxOnTop,
+  canSend = true,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1946,6 +1947,8 @@ export function ProductEditor({
   tiers?: readonly string[];
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
+  /** Whether this role may send to the list (lib/team-roles.ts "send"): putting a waitlisted product on sale emails its waitlist. */
+  canSend?: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -2608,6 +2611,7 @@ export function ProductEditor({
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}
+                    canLaunch={canSend}
                   />
                 ) : null}
                 {product.call || product.course || product.shipping ? null : <BundleToggle product={product} />}

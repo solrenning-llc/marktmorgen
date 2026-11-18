@@ -62,6 +62,7 @@ import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
+import { PATH_LEAD_DAYS } from "@/lib/path-lead";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
@@ -96,6 +97,8 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { REFUND_MARK_MAX_BYTES } from "@/lib/affiliate-lead-rules";
 
 const KB = 1_024;
+/** lib/move-members.ts PENDING_MAX, held there by the source check of its entry below. */
+const PENDING_MAX = 20;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
 const KEY = 256;
 /** A mark: a key of under 80 characters holding a word, a count or a time. */
@@ -199,6 +202,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:creators:@app/api/creators/route.ts": company("Applications to the creators' page, per connection", "The company's own sign-up page for creators, not a store's."),
   "nl:aff:payday:lock@app/api/cron/affiliates/route.ts": lock("The affiliates' payday job"),
   "nl:closing:lock@app/api/cron/closing/route.ts": lock("The closing job"),
+  "nl:lock:plan-stop:@lib/billing.ts": lock("A plan's stop, while a plan refund or the creator changes it (30 s, one per subscription)"),
   "nl:closed:lock@app/api/cron/closed-data/route.ts": lock("The deletion of closed stores' records"),
   "nl:closing:refund:@lib/closing-refunds.ts": lock("A store's refunds of its members' unused time, one request at a time"),
   "nl:closing:credit:@lib/closing-credit.ts": { what: "What is left of a closing's emails to its buyers (queue item 307 EC1)", parts: [capped(MARK, "One count a store.", src("lib/closing-credit.ts", "creditKey"))] },
@@ -215,6 +219,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:courses:lock@app/api/cron/courses/route.ts": lock("The courses job"),
   "nl:dc:lock@app/api/cron/discord/route.ts": lock("The Discord job"),
   "nl:imports:lock@app/api/cron/imports/route.ts": lock("The imports job"),
+  "nl:backup:files:day:@lib/backup-files-source.ts": company("The count of a UTC day's pages of one source answered by the backup files route, taken before any provider is asked (273 [BK1] files part 1)", "One key a day for each of the three sources, holding a small count, made with its expiry only if absent and kept 2 days, so at most 9 at once for the company. Off: the route answers 404 while its review is null, and nothing calls it."),
   "nl:backup:ran:@lib/backup-run.ts": company("The count of a day's calls to the backup run, taken before any cost: at most a run and one new try after a failure (273 [BK1], inbox C4-49)", "One key a day holding a small count, made with its expiry only if absent and kept 2 days, so at most 3 at once for the company. Built and off: nothing calls the run."),
   "nl:backup:last-ok@lib/backup-run.ts": company("When the last backup copy was verified, and its manifest's id, the copy never deleted to make room (273 [BK1], inbox C4-53)", "One key for the company: a short JSON of a time in ms and a manifest id, kept for good (replaced by each verified copy; its absence would be a loss), never more than one. Built and off: nothing calls the run."),
   "nl:backup:lock@lib/backup-run.ts": company("The lock that keeps backup runs one at a time (273 [BK1], inbox C4-53)", "One key for the company holding the run's random token, made only if absent, kept at most 15 minutes and let go, only by its own run, when the run ends. Built and off: nothing calls the run."),
@@ -392,7 +397,13 @@ export const FAMILIES: Record<string, Family> = {
     ],
   },
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
-  "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
+  "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token, and the sessions it spent for good", parts: [
+    item(KEY, "One per package, kept with it.", "call"),
+    // C6 R40, Claude 4 and Claude 6 on #3487 (9-10 November 2026): <token key>:used, the package's paid sessions, one id of 16 characters per
+    // confirmed hold (packageSessionUsed and spent in lib/call-packages.ts): its total (MAX_PACKAGE_SESSIONS, 20), with room kept for as many
+    // again (a late confirmation of a hold that had already let its slot go), kept exactly as long as the package.
+    item(768, "Its paid sessions: one id of 16 characters each, at most 20 with as many again in room, kept as long as the package.", "call"),
+  ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept until 200 days after the call it moved to, two years at most", "call", 730, KB),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
@@ -429,6 +440,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:call:reminded:@lib/call-reminders.ts": short("A buyer reminded of a call", "call", 430, 2 * MARK),
   "nl:call:room:@lib/call-rooms.ts": short("A call's video room, until the call is over", "call", 430, 2 * KEY),
   "nl:call:busy:@lib/calls.ts": { what: "A store's booked calls", parts: [item(512, "One entry per call booked.", "call")] },
+  // Read-only alias of the diary above (pre-review of claude5/public-admission-book, 9 November 2026): no storage or TTL write.
+  "nl:call:busy:@lib/book-page-rules.ts": { what: "A store's booked calls, only asked whether a booking's move link names one of them (lib/book-page-admission.ts, one HEXISTS); kept and priced by nl:call:busy:@lib/calls.ts, with no duplicate bytes", line: "database-storage" },
   "nl:call:confirmed:@lib/calls.ts": { what: "A call's confirmation sent", parts: [item(MARK, "One per call.", "call")] },
   "nl:call:series:@lib/call-series-open.ts": { what: "A store's call series still running", parts: [item(224, "One member per series booked (lib/order-data.ts charges a ZADD 32 + 8 + 128 bytes, a quarter more), removed with its bytes given back at the next write once its last session is over.", "call")] },
   "nl:call:lock:@lib/calls.ts": short("A store's calls while one is booked", "request", 1, 128, REQ("checkout")),
@@ -443,8 +456,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },
   "nl:recover:asks@lib/checkout-ask.ts": company("Checkout asks due", "One sorted set for every store, members gone when asked (a few hours): each a public request's."),
   "nl:none@lib/checkout-recovery.ts": company("A key that is never written", "Read in place of a list a store does not have."),
-  "nl:recover:link:@lib/checkout-recovery.ts": short("A stop link of a checkout reminder, 400 days", "own", 400, LINK_BYTES, MAIL("reminder")),
-  "nl:recover:off:@lib/checkout-recovery.ts": room("An address that pressed stop, kept for good: its room taken before each reminder is sent (RECOVER_TRACE_BYTES)", "lib/checkout-recovery.ts"),
+  "nl:read:once:@lib/page-read.ts": short("A page's reading token used, until it expires two hours after the page was drawn: one a page view drawn", "request", 1, MARK, REQ("page reading")),
+  "nl:recover:link:@lib/checkout-recovery.ts": short("A stop link of a checkout reminder, 400 days: one an email; or of the emails to a moved member (moveStopLink): one a store and address, the same in each of them and on every pass that tries one again, written only for an email the day and the month have room for, so never more than one an email", "own", 400, LINK_BYTES, MAIL("reminder")),
+  "nl:recover:off:@lib/checkout-recovery.ts": room("An address that pressed stop, kept for good: its room taken before each reminder is sent (RECOVER_TRACE_BYTES), and with each moved member's invitation (lib/move-members.ts)", "lib/checkout-recovery.ts", "lib/move-members.ts"),
   "nl:recover:once:@lib/checkout-recovery.ts": short("An address told of a product this week", "own", 8, KEY, MAIL("reminder")),
   "nl:recover:sent:@lib/checkout-recovery.ts": short("A checkout's reminder sent, or found paid", "request", 15, MARK, REQ("checkout")),
   "nl:recover:tries:@lib/checkout-recovery.ts": short("How many times a sender refused a checkout's reminder for certain (REFUSED_TRIES at most), a day", "request", 1, MARK, REQ("checkout")),
@@ -466,6 +480,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),
+  "nl:cm:@lib/community-about.ts": short("A community's About page counts, kept six hours", "request", 1, 512, REQ("community-about")),
   "nl:cm:@lib/community-approval.ts": {
     what: "Posts and comments waiting for the creator's approval, the notes left to their authors, and each member's approved count (543 [CM2])",
     room: ["lib/community-approval.ts"],
@@ -482,7 +497,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/community-challenges.ts": { what: "Challenges, who joined each and their daily check-ins; the creator's changes this hour, an hour", room: ["lib/community-challenges.ts"] },
   "nl:cm:evq@lib/community-events.ts": company("Event reminders due", "One sorted set for every store, counted with each event's room."),
   "nl:rl:cm:ev:@lib/community-events.ts": short("Event changes an hour", "studio", 1),
-  "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts", line: "community-pictures" },
+  // A door's note lives a day; a picture's mark lives as long as its post keeps it, and is taken from the store's data
+  // room with the post (lib/community.ts postBytes, PICTURE_MARK_BYTES), so the room's line prices it.
+  "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts; a posted picture's mark, in its post's data room", line: "community-pictures" },
   "nl:cimg:doors@lib/community-files.ts": company("Picture doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's."),
   "nl:cimg:n:@lib/community-files.ts": { what: "A community's pictures counted", parts: [capped(KEY, "One count a store.")] },
   "nl:cm:@lib/community-found.ts": short("A member's ticket for a course in the search, answered", "request", 1, 512, REQ("search")),
@@ -606,6 +623,13 @@ export const FAMILIES: Record<string, Family> = {
       per("own", 401, MARK, "A link in one of the store's own emails noted."),
       per("access", 401, MARK, "A link in an access email noted."),
       per("monthly", 401, MARK, "A link in a monthly email noted."),
+      per("order", 401, MARK, "A membership's ad cookies noted, once per membership sold with the buyer's yes (lib/ad-events.ts).", KIND("membership")),
+      // A confirmed Path lead's mark (lib/path-lead.ts) is noted beside the link that carried it (13 [D10], review M1 of #3431).
+      per("access", 401, MARK, "A Path lead's mark noted: a sign-up link used.", MAIL("join")),
+      per("order", 401, MARK, "A Path lead's mark noted: a free copy's link used.", KIND("free")),
+      // A waitlist email notes its confirm and leave links (lib/waitlist.ts), and its confirmation the Path lead's mark.
+      per("store", 401, 2 * MARK, "A waitlist email's confirm and leave links noted.", MAIL("waitlist")),
+      per("store", 401, MARK, "A Path lead's mark noted: a waitlist link used.", MAIL("waitlist")),
     ],
   },
   "nl:transparency:@lib/transparency.ts": company("The public transparency page's counts: notices received and acted on, year by year (624 [SZ8](47))", "The company's: one hash and one set of notice ids a year, nothing about any store or person."),
@@ -615,13 +639,17 @@ export const FAMILIES: Record<string, Family> = {
   "nl:held:walk@lib/plan-closing.ts": company("Final closing continuation", "One global rank cursor, at most1KiB,30days TTL; resumes past a full first page of coverage holds. Partial/changing walks never certify a monthly complete observation; included in HELD_EXPOSURE."),
   "nl:held:stores@lib/held-stores.ts": company("Held closing stores awaiting complete billing evidence", "One private reference up to1280bytes plus score/member overhead per existing obligation; funded post_cancellation case ceiling bounds financed cases, overflow stays counted and funding is unknown. Pruned on deletion; never expires an unresolved obligation. Cost in HELD_EXPOSURE of tests/plan-cost-registry.ts."),
   "nl:held:retry:@lib/held-stores.ts": company("Daily held recheck claims", "At most HELD_RECHECKS_PER_DAY hashed identities and one count, two days TTL (up to3 dated hashes overlap). Global funded work ceiling; no raw store/address in the hash. Cost in HELD_EXPOSURE."),
-  "nl:held:month:@lib/held-stores.ts": company("Monthly held store aggregate", "Count, observed peak, last observation day and completeness only; at most15 monthly keys alive for400days. Cost in HELD_EXPOSURE; unknown/partial is never zero."),
+  "nl:held:refused:@lib/held-stores.ts": company("Creator accounts that refused us on a day (DONO-3)", "Hashed account identities only, one field each, ACCOUNT_NOTE_SECONDS (3 days) TTL; several distinct accounts refusing together are ours, never a lapse. Cost in CLOSING_DEADLINE_WORK."),
+  "nl:held:silent:@lib/held-stores.ts": company("Creator accounts that gave no answer at all on a day (DONO-3, Claude 3's H1 on #3463)", "Hashed account identities only, one field each, ACCOUNT_NOTE_SECONDS (3 days) TTL; several distinct accounts silent together are ours, never a lapse. Cost in CLOSING_DEADLINE_WORK."),
+  "nl:held:answered:@lib/held-stores.ts": company("Creator accounts that answered on a day (DONO-3)", "Hashed account identities only, one field each, ACCOUNT_NOTE_SECONDS (3 days) TTL; the other side of nl:held:refused:. Cost in CLOSING_DEADLINE_WORK."),
+  "nl:held:month:@lib/held-stores.ts": company("Monthly held store aggregate", "Count, observed peak, last observation day, completeness, and DONO-3's lapses and stores kept past the published time by reason, each counted once under a hashed store identity, only; at most15 monthly keys alive for400days. Cost in HELD_EXPOSURE; unknown/partial is never zero."),
   "nl:forget:q@lib/store-forget-retry.ts": company("Deleted stores whose webhooks, API keys and assistant notes are tried again", "One field a deleted store whose first try failed, its stats id and id with a count and two times (under 160 bytes); taken out when done, or moved to nl:forget:kept after FORGET_TRIES tries. Only deletes that failed add to it."),
   "nl:forget:kept@lib/store-forget-retry.ts": company("Deleted stores whose webhooks and API keys were given up after every try", "One field a given-up deleted store (under 160 bytes), never read by the daily run; kept on purpose for the owner's report until it is acted on. Only deletes that failed FORGET_TRIES times add to it."),
   "nl:forget:month:@lib/store-forget-retry.ts": company("Monthly counts of deleted stores' forgetting tried again", "Three counts a month, no store or person; at most 14 monthly keys alive for 400 days."),
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),
   "nl:fair:c:@lib/fair-coupon.ts": { what: "A fair-price coupon made on the creator's Stripe", parts: [capped(96 * KEY, "One per percent offered.")] },
+  "nl:member:c:@lib/fair-coupon.ts": { what: "A member-price coupon made on the creator's Stripe (620 [SZ4])", parts: [capped(96 * KEY, "One per percent offered: at most the 18 of MEMBER_PERCENT_CHOICES.")] },
   "nl:mail:flows:@lib/flow-list.ts": { what: "The store's workflows", room: ["lib/flows.ts"] },
   "nl:wf:day:@lib/flow-runs.ts": short("Runs started and refused a day", "day", 3, 128),
   "nl:wf:held:@lib/flow-runs.ts": { what: "Held runs", room: ["lib/flows.ts"] },
@@ -753,6 +781,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stats:@lib/meta-ads.ts": { what: "What Meta says the ads spent", parts: [capped(KEPT_DAYS * 256, "A line a day.", src("lib/stats.ts", "KEPT_DAYS"))] },
   "nl:mv:@lib/move-members.ts": room("Members invited over from another platform", "lib/move-members.ts"),
   "nl:mv:due@lib/move-members.ts": company("Invites to remind", "One sorted set for every store, each an invite's."),
+  // Claude 7, MEDIUM on #3473: a membership's removal marks it for a day, so an import step that read the catalog before it writes nothing to it.
+  "nl:mv:gone:@lib/move-members.ts": short("A membership just removed, so no import step writes an invitation to it", "studio", 1),
+  // Claude 3, MEDIUM on #3473: a membership is noted before its removal and taken off once its invitations are deleted.
+  "nl:mv:pend:@lib/move-members.ts": { what: "Memberships removed whose invitations a person's erasure must still reach", parts: [capped(PENDING_MAX * MARK + KEY, "One set a store, at most PENDING_MAX product ids (a removal that would add one more is refused); each taken off once its invitations are deleted.", src("lib/move-members.ts", `PENDING_MAX = ${PENDING_MAX};`))] },
   "nl:mv:link:@lib/move-members.ts": room("An invite's link, until a while after the renewal it is for", "lib/move-members.ts"),
   // ---------------------------------------------------------------- lib/ n–p
   "nl:next:@lib/next-bought.ts": { what: "What buyers bought next, cached", parts: [capped(256 * KB, "One cached view.")] },
@@ -827,11 +859,12 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pp:settle:after@lib/paypal-payouts.ts": company("Where the daily PayPal settling stopped", "One store id for the whole company, kept seven days."),
   "nl:pp:stores@lib/paypal-payouts.ts": company("Stores with a batch open", "One set for every store."),
   "nl:pp:unk:month:@lib/paypal-payouts.ts": company("Monthly counts of PayPal payout batches whose answer was not known", "Three counts a month (unknown, settled, manual), no store or person; at most 14 monthly keys alive for 400 days."),
-  "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days at most.", KIND("paypal")), per("request", 3, 768, "One opened and never paid, three days.", REQ("paypal checkout"))] },
+  "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days from opening; a capture's answer that comes back after them (not reachable while each PayPal call stops at TIMEOUT_MS and PayPal is asked with a day left) keeps it six hours from that answer.", KIND("paypal")), per("request", 30, 768, "One opened and never paid: three days, kept while pending, 30 from opening at most (lib/paypal-sales.ts, watchFirst and watchLater; Claude 3's first money review of #3404). PayPal is asked only with a day left; a capture's answer that comes back after the thirty days keeps it six hours from that answer, for the sweep (Claude 5's second money review of #3411).", REQ("paypal checkout"))] },
   "nl:ppsell:own:@lib/paypal-sales.ts": short("The paid orders behind one address's product", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
+  "nl:ppsell:try:@lib/paypal-sales.ts": short("How many times a PayPal order's capture was asked for (at most CAPTURE_TRIES_PER_ORDER), until thirty days from its opening", "order", 30, MARK, KIND("paypal")),
   // A PayPal order hands over one product (lib/paypal-sales.ts, sellsWithPayPal): never a call, a recurring one or
   // license keys, but it can open a community or a private podcast, so the membership parts it can reach count with
   // it (PAYPAL_NEVER_REACHES leaves out only what a recurring product or license keys keep): the parts of no kind, those
@@ -846,6 +879,8 @@ export const FAMILIES: Record<string, Family> = {
   // CANCELED_KEPT_SECONDS of lib/paypal-sales.ts: what a canceled order's notices and its page say (store, handle,
   // product, price, the buyer's PayPal address, what was taken), written once (SET NX) when PayPal never confirmed it.
   "nl:ppsell:canceled:@lib/paypal-sales.ts": short("A PayPal order canceled because PayPal never confirmed its payment, for its notices and the page its buyer comes back to, thirty days", "order", 30, KB, KIND("paypal")),
+  // ONBOARDING_SECONDS of lib/paypal-sales.ts: the way back from PayPal is taken only while it is there.
+  "nl:ppsell:start:@lib/paypal-sales.ts": { what: "A PayPal connect started from the studio, a day", parts: [capped(MARK, "One a store, holding \"1\", gone within a day.")] },
   // CANCEL_NOTICE_EVERY_SECONDS and CANCEL_NOTICE_BATCH of lib/paypal-sales.ts: two members a canceled order (its buyer's notice, its creator's), each gone once sent or when its mark ends.
   "nl:ppsell:tell@lib/paypal-sales.ts": short("Canceled PayPal orders whose notices the sender refused, until each is sent or thirty days pass", "order", 30, 2 * MARK, KIND("paypal")),
   "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),
@@ -856,6 +891,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
+  "nl:stamp:noroom:@lib/pdf-stamp.ts": { what: "A store found without room for a new stamped copy or preview", parts: [capped(KEY + MARK, "One mark a store, kept NO_ROOM_NOTE_SECONDS (an hour).", src("lib/stamp-cost-rules.ts", "NO_ROOM_NOTE_SECONDS"))] },
   "nl:stamp:drop@lib/pdf-stamp.ts": company("Folders of stamped copies to delete again", "One set, members gone when done."),
   "nl:phone:cfg:@lib/phone-alerts.ts": { what: "Phones that hear of sales", parts: [capped(MAX_DEVICES * 6 * 2 * KB, "MAX_STORE_DEVICES devices.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },
   "nl:phone:seen:@lib/phone-alerts.ts": { what: "An event already sent to phones", parts: [per("order", 40, MARK, "A sale."), per("buyer", 40, MARK, "A buyer's action.")] },
@@ -885,10 +921,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:plans:late-told:@lib/plan-late-notice.ts": company("A buyer told that a payment after their plan's end was refunded", "One small hash a late payment's Stripe invoice: a claim flag (the email went, is going, or was given up) and the tries (at most LATE_TELL_TRIES, 7); no name or address. Written with HSETNX, HINCRBY and EXPIRE, gone by itself LATE_TELL_KEEP_DAYS (400) after its last try (lib/plan-late-notice.ts)."),
   "nl:share:stores@lib/platform-share.ts": company("Stores whose sales pay a share", "One set for every store."),
   "nl:pod:by:@lib/podcast-access.ts": { what: "A listener's access to a private podcast", parts: [item(MARK, "One a buyer.", "membership")] },
+  "nl:pod:pids:@lib/podcast-access.ts": { what: "The store's products that ever had a private podcast feed, so a person's deletion finds a removed one's feeds: counted with its product (PRODUCT_SIDE_BYTES): one member a product, written once, an id of at most 12 characters (lib/store.ts freshId), 96 bytes as lib/order-data.ts charges it, kept after the product is removed as its side room is (#4471; the order write charges it to the room again as it lands)", room: ["lib/store.ts"] },
+  "nl:pod:by:*@lib/podcast-access.ts": company("The pattern the one-time walk reads feeds granted before the product note by", "Not a key: a pattern."),
+  "nl:podnote:walk@lib/podcast-access.ts": company("Where the one-time walk that notes the products of feeds granted before the product note is", "One key, the company's job: a phase and a cursor, kept once done so the walk is not run again."),
   "nl:pod:n:@lib/podcast-access.ts": short("A feed's reads a day", "request", 2, 128, REQ("page")),
   "nl:pod:ok:@lib/podcast-access.ts": short("A listener's access, answered", "request", 1, KEY, REQ("page")),
   "nl:pod:t:@lib/podcast-access.ts": { what: "A listener's feed token", parts: [item(KEY, "One a buyer.", "membership")] },
   "nl:pod:@lib/podcast.ts": { what: "A podcast's episodes", parts: [capped((tier) => 0 * MAX_PRODUCTS + (tier ? 0 : 0), "Kept on the product's record (lib/store.ts, setPodcastEpisodes): counted with products.")], room: ["lib/store.ts"] },
+  // 33 [F2] part 2 (9 November 2026): the public feed's settings, only read; the studio unit that writes them counts them in the room.
+  "nl:pod:@lib/podcast-public-show.ts": { what: "A podcast's public feed settings, read for its public feed", parts: [capped(0, "Read only: nothing writes it yet, so no store keeps one; a record is read at most PUBLIC_SHOW_MAX_BYTES.", src("lib/podcast-public-show.ts", "PUBLIC_SHOW_MAX_BYTES = 768_000", "nl:pod:${id}:public"))] },
   // Read-only alias of the existing retained family below; no storage or TTL write.
   "nl:pre:@lib/dispute-preorder-review.ts": { what: "One retained pre-order row read with its existing PTTL; storage and 400-day retention priced by nl:pre:@lib/preorders.ts, with no duplicate bytes", line: "database-storage" },
   "nl:pre:@lib/preorders.ts": { what: "Pre-orders: who paid, the refunds read", parts: [per("order", 430, KB, "A pre-order and its payment, 400 days after its last change.", KIND("preorder")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled (thirty days from the last one marked) and where an unfinished pass over them stands (lib/preorders.ts passKey, a JSON of under 300 bytes, a week).")] },
@@ -903,6 +944,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:upd:latest:@lib/product-updates.ts": { what: "A product's latest update: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:upd:off:@lib/product-updates.ts": { what: "A buyer who stopped updates", parts: [kept(MARK, "Updates go to buyers: one mark a buyer, kept for good.")] },
   "nl:upd:stop:@lib/product-updates.ts": { what: "An update's stop link: one for each address a store writes to, the same in every email", parts: [kept(LINK_BYTES, "Updates go to buyers: one a buyer, kept while they are written to.")] },
+  "nl:updheld@lib/product-updates.ts": company("Updates held while their store is switched off, by when the mail job looks at each again", "One sorted set of send ids (24 characters each), a member for each send held, out once it goes back in the queue (a day later at most) or ends with its 60 days (Claude 7 on #3403)."),
   "nl:updq@lib/product-updates.ts": company("Updates under way", "One sorted set, members gone when sent."),
   "nl:confirm:@lib/purchase-email.ts": short("An order's confirmation sent", "order", 40, MARK),
   "nl:confirm-room:@lib/purchase-email.ts": short("An order's admitted room given back, once", "order", 2, MARK),
@@ -942,6 +984,14 @@ export const FAMILIES: Record<string, Family> = {
   "nl:goal:@lib/sales-goal.ts": { what: "The store's sales goal", parts: [capped(KB, "One a store.")] },
   "nl:path:board:v1@lib/path-board.ts": { what: "Shared mission board: one pseudonymous member per store, charged PATH_BOARD_ROOM_BYTES in its own room atomically", room: ["lib/path-atomic.ts"] },
   "nl:path:board:owners:v1@lib/path-board.ts": { what: "Private reverse lookup for removal: one field per opted-in store, included in its board room charge", room: ["lib/path-atomic.ts"] },
+  "nl:pathlead:@lib/path-lead.ts": {
+    what: "An address already counted as one of the store's Path leads (13 [D10]): a one-way fingerprint, never the address, kept PATH_LEAD_DAYS",
+    parts: [
+      per("access", PATH_LEAD_DAYS, MARK, "A sign-up link used: at most one mark for the email that carried it.", MAIL("join")),
+      per("store", PATH_LEAD_DAYS, MARK, "A waitlist link used: at most one mark for the email that carried it.", MAIL("waitlist")),
+      per("order", PATH_LEAD_DAYS, MARK, "A free copy's link used: at most one mark for the order it is (a free copy is no other kind of order).", KIND("free")),
+    ],
+  },
   "nl:path:@lib/path.ts": { what: "Marktmorgen Path: the owner's four answers, the days they opened it, the best level reached and the last reading of the money (18 October 2026): one slot, at what the record weighs", room: ["lib/path-atomic.ts"] },
   "nl:product:page:@lib/sales-page-store.ts": { what: "Products' and pages' blocks", room: ["lib/sales-page-store.ts"] },
   "nl:product:pages:@lib/sales-page-store.ts": { what: "A page's earlier versions", room: ["lib/sales-page-store.ts"] },
@@ -1028,7 +1078,7 @@ export const FAMILIES: Record<string, Family> = {
     parts: [
       capped((KEPT_DAYS + 1) * ((DAY_FIELDS_MAX + 1) * 96 + KEY), "Each day's counts, at most DAY_FIELDS_MAX fields and \"~\" for the rest, kept KEPT_DAYS.", src("lib/stats.ts", "KEPT_DAYS", "DAY_FIELDS_MAX", "cappedCountCommand")),
       capped((tier) => Math.min((KEPT_DAYS + 1) * 12_432, 14 * 31 * 200 + 15 * VISITS_INCLUDED[tier] * 13), "Each day's visitors, a HyperLogLog of at most 12 KB with its key, and at most 13 bytes a visitor until it is: visits are counted by the calendar month, 15 of them in KEPT_DAYS.", src("lib/stats.ts", "KEPT_DAYS", "PFADD")),
-      capped((LIFE_WRITE_MAX + 1) * 96 + 2 * KB, "All time: at most LIFE_WRITE_MAX fields and \"~\".", src("lib/stats.ts", "LIFE_WRITE_MAX", "LIFE_KEEP_PER_KIND")),
+      capped((LIFE_WRITE_MAX + 1) * 96 + 2 * KB, "All time: at most LIFE_WRITE_MAX fields and \"~\", and its own few written outside that count (the visitors, the confirmed leads lc) in the 2 KB.", src("lib/stats.ts", "LIFE_WRITE_MAX", "LIFE_KEEP_PER_KIND")),
       per("request", 1, 96, "Who is on now: a member a view, let go once a day.", undefined),
       capped(ALL_TIME_PAGES * 100 * 512 + 64 * KB, "Sales cached ten minutes, and today's two minutes.", src("lib/stats.ts", "ALL_TIME_PAGES")),
     ],
@@ -1099,6 +1149,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:traffic:folders:@lib/traffic.ts": company("The stores with visits, a month", "One set a month for every store."),
   "nl:traffic:n:@lib/traffic.ts": { what: "Visits in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:traffic:r:@lib/traffic.ts": { what: "Requests in the window", parts: [capped(2 * KEY, "One a window.")] },
+  "nl:traffic:read:@lib/page-read.ts": { what: "Page readings counted in the window (639 [GL7](25))", parts: [capped(2 * KEY, "One a window, kept to the window's end and a day.")] },
   "nl:traffic:x:@lib/traffic.ts": { what: "The live room in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:nudge:@lib/trial-nudges.ts": company("A trial's nudges sent", "The company's emails to a creator about their own plan."),
   "nl:trialnudge:cursor@lib/trial-nudges.ts": company("Where the trial nudges stopped", "One key, the company's job."),

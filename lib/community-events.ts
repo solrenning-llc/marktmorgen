@@ -775,8 +775,9 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
     return "already";
   }
   if (event.cap > 0 && Number(length) > event.cap) {
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    const [removed] = await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+    // Given back only when this took the place away: a deletion of the member in between gave it back already.
+    if (Number(removed) === 1) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
   }
   return "added";
@@ -966,7 +967,7 @@ export function announcementText(store: Pick<Store, "handle" | "language">, even
  * were coming to, and forgets each event's answer about whether they may
  * come in (lib/community-erasure.ts).
  */
-export async function forgetRsvpsPerson(id: string, who: string, email: string): Promise<number> {
+export async function forgetRsvpsPerson(id: string, who: string, email: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   // Each reply in its own exact shape (CX-123 rule 24): an unknown event list
   // is not "no events", and an unknown HDEL or DEL is not "nothing removed",
@@ -984,6 +985,9 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string):
   if (!replies) throw new UnknownReplyError(what);
   const counts = replies.map(countOf);
   if (counts.some((n) => n === null)) throw new UnknownReplyError(what);
+  // Each place's room comes back only where this deletion removed it (an exact 1), as cancelRsvp gives it.
+  const gone = events.filter((_, i) => counts[i] === 1);
+  if (room && gone.length) await giveData(room, gone.map((e) => ({ slot: EVENT_SLOT(e), bytes: RSVP_BYTES })));
   return (counts.slice(0, events.length) as number[]).reduce((sum, n) => sum + n, 0);
 }
 

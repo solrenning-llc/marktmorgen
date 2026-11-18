@@ -34,7 +34,19 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
   alias: { "@": root }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "error",
 }).then((b) => b.outputFiles[0].text);
+/** The lesson while its quiz cannot be answered (passed, out of tries, or waiting between tries): QuizForget alone. */
+const forgetFixture = ({ who = "a".repeat(32), tries = 0, final = false } = {}) => build({
+  stdin: { contents: `
+    import React from 'react';import {createRoot} from 'react-dom/client';
+    import {QuizForget} from '@/components/quiz-keep';
+    createRoot(document.getElementById('root')).render(<p>Result<QuizForget who=${JSON.stringify(who)} tries={${tries}} final={${final}} /></p>);
+  `, resolveDir: root, loader: "tsx" },
+  bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
+  alias: { "@": root }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "error",
+}).then((b) => b.outputFiles[0].text);
 const ada = await fixture();
+const adaPassed = await forgetFixture({ final: true });
+const adaWaiting = await forgetFixture({ final: false });
 const adaOtherQuestions = await fixture({ shown: "aaaaaaaaaaa1,aaaaaaaaaaa9" });
 const adaAfterRecordedTry = await fixture({ tries: 1 });
 const adaQuizChanged = await fixture({ version: "v2" });
@@ -131,6 +143,23 @@ try {
   await open(adaOtherQuestions);
   await forgotten();
   is("a try with other questions never gets them, and they are forgotten", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);
+
+  // Review of #4324 (LOW 7): the lesson for a student who passed or used the last try draws QuizForget with `final`,
+  // and the draft goes the moment the lesson opens; while they only wait between tries, a draft never sent stays.
+  const openForget = async (script) => {
+    await tab.goto("https://quiz.test/");
+    await tab.addScriptTag({ content: script });
+    await tab.locator("[data-quiz-forget]").waitFor({ state: "attached" });
+  };
+  await open(ada);
+  await tab.getByLabel("B").check();
+  is("(control) a draft is kept before the lesson closes", JSON.parse(await kept()).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] });
+  await openForget(adaWaiting);
+  await tab.waitForTimeout(200);
+  is("waiting between tries, at the same count: the draft never sent stays", JSON.parse((await kept()) ?? "null")?.answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] });
+  await openForget(adaPassed);
+  await forgotten();
+  is("passed or out of tries (final): the draft is gone once the lesson opens", await kept(), null);
 
   await context.addInitScript(() => {
     Object.defineProperty(window, "localStorage", { get() { throw new Error("denied"); } });

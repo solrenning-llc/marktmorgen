@@ -82,7 +82,7 @@ import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseReco
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
-import { forgetPodcastPerson } from "@/lib/podcast-access";
+import { forgetPodcastPerson, podcastProductCount } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
 import { forgetRecoveryPerson } from "@/lib/checkout-recovery";
@@ -286,13 +286,14 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    podcastProductCount(scope.statsId),
   ]);
   return {
     products: scope.productIds.length,
@@ -306,6 +307,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificates,
     droppedCourses: scope.droppedCourses ?? 0,
     droppedRecords: scope.droppedRecords ?? 0,
+    podcastProducts,
   };
 }
 

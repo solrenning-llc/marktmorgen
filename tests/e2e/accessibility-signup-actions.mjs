@@ -120,13 +120,18 @@ try{
    });
    async function audit(state){
     await page.waitForLoadState("networkidle");await restoreDarkAfterNavigation();
+    // The server draws the studio search inert and invisible until the page's script runs (components/studio-search.tsx);
+    // "Your store" and an idle network are already true on the server's HTML. Audited before it was ready, WebKit failed
+    // label-title-only on its field (tests/signup-audit-after-search-ready.test.ts). Default timeout: never ready fails.
+    await page.waitForFunction(()=>!document.querySelector('[role="search"][inert]'));
     await page.evaluate(()=>{document.activeElement?.blur?.();window.scrollTo({top:0,left:0,behavior:"instant"});});
     await page.waitForFunction(()=>scrollX===0&&scrollY===0);
     if(mode==="dark"&&!await page.evaluate(()=>matchMedia("(prefers-color-scheme: dark)").matches))throw Error("Dark color-scheme request not honored");
    await page.addScriptTag({content:axe});
     const result=await page.evaluate(async()=>{
-     const root=document.documentElement,result=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});
-     return {scroll:root.scrollWidth,client:root.clientWidth,rules:result.passes.map(r=>r.id),
+     const searchGate=()=>{const box=document.querySelector('[role="search"][aria-label="Studio"]');return box?(box.hasAttribute("inert")?"closed":"open"):"none";};
+     const searchGateAtStart=searchGate(),root=document.documentElement,result=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});
+     return {scroll:root.scrollWidth,client:root.clientWidth,searchGateAtStart,searchGateAtEnd:searchGate(),rules:result.passes.map(r=>r.id),
       violations:result.violations.map(r=>({id:r.id,targets:r.nodes.map(n=>n.target)})),
       incomplete:result.incomplete.map(r=>({id:r.id,targets:r.nodes.map(n=>n.target)}))};
     });

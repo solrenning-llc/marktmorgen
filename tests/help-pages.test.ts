@@ -24,6 +24,8 @@ import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { SUMMARY_CHARS, answerSummary, helpAnswer, helpAnswerPath, helpPagePaths } from "@/lib/help-pages";
 import HelpSectionPage, { generateMetadata as sectionMeta } from "@/app/help/[section]/page";
 import HelpAnswerPage, { generateMetadata as answerMeta, generateStaticParams as answerParams } from "@/app/help/[section]/[answer]/page";
+import * as sectionRoute from "@/app/help/[section]/page";
+import * as answerRoute from "@/app/help/[section]/[answer]/page";
 import HelpPage from "@/app/help/page";
 import sitemap from "@/app/sitemap";
 import { NotFoundError } from "./help-pages-navigation";
@@ -81,6 +83,8 @@ async function main(): Promise<void> {
 
   part("Not found is not found");
   {
+    is("Next serves only the enumerated help sections", Reflect.get(sectionRoute, "dynamicParams"), false);
+    is("Next serves only the enumerated help answers", Reflect.get(answerRoute, "dynamicParams"), false);
     const missing = async (run: () => Promise<unknown>) => {
       try {
         await run();

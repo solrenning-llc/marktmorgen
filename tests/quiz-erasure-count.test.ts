@@ -23,12 +23,29 @@ const keys = [
   `nl:course:course_quiz_b:passed:${who}`,
 ];
 
+// Each record in the type the product writes: a course's passes are a set (markPassed, SADD), a lesson's tries and
+// result are strings. The take script of #2576 reads the passes with SMEMBERS, so a string there is not a pass list.
+const isPasses = (key: string) => key.includes(":passed:");
+
 function seed(): void {
-  for (const key of keys) redis.run(["SET", key, "1"]);
+  for (const key of keys) redis.run(isPasses(key) ? ["SADD", key, "lesson_1"] : ["SET", key, "1"]);
+}
+
+/**
+ * The deletion's own pipeline: one DEL of every key, or (#2576) one take script per course, which reads what the
+ * keys held and deletes them in the same step. Either is where an unknown reply is injected.
+ */
+function deletion(commands: unknown[][]): boolean {
+  if (commands.length === 1 && commands[0]?.[0] === "DEL") return true;
+  return commands.length > 0 && commands.every((command) => command[0] === "EVAL");
 }
 
 function kept(): number {
-  return keys.filter((key) => redis.run(["GET", key]) === "1").length;
+  return keys.filter((key) => {
+    if (!isPasses(key)) return redis.run(["GET", key]) === "1";
+    const passes = redis.run(["SMEMBERS", key]);
+    return Array.isArray(passes) && passes.includes("lesson_1");
+  }).length;
 }
 
 async function main(): Promise<void> {
@@ -67,7 +84,7 @@ async function main(): Promise<void> {
     redis.clear();
     seed();
     redis.pipeline = (async (commands) => {
-      if (commands.length === 1 && commands[0]?.[0] === "DEL") return reply as never;
+      if (deletion(commands)) return reply as never;
       return original(commands);
     }) as typeof redis.pipeline;
     let refused = false;
@@ -90,7 +107,7 @@ async function main(): Promise<void> {
   const eraser = ERASERS.find((entry) => entry.module === "lib/quiz.ts")!;
   const subject = { courses: COURSES, learner: who, email: EMAIL } as never;
   redis.pipeline = (async (commands) => {
-    if (commands.length === 1 && commands[0]?.[0] === "DEL") return ["1"];
+    if (deletion(commands)) return ["1"];
     return original(commands);
   }) as typeof redis.pipeline;
   let aggregateRefused = false;

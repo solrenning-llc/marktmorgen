@@ -7,6 +7,10 @@ import { BlobNotFoundError } from "@vercel/blob";
 /** Each file with when it was stored (ms); one with no time was stored long ago. */
 export const files = new Map<string, { bytes: Uint8Array; contentType: string; at?: number }>();
 export const deleted: string[] = [];
+/** How many times each name was asked about with head (tests/encanto-thumb-leves.test.ts counts the cleanup's). */
+export const heads = new Map<string, number>();
+/** Names whose read fails as an outage of the file store would (a 503), not as "not there". */
+export const unreadable = new Set<string>();
 
 function missing(pathname: string): Error {
   void pathname;
@@ -16,12 +20,14 @@ function missing(pathname: string): Error {
 // ---------------------------------------------------------------- lib/blob
 
 export async function head(pathname: string) {
+  heads.set(pathname, (heads.get(pathname) ?? 0) + 1);
   const file = files.get(pathname);
   if (!file) throw missing(pathname);
   return { pathname, size: file.bytes.length, contentType: file.contentType, url: `https://blob.test/${pathname}`, downloadUrl: "", uploadedAt: new Date(file.at ?? 0), cacheControl: "", contentDisposition: "", etag: "" };
 }
 
 export async function get(pathname: string) {
+  if (unreadable.has(pathname)) throw new Error("Vercel Blob: 503 (synthetic outage)");
   const file = files.get(pathname);
   if (!file) return null;
   const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(file.bytes); controller.close(); } });

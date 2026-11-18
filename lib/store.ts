@@ -2081,9 +2081,10 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
     if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
     // Not active is not "stopped": a past_due or unpaid add-on (lib/assistant-billing.ts assistantPlanOf) is written
     // down as not active while Stripe may still charge it, and once the store is gone nothing finds it again. It holds
-    // the store until it is known to stop: set to stop at the end of its month, or that month (its period) over.
+    // the store until it is known to stop: set to stop at the end of its month, or ended at Stripe (`terminal`). A
+    // period unread or run out is not proof of an end, as Stripe renews a past_due one (Codex X6 and T on #4202).
     const plan = store.assistantPlan;
-    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.period && plan.period.end > Date.now() / 1000) return { ok: false, reason: "assistant_due" };
+    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.terminal !== true) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
     // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
     // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused

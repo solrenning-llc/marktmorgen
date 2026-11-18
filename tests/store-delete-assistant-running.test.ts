@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   part("An add-on that has ended does not hold the store");
   {
     const store = await extraStore("assist-ended@example.com", "assistendedfirst", "assistendedextra");
-    await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantended1", active: false, period: null, cancelsAtEnd: false, disputedAt: "" });
+    await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantended1", active: false, terminal: true, period: null, cancelsAtEnd: false, disputedAt: "" });
     const result = await deleteStore(storeRef(store));
     is("deleting it goes through", result.ok ? "deleted" : result.reason, "deleted");
   }
@@ -115,10 +115,10 @@ async function main(): Promise<void> {
     is("and that store is still there", (await storeForId(lapsed.sid))?.handle ?? null, "assistlapsedextra");
   }
 
-  part("An add-on whose paid period is over charges nothing more: the store can go");
+  part("An add-on Stripe ended, its paid period over, charges nothing more: the store can go");
   {
     const store = await extraStore("assist-over@example.com", "assistoverfirst", "assistoverextra");
-    await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantover1", active: false, period: { start: NOW - 40 * 86_400, end: NOW - 10 * 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" });
+    await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantover1", active: false, terminal: true, period: { start: NOW - 40 * 86_400, end: NOW - 10 * 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" });
     const result = await deleteStore(storeRef(store));
     is("deleting it goes through", result.ok ? "deleted" : result.reason, "deleted");
   }

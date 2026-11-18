@@ -343,6 +343,11 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+        // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
+        if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, mark] = args;
+          return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

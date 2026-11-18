@@ -81,13 +81,14 @@ import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
+import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
-import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
+import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
@@ -106,10 +107,8 @@ export type ImportSource = "csv" | "clickfunnels";
 
 /** The most rows one import may bring, by kind. */
 export const IMPORT_LIMITS: Record<ImportKind, number> = { contacts: 50_000, products: 500, purchases: 20_000, members: MAX_MOVED_MEMBERS };
-/** Rows one upload request may carry. */
-export const BATCH_ROWS = 1_000;
-/** The most an upload request may weigh. */
-export const BATCH_BYTES = 1_000_000;
+/** Rows one upload request may carry, and the most it may weigh (lib/import-batches.ts, shared with the page). */
+export { BATCH_BYTES, BATCH_ROWS };
 /** Rows kept for the report of what was not brought in; the count goes on past it. */
 export const MAX_REPORT_ROWS = 5_000;
 
@@ -1091,6 +1090,12 @@ function classifyProducts(store: Store, rows: string[][]): { valid: ProductRow[]
       }
       priceCents = amount;
     }
+    // readBatch keeps a description to its cap plus one: one longer than the cap arrived cut, often inside a tag,
+    // and is refused as it is, never brought in short (docs/cross-product-handoff.md).
+    if (rawDescription.length > MAX_ABOUT_LENGTH * 2) {
+      problems.push({ line, column: "description", problem: `Longer than ${(MAX_ABOUT_LENGTH * 2).toLocaleString("en-US")} characters with its formatting, so it cannot be brought in whole. Shorten it, or remove its formatting`, value: rawDescription.slice(0, 80) });
+      continue;
+    }
     const description = cleanAbout(plainText(rawDescription).slice(0, MAX_ABOUT_LENGTH * 2));
     if (plainText(rawDescription).trim().length > MAX_ABOUT_LENGTH) {
       problems.push({ line, column: "description", problem: `Longer than ${MAX_ABOUT_LENGTH.toLocaleString("en-US")} characters`, value: rawDescription.slice(0, 80) });
@@ -1672,7 +1677,8 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     return "more";
   }
   // The company's day first: over it, the same buyers wait for tomorrow.
-  if (!(await reserveDay(messages.length))) {
+  const day = mailDay();
+  if (!(await reserveDay(messages.length, day))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     await unsent(portion);
     return "retry";
@@ -1692,12 +1698,12 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     if (saved !== "OK") {
       held.n += room;
       await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
-      await releaseDay(messages.length);
+      await releaseDay(messages.length, day);
       await unsent(portion);
       throw new UnknownReplyError("an import's hold saved before its send");
     }
   }
-  if (sending.length < messages.length) await releaseDay(messages.length - sending.length);
+  if (sending.length < messages.length) await releaseDay(messages.length - sending.length, day);
   if (sending.length === 0) {
     job.counts.unmailed += messages.length;
     await unsent(portion);
@@ -1708,7 +1714,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
-    await releaseDay(sending.length);
+    await releaseDay(sending.length, day);
     await unsent(portion);
     return "retry";
   }
@@ -2087,12 +2093,13 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
-      if (!(await reserveDay(1))) {
+      const day = mailDay();
+      if (!(await reserveDay(1, day))) {
         await putBack(now);
         continue;
       }
       if ((await reserveMoved(store, 1)) < 1) {
-        await releaseDay(1);
+        await releaseDay(1, day);
         // The month's emails are spent: tried once more when they open again, while that is still before the renewal
         // date (after it, reminderEmail has nothing to send). Due REMIND_DAYS_BEFORE days before it, and every window
         // longer than that, a second refusal finds the next opening past the renewal date, so it is put back at most
@@ -2120,7 +2127,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         counts.sent += 1;
       } else if (sent === "retry") {
         await releaseMoved(store, 1);
-        await releaseDay(1);
+        await releaseDay(1, day);
         await putBack(now);
       }
     } catch (error) {

@@ -50,6 +50,8 @@ export function MemberPriceEditor({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const reviewRef = useRef<HTMLHeadingElement>(null);
+  const reviewButtonRef = useRef<HTMLButtonElement>(null);
+  const editHeadingRef = useRef<HTMLHeadingElement>(null);
 
   if (!choices) {
     return (
@@ -82,6 +84,19 @@ export function MemberPriceEditor({
     requestAnimationFrame(() => reviewRef.current?.focus());
   }
 
+  /**
+   * Leaves the review step with the focus on a control that is still there (Codex X6 on #3026, LOW): going back and a
+   * save that failed return it to "Review changes", where the person was; a save to the editor's heading, since
+   * "Review changes" is then off until something changes. Never left on the review's buttons, which are gone.
+   */
+  function leaveReview(to: "review" | "heading") {
+    setReviewing(false);
+    requestAnimationFrame(() => {
+      const button = reviewButtonRef.current;
+      (to === "review" && button && !button.disabled ? button : editHeadingRef.current)?.focus();
+    });
+  }
+
   async function save() {
     setBusy(true);
     setProblem(null);
@@ -93,15 +108,15 @@ export function MemberPriceEditor({
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string; field?: MemberEditField; rule?: number | null };
       if (!data.ok) {
-        setReviewing(false);
+        leaveReview("review");
         setProblem({ message: typeof data.message === "string" && data.message ? data.message : SAVE_FAILED, field: data.field ?? "form", rule: data.rule ?? null });
         return;
       }
-      setReviewing(false);
+      leaveReview("heading");
       toast(on ? "Saved. Member prices are on." : "Saved. Member prices are off: everybody pays your normal prices.");
       router.refresh();
     } catch {
-      setReviewing(false);
+      leaveReview("review");
       setProblem({ message: SAVE_FAILED, field: "form", rule: null });
     } finally {
       setBusy(false);
@@ -143,7 +158,7 @@ export function MemberPriceEditor({
           <button type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center" onClick={() => void save()} disabled={busy} aria-busy={busy}>
             {busy ? "Saving…" : "Confirm and save"}
           </button>
-          <button type="button" className="btn btn-ghost btn-sm inline-flex min-h-11 items-center" onClick={() => setReviewing(false)} disabled={busy}>
+          <button type="button" className="btn btn-ghost btn-sm inline-flex min-h-11 items-center" onClick={() => leaveReview("review")} disabled={busy}>
             Go back and change
           </button>
         </div>
@@ -153,7 +168,7 @@ export function MemberPriceEditor({
 
   return (
     <div className="card p-6 sm:p-8" id="member-prices">
-      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Member prices</h2>
+      <h2 ref={editHeadingRef} tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">Member prices</h2>
       <p className="mt-2 text-ink-soft">
         People who have one of your memberships, or bought one of your products, pay less on the products you choose. Stripe takes it off at
         checkout, with no code to type. Off until you switch it on.
@@ -310,7 +325,7 @@ export function MemberPriceEditor({
           {`${problem.rule !== null ? `Rule ${problem.rule + 1}: ` : ""}${problem.message}`}
         </p>
       ) : null}
-      <button type="button" className="btn btn-primary btn-sm mt-4 inline-flex min-h-11 items-center" onClick={review} disabled={busy || !changed}>
+      <button ref={reviewButtonRef} type="button" className="btn btn-primary btn-sm mt-4 inline-flex min-h-11 items-center" onClick={review} disabled={busy || !changed}>
         Review changes
       </button>
     </div>

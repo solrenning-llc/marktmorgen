@@ -69,6 +69,8 @@ test('archived thresholds preserve historical figures without proposing current 
 });
 test('the value presentation retains owner quotations and its dated tax-model rows',()=>{
  const doc=readFileSync('docs/value-presentation-2026-10-18.md','utf8');
- for(const row of currentPriceMarginRows(PLANS_ON_SALE,ASSISTANT_ON_SALE))assert.ok(doc.includes(row));
+ // Whole lines, not substrings: a prefix before a row shifts every column of the table.
+ const lines=new Set(doc.split('\n'));
+ for(const row of currentPriceMarginRows(PLANS_ON_SALE,ASSISTANT_ON_SALE))assert.ok(lines.has(row),row);
  assert.match(doc,/preço: o que maximiza o meu lucro/);assert.doesNotMatch(doc,/\bsmall\b|unlimited (visits|orders|emails|storage) on (Store|Studio|Scale)/i);
 });

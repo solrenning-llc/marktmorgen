@@ -128,3 +128,37 @@ test("a person's erasure reads only their store's asks, however many other store
   await sendAsked(gone, Date.now() + 10_000);
   assert.equal(redis.run(["ZSCORE", askIndexKey(statsId, OTHER), later]), null, "an ask the job took leaves its person's index too");
 });
+
+/**
+ * Codex L on #4290 (L-20261118-0315, MEDIUM): the job takes an ask off the queue and the person's index before it
+ * loads the store. An erasure that completes while the store loads finds neither entry; when the load then fails, the
+ * retry (again) wrote the address back into both, with nothing left to delete it. An ask made before the erasure is
+ * never put back.
+ */
+test("an erasure landing while the job loads the store keeps a failed send from putting the address back", async () => {
+  redis.clear();
+  const { forgetAskPerson, sendAsked } = await import("@/lib/checkout-ask");
+  const statsId = "fedcbafedcbafedcbafedcbafedcba98";
+  const now = Math.floor(Date.now() / 1000);
+  const mine = askMember({ statsId, handle: "askrace", productId: "prod01", email: PERSON, askedAt: now - ASK_AFTER_SECONDS - 10, from: "checkout", after: ASK_AFTER_SECONDS });
+  redis.run(["ZADD", QUEUE, now - 10, mine]);
+  redis.run(["ZADD", askIndexKey(statsId, PERSON), now - 10, mine]);
+  let erased = -1;
+  const erasedWhileLoading = async () => {
+    erased = await forgetAskPerson(statsId, PERSON);
+    throw new Error("synthetic: the store could not be read");
+  };
+  const oldLog = console.error;
+  console.error = () => {};
+  let counts: { retried: number };
+  try {
+    counts = await sendAsked(erasedWhileLoading, Date.now() + 10_000);
+  } finally {
+    console.error = oldLog;
+  }
+  assert.equal(erased, 0, "(control) the erasure ran while the ask was in flight and found nothing to take");
+  assert.equal(counts.retried, 0, "the failed send is not put back");
+  const left = (redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", "+inf"]) as string[]).filter((m) => parseAsk(m)?.email === PERSON);
+  assert.deepEqual(left, [], "the address is not back in the queue");
+  assert.deepEqual(await asksOf(statsId, PERSON), [], "nor in the person's index");
+});

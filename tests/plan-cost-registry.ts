@@ -103,6 +103,9 @@ import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { BOOK_STRIPE_READS } from "@/lib/book-page-rules";
+import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
+import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
@@ -555,6 +558,67 @@ export const TASK_DOOR_COST =
  * public requests before it is drawn, held above it in tests/plan-cost-registry.test.ts.
  */
 export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One reading of a booking page's open times, besides the page's own request (app/[handle]/book/[product]/page.tsx:
+ * slotsForProduct, and a booking's move, slotsForMove; both read lib/calls.ts readBusy), at the most, for a store of
+ * `listings` call products (traffic audit, 9 November 2026). Taken as bookTimesUnits(listings) of the store's
+ * requests before anything of it is read (lib/book-page-rules.ts), held above this in tests/plan-cost-registry.test.ts:
+ *   - the creator's Stripe account, BOOK_STRIPE_READS reads (five pages of a hundred completed checkouts with their
+ *     payments and charges, and five disputes asked about), each waited on EXPORT_PAGE_SECONDS at 2 GB as the export
+ *     and the calendar feed price them, its body worked through at a tenth of a second (STRIPE_LIST_PAGE);
+ *   - the creator's own calendars (lib/calendar-sync.ts, calendarBusy): MAX_FEEDS read side by side when their
+ *     reading is old, waited on FEED_TIMEOUT_MS beside Stripe (readBusy starts them first and waits on both, so only
+ *     what runs past Stripe's wait is added), each of FEED_MAX_BYTES parsed at BOOK_FEED_PARSE_CPU (a review
+ *     ceiling), and each reading read and written four times at BOOK_FEED_READING_BYTES (2,000 times as JSON pairs);
+ *   - every call listing, one GET each (lib/catalog.ts, readListings) at LISTING_READ_BYTES;
+ *   - the diary of holds and bookings (one HGETALL of up to twice CALENDAR_CALLS entries at BOOK_DIARY_ENTRY_BYTES)
+ *     and its refunded entries let go, the bookings' moves (lib/call-records.ts, readMoves: a hundred at an MGET),
+ *     and the twenty bookings caught up after the page is sent (catchUpBookings: EXISTS each and its listing; a
+ *     booking it confirms is its order's own work, priced in the orders line);
+ *   - BOOK_TIMES_COMMANDS commands besides the listings (counted below), and the times sent on with the page
+ *     (BOOK_TIMES_SENT_BYTES: a horizon's every start).
+ * A team's hosts and their calendars are priced in the team-scheduling line.
+ */
+export const BOOK_FEED_PARSE_CPU = 0.5;
+export const BOOK_FEED_READING_BYTES = 65_536;
+export const BOOK_DIARY_ENTRY_BYTES = 512;
+export const BOOK_TIMES_SENT_BYTES = 100_000;
+/**
+ * The commands of a reading besides its listings, counted from the code: coming soon (1); a package's token and what
+ * is left of it (4); a draft's owner (2); the diary (HGETALL and the holds that ran out let go: 2); the creator's
+ * calendars (their settings and home zone, 2; each feed's two readings, 2; each feed read again: its mark taken and
+ * let go, 3, its readings written and its error cleared, 3: MAX_FEEDS x 8); the bookings' moves (CALENDAR_CALLS / 100
+ * MGET); the refunded entries let go (1); the catch-up (20 EXISTS and 20 listings); the team asked whether it is one (2).
+ */
+export const BOOK_TIMES_COMMANDS = 1 + 4 + 2 + 2 + 2 + MAX_FEEDS * 8 + CALENDAR_CALLS / 100 + 1 + 20 + 20 + 2;
+export function bookTimesRead(listings: number): number {
+  return readShapeCost({
+    // The calendars are read beside Stripe (readBusy starts them before readCallSessions and waits on both): only what
+    // their wait runs past Stripe's own (stripePages, below) is added.
+    seconds: Math.max(0, FEED_TIMEOUT_MS / 1000 - BOOK_STRIPE_READS * EXPORT_PAGE_SECONDS),
+    cpu: 0.5 + MAX_FEEDS * BOOK_FEED_PARSE_CPU + BOOK_STRIPE_READS * 0.1,
+    commands: BOOK_TIMES_COMMANDS + listings,
+    dbBytes: listings * LISTING_READ_BYTES + 2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES + MAX_FEEDS * 4 * BOOK_FEED_READING_BYTES
+      + CALENDAR_CALLS * 128 + 20 * LISTING_READ_BYTES,
+    outBytes: BOOK_TIMES_SENT_BYTES,
+    stripePages: BOOK_STRIPE_READS,
+  });
+}
+/**
+ * What booking a time costs besides its times and its checkout (app/api/store/book; review of #3478): the request
+ * itself, which no page counted (a later page's wait and work, a store's record and the call's listing read, its
+ * limits and counts), and its calls to the creator's Stripe account before the time is held, each waited on
+ * EXPORT_PAGE_SECONDS, at the dearer of its two paths (Claude 7's MEDIUM 1 on #3478):
+ *   - with a discount code: the code read and the browser's earlier hold let go, two calls;
+ *   - from a package: the earlier hold let go (releaseOwnHold: its diary read and one /expire), prepareSession (the
+ *     package's checkout read, its charge's disputes read, the session's coupon made: three calls), and, when another
+ *     tab took the package's last session, this hold let go again (its diary read and one more /expire): five calls,
+ *     BOOK_POST_STRIPE_CALLS, and the booking diary read twice, each up to twice CALENDAR_CALLS entries.
+ * The checkout opened for the hold is the order's own work (ORDER_COMPUTE, admitted as CALL_ORDER_UNITS orders).
+ * Taken as BOOK_POST_EXTRA_UNITS with the times.
+ */
+export const BOOK_POST_STRIPE_CALLS = 1 + 3 + 1;
+export const BOOK_POST_READ = readShapeCost({ seconds: 1.3, cpu: 0.2, commands: 30, dbBytes: 2 * LISTING_READ_BYTES + 2 * (2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES), outBytes: 2_048, stripePages: BOOK_POST_STRIPE_CALLS });
 /**
  * One product's shared card (app/[handle]/p/[product]/opengraph-image.tsx), at its worst (reviews of #4211): the call,
  * PRODUCT_CARD_CPU_SECONDS of CPU held PRODUCT_CARD_HELD_SECONDS at 2 GB (a stated bound: a picture decoded at the pixels
@@ -1725,7 +1789,7 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [
       { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
-      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? await isResting(store) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? (times ? times.admitted === \"resting\" : await isResting(store)) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
     basis: "Each render of a card is one of the store's public requests, taken once, after the store and the listing are read and before anything else (stock, keys, bumps, the summary, the script's open), as the store's own product page does (isResting, #4634); an open by the script does not take a second one, and an open of a product that cannot be read takes its own (readScriptOpen's counted, Claude 7 on #4645); a resting store's card reads nothing more. Its worst product render (limited stock with lapsed holds, keys, a bump, the summary, opened by the script) and a weekly call's times in a frame on a listed site (view=times: slotsForProduct, its held and booked times, the calendar and the call's sessions, Stripe stood in; not a team's) are each measured against COMMANDS.laterPage + COMMANDS.laterCount in tests/embed-card-metered.test.ts; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
@@ -1859,6 +1923,18 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
+      // A booking page is counted before its call is read, and its open times are taken before the creator's Stripe account is asked,
+      // for a page and for a booking's move (traffic audit, 9 November 2026; bookTimesRead held in tests/plan-cost-registry.test.ts).
+      { file: "app/[handle]/book/[product]/page.tsx", names: ["if (await isResting(store)) {", "if (!proved || (await isResting(store, undefined, \"buyer\"))) return", "!(await payBookTimes(store, pkg ? \"buyer\" : \"public\"))", "(await payBookTimes(store, \"buyer\")) ? await slotsForMove("] },
+      // The calendar embedded on a creator's listed site pays for its times as the booking page does (pre-review, 9 November 2026),
+      // held in the frame's own count, one INCRBY for both (tests/embed-card-metered.test.ts), and given back when not drawn.
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["await admitPageAndHold(store, timesHold)", "bookTimesUnits(idsOfKind(store, \"call\").length)", "if (times && !calendar) await times.release();", "timesPaid ? await slotsForProduct("] },
+      { file: "lib/traffic.ts", names: ["export async function admitPageAndHold(", "countRequests(folder, store, window, who, now, 1 + hold,", "if (hold > 0) await redisPipeline([[\"DECRBY\", key, hold]])"] },
+      { file: "lib/book-page-admission.ts", names: ["bookTimesUnits(idsOfKind(store, \"call\").length)", "takePublicRequest(store, \"buyer\", now, units)", "holdPublicRequests(store, units, now)", "[\"HEXISTS\", bookingDiaryKey(store.callsId), session]"] },
+      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey", "BOOK_POST_EXTRA_UNITS"] },
+      // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).
+      { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");", "if (previous) await releaseOwnHold(store, previous).catch(() => {});", "const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;", "await releaseOwnHold(store, result.session, { openedHere: true })"] },
+      { file: "app/api/store/book/move/route.ts", names: ["const inDiary = await bookedHere(store, session);", "if (!inDiary) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"unavailable\");"] },
       // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
       // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
       // before it is read (lib/store-search-index.ts, c1-cost-store-search).

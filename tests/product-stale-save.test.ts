@@ -114,6 +114,35 @@ async function main() {
   is("the focus moves once the notice is on the page, from an effect, not a frame asked for before it", /useEffect\(\(\) => \{\s*if \(stale\) document\.getElementById\(`product-\$\{stale\.id\}-stale-title`\)\?\.focus\(\);/.test(editor), true);
   is("both ways forward are offered by name", /Keep my changes and save/.test(editor) && /Use the saved version/.test(editor), true);
 
+  part("A finished save can close only the opening that submitted it");
+  // Exercise the production completion callback with an in-memory request that
+  // can finish after the creator has canceled or opened another form (Codex L and X4 on #4238).
+  const saveSource = /const save = \(\) => \{\n([\s\S]*?)\n              \};\n              return \(\n              <>\n              <ProductForm/.exec(editor)?.[1];
+  if (!saveSource) throw new Error("The product form's save callback was not found");
+  const saveForm = new Function("product", "aboutFor", "payloadOf", "draft", "aboutUnread", "openedRev", "run", "setEditingId", "setPriceReview", saveSource);
+  for (const [label, active, opening, expected] of [
+    ["the same opening", "product-a", 1, null],
+    ["a different product", "product-b", 2, "product-b"],
+    ["the same product reopened", "product-a", 2, "product-a"],
+  ] as const) {
+    const aboutFor = { current: 1 };
+    let finish: (() => void) | undefined;
+    let editing: string | null = "product-a";
+    let priceReview: string | null = "product-a";
+    saveForm(
+      { id: "product-a" }, aboutFor, () => ({}), {}, false, 1,
+      (_payload: unknown, done: () => void) => { finish = done; },
+      (set: (value: string | null) => string | null) => { editing = set(editing); },
+      (set: (value: string | null) => string | null) => { priceReview = set(priceReview); },
+    );
+    if (!finish) throw new Error("The save did not submit a completion callback");
+    aboutFor.current = opening;
+    editing = active;
+    priceReview = active;
+    finish();
+    is(label, [editing, priceReview], [expected, expected]);
+  }
+
   part("What a refusal reads is counted, in the studio request it is part of");
   is("two reads at most: the listing and the description", PRODUCT_STALE_READ.commands, 2);
   is("bounded by a product's records and the longest description", PRODUCT_STALE_READ.bytes, MAX_PRODUCT_BYTES + MAX_ABOUT_LENGTH * 4);

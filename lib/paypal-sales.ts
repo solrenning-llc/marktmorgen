@@ -1815,29 +1815,54 @@ export async function paypalCounts(statsId: string | null): Promise<{ sales: num
 /**
  * The store's PayPal sales paid since `since` (seconds), newest first, at most
  * `limit`: one range and one read of the orders. Nothing is asked of PayPal.
+ * `now` (seconds) tells a record that expired by design from one not read.
  */
-export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
+export async function readPayPalSales(statsId: string | null, since: number, limit: number, now = Math.floor(Date.now() / 1000)): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
-  // The orders, as a list of text no longer than the LIMIT asked ([] is none): any other reply is unknown, never "no
-  // PayPal sales" (CX-123 rule 24). A member that is not an order id is a sale this reading lacks: partial.
-  const members = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
-  if (!members || members.length > limit + 1) throw new UnknownReplyError("the PayPal sales");
-  const list = members.filter((o) => ORDER_ID.test(o));
-  let partial = list.length < members.length || list.length > limit;
-  if (!list.length) return { sales: [], partial };
-  const asked = list.slice(0, limit);
-  // One slot for each record asked, text or null (its record ended): anything else is unknown.
-  const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...asked.map(paidKey)]]), 1)?.[0], asked.length);
-  if (!rows || rows.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the PayPal sales' records");
-  const sales: Paid[] = [];
-  for (const raw of rows) {
-    if (raw === null) continue;
-    // A record that does not read, or is not this store's, is not guessed at; nor is the reading complete without it.
-    const paid = jsonObject(raw);
-    if (paid && paid.store === statsId && typeof paid.order === "string") sales.push(paid as unknown as Paid);
-    else partial = true;
+  // Read exactly, as the refunds beside it are (readPayPalRefundsWithCoverage; rule 24): the list as a list of text no
+  // longer than asked, each member with its time, else unknown and thrown, never "no PayPal sales".
+  const flat = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "WITHSCORES", "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * (limit + 1)) throw new UnknownReplyError("the PayPal sales");
+  const orders: string[] = [];
+  const paidAt = new Map<string, number>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const time = /^\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(time)) throw new UnknownReplyError("the PayPal sales");
+    orders.push(flat[i]);
+    paidAt.set(flat[i], time);
   }
-  return { sales, partial };
+  const listed = orders.slice(0, limit);
+  // An order that is not an order id, a record Redis answered as missing or one written for another store is a sale
+  // this reading could not count: the reading is partial, never whole without it.
+  let missing = listed.some((o) => !ORDER_ID.test(o));
+  const list = listed.filter((o) => ORDER_ID.test(o));
+  const partial = orders.length > limit;
+  if (!list.length) return { sales: [], partial: partial || missing };
+  const what = "a PayPal sale's record";
+  const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...list.map(paidKey)]]), 1)?.[0], list.length);
+  if (!rows) throw new UnknownReplyError(what);
+  const sales: Paid[] = [];
+  list.forEach((order, i) => {
+    const raw = rows[i];
+    if (raw === null) {
+      // Its record is written with the member, at its time, and kept PAID_KEPT_SECONDS: past that it expired by design
+      // and the member is only waiting for the next sale's trim (Codex L and Codex V on #4001), outside what is kept.
+      // Missing inside that window, it is a sale this reading could not count.
+      if ((paidAt.get(order) ?? now) + PAID_KEPT_SECONDS > now) missing = true;
+      return;
+    }
+    if (typeof raw !== "string") throw new UnknownReplyError(what);
+    let paid: unknown;
+    try {
+      paid = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError(what);
+    }
+    if (!paid || typeof paid !== "object" || Array.isArray(paid) || (paid as Paid).order !== order || typeof (paid as Paid).store !== "string") throw new UnknownReplyError(what);
+    if ((paid as Paid).store === statsId) sales.push(paid as Paid);
+    else missing = true;
+  });
+  return { sales, partial: partial || missing };
 }
 
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */

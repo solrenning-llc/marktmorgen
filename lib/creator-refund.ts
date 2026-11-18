@@ -44,12 +44,18 @@
  * Closing what was bought needs nothing here: every door reads the payment
  * from Stripe and closes on a full refund by the one rule of lib/refunds.ts.
  *
- * Cost: one studio request (counted by guardStoreWrite before any of this),
- * at most two Stripe calls on the creator's account (no fee to Marktmorgen),
- * and three Redis commands (the mark, and the log's LPUSH and LTRIM).
+ * Cost: REFUND_UNITS studio requests, one counted by guardStoreWrite before
+ * any of this and the rest before the first Stripe call (countUnits), so every
+ * wait is paid for before it is spent; at most REFUND_STRIPE_CALLS (three)
+ * Stripe calls on the creator's account (the charge, its refunds, the refund;
+ * no fee to Marktmorgen), each waited on for up to STRIPE_TIMEOUT_MS; and
+ * three Redis commands (the mark, and the log's LPUSH and LTRIM). The units
+ * past the first pay for the three waits at 2 GB (held in
+ * tests/wg9-creator-refund-action.test.ts; Claude 5 on #3678).
  */
 import { createHash } from "node:crypto";
 import { onAccount, StripeError } from "@/lib/stripe-account";
+import { countUnits } from "@/lib/person-agenda-read";
 import { saleHandles, type Store } from "@/lib/store";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { logTeam } from "@/lib/team";
@@ -63,6 +69,14 @@ import {
   refundOutcome,
   refundableOf,
 } from "@/lib/creator-refund-rules";
+
+/** The most Stripe calls one refund makes: the charge, its refunds and the refund itself. */
+export const REFUND_STRIPE_CALLS = 3;
+/**
+ * Studio requests one refund takes: the route's one (guardStoreWrite) and, before the first Stripe call, enough more
+ * to pay for REFUND_STRIPE_CALLS waits of STRIPE_TIMEOUT_MS at 2 GB (Claude 5 on #3678, MEDIUM cost).
+ */
+export const REFUND_UNITS = 10;
 
 /** How long a refund told in the log stays marked: past the 24 hours Stripe keeps an idempotency key. */
 export const TOLD_DAYS = 2;
@@ -88,6 +102,7 @@ export type RefundError =
   | "currency_not_listed"
   | "in_progress"
   | "stripe_refused"
+  | "studio_used"
   | "unknown";
 
 export type RefundAnswer =
@@ -115,6 +130,8 @@ export function refundStatus(answer: RefundAnswer): number {
     case "unavailable":
     case "unreadable":
       return 503;
+    case "studio_used":
+      return 429;
     case "unknown":
       return 502;
     default:
@@ -168,6 +185,11 @@ export async function giveRefund(
   if (!key) return fail("invalid");
   const reason = input.reason === undefined || input.reason === "" ? null : parseRefundReason(input.reason);
   if (input.reason !== undefined && input.reason !== "" && !reason) return fail("reason");
+
+  // The waits are paid for before the first of them: the route counted one studio request, the rest are taken now.
+  // Not counted (used up, or the count unknown): nothing is asked of Stripe.
+  const counted = await countUnits(store, REFUND_UNITS - 1).catch(() => null);
+  if (!counted?.ok) return fail("studio_used");
 
   let charge: Record<string, unknown>;
   try {
@@ -252,7 +274,8 @@ async function settle(store: Store, who: { email: string; role: Role }, chargeId
   const claimed = await claimMark(toldKey(toldFor), TOLD_DAYS * 86_400, value);
   if (claimed !== "taken" && store.sid) {
     const logged = await logTeam(store.sid, { who: who.email, role: who.role, what });
-    if (!logged && claimed === "ours") await releaseMark(toldKey(toldFor), value).catch((error) => console.error("letting a refund's told mark go failed", error));
+    // "ours" or "unknown": releaseMark compares the value first, so it never lets go another run's mark (Claude 5 on #3678).
+    if (!logged) await releaseMark(toldKey(toldFor), value).catch((error) => console.error("letting a refund's told mark go failed", error));
   }
   if (state === "unknown") return fail("unknown");
   if (state === "failed") return fail("refund_failed");

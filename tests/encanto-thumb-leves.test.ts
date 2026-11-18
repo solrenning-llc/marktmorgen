@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   const { copyAttachedPicture } = r2copy;
   is("three files is the most an attached picture has", (r2copy as Record<string, unknown>).PICTURE_R2_FILES_PER_ATTACH, 3);
   is("off: nothing read", [await copyAttachedPicture([big, small, thumb], { config: null, read }), reads.length], [false, 0]);
-  const config = { endpoint: "https://r2.test", bucket: "pictures", origin: "https://images.test", key: { id: "k", secret: "s" } };
+  const config = { endpoint: "https://r2.test", bucket: "pictures", origin: "https://images.test", key: { accessKeyId: "k", secretAccessKey: "s" } };
   is(
     "more files than a picture has: refused before anything is read",
     [await copyAttachedPicture([big, small, thumb, picture("d")], { config, read }), reads.length],
@@ -95,7 +95,9 @@ async function main(): Promise<void> {
     await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: linked, width: 320, height: 180 }))),
     [503, "check_unavailable"],
   );
-  is("and the file is kept: unknown is never \"not a picture\"", files.has(linked), true);
+  // Claude 4's LOW on #2801 @4a42958b42: the creator chooses it again (a new upload under a new name), so the fresh file
+  // would be an orphan nothing sweeps; it is let go as any refused fresh upload is, and only while its own head answers.
+  is("and the fresh upload is let go, as any refused one: nothing would ever attach or sweep it", files.has(linked), false);
   const words = readFileSync("components/link-picture.tsx", "utf8");
   is(
     "the link's picture form says it in plain words",

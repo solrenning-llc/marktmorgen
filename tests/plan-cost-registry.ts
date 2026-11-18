@@ -68,7 +68,7 @@ import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
-import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
+import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS } from "@/lib/imports";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
@@ -648,6 +648,13 @@ export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMAN
  * and one pipeline of MAX_SHELF PayPal counts on top. Taken as SHELF_REQUEST_UNITS public requests before it reads.
  */
 export const SHELF_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS + MAX_SHELF, (NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES) * 16_384 + MAX_PRODUCT_BYTES + 4_096);
+/**
+ * The commands each email to somebody brought over is priced at beside what it did before: its guards and stop link
+ * (MOVED_EMAIL_EXTRA_COMMANDS) and, for the invitation it makes, its reminder's passes held for a missing postal
+ * address (MOVE_HELD_PASSES at MOVE_HELD_PASS_COMMANDS each; review of #3476, Claude 7's cost MEDIUM 1).
+ */
+export const MOVED_EMAIL_COMMANDS_PRICED = MOVED_EMAIL_EXTRA_COMMANDS + MOVE_HELD_PASSES * MOVE_HELD_PASS_COMMANDS;
+
 /**
  * What one Store assistant checkout reminder costs besides the model and its
  * email (lib/assistant-reminder.ts), at the most: its commands and its
@@ -1527,6 +1534,45 @@ export const HELD_EXPOSURE = {
   completeMonthlyCostUsd: null,
   reviewedGlobalCaseCeiling: null,
 } as const;
+/**
+ * DONO-3 company work for a closing store at or past its day (fourth pre-review, LEVE 3), outside paid-unit
+ * COST_LINES like HELD_EXPOSURE, at most per store per daily run of the closing job:
+ *   - kept past the published time: GET of its record, SET of its reason when it changes (overdueWhy), and the
+ *     monthly count's EVAL (HELD_ONCE);
+ *   - its creator account refusing us: SET of its record (refusedFrom, refusedLast), HSET+EXPIRE of the day's
+ *     account note, and four HLEN of the two days' notes; an account that answers: HSET+EXPIRE and, after a
+ *     refusal, one SET;
+ *   - after STRIPE_SILENT_DAYS of refusals: one more platform GET of the store's own subscription, once a run, with
+ *     the activation readSubscription does for a funded plan (the same as observeStoreSubscriptions');
+ *   - its creator account giving no answer (Claude 3's H1 on #3463), the same shape: SET of its record (silentFrom,
+ *     silentLast), HSET+EXPIRE of the day's account note and, past the deadline with a streak, four HLEN of the two
+ *     days' notes and the same one platform GET of the store's own subscription (shared with a refusal's, once a run);
+ *   - a lapse before its members' renewals were stopped: one notice per member with a known subscription, out of the
+ *     closing's own email credit (lib/closing-credit.ts), and one SET of its record, once; a member owed a refund is
+ *     told both in its refund letter, one letter an address, and a member already told of the closing gets one
+ *     follow-up only, the one its notice paid for: any letter past it takes one credit first, all or nothing, or the
+ *     store is held (Claude 1 cloud's review of #3463, tests/closing-told-follow-ups.test.ts); the refund letter
+ *     reads the paid periods once more (HGETALL) for who was already sent a follow-up;
+ *   - a lapse: SET of its record and the monthly count's EVAL, once.
+ * The notes are hashed identities (about 80 bytes a field) for ACCOUNT_NOTE_SECONDS. Stripe's endpoint tariff and the
+ * number of stores in this state are unknown, never zero: no monthly total is certified here.
+ */
+export const CLOSING_DEADLINE_WORK = {
+  overdueCommandsPerRun: 3,
+  refusalCommandsPerRun: 1 + 2 + 4,
+  silenceCommandsPerRun: 1 + 2 + 4,
+  renewalNoticeCommandsOnce: 1,
+  lapseLetterReadsOnce: 1,
+  answerCommandsPerRun: 2 + 1,
+  platformGetsPerRefusedRun: 1,
+  fundedActivationsPerRefusedRun: 1,
+  lapseCommandsOnce: 2,
+  accountNoteBytesPerField: 80,
+  accountNoteSeconds: 3 * 86400,
+  stripeEndpointTariffUsd: null,
+  storesInThisState: null,
+  completeMonthlyCostUsd: null,
+} as const;
 /** A full held store, not its smaller ended-store allowance, for31days. All
  * still-retained outside-room keys are charged at peak for the whole month. */
 export function heldStoreMonthlyExposure(tier: Tier) {
@@ -1798,18 +1844,28 @@ export const COST_LINES: CostLine[] = [
       // A step's one give-back (its end, or a send tried again) never below zero.
       const steps = a.steps * request("step", 10 + GIVE_BACK_FLOOR_EXTRA_COMMANDS);
       const reports = a.reports * request("light", 4, MAX_REPORT_ROWS * 400);
-      return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL;
+      // Each email to somebody brought over, Store's own or (Studio, Scale) one of the monthly emails, with the store's
+      // deleted people, the list's rows, the stop mark and its own stop link read and written before it goes
+      // (MOVED_EMAIL_EXTRA_COMMANDS), and its invitation's reminder held for a missing postal address at most
+      // MOVE_HELD_PASSES times (MOVED_EMAIL_COMMANDS_PRICED).
+      const movedExtra = Math.max(a.movedEmails, monthlyEmails(tier)) * MOVED_EMAIL_COMMANDS_PRICED * COMMAND;
+      return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL + movedExtra;
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
-      { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS"] },
+      { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS", "MOVED_EMAIL_EXTRA_COMMANDS", "MOVE_HELD_PASSES", "MOVE_HELD_PASS_COMMANDS", "MOVE_HELD_RETRY_MS"] },
+      // The store's deleted people, the list's rows, the stop mark and the stop link read and written before each email
+      // to somebody brought over.
+      { file: "lib/suppression.ts", names: ["suppressedAmong"] },
+      { file: "lib/contacts.ts", names: ["leftListAmong"] },
+      { file: "lib/checkout-recovery.ts", names: ["moveStopLink", "remindersStoppedAmong"] },
       { file: "lib/mail.ts", names: ["GIVE_BACK_FLOOR_EXTRA_COMMANDS"] },
       { file: "app/api/store/import/route.ts", names: ["import-start-month", "import-step-month", "import-report-month"] },
       // The store's deleted people, checked where a chunk of past buyers or members is written (review of #3383).
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
       { file: "lib/move-members.ts", names: ["INVITE_UNLESS_ERASED"] },
     ],
-    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId).",
+    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). Before each email to somebody brought over, the store's deleted people and the creator's list's rows are read (one HMGET each a portion: suppressedAmong, leftListAmong), and before each member's email or reminder the stop mark is read and, once the day and the month have room for it, its stop link written with its three erasure notes (one link a store and address, the same on every email and every pass: lib/checkout-recovery.ts moveStopLink): MOVED_EMAIL_EXTRA_COMMANDS an email at the most, priced on every one of Store's own and, on Studio and Scale, on every monthly email (the most of those a month can be to people brought over); the mark a stop link may leave is taken in the store's data room with each invitation (RECOVER_TRACE_BYTES), and the link itself is a reminder email's key (tests/store-data-registry.ts). The same mark is written when a member's first email or reminder bounces for good or is marked as spam (lib/mail-health.ts heardFromSender, one SET in the sender's notice, a company cost, and the same room), so the reminder is not sent to them; the reminder reads it with the stop mark read already counted.",
   },
   {
     id: "clickfunnels",

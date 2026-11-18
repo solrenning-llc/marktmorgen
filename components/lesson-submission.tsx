@@ -282,13 +282,18 @@ export function LessonSubmission({
                     <p className="break-all font-semibold" style={{ color: "var(--st-text)" }}>{row.file.name}</p>
                     <p className="st-muted mt-1">{`${sizeText(row.file.bytes, locale, w)} · ${w.sentOn(day(row.at))}`}</p>
                     <p className="mt-1 font-semibold">{w.states[row.state]}</p>
+                    {/* While its request runs a button stays in the tab order, marked aria-disabled and busy, and a press does
+                        nothing: native disabled would drop the focus to the page (WCAG 2.4.3; Codex X6 on #3574). */}
                     {row.state === "uploading" ? (
-                      <button type="button" className="btn st-btn mt-2" disabled={working === row.id} aria-busy={working === row.id} onClick={() => void cancelUpload(row)}>
+                      <button type="button" className="btn st-btn mt-2" aria-disabled={working === row.id} aria-busy={working === row.id} onClick={() => { if (working !== row.id) void cancelUpload(row); }}>
                         {working === row.id ? w.working : w.cancelUpload(row.file.name)}
                       </button>
                     ) : (
                       <>
-                        <p className="st-muted mt-1">{row.keepUntil * 1000 > list.now ? w.keptUntil(day(row.keepUntil)) : w.keepingEnded(day(row.keepUntil))}</p>
+                        {/* A withdrawn file is deleted or due to be (its state says withdrawn): it is never said kept until a day (Codex X6 on #3574). */}
+                        {row.state === "withdrawn" ? null : (
+                          <p className="st-muted mt-1">{row.keepUntil * 1000 > list.now ? w.keptUntil(day(row.keepUntil)) : w.keepingEnded(day(row.keepUntil))}</p>
+                        )}
                         {row.note ? (
                           <div className="mt-2">
                             <p className="st-label">{w.yourNote}</p>
@@ -306,10 +311,10 @@ export function LessonSubmission({
                             <div className="mt-3">
                               <p ref={question} tabIndex={-1} className="font-semibold">{w.withdrawAsk(row.file.name)}</p>
                               <div className="mt-2 flex flex-wrap gap-3">
-                                <button type="button" className="btn st-btn" disabled={working === row.id} aria-busy={working === row.id} onClick={() => void withdraw(row)}>
+                                <button type="button" className="btn st-btn" aria-disabled={working === row.id} aria-busy={working === row.id} onClick={() => { if (working !== row.id) void withdraw(row); }}>
                                   {working === row.id ? w.working : w.withdrawYes}
                                 </button>
-                                <button type="button" className="btn st-btn" disabled={working === row.id} onClick={() => setAsking(null)}>{w.withdrawNo}</button>
+                                <button type="button" className="btn st-btn" aria-disabled={working === row.id} onClick={() => { if (working !== row.id) setAsking(null); }}>{w.withdrawNo}</button>
                               </div>
                             </div>
                           ) : (

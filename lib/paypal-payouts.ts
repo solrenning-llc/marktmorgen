@@ -542,9 +542,12 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
  * `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within
  * PRESS_PACE_SECONDS, an unknown mark, or no token). `unavailable`: true, and only then present, when it was not asked
  * because nothing could be checked (no token, or a pace mark that could not be confirmed), not because it was asked
- * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212).
+ * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212). `retryNow`: with `unavailable`,
+ * true only when no mark of this reading is left (none was taken, or its release was confirmed), so a new try asks at
+ * once; false when the mark could not be confirmed taken or let go, so the next try may find it until it runs out
+ * (Codex L on #4212).
  */
-export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean };
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean; retryNow?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -596,13 +599,13 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
   const mark = pace ? claimValue() : "";
   const claimed = pace ? await claimMark(pace.key, pace.seconds, mark) : "ours";
   if (claimed === "taken") return onTheirWayNow();
-  if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true };
+  if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true, retryNow: false };
   const token = await bearer(store).catch(() => null);
   if (!token) {
     // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
     // press asks again (review of #4212, LEVE).
-    if (pace) await releaseMark(pace.key, mark);
-    return { ...onTheirWayNow(), unavailable: true };
+    const released = pace ? await releaseMark(pace.key, mark) : true;
+    return { ...onTheirWayNow(), unavailable: true, retryNow: released };
   }
   const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);

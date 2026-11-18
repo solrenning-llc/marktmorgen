@@ -185,7 +185,9 @@ export function PayPalPayouts({
                   if (data) {
                     toast(
                       data.unavailable
-                        ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
+                        ? data.retryNow
+                          ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
+                          : "We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute."
                         : data.asked === false
                           ? "PayPal was asked less than a minute ago. Try again in a minute."
                           : Number(data.paid)

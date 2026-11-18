@@ -1,3 +1,4 @@
+import { consumerGate } from "@/lib/eu-vat-gate";
 import { startGift } from "@/lib/gifts";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { startGroup } from "@/lib/group-buy";
@@ -5,7 +6,7 @@ import { preorderDay, soonOne } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
-import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { BoxesRefused, ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
@@ -109,11 +110,14 @@ export async function POST(request: NextRequest) {
   let linkToken = "";
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent: FormData = new FormData();
   // The course's end the page showed beside this form (24 [E7], lib/course-access-end.ts): undefined when the form
   // drew none (the sale then carries no end), null for "none", or the end; "bad" for any other value.
   let shownEnd: number | null | undefined | "bad" = undefined;
   try {
     const form = await (await limited(request, 8_000)).formData();
+    sent = form;
     digitalConsent = consentFromForm(form);
     const sentFrom = form.get("from");
     from = sentFrom === "renew" || sentFrom === "course" ? sentFrom : "";
@@ -197,6 +201,14 @@ export async function POST(request: NextRequest) {
   }
   // A call is booked for a time on its own page, never bought without one.
   if (product.call) return away(`/@${store.handle}/book/${product.id}`);
+  // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate): before anything is held, written or charged, a paid sale to
+  // the EU or the UK is refused, and a sale without the billing country asks for it. A bundle is read by its members.
+  const members = product.bundle ? new Map((await readListings(store, product.bundle)).map((listing) => [listing.id, listing])) : undefined;
+  const gate = consumerGate({ product, members, headers: request.headers, form: sent });
+  if (!gate.ok) {
+    const status = gate.reason === "refused" ? "abroad" : "country";
+    return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);
+  }
   // Every license key in the pool is given: nobody is charged for one that
   // does not exist. The creator was emailed when the pool ran low. A count
   // that could not be read is unknown, never "some left": nothing opens and
@@ -345,6 +357,8 @@ export async function POST(request: NextRequest) {
       createCheckout(store, product, linkOrigin(request, store), optionId, {
         bumps,
         picked,
+        // The boxes the buyer ticked go through the same EU VAT gate as the product, as one order.
+        gateBoxes: (boxes) => consumerGate({ product, members, boxes, headers: request.headers, form: sent }),
         held: holding,
         upsellKey: upsell?.fingerprint,
         plan: inPlan,
@@ -440,6 +454,11 @@ export async function POST(request: NextRequest) {
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
     // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
+    // A ticked box the EU VAT gate refuses for this order: back to the page, as for the product itself.
+    if (error instanceof BoxesRefused) {
+      const status = error.reason === "refused" ? "abroad" : "country";
+      return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);
+    }
     if (error instanceof ReturningCodeRefused) return away(`/@${store.handle}/p/${product.id}?returning=${error.reason}#returning`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).

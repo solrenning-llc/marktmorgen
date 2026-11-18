@@ -49,7 +49,8 @@ import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/l
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
-import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
+import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit } from "@/lib/traffic-rules";
+import { READ_SAMPLE } from "@/lib/page-read-sample";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
@@ -104,6 +105,9 @@ import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { BOOK_STRIPE_READS } from "@/lib/book-page-rules";
+import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
+import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
@@ -123,7 +127,7 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, readBeaconCost, readCeilingMarksCost, visitCost } from "./traffic-cost";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -596,6 +600,67 @@ export const TASK_DOOR_COST =
  * public requests before it is drawn, held above it in tests/plan-cost-registry.test.ts.
  */
 export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One reading of a booking page's open times, besides the page's own request (app/[handle]/book/[product]/page.tsx:
+ * slotsForProduct, and a booking's move, slotsForMove; both read lib/calls.ts readBusy), at the most, for a store of
+ * `listings` call products (traffic audit, 9 November 2026). Taken as bookTimesUnits(listings) of the store's
+ * requests before anything of it is read (lib/book-page-rules.ts), held above this in tests/plan-cost-registry.test.ts:
+ *   - the creator's Stripe account, BOOK_STRIPE_READS reads (five pages of a hundred completed checkouts with their
+ *     payments and charges, and five disputes asked about), each waited on EXPORT_PAGE_SECONDS at 2 GB as the export
+ *     and the calendar feed price them, its body worked through at a tenth of a second (STRIPE_LIST_PAGE);
+ *   - the creator's own calendars (lib/calendar-sync.ts, calendarBusy): MAX_FEEDS read side by side when their
+ *     reading is old, waited on FEED_TIMEOUT_MS beside Stripe (readBusy starts them first and waits on both, so only
+ *     what runs past Stripe's wait is added), each of FEED_MAX_BYTES parsed at BOOK_FEED_PARSE_CPU (a review
+ *     ceiling), and each reading read and written four times at BOOK_FEED_READING_BYTES (2,000 times as JSON pairs);
+ *   - every call listing, one GET each (lib/catalog.ts, readListings) at LISTING_READ_BYTES;
+ *   - the diary of holds and bookings (one HGETALL of up to twice CALENDAR_CALLS entries at BOOK_DIARY_ENTRY_BYTES)
+ *     and its refunded entries let go, the bookings' moves (lib/call-records.ts, readMoves: a hundred at an MGET),
+ *     and the twenty bookings caught up after the page is sent (catchUpBookings: EXISTS each and its listing; a
+ *     booking it confirms is its order's own work, priced in the orders line);
+ *   - BOOK_TIMES_COMMANDS commands besides the listings (counted below), and the times sent on with the page
+ *     (BOOK_TIMES_SENT_BYTES: a horizon's every start).
+ * A team's hosts and their calendars are priced in the team-scheduling line.
+ */
+export const BOOK_FEED_PARSE_CPU = 0.5;
+export const BOOK_FEED_READING_BYTES = 65_536;
+export const BOOK_DIARY_ENTRY_BYTES = 512;
+export const BOOK_TIMES_SENT_BYTES = 100_000;
+/**
+ * The commands of a reading besides its listings, counted from the code: coming soon (1); a package's token and what
+ * is left of it (4); a draft's owner (2); the diary (HGETALL and the holds that ran out let go: 2); the creator's
+ * calendars (their settings and home zone, 2; each feed's two readings, 2; each feed read again: its mark taken and
+ * let go, 3, its readings written and its error cleared, 3: MAX_FEEDS x 8); the bookings' moves (CALENDAR_CALLS / 100
+ * MGET); the refunded entries let go (1); the catch-up (20 EXISTS and 20 listings); the team asked whether it is one (2).
+ */
+export const BOOK_TIMES_COMMANDS = 1 + 4 + 2 + 2 + 2 + MAX_FEEDS * 8 + CALENDAR_CALLS / 100 + 1 + 20 + 20 + 2;
+export function bookTimesRead(listings: number): number {
+  return readShapeCost({
+    // The calendars are read beside Stripe (readBusy starts them before readCallSessions and waits on both): only what
+    // their wait runs past Stripe's own (stripePages, below) is added.
+    seconds: Math.max(0, FEED_TIMEOUT_MS / 1000 - BOOK_STRIPE_READS * EXPORT_PAGE_SECONDS),
+    cpu: 0.5 + MAX_FEEDS * BOOK_FEED_PARSE_CPU + BOOK_STRIPE_READS * 0.1,
+    commands: BOOK_TIMES_COMMANDS + listings,
+    dbBytes: listings * LISTING_READ_BYTES + 2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES + MAX_FEEDS * 4 * BOOK_FEED_READING_BYTES
+      + CALENDAR_CALLS * 128 + 20 * LISTING_READ_BYTES,
+    outBytes: BOOK_TIMES_SENT_BYTES,
+    stripePages: BOOK_STRIPE_READS,
+  });
+}
+/**
+ * What booking a time costs besides its times and its checkout (app/api/store/book; review of #3478): the request
+ * itself, which no page counted (a later page's wait and work, a store's record and the call's listing read, its
+ * limits and counts), and its calls to the creator's Stripe account before the time is held, each waited on
+ * EXPORT_PAGE_SECONDS, at the dearer of its two paths (Claude 7's MEDIUM 1 on #3478):
+ *   - with a discount code: the code read and the browser's earlier hold let go, two calls;
+ *   - from a package: the earlier hold let go (releaseOwnHold: its diary read and one /expire), prepareSession (the
+ *     package's checkout read, its charge's disputes read, the session's coupon made: three calls), and, when another
+ *     tab took the package's last session, this hold let go again (its diary read and one more /expire): five calls,
+ *     BOOK_POST_STRIPE_CALLS, and the booking diary read twice, each up to twice CALENDAR_CALLS entries.
+ * The checkout opened for the hold is the order's own work (ORDER_COMPUTE, admitted as CALL_ORDER_UNITS orders).
+ * Taken as BOOK_POST_EXTRA_UNITS with the times.
+ */
+export const BOOK_POST_STRIPE_CALLS = 1 + 3 + 1;
+export const BOOK_POST_READ = readShapeCost({ seconds: 1.3, cpu: 0.2, commands: 30, dbBytes: 2 * LISTING_READ_BYTES + 2 * (2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES), outBytes: 2_048, stripePages: BOOK_POST_STRIPE_CALLS });
 /**
  * One product's shared card (app/[handle]/p/[product]/opengraph-image.tsx), at its worst (reviews of #4211): the call,
  * PRODUCT_CARD_CPU_SECONDS of CPU held PRODUCT_CARD_HELD_SECONDS at 2 GB (a stated bound: a picture decoded at the pixels
@@ -1775,7 +1840,7 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [
       { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
-      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? await isResting(store) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? (times ? times.admitted === \"resting\" : await isResting(store)) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
     basis: "Each render of a card is one of the store's public requests, taken once, after the store and the listing are read and before anything else (stock, keys, bumps, the summary, the script's open), as the store's own product page does (isResting, #4634); an open by the script does not take a second one, and an open of a product that cannot be read takes its own (readScriptOpen's counted, Claude 7 on #4645); a resting store's card reads nothing more. Its worst product render (limited stock with lapsed holds, keys, a bump, the summary, opened by the script) and a weekly call's times in a frame on a listed site (view=times: slotsForProduct, its held and booked times, the calendar and the call's sessions, Stripe stood in; not a team's) are each measured against COMMANDS.laterPage + COMMANDS.laterCount in tests/embed-card-metered.test.ts; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
@@ -1909,6 +1974,18 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
+      // A booking page is counted before its call is read, and its open times are taken before the creator's Stripe account is asked,
+      // for a page and for a booking's move (traffic audit, 9 November 2026; bookTimesRead held in tests/plan-cost-registry.test.ts).
+      { file: "app/[handle]/book/[product]/page.tsx", names: ["if (await isResting(store)) {", "if (!proved || (await isResting(store, undefined, \"buyer\"))) return", "!(await payBookTimes(store, pkg ? \"buyer\" : \"public\"))", "(await payBookTimes(store, \"buyer\")) ? await slotsForMove("] },
+      // The calendar embedded on a creator's listed site pays for its times as the booking page does (pre-review, 9 November 2026),
+      // held in the frame's own count, one INCRBY for both (tests/embed-card-metered.test.ts), and given back when not drawn.
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["await admitPageAndHold(store, timesHold)", "bookTimesUnits(idsOfKind(store, \"call\").length)", "if (times && !calendar) await times.release();", "timesPaid ? await slotsForProduct("] },
+      { file: "lib/traffic.ts", names: ["export async function admitPageAndHold(", "countRequests(folder, store, window, who, now, 1 + hold,", "if (hold > 0) await redisPipeline([[\"DECRBY\", key, hold]])"] },
+      { file: "lib/book-page-admission.ts", names: ["bookTimesUnits(idsOfKind(store, \"call\").length)", "takePublicRequest(store, \"buyer\", now, units)", "holdPublicRequests(store, units, now)", "[\"HEXISTS\", bookingDiaryKey(store.callsId), session]"] },
+      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey", "BOOK_POST_EXTRA_UNITS"] },
+      // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).
+      { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");", "if (previous) await releaseOwnHold(store, previous).catch(() => {});", "const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;", "await releaseOwnHold(store, result.session, { openedHere: true })"] },
+      { file: "app/api/store/book/move/route.ts", names: ["const inDiary = await bookedHere(store, session);", "if (!inDiary) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"unavailable\");"] },
       // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
       // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
       // before it is read (lib/store-search-index.ts, c1-cost-store-search).
@@ -1927,6 +2004,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_FENCED_WRITE_CALLS", "CONTACT_WRITE_CALLS"] },
     ],
     basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. An affiliate's own page (lib/affiliate-page-admission.ts) and the store's map (lib/store-sitemap.ts) count what they would read first, with a few commands, and take that many of the window's requests before reading it (lib/public-read-rules.ts; affiliatePageRead, affiliateLoadRead and sitemapRead held in tests/plan-cost-registry.test.ts), so neither reads past the window; the affiliate program's book is worked out for all its affiliates at most every BOOK_FRESH_SECONDS and kept that long (lib/affiliate-book-snapshot.ts), the load that works it out paying for it in full outside its connection's share of the day, every other load paying for its own part. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. The open cart's count of its limited products (513 [PF1], unit 3, 2 November 2026) adds at most MAX_CART reads, and asks the creator's Stripe account, which costs us nothing but the wait, only about a hold that ran out, at most MAX_CHECKS times a product; a hold settled, by being counted sold or let go, is not asked about again; a count that settles holds writes at most one HDEL and one STOCK_SELL a product whatever their number (STOCK_PAGE_SETTLE_COMMANDS_MOST, besides its read), and pages counting at the same time each pay their own inside their own request, the one that comes second counting nothing (Claude 5's MÉDIO on #4472; tests/stock-settle-pages.test.ts); a sale still written the old way (a field each) is read and counted, never written, by a page's count (Claude 7's MÉDIO on #4472; tests/stock-sell-cost.test.ts). A sign-up's contact is written only over the row it was decided from (lib/contacts.ts): without a race one round is at most CONTACT_COMMANDS_MOST.upsertRound commands (a script is one plus its CONTACT_WRITE_CALLS calls; a waitlist confirmation's, fenced by its link since #4268, plus its CONTACT_FENCED_WRITE_CALLS, the fence's PTTL and TIME more, and the round is priced at that dearer one), inside a later page's commands. A sign-up a public request pays for (the list's or the waitlist's confirmation): its first round with the read back of an answer in another shape is at most CONTACT_COMMANDS_MOST.upsertPublic, inside the later page's commands that request pays for; each round more, after a row changed meanwhile, first takes one public request of the store's (payRound, takePublicRequest), at most upsertRound commands inside it, or is not made and the sign-up is refused for the visitor to try again (Codex Z on #3448, 6751568157; held with contended runs in tests/contacts-write-cost.test.ts). A waitlist's confirm press (app/api/store/waitlist/confirm/route.ts) does more than its page's one request pays for when it writes: it reads the link and the store, then the link and the entry again, writes the entry back only while its link and the entry are still there (WAIT_CONFIRM, #4268: one EVAL and at most WAIT_CONFIRM_CALLS calls inside it) and signs the address up (upsertPublic), at most 26 commands measured against the page's 18; so before it writes anything it takes WAIT_CONFIRM_UNITS more of the store's public requests (takePublicRequest), or writes nothing and is refused, and the whole press, that request's own count included, stays inside the two it is paid by (held in tests/waitlist-confirm-cost.test.ts). An order's sign-up goes round up to three times (CONTACT_COMMANDS_MOST.upsert), inside the order's own compute. An unsubscribe (CONTACT_COMMANDS_MOST.unsubscribe), a purchase noted, the links' tokens (tokens(n)) and a taken-back permission are held the same way.",
+  },
+  {
+    id: "page-readings",
+    feature: "How a page was read: time on page, reading depth, the store page item by item (639 [GL7](25), 4 November 2026)",
+    monthlyUsd: (tier) => readingsCost(REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]),
+    sources: [
+      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "readSlot", "slots: pending + (readSlot(window.id, place) ? 1 : 0)", "if (!window || window.slots < 1", "window.slots -= 1;", "if (readingsFull(pass, now) || spentHere(pass.nonce, now)) return false;", "admitReading", "ADMIT_READING", "noteReadStore", "if n > tonumber(ARGV[1]) then"] },
+      { file: "app/api/store/read/route.ts", names: ["if (readingsFull(pass)) return done();", "if (spentHere(pass.nonce)) return done();", "admitReading(pass)"] },
+      { file: "lib/traffic.ts", names: ["noteReadStore(store.statsId, resting || store.suspended ? null : store, now, at)", "if (n <= limit) return { counted: \"all\", at: n - hold };"] },
+    ],
+    basis: "Readings have their own count in the store's window, apart from its public requests, so they never make its pages rest; it stops at one reading for every READ_SAMPLE requests the public pages may answer (readCeiling). The slot is reserved before a token is made (the review of #2571, 5 November 2026): a page gets a token only when its own request, counted by its page check, is the one place of its block of READ_SAMPLE drawn for readings (readSlot), and once for it, so a window's public requests carry at most its ceiling of tokens, every one priced here at readBeaconCost (tests/traffic-cost.ts, 10 commands at the worst, every billed command counted, the cost lane's CX-35; since Codex G's review of #2571 the mark and the count are one script, whose count's expiry is priced once a window), whether it is counted or refused, and none inside the visits line, with the window's ceiling mark once for each ceiling its tokens can carry (readCeilingMarksCost, #2571, the review at 5d245b24); held over a whole window, every page drawn, in tests/page-read-ceiling.test.ts. A token sent again costs no command on the server that spent it (spentHere) and, on another, its mark and one of the window's readings, after which that server asks nothing more of the window: sending one again anywhere, any number of times, stays inside the window's ceiling and one refusal a server (the review of #2571 at 59e575c0, tests/page-read-replay.test.ts).",
   },
   {
     id: "studio",
@@ -2373,6 +2461,28 @@ export function perPaymentCost(tier: Tier): number {
 }
 
 /**
+ * The page readings a window of `requests` requests counts at the most
+ * (lib/page-read.ts, readCeiling: one for every READ_SAMPLE requests its
+ * public pages may answer), each priced at readBeaconCost (639 [GL7](25)).
+ */
+export function readingsAtCeiling(requests: number): number {
+  return Math.ceil(publicVisitLimit(requests) / READ_SAMPLE);
+}
+
+/**
+ * What a window of `requests` requests can cost in page readings: every
+ * reading its ceiling allows at readBeaconCost, the window's ceiling
+ * mark once for each ceiling its tokens can carry (tests/traffic-cost.ts,
+ * readCeilingMarksCost; tests/page-read-worst-commands.test.ts), and the
+ * window's count given its expiry once, by the admission that makes it
+ * (lib/page-read.ts ADMIT_READING, Codex G's review of #2571: one EXPIRE when
+ * INCR answers 1, which a window's count does once).
+ */
+export function readingsCost(requests: number): number {
+  return readingsAtCeiling(requests) * readBeaconCost() + readCeilingMarksCost() + COMMAND;
+}
+
+/**
  * The worst window a store that pays nothing can cost (17 October 2026): a
  * free trial, the largest of the three. Its visits, pages and orders at the
  * trial's figures, its emails if it is a trial of a plan with monthly emails,
@@ -2389,6 +2499,8 @@ export function nonPayingWorst(): number {
   const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
   return TRIAL_VISITS * visitCost()
     + requests
+    // Every page reading the trial's window counts (line page-readings, 639 [GL7](25)).
+    + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS)
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
     + TRIAL_VIDEO_HOURS * hourCost()
@@ -2647,6 +2759,7 @@ export const NOT_A_COST: Record<string, string> = {
   CALENDAR_ADDS_PER_TEN_MINUTES: "A burst limit per store on calendar adds, each one of the store's studio requests (line studio) that reads one remote calendar (R27): it only refuses, before the read.",
   CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES: "The same per connection, whatever store it is signed in to (R27): it only refuses, before the read.",
   TRIAL_MONTHLY_EMAILS: "The free trial's emails: in nonPayingWorst (line free-share).",
+  MOVES_PER_30_DAYS: "Moves of the sign-in address one account may finish in 30 days (lib/move-pace.ts, app/api/auth/move; Claude 7's review of #3326), counted by its store's id before the move does anything and refused when the count cannot be read: each finished move is at most MOVE_END_EMAILS (2) company emails at its end and the company's carrying work, held in SCOPES (move-done) as a company cost per account, not a plan allowance.",
   SUPPORT_PER_DAY: "The daily cap on \"Send this to support\" requests (lib/help-support.ts): two company emails each, nothing kept, held in SCOPES (help-support) as a company cost, not a plan allowance.",
   DAILY_CAPS: "The choices of a host's own daily booking cap: how many calls a host takes, not a cost.",
   KIT_PER_DAY: "A daily burst limit under the writing jobs an affiliate kit takes (line ai).",
@@ -2658,7 +2771,7 @@ export const NOT_A_COST: Record<string, string> = {
   NON_PAYING_ALLOWANCES: "The figures of a store that pays nothing: in nonPayingWorst (line free-share).",
   PIPELINES_BY_TIER: "How many deal pipelines a store keeps: a setting in one record counted in the store's data room (tests/store-data-registry.ts, nl:crm:pipes:); changing or moving deals are studio requests (line studio), and a deal entering a stage takes one more before its workflow is checked (lib/deal-stage-trigger.ts, STAGE_TRIGGER_UNITS).",
   GIFT_REFUND_PAGES_PER_STORE: "Pages of the creator's refunds (GET /refunds, up to 100 each, newest first) the checkout sweep reads per store per run for gifts (lib/gifts.ts, revokeRefundedGifts; CX-123 rule 24, r24 money inventory item 1), asked only of a store that ever sold one, each page from the last one's final row (starting_after) until has_more is false: at most GIFT_REFUND_PAGES_PER_STORE calls a store every five minutes for gifts, and at most GIFT_REFUND_PAGES_PER_STORE + PREORDER_REFUND_PAGES_PER_STORE for the two together, inside each run's deadline; a run that stops with pages left keeps the anchor and goes on next run from where it stopped (the pass, nl:gift:<store>:refunds:pass, a JSON of under 300 bytes kept a week, in the store's data family and erased with it): one more GET in the run's first read (with the GETs of the sold mark and of the anchor), one SET with EX of the pass for each page read whole with more after it (at most GIFT_REFUND_PAGES_PER_STORE a run), and at the end of a pass one SET of the anchor with one DEL of the pass instead of the anchor's SET alone; a run that resumes a pass reads the newest page first, inside the same GIFT_REFUND_PAGES_PER_STORE pages. Each refund read is one row handled as before, with the store commands a refund row of the same job takes (the SISMEMBER of the read set and the GET of the payment's gift, then for a full refund of one sold here the reads of that gift and of what it gave, the course removal, the writes that take it back and the mark of the row as read, a SADD with the EXPIRE that keeps the read set thirty days from its last mark), each reply read in its exact shape, at most 100 x GIFT_REFUND_PAGES_PER_STORE rows a run instead of 100. A scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call.",
-  PREORDER_REFUND_PAGES_PER_STORE: "Pages of the creator's refunds (GET /refunds, up to 100 each, newest first) the checkout sweep reads per store per run for pre-orders (lib/preorders.ts, revokeRefundedPreorders; CX-123 rule 24, r24 money inventory item 1), asked only of a store that ever sold one, each page from the last one's final row (starting_after) until has_more is false: at most PREORDER_REFUND_PAGES_PER_STORE calls a store every five minutes for pre-orders, and at most GIFT_REFUND_PAGES_PER_STORE + PREORDER_REFUND_PAGES_PER_STORE for the two together, inside each run's deadline; a run that stops with pages left keeps the anchor and goes on next run from where it stopped (the pass, nl:pre:<store>:refunds:pass, a JSON of under 300 bytes kept a week, in the store's data family and erased with it): one more GET in the run's first read (with the GETs of the sold mark and of the anchor), one SET with EX of the pass for each page read whole with more after it (at most PREORDER_REFUND_PAGES_PER_STORE a run), and at the end of a pass one SET of the anchor with one DEL of the pass instead of the anchor's SET alone; a run that resumes a pass reads the newest page first, inside the same PREORDER_REFUND_PAGES_PER_STORE pages. Each refund read is one row handled as before, with the store commands a refund row of the same job takes (the SISMEMBER of the read set and the GET of the payment's pre-order, then for a full refund of one sold here the reads of that pre-order and of what it gave, the course removal, the writes that take it back and the mark of the row as read, a SADD with the EXPIRE that keeps the read set thirty days from its last mark), each reply read in its exact shape, at most 100 x PREORDER_REFUND_PAGES_PER_STORE rows a run instead of 100. A scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call.",
+  PREORDER_REFUND_PAGES_PER_STORE: "Pages of the creator's refunds (GET /refunds, up to 100 each, newest first) the checkout sweep reads per store per run for pre-orders (lib/preorders.ts, revokeRefundedPreorders; CX-123 rule 24, r24 money inventory item 1), asked only of a store that ever sold one, each page from the last one's final row (starting_after) until has_more is false: at most PREORDER_REFUND_PAGES_PER_STORE calls a store every five minutes for pre-orders, and at most GIFT_REFUND_PAGES_PER_STORE + PREORDER_REFUND_PAGES_PER_STORE for the two together, inside each run's deadline; a run that stops with pages left keeps the anchor and goes on next run from where it stopped (the pass, nl:pre:<store>:refunds:pass, a JSON of under 300 bytes kept a week, in the store's data family and erased with it): one more GET in the run's first read (with the GETs of the sold mark and of the anchor), one SET with EX of the pass for each page read whole with more after it (at most PREORDER_REFUND_PAGES_PER_STORE a run), and at the end of a pass one SET of the anchor with one DEL of the pass instead of the anchor's SET alone; a run that resumes a pass reads the newest page first, inside the same PREORDER_REFUND_PAGES_PER_STORE pages. Each refund read is one row handled as before, with the store commands a refund row of the same job takes (the SISMEMBER of the read set and the GET of the payment's pre-order, then for a full refund of one sold here the hand-over's giving mark taken around it (one SET NX EX, and one EVAL that lets it go; a row whose mark another run holds is left unread for the next run, lib/preorders.ts), the reads of that pre-order and of what it gave, the course removal, the writes that take it back and the mark of the row as read, a SADD with the EXPIRE that keeps the read set thirty days from its last mark; the release job's own refund check takes the same mark, with one HGET of the entry under it), each reply read in its exact shape, at most 100 x PREORDER_REFUND_PAGES_PER_STORE rows a run instead of 100. A scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call.",
 };
 
 /** What a scope of a counter in the code is: counted in a line, an abuse guard, or open. */
@@ -2698,7 +2811,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   // The studio's one search box (766 [STN13]): its counters, checked before the search's STUDIO_SEARCH_UNITS studio requests are taken and counted inside them when it is answered.
   "studio-search": BURST("studio"), "studio-search-day": BURST("studio"),
   // Sign-in and account security.
-  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
+  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "move-done": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),
   "stock-hold": guard("Holds one connection may start on a store's limited products within one hold's time (lib/stock.ts, HOLDS_PER_ADDRESS): a bound on held units, not per store use."),
@@ -2712,7 +2825,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "metaads-deauth": guard("Meta's own notices: a company cost."), "outreach-stop": guard("A recipient's stop link: a company cost."),
   "free-conn": PUBLIC, "free-net": PUBLIC,
   // Public requests: counted in the store's window as well (lib/metered-limits.ts, withinStore).
-  "ads-event": PUBLIC, "aff-join": PUBLIC, "aff-open": PUBLIC, "book-move": PUBLIC, "cart-read": PUBLIC, "come-back": PUBLIC, "course-start": PUBLIC,
+  "ads-event": PUBLIC, "aff-join": PUBLIC, "aff-open": PUBLIC, "aff-partner": PUBLIC, "book-move": PUBLIC, "cart-read": PUBLIC, "come-back": PUBLIC, "course-start": PUBLIC,
   "discord-join": PUBLIC, download: PUBLIC, "orders-bundle": PUBLIC, "orders-older": PUBLIC, "form-ip": PUBLIC, heard: PUBLIC, "join-ip": PUBLIC, "manage-card": PUBLIC, "manage-card-back": PUBLIC,
   "manage-leave": PUBLIC, "manage-open": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
@@ -2771,6 +2884,12 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,
   "lib/billing-reminders.ts": COMPANY, "lib/passkeys.ts": COMPANY, "lib/plan-closing.ts": COMPANY, "lib/closing-buyers.ts": COMPANY, "lib/closing-plan-guard.ts": COMPANY, "lib/plan-refund-flow.ts": COMPANY, "lib/plan-pause.ts": COMPANY,
+  // The end of a move of the sign-in address: at most MOVE_END_EMAILS (2) company emails a move (app/api/auth/move
+  // tellMoved: the old address every time, the new one only when something did not come along), on top of the two
+  // of its ask (lib/auth.ts sendMoveLink), so up to four a finished move. Finished moves are counted before any of it,
+  // at most MOVES_PER_30_DAYS (10) an account, by its store's id (lib/move-pace.ts, scope move-done; Claude 7's review
+  // of #3326): at most 2 x 10 x 2 = 40 end emails an account in any calendar month. The asks are paced by move-ask.
+  "app/api/auth/move/route.ts": COMPANY,
   "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],

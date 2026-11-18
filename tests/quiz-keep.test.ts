@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as keepRules from "@/lib/quiz-keep-rules";
 import { QUIZ_KEEP_DAYS, checkedAfter, draftOf, draftToRestore, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
 import { deviceQuizKey } from "@/lib/quiz-keep-key";
 import { devicePlaceKey } from "@/lib/lesson-position";
@@ -111,6 +112,43 @@ part("Offered only while the student may answer");
   is("pressing the quiz's button forgets nothing: only a recorded try does", /addEventListener\("submit"/.test(readFileSync("components/quiz-keep.tsx", "utf8")), false);
   is("the owner, a visitor: no", [draw("owner").includes("data-quiz-keep"), draw("visitor").includes("data-quiz-keep")], [false, false]);
   is("before scripts run it draws nothing visible: the quiz is the plain form it was", /<span class="block" data-quiz-keep="true"><\/span>/.test(draw("student")), true);
+}
+
+part("Old or unreadable drafts go whenever a lesson or the library opens, and all of them at sign-out (review of #4324, MEDIUM 1)");
+{
+  // A synthetic browser storage: what localStorage offers the sweep (length, key, getItem, removeItem).
+  const storageOf = (entries: [string, string][]) => {
+    const kept = new Map(entries);
+    return { kept, storage: { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, getItem: (k: string) => kept.get(k) ?? null, removeItem: (k: string) => void kept.delete(k) } };
+  };
+  const named = keepRules as unknown as Record<string, unknown>;
+  const sweep = named.sweepQuizDrafts as ((storage: unknown, now: number) => number) | undefined;
+  const forgetAll = named.forgetAllQuizDrafts as ((storage: unknown) => number) | undefined;
+  const fresh = JSON.stringify(draftOf(inputs, shown, 0, NOW - 60_000));
+  const stale = JSON.stringify(draftOf(inputs, shown, 0, NOW - (QUIZ_KEEP_DAYS * 86_400_000 + 1)));
+  const future = JSON.stringify(draftOf(inputs, shown, 0, NOW + 86_400_000));
+  const { kept, storage } = storageOf([
+    ["mm:quiz:shop:prod:one:" + "a".repeat(32), fresh],
+    ["mm:quiz:shop:prod:two:" + "a".repeat(32), stale],
+    ["mm:quiz:gone:prod:one:" + "b".repeat(32), "not json"],
+    ["mm:quiz:shop:prod:three:" + "c".repeat(32), future],
+    ["mm:quiz:shop:prod:four:" + "c".repeat(32), "[1,2]"],
+    ["mm:place:other", "kept"],
+  ]);
+  is("the sweep exists", typeof sweep, "function");
+  if (sweep) {
+    is("removes the four old, unreadable or impossible drafts", sweep(storage, NOW), 4);
+    is("and keeps the fresh draft and what is not a quiz draft", [...kept.keys()], ["mm:quiz:shop:prod:one:" + "a".repeat(32), "mm:place:other"]);
+  }
+  is("signing out removes them all", typeof forgetAll === "function" ? [forgetAll(storage), [...kept.keys()]] : null, [1, ["mm:place:other"]]);
+  const lesson = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
+  const library = readFileSync("app/library/page.tsx", "utf8");
+  const signin = readFileSync("app/signin/page.tsx", "utf8");
+  is("every lesson and the library sweep, for anyone who opens them", [/<QuizSweep \/>/.test(lesson), /<QuizSweep \/>/.test(library)], [true, true]);
+  is("the page signing out ends on removes every draft", /status\.startsWith\("out"\) \? <ForgetQuizDrafts \/>/.test(signin), true);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+  is("the privacy policy says when they are removed", /id="quiz-drafts"[\s\S]{0,2400}Each time a lesson or the library opens in that browser[\s\S]{0,300}signing out removes them all/.test(privacy), true);
+  is("and the register too", PERSON_DATA.some((r) => r.file === "lib/quiz-keep-rules.ts" && /a lesson or the library opens/.test(r.what) && /sign out/.test(r.what)), true);
 }
 
 part("Said in every language, and in the privacy policy");

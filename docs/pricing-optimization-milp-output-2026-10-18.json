@@ -5,7 +5,7 @@
    "scenario": "-0.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 973.2185,
+   "objective": 973.1297,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -52,7 +52,7 @@
    "scenario": "-0.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 985.3605,
+   "objective": 985.2371,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -99,7 +99,7 @@
    "scenario": "-1",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 342.8024,
+   "objective": 342.7704,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -146,7 +146,7 @@
    "scenario": "-1",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 347.0655,
+   "objective": 347.0211,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -193,7 +193,7 @@
    "scenario": "-1.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 178.0263,
+   "objective": 177.4887,
    "plans": {
     "creator": {
      "monthCents": 13900,
@@ -222,7 +222,7 @@
      }
     },
     "scale": {
-     "monthCents": 128900,
+     "monthCents": 129900,
      "shares": {
       "ai": 1.0,
       "video": 1.0,
@@ -240,7 +240,7 @@
    "scenario": "-1.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 261.6616,
+   "objective": 259.8187,
    "plans": {
     "creator": {
      "monthCents": 10900,
@@ -269,7 +269,7 @@
      }
     },
     "scale": {
-     "monthCents": 57900,
+     "monthCents": 58900,
      "shares": {
       "ai": 0.1,
       "video": 0.1,
@@ -287,7 +287,7 @@
    "scenario": "-2",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 96.6221,
+   "objective": 96.0,
    "plans": {
     "creator": {
      "monthCents": 13900,
@@ -316,7 +316,7 @@
      }
     },
     "scale": {
-     "monthCents": 128900,
+     "monthCents": 129900,
      "shares": {
       "ai": 1.0,
       "video": 1.0,
@@ -334,7 +334,7 @@
    "scenario": "-2",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 209.9956,
+   "objective": 206.8819,
    "plans": {
     "creator": {
      "monthCents": 10900,
@@ -363,7 +363,7 @@
      }
     },
     "scale": {
-     "monthCents": 57900,
+     "monthCents": 58900,
      "shares": {
       "ai": 0.1,
       "video": 0.1,

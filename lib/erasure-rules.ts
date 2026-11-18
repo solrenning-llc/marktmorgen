@@ -95,13 +95,19 @@ export type ErasureSize = {
  * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4471) the private podcast feeds of
  * removed products: the count of the store's noted products (SCARD), their set read with whether the walk of feeds
  * granted before the note is done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most
- * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (#4462, 16 November 2026) the count and the read of the
- * store's waitlist marks (lib/waitlist.ts waitlistMarks: two SCARD, two SMEMBERS), whose members are then counted with
- * the rest (ERASE_PER.waitlists): 558 before them.
+ * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; (Claude 3 on #3473) the read of the memberships whose
+ * invitations wait to be deleted (lib/move-members.ts withPendingInvites), one SMEMBERS: 558 before it; and (#4462,
+ * 16 November 2026) the count and the read of the store's waitlist marks (lib/waitlist.ts waitlistMarks: two SCARD,
+ * two SMEMBERS), whose members are then counted with the rest (ERASE_PER.waitlists): 559 before them.
  */
-export const ERASE_FIXED_COMMANDS = 562;
-/** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+export const ERASE_FIXED_COMMANDS = 563;
+/**
+ * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
+ * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
+ * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
+ * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000.
+ */
+export const ERASE_FIXED_BYTES = 325_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],

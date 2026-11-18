@@ -614,6 +614,10 @@ async function main(): Promise<void> {
     // Merge of main e023347098 into #2571 (18 November 2026, Claude 3 local): main's costs (#3591, #4246) and this PR's
     // time-on-page readings together, monthly 44.33, 309.83, 694.40 -> 44.31, 309.77, 694.18; figures as the model computes
     // them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #3501 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
+    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #3411 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
+    // Merge of main into #3501 (18 November 2026, Claude 6 cloud, main f3b01adfe7): main's model and this PR's lines
     // Merge of main into #3476 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
     // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #3411 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines

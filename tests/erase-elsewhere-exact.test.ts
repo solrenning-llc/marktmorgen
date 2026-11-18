@@ -496,6 +496,23 @@ async function main(): Promise<void> {
     is("and S is still in X's index", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);
   }
 
+  part("LEVE (Claude 4 on #3660 at 89d44aba5a): an id read past as no store (nil), whose team still lists the person, leaves the index for good");
+  {
+    fresh();
+    // A deleted store whose team drop failed (app/api/store/stores/route.ts drops it with .catch): its team still lists
+    // X, its id stays in X's index, and no store is kept under it. Ahead of more ids than are read.
+    const gone = "a".repeat(32);
+    redis.run(["SET", teamKey(gone), JSON.stringify({ members: [{ email: X, role: "admin", joinedAt: new Date().toISOString() }], invites: [] })]);
+    redis.run(["SADD", teamIndexKey(X), gone]);
+    for (let i = 0; i < MEMBER_STORES_READ; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`gone${i}`).digest("hex")]);
+    const before = Number(redis.run(["SCARD", teamIndexKey(X)]));
+    const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
+    const after = Number(redis.run(["SCARD", teamIndexKey(X)]));
+    is("the read past stays unknown this time", read, "UnknownReplyError");
+    is("and every id it read leaves the index, the dead store's included: the next read gets further", before - after >= MEMBER_STORES_READ - 1, true);
+    is("the dead store's id is out of the index, not put back", redis.run(["SISMEMBER", teamIndexKey(X), gone]), 0);
+  }
+
   part("LEVE (Claude 1 C3 on #3660 at 0c057f2cb8): an entry kept only for an undecided calendar keeps no more of the store than that");
   {
     fresh();

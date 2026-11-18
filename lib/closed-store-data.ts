@@ -608,12 +608,16 @@ async function clearClaims(store: Store, hosts: string[], own: Set<string>, keep
   const key = claimsLeftKey(storeRef(store));
   const ended = String(store.planEndedAt ?? "");
   const left = await claimsLeft(key, ended);
+  // Hosts read to their end on an earlier walk: a claim naming this store may have been written to them since (a paid
+  // booking is written whatever is there), so each is read once more from its start on the walk that finishes
+  // (Claude 5's LOW on #3660), within CLAIM_PAGES like any other host.
+  const endedBefore = hosts.filter((host) => left[host] === CLAIMS_END);
   let moved = false;
   let stopped: unknown = null;
-  let unfinished = false;
   let kept = false;
-  for (const host of hosts) {
-    let cursor = left[host] ?? "0";
+  /** Reads `host`'s claims from `from`, CLAIM_PAGES pages at the most, deleting this store's: where it stopped. */
+  const walkHost = async (host: string, from: string): Promise<string> => {
+    let cursor = from;
     for (let round = 0; round < CLAIM_PAGES && cursor !== CLAIMS_END; round += 1) {
       let page: ReturnType<typeof scanPage> = null;
       try {
@@ -645,8 +649,20 @@ async function clearClaims(store: Store, hosts: string[], own: Set<string>, keep
       left[host] = cursor;
       moved = true;
     }
+    return cursor;
+  };
+  let unfinished = false;
+  for (const host of hosts) {
+    const cursor = await walkHost(host, left[host] ?? "0");
     if (stopped) break;
     if (cursor !== CLAIMS_END) unfinished = true;
+  }
+  if (!stopped && !unfinished && endedBefore.length > 0) {
+    for (const host of endedBefore) {
+      const cursor = await walkHost(host, "0");
+      if (stopped) break;
+      if (cursor !== CLAIMS_END) unfinished = true;
+    }
   }
   if (!stopped && !unfinished) return key;
   if (moved) {

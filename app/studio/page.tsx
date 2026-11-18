@@ -152,6 +152,7 @@ import { BusinessTasks } from "@/components/business-tasks";
 import { NextActionsPanel } from "@/components/next-actions-panel";
 import { nextActions } from "@/lib/next-actions-rules";
 import { nextFactsOf } from "@/lib/next-actions-read";
+import { DRAFTABLE, NEXT_DRAFT_JOBS } from "@/lib/next-action-draft-rules";
 import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
@@ -1497,7 +1498,8 @@ export default async function StudioPage({
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
-            {nextScreen ? <NextActionsPanel view={nextScreen} /> : null}
+            {/* A draft written with AI only when asked (unit 3): for a role that writes drafts, on a store with the writing help. */}
+            {nextScreen ? <NextActionsPanel view={nextScreen} draftable={ai.on && may("draft") ? DRAFTABLE : []} jobs={NEXT_DRAFT_JOBS} /> : null}
             {/* The store's own task list (IA2): read by the block itself once the page is open, nothing read here. */}
             {may("settings") ? <BusinessTasks /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
@@ -1580,6 +1582,10 @@ export default async function StudioPage({
                   : []),
                 // Everyone on the store, for their own devices (lib/phone-alerts.ts).
                 { href: studioPath(store, "", "phone"), title: "Phone notifications", text: "A buzz for sales, bookings, community reports, affiliate applications and live events, on your own devices.", icon: "phone" as const },
+                // The owner's own alert emails, so the owner's only (lib/notify-prefs-rules.ts, queue item 601 [KB22] U6).
+                ...(role === "owner"
+                  ? [{ href: studioPath(store, "", "notifications"), title: "Alert emails", text: "Choose which emails about your store's numbers you get. Account, payment and legal emails always come.", icon: "mail" as const }]
+                  : []),
                 // Everyone on the store, for their own calendar as a team host (lib/host-calendar.ts).
                 ...(callProducts.length > 0
                   ? [{ href: studioPath(store, "", "calendar"), title: "Your calendar", text: "Your own busy times, kept out of the team calls you host.", icon: "calendar" as const }]

@@ -905,6 +905,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        q: "How do I choose which alert emails I get?",
+        a: [
+          "In your studio, open \u201cAlert emails\u201d. Under \u201cAlerts you choose\u201d, each email about your store's numbers has its own box: \u201cVisits fell\u201d, \u201cFewer sales from the same visits\u201d, \u201cRefunds piling up\u201d, \u201cMonthly goal off pace\u201d, \u201cMonthly goal reached\u201d and \u201cSales stopped\u201d. Each one is on until you turn it off. Uncheck the ones you do not want, then press \u201cSave choices\u201d. Turning one off stops its email only: your phone and your team chat keep their own settings.",
+          "Some emails are \u201cAlways sent\u201d, and the page says why for each: changes to your account, payment problems, your plan and your store, and notices about your content. Only the store's owner can open this page, because these emails go to the owner.",
+          "The stop link at the foot of the weekly email stops all of these alerts too, along with the weekly, monthly and busy-day emails. If it was used, the page says so, with a button to start them again. The alerts begin once your store takes payments through Stripe, on a paid plan or a free trial.",
+        ],
+      },
+      {
         q: "Can my store show that people are buying?",
         a: [
           "Yes, with the truth only. Under \u201cLatest purchases on your store\u201d in your studio, switch it on, and your front page and product pages show a small card at the bottom: what was bought, how long ago, and the country the card was billed in, written in your store's language. It never says who bought, by name, city or picture.",

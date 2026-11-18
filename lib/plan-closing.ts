@@ -1065,7 +1065,9 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
       const [raw] = await redisPipeline([["GET", stateKey(key)]]);
       const kept = parseState(raw);
       if (result.note === "daily-recheck-budget") result.overdue = overdueWhy(kept) ?? result.overdue;
-      else if (typeof raw === "string" && overdueWhy(kept) !== result.overdue) await redisPipeline([["SET", stateKey(key), JSON.stringify({ ...kept, overdueAs: OVERDUE_REASONS.indexOf(result.overdue) })]]);
+      // Written only over the state just read (CLOSING_STATE_SAVE, as every other write of this state; Claude 4's LOW
+      // on #3501): a run that advanced the state in between keeps what it wrote, and this note is simply not made.
+      else if (typeof raw === "string" && overdueWhy(kept) !== result.overdue) await redisPipeline([["EVAL", CLOSING_STATE_SAVE, 1, stateKey(key), "is", raw, JSON.stringify({ ...kept, overdueAs: OVERDUE_REASONS.indexOf(result.overdue) })]]);
       await recordOverdue(key, result.overdue, now);
     } catch (error) {
       console.error("counting a closing store kept past its published time failed", error);

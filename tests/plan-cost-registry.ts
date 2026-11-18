@@ -1507,7 +1507,8 @@ export const HELD_EXPOSURE = {
 /**
  * DONO-3 company work for a closing store at or past its day (fourth pre-review, LEVE 3), outside paid-unit
  * COST_LINES like HELD_EXPOSURE, at most per store per daily run of the closing job:
- *   - kept past the published time: GET of its record, SET of its reason when it changes (overdueWhy), and the
+ *   - kept past the published time: GET of its record, its reason when it changes (overdueWhy) written only over the
+ *     state just read (CLOSING_STATE_SAVE's EVAL with its TYPE, GET and SET; Claude 4's LOW on #3501), and the
  *     monthly count's EVAL (HELD_ONCE);
  *   - its creator account refusing us: SET of its record (refusedFrom, refusedLast), HSET+EXPIRE of the day's
  *     account note, and four HLEN of the two days' notes; an account that answers: HSET+EXPIRE and, after a
@@ -1528,7 +1529,7 @@ export const HELD_EXPOSURE = {
  * number of stores in this state are unknown, never zero: no monthly total is certified here.
  */
 export const CLOSING_DEADLINE_WORK = {
-  overdueCommandsPerRun: 3,
+  overdueCommandsPerRun: 1 + (1 + 3) + 1,
   refusalCommandsPerRun: 1 + 2 + 4,
   silenceCommandsPerRun: 1 + 2 + 4,
   renewalNoticeCommandsOnce: 1,

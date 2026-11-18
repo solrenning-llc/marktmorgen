@@ -258,8 +258,10 @@ export async function readGeneration(statsId: string | null, person: string): Pr
 export async function readGenerations(statsId: string, persons: string[]): Promise<number[]> {
   if (!persons.length || !isRedisConfigured()) return persons.map(() => 0);
   const replies = await redisPipeline(persons.map((person) => ["GET", generationKey(statsId, person)]));
-  // A reply slot that is missing is unknown, as is every slot of an envelope that is not an array.
-  return persons.map((_, i) => (Array.isArray(replies) && i < replies.length ? generationOf(replies[i]) : -1));
+  // One reply per person, exactly (Codex X6 on #2287): an envelope that is not an array, or one of another length, short
+  // or long, is not the reply to these reads, so every slot is unknown (-1), never 0 and never read by position.
+  if (!Array.isArray(replies) || replies.length !== persons.length) return persons.map(() => -1);
+  return persons.map((_, i) => generationOf(replies[i]));
 }
 
 /**

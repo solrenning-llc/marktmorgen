@@ -68,12 +68,17 @@ type OpenBatch = PendingPayoutBatch;
 type Sent = OpenBatch["lines"][number];
 
 async function readLink(store: Store): Promise<Link | null> {
+  return (await readLinkAsKept(store))?.link ?? null;
+}
+
+/** The app's record and its exact text as kept, so a write can go only onto that same record (AUTOPAY_IF). */
+async function readLinkAsKept(store: Store): Promise<{ link: Link; raw: string } | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", linkKey(store.statsId)]]);
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Link;
-    return typeof v.client === "string" && typeof v.secret === "string" ? v : null;
+    return typeof v.client === "string" && typeof v.secret === "string" ? { link: v, raw } : null;
   } catch {
     return null;
   }
@@ -229,11 +234,28 @@ export async function disconnectPayPal(store: Store): Promise<void> {
   await redisPipeline([["DEL", linkKey(store.statsId)]]);
 }
 
+/**
+ * The switch written only onto the exact record read, in one step: KEYS[1] the app's record, ARGV[1] its text as read,
+ * ARGV[2] the text to write. Answers 1 (written) or 0 (gone or replaced meanwhile, nothing written).
+ */
+export const AUTOPAY_IF = `-- marktmorgen:paypal-autopay-if:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1`;
+
+/**
+ * Turns automatic payouts on or off on the app's record. Written only onto the exact record read (AUTOPAY_IF), its
+ * reply read exactly, 0 or 1: a disconnect between the read and the write is never undone (the app, with its sealed
+ * secret, is not written back), and an app replaced meanwhile is never overwritten by the old one's record (Codex X8
+ * on #4345, ALTO: SET XX proved only that some record was there). Either way the switch answers false: not
+ * connected, or changed meanwhile, to be tried again. Anything else is unknown and throws.
+ */
 export async function setAutoPay(store: Store, on: boolean): Promise<boolean> {
-  const link = await readLink(store);
-  if (!link || !store.statsId) return false;
-  await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify({ ...link, auto: on })]]);
-  return true;
+  const kept = await readLinkAsKept(store);
+  if (!kept || !store.statsId) return false;
+  const set = repliesFor(await redisPipeline([["EVAL", AUTOPAY_IF, 1, linkKey(store.statsId), kept.raw, JSON.stringify({ ...kept.link, auto: on })]]), 1);
+  if (!set || (set[0] !== 1 && set[0] !== 0)) throw new UnknownReplyError("turning PayPal automatic payouts on or off");
+  return set[0] === 1;
 }
 
 async function readOpen(statsId: string): Promise<Map<string, OpenBatch>> {

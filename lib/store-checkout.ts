@@ -16,7 +16,7 @@ import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrig
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
-import { rememberPlan } from "@/lib/plans";
+import { rememberPlan } from "@/lib/plan-remember";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleOff } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
@@ -919,7 +919,7 @@ export async function createCheckout(
   // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
   // rememberPlan throws unless the write is confirmed, and on an id the job could not follow (Codex X4 on #4493), so a
   // checkout whose end is not on that list is never handed out; the open session then expires unpaid.
-  if (plan || (membership && membership.payments > 0)) await rememberPlan(store.stripeAccountId ?? "", session.id);
+  if (plan || (membership && membership.payments > 0)) await rememberPlan(store.stripeAccountId ?? "", session.id, { sid: store.sid, product: product.id });
   // When Stripe closes it, in Unix seconds: its own expires_at, else the one this checkout was opened with (a held unit,
   // the reminders' hour), else null (Stripe's default day). A caller that keeps the address keeps it no longer
   // (lib/winback-send.ts; Claude 7's review of #3482, MEDIUM).

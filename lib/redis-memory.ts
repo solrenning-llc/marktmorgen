@@ -271,6 +271,11 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
+        if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, mark] = args;
+          return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;
@@ -2575,7 +2580,11 @@ export class MemoryRedis {
         // passes for the wrong reason.
         const at = flags.indexOf("EX");
         const seconds = at >= 0 ? Number(flags[at + 1]) : NaN;
+        // EXAT: the unix second the key ends at (lib/paypal-sales.ts, an order kept until thirty days from opening).
+        const exat = flags.indexOf("EXAT");
+        const endsAt = exat >= 0 ? Number(flags[exat + 1]) : NaN;
         if (Number.isFinite(seconds)) this.until.set(key, this.now() + seconds * 1000);
+        else if (Number.isFinite(endsAt)) this.until.set(key, endsAt * 1000);
         else this.until.delete(key);
         return "OK";
       }

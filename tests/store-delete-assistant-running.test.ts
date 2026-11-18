@@ -99,6 +99,22 @@ async function main(): Promise<void> {
     is("which names no button the assistant's card does not show while its payment is failing", /press|Stop at the end/i.test(notice?.[2] ?? "press"), false);
   }
 
+  part("An add-on not known to have ended holds the store, its period unreadable or over (Codex X6 and T on #4202)");
+  {
+    // An identified subscription, not active, not set to stop, with no proof Stripe ended it: a past_due or unpaid
+    // one whose period Stripe did not say, or whose period ran out before the next sync wrote the renewed month.
+    const unread = await extraStore("assist-unknown@example.com", "assistunknownfirst", "assistunknownextra");
+    await setAssistantPlan(storeRef(unread), { subscriptionId: "sub_assistantunknown1", active: false, period: null, cancelsAtEnd: false, disputedAt: "" });
+    const first = await deleteStore(storeRef(unread));
+    is("its period unreadable: deleting it is refused, as unknown is not ended", first.ok ? "deleted" : first.reason, "assistant_due");
+    is("that store is still there", (await storeForId(unread.sid))?.handle ?? null, "assistunknownextra");
+    const lapsed = await extraStore("assist-lapsed@example.com", "assistlapsedfirst", "assistlapsedextra");
+    await setAssistantPlan(storeRef(lapsed), { subscriptionId: "sub_assistantlapsed1", active: false, period: { start: NOW - 40 * 86_400, end: NOW - 10 * 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" });
+    const second = await deleteStore(storeRef(lapsed));
+    is("its period over but not ended: deleting it is refused, Stripe may still bill the next month", second.ok ? "deleted" : second.reason, "assistant_due");
+    is("and that store is still there", (await storeForId(lapsed.sid))?.handle ?? null, "assistlapsedextra");
+  }
+
   part("An add-on whose paid period is over charges nothing more: the store can go");
   {
     const store = await extraStore("assist-over@example.com", "assistoverfirst", "assistoverextra");

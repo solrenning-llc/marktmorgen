@@ -706,6 +706,7 @@ export function StatsPanel({
 
       {reading ? <ReadingLine reading={reading} /> : null}
 
+      {/* oxlint-disable-next-line react/purity -- pre-existing read of today's date, not flagged by the former ESLint React Compiler rule; changing render behavior is outside the lint swap */}
       {pickDates ? <CustomRange today={data.days[data.days.length - 1]?.date ?? new Date().toISOString().slice(0, 10)} currency={data.currency ?? "usd"} /> : null}
 
       {empty ? (

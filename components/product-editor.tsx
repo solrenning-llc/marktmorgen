@@ -1204,6 +1204,7 @@ function OptionsBlock({
       )}
 
       <ul className="mt-3 space-y-2">
+        {/* oxlint-disable-next-line react/refs -- the ref is read only inside ref callbacks and event handlers, not during render; oxlint's port flags the enclosing callback */}
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
             {editingId === option.id ? (() => {
@@ -1457,6 +1458,7 @@ function OptionsBlock({
       {adding
         ? form(
             "Add this price",
+            // oxlint-disable-next-line react/refs -- run() reads its in-flight ref only when the form is submitted, not during render; oxlint's port flags the callback
             () =>
               run(
                 { action: "add", id: product.id, label, price, details, best, ...(shipped ? { sku } : {}) },

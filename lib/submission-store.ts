@@ -962,24 +962,31 @@ export async function forgetSubmissionsPerson(
 /**
  * What one buyer sent for review in a store, for the copy of their data
  * (lib/person-copy.ts): each kept record as they sent it, with the
- * creator's reply when there is one, and each upload still open. A record
- * there but unreadable is said, never left out.
+ * creator's reply when there is one, and each upload still open, each named
+ * by its course's product. A record there but unreadable is said, never left out.
  */
-export async function submissionsCopyOf(folder: string, who: string): Promise<unknown[]> {
+export async function submissionsCopyOf(
+  folder: string,
+  who: string,
+  productOfCourse: (courseId: string) => string | null = () => null,
+): Promise<unknown[]> {
   const out: unknown[] = [];
   const iso = (seconds: number) => (seconds > 0 ? new Date(seconds * 1000).toISOString() : "");
   for (const entry of await entriesOf(folder, who)) {
+    // Named by the product the buyer bought, as the copy's other course records are (LOW on #3570); a course no
+    // longer in the store keeps its own id.
+    const course = productOfCourse(entry.courseId) ?? entry.courseId;
     let kept: KeptSubmission | null;
     try {
       kept = await readSubmission(folder, entry.id);
     } catch (error) {
       if (!(error instanceof UnknownReplyError)) throw error;
-      out.push({ course: entry.courseId, lesson: entry.lessonId, unread: "A file you sent for review is kept for this lesson, but its record could not be read for this copy." });
+      out.push({ course, lesson: entry.lessonId, unread: "A file you sent for review is kept for this lesson, but its record could not be read for this copy." });
       continue;
     }
     if (kept) {
       out.push({
-        course: entry.courseId,
+        course,
         lesson: entry.lessonId,
         file: kept.file.name,
         bytes: kept.file.bytes,
@@ -993,7 +1000,7 @@ export async function submissionsCopyOf(folder: string, who: string): Promise<un
       continue;
     }
     const door = await readDoorById(folder, entry.id);
-    if (door) out.push({ course: entry.courseId, lesson: entry.lessonId, file: door.name, bytes: door.bytes, type: door.type, uploadStarted: iso(door.at), state: "uploading" });
+    if (door) out.push({ course, lesson: entry.lessonId, file: door.name, bytes: door.bytes, type: door.type, uploadStarted: iso(door.at), state: "uploading" });
   }
   return out;
 }

@@ -394,7 +394,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
-  "lib/submission-store.ts": async (s) => submissionsCopyOf(await storeFolder(storeRef(s.store)), s.learner),
+  "lib/submission-store.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return submissionsCopyOf(await storeFolder(storeRef(s.store)), s.learner, (courseId) => productOf.get(courseId) ?? null);
+  },
   // Withdrawn ones too: the erasure deletes them, so they are kept about the person.
   "lib/certificate.ts": async (s) => certificatesOf(s.courses.map((c) => c.courseId), s.email),
   "lib/lesson-comments.ts": async (s) => {

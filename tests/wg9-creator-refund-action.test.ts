@@ -19,6 +19,9 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readLogWhole } from "@/lib/team";
 import { TOLD_DAYS, giveRefund } from "@/lib/creator-refund";
+import * as refundLib from "@/lib/creator-refund";
+import { allowanceUsedExact, forceAllowance } from "@/lib/store-allowance";
+import { PLATFORM_SUBSCRIPTION_SEARCH, UNIT_COST } from "./plan-cost-registry";
 import { POST } from "@/app/api/store/person-refund/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -296,6 +299,56 @@ async function main(): Promise<void> {
   await post({ charge: CHARGE, token: T9, amount: "1.00", reason: "requested_by_customer" });
   is("and only once", (await logLines(store)).length, logBefore + 1);
   is("one refund given back in all", refundPosts().filter((c) => new URLSearchParams(c.body ?? "").get("amount") === "100").length >= 1 && stripe.charge.refunded, 100);
+
+  part("Claude 5 on #3678 (6934250282), MEDIUM cost: three Stripe waits are counted before the first one");
+  // The refund makes up to three Stripe calls (the charge, its refunds, the refund), each waited on for up to
+  // STRIPE_TIMEOUT_MS at 2 GB. The route's guardStoreWrite counts one studio request; the rest are taken before the
+  // first call, so every wait is paid for before it is spent (MR 1).
+  const lib = refundLib as unknown as { REFUND_STRIPE_CALLS?: number; REFUND_UNITS?: number };
+  is("the most Stripe calls a refund makes is named: three", lib.REFUND_STRIPE_CALLS, 3);
+  const units = lib.REFUND_UNITS ?? 1;
+  const waits = 3 * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
+  is(`the units past the route's one pay for three waits at 2 GB (${waits.toFixed(6)} USD)`, (units - 1) * UNIT_COST.studio >= waits, true);
+  reset();
+  const TC = "c".repeat(32);
+  const usedBefore = await allowanceUsedExact(store, "studio");
+  await giveRefund(store, { email: OWNER, role: "owner" }, { charge: CHARGE, token: TC, amount: "1.00" });
+  const usedAfter = await allowanceUsedExact(store, "studio");
+  is("a refund takes the units past the route's one from the studio figure", usedBefore !== null && usedAfter !== null ? usedAfter - usedBefore : null, units - 1);
+  is("and it made three Stripe calls", stripe.calls.length, 3);
+
+  part("Claude 5 on #3678, LEVE: a told mark whose claim was unknown is let go when the log line is lost");
+  reset();
+  const TL = "d".repeat(32);
+  const toldBefore = (await logLines(store)).length;
+  const plainPipeline = redis.pipeline.bind(redis);
+  let lostOnce = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const [name, key] = [String(commands[0]?.[0] ?? ""), String(commands[0]?.[1] ?? "")];
+    // The SET NX lands, but its answer comes back in another shape; the read back fails: the claim is "unknown".
+    if (name === "SET" && key.startsWith("nl:crefund:told:") && commands[0].includes("NX")) {
+      await plainPipeline(commands);
+      return ["??"];
+    }
+    if (name === "GET" && key.startsWith("nl:crefund:told:")) throw new Error("synthetic: the read back failed");
+    if (!lostOnce && name === "LPUSH" && key.startsWith("nl:team:log:")) {
+      lostOnce += 1;
+      throw new Error("synthetic: the team log's write was lost");
+    }
+    return plainPipeline(commands);
+  }) as typeof redis.pipeline;
+  await post({ charge: CHARGE, token: TL, amount: "1.00" });
+  redis.pipeline = plainPipeline;
+  is("its line was not written", (await logLines(store)).length, toldBefore);
+  await post({ charge: CHARGE, token: TL, amount: "1.00" });
+  is("the same form again writes it now", (await logLines(store)).length, toldBefore + 1);
+
+  part("Claude 5 on #3678, MEDIUM cost: no studio request left for the waits, nothing is asked of Stripe");
+  reset();
+  await forceAllowance(store, "studio", 100_000_000);
+  const studioRefused = await giveRefund(store, { email: OWNER, role: "owner" }, { charge: CHARGE, token: "e".repeat(32), amount: "1.00" });
+  is("said as the studio's requests used", studioRefused, { ok: false, error: "studio_used" });
+  is("no Stripe call", stripe.calls.length, 0);
 
   part("What is kept: one mark per refund told, for as long as Stripe keeps a key");
   is("two days, past Stripe's 24 hours", TOLD_DAYS, 2);

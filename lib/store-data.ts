@@ -311,6 +311,16 @@ export async function forceData(store: DataStore, changes: DataChange[], now = D
   if (!counted.ok) throw new Error("the store's data room could not be counted");
 }
 
+/**
+ * Counts, before it is written, what a write that is never refused will
+ * grow by, like noteData, but says whether the count landed: a write that
+ * must never be stored uncounted is made only on `ok` (lib/contacts.ts,
+ * Codex X6 on #2576). Never refuses for room; never throws.
+ */
+export function countData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
+  return run(store, changes, true, now / 1000);
+}
+
 /** One slot shrunk by `bytes`. Never refuses and never throws. */
 export function giveDataBytes(store: DataStore, slot: string, bytes: number, now = Date.now()): Promise<void> {
   return giveData(store, [{ slot, bytes }], now);

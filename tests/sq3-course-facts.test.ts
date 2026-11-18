@@ -26,6 +26,7 @@ import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 import { store as redis } from "./redis-stub";
 import { COMMANDS } from "./traffic-cost";
 import { REQUEST_COMMANDS } from "./plan-cost-registry";
+import { FINISHED_FACT_COMMANDS } from "@/lib/certificate";
 import { done, is, part } from "./check";
 
 const FOLDER = "0123456789abcdef0123456789abcdef";
@@ -161,7 +162,10 @@ async function main() {
     is("200 minutes", value.videoSeconds, 200 * 60);
     is("the sales page reads the course and the lengths: two commands", COURSE_FACTS_COMMANDS, 2);
     // The later page measured 6 commands on 6 November 2026 (tests/traffic.test.ts, drawLater).
-    is("with them a course's sales page stays inside the later-page model", 6 + COURSE_FACTS_COMMANDS <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
+    // "N students earned the certificate" (93 [D2-VERIFIED-SOCIAL]) is one HLEN more on that page (lib/certificate.ts,
+    // earnedCount), read only when a "By the numbers" block asks for it: counted here too (Claude 2 I, Claude 6, Claude 5).
+    is("the certificates earned: one command", FINISHED_FACT_COMMANDS, 1);
+    is("with them a course's sales page stays inside the later-page model", 6 + COURSE_FACTS_COMMANDS + FINISHED_FACT_COMMANDS <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
   }
 
   part("both pages say it, from the code");

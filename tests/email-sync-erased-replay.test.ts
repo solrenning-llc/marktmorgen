@@ -74,3 +74,54 @@ test("a deletion print that does not read is unknown: nothing written, never tak
     assert.equal(logSize(), 0, value);
   }
 });
+
+/**
+ * Codex C2 (5876565212) and Codex G (5876832230): the deletion can land between the first read of its print and the
+ * job's write, and the job would then go to the platform. The erasure writes the print before it deletes any job
+ * (lib/person-erasure.ts), so queuePerson reads the print again once its job is written, before it is sent: a
+ * deletion that came in between takes that job out, and nothing goes.
+ */
+test("a deletion landing between the check and the job's write hands nothing over", async () => {
+  reset();
+  const KEPT = "late.deleted@example.com";
+  const real = redis.pipeline.bind(redis);
+  let landed = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!landed && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:esync:j:"))) {
+      landed = true;
+      // The erasure, at this moment: its print first, then its jobs (none yet).
+      await real([suppressCommand(LIST, KEPT, Math.floor(Date.now() / 1000))]);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let answer: string;
+  try {
+    answer = await queuePerson(store, person(KEPT, ORDER_AT));
+  } finally {
+    redis.pipeline = real;
+  }
+  assert.equal(landed, true, "the deletion landed after the first check");
+  assert.equal(answer, "off");
+  assert.equal(queueSize(), 0, "nothing waits for the platform");
+  assert.equal((redis.run(["LRANGE", logKey, 0, -1]) as string[]).some((id) => String(redis.run(["GET", `nl:esync:j:${id}`]) ?? "").includes(KEPT)), false, "and no job holds the address");
+});
+
+test("the deletion's reads are counted (Claude 4 and Codex N1): HAND_OVER_ERASED_READS, named in the cost registry", async () => {
+  reset();
+  const { HAND_OVER_ERASED_READS } = await import("@/lib/email-sync");
+  const { COST_LINES } = await import("./plan-cost-registry");
+  const real = redis.pipeline.bind(redis);
+  let reads = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    reads += commands.filter((c) => c[0] === "HGET" && c[1] === suppressedKey(LIST)).length;
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try {
+    assert.equal(await queuePerson(store, person("counted.buyer@example.com", ORDER_AT)), "queued");
+  } finally {
+    redis.pipeline = real;
+  }
+  assert.equal(reads, HAND_OVER_ERASED_READS, "a person handed over reads the deletion print this many times");
+  const named = COST_LINES.filter((line) => line.sources.some((s) => s.file === "lib/email-sync.ts" && s.names.includes("HAND_OVER_ERASED_READS"))).map((line) => line.id);
+  assert.deepEqual(named.sort(), ["orders", "public-requests"], "the orders line and the public requests line (sign-ups, free copies) name them");
+});

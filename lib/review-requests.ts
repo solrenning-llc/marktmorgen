@@ -38,7 +38,7 @@ import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
+import { canWrite, fromLine, mailDay, release, render, reserve, type MailDay } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -446,7 +446,7 @@ export async function sendReviewRequests(
     let decided = false;
     // The day whose emails were reserved for this batch, until its outcome is known: a throw in between gives them back
     // (Codex N1 on #4495), as an outcome that was not "sent" does.
-    let reservedDay: string | null = null;
+    let reservedDay: MailDay | null = null;
     try {
     const day = mailDay();
     const reserved = await reserve(store, ready.length, false, day);

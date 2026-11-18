@@ -1,9 +1,15 @@
 /**
- * 313 [CV1] unit 4b: a product picture, and its smaller copy, copied to the pictures' own R2 bucket as they are
- * attached, when that bucket is on (lib/picture-r2.ts, pictureR2Config: off until the owner's settings and the
+ * 313 [CV1] unit 4b: a product picture, its smaller copy and its thumbnail copy (lib/product-image.ts, imagePaths; at
+ * most PICTURE_R2_FILES_PER_ATTACH files, more refused before anything is read), copied to the pictures' own R2 bucket
+ * as they are attached, when that bucket is on (lib/picture-r2.ts, pictureR2Config: off until the owner's settings and the
  * reviewed request ceiling exist). Off, nothing is read and nothing is sent. Each file is read once from the file
  * store, at most MAX_IMAGE_BYTES, and written create-only; a copy that fails leaves the picture as it was, served
  * from where it always was. Nothing serves from R2 yet: addressing marked pictures is unit 4c.
+ *
+ * Its cost, for the review PICTURE_R2_CEILING waits on (lib/picture-r2.ts): an attached picture's copy is at most
+ * PICTURE_R2_FILES_PER_ATTACH Blob reads (the picture and its smaller copy at most MAX_IMAGE_BYTES each, the thumbnail
+ * at most MAX_THUMB_BYTES) and as many create-only Class A writes, plus the RETRY_PER_CALL deletes tried again below
+ * (Codex N1, LOW 2 on #2801). No line prices it yet: it is off, and turning it on needs that review first.
  */
 import { get } from "@/lib/blob";
 import { copyPictureToR2, deletePictureFromR2, pictureR2Config, type PictureR2Config } from "@/lib/picture-r2";
@@ -41,13 +47,16 @@ async function readPicture(path: string): Promise<Uint8Array> {
   return whole;
 }
 
+/** The most files one attached picture has (imagePaths): the picture, its smaller copy and its thumbnail copy. */
+export const PICTURE_R2_FILES_PER_ATTACH = 3;
+
 /** True when every file was copied (or was already there under its fresh name); false when off or on any failure. */
 export async function copyAttachedPicture(
   paths: readonly string[],
   options: { config?: PictureR2Config | null; read?: (path: string) => Promise<Uint8Array> } = {},
 ): Promise<boolean> {
   const config = "config" in options ? options.config : pictureR2Config();
-  if (!config || paths.length === 0) return false;
+  if (!config || paths.length === 0 || paths.length > PICTURE_R2_FILES_PER_ATTACH) return false;
   const read = options.read ?? readPicture;
   // A copy also tries again a few deletes an earlier drop left behind (PICTURE_DROP_QUEUE), as a stamped copy does.
   await retryPictureDrops(RETRY_PER_CALL, { config }).catch((error: unknown) => console.error("pictures left in their bucket from before could not be deleted yet; they stay on the list", error));

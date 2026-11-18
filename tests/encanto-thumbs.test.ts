@@ -6,8 +6,11 @@
  *   - (1) checked exactly as the smaller copy is (lib/product-image.ts, parseThumb; app/api/store/image/route.ts:
  *     owned name, fresh from the picture door or the product's own, type sniffed and matching, a fixed byte ceiling,
  *     narrower than the copies above it); a copy that fails is dropped and never written;
- *   - (2) it lives in the store's picture folder, so the storage meter counts it, and it goes with the picture when
- *     the picture is replaced or deleted, or copied to the pictures' own bucket (imagePaths);
+ *   - (2) it lives in the store's picture folder (`images/`), beside the picture and its smaller copy, and goes with
+ *     the picture when the picture is replaced or deleted, or copied to the pictures' own bucket (imagePaths). Like
+ *     them, it is not in the storage meter, which lists `stores/` only (lib/file-store.ts, filesHeld): its storage is
+ *     one file of at most MAX_THUMB_BYTES a picture, with no line of its own yet, so not certified, never zero
+ *     (Codex N1, LOW 3 on #2801; tests/encanto-thumb-leves.test.ts);
  *   - (3) its cost is written down: every thumbnail upload is its own studio request through the pictures' upload
  *     route (studioAccess, counted against the plan's studio figure, a hard ceiling a month), which the line
  *     `picture-uploads` already prices at the dearest upload request; the line `picture-thumbnails` in

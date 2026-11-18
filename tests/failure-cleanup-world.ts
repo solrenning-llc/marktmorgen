@@ -21,6 +21,11 @@ function missing(pathname: string): Error {
 
 export async function head(pathname: string) {
   heads.set(pathname, (heads.get(pathname) ?? 0) + 1);
+  return described(pathname);
+}
+
+/** What head answers, without counting it as a head (a read carries it too). */
+function described(pathname: string) {
   const file = files.get(pathname);
   if (!file) throw missing(pathname);
   return { pathname, size: file.bytes.length, contentType: file.contentType, url: `https://blob.test/${pathname}`, downloadUrl: "", uploadedAt: new Date(file.at ?? 0), cacheControl: "", contentDisposition: "", etag: "" };
@@ -31,7 +36,7 @@ export async function get(pathname: string) {
   const file = files.get(pathname);
   if (!file) return null;
   const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(file.bytes); controller.close(); } });
-  return { statusCode: 200, stream, blob: await head(pathname) };
+  return { statusCode: 200, stream, blob: described(pathname) };
 }
 
 export async function del(pathnames: string | string[]): Promise<void> {

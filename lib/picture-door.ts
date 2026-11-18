@@ -154,13 +154,20 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
  * time read here is a second check that a file stored before its note (a door
  * asked again for somebody's picture) is kept. Anything that cannot be read is
  * kept. Best effort: nothing here throws.
+ *
+ * `known` holds the stored time this same request already read with its own
+ * head (app/api/store/image): that time is used, not asked for again, so a
+ * copy refused after its check costs the attaching request one head, as the
+ * line picture-thumbnails prices (Codex N1, LOW 1 on #2801). The check is the
+ * same: a name is never written over, so its stored time cannot change.
  */
-export async function dropTakenPictures(taken: Map<string, number>, paths: string[]): Promise<void> {
+export async function dropTakenPictures(taken: Map<string, number>, paths: string[], known?: ReadonlyMap<string, number>): Promise<void> {
   const ours: string[] = [];
   for (const path of new Set(paths)) {
     const noted = taken.get(path);
     if (noted === undefined) continue;
-    const stored = await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
+    const read = known?.get(path);
+    const stored = read !== undefined ? read : await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
     if (Number.isFinite(stored) && stored > noted) ours.push(path);
   }
   if (ours.length) await del(ours).catch(() => {});

@@ -303,6 +303,18 @@ async function main(): Promise<void> {
   const longAfter = await startPitch(store, input, { reader: site(COPPER), now: later });
   is("not a year later either", longAfter.ok ? "written" : longAfter.reason, "stopped");
   is("once stopped, it cannot be marked as anything else", (await setPitchStatus(store, second.pitch.id, "deal"))?.status, "stopped");
+  // A business that answered, then pressed stop: it is closed all the same, and the answer the creator marked stays,
+  // so "What your pitches did" never says it got none (Claude 1 cloud on #4123, reconfirmed by Claude 7 and Codex N1).
+  for (const marked of ["replied", "deal"] as const) {
+    const domain = marked === "replied" ? "birchlane.com" : "elmrow.com";
+    const answered = await startPitch(store, { ...input, page: `https://${domain}/contact`, email: `hello@${domain}`, company: domain }, { reader: site({ [`https://${domain}/contact`]: `<p>hello@${domain}</p>` }), now: NOW + 140 });
+    if (!answered.ok) throw new Error(`no pitch to ${domain}: ${answered.reason}`);
+    await setPitchStatus(store, answered.pitch.id, "sent", NOW + 150);
+    is(`marked ${marked}`, (await setPitchStatus(store, answered.pitch.id, marked, NOW + 160))?.status, marked);
+    is(`the business presses stop after a ${marked}`, await stopFromLink(answered.pitch.stop, false, NOW + 170), true);
+    is(`a ${marked} pitch keeps its mark`, (await listPitches(store)).find((p) => p.id === answered.pitch.id)?.status, marked);
+    is(`and the business is closed to the store all the same`, (await readStopLink(answered.pitch.stop))?.stopped, true);
+  }
 
   part("Closed to every store");
   const two = await claimHandle("other@example.com", "bakes", "Bakes by Mo", "");

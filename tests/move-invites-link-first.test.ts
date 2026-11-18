@@ -63,6 +63,34 @@ async function main(): Promise<void> {
   await write();
   is("one invitation dropped, its link with it", [await dropProductInvites(store, club, async () => true), ...(await redis.pipeline([["HEXISTS", key, field], ["EXISTS", linkKey(token)]]))], [1, 0, 0]);
 
+  for (const [operation, answer] of [["DEL", 2], ["ZREM", "lost"]] as const) {
+    part(`An unconfirmed ${operation} leaves the invitation available for retry`);
+    await write();
+    const dueKey = "nl:mv:due";
+    const member = `${store.sid}|${field}`;
+    await original([["ZADD", dueKey, 1_900_000_000, member]]);
+    redis.pipeline = (async (batch: Command[]) => {
+      const failed = batch.findIndex((command) => command[0] === operation && command[1] === (operation === "DEL" ? linkKey(token) : dueKey));
+      if (failed === -1) return original(batch);
+      const replies = await original(batch.filter((_, index) => index !== failed));
+      replies.splice(failed, 0, answer);
+      return replies;
+    }) as typeof redis.pipeline;
+    let unconfirmed = false;
+    try {
+      await dropProductInvites(store, club, async () => true);
+    } catch (error) {
+      unconfirmed = error instanceof UnknownReplyError;
+    } finally {
+      redis.pipeline = original;
+    }
+    is("the cleanup is unconfirmed and keeps the invitation",
+      [unconfirmed, (await original([["HEXISTS", key, field]]))[0]], [true, 1]);
+    is("an exact retry removes the invitation, its link and its reminder",
+      [await dropProductInvites(store, club, async () => true), ...await original([["HEXISTS", key, field], ["EXISTS", linkKey(token)], ["ZSCORE", dueKey, member]])],
+      [1, 0, 0, null]);
+  }
+
   done();
 }
 

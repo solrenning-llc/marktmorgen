@@ -146,16 +146,20 @@ async function givePicturePlace(path: string): Promise<void> {
   }
 }
 
-/** The pictures a community keeps now, doors not yet used included, for the studio. */
+/**
+ * The pictures a community keeps now, doors not yet used included, as the closing walk adds them to a store's bytes
+ * (lib/plan-closing.ts). Read exactly (rule 24; #4260, Codex V): only an exact nil is no pictures and only a string of
+ * digits is a count. Any other reply (none, two, another shape, a negative or a fraction) and a read that throws are
+ * unknown, never zero: it throws, and the closing walk keeps the store held and looks at it again on its next run, so
+ * a store is never saved as fitting, or taken on toward its closing day, on a figure nobody has.
+ */
 export async function picturesKept(communityFolder: string): Promise<number> {
   if (!/^[0-9a-f]{24}$/.test(communityFolder) || !isRedisConfigured()) return 0;
-  try {
-    const [raw] = await redisPipeline([["GET", countKey(communityFolder)]]);
-    const n = Number(raw);
-    return Number.isSafeInteger(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  const [raw] = repliesFor(await redisPipeline([["GET", countKey(communityFolder)]]), 1) ?? [undefined];
+  if (raw === null) return 0;
+  const n = typeof raw === "string" && /^[0-9]{1,15}$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(n)) throw new UnknownReplyError("a community's picture count");
+  return n;
 }
 
 /** A community whose pictures were all removed (lib/plan-closing.ts) keeps none. */

@@ -39,6 +39,28 @@
     "list-email": 0,
     "visits": 3400
    },
+   "lowest": {
+    "A": {
+     "ai": 1,
+     "video": 1,
+     "storage": 1,
+     "orders": 1,
+     "store-email": 1,
+     "transactional-email": 1,
+     "list-email": 1,
+     "visits": 1
+    },
+    "C": {
+     "ai": 1,
+     "video": 0.25,
+     "storage": 0.1,
+     "orders": 0.1,
+     "store-email": 0.1,
+     "transactional-email": 0.1,
+     "list-email": 1,
+     "visits": 0.1
+    }
+   },
    "options": [
     {
      "monthCents": 900,
@@ -355,6 +377,28 @@
     "transactional-email": 400,
     "list-email": 7000,
     "visits": 10000
+   },
+   "lowest": {
+    "A": {
+     "ai": 1,
+     "video": 1,
+     "storage": 1,
+     "orders": 1,
+     "store-email": 1,
+     "transactional-email": 1,
+     "list-email": 1,
+     "visits": 1
+    },
+    "C": {
+     "ai": 0.1,
+     "video": 0.1,
+     "storage": 0.1,
+     "orders": 0.1,
+     "store-email": 0.1,
+     "transactional-email": 0.1,
+     "list-email": 0.1,
+     "visits": 0.1
+    }
    },
    "options": [
     {
@@ -2268,6 +2312,28 @@
     "transactional-email": 1000,
     "list-email": 10000,
     "visits": 40000
+   },
+   "lowest": {
+    "A": {
+     "ai": 1,
+     "video": 1,
+     "storage": 1,
+     "orders": 1,
+     "store-email": 1,
+     "transactional-email": 1,
+     "list-email": 1,
+     "visits": 1
+    },
+    "C": {
+     "ai": 0.1,
+     "video": 0.1,
+     "storage": 0.1,
+     "orders": 0.1,
+     "store-email": 0.1,
+     "transactional-email": 0.1,
+     "list-email": 0.1,
+     "visits": 0.1
+    }
    },
    "options": [
     {

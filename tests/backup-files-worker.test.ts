@@ -102,6 +102,12 @@ function big(size: number, seed: number): Uint8Array {
 }
 
 async function main(): Promise<void> {
+  let ambientRequests = 0;
+  // Fail closed if a scheduled path escapes the fixtures: no native fetch is available to this test.
+  globalThis.fetch = (async () => {
+    ambientRequests += 1;
+    throw new Error("unmocked network request in backup worker test");
+  }) as typeof fetch;
   part("it runs on its hourly cron only: no fetch handler, no workers.dev, no route");
   const tomlPath = join(root, "workers/backup-files/wrangler.toml");
   const toml = existsSync(tomlPath) ? readFileSync(tomlPath, "utf8") : "";
@@ -137,12 +143,12 @@ async function main(): Promise<void> {
   fresh();
   let noRetry = 0;
   const controller = { scheduledTime: DAY0, cron: "17 * * * *", noRetry: () => { noRetry += 1; } };
-  await worker.scheduled(controller as never, env({ BACKUP_FILES_ROUTE_URL: undefined }) as never, { waitUntil: () => undefined } as never);
-  const unconfigured = files.json(`reports/${iso(Date.now())}.json`) as { alarms?: { code: string }[] } | null;
-  is("without its route: noRetry, the route never called, the report and the hook say why", [noRetry > 0, world.calls.filter((c) => c.url !== ALARM).length, unconfigured?.alarms?.some((a) => a.code === "worker_unconfigured")], [true, 0, true]);
   const realFetch = globalThis.fetch;
   globalThis.fetch = fakeFetch as typeof fetch;
   try {
+    await worker.scheduled(controller as never, env({ BACKUP_FILES_ROUTE_URL: undefined }) as never, { waitUntil: () => undefined } as never);
+    const unconfigured = files.json(`reports/${iso(Date.now())}.json`) as { alarms?: { code: string }[] } | null;
+    is("without its route: noRetry, the route never called, the report and the hook say why", [noRetry > 0, world.calls.filter((c) => c.url !== ALARM).length, unconfigured?.alarms?.some((a) => a.code === "worker_unconfigured")], [true, 0, true]);
     fresh();
     noRetry = 0;
     await worker.scheduled(controller as never, env() as never, { waitUntil: () => undefined } as never);
@@ -150,6 +156,8 @@ async function main(): Promise<void> {
     globalThis.fetch = realFetch;
   }
   is("every source of the contract is listed, so bunny (not built) alarms and no heartbeat is sent", [BACKUP_FILES_SOURCES.every((source) => world.calls.some((c) => c.url.includes(`source=${source}&`))), beats(), noRetry > 0], [true, 0, true]);
+
+  is("the scheduled paths never reach an unmocked network transport", ambientRequests, 0);
 
   part("a finished day with nothing to alarm: every object copied exactly, one heartbeat");
   fresh();
@@ -794,6 +802,10 @@ async function main(): Promise<void> {
   setListing("blob", S, pairPrivacy.slice(1));
   for (const day of [2, 31, 32, 35]) await runAt(day);
   is("day 35: the erasure was applied, the copy is gone", files.objects.has(privacyName), false);
+  await runAt(1 + 92);
+  is("when its retention ends, the original day's archive replayed from the journal is removed",
+    files.under(`deletions/${iso(DAY0 + DAY)}/`).length, 0);
+
 
   done();
 }

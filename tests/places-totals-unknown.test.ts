@@ -32,6 +32,7 @@ import { lookAs } from "./places-totals-unknown-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
@@ -67,7 +68,15 @@ async function groupPart(): Promise<void> {
   if (!started.ok) throw new Error("no group");
   const id = started.group.id;
   const session = { id: "cs_test_" + "p".repeat(24), created: 1_900_000_000, amount_total: 9800, currency: "usd", payment_intent: "pi_PlacesGroup0001", metadata: { store: "placesgroup", product: product.id, group: id, people: "2" }, customer_details: { email: "buyer@example.com" } };
-  if ((await settleGroup({ store, session, product, base: "https://marktmorgen.com/@placesgroup", from: '"Places" <hello@marktmorgen.com>' })) !== "settled") throw new Error("not settled");
+  // settleGroup reads the payment's own charge (refund and dispute flags, main 337a937ac4) before it closes the purchase:
+  // this healthy control answers that read as a plain paid one; every other Stripe call stays unanswered (Claude 6, #2992).
+  const before = globalThis.fetch;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => paidIntentReply(input, init?.method ?? "GET") ?? noStripe(input, init)) as typeof fetch;
+  try {
+    if ((await settleGroup({ store, session, product, base: "https://marktmorgen.com/@placesgroup", from: '"Places" <hello@marktmorgen.com>' })) !== "settled") throw new Error("not settled");
+  } finally {
+    globalThis.fetch = before;
+  }
   store = (await storeForEmail(OWNER))!;
   const render = async () => renderToStaticMarkup(await GroupPage({ params: Promise.resolve({ handle: "@placesgroup", group: id }), searchParams: Promise.resolve({}) }));
   const facts = (html: string) => ({

@@ -242,6 +242,27 @@ async function main(): Promise<void> {
   if (notSentLines) {
     is("a refund already told: no line", await notSentLines(store, "refund.issued", `paypal:${healthy.capture}`, "Not sent, synthetic."), 0);
     is("still one line in all", (await notSent()).length, 1);
+
+    // Codex L and Codex U on #3499 (MEDIUM): the mark's SET NX lands but its answer is lost on the way back. The
+    // "Not sent" line must still be written, on that call or the next, never left out for good behind the mark.
+    const stock = redis.pipeline.bind(redis);
+    let lose = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await stock(commands);
+      if (lose && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:hooks:evt:") && commands[0].includes("NX")) {
+        lose = false;
+        throw new Error("Synthetic: the mark's answer was lost");
+      }
+      return replies;
+    }) as typeof redis.pipeline;
+    const before = (await notSent()).length;
+    try {
+      await notSentLines(store, "refund.issued", "paypal:lost-mark-answer", "Not sent, synthetic.").catch(() => 0);
+      await notSentLines(store, "refund.issued", "paypal:lost-mark-answer", "Not sent, synthetic.").catch(() => 0);
+    } finally {
+      redis.pipeline = stock;
+    }
+    is("a mark whose answer was lost still leaves its \"Not sent\" line, once", (await notSent()).length - before, 1);
   }
 
   part("The tries stay inside REFUND_TELL_TRIES_AT_MOST whatever the mark answers (Codex C2's M1 on #3499)");

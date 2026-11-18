@@ -878,6 +878,8 @@ export const FAMILIES: Record<string, Family> = {
   // CANCELED_KEPT_SECONDS of lib/paypal-sales.ts: what a canceled order's notices and its page say (store, handle,
   // product, price, the buyer's PayPal address, what was taken), written once (SET NX) when PayPal never confirmed it.
   "nl:ppsell:canceled:@lib/paypal-sales.ts": short("A PayPal order canceled because PayPal never confirmed its payment, for its notices and the page its buyer comes back to, thirty days", "order", 30, KB, KIND("paypal")),
+  // ONBOARDING_SECONDS of lib/paypal-sales.ts: the way back from PayPal is taken only while it is there.
+  "nl:ppsell:start:@lib/paypal-sales.ts": { what: "A PayPal connect started from the studio, a day", parts: [capped(MARK, "One a store, holding \"1\", gone within a day.")] },
   // CANCEL_NOTICE_EVERY_SECONDS and CANCEL_NOTICE_BATCH of lib/paypal-sales.ts: two members a canceled order (its buyer's notice, its creator's), each gone once sent or when its mark ends.
   "nl:ppsell:tell@lib/paypal-sales.ts": short("Canceled PayPal orders whose notices the sender refused, until each is sent or thirty days pass", "order", 30, 2 * MARK, KIND("paypal")),
   "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),

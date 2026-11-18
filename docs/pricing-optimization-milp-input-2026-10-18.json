@@ -2282,7 +2282,7 @@
    "baseYear": 15422,
    "coefMonth": {
     "ai": 336,
-    "video": 46,
+    "video": 47,
     "storage": 206,
     "orders": 95,
     "store-email": 28,
@@ -2298,7 +2298,7 @@
     "store-email": 327,
     "transactional-email": 450,
     "list-email": 7560,
-    "visits": 3142
+    "visits": 3143
    }
   },
   "scale": {

@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.37% / 60.11% | 12.12% | 553 | $69 / $690 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.37% / 60.11% | 12.12% | 556 | $69 / $690 |
 | Studio | **$869 / $8,690** | every #553 figure, none cut | 61.16% / 60.85% | 12.43% | 17 | $449 / $4,490 |
 | Scale | **$1,799 / $17,990** | every #553 figure, none cut | 61.24% / 60.90% | 12.47% | 8 | $999 / $9,990 |
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 553 |
+| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 556 |
 | Studio | $869 | 21.0% | 20.6% / 1.4% / 10.6% / 21.0% | 17 |
 | Scale | $1,799 | 23.6% | 23.6% / 1.6% / 11.9% / 23.5% | 8 |
 
@@ -178,7 +178,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: none finite | $79: none finite | $99: none finite | $129: none finite |
-| Studio | $449: none finite | $559: none finite | $669: 2400 | $889: 15 |
+| Studio | $449: none finite | $559: none finite | $669: 2449 | $889: 15 |
 | Scale | $999: none finite | $1,239: none finite | $1,489: 25 | $1,989: 6 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
@@ -186,7 +186,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | ε -0.5: C over A | ε -1: C over A | ε -1.5: C over A | ε -2: C over A |
 | --- | --- | --- | --- | --- |
 | Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.09× ($159 against $189) | 1.19× ($159 against $189) |
-| Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.39× ($349 against $679) | 1.95× ($349 against $679) |
+| Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.40× ($349 against $679) | 1.95× ($349 against $679) |
 | Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.45× ($649 against $1,359) | 2.10× ($649 against $1,359) |
 
 **Each cut alone.** The same, one figure at a time cut to a tenth of #553's (rounded down as a page prints it), every other kept: the lowest price that keeps 60%, and the profit index over A's best in the two scenarios where a cut can lower the price.

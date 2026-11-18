@@ -21,6 +21,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
 import { POSITIVE_NET_CENTS } from "@/lib/receiving-costs";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import * as table from "./marktmorgen-affiliates-table";
 import { affiliateRows, netWithCommissionCents, renderMarktmorgenAffiliates } from "./marktmorgen-affiliates-table";
 import { done, is, part } from "./check";
 
@@ -59,6 +60,33 @@ is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PR
 is("the payout cost abroad is unknown, never zero, and no percentage is certified", [/unknown/i.test(doc), /never zero/i.test(doc), /no percentage is certified/i.test(doc)], [true, true, true]);
 is("the commission is owed only after payment and the 30-day refund window, and taken back on refund or dispute", [/30 days/.test(doc), /refund/i.test(doc), /dispute/i.test(doc)], [true, true, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
+
+part("Claude 5's review of #3756 (6910906486): the rules match the refund policy and the table prints what is paid");
+// HIGH: a yearly plan is refunded at any time, less the months already started (app/refunds/page.tsx section 3,
+// lib/plan-refund-rules.ts unstarted_months). Paid for the whole year at 30 days, the commission is cash already gone
+// when the refund comes; owed per started month, the months refunded were never paid out.
+is("a yearly plan's commission is owed per started month (a twelfth a month), never the whole year at once", /yearly plan[^.]*per started month/i.test(doc) && /never the whole year at once/i.test(doc), true);
+// MEDIUM: the table's percentage holds for a full plan payment; a plan change's prorated charge is smaller while the
+// fixed part of the fee and of the dispute reserve is not (lib/billing.ts, proration_behavior "always_invoice").
+is("the commission is owed only on a full plan payment, never on a prorated charge", /only on a full plan payment/i.test(doc) && /prorated/i.test(doc), true);
+// LEVE 1: the commission is rounded up to the cent (ceilBps); the "Per payment" column printed it rounded down.
+const paidCents = (table as { commissionCents?: (row: { priceCents: number }, bps: number) => number }).commissionCents;
+is("a commission-in-cents helper is exported", typeof paidCents, "function");
+for (const row of rows) {
+  if (row.maxCommissionBps === null || !paidCents) continue;
+  const cents = paidCents(row, row.maxCommissionBps);
+  const printed = `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  is(`${row.id}: "Per payment" prints the commission rounded up, as the net takes it`, doc.includes(`| ${(row.maxCommissionBps / 100).toFixed(2)}% | ${printed} |`), true);
+}
+// LEVE 2: the line under the table started its minimum at 100% and skipped the plans that cannot pay.
+const lowestLine = (table as { lowestLine?: (rows: { name: string; maxCommissionBps: number | null }[]) => string }).lowestLine;
+is("a lowest-line helper is exported", typeof lowestLine, "function");
+if (lowestLine) {
+  is("no plan can pay: it says so, never 100%", lowestLine([{ name: "A", maxCommissionBps: null }, { name: "B", maxCommissionBps: null }]).includes("100.00%"), false);
+  is("one plan cannot pay: no single percentage for every plan is offered", /one percentage for every plan/i.test(lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: null }])), false);
+  is("one plan cannot pay: it is named", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: null }]).includes("B"), true);
+  is("every plan can pay: the lowest is given", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: 4000 }]).includes("**40.00%**"), true);
+}
 
 part("Paying an affiliate: what was read, with its date and source (unit 2)");
 is("Stripe's own pages are cited, with the day they were read", ["https://stripe.com/connect/pricing", "https://docs.stripe.com/connect/cross-border-payouts", "https://docs.stripe.com/global-payouts", "https://docs.stripe.com/global-payouts/recipient-requirements"].every((url) => doc.includes(url)) && doc.includes("read on 11 November 2026"), true);

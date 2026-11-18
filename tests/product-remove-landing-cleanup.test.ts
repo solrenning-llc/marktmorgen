@@ -12,9 +12,11 @@ import { dataKey } from '@/lib/store-data';
 import { store as redis } from './redis-stub';
 import { paidPeriod } from './billing-period-fixture';
 import { done, is } from './check';
+import { answerNoRunningSubscriptions } from './stripe-no-running';
 
 globalThis.fetch = async () => { throw Error('No external provider in this proof'); };
 async function main() {
+  answerNoRunningSubscriptions();
   redis.clear();
   const owner = 'g-landing-cleanup@example.test';
   await claimHandle(owner, 'g-landing-cleanup', 'Synthetic store', '');

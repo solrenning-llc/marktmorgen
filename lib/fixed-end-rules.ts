@@ -11,7 +11,7 @@
  * fields, so the two can only agree (tests/fixed-end-cancel.test.ts checks
  * the end finishPlan writes is read back as the sold one).
  */
-import { addPeriods } from "@/lib/plans";
+import { addPeriods } from "@/lib/plan-periods";
 import { isInterval } from "@/lib/product-recurring";
 
 export type FixedEndSub = {

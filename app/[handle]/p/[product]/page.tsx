@@ -37,7 +37,7 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
-import { productIdFromAddress, readListing, readListings } from "@/lib/catalog";
+import { productIdFromAddress, readAsking, readListing, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -75,12 +75,14 @@ import { JsonLd } from "@/components/structured-data";
 import { offeredItems } from "@/lib/bundles";
 import { bundleReady as enoughToSell, picks } from "@/lib/bundle-rules";
 import { productSegment } from "@/lib/product-slug";
+import { storeAddress } from "@/lib/store-sitemap";
 import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
-import { readCourse } from "@/lib/course";
+import { coursesWords } from "@/lib/buyer-words/courses";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
+import { accessEndFact, readCourseForSale, shownAccessEnd } from "@/lib/course-access-end";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -185,7 +187,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * (canGiveProduct), a paid one while Stripe or the creator's PayPal takes it.
  */
 function productData(store: Store, product: Listing, description: string, soldOut: boolean, summary: Summary | null, soon = false, preorder = false, sellable = false) {
-  const url = `${SITE_URL}${productPath(store, product)}`;
+  // The page's own address, as its canonical names it: the creator's domain's when it is live there.
+  const url = storeAddress(store, `/p/${productSegment(product)}`);
   const options = sellableOptions(product);
   const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
   // A call with several lengths (lib/call-lengths.ts): each length's own price, as its checkout charges it.
@@ -286,10 +289,13 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const giftProblem = typeof query.gift === "string" ? query.gift : "";
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   const groupProblem = typeof query.group === "string" ? query.group : "";
   // Sent back because the box to start access at once was not checked (lib/digital-consent.ts): said beside it.
   const consentAgain = query.consent === "needed";
+  // Sent back by the checkout (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate): refused from the EU or the UK, or
+  // the billing country was left out. Only those two words; anything else shows nothing.
+  const countryStatus = query.status === "abroad" || query.status === "country" ? query.status : null;
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
@@ -313,7 +319,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, asksAtCheckout] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
     // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
     stockLeft(store, product).catch(() => undefined),
@@ -327,7 +333,20 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
-    product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
+    // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays: a term
+    // of the sale, so the record is read exactly. When it cannot be read, no way to buy the course is drawn (the buy
+    // box says buying is not available just now), never a buy box without the date. The video total stays lenient.
+    product.course ? readCourseForSale(product.course.id).then(async ({ course, unread }) => ({
+          facts: course ? await readCourseFacts(course).catch(() => null) : null,
+          accessEndLine: course && !product.recurring ? accessEndFact(course, store.language) : null,
+          // What the buy form sends back (24 [E7]): the end this page says, or "none"; never for a membership.
+          shownEnd: course && !product.recurring ? shownAccessEnd(course) : product.recurring ? null : "none",
+          unread,
+        })) : Promise.resolve(null),
+    // Whether it asks questions at checkout: then it is bought here, from the buy box that asks them, and is not
+    // offered for a cart, whose checkout refuses it (#4350). Read only where the cart would be offered; unknown is
+    // not "asks nothing" (rule 24), so the cart is not offered then either.
+    cartOn && !soon && cartable(product) ? readAsking(store, [product.id]).then((asking) => asking.has(product.id)).catch(() => true) : Promise.resolve(true),
   ]);
   // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
   if (savedPage === "unread") {
@@ -341,7 +360,11 @@ export default async function ProductPage({ params, searchParams }: Params) {
       </div>
     );
   }
-  const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
+  const videoLine = courseFacts?.facts?.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
+  // Said only where the checkout that stamps it is offered: a PayPal purchase takes no end (lib/paypal-delivery.ts,
+  // recordOpenEnrollment), so a course sold here through PayPal alone never shows a date (Claude 5's M1 on #3445).
+  const accessEndLine = canSellProduct(store, product) ? courseFacts?.accessEndLine ?? null : null;
+  const courseUnread = courseFacts?.unread === true;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -459,12 +482,26 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
+      {query.terms === "changed" && product.course ? <p className="st-note mt-4 text-sm" role="alert">{coursesWords(store.language).accessEndChanged}</p> : null}
       {unread && selling && !soon ? (
         <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
       ) : (
-        <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
+        <>
+          {/* Drawn with the buy box only: its link and the field's aria-describedby point at the country field inside it. */}
+          {countryStatus ? (
+            <div className="st-note mb-4" role="alert" id="country-notice">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices[countryStatus].title}</p>
+              <p className="mt-1 text-sm">{w.notices[countryStatus].body}</p>
+              <p className="mt-2 text-sm">
+                <a href={`#bc-${product.id}`} className="underline">{w.chooseCountry}</a>
+              </p>
+            </div>
+          ) : null}
+          <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
+        </>
       )}
-      {cartOn && !soon && !unread && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {/* A course whose exact read failed offers no way to buy here, the cart included (Codex L on #3445): the BuyBox is closed on the same reading. */}
+      {!courseUnread && cartOn && !soon && !unread && !asksAtCheckout && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -583,7 +620,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       ) : (
         <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
       )}
-      <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
+      <JsonLd data={breadcrumbData({ name: store.name, url: storeAddress(store) }, { title: product.title, url: storeAddress(store, `/p/${productSegment(product)}`) })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}
@@ -626,7 +663,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
-            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} />
+            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} accessEndLine={accessEndLine} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
             {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
@@ -694,7 +731,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
       </div>
       {soldLine}
-      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />
+      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} accessEndLine={accessEndLine} />
       {bundleList}
       <div className="mt-4">{buyTerms}</div>
     </section>

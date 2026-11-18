@@ -892,8 +892,8 @@ async function entriesOf(folder: string, who: string): Promise<NonNullable<Retur
  * Deletes everything one buyer sent for review in a store (lib/person-erasure.ts):
  * each upload still open is given up at the vault (and its storage reservation
  * given back), each record and door deleted, each file handed to the erasure in
- * `files` (deleted at once, or by the daily job within a day), taken off the
- * sweep's list, and the buyer's places and entries let go. Answers how many
+ * `files` (deleted at once, or by the daily job within a day), left due at once
+ * on the sweep's list, and the buyer's places and entries let go. Answers how many
  * submissions went. A step whose answer is unknown throws: the erasure says it
  * is not finished, and pressing again finishes it.
  */
@@ -903,6 +903,7 @@ export async function forgetSubmissionsPerson(
   files: string[],
   steps: Pick<DoorSteps, "abortReservedVault"> = VAULT_STEPS,
   data?: DataStore,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<number> {
   const entries = await entriesOf(folder, who);
   let gone = 0;
@@ -917,7 +918,10 @@ export async function forgetSubmissionsPerson(
       await redisPipeline([
         ["DEL", recordKey(folder, entry.id)],
         ["DEL", doorKey(folder, entry.id)],
-        ...(pathname ? [["ZREM", DUE_KEY, dueMember(folder, pathname)]] : []),
+        // The file stays on the sweep's list, due at once (Claude 6 on #3570): the caller deletes it at the end of the
+        // erasure, but if that delete fails or never runs, this entry is its only durable reminder, and the next daily
+        // sweep deletes it. Deleting a file already gone is harmless, and the sweep's record DEL finds nothing.
+        ...(pathname ? [["ZADD", DUE_KEY, nowSeconds, dueMember(folder, pathname)]] : []),
       ]),
       pathname ? 3 : 2,
     );

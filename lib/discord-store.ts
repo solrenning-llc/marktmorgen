@@ -35,6 +35,8 @@ const DUE_KEY = "nl:dc:due";
  * between runs (every 30 minutes, vercel.json).
  */
 export const DUE_LEASE_SECONDS = 15 * 60;
+/** The most people one run of the line takes (dueMembers): its cost is NOT_A_COST.DISCORD_DUE_PER_RUN (tests/plan-cost-registry.ts). */
+export const DISCORD_DUE_PER_RUN = 200;
 const STATE_SECONDS = 10 * 60;
 const stateKey = (token: string) => `nl:dc:state:${createHash("sha256").update(`nimbus-discord:${token}`).digest("hex").slice(0, 40)}`;
 
@@ -262,7 +264,7 @@ export async function checkSoon(sid: string, userId: string): Promise<void> {
  * run never finishes (the function stopped, Redis failing for the put-back too) comes due again when the lease runs
  * out, instead of being dropped for good with the creator's paid roles still given.
  */
-export async function dueMembers(now = Date.now(), limit = 200): Promise<{ sid: string; userId: string }[]> {
+export async function dueMembers(now = Date.now(), limit = DISCORD_DUE_PER_RUN): Promise<{ sid: string; userId: string }[]> {
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).filter((m): m is string => typeof m === "string");

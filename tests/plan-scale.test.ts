@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   is("the validated existing price is also cached", sent.length, validCount);
 
   part("Moving up from Pro");
-  held = { id: "sub_Owner00000001", status: "active", items: { data: [{ id: "si_Item00000001", price: { lookup_key: lookupKey("pro", "month"), unit_amount: PLAN_PRICES.pro.month, recurring: { interval: "month" } } }] }, metadata: { tier: "pro" } };
+  held = { id: "sub_Owner00000001", status: "active", cancel_at: null, cancel_at_period_end: false, items: { data: [{ id: "si_Item00000001", price: { lookup_key: lookupKey("pro", "month"), unit_amount: PLAN_PRICES.pro.month, recurring: { interval: "month" } } }] }, metadata: { tier: "pro" } };
   sent.length = 0;
   const moved = await switchPlan("sub_Owner00000001", { tier: "scale", cycle: "month" });
   const change = sent.find((s) => s.method === "POST" && s.body.has("items[0][price]"));

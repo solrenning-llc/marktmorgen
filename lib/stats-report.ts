@@ -22,12 +22,15 @@ import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesT
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { type Claimed, claimMark } from "@/lib/claim-mark";
 import { deriveKey } from "@/lib/secret-box";
 import { formatMoney } from "@/lib/money";
 import { insightsFrom } from "@/lib/insights";
 import type { AdSpend } from "@/lib/ad-spend-rules";
 import { SITE_URL } from "@/lib/site-url";
 import { goalProgress, moneyByDay, monthTitle } from "@/lib/sales-goal-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type Window = "d7" | "d30" | "d90";
 const WINDOWS: Window[] = ["d7", "d30", "d90"];
@@ -288,15 +291,46 @@ export function weeklyTokenOk(handle: string, token: string): boolean {
   return timingSafeEqual(Buffer.from(want), Buffer.from(token));
 }
 
+/**
+ * Whether the numbers emails are stopped for a store: true when its creator
+ * pressed "Stop", and also when the answer is in any other shape than 0 or 1
+ * (CX-123 rule 24): an unknown answer is never "not stopped", so no numbers
+ * email goes on it this time, and it is said in the log. Sweep A6 (Claude 5).
+ */
 export async function weeklyOff(handle: string): Promise<boolean> {
+  return (await weeklyOffState(handle)) !== false;
+}
+
+/**
+ * Whether the numbers emails are stopped: true, false, or null when the answer is unknown. The weekly and monthly
+ * jobs use it so an unknown answer is never kept as decided for the period (review of #4169); weeklyOff reads null as
+ * stopped, as before.
+ */
+export async function weeklyOffState(handle: string): Promise<boolean | null> {
   if (!isRedisConfigured()) return false;
-  const [member] = await redisPipeline([["SISMEMBER", OFF, handle]]);
-  return Number(member) === 1;
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
+  const member = replies ? countOf(replies[0]) : null;
+  if (member === 0) return false;
+  if (member === 1) return true;
+  console.error("weekly-off: whether the numbers emails are stopped is unknown; no numbers email this time");
+  return null;
 }
 
 export async function setWeeklyOff(handle: string, off: boolean): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([[off ? "SADD" : "SREM", OFF, handle]]);
+  confirmedWrite(await redisPipeline([[off ? "SADD" : "SREM", OFF, handle]]), [1], "the weekly email's stop");
+}
+
+/**
+ * A write's own answer read exactly (CX-123 rule 24): one whole count per command, none above what that command
+ * could change; any other shape throws, so a stop or a change is never said as done when nothing confirmed it.
+ */
+function confirmedWrite(replies: unknown, most: number[], what: string): void {
+  const exact =
+    Array.isArray(replies) &&
+    replies.length === most.length &&
+    replies.every((reply, i) => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 && reply <= most[i]);
+  if (!exact) throw new UnknownReplyError(what);
 }
 
 // ---- The weekly email to the team (added 11 October 2026) ---------------------
@@ -320,12 +354,13 @@ export async function weeklyTeam(handle: string): Promise<string[]> {
 export async function setWeeklyTeam(handle: string, emails: string[]): Promise<void> {
   if (!isRedisConfigured()) return;
   const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, MAX_WEEKLY_TEAM);
-  await redisPipeline([["DEL", teamKey(handle)], ...(clean.length ? [["SADD", teamKey(handle), ...clean]] : [])]);
+  const replies = await redisPipeline([["DEL", teamKey(handle)], ...(clean.length ? [["SADD", teamKey(handle), ...clean]] : [])]);
+  confirmedWrite(replies, clean.length ? [1, clean.length] : [1], "who gets the weekly email");
 }
 
 export async function leaveWeeklyTeam(handle: string, email: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["SREM", teamKey(handle), email.trim().toLowerCase()]]);
+  confirmedWrite(await redisPipeline([["SREM", teamKey(handle), email.trim().toLowerCase()]]), [1], "a team member's weekly email stop");
 }
 
 /** A team member's own stop link token: the store and their address, signed. */
@@ -341,11 +376,55 @@ export function weeklyMemberTokenOk(handle: string, email: string, token: string
   return timingSafeEqual(Buffer.from(want), Buffer.from(token));
 }
 
-/** Claims this week's email for a store; false when it was already claimed, so nobody gets two. */
+/**
+ * Claims this week's email for a store; false when it was already claimed, so nobody gets two. Read exactly
+ * (lib/claim-mark.ts, CX-123 rule 24): an answer not known to be this run's is never a claim, and nothing is sent on it.
+ */
 export async function claimWeek(handle: string, now = Date.now()): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
-  const [ok] = await redisPipeline([["SET", sentKey(weekOf(now), handle), "1", "NX", "EX", 9 * 86400]]);
-  return ok !== null;
+  return (await weekClaim(handle, now)) === "ours";
+}
+
+/** The week's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
+export async function weekClaim(handle: string, now = Date.now()): Promise<Claimed> {
+  if (!isRedisConfigured()) return "unknown";
+  return claimState(sentKey(weekOf(now), handle), 9 * 86400);
+}
+
+/**
+ * The visited folders the weekly or monthly job has decided for a period (C1 cost audit, 12 November 2026): emailed,
+ * quiet, stopped, not on a running plan, no store, or claimed already. The job runs every hour for two days; before,
+ * each run started again at the first folder and read every store already claimed (its record, its stop, its channel
+ * and a claim answering "taken") before reaching one not yet decided, so run k read about 25k stores and every run
+ * after the last one re-read them all until its time ran out. A folder left undecided (its store, its channel or its
+ * numbers could not be read) is not kept, and the next run reads it again. Read whole or not at all: an answer in
+ * another shape decides nothing, and the run reads every folder as before (the claims keep anyone from two emails).
+ */
+const seenKey = (kind: "weekly" | "monthly", period: string) => (kind === "weekly" ? `nl:weekly:seen:${period}` : `nl:monthly:seen:${period}`);
+
+export async function readSeen(kind: "weekly" | "monthly", period: string): Promise<Set<string>> {
+  if (!isRedisConfigured()) return new Set();
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", seenKey(kind, period)]]), 1);
+  const members = replies?.[0];
+  if (!Array.isArray(members) || members.some((member) => typeof member !== "string")) return new Set();
+  return new Set(members as string[]);
+}
+
+/** Keeps the folders decided in this run, for as long as the period's claims last. */
+export async function noteSeen(kind: "weekly" | "monthly", period: string, folders: string[]): Promise<void> {
+  if (!folders.length || !isRedisConfigured()) return;
+  const key = seenKey(kind, period);
+  await redisPipeline([["SADD", key, ...folders], ["EXPIRE", key, (kind === "weekly" ? 9 : 40) * 86400]]);
+}
+
+/** A once-only claim (SET NX): true only when it is this run's; taken or unknown is false, and unknown is said. */
+async function ownClaim(key: string, seconds: number): Promise<boolean> {
+  return (await claimState(key, seconds)) === "ours";
+}
+
+async function claimState(key: string, seconds: number): Promise<Claimed> {
+  const got = await claimMark(key, seconds);
+  if (got === "unknown") console.error(`stats-report: the claim ${key.split(":").slice(0, 2).join(":")} answered in an unknown shape; nothing is sent on it this time`);
+  return got;
 }
 
 const CHANNEL_WORDS: Record<string, string> = {
@@ -373,7 +452,8 @@ const CHANNEL_WORDS: Record<string, string> = {
 const channelWord = (source: string) => (Object.hasOwn(CHANNEL_WORDS, source) ? CHANNEL_WORDS[source] : source);
 
 /** The week's email, in words. Null when the store had no visitors in the week: nothing to say. */
-export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, spends: AdSpend[] = [], goal = 0): { subject: string; text: string } | null {
+/** spends null: the ad spend could not be read; the email says so instead of leaving it out as if there were none. */
+export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, spends: AdSpend[] | null = [], goal = 0): { subject: string; text: string } | null {
   const week = data.totals.d7;
   if (week.visitors === 0) return null;
   const known = paidFiguresComplete(data);
@@ -425,11 +505,12 @@ export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, sp
     }
   }
 
-  const worth = insightsFrom(data, "d7", spends, 3);
+  const worth = insightsFrom(data, "d7", spends ?? [], 3);
   if (worth.length) {
     lines.push("", "Worth knowing:");
     for (const item of worth) lines.push(`- ${item.text}`);
   }
+  if (spends === null) lines.push("", "Ad spend could not be read this time, so nothing here is set against it.");
 
   lines.push("", `Everything, day by day and channel by channel, is in your studio: ${SITE_URL}/studio`);
   lines.push("", `You get this every Monday while your store has visitors. To stop it: ${stopUrl}`);
@@ -460,11 +541,15 @@ export function lastMonthOf(now = Date.now()): string {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
 }
 
-/** Claims a month's email for a store; false when it was already claimed. */
+/** Claims a month's email for a store; false when it was already claimed, or when the answer is not known to be ours. */
 export async function claimMonth(handle: string, month: string): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
-  const [ok] = await redisPipeline([["SET", monthSentKey(month, handle), "1", "NX", "EX", 40 * 86400]]);
-  return ok !== null;
+  return (await monthClaim(handle, month)) === "ours";
+}
+
+/** The month's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
+export async function monthClaim(handle: string, month: string): Promise<Claimed> {
+  if (!isRedisConfigured()) return "unknown";
+  return claimState(monthSentKey(month, handle), 40 * 86400);
 }
 
 /** Lets a month's claim go, when the numbers could not be read, so a later run tries again. */
@@ -595,10 +680,15 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
   const verdict = isBusy(today, await viewsBefore(store, 14, now));
   if (!verdict.busy) return false;
   const day = new Date(now).toISOString().slice(0, 10);
-  const [claimed] = await redisPipeline([["SET", busyKey(store.handle, day), "1", "NX", "EX", 2 * 86400]]);
-  if (claimed === null) return false;
+  if (!(await ownClaim(busyKey(store.handle, day), 2 * 86400))) return false;
 
-  const top = (await sourcesToday(store, now)).filter((s) => s.name !== "direct")[0];
+  // Which channel brought most of them is one optional sentence. Read after the day's mark is taken, a reading that
+  // cannot be trusted (it throws, rule 24) leaves that sentence out, never a channel made up, and the email still goes.
+  const sources = await sourcesToday(store, now).catch((error: unknown) => {
+    console.error("stats-report: today's channels could not be read for the busy-day email; it goes without them", error);
+    return [];
+  });
+  const top = sources.filter((s) => s.name !== "direct")[0];
   const token = weeklyToken(store.handle);
   const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
   const lines = [
@@ -620,4 +710,9 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
     text: lines.join("\n"),
     headers: { "List-Unsubscribe": `<${stopUrl}>` },
   }).catch(() => false);
+}
+
+/** Lets this week's claim go, when the numbers could not be read, so a later run tries again (as releaseMonth does for the month). */
+export async function releaseWeek(handle: string, now = Date.now()): Promise<void> {
+  if (isRedisConfigured()) await redisPipeline([["DEL", sentKey(weekOf(now), handle)]]);
 }

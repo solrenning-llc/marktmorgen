@@ -6,6 +6,7 @@ import type { VoiceSource, VoiceSummary } from "@/lib/customer-voice";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
+  unread: "Some of what customers said could not be read just now, so no summary was made: it would leave them out for the whole month. No AI job was used. Try again in a moment.",
   few: "Not enough yet: fewer than 8 things customers wrote or searched for in the last 90 days. It is worth reading once there are more.",
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "This summary is not available right now.",
@@ -30,6 +31,13 @@ const said = (counts: Partial<Record<VoiceSource, number>>) =>
     .map((s) => `${counts[s]} ${SOURCE_WORDS[s][counts[s] === 1 ? 0 : 1]}`)
     .join(" · ");
 
+/** The lists named in plain words, the first capitalized: "Reviews and searches with no result". Pure. */
+export function unreadWords(unread: VoiceSource[]): string {
+  const names = SOURCES.filter((s) => unread.includes(s)).map((s) => SOURCE_WORDS[s][1]);
+  const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return list ? `${list[0].toUpperCase()}${list.slice(1)}` : "";
+}
+
 function monthName(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -42,6 +50,7 @@ function monthName(month: string): string {
  * customers' own words.
  */
 export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
+  // oxlint-disable-next-line react/purity -- pre-existing read of today's date, not flagged by the former ESLint React Compiler rule; changing render behavior is outside the lint swap
   const thisMonth = new Date().toISOString().slice(0, 7);
   const [summary, setSummary] = useState<VoiceSummary | null>(initial);
   const [busy, setBusy] = useState(false);
@@ -54,9 +63,13 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
     setError(null);
     try {
       const response = await fetch("/api/store/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
       if (data.ok && data.summary) setSummary(data.summary);
-      else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      else {
+        const message = MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
+        const named = data.error === "unread" && Array.isArray(data.unread) ? unreadWords(data.unread) : "";
+        setError(named ? `${message} Not read: ${named}.` : message);
+      }
     } catch {
       setError(MESSAGES.server_error);
     } finally {

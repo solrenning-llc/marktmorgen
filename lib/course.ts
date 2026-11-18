@@ -13,16 +13,20 @@
  *
  * Pure rules at the top, storage at the bottom.
  */
+import { type CourseIndexes, noteRemovedCourse } from "@/lib/removed-courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { DELETE_IF_SAME } from "@/lib/redis-lock";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
 import { randomLetters } from "@/lib/random-letters";
 import { UnknownReply, exactReplies } from "@/lib/redis-exact";
+import { courseAccessExpiryState } from "@/lib/course-access-expiry-rules";
 
 export const MAX_MODULES = 30;
 export const MAX_LESSONS = 200;
@@ -139,7 +143,125 @@ export type Course = {
    * already running, taking late joiners.
    */
   startsAt: number | null;
+  /**
+   * When access to the course ends, in seconds (24 [E7]), or absent for no end, as for every course before it.
+   *
+   * Fairness: the date reaches only a buyer who was shown it before paying. The course's own sales page and course
+   * page say it and send it with the buy form; the checkout refuses when it is no longer the date shown, and stamps
+   * the one shown on the Stripe session (`metadata[access_end]`, lib/course-access-end.ts). The learner's gate
+   * (lib/learn.ts courseAccess) then holds an end only for a stamped purchase: every other way in (the storefront
+   * card, the cart, a bundle, a box ticked at checkout, a gift, a pre-order, a group place, an import, a community
+   * level) carries no stamp and has no end, and with several purchases the most generous one counts.
+   *
+   * A stamped buyer's end is the later of their stamp and this date (stampedAccessEnd): moving the date later moves it
+   * for them too, taking it off removes their end, and it can never move earlier than a date already set
+   * ("access-end" in editCourse). A membership course never takes one: members keep access while they pay.
+   */
+  accessEndsAt?: number;
+  /**
+   * Ends already reached by stamped buyers when the date was taken off (Codex Cloud 1 on #3445): `at` is the date the
+   * course had then, and every stamped buyer who bought at or before `before` keeps at least it, so taking the date off
+   * and setting an earlier one (the studio's way to end sooner for new buyers) never shortens an end a buyer already
+   * had. "unknown": a list that did not read, so an end is a check not made for a stamped buyer (rule 24).
+   */
+  accessEndsKept?: KeptEnd[] | "unknown";
 };
+
+/** An end reached by the stamped buyers who bought at or before `before` (Course.accessEndsKept). */
+export type KeptEnd = { at: number; before: number };
+
+/**
+ * The most kept ends a course holds. Each new one drops those it covers (an end no later, for fewer buyers); past
+ * this, the two oldest merge into the later end for the later group, which only ever gives a buyer more time.
+ */
+export const MAX_KEPT_ENDS = 12;
+
+/** The list with one more kept end, taken when the date comes off at `before`. */
+export function keepEnd(kept: KeptEnd[], next: KeptEnd): KeptEnd[] {
+  const out = [...kept.filter((k) => k.at > next.at && k.before <= next.before), next].sort((a, b) => a.before - b.before);
+  while (out.length > MAX_KEPT_ENDS) {
+    const [first, second] = out;
+    out.splice(0, 2, { at: Math.max(first.at, second.at), before: second.before });
+  }
+  return out;
+}
+
+/** A stored list of kept ends: absent is none, any other shape than the one written is "unknown" (rule 24). */
+function readKeptEnds(raw: unknown): KeptEnd[] | "unknown" | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length > MAX_KEPT_ENDS) return "unknown";
+  const kept: KeptEnd[] = [];
+  for (const item of raw) {
+    const entry = item as Record<string, unknown> | null;
+    if (!entry || typeof entry !== "object" || Object.keys(entry).length !== 2) return "unknown";
+    if (!Number.isSafeInteger(entry.at) || (entry.at as number) <= 0 || !Number.isSafeInteger(entry.before) || (entry.before as number) <= 0) return "unknown";
+    kept.push({ at: entry.at as number, before: entry.before as number });
+  }
+  return kept.length ? kept : undefined;
+}
+
+/** The furthest ahead an access end may be set: ten years. */
+export const MAX_ACCESS_END_SECONDS = 3_650 * 86_400;
+
+/** The course's end date while it is still ahead, or null (the studio says a passed one as passed). */
+export function accessEndAhead(course: Pick<Course, "accessEndsAt">, nowSeconds = Date.now() / 1000): number | null {
+  return course.accessEndsAt !== undefined && course.accessEndsAt > Math.floor(nowSeconds) ? course.accessEndsAt : null;
+}
+
+/**
+ * How long Stripe keeps a checkout open at most: 24 hours, its maximum (and default) session lifetime. A checkout
+ * opened before the end can be paid until then, after the end has passed (C2's M-A on #3445), so a stamp counts only
+ * on a session created at least this long before it (lib/learn.ts), and the store stops saying the date this long
+ * before it (accessEndForSale): whoever buys in that last day keeps the course with no end.
+ */
+export const CHECKOUT_OPEN_SECONDS = 24 * 3600;
+
+/**
+ * The end date to say, and stamp, to somebody who has not bought yet, or null: only one more than a checkout's
+ * lifetime ahead (CHECKOUT_OPEN_SECONDS), so nobody is charged after the end for access the date already closed.
+ */
+export function accessEndForSale(course: Pick<Course, "accessEndsAt">, nowSeconds = Date.now() / 1000): number | null {
+  return course.accessEndsAt !== undefined && course.accessEndsAt - Math.floor(nowSeconds) > CHECKOUT_OPEN_SECONDS ? course.accessEndsAt : null;
+}
+
+/** Whether a purchase made at `createdSeconds` (unknown: null) is held to the end it was stamped with. */
+export function stampHolds(stamp: number, createdSeconds: number | null): boolean {
+  return createdSeconds !== null && Number.isSafeInteger(createdSeconds) && createdSeconds <= stamp - CHECKOUT_OPEN_SECONDS;
+}
+
+/**
+ * A stamped purchase's end, in seconds, or null for none: the latest of the end its buyer was shown (`stamp`), the
+ * course's date now, so moving the date later reaches them, and every end they had already reached when the date was
+ * taken off (accessEndsKept, for a purchase made at `boughtAt` or before; not known, every one counts); null while
+ * the creator has the date off. "unknown" when the kept ends did not read.
+ */
+export function stampedAccessEnd(course: Pick<Course, "accessEndsAt" | "accessEndsKept">, stamp: number, boughtAt: number | null): number | null | "unknown" {
+  if (course.accessEndsAt === undefined) return null;
+  if (course.accessEndsKept === "unknown") return "unknown";
+  let end = Math.max(stamp, course.accessEndsAt);
+  for (const kept of course.accessEndsKept ?? []) {
+    if (boughtAt === null || !Number.isSafeInteger(boughtAt) || boughtAt <= kept.before) end = Math.max(end, kept.at);
+  }
+  return end;
+}
+
+/**
+ * Whether a learner whose purchase carries `stamp` (null: no end was shown, so none) may still take the course at
+ * `nowSeconds`: "open", "ended" once their end has passed (lib/course-access-expiry-rules.ts), or "unknown" when a
+ * time does not read, which the gate says as a check it could not make, never as ended and never as open.
+ */
+export function accessEndState(
+  course: Pick<Course, "accessEndsAt" | "accessEndsKept">,
+  stamp: number | null,
+  nowSeconds: number,
+  boughtAt: number | null,
+): "open" | "ended" | "unknown" {
+  if (!Number.isFinite(nowSeconds) || (stamp !== null && !Number.isSafeInteger(stamp))) return "unknown";
+  const end = stamp === null ? null : stampedAccessEnd(course, stamp, boughtAt);
+  if (end === "unknown") return "unknown";
+  const state = courseAccessExpiryState(end, Math.floor(nowSeconds));
+  return state === "expired" ? "ended" : state === "invalid" ? "unknown" : "open";
+}
 
 export function newCourseId(): string {
   return crypto.randomUUID().replace(/-/g, "");
@@ -212,7 +334,11 @@ export function parseCourse(raw: unknown): Course | null {
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
     const shelf = readShelf(value.shelf);
     const months = readCertificateMonths(value.certificateMonths);
-    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}) };
+    // A whole number of seconds after 1970, or no end (24 [E7]): a value of any other shape is no end, the side that
+    // never takes a course away from anybody (lib/learn.ts courseAccess holds an end only for a stamped purchase).
+    const ends = Number.isSafeInteger(value.accessEndsAt) && (value.accessEndsAt as number) > 0 ? { accessEndsAt: value.accessEndsAt as number } : {};
+    const kept = readKeptEnds(value.accessEndsKept);
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}), ...ends, ...(kept ? { accessEndsKept: kept } : {}) };
   } catch {
     return null;
   }
@@ -310,12 +436,17 @@ export type CourseEdit =
   /** How long certificates issued from now on stay valid: 1 to 120 months, or null for good. */
   | { op: "certificate-months"; months: unknown }
   | { op: "start"; at: unknown }
+  /**
+   * When access ends (24 [E7]): a moment in seconds after `now` and at most ten years ahead, or null to take it off.
+   * `membership`: the course is sold as a membership, which never takes an end (members keep it while they pay).
+   */
+  | { op: "access-end"; at: unknown; now: number; membership: boolean }
   /** Several modules at once, each with its lessons by title: an outline taken from the writing help (lib/ai.ts). */
   | { op: "outline"; modules: { title: unknown; lessons: unknown[] }[] };
 
 export type EditResult =
   | { ok: true; course: Course; removed: ProductFile[]; addedId?: string }
-  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" | "months" };
+  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" | "months" | "access_end" | "access_end_earlier" | "access_end_membership" };
 
 function mapLesson(course: Course, lessonId: string, change: (lesson: Lesson) => Lesson): Course | null {
   let found = false;
@@ -529,6 +660,28 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
       }
       return { ok: true, course: { ...course, startsAt: at }, removed: [] };
     }
+    case "access-end": {
+      const now = Math.floor(edit.now);
+      if (edit.at === null) {
+        const rest = { ...course };
+        delete rest.accessEndsAt;
+        // The end every stamped buyer has now is kept for them (Codex Cloud 1 on #3445), so a date set again, even an
+        // earlier one for new buyers, never shortens it. A list that did not read stays "unknown".
+        if (course.accessEndsAt !== undefined && course.accessEndsKept !== "unknown") {
+          rest.accessEndsKept = keepEnd(course.accessEndsKept ?? [], { at: course.accessEndsAt, before: now });
+        }
+        return { ok: true, course: rest, removed: [] };
+      }
+      // A membership is open while it is paid: an end date would lock out a member who is still being charged.
+      if (edit.membership) return { ok: false, reason: "access_end_membership" };
+      if (typeof edit.at !== "number" || !Number.isSafeInteger(edit.at) || edit.at <= now || edit.at > now + MAX_ACCESS_END_SECONDS) {
+        return { ok: false, reason: "access_end" };
+      }
+      // Never earlier than a date already set: the creator's own promise, which the studio keeps simple to read.
+      // Buyers already stamped keep the later of their stamp and this date either way (stampedAccessEnd).
+      if (course.accessEndsAt !== undefined && edit.at < course.accessEndsAt) return { ok: false, reason: "access_end_earlier" };
+      return { ok: true, course: { ...course, accessEndsAt: edit.at }, removed: [] };
+    }
   }
 }
 
@@ -580,6 +733,37 @@ export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
 }
 
 /**
+ * readCourses, read exactly (rule 24), for a person's deletion
+ * (lib/person-erasure.ts erasureScope) and a store's whole export
+ * (lib/store-export.ts): a course is left out only when Redis answers the
+ * exact null for it. A reply that is not a whole list of the ids asked, or an
+ * outline kept but unreadable, throws UnknownReply, so the deletion never
+ * takes an unknown read for "no such course" and answers done while the
+ * person's records in that course are still kept, and an export never hands
+ * over a file without a course as if the store had none. `what` names the
+ * reading in the error.
+ */
+export async function readCoursesExact(ids: string[], what = "the course outlines a person's deletion goes through"): Promise<Map<string, Course>> {
+  const found = new Map<string, Course>();
+  const valid = [...new Set(ids.filter((id) => COURSE_ID_PATTERN.test(id)))];
+  if (valid.length === 0) return found;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
+  // A hundred at a command, as readCourses: the same commands, so the deletion's counted cost does not move.
+  for (let i = 0; i < valid.length; i += 100) {
+    const some = valid.slice(i, i + 100);
+    const [rows] = exactReplies(await redisPipeline([["MGET", ...some.map(courseKey)]]), 1, what);
+    const each = exactReplies(rows, some.length, what);
+    some.forEach((id, n) => {
+      if (each[n] === null) return;
+      const course = parseCourse(each[n]);
+      if (!course || course.id !== id) throw new UnknownReply(what);
+      found.set(id, course);
+    });
+  }
+  return found;
+}
+
+/**
  * Where a course is counted in the store's data room (lib/store-data.ts):
  * its outline in one slot, its lessons' text in another, each lesson's words
  * as the community's search may index them (lib/community-index.ts) included.
@@ -607,24 +791,61 @@ export async function readBody(courseId: string, lessonId: string): Promise<stri
   return typeof raw === "string" ? raw : "";
 }
 
+/**
+ * A lesson's text read in its exact shape, for a caller that writes from it
+ * (lib/community-index.ts): "" only when there is none (an absent key), the
+ * text when it is one, and UnknownReplyError for any other reply, so an odd
+ * or partial answer is never taken as a lesson with no text (CX-123 rule 24).
+ */
+export async function readBodyKnown(courseId: string, lessonId: string): Promise<string> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
+  const replies = repliesFor(await redisPipeline([["GET", bodyKey(courseId, lessonId)]]), 1);
+  const raw = replies?.[0];
+  if (raw === null) return "";
+  if (typeof raw === "string") return raw;
+  throw new UnknownReplyError("a lesson's text");
+}
+
+/**
+ * A lesson's text read exactly, for the studio's editor (rule 24): the text, ""
+ * when none is kept, and null when the reply is neither, so an unknown read is
+ * never opened as an empty lesson whose Save would write over the real text.
+ */
+export async function readBodyExact(courseId: string, lessonId: string): Promise<string | null> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return null;
+  const replies = await redisPipeline([["GET", bodyKey(courseId, lessonId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const [raw] = replies;
+  return typeof raw === "string" ? raw : raw === null ? "" : null;
+}
+
 /** Many lessons' text at once, a hundred to a command: for a store's whole export (lib/store-export.ts). */
 /** Lesson bodies read together, across courses: how many a command. Each is at most MAX_BODY_LENGTH, so one command carries a few megabytes at the most. */
 export const BODIES_PER_READ = 500;
 
-/** The text of every lesson of these courses, by course and lesson, BODIES_PER_READ at a command whatever course each is of (lib/store-export.ts). */
+/**
+ * The text of every lesson of these courses, by course and lesson, BODIES_PER_READ at a command whatever course each is of (lib/store-export.ts).
+ * Read exactly (rule 24): "" only for Redis's own null; a reply that is not one list of exactly the keys asked, or a
+ * value that is not text, throws UnknownReply, so the export says the part could not be read instead of writing the
+ * lesson out empty in the file a creator takes before the store closes.
+ */
 export async function readAllBodies(courses: { id: string; lessons: string[] }[]): Promise<Map<string, Record<string, string>>> {
+  const what = "the lessons' text a store's export reads";
   const out = new Map<string, Record<string, string>>();
   const wanted = courses.filter((c) => COURSE_ID_PATTERN.test(c.id)).flatMap((c) => {
     out.set(c.id, {});
     return c.lessons.filter((id) => ITEM_ID_PATTERN.test(id)).map((lesson) => ({ course: c.id, lesson }));
   });
-  if (!isRedisConfigured()) return out;
+  if (wanted.length === 0) return out;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
   for (let i = 0; i < wanted.length; i += BODIES_PER_READ) {
     const some = wanted.slice(i, i + BODIES_PER_READ);
-    const [raw] = await redisPipeline([["MGET", ...some.map((w) => bodyKey(w.course, w.lesson))]]);
+    const [raw] = exactReplies(await redisPipeline([["MGET", ...some.map((w) => bodyKey(w.course, w.lesson))]]), 1, what);
+    const values = exactReplies(raw, some.length, what);
     some.forEach((w, n) => {
-      const value = Array.isArray(raw) ? raw[n] : null;
-      out.get(w.course)![w.lesson] = typeof value === "string" ? value : "";
+      const value = values[n];
+      if (value !== null && typeof value !== "string") throw new UnknownReply(what);
+      out.get(w.course)![w.lesson] = value ?? "";
     });
   }
   return out;
@@ -656,8 +877,93 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
   if (grown < 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: -grown }]);
 }
 
-/** Takes a course's records away, and gives back their room. Its files are the caller's to delete. */
-export async function dropCourse(course: Course, room: DataStore): Promise<void> {
+/**
+ * The lesson texts of a course made by an import (260 [KJ5], lib/course-import-apply.ts),
+ * written at once: each text already as the editor keeps it (cleanBody), for
+ * a lesson id given once. The room for all of them is taken in one step
+ * before anything is written (DataRoomError when it does not fit, and then
+ * nothing is); each is written only where no text is kept yet; anything
+ * that comes back otherwise takes away what this call is known to have
+ * written (only while the key still holds exactly that text), gives back the
+ * room of what is known gone and throws. A text whose writer cannot be told
+ * stays, with its room counted: never another writer's text deleted.
+ */
+export async function saveNewBodies(courseId: string, bodies: { lessonId: string; text: string }[], room: DataStore): Promise<void> {
+  if (!COURSE_ID_PATTERN.test(courseId)) throw new Error("not a course id");
+  const ids = new Set<string>();
+  for (const { lessonId, text } of bodies) {
+    if (!ITEM_ID_PATTERN.test(lessonId) || ids.has(lessonId)) throw new Error("not a new lesson's text");
+    if (typeof text !== "string" || !text || cleanBody(text) !== text) throw new Error("not a lesson text as the editor keeps it");
+    ids.add(lessonId);
+  }
+  if (!bodies.length) return;
+  if (!isRedisConfigured()) throw new Error("lesson texts cannot be written here");
+  const bytes = bodies.reduce((sum, { text }) => sum + bodyBytes(text), 0);
+  await needData(room, [{ slot: BODIES_SLOT(courseId), bytes }]);
+  let replies: unknown[] | null = null;
+  try {
+    replies = repliesFor(await redisPipeline(bodies.map(({ lessonId, text }) => ["SET", bodyKey(courseId, lessonId), text, "NX"])), bodies.length);
+  } catch {
+    replies = null;
+  }
+  if (replies && replies.every((reply) => reply === "OK")) return;
+  // Taking back: only what this call wrote goes, and only the room of what is known to be gone (or never
+  // written) comes back; anything whose fate cannot be read keeps its room counted, more and never less.
+  const gone: { lessonId: string; text: string }[] = [];
+  const mine: { lessonId: string; text: string }[] = [];
+  const unsure: { lessonId: string; text: string }[] = [];
+  bodies.forEach((body, i) => {
+    const reply = replies?.[i];
+    if (replies && reply === null) gone.push(body); // NX refused: another text is kept there, and this one was never written.
+    else if (reply === "OK") mine.push(body);
+    else unsure.push(body);
+  });
+  if (unsure.length) {
+    let held: unknown[] | null = null;
+    try {
+      const read = repliesFor(await redisPipeline([["MGET", ...unsure.map((body) => bodyKey(courseId, body.lessonId))]]), 1);
+      held = read && Array.isArray(read[0]) && read[0].length === unsure.length ? read[0] : null;
+    } catch {
+      held = null;
+    }
+    unsure.forEach((body, i) => {
+      const value = held?.[i];
+      // Nothing there, or another text: not this call's. The same text says nothing about who wrote it (NX refuses a
+      // writer's identical text the same way), so it is never deleted and keeps its room counted (Codex L on #3821).
+      if (held && (value === null || (typeof value === "string" && value !== body.text))) gone.push(body);
+    });
+  }
+  if (mine.length) {
+    let deleted: unknown[] | null = null;
+    try {
+      // Deleted in one step only while the key still holds this call's text: one put there since by another writer stays.
+      deleted = repliesFor(await redisPipeline(mine.map((body) => ["EVAL", DELETE_IF_SAME, 1, bodyKey(courseId, body.lessonId), body.text])), mine.length);
+    } catch {
+      deleted = null;
+    }
+    mine.forEach((body, i) => {
+      const count = deleted ? countOf(deleted[i]) : null;
+      if (count === 0 || count === 1) gone.push(body);
+    });
+  }
+  const back = gone.reduce((sum, { text }) => sum + bodyBytes(text), 0);
+  if (back > 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: back }]);
+  throw new UnknownReplyError("an imported course's lesson texts");
+}
+
+/**
+ * Takes a course's records away, and gives back their room. Its files are the caller's to delete. The course is noted
+ * as dropped first, with its lessons and modules (lib/removed-courses.ts), so a person's records kept under it are
+ * still reached by their erasure; a note that is not confirmed, or a full list, throws and deletes nothing.
+ */
+export async function dropCourse(course: Course, room: DataStore, productId = "", indexes?: CourseIndexes): Promise<void> {
+  const noted = await noteRemovedCourse(room.statsId, {
+    productId,
+    courseId: course.id,
+    lessonIds: lessonsInOrder(course).map(({ lesson }) => lesson.id),
+    moduleIds: course.modules.map((m) => m.id),
+  }, room, indexes);
+  if (noted !== "noted") throw new Error("the store's list of dropped courses is full");
   const keys = [courseKey(course.id), ...lessonsInOrder(course).map(({ lesson }) => bodyKey(course.id, lesson.id))];
   await redisPipeline(keys.map((key) => ["DEL", key]));
   await giveData(room, [{ slot: OUTLINE_SLOT(course.id), bytes: 0, set: true }, { slot: BODIES_SLOT(course.id), bytes: 0, set: true }]);

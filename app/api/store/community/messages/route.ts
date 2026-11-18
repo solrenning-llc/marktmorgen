@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { CREATOR, within } from "@/lib/community";
+import { CREATOR, readMember, within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
 import {
   MAX_MESSAGE_TEXT,
@@ -96,12 +96,41 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
-    // somebody chose to have.
-    const started = await within(id, key, "dmNew");
+    // somebody chose to have. So the day's openings are counted only when this
+    // message is a new request (send asks), never for a message to the creator
+    // or in a conversation already going.
+    // Asked before send writes anything: a count it cannot read is "nothing was changed", never "could not confirm".
+    const started = owner
+      ? true
+      : async () => {
+          progress.writing = false;
+          const ok = await within(id, key, "dmNew");
+          progress.writing = true;
+          return ok;
+        };
+    // Only to somebody in the community: a key nobody holds, or a member the
+    // creator removed, gets nothing written under it (no request waiting where
+    // nobody can read or decline it, no room taken). The sender is answered
+    // exactly as for a member they have not written to yet, in the same state:
+    // a key is a plain hash of an address, so a different answer would tell
+    // who is a member. With requests on, that is a request sent, or "slow"
+    // past the day's openings (counted as for a member); with requests off, or
+    // from the creator, the message sent into the conversation.
+    if (to !== CREATOR) {
+      const them = await readMember(id, to);
+      if (!them || them.removed) {
+        const asking = config.dm.ask && key !== CREATOR;
+        if (!asking) return back(`${box}/${pairOf(key, to)}`, "dmsent");
+        const ok = typeof started === "function" ? await started() : started;
+        return back(box, ok ? "dmasked" : "slow");
+      }
+    }
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {
-      sent = await send(id, config.dm, key, to, text, store);
+      // Past the day's openings, a new request is refused before it is written
+      // (never written and then answered "slow", which invites a second copy).
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
@@ -117,13 +146,14 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
               ? "dmbetween"
               : sent.reason === "empty"
                 ? "empty"
-                : "dmoff";
+                : sent.reason === "slow"
+                  ? "slow"
+                  : "dmoff";
       // "declined" answers exactly as success does, on purpose: somebody who
       // was turned down learns that their message went, and nothing else.
       // Telling them they were declined turns a quiet no into an argument.
-      return back(why === "dmsent" ? box : `${box}/${pairOf(key, to)}`, why);
+      return back(why === "dmsent" || why === "slow" ? box : `${box}/${pairOf(key, to)}`, why);
     }
-    if (!owner && !started && sent.asked) return back(box, "slow");
     return sent.asked ? back(box, "dmasked") : back(`${box}/${pairOf(key, to)}`, "dmsent");
   }
 

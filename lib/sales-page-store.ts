@@ -32,7 +32,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -146,34 +146,88 @@ export async function releasePictures(statsId: string, productId: string, paths:
   return mine;
 }
 
-/** A product's page, or the empty page when it has none (or it cannot be read). */
+/**
+ * A product's page, or the empty page when Redis confirms none is kept (a GET
+ * that answers null). Any other answer (no reply, more than one, a slot that
+ * is not a text, a kept record that is not a page) throws UnknownReplyError,
+ * so nothing is ever decided from an empty page that was not (CX-123 rule 24;
+ * Codex T's proof, C4-20261106-2610-C6-153). A failed request throws as before.
+ */
 export async function readPage(statsId: string | null, productId: string): Promise<SalesPage> {
   if (!statsId || !isRedisConfigured()) return { ...EMPTY_PAGE, blocks: [] };
-  const [raw] = await redisPipeline([["GET", pageKey(statsId, productId)]]);
-  return pageOf(raw);
+  const replies = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a page read");
+  return pageOf(replies[0]);
 }
 
-function pageOf(raw: unknown): SalesPage {
-  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) return { ...EMPTY_PAGE, blocks: [] };
+/**
+ * The UTF-8 bytes a product's kept page record weighs (STRLEN, Redis's own count), read exactly: 0 when none is kept,
+ * null for any other answer or a failed request, never a size guessed (rule 24). What a publish pays its reads by.
+ */
+export async function keptPageBytes(statsId: string, productId: string): Promise<number | null> {
   try {
-    return parsePage(JSON.parse(raw));
+    const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+    const bytes = replies ? replies[0] : undefined;
+    return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
   } catch {
-    return { ...EMPTY_PAGE, blocks: [] };
+    return null;
   }
 }
 
-/** Values of many keys, a hundred at a command (MGET): what the whole export reads (lib/store-export.ts). */
+/** A page that grew past what was counted for reading it: nothing was read whole, and nothing is decided from it. */
+export class PageGrown extends Error {
+  constructor() {
+    super("The page changed while it was being read. Try again in a moment.");
+    this.name = "PageGrown";
+  }
+}
+
+/**
+ * A product's page, read no further than `most` bytes (what keptPageBytes measured and the caller counted): a page grown
+ * since is read cut, cannot be read, and throws PageGrown, so never more is read than was paid for.
+ */
+export async function readPageWithin(statsId: string | null, productId: string, most: number): Promise<SalesPage> {
+  if (!statsId || !isRedisConfigured() || most <= 0) return { ...EMPTY_PAGE, blocks: [] };
+  const [raw] = repliesFor(await redisPipeline([["GETRANGE", pageKey(statsId, productId), 0, most - 1]]), 1) ?? [undefined];
+  if (typeof raw !== "string") throw new UnknownReplyError("a page");
+  if (!raw) return { ...EMPTY_PAGE, blocks: [] };
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new PageGrown();
+  }
+  return pageOf(raw);
+}
+
+/** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
+function pageOf(raw: unknown): SalesPage {
+  if (raw === null) return { ...EMPTY_PAGE, blocks: [] };
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new UnknownReplyError("a kept page");
+  try {
+    return pageRecordExact(raw, "a kept page");
+  } catch {
+    throw new UnknownReplyError("a kept page");
+  }
+}
+
+/**
+ * Values of many keys, a hundred at a command (MGET): what the whole export
+ * reads (lib/store-export.ts). Each command must answer exactly one list with
+ * one slot per key asked, or the whole read throws UnknownReplyError.
+ */
 async function readMany(keys: string[]): Promise<unknown[]> {
   const out: unknown[] = [];
   for (let i = 0; i < keys.length; i += 100) {
-    const [raw] = await redisPipeline([["MGET", ...keys.slice(i, i + 100)]]);
-    const values = Array.isArray(raw) ? raw : [];
-    for (let n = 0; n < Math.min(100, keys.length - i); n += 1) out.push(values[n] ?? null);
+    const asked = keys.slice(i, i + 100);
+    const replies = repliesFor(await redisPipeline([["MGET", ...asked]]), 1);
+    const values = replies ? repliesFor(replies[0], asked.length) : null;
+    if (!values) throw new UnknownReplyError("a batch of page reads");
+    out.push(...values);
   }
   return out;
 }
 
-/** The pages of many products, in their order, a hundred at a command. */
+/** The pages of many products, in their order, a hundred at a command; throws like readPage when any answer is unknown. */
 export async function readPages(statsId: string | null, productIds: string[]): Promise<SalesPage[]> {
   if (!statsId || !isRedisConfigured()) return productIds.map(() => ({ ...EMPTY_PAGE, blocks: [] }));
   return (await readMany(productIds.map((id) => pageKey(statsId, id)))).map(pageOf);
@@ -296,8 +350,11 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  // An answer that is not one list is unknown, never "no earlier versions" (CX-123 rule 24; audit of the API routes,
+  // 11 Nov 2026): app/api/store/page-versions then refuses, and the editor says they could not be read just now.
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const list: unknown[] = reply[0];
   const out: PageVersion[] = [];
   for (const entry of list) {
     if (typeof entry !== "string") continue;

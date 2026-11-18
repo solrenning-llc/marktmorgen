@@ -1,4 +1,5 @@
 import { EmailField } from "@/components/email-field";
+import { EmptyState } from "@/components/empty-state";
 import { placeLine } from "@/lib/call-place";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { isDiscordConfigured } from "@/lib/discord";
@@ -13,6 +14,9 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { windowOf, withConfirmations } from "@/lib/withdrawal";
+import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
+import { orderProblemWords } from "@/lib/buyer-words/order-problem";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
 import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
@@ -174,8 +178,9 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   // them a batch at a time (components/older-purchases.tsx), from where `older.cursor` says.
   let older: ReturnType<typeof olderOf> = { cursor: null, count: 0, added: false };
   let discordProducts: Set<string> | null = null;
-  // What the purchases need besides themselves: podcast feeds, license keys and what can be reviewed (lib/purchase-cards.ts).
-  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set() };
+  // What the purchases need besides themselves: podcast feeds, license keys, what can be reviewed and how far the buyer is
+  // in each course (lib/purchase-cards.ts).
+  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set(), progress: new Map() };
   if (email && meter) {
     try {
       // Waited on ORDERS_READ_MS at the most (lib/buyer-orders.ts, withinOpening): past it nothing more is read and the
@@ -183,7 +188,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       const reading = (async () => {
         // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
         // a failure nobody expected is said as "could not be read", never as nothing waiting.
-        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
+        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter).then((listed) => withConfirmations(listed, meter)), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
 
         // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
         const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
@@ -266,7 +271,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                 </section>
               ) : null}
               {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && !older.cursor ? (
-                <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
+                <EmptyState title={words.nothingToOpenTitle} body={words.nothingToOpen(store.name)} className="mt-6" />
               ) : (
                 <>
                   <p className="st-muted mt-4 leading-relaxed">{words.everythingSold(store.name)}</p>
@@ -294,6 +299,24 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                     ) : null}
                     {older.cursor ? <OlderPurchases older={older.cursor} left={words.olderNotChecked(older.count, older.added)} /> : null}
                   </OrdersSharedProvider>
+                  {/* The EU withdrawal function (lib/withdrawal.ts, 588 [KB9]): one link, the same size whatever the list holds (a line
+                      per purchase would outgrow ORDERS_PAGE_BYTES), to the page that lists the purchases still inside their period. */}
+                  {purchases.some((purchase) => windowOf(purchase).open) ? (
+                    <p className="mt-7">
+                      <Link href={`/@${store.handle}/orders/withdraw?${new URLSearchParams({ token })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                        {withdrawalWords(store.language).withdrawLink}
+                      </Link>
+                    </p>
+                  ) : null}
+                  {/* "Report a problem with this order" (567 [GD1] (a)): one link, the same size whatever the list holds, to the page
+                      that lists the orders and sends the report to the creator's inbox. */}
+                  {purchases.length > 0 ? (
+                    <p className="mt-4">
+                      <Link href={`/@${store.handle}/orders/problem?${new URLSearchParams({ token })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                        {orderProblemWords(store.language).title}
+                      </Link>
+                    </p>
+                  ) : null}
                   <p className="st-muted mt-6 text-sm">{words.worksFor24}</p>
                 </>
               )}
@@ -360,7 +383,7 @@ function Frame({ store, children }: { store: Store; children: React.ReactNode })
         </div>
 
         <div className="mt-8 text-center">
-          <p className="st-muted mx-auto mb-4 max-w-xl text-sm" data-while-open>
+          <p className="st-muted mx-auto mb-4 max-w-[50ch] text-sm" data-while-open>
             {words.whileOpen}
           </p>
           {/* Alone on their line, so at least 44 px high (WCAG 2.5.5), as "Back to your purchases" is. */}

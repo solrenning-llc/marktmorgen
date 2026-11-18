@@ -31,6 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -38,10 +39,11 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
@@ -120,6 +122,18 @@ export type LogLine = {
 const EMPTY: Team = { members: [], invites: [] };
 
 /** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
+/** Whether a team GET's text is a team record as the writers make it: a JSON object whose invitations, if any, are a list. */
+function readsAsTeamRecord(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const invites = (value as { invites?: unknown }).invites;
+    return invites === undefined || Array.isArray(invites);
+  } catch {
+    return false;
+  }
+}
+
 export function parseTeam(raw: unknown): Team {
   if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
   try {
@@ -153,11 +167,32 @@ export function parseTeam(raw: unknown): Team {
 
 const now = () => Math.floor(Date.now() / 1000);
 
-/** A store's team as it is now. Invitations past their seven days are left out. */
+/**
+ * The team record exactly as stored (rule 24): no record is no team; a reply in
+ * another shape, or text that is not a team record as saveTeam writes it (a
+ * JSON object with its members list), throws UnknownReplyError, never an empty
+ * team, so nothing reads "nobody on it" or "two-step not required" from it and
+ * nothing writes over it.
+ */
+async function readTeamRecord(sid: string): Promise<Team> {
+  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's team");
+  const raw = replies[0];
+  if (raw === null) return { members: [], invites: [] };
+  let stored: unknown = null;
+  try {
+    stored = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    stored = null;
+  }
+  if (!stored || typeof stored !== "object" || Array.isArray(stored) || !Array.isArray((stored as { members?: unknown }).members)) throw new UnknownReplyError("a store's team");
+  return parseTeam(raw);
+}
+
+/** A store's team as it is now. Invitations past their seven days are left out. Unknown throws (readTeamRecord). */
 export async function readTeam(sid: string): Promise<Team> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { ...EMPTY };
-  const [raw] = await redisPipeline([["GET", teamKey(sid)]]);
-  const team = parseTeam(raw);
+  const team = await readTeamRecord(sid);
   return { members: team.members, invites: team.invites.filter((i) => i.expiresAt > now()), ...(team.requireTwoStep ? { requireTwoStep: true } : {}) };
 }
 
@@ -165,13 +200,11 @@ export async function readTeam(sid: string): Promise<Team> {
  * Writes a team. Every change is made with the team's lock held, so the
  * owner's two-step requirement is read back here and kept unless the change
  * itself says otherwise: a member joining or leaving never switches it off.
+ * A record read in an unknown shape throws before anything is written.
  */
 async function saveTeam(sid: string, team: Team): Promise<void> {
   let required = team.requireTwoStep;
-  if (required === undefined) {
-    const [raw] = await redisPipeline([["GET", teamKey(sid)]]);
-    required = parseTeam(raw).requireTwoStep === true;
-  }
+  if (required === undefined) required = (await readTeamRecord(sid)).requireTwoStep === true;
   const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
   await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);
 }
@@ -186,13 +219,43 @@ async function saveTeam(sid: string, team: Team): Promise<void> {
  * passkey and logs in by the link is asked for the second step here. A
  * session read without its id, or opened before this was written down, has
  * none: the answer is to ask for the step, never to let it through.
- * Read only when the requirement is on.
+ * Read only when the requirement is on. A team record that answers in an
+ * unknown shape (rule 24) is taken as requiring it: the step is asked for,
+ * never skipped because the owner's choice could not be read.
  */
 export async function teamTwoStepBlocks(store: Store, email: string, role: Role, session?: string): Promise<boolean> {
   if (role === "owner" || !store.sid) return false;
-  const team = await readTeam(store.sid);
-  if (!team.requireTwoStep) return false;
+  const required = await readTeam(store.sid).then(
+    (team) => team.requireTwoStep === true,
+    (error: unknown) => {
+      if (error instanceof UnknownReplyError) return true;
+      throw error;
+    },
+  );
+  if (!required) return false;
   return (await liveSecondStep(email, session)) === null;
+}
+
+/**
+ * The team's members, read exactly (rule 24), for what must never take an
+ * unknown answer for "nobody on the team" (lib/visit.ts: a teammate's visit
+ * is not a buyer's). No record is no team; a reply in another shape, or text
+ * that is not a team record as saveTeam writes it, throws UnknownReplyError.
+ */
+export async function readTeamMembers(sid: string): Promise<Member[]> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's team");
+  const raw = replies[0];
+  if (raw === null) return [];
+  let stored: unknown = null;
+  try {
+    stored = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    stored = null;
+  }
+  if (!stored || typeof stored !== "object" || !Array.isArray((stored as { members?: unknown }).members)) throw new UnknownReplyError("a store's team");
+  return parseTeam(raw).members;
 }
 
 /**
@@ -268,19 +331,37 @@ export async function roleIn(store: Store, email: string): Promise<Role | null> 
 /**
  * The stores this person is on as one of a team, with their role in each,
  * read from each store's own record. An entry in the index the record no
- * longer agrees with is dropped from the index on the way.
+ * longer agrees with is dropped from the index on the way, only on confirmed
+ * absence (rule 24): the team record, read exactly, has no such member (or no
+ * record at all), or the store's own record names them its owner. An index
+ * that answers in an unknown shape throws; a store whose team answers in an
+ * unknown shape, or whose record could not be found, is left out of the list
+ * but kept in the index, since storeForId answers null for an unknown reply too.
  */
 export async function memberStores(email: string): Promise<{ store: Store; role: TeamRole }[]> {
   if (!isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(address)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   const found: { store: Store; role: TeamRole }[] = [];
   const stale: string[] = [];
   for (const sid of list.slice(0, 50)) {
+    // A store whose team answers in an unknown shape is left out of this answer and kept in the index: it is
+    // neither "on it" nor "gone", and one other store's unreadable record never stops the person's own studio.
+    const team = await readTeam(sid).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    });
+    if (!team) continue;
+    const member = team.members.find((m) => m.email === address);
+    if (!member) {
+      stale.push(sid);
+      continue;
+    }
     const store = await storeForId(sid);
-    const member = store ? (await readTeam(sid)).members.find((m) => m.email === address) : undefined;
-    if (store && member && normaliseEmail(store.email) !== address) found.push({ store, role: member.role });
+    if (!store) continue;
+    if (normaliseEmail(store.email) !== address) found.push({ store, role: member.role });
     else stale.push(sid);
   }
   if (stale.length) await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
@@ -301,22 +382,38 @@ export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<v
   }
 }
 
-/** The activity log, newest first. */
-export async function readLog(sid: string): Promise<LogLine[]> {
-  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]);
+/**
+ * The activity log, newest first; null when Redis answered in a shape that cannot be read (rule 24), so the Team page
+ * never says "nothing yet". Only Redis's own empty list is none; a line that is itself not readable is skipped, as
+ * before, and counted in `skipped`, so a decision that needs every line (a removal's "never taken off") can tell it
+ * was not read whole (Claude 4 on #3164).
+ */
+export async function readLogWhole(sid: string): Promise<{ lines: LogLine[]; skipped: number } | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { lines: [], skipped: 0 };
+  const rows = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]), 1)?.[0]);
+  if (!rows) return null;
   const lines: LogLine[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  let skipped = 0;
+  for (const row of rows) {
     try {
-      const value = JSON.parse(String(row)) as Partial<LogLine>;
-      if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
+      const value = JSON.parse(row) as Partial<LogLine>;
+      if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") {
+        skipped += 1;
+        continue;
+      }
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
       lines.push({ at: value.at, who: value.who, role, what: value.what });
     } catch {
       // A line that cannot be read is skipped, not shown half.
+      skipped += 1;
     }
   }
-  return lines;
+  return { lines, skipped };
+}
+
+/** The activity log's readable lines, newest first, for showing; null when it could not be read (readLogWhole). */
+export async function readLog(sid: string): Promise<LogLine[] | null> {
+  return (await readLogWhole(sid))?.lines ?? null;
 }
 
 export type InviteResult =
@@ -349,12 +446,8 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const replies = repliesFor(await redisPipeline([
-      ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
-      ["INCR", counter],
-    ]), 2);
     // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
-    const sent = countOf(replies?.[1]);
+    const sent = windowCountOf(await redisPipeline(windowCount(counter, 24 * 60 * 60)));
     if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");
@@ -479,7 +572,11 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
   return added;
 }
 
-/** A teammate was taken off the team but their API keys could not all be paused after: the removal is to be repeated. */
+/**
+ * A teammate was taken off the team but what they could reach was not all
+ * closed after (their API keys paused, the store taken out of their index,
+ * their pipeline access forgotten): the removal is to be repeated.
+ */
 export class KeysNotSwept extends Error {
   constructor() {
     super("The API keys of a teammate taken off the team could not all be paused; repeat the removal.");
@@ -532,32 +629,56 @@ export async function removeMember(store: Store, email: string, options: { repea
   await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unmatched: [...first.unmatched, ...second.unmatched], unrecorded: [...first.unrecorded, ...second.unrecorded] }).catch((error: unknown) =>
     console.error("telling the owner which API keys a teammate leaving paused failed", error),
   );
-  if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
-  // What they could do with each pipeline (639 [GL7](7)) goes with them.
-  if (removed) await forgetPipelineAccess(store, address).catch(() => {});
+  // The store leaves their index, and what they could do with each pipeline (639 [GL7](7)) goes with them; a repeat
+  // does it again, as a removal whose cleanup failed is repeated. Either failing is said as not finished, never removed.
+  if (removed || options.repeat) {
+    try {
+      await redisPipeline([["SREM", indexKey(address), store.sid]]);
+      await forgetPipelineAccess(store, address);
+    } catch (error) {
+      console.error("closing a former teammate's index or pipeline access failed; the removal is to be repeated", error);
+      throw new KeysNotSwept();
+    }
+  }
   return removed;
 }
 
 /**
- * What an invitation is for, read without spending it, so the page the link
- * opens can say which store and which role before anything happens.
+ * What an invitation is for, read without spending it, so the page the link opens can say which store and which
+ * role before anything happens: null when it no longer works. The link's GET in any other shape is unknown and
+ * throws UnknownReplyError, and a read behind it that fails (the store, the team) throws too: never "no longer
+ * works" for what could not be read (CX-123 rule 24).
  */
 export async function peekInvite(token: string): Promise<{ store: Store; email: string; role: TeamRole } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", inviteKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const read = repliesFor(await redisPipeline([["GET", inviteKey(token)]]), 1);
+  if (!read) throw new UnknownReplyError("a team invitation");
+  const [raw] = read;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a team invitation");
+  let claim: { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
   try {
-    const claim = JSON.parse(raw) as { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
-    const role = parseTeamRole(claim.role);
-    if (typeof claim.sid !== "string" || typeof claim.email !== "string" || !role) return null;
-    const store = await storeForId(claim.sid);
-    if (!store) return null;
-    const team = await readTeam(store.sid);
-    if (!team.invites.some((i) => i.id === claim.id)) return null;
-    return { store, email: normaliseEmail(claim.email), role };
+    claim = JSON.parse(raw) as typeof claim;
   } catch {
     return null;
   }
+  const role = parseTeamRole(claim?.role);
+  if (typeof claim?.sid !== "string" || typeof claim.email !== "string" || !role) return null;
+  // The store read exactly (Claude 6 on #2969): only one confirmed not there is "no longer works".
+  const store = await storeForIdExact(claim.sid);
+  if (!store) return null;
+  // The team read exactly too (Claude 1 on #2969, the team case of K2's MEDIUM): nil is no team, a string is the
+  // record as written, and any other answer is unknown, never an empty team that sends a valid link to "expired".
+  const teamRead = repliesFor(await redisPipeline([["GET", teamKey(store.sid)]]), 1);
+  if (!teamRead) throw new UnknownReplyError("a team");
+  const [teamRaw] = teamRead;
+  if (teamRaw !== null && typeof teamRaw !== "string") throw new UnknownReplyError("a team");
+  // A string is the record only when it reads as one (Codex X5 on #2969): text that is not JSON, empty text, JSON
+  // that is not a record or invitations that are not a list would be parsed as an empty team, which says expired.
+  if (typeof teamRaw === "string" && !readsAsTeamRecord(teamRaw)) throw new UnknownReplyError("a team record");
+  const live = parseTeam(teamRaw).invites.filter((i) => i.expiresAt > now());
+  if (!live.some((i) => i.id === claim.id)) return null;
+  return { store, email: normaliseEmail(claim.email), role };
 }
 
 export type JoinResult =
@@ -581,7 +702,7 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   } catch {
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
-    raw = Number(removed) === 1 ? read : null;
+    raw = countOf(removed) === 1 ? read : null;
   }
   if (typeof raw !== "string" || !raw) return { ok: false, reason: "expired" };
 
@@ -619,12 +740,22 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   return { ok: true, store, member: joined.member };
 }
 
-/** Forgets a store's team, its invitations and its log, when the store itself goes. */
+/**
+ * Forgets a store's team, its invitations and its log, when the store itself goes. A team that answers in an
+ * unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the teammates' index entries,
+ * which could not be read, are left, and memberStores drops each on the confirmed absence that follows.
+ */
 export async function dropTeam(store: Store): Promise<void> {
   if (!store.sid) return;
-  const team = await readTeam(store.sid);
+  const members = await readTeam(store.sid).then(
+    (team) => team.members,
+    (error: unknown) => {
+      if (error instanceof UnknownReplyError) return [];
+      throw error;
+    },
+  );
   await redisPipeline([
-    ...team.members.map((m) => ["SREM", indexKey(m.email), store.sid]),
+    ...members.map((m) => ["SREM", indexKey(m.email), store.sid]),
     ["DEL", teamKey(store.sid)],
     ["DEL", logKey(store.sid)],
   ]);
@@ -633,21 +764,61 @@ export async function dropTeam(store: Store): Promise<void> {
 /**
  * Carries a person's places on other stores' teams to their new address,
  * when they move their account (app/api/auth/move). Without it, moving
- * would quietly take them off every team they are on.
+ * would quietly take them off every team they are on. Answers the stores
+ * whose place stayed on the old address (its restrictions or API keys could
+ * not be carried), so the move can say so and take them off (dropMemberships).
+ *
+ * The old address is never left on a team while the store is answered as carried (Claude 2's review of #3326): a
+ * store's team record, not this index, is what lets a session in (lib/studio-route.ts resolveAccess reads roleIn),
+ * so a place left on the record with its index entry gone would open the store to whoever signs in at the old
+ * address later, and nobody would be told. So:
+ *
+ *   - a list of stores or a store read in an unknown shape (rule 24) is never read as "nothing there": the first
+ *     throws UnknownReplyError, so nothing is said as carried and the move's clean-up runs; the second keeps that
+ *     store as stayed;
+ *   - when the new address already has the store (it is on the team, or owns it), the old address's place is not
+ *     carried but taken off, through removeMember as any teammate taken off is. The new address keeps the role the
+ *     store's owner gave it, not the higher of the two: that is the owner's own choice for the address now on the
+ *     team, and raising it would hand that address a power nobody granted to it. The old address's restrictions and
+ *     API keys go with its place (held "left"; the owner is emailed which), as merging them into the new address's
+ *     own would decide for the owner. The team's log says which role the old place had, so the owner can raise it.
+ *     A removal that cannot be finished keeps the store as stayed. One whose second sweep of the API keys could not be
+ *     finished (KeysNotSwept: the old place is off the team, but a key it made meanwhile may not be held) is not
+ *     stayed, as the place is gone and the new address keeps its own; it is put in `unswept`, with the old place's
+ *     role, for the move's clean-up to repeat that sweep (dropMemberships), which nothing else would do: the old
+ *     address has no role there any more, so it reads as nothing to take off (Claude 2's third review of #3326).
+ *     `unswept` is filled as each store is done, so a later store that throws does not lose it.
  */
-export async function moveMemberships(from: string, to: string): Promise<void> {
+export async function moveMemberships(from: string, to: string, unswept: Map<string, Role> = new Map()): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  // Their stores, read whole (rule 24; Codex G's 4223): an answer that is not a list of store ids is unknown and
+  // stops the move of their teams with nothing deleted, never "on no team", which deleted the old address's index.
+  const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (!list || !list.every((id) => STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores");
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {
-    const store = await storeForId(sid);
-    if (!store || normaliseEmail(store.email) === after) continue;
-    const role = await withTeam(sid, async () => {
+    // Read exactly (Codex G's 4224): a store that does not read stays on the old index; only one confirmed gone
+    // leaves it. One the new address owns is not skipped: its old place is taken off below.
+    const found = await storeForIdExactly(sid);
+    // Confirmed gone: nothing opens it, and its index entry goes. Not known: never read as gone.
+    if (found === "none") continue;
+    if (found === "unknown") {
+      stayed.push(sid);
+      continue;
+    }
+    const store = found;
+    const owns = normaliseEmail(store.email) === after;
+    const outcome = await withTeam(sid, async (): Promise<{ moved: Role } | { taken: Role; kept: Role } | null> => {
       const team = await readTeam(sid);
-      if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;
+      const mine = team.members.find((m) => m.email === before);
+      if (!mine) return null;
+      // The new address already has this store: the old place is taken off below, outside this lock (removeMember takes it).
+      if (owns) return { taken: mine.role, kept: "owner" };
+      const theirs = team.members.find((m) => m.email === after);
+      if (theirs) return { taken: mine.role, kept: theirs.role };
       // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
       // be confirmed, this store's membership stays on the old address: the new one never has the store without
       // its restrictions.
@@ -673,16 +844,145 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
         throw error;
       }
-      return team.members.find((m) => m.email === before)?.role ?? "support";
+      return { moved: mine.role };
     });
-    if (!role) continue;
+    if (!outcome) continue;
+    if ("taken" in outcome) {
+      try {
+        await removeMember(store, before);
+      } catch (error) {
+        if (error instanceof KeysNotSwept) {
+          // Off the team, its sweep to be repeated by the move's clean-up (dropMemberships), which is told the role it had.
+          console.error("a moved address was taken off a team, but its API keys could not all be paused; the move's clean-up repeats it", error);
+          unswept.set(sid, outcome.taken);
+        } else {
+          console.error("taking a moved address off a team its new address is already on failed; the move's clean-up takes it off", error);
+          stayed.push(sid);
+          continue;
+        }
+      }
+      await logTeam(sid, {
+        who: after,
+        role: outcome.kept,
+        what: `Moved their sign-in from ${before}, already on the team: the place at ${before} (${outcome.taken}) was taken off, and ${outcome.kept} kept`,
+      });
+      continue;
+    }
     // The old address's restrictions go only once the team names the new one.
     await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
-    await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
+    await logTeam(sid, { who: after, role: outcome.moved, what: `Moved their sign-in from ${before}` });
   }
   // The old address keeps only the stores that stayed on it; SREM with no member is an error in Redis, so it is sent only with some.
   const moved = list.filter((sid) => !stayed.includes(sid));
   if (!stayed.length) await redisPipeline([["DEL", indexKey(before)]]);
   else if (moved.length) await redisPipeline([["SREM", indexKey(before), ...moved]]);
+  return stayed;
+}
+
+/**
+ * Takes an address an account moved away from off every other store's team it is still on, when the move could not
+ * carry those places (app/api/auth/move): left there, an account made at that address later would be on those
+ * teams. Each goes through removeMember, as any teammate taken off does: their API keys are paused, the owner is
+ * told of those, and the team's log says why. True only when the index and every store on it were read and settled;
+ * the person is told to ask each owner to invite the new address again.
+ *
+ * Kept on purpose, although it reaches past the person (Claude 2's review of #3326, finding LOW): the removal also
+ * pauses every key on that store whose maker was never recorded (lib/api-key-pause.ts leftTeam, held "told"),
+ * which may include the owner's own keys made before makers were recorded. Such a key may be the person's, and
+ * after this they are on that team at neither address, so it is never left open on a guess; the owner is emailed
+ * the keys by name and may turn each back on at once. Pausing only the person's recorded keys would leave theirs
+ * among the unrecorded ones working for somebody no longer on the team.
+ *
+ * A removal whose second sweep of the API keys could not be finished (KeysNotSwept), here or in moveMemberships
+ * (`unswept`, with the role the place had), is repeated once, as the team route repeats one when the owner presses
+ * Remove again (removeMember with `repeat`): the address has no role there any more, but a key it made while it was
+ * being taken off may not be held, and would work again for an account made at that address later and invited back
+ * (Claude 2's third review of #3326). A repeat that cannot be finished either leaves that store in the answer's
+ * `unswept`: the move is not said as complete there, the team's log says it, and the store's owner is emailed to
+ * revoke what they do not recognize (lib/api-key-pause.ts tellOwnerOfUnswept). `settled` is true only when the index
+ * and every store on it were read and settled, and no sweep was left unfinished.
+ */
+export async function dropMemberships(email: string, unswept: ReadonlyMap<string, Role> = new Map()): Promise<{ settled: boolean; unswept: string[] }> {
+  if (!isRedisConfigured()) return { settled: true, unswept: [] };
+  const address = normaliseEmail(email);
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  let settled = true;
+  const open: string[] = [];
+  // The index and the stores whose sweep is to be repeated: the latter may be out of the index already (its SREM ran,
+  // and forgetting the pipeline access after it failed).
+  for (const sid of [...new Set([...ids, ...unswept.keys()])].filter((id) => STORE_ID_PATTERN.test(id))) {
+    // A store whose sweep is to be repeated stays in `open` unless the repeat is known to have finished: a read that
+    // does not answer, or anything that throws before then, never passes as every key held (Claude 4's review of
+    // #3326, MEDIUM, rule 24). Its owner is emailed whenever the store itself was read.
+    let store: Store | null = null;
+    let finished = false;
+    let told = false;
+    try {
+      store = await storeForId(sid);
+      // Not found, or not known: kept in the index for memberStores to drop on a confirmed absence, and said as unsettled.
+      if (!store) {
+        settled = false;
+        if (unswept.has(sid)) open.push(sid);
+        continue;
+      }
+      const role = await roleIn(store, address);
+      if (role === "owner") continue;
+      const was = role ?? unswept.get(sid);
+      // No role and no unfinished sweep: nothing of theirs there (a place carried, or taken off whole).
+      if (!was) continue;
+      const out = await takeOffSwept(store, address, role === null);
+      finished = out.swept;
+      if (!out.swept) {
+        settled = false;
+        open.push(sid);
+      }
+      if (out.removed) {
+        await logTeam(sid, { who: address, role: was, what: "Taken off the team: they moved their sign-in to another address, and their place could not go with it" });
+      }
+      if (out.swept) continue;
+      told = true;
+      await tellOwnerOfUnswept(store, address);
+      await logTeam(sid, { who: address, role: was, what: `Some API keys ${address} made may still work: not all could be paused when they left the team. Revoke any you do not recognize` });
+    } catch (error) {
+      console.error("taking a moved address off a team failed", error);
+      settled = false;
+      if (unswept.has(sid) && !finished && !open.includes(sid)) open.push(sid);
+      if (store && open.includes(sid) && !told) await tellOwnerOfUnswept(store, address);
+    }
+  }
+  return { settled, unswept: open };
+}
+
+/** The owner of a store where a former teammate's API keys may still work is emailed; a failure is only logged. */
+async function tellOwnerOfUnswept(store: Store, address: string): Promise<void> {
+  const { tellOwnerOfUnswept: tell } = await import("@/lib/api-key-pause");
+  await tell(store, address).catch((error: unknown) => console.error("telling the owner that a former teammate's API keys may still work failed", error));
+}
+
+/**
+ * removeMember for an address that moved away, with its sweep of the API keys repeated once when it could not be
+ * finished (KeysNotSwept), as the team route does on the owner's second press. `again`: the address is off the team
+ * already and only the sweep is repeated. `removed`: it was on the team and is off it now; `swept`: a sweep after
+ * that finished. Any other failure of the first removal throws, as nothing was done.
+ */
+async function takeOffSwept(store: Store, address: string, again: boolean): Promise<{ removed: boolean; swept: boolean }> {
+  let removed = false;
+  if (!again) {
+    try {
+      return { removed: await removeMember(store, address), swept: true };
+    } catch (error) {
+      if (!(error instanceof KeysNotSwept)) throw error;
+      console.error("a moved address was taken off a team, but its API keys could not all be paused; repeated once", error);
+      removed = true;
+    }
+  }
+  try {
+    await removeMember(store, address, { repeat: true });
+    return { removed, swept: true };
+  } catch (error) {
+    console.error("repeating the sweep of a moved address's API keys failed", error);
+    return { removed, swept: false };
+  }
 }

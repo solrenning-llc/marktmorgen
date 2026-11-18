@@ -15,6 +15,7 @@
  *   nl:cm:<id>:c:<post>       the comments under one post (hash)
  *   nl:cm:<id>:l:<post>       who liked one post (set of member keys)
  *   nl:cm:<id>:lc:<post>:<c>  who liked one comment (set of member keys)
+ *   nl:cm:<id>:likelock:<post>[:<c>]:<member>  held while one member's press on one like runs (pressLike)
  *   nl:cm:<id>:m              everyone who has come in: key -> Member (hash)
  *   nl:cm:<id>:dir            those who chose to be listed, by joining time
  *   nl:cm:<id>:rep            reported posts and comments, newest first
@@ -45,8 +46,10 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type DataOwner, orderWrite } from "@/lib/order-data";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { type DataOwner, ORDER_WRITE, fieldReleaseBytes, orderScriptWith, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { HASH_DEL_IF } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import {
@@ -77,12 +80,17 @@ import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
+import { type Held, LockBusyError, withLock } from "@/lib/redis-lock";
+import { likePoint } from "@/lib/community-points";
 import { dataBytes } from "@/lib/store-data-rules";
+import { PICTURE_MARK_BYTES } from "@/lib/community-files";
 import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { type AboutSetting, NO_ABOUT_PAGE, parseAboutSetting } from "@/lib/community-about-setting";
+import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -107,6 +115,15 @@ export type Space = {
    * opens the right to start a conversation, never the right to take part.
    */
   level: number;
+  /**
+   * For a space kept for some buyers: whether a member without one of those
+   * products sees it in the list, locked, with its name, its one line and the
+   * way to buy in (542 [CM1], "Visible and locked"), instead of no sign of it
+   * ("Hidden", the default, and every space made before there was a choice).
+   * Never its posts, comments, members or any count: that is still only
+   * maySeeSpace's to open (lib/community-access.ts, lib/community-locked.ts).
+   */
+  shown?: true;
 };
 
 export type CommunityConfig = {
@@ -129,6 +146,8 @@ export type CommunityConfig = {
   questions: string[];
   /** Sent privately to a member the first time they come in, from the creator, when messages are on. */
   welcome: string;
+  /** The public About page, and whether it shows its counts (lib/community-about-setting.ts). Off until the creator turns it on. */
+  page: AboutSetting;
 };
 
 export type Member = {
@@ -162,6 +181,14 @@ export type Member = {
   qq: string[];
   /** When they answered, in seconds; 0 until they have. */
   qa: number;
+  /**
+   * "o" on a record written since 4 November 2026: made by an order (counted
+   * in the orders' part, lib/order-data.ts) and grown in the members' slot
+   * at what setProfile counts (countedMember), so deleting it gives each
+   * part back where it was taken. Absent on records written before, whose
+   * room is left counted.
+   */
+  r?: "o";
 };
 
 export type CommunityImage = { path: string; w: number; h: number; alt: string };
@@ -217,8 +244,10 @@ const spaceKey = (id: string, space: string) => `${base(id)}:sp:${space}`;
 const commentsKey = (id: string, post: string) => `${base(id)}:c:${post}`;
 const likesKey = (id: string, post: string) => `${base(id)}:l:${post}`;
 const commentLikesKey = (id: string, post: string, comment: string) => `${base(id)}:lc:${post}:${comment}`;
+const likeLockKey = (id: string, post: string, comment: string | null, who: string) => `${base(id)}:likelock:${post}${comment ? `:${comment}` : ""}:${who}`;
 const membersKey = (id: string) => `${base(id)}:m`;
 const dirKey = (id: string) => `${base(id)}:dir`;
+const handlesKey = (id: string) => `${base(id)}:h`;
 const reportsKey = (id: string) => `${base(id)}:rep`;
 const reportersKey = (id: string, target: string) => `${base(id)}:rep:${target}`;
 const rateKey = (id: string, who: string, kind: string) => `nl:cm:rl:${id}:${who}:${kind}`;
@@ -239,7 +268,9 @@ const MEMBERS_SLOT = "cm:m";
 export const SET_ENTRY_BYTES = 96;
 /** What a post counts for: its record, its two places in the feeds, and its words. */
 function postBytes(post: Post): number {
-  return dataBytes([JSON.stringify(post)], 3) + indexBytes([post.title, post.text]);
+  // A post's picture keeps a mark for as long as the post keeps it (lib/community-files.ts, PICTURE_MARK_BYTES):
+  // taken from the room with the post, given back with it.
+  return dataBytes([JSON.stringify(post)], 3) + indexBytes([post.title, post.text]) + (post.img ? PICTURE_MARK_BYTES : 0);
 }
 
 /** What a comment counts for: its field, and the words it can add to its post's. */
@@ -265,6 +296,8 @@ export function freshConfig(storeName: string): CommunityConfig {
     chat: { ...NO_CHAT },
     questions: [],
     welcome: "",
+    // Nothing of the community is shown to people who are not in it until the creator says so.
+    page: { ...NO_ABOUT_PAGE },
   };
 }
 
@@ -288,6 +321,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         only: ids(entry.only, 50).filter((p) => p.length <= 40),
         // Spaces made before there were levels need none.
         level: Number.isInteger(entry.level) && entry.level >= 2 && entry.level <= 9 ? entry.level : 0,
+        // And before a kept space could be shown locked: hidden, as it always was.
+        ...(entry.shown === true ? { shown: true as const } : {}),
       });
       if (spaces.length >= MAX_SPACES) break;
     }
@@ -310,6 +345,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         .filter(Boolean)
         .slice(0, MAX_QUESTIONS),
       welcome: typeof value.welcome === "string" ? value.welcome.slice(0, MAX_WELCOME) : "",
+      // And before there was an About page: off.
+      page: parseAboutSetting(value.page),
     };
   } catch {
     return null;
@@ -323,11 +360,25 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
 }
 
 /**
+ * A setup that Redis did answer, as text, but that is not settings: stored
+ * damaged, so asking again gives the same answer. Still an unknown reply to
+ * anyone who catches UnknownReplyError; only a caller that knows what such a
+ * setup means for it may tell the two apart (lib/community-erasure.ts).
+ */
+export class DamagedConfigError extends UnknownReplyError {
+  constructor() {
+    super("a community setup stored damaged");
+    this.name = "DamagedConfigError";
+  }
+}
+
+/**
  * The settings, read before anything is written over them: null only when
  * the GET answered exactly nil, so there is no setup yet. A lost reply, one
  * in another shape or a value that does not parse throws, and the caller
  * writes nothing; a fresh setup over the creator's spaces and access would
- * lock every paying member out.
+ * lock every paying member out. A text value that does not parse throws
+ * DamagedConfigError.
  */
 export async function readConfigExact(id: string): Promise<CommunityConfig | null> {
   if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
@@ -335,12 +386,40 @@ export async function readConfigExact(id: string): Promise<CommunityConfig | nul
   if (!replies) throw new UnknownReplyError("a community setup");
   if (replies[0] === null) return null;
   const config = parseConfig(replies[0]);
-  if (!config) throw new UnknownReplyError("a community setup");
+  if (!config) throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
   return config;
 }
 
+/**
+ * The settings as readConfigExact reads them, with the exact stored text, for a write that must land only over what
+ * was read (saveConfigIfSame): null only when there is no setup yet; anything unknown throws.
+ */
+export async function readConfigExactRaw(id: string): Promise<{ config: CommunityConfig; raw: string } | null> {
+  if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community setup");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config || typeof replies[0] !== "string") throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
+  return { config, raw: replies[0] };
+}
+
+/**
+ * The settings written only while the stored text is still `read` (Codex X5's review of #3007): true when written,
+ * false when another save landed in between and nothing was written; any other answer throws UnknownReplyError. The
+ * same compare-and-set script as a product's description (lib/product-about.ts, modeled in lib/redis-memory.ts).
+ */
+export async function saveConfigIfSame(id: string, read: string, config: CommunityConfig): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["EVAL", WRITE_ABOUT_IF, 1, cfgKey(id), read, JSON.stringify(config)]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === 1) return true;
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === 0) return false;
+  throw new UnknownReplyError("a community's setup save");
+}
+
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {
-  await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]);
+  // Its own answer read (review of #3007, L2): a save not confirmed throws, so no route says it saved.
+  const replies = repliesFor(await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a community's setup save");
 }
 
 // ------------------------------------------------------------------ members
@@ -367,11 +446,31 @@ function parseMember(raw: unknown): Member | null {
       q: Array.isArray(v.q) ? v.q.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_ANSWER)).slice(0, MAX_QUESTIONS) : [],
       qa: typeof v.qa === "number" ? v.qa : 0,
       qq: Array.isArray(v.qq) ? v.qq.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_QUESTION)).slice(0, MAX_QUESTIONS) : [],
+      ...(v.r === "o" ? { r: "o" as const } : {}),
     };
   } catch {
     return null;
   }
 }
+
+/**
+ * A member's record as the members' slot counts it: without what is written
+ * without being counted (when they were last seen, the emails switch, their
+ * unsubscribe token, a mute or removal) and with the handle the name gives,
+ * the one setProfile counts. Only setProfile changes it, and counts each
+ * change, so the slot holds exactly what it grew by since the record was made.
+ */
+function countedMember(member: Member): string {
+  return JSON.stringify({ ...member, h: member.n.slice(0, 40), mail: false, seen: member.at, muted: false, removed: false, t: "" });
+}
+
+/** A member's record as touchMember first writes it (an order's write, lib/order-data.ts). */
+function firstMember(key: string, email: string, at: number): Member {
+  return { k: key, e: email, n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], r: "o" };
+}
+
+/** What a member's name takes in the members' slot beside the record: the words it is found by and its handle. */
+const nameBytes = (name: string) => (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0);
 
 export function memberKey(email: string): string {
   return emailKey(email);
@@ -410,9 +509,43 @@ export async function lastSeenIn(id: string, emails: string[]): Promise<Map<stri
   return out;
 }
 
+/**
+ * A member's record, or null only when Redis said there is none. A reply in
+ * any other shape (missing, cut short, not a record, a record without its own
+ * yes or no on a mute and a removal, or somebody else's) is thrown (CX-123
+ * rule 24): read as "no record", it let a member the creator took out past
+ * the removal and back in as somebody new (lib/community-access.ts
+ * communityViewer, touchMember's re-read).
+ */
 export async function readMember(id: string, key: string): Promise<Member | null> {
-  const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
-  return parseMember(raw);
+  return (await readMemberExact(id, key))?.member ?? null;
+}
+
+/** The record as readMember reads it, with the exact text it was kept as (what a compare-and-set writes over). */
+async function readMemberExact(id: string, key: string): Promise<{ raw: string; member: Member } | null> {
+  const replies = repliesFor(await redisPipeline([["HGET", membersKey(id), key]]), 1);
+  if (!replies) throw new UnknownReplyError("a community member record");
+  const raw = replies[0];
+  if (raw === null) return null;
+  const member = exactMember(raw, key);
+  if (!member || typeof raw !== "string") throw new UnknownReplyError("a community member record");
+  return { raw, member };
+}
+
+/** The record kept under `key`, when it is one: its own key, and a mute and a removal each a yes or a no. */
+function exactMember(raw: unknown, key: string): Member | null {
+  if (typeof raw !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const fields = value as Record<string, unknown>;
+  if (typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return null;
+  const member = parseMember(raw);
+  return member && member.k === key ? member : null;
 }
 
 export async function readMembers(id: string, keys: string[]): Promise<Map<string, Member>> {
@@ -428,8 +561,31 @@ export async function readMembers(id: string, keys: string[]): Promise<Map<strin
   return out;
 }
 
+/**
+ * The members of `keys`, read exactly (rules 24 and 30), for deciding who an email goes to: one left out of the map
+ * only when its row answered exactly nil, so it is gone. A reply lost, cut short or in another shape, or a row that is
+ * not that member's record, throws UnknownReplyError: a member who did not read is not one who is gone, and an email
+ * meant for them is not counted as sent (lib/community-event-mail.ts).
+ */
+export async function readMembersExact(id: string, keys: string[]): Promise<Map<string, Member>> {
+  const out = new Map<string, Member>();
+  const unique = [...new Set(keys)].filter((k) => k !== CREATOR);
+  if (!unique.length) return out;
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...unique]]), 1);
+  const rows = replies && repliesFor(replies[0], unique.length);
+  if (!rows) throw new UnknownReplyError("community members");
+  unique.forEach((key, i) => {
+    if (rows[i] === null) return;
+    const member = parseMember(rows[i]);
+    if (!member || member.k !== key) throw new UnknownReplyError("a community member record");
+    out.set(key, member);
+  });
+  return out;
+}
+
 /** Writes a member's record only if it is still exactly what was read. */
 const CAS_MEMBER = [
+  "-- marktmorgen:member-cas:v1",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
   "if cur ~= ARGV[2] then return 0 end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
@@ -441,19 +597,26 @@ const CAS_MEMBER = [
 /**
  * Changes some of a member's fields on the record as it is now, so a change
  * the member makes never writes back a mute or a removal the creator just
- * undid, or undoes one they just made. Null when there is no record.
+ * undid, or undoes one they just made. Null only when Redis said there is no
+ * record. A read or a write answered in any other shape throws
+ * UnknownReplyError (CX-123 rule 24): read as "no record", it let a stop
+ * link say "Unsubscribed." with the emails still on, and a mute say done
+ * with nothing written.
  */
 async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
-    const member = parseMember(raw);
-    if (!member || typeof raw !== "string") return null;
+    const read = await readMemberExact(id, key);
+    if (!read) return null;
+    const { raw, member } = read;
     const next: Member = { ...member, ...change(member), k: member.k };
     const listed = next.dir && next.n && !next.removed ? "1" : "0";
-    const [written] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
-    ]);
-    if (Number(written) !== 1) continue;
+    ]), 1);
+    // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
+    const written = replies?.[0];
+    if (written === 0) continue;
+    if (written !== 1) throw new UnknownReplyError("a change to a community member record");
     // The search index follows the very same switch the directory does, from
     // the very same place, so the two can never come to disagree about who is
     // findable. Somebody who took themselves off the list is taken out of the
@@ -476,9 +639,12 @@ export async function touchMember(id: string, email: string, existing: Member | 
     if (at - existing.seen < 3_600) return existing;
     return (await patchMember(id, key, () => ({ seen: at }))) ?? existing;
   }
-  const [size] = await redisPipeline([["HLEN", membersKey(id)]]);
+  // The head count in its exact shape (CX-123 rule 24): read with Number(...), a missing or off-shape
+  // HLEN was NaN, never at the ceiling, and a new record was written whatever the count was.
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", membersKey(id)]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("a community's head count");
   if (Number(size) >= MAX_MEMBERS) return null;
-  const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+  const member = firstMember(key, normaliseEmail(email), at);
   // HSETNX: two first visits at once make one record, not two. Counted in
   // the store's room at what it adds (lib/order-data.ts); what a member adds
   // to it later is taken from the room (MEMBERS_SLOT).
@@ -503,22 +669,97 @@ export async function setProfile(
   // their name is found by. A record that shrinks gives it back.
   const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
   const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });
-  const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);
+  const grown = dataBytes([countedMember(JSON.parse(after) as Member)]) - dataBytes([countedMember(member)]) + nameBytes(name) - nameBytes(member.n);
+  // A record that shrinks gives it back only once the shorter one is written (Claude 1 cloud's LEVE on #2576): a write
+  // whose answer is lost, or a record gone in between, gives nothing back (below).
   if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
-  // which may carry a number when somebody already held the plain one.
+  // which may carry a number when somebody already held the plain one. It
+  // only reserves: the handle they had stays theirs until the record is known
+  // not to carry it any more (rule 30 on Codex G's review 5815632734 of #3123),
+  // so a change that did not go in never lets the name they are still shown
+  // under resolve to nobody, or to somebody else.
   const handle = await claimHandle(id, member.k, name, member.h);
-  return (
-    (await patchMember(id, member.k, (now) => ({
-      n: name,
-      h: handle,
-      dir: change.dir && Boolean(name),
-      mail: change.mail,
-      ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
-    }))) ?? member
-  );
+  const had = member.h && member.h !== handle ? member.h : "";
+  let replaced = "";
+  let saved: Member | null;
+  try {
+    saved = await patchMember(id, member.k, (now) => {
+      replaced = now.h;
+      return {
+        n: name,
+        h: handle,
+        dir: change.dir && Boolean(name),
+        mail: change.mail,
+        ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
+      };
+    });
+  } catch (error) {
+    // The read or the write after the claim answered in no known shape, so
+    // whether the record took the new handle is not known: a lost answer may
+    // hide a write that went in. Each of the two handles is given back only
+    // when the record, read in the same step, does not carry it (rule 30 on
+    // Codex G's reviews 5815559331 and 5815632734 of #3123): a record still
+    // on the old one keeps the old one and lets the new one go, a record on
+    // the new one keeps the new one and lets the old one go. When an answer
+    // is not known, nothing more is given back, so both stay reserved: a
+    // handle held too long is safe, one that stops resolving to the person
+    // still shown under it is not. Either way the original failure is what
+    // the caller sees.
+    await giveBackUnlessCarried(id, member.k, [handle, had]).catch(() => 0);
+    throw error;
+  }
+  // The erasure deletes only the handle the record holds (lib/community-erasure.ts),
+  // so a handle the record does not carry is given back here, never left tied to
+  // the member: the one this change claimed when the record went in between (an
+  // erasure), the one the member had once the record no longer carries it, and
+  // one a change made at the same time wrote and this one replaced (rule 30 on
+  // Codex G's reviews 5815472405 and 5815632734 of #3123).
+  if (!saved) {
+    await giveBackUnlessCarried(id, member.k, [handle, had]);
+    return member;
+  }
+  await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);
+  if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
+  return saved;
+}
+
+/**
+ * Gives back each of these handles, one GIVE_BACK_HANDLE each, so each is let
+ * go only while it still points at this member and the record, read in the
+ * same step, does not carry it. Stops at the first answer that is not known,
+ * keeping every handle not yet given back.
+ */
+async function giveBackUnlessCarried(id: string, who: string, handles: string[]): Promise<void> {
+  for (const handle of [...new Set(handles)]) if (handle) await giveBackHandle(id, handle, who);
+}
+
+/**
+ * Gives a handle back only while it still points at this member and the
+ * member's record, read in the same step, does not carry it: a record that
+ * names it keeps it, and one gone or naming another lets it go. 1 deleted,
+ * 0 kept; -1 (a record that cannot be read) and any other answer are not
+ * known to be either.
+ */
+const GIVE_BACK_HANDLE = [
+  "-- marktmorgen:community-handle-give-back:v1",
+  'if redis.call("HGET", KEYS[2], ARGV[1]) ~= ARGV[2] then return 0 end',
+  'local raw = redis.call("HGET", KEYS[1], ARGV[2])',
+  "if raw then",
+  "  local ok, record = pcall(cjson.decode, raw)",
+  '  if not ok or type(record) ~= "table" then return -1 end',
+  "  if record.h == ARGV[1] then return 0 end",
+  "end",
+  'return redis.call("HDEL", KEYS[2], ARGV[1])',
+].join("\n");
+
+/** Runs GIVE_BACK_HANDLE; throws UnknownReplyError unless Redis answered 1 or 0 exactly. */
+async function giveBackHandle(id: string, handle: string, who: string): Promise<number> {
+  const replies = repliesFor(await redisPipeline([["EVAL", GIVE_BACK_HANDLE, 2, membersKey(id), handlesKey(id), handle, who]]), 1);
+  const gone = replies?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("giving back a community handle");
+  return gone;
 }
 
 /**
@@ -543,9 +784,20 @@ export async function setMail(id: string, member: Member, mail: boolean): Promis
   return (await patchMember(id, member.k, () => ({ mail }))) ?? member;
 }
 
-/** Keeps the unsubscribe token a member's emails carry. */
-export async function setMemberToken(id: string, member: Member, token: string): Promise<void> {
-  await patchMember(id, member.k, () => ({ t: token }));
+/**
+ * Keeps the unsubscribe token a member's emails carry, made once and never
+ * replaced: the token is written only while the record holds none, so two
+ * sends that read the member before either wrote (or one holding an old
+ * snapshot) never undo a link already put in an email (Codex G on #3123).
+ * Answers the token the record holds afterwards, which is `token` or the one
+ * kept before it; null only when Redis said there is no record. Any other
+ * answer throws (CX-123 rule 24).
+ */
+export async function setMemberToken(id: string, member: Member, token: string): Promise<string | null> {
+  const kept = await patchMember(id, member.k, (now) => (now.t ? {} : { t: token }));
+  if (!kept) return null;
+  if (!/^[0-9a-f]{40}$/.test(kept.t)) throw new UnknownReplyError("a community member's stop link");
+  return kept.t;
 }
 
 /** The creator mutes or unmutes, removes or lets back. */
@@ -588,20 +840,29 @@ export async function directorySize(id: string): Promise<number> {
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
 export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
-  const [reply, total] = await redisPipeline([
-    ["HSCAN", membersKey(id), cursor, "COUNT", count],
-    ["HLEN", membersKey(id)],
-  ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  const both = repliesFor(
+    await redisPipeline([
+      ["HSCAN", membersKey(id), cursor, "COUNT", count],
+      ["HLEN", membersKey(id)],
+    ]),
+    2,
+  );
+  // HSCAN answers [cursor, [field, value, ...]] and HLEN a count (CX-123 rule 24): a page in any other shape is
+  // unknown, never a last or empty page, so no list, export or send takes a part of the members for all of them.
+  const page = repliesFor(both?.[0], 2);
+  const at = page?.[0];
+  const next = typeof at === "string" && /^\d{1,20}$/.test(at) ? at : countOf(at) !== null ? String(at) : null;
+  const flat = stringList(page?.[1]);
+  const total = countOf(both?.[1]);
+  if (next === null || !flat || flat.length % 2 !== 0 || total === null) throw new UnknownReplyError("a page of a community's members");
   const members: Member[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
   }
   // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
-  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
-  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
+  const bytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
+  return { members, next, total, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */
@@ -702,16 +963,26 @@ export type NewPost = {
   img: CommunityImage | null;
   kind: "post" | "announcement";
   poll: Poll | null;
+  /**
+   * The post's id, when it is fixed beforehand: a held post is published
+   * under its own item's id (lib/community-approval.ts, 543 [CM2]), so a
+   * write whose reply was lost can be found, and never made twice.
+   */
+  id?: string;
 };
 
 /** Writes a post. The caller has checked who may, and cleaned what it says. */
 export async function createPost(id: string, input: NewPost, room: DataStore): Promise<{ ok: true; post: Post } | { ok: false; reason: "full" }> {
-  const [count] = await redisPipeline([["ZCARD", feedKey(id)]]);
-  if (Number(count) >= MAX_POSTS) return { ok: false, reason: "full" };
-  const [n] = await redisPipeline([["INCR", seqKey(id)]]);
+  // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
+  const count = countOf(repliesFor(await redisPipeline([["ZCARD", feedKey(id)]]), 1)?.[0]);
+  if (count === null) throw new UnknownReplyError("ZCARD of a community's feed");
+  if (count >= MAX_POSTS) return { ok: false, reason: "full" };
+  // The post's number is the feeds' score: an unreadable one, or one INCR cannot give, writes nothing (rule 24).
+  const n = countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]);
+  if (n === null || n < 1) throw new UnknownReplyError("INCR of a community's post sequence");
   const post: Post = {
-    id: newItemId(),
-    n: Number(n),
+    id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(),
+    n,
     sp: input.space,
     a: input.author,
     title: input.title,
@@ -805,14 +1076,15 @@ export async function editPost(id: string, post: Post, input: { title: string; t
 export async function deletePost(id: string, post: Post, room: DataStore): Promise<void> {
   const [raw] = await redisPipeline([["HKEYS", commentsKey(id, post.id)]]);
   const commentIds = Array.isArray(raw) ? (raw as string[]) : [];
-  await redisPipeline([
+  const gone = await redisPipeline([
     ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), reportersKey(id, `p:${post.id}`), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c))],
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
     ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
     ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
-  if (post.a !== CREATOR) await giveData(room, [TRACE_ENTRY]);
+  // Its entry in the author's trace comes back only when this took it out: a deletion of the author takes the whole trace.
+  if (post.a !== CREATOR && Number(gone[4]) === 1) await giveData(room, [TRACE_ENTRY]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });
@@ -877,25 +1149,208 @@ export async function postNumbers(
 }
 
 /** One like per member per post: a second press takes it back. */
-export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean | null> {
   return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
 /** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
-async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  const [held] = await redisPipeline([["SISMEMBER", key, who]]);
+/**
+ * true: liked now; false: this press took the like back; null: it changed nothing (a press at the same moment took the
+ * like back first), so nothing is awarded or taken for it.
+ */
+async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean | null> {
+  // Rule 24: each reply read exactly, 0 or 1; any other is unknown and throws
+  // (the route answers "error" and awards nothing). Never "already liked" on a
+  // reply that does not say so: that took the like away, gave its room back
+  // twice and took a point from the author.
+  const zeroOrOne = (reply: unknown): 0 | 1 | null => (reply === 0 || reply === 1 ? reply : null);
+  const held = zeroOrOne(repliesFor(await redisPipeline([["SISMEMBER", key, who]]), 1)?.[0]);
+  if (held === null) throw new UnknownReplyError("a like's SISMEMBER");
   // The like and its entry in the member's trace (traceKey) take their room first.
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
-  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
-  if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
-  const times = Number(held) === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
-  return false;
+  if (held !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
+  const adds = repliesFor(await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]), 2);
+  const added = zeroOrOne(adds?.[0]);
+  const traceAdded = zeroOrOne(adds?.[1]);
+  // Unknown: the room taken is kept, since the like may be written.
+  if (added === null || traceAdded === null) throw new UnknownReplyError("a like's SADD");
+  if (added === 1) {
+    // The trace entry an earlier attempt left was already there (its SADD answered 0): the room this press took for it
+    // is given back, never left counted (Codex P on #3819).
+    if (held !== 1 && traceAdded === 0) await giveData(room, [TRACE_ENTRY]);
+    return true;
+  }
+  const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
+  // Room is given back only once the removal is confirmed.
+  const like = zeroOrOne(removed?.[0]);
+  const traced = zeroOrOne(removed?.[1]);
+  if (like === null || traced === null) throw new UnknownReplyError("a like's SREM");
+  // Each entry's room only when this press removed it (a 0 is a press at the same moment that removed it first and
+  // gave it back), plus the room this press took itself when it found no like (Claude 1 on #3819).
+  const own = held === 1 ? 0 : 1;
+  const likeTimes = like + own;
+  // The trace entry's room comes back for what this press took, plus the entry it removed only when that entry was
+  // there before this press (its SADD answered 0); an entry this press added itself is in its own room already
+  // (#2576).
+  const traceTimes = own + (traced === 1 && traceAdded === 0 ? 1 : 0);
+  if (likeTimes || traceTimes) {
+    await giveData(room, [
+      ...(likeTimes ? [{ slot: POST_SLOT(post), bytes: likeTimes * SET_ENTRY_BYTES }] : []),
+      ...(traceTimes ? [{ ...TRACE_ENTRY, bytes: traceTimes * TRACE_ENTRY.bytes }] : []),
+    ]);
+  }
+  return like === 1 ? false : null;
+}
+
+/**
+ * A press on a like, in one Redis step (#3819: Codex V, G and U, MEDIUM; Codex P, HIGH): the like, its entry in the
+ * member's trace and the author's point change together, or nothing changes. Until then they were separate steps
+ * under a lock nothing checked: a press paused past the lock's term gave a point for a like another press had taken
+ * back, a point write that failed left the like changed and the point not, and a press paused before its write put a
+ * like back without its room.
+ *
+ * KEYS: the store's room, what ORDER_WRITE writes for the point (the author's all-time board, then today's), then the
+ * like's lock, the likes, the member's trace and the community's members. ARGV: ORDER_WRITE's own (one point given),
+ * then the author, the lock's token, the member, the trace entry, the like as read before the room was taken (1 or 0)
+ * and whether the author earns (1 or 0); the six are taken off ARGV's end before ORDER_WRITE's body reads the rest.
+ *
+ *   {0}               the lock is not this press's any more: nothing changed;
+ *   {2}               the like is not as it was read: nothing changed, read it again;
+ *   {-1}              a call this script does not take, or a board score that is not a whole number: nothing changed;
+ *   {1, 1, t, bytes}  liked now (t: 1 the trace entry is new, 0 it was there); the point given, and the board room it
+ *                     took, only while the author is still in the community (lib/community-push.ts STILL_IN reads the
+ *                     member record the same way);
+ *   {1, 0, t, 0}      taken back (t: 1 the trace entry went, 0 it was not there); the point taken back as
+ *                     lib/community-points.ts REMOVE_POINT takes it (never below zero, a negative score repaired).
+ */
+export const LIKE_PRESS = `-- marktmorgen:community-like-press:v1
+local point = table.remove(ARGV) == '1'
+local expect = tonumber(table.remove(ARGV))
+local ref = table.remove(ARGV)
+local who = table.remove(ARGV)
+local token = table.remove(ARGV)
+local author = table.remove(ARGV)
+local members, trace, likes, lock = KEYS[#KEYS], KEYS[#KEYS - 1], KEYS[#KEYS - 2], KEYS[#KEYS - 3]
+if redis.call('GET', lock) ~= token then return {0} end
+local held = redis.call('SISMEMBER', likes, who)
+if held ~= expect then return {2} end
+local function write()
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}
+end
+if held == 0 then
+  local charged = 0
+  if point then
+    local raw = redis.call('HGET', members, author)
+    local still = false
+    if raw then
+      local ok, record = pcall(cjson.decode, raw)
+      still = ok and type(record) == 'table' and record.k == author and type(record.e) == 'string' and record.removed == false and type(record.muted) == 'boolean'
+    end
+    if still then
+      local out = write()
+      if out[1] == -1 then return {-1} end
+      charged = out[1]
+    end
+  end
+  redis.call('SADD', likes, who)
+  return {1, 1, redis.call('SADD', trace, ref), charged}
+end
+if point then
+  local function score(key)
+    local raw = redis.call('ZSCORE', key, author)
+    if raw == false then return 0 end
+    local value = tonumber(raw)
+    if not value or value ~= math.floor(value) or math.abs(value) > 9007199254740991 then return false end
+    return value
+  end
+  local total, today = score(KEYS[2]), score(KEYS[3])
+  if total == false or today == false then return {-1} end
+  local function take(key, value)
+    if value < 0 then redis.call('ZADD', key, 0, author) elseif value > 0 then redis.call('ZINCRBY', key, -1, author) end
+  end
+  take(KEYS[2], total)
+  take(KEYS[3], today)
+end
+redis.call('SREM', likes, who)
+return {1, 0, redis.call('SREM', trace, ref), 0}`;
+
+/** How many times a press reads the like again when it changed between its read and its step, before it says busy. */
+const LIKE_PRESS_TRIES = 3;
+
+/**
+ * One member's press on a post's or a comment's like, with the author's point, under one lock per member and liked
+ * thing (Codex T and Codex U on #3819), in one fenced step (LIKE_PRESS): the like, its trace entry and the point change
+ * together and only while the lock is still this press's. A lock not had in time, or lost before the step, throws
+ * LockBusyError with nothing changed (the route answers "error": try again). The like's room is taken before the step
+ * when the like was not there, and given back when the step did not add it; a removal gives its entries' room back
+ * once the step confirms it. A reply of any other shape keeps the room taken and throws UnknownReplyError (rule 24).
+ * The author is given or loses a point only when this press changed the like, never for their own like.
+ */
+export async function pressLike(
+  id: string,
+  post: string,
+  comment: string | null,
+  who: string,
+  author: string,
+  room: DataStore,
+  owner: DataOwner,
+): Promise<boolean | null> {
+  const key = comment ? commentLikesKey(id, post, comment) : likesKey(id, post);
+  const ref = comment ? `lc:${post}:${comment}` : `l:${post}`;
+  const earns = author !== who ? likePoint(id, author) : null;
+  // A press with no point still runs the same step: its boards are the author's own keys only to name them.
+  const point = earns ?? likePoint(id, "0".repeat(32));
+  if (!point) throw new Error("not a community a like is pressed in");
+  const zeroOrOne = (reply: unknown): 0 | 1 | null => (reply === 0 || reply === 1 ? reply : null);
+  const entries = [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY];
+  return withLock(likeLockKey(id, post, comment, who), 20, 5_000, async (lock: Held) => {
+    for (let attempt = 0; attempt < LIKE_PRESS_TRIES; attempt += 1) {
+      const held = zeroOrOne(repliesFor(await redisPipeline([["SISMEMBER", key, who]]), 1)?.[0]);
+      if (held === null) throw new UnknownReplyError("a like's SISMEMBER");
+      if (held === 0) await needData(room, entries);
+      const giveBack = async () => {
+        if (held === 0) await giveData(room, entries);
+      };
+      const step = orderScriptWith(owner, point.add, LIKE_PRESS, [lock.key, key, traceKey(id, who), membersKey(id)], [
+        earns ? author : "",
+        lock.token,
+        who,
+        ref,
+        held,
+        earns ? 1 : 0,
+      ]);
+      const reply = repliesFor(await redisPipeline([step]), 1)?.[0];
+      const answer = Array.isArray(reply) ? reply : null;
+      if (answer && answer.length === 1 && answer[0] === 0) {
+        await giveBack();
+        throw new LockBusyError("a like's lock ran out before its step");
+      }
+      if (answer && answer.length === 1 && answer[0] === 2) {
+        await giveBack();
+        continue;
+      }
+      if (answer && answer.length === 1 && answer[0] === -1) {
+        await giveBack();
+        throw new UnknownReplyError("a like's step (a call or a board score it does not take)");
+      }
+      const changed = answer && answer.length === 4 && answer[0] === 1 ? zeroOrOne(answer[1]) : null;
+      const traced = answer && answer.length === 4 ? zeroOrOne(answer[2]) : null;
+      const charged = answer && answer.length === 4 ? countOf(answer[3]) : null;
+      // Unknown: the room taken is kept, since the like may be written.
+      if (changed === null || traced === null || charged === null || changed !== (held === 0 ? 1 : 0)) throw new UnknownReplyError("a like's step");
+      if (changed === 1) {
+        // The trace entry an earlier press left was already there: the room taken for it is given back (Codex P on #3819).
+        if (traced === 0) await giveData(room, [TRACE_ENTRY]);
+        return true;
+      }
+      await giveData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, ...(traced === 1 ? [TRACE_ENTRY] : [])]);
+      return false;
+    }
+    throw new LockBusyError("a like kept changing under its press");
+  });
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */
-export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean | null> {
   return toggleIn(id, commentLikesKey(id, post, comment), `lc:${post}:${comment}`, post, who, room);
 }
 
@@ -980,18 +1435,21 @@ export async function readComment(id: string, post: string, comment: string): Pr
 export async function addComment(
   id: string,
   post: string,
-  input: { parent: string; author: string; text: string },
+  input: { parent: string; author: string; text: string; id?: string },
   room: DataStore,
 ): Promise<{ ok: true; comment: Comment } | { ok: false; reason: "full" | "parent" }> {
-  const [size] = await redisPipeline([["HLEN", commentsKey(id, post)]]);
-  if (Number(size) >= MAX_COMMENTS_PER_POST) return { ok: false, reason: "full" };
+  // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", commentsKey(id, post)]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("HLEN of a community post's comments");
+  if (size >= MAX_COMMENTS_PER_POST) return { ok: false, reason: "full" };
   let parent = "";
   if (input.parent) {
     const above = await readComment(id, post, input.parent);
     if (!above) return { ok: false, reason: "parent" };
     parent = above.parent || above.id;
   }
-  const comment: Comment = { id: newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
+  // A fixed id: a held comment is published under its item's id (543 [CM2]), as a held post is.
+  const comment: Comment = { id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
   const traced = comment.a !== CREATOR;
   await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }, ...(traced ? [TRACE_ENTRY] : [])]);
   await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)], ...(traced ? [["SADD", traceKey(id, comment.a), `c:${post}:${comment.id}`]] : [])]);
@@ -1021,14 +1479,16 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
   const all = comment.parent ? [] : (await readComments(id, post)).filter((c) => c.parent === comment.id);
   const gone = [comment.id, ...all.map((c) => c.id)];
   const freed = [comment, ...all].reduce((sum, c) => sum + commentBytes(c), 0);
-  await redisPipeline([
+  const authored = [comment, ...all].filter((c) => c.a !== CREATOR);
+  const replies = await redisPipeline([
     ["HDEL", commentsKey(id, post), ...gone],
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
     ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
-    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
+    ...authored.map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
   ]);
-  const traced = [comment, ...all].filter((c) => c.a !== CREATOR).length;
+  // Each entry in an author's trace comes back only when this took it out.
+  const traced = replies.slice(replies.length - authored.length).filter((n) => Number(n) === 1).length;
   await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
@@ -1065,7 +1525,12 @@ export async function report(id: string, target: ReportTarget, who: string, room
     ["SADD", traceKey(id, who), `r:${key}`],
   ]);
   if (Number(traced) !== 1) await giveData(room, [TRACE_ENTRY]);
-  if (Number(added) !== 1) return "again";
+  if (Number(added) !== 1) {
+    // Already a reporter. "again" only while the item really is in the queue: a
+    // retry after a lost queue write (or after the creator dismissed it) queues it.
+    const [queued] = await redisPipeline([["ZSCORE", reportsKey(id), key]]);
+    if (queued !== null && queued !== undefined) return "again";
+  }
   await redisPipeline([
     ["ZADD", reportsKey(id), Date.now(), key],
     ["ZREMRANGEBYRANK", reportsKey(id), 0, -(MAX_REPORT_QUEUE + 1)],
@@ -1153,21 +1618,58 @@ export async function dropSpace(id: string, space: string): Promise<void> {
 }
 
 /**
+ * One member's own record as it is now, read exactly, for deleting them (lib/community-erasure.ts): its value, or null
+ * when there is none. Anything Redis did not answer whole is UnknownReply, never "no member", so the person is not
+ * reported deleted with the record kept (Claude 5 on #2576).
+ */
+export async function readMemberRecord(id: string, who: string): Promise<{ raw: string; member: Member | null } | null> {
+  if (!isRedisConfigured()) return null;
+  const [raw] = exactReplies(await redisPipeline([["HGET", membersKey(id), who]]), 1, "a member's record read");
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReply("a member's record read");
+  return { raw, member: parseMember(raw) };
+}
+
+/**
  * Deletes one member's own record (lib/community-erasure.ts): who they are,
  * their name and answers, their place in the directory, and the counts kept
- * for their limits. Answers the record as it was, for the keys it names
- * elsewhere (their handle, their unsubscribe token), or null.
+ * for their limits. Taken LAST, after what it names elsewhere (their handle,
+ * their unsubscribe token) is gone, and only while it still holds the value
+ * read (`raw`, from readMemberRecord): a step that fails before it leaves the
+ * record for the next try to find those keys by (Claude 5 on #2576). Answers
+ * true when this call deleted it (or there was none), false when it changed in
+ * between; each delete's answer is read exactly (CX-123 rule 24; Claude 7 on
+ * #3095), and any other is UnknownReplyError, with no room given back.
  */
-export async function forgetMemberRecord(id: string, who: string): Promise<Member | null> {
-  if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", membersKey(id), who]]);
-  const member = parseMember(raw);
-  await redisPipeline([
-    ["HDEL", membersKey(id), who],
+export async function forgetMemberRecord(id: string, who: string, raw: string | null, room?: DataStore): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const rates = (Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind));
+  const commands: (string | number)[][] = [
     ["ZREM", dirKey(id), who],
-    ["DEL", ...(Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind))],
-  ]);
-  return member;
+    ["DEL", ...rates],
+  ];
+  if (raw !== null) commands.push(["EVAL", HASH_DEL_IF, 1, membersKey(id), who, raw]);
+  // Each delete's own answer, read exactly: ZREM of one field 0 or 1, the rate keys' DEL from 0 up to their number, the
+  // record's compare-and-delete 0 or 1. Any other answer, or a pipeline that does not answer one for each, may have
+  // left the record there: it throws, and the erasure is retried, never reported done.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const [listed, limits, taken] = (replies ?? []).map(countOf);
+  if (!replies || (listed !== 0 && listed !== 1) || limits === null || limits === undefined || limits > rates.length || (raw !== null && taken !== 0 && taken !== 1)) {
+    throw new UnknownReplyError("a community member's record deleted");
+  }
+  if (raw === null) return true;
+  if (taken === 0) return false;
+  const member = parseMember(raw);
+  // A record made by an order gives back its first write to the orders' part
+  // and what it grew by, its name's words and handle with it, to the members'
+  // slot. One written before this was recorded (no `r`) stays counted.
+  if (room && member?.r === "o") {
+    const first = firstMember(member.k, member.e, member.at);
+    const grown = dataBytes([countedMember(member)]) - dataBytes([countedMember(first)]) + nameBytes(member.n);
+    await releaseOrderData(room, fieldReleaseBytes(who, JSON.stringify(first)));
+    if (grown > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
+  }
+  return true;
 }
 
 /** Commands sent at once while reading a whole community for one member's copy. */

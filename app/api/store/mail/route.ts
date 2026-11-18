@@ -12,13 +12,16 @@ import {
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
-import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
+import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, mailDay, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
-import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
+import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
-import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
+import { FLOW_ID, FlowWriteUnconfirmed, FlowsBusy, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, restoreFlowVersion, saveFlow, setFlowActive } from "@/lib/flows";
+import { FlowHistoryNotPaid, FlowVersionsUnavailable, flowHistorySize, payFlowHistory, readFlowVersions } from "@/lib/flow-versions";
+import { listVersionsBytes } from "@/lib/flow-versions-rules";
+import { studioRefusal } from "@/lib/person-tasks";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
 import { RUNS_LISTED } from "@/lib/flow-limits";
@@ -26,6 +29,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { courseProgress } from "@/lib/learn";
 import { idsOfKind } from "@/lib/catalog";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { DraftRemovalConflict, DraftRemovalUnconfirmed, DraftReadUnavailable, DraftWriteUnconfirmed, finishBroadcastDraft, removeDraft, saveDraft } from "@/lib/mail-drafts";
 import { copyOf, keepSending } from "@/lib/mail-reuse";
 import { setUpStarters } from "@/lib/mail-starters";
@@ -60,6 +64,9 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
   "flow-remove": "send",
   // Switching a workflow on is its own, explicit step (lib/flows.ts, setFlowActive).
   "flow-activate": "send",
+  // A workflow's earlier versions and putting one back (639 [GL7](19)): as a save is.
+  "flow-versions": "send",
+  "flow-restore": "send",
   // A workflow's runs name the people in them, so they are for those who send.
   "flow-runs": "send",
   "flow-run": "send",
@@ -79,7 +86,7 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
 /**
  * Everything the studio does with email:
  *
- *   { action: "settings", fromName, address }
+ *   { action: "settings", fromName, address, onPolicies? }
  *   { action: "import", text, confirm: true }
  *   { action: "count", productId, notProductId, who, narrow? }   who: "all" | "buyers" | "leads";
  *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
@@ -91,6 +98,10 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *   { action: "cancel", id }
  *   { action: "flow", flow: {...} }  /  { action: "flow-remove", id }
  *   { action: "flow-activate", id, active }   switch a saved workflow on or off
+ *   { action: "flow-versions", id }           its earlier versions, newest first (lib/flow-versions.ts)
+ *   { action: "flow-restore", id, at }        put one back: a save, checked whole, that can be undone the same way;
+ *                                             both take studio requests for what they move first
+ *                                             (lib/flow-versions-rules.ts), 429 or 503 without them
  *   { action: "flow-runs", id }               its most recent runs
  *   { action: "flow-run", id, run }           one run's history, step by step
  *   { action: "flow-resolve", id, run, choice }   a held run: "continue" | "retry" | "end"
@@ -131,7 +142,8 @@ export async function POST(request: NextRequest) {
       const address = text(body.address, 1000).replace(/\s+/g, " ").trim().slice(0, MAX_MAIL_ADDRESS);
       if (!fromName) return fail("from_name");
       if (address.length < 10) return fail("address");
-      await setMailSettings(ref, { fromName, address });
+      // Shown on the public policies page only when the creator checked it, never by default (#1824).
+      await setMailSettings(ref, { fromName, address, ...(body.onPolicies === true ? { onPolicies: true as const } : {}) });
       return Response.json({ ok: true });
     }
 
@@ -165,7 +177,7 @@ export async function POST(request: NextRequest) {
       if (!isNarrowed(narrow) && body.channels !== true) {
         return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
       }
-      // Counted before it is read: the ten-minute copy by its size, or Stripe, PayPal and the imported buyers again.
+      // Counted before it is read: the one-hour copy by its size, or Stripe, PayPal and the imported buyers again.
       const counting = countLedger(store);
       const ledger = await buyerLedger(store, counting.count).catch((error) => {
         if (error instanceof LedgerNotCounted) return error;
@@ -184,17 +196,26 @@ export async function POST(request: NextRequest) {
         // How many of the store's buyers are of each kind (270 [GR1], unit 3c), from the same ledger: no extra read.
         kinds: Object.fromEntries(rfmSummary(ledger.buyers.values(), now).map((k) => [k.id, k.buyers])),
         partial: ledger.partial,
+        // When these buyers were read (ms; the copy is kept an hour, C3-80 (b)): the studio says "as of" that time.
+        ...(typeof ledger.at === "number" ? { asOf: ledger.at } : {}),
       });
     }
 
     if (action === "segment-save") {
       const saved = await saveSegment(store, body);
-      if (!saved.ok) return Response.json({ ok: false, error: `segment_${saved.reason}` }, { status: 400 });
+      // Groups that could not be read are a moment's trouble, not the creator's: 503, and nothing was saved.
+      if (!saved.ok) return Response.json({ ok: false, error: `segment_${saved.reason}` }, { status: saved.reason === "unavailable" ? 503 : 400 });
       return Response.json({ ok: true, segments: saved.segments });
     }
 
     if (action === "segment-remove") {
-      return Response.json({ ok: true, segments: await removeSegment(store, body.id) });
+      // Removed, but the groups left could not be read: never shown as none (CX-123 rule 24).
+      const segments = await removeSegment(store, body.id).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
+      if (!segments) return fail("segment_unread", 503);
+      return Response.json({ ok: true, segments });
     }
 
     if (action === "test") {
@@ -203,7 +224,8 @@ export async function POST(request: NextRequest) {
       const content = text(body.body, MAX_MAIL_BODY * 2).trim().slice(0, MAX_MAIL_BODY);
       if (!subject) return fail("subject");
       if (!content) return fail("body");
-      const reserved = await reserve(store, 1);
+      const day = mailDay();
+      const reserved = await reserve(store, 1, false, day);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
       const r = render(store, `[Test] ${subject}`, content, null);
       const outcome = await sendBatch(
@@ -214,7 +236,7 @@ export async function POST(request: NextRequest) {
         { by: "monthly" },
       );
       if (outcome !== "sent") {
-        await release(store, 1);
+        await release(store, 1, day);
         return fail("send", 502);
       }
       return Response.json({ ok: true, to: email });
@@ -289,6 +311,25 @@ export async function POST(request: NextRequest) {
       const raw = body.flow && typeof body.flow === "object" ? (body.flow as Record<string, unknown>) : {};
       const result = await saveFlow(store, raw);
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
+    }
+
+    if (action === "flow-versions") {
+      const id = text(body.id, 40);
+      if (!FLOW_ID.test(id) || !store.listId) return fail("unknown", 404);
+      // What it moves is measured and paid for in studio requests before any of it is read (Claude 5 on #1927).
+      await payFlowHistory(store, listVersionsBytes(await flowHistorySize(store.listId, id)));
+      const flows = await readFlowListStrict(store.listId);
+      if (!flows.some((f) => f.id === id)) return fail("unknown", 404);
+      const versions = await readFlowVersions(store.listId, id);
+      return Response.json({ ok: true, versions: versions.map((v) => ({ at: v.at, name: v.flow.name, trigger: v.flow.trigger, steps: v.flow.steps.length })) });
+    }
+
+    if (action === "flow-restore") {
+      const id = text(body.id, 40);
+      const at = typeof body.at === "number" && Number.isSafeInteger(body.at) ? body.at : 0;
+      if (!FLOW_ID.test(id) || !at) return fail("unknown", 404);
+      const result = await restoreFlowVersion(store, id, at);
+      return result.ok ? Response.json({ ok: true, flows: result.flows, kept: result.kept === true }) : fail(result.reason, result.reason === "unknown" || result.reason === "version" ? 404 : result.reason === "history_room" ? 409 : 400);
     }
 
     if (action === "flow-import") {
@@ -371,18 +412,27 @@ export async function POST(request: NextRequest) {
 
     if (action === "flow-remove") {
       const result = await removeFlow(store, text(body.id, 40));
-      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, 404);
+      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "history_unconfirmed" ? 503 : 404);
     }
 
     return fail("invalid");
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // The studio would not take the requests a workflow's history costs: nothing of it was read (lib/flow-versions.ts).
+    if (error instanceof FlowHistoryNotPaid) {
+      const refused = studioRefusal(error.reason, error.words);
+      return Response.json(refused.body, { status: refused.status });
+    }
     console.error("an email action failed", error);
     if (error instanceof BroadcastCancellationUnconfirmed) return fail("broadcast_cancel_unconfirmed", 502);
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);
+    // An email's record that could not be read (rule 24): nothing was changed, never "not there".
+    if (error instanceof BroadcastsUnreadable) return fail("broadcast_read_unavailable", 503);
+    if (error instanceof FlowsBusy) return fail("flow_write_busy", 409);
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
+    if (error instanceof FlowVersionsUnavailable) return fail("flow_versions_unavailable", 503);
     // A sequence's stages and fields are checked against the store's own; unknown ones save nothing (lib/crm.ts).
     if (error instanceof CrmSchemaReadUnavailable) return fail("crm_schema_read_unavailable", 503);
     if (error instanceof DraftWriteUnconfirmed) return fail("draft_write_unconfirmed", 502);

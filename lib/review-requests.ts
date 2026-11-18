@@ -38,7 +38,7 @@ import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
+import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -47,6 +47,7 @@ import { mintReviewLink, provePurchase } from "@/lib/review-proof";
 import { readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_SITES, parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { type Store, storeForHandle } from "@/lib/store";
+import { storeOrGone } from "@/lib/store-gone";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -67,6 +68,8 @@ export const REVIEW_STOP = /^[0-9a-f]{40}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
+/** That address's stop on review requests, for the person's copy to read (lib/person-copy.ts). */
+export const reviewStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:rev:stop:${token}`;
 
@@ -243,8 +246,10 @@ export async function sendReviewRequests(
 ): Promise<AskCounts> {
   const counts: AskCounts = { sent: 0, dropped: 0, waiting: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", ASK_DUE_KEY, 0, nowSeconds, "LIMIT", 0, MAX_ASKS_PER_RUN]]);
-  const members = Array.isArray(raw) ? (raw as string[]) : [];
+  // Read exactly (rule 24): a reply of another shape is unknown, never "nothing due"; the cron reports it failed.
+  const raw = repliesFor(await redisPipeline([["ZRANGEBYSCORE", ASK_DUE_KEY, 0, nowSeconds, "LIMIT", 0, MAX_ASKS_PER_RUN]]), 1)?.[0];
+  if (!Array.isArray(raw) || !raw.every((m) => typeof m === "string")) throw new exactReply.UnknownReplyError("the review requests that are due");
+  const members = raw as string[];
   const stores = new Map<string, Store | null>();
   const groups = new Map<string, { store: Store; ready: Ready[] }>();
   const drop = async (member: string) => {
@@ -263,7 +268,23 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    if (!stores.has(entry.handle)) stores.set(entry.handle, await load(entry.handle).catch(() => null));
+    // Only an exact nil (or a released name) at the store's address is "no store" (CX-123 rule 24, lib/store-gone.ts). A
+    // read that threw or answered in another shape is not known: the order waits, as it does when Stripe cannot be read,
+    // and the failure is not kept for the run, so the store's other orders are read again.
+    if (!stores.has(entry.handle)) {
+      const loaded = await storeOrGone(load, entry.handle).then(
+        (found) => ({ found }),
+        (error: unknown) => {
+          console.error("reading a store for a review request failed", error);
+          return null;
+        },
+      );
+      if (!loaded) {
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      stores.set(entry.handle, loaded.found);
+    }
     const store = stores.get(entry.handle) ?? null;
     if (!store || store.statsId !== entry.statsId || !store.reviewAsk.days) {
       await drop(member);
@@ -385,7 +406,8 @@ export async function sendReviewRequests(
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
-    const reserved = await reserve(store, ready.length);
+    const day = mailDay();
+    const reserved = await reserve(store, ready.length, false, day);
     if (reserved !== "ok") {
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
@@ -395,7 +417,7 @@ export async function sendReviewRequests(
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
     if (outcome !== "sent") {
-      await release(store, ready.length);
+      await release(store, ready.length, day);
       if (outcome === "refused") {
         await unclaim(null);
         for (const item of ready) await drop(item.member);

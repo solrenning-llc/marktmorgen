@@ -1,4 +1,5 @@
 import { VisitUsBlock } from "@/components/visit-us-block";
+import { StoreTrustCard } from "@/components/store-trust-card";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
 import { StorePagesNav } from "@/components/store-pages-nav";
@@ -21,7 +22,8 @@ import { StoreTipBox } from "@/components/store-tip-box";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
-import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchStore, searchWords } from "@/lib/catalog";
+import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchWords } from "@/lib/catalog";
+import { SEARCH_UNAVAILABLE, searchStorePaid } from "@/lib/store-search-index";
 import { StoreQuotes } from "@/components/store-quotes";
 import { showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
@@ -72,6 +74,7 @@ import { outOfKeys } from "@/lib/licence-keys";
 import { ProductCard } from "@/components/store-product";
 import { canWrite } from "@/lib/mail";
 import { canUseDomain } from "@/lib/domains";
+import { storeAddress } from "@/lib/store-sitemap";
 import { SITE_URL } from "@/lib/site-url";
 import { summaries } from "@/lib/reviews";
 import { SHOWN_FROM, readSoldCounts, refreshSoldCounts, stale } from "@/lib/sold-count";
@@ -113,13 +116,13 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store } = found;
 
-  // A store on its own live domain names that as its address for search engines.
-  const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}/` : null;
-
   return {
     title: `${store.name} — Marktmorgen`,
     description: store.bio || speech(store).w.storeDescription(store.name),
-    ...(ownDomain ? { alternates: { canonical: ownDomain } } : {}),
+    // The one address the store names as its own, as its map lists it: its live domain's, or
+    // marktmorgen.com/@handle however the handle was written in the address bar (/@LocalShop
+    // draws the same page, and must not be a second address of it).
+    alternates: { canonical: storeAddress(store) },
     // An empty store has nothing to offer a search engine yet. One with
     // something on it does, so it stops hiding the moment it has. A page of
     // links alone counts: it is a page somebody may be looking for.
@@ -177,10 +180,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   // is nothing to correct.
   if (asked !== store.handle && !reachedOn) permanentRedirect(`/@${store.handle}`);
 
-  // A store with no plan a visit can be charged to, which has had the visits
-  // such a store has this month, rests until the month turns or its plan is
-  // paid (lib/traffic.ts). Asked only of such a store, before anything else
-  // is read for it; a store that pays is never rested.
+  // A store rests until its window turns once the visits or the requests its
+  // standing covers this window are used, or when they cannot be read
+  // (lib/traffic.ts, isResting): a store with no plan at the visits such a
+  // store has, a store that pays at its plan's. Asked before anything else is
+  // read for it. Only a visit a person's browser sent is counted toward it
+  // (app/api/store/hit).
   if (await isResting(store)) return <StoreResting store={store} />;
   // Switched off after notices about its content (lib/takedown.ts).
   if (store.suspended) return <StoreResting store={store} suspended />;
@@ -188,7 +193,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   const selling = canSell(store);
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   // Sold through the creator's own PayPal as well, or instead (lib/paypal-sales.ts).
   const byPayPal = sellsThroughPayPal(store);
   // A buyer standing in front of a checkout deserves to know it is a rehearsal
@@ -218,8 +223,15 @@ export default async function StorePage({ params, searchParams }: Params) {
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
       ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
       : false;
-  const searching = searchAllowed ? wantedSearch : "";
-  const results = searching ? await searchStore(store, searching) : null;
+  // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
+  // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
+  // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
+  const answer = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  // A store whose index is too large to keep offers no search for now, and says so; its products are listed as usual.
+  const searchUnavailable = answer === SEARCH_UNAVAILABLE;
+  const results = answer === SEARCH_UNAVAILABLE ? null : answer;
+  const searchRefused = wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0 && !results;
+  const searching = results ? wantedSearch : "";
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
   if (results && results.total === 0 && store.statsId && !isBot((await headers()).get("user-agent") ?? "")) {
     const statsId = store.statsId;
@@ -249,7 +261,9 @@ export default async function StorePage({ params, searchParams }: Params) {
   // What is left of each limited product, counted from real checkouts. Asked
   // side by side, so a long store does not wait on its products one by one;
   // a product without a limit is answered without asking anything.
-  // A product handing out keys from a pool that is empty is sold out too.
+  // A product handing out keys from a pool that is empty is sold out too; one
+  // whose keys left could not be read is unknown, never "keys left" (CX-123
+  // rule 24): its card then draws no way to buy it and no count.
   // What each bundle on this page holds now: one read for the page, none for
   // a page without bundles (lib/bundles.ts).
   const inBundles = offeredItems(store, known).catch(() => new Map<string, Listing[]>());
@@ -257,22 +271,31 @@ export default async function StorePage({ params, searchParams }: Params) {
     listings.map(async (product) => {
       const [stock, out] = await Promise.all([
         stockLeft(store, product).catch(() => null),
-        outOfKeys(store, product).catch(() => false),
+        outOfKeys(store, product).catch(() => null),
       ]);
-      return out ? 0 : stock;
+      return out === null ? ("unread" as const) : out ? 0 : stock;
     }),
   );
   const rated = await ratings;
   const storeRating = storeSummary(rated, index.filter((item) => !item.hidden).map((item) => item.id));
   const bundleItems = await inBundles;
   // Coming soon, and the day each pre-ordered one is expected: one request (lib/preorders.ts).
-  const coming = await soonState(store).catch(() => ({ soon: new Set<string>(), days: new Map<string, string>() }));
+  // A reading that failed or came back out of shape is unknown, never "none coming soon" (CX-123 rule 24).
+  const soonRead = await soonState(store).catch(() => null);
+  const coming = soonRead ?? { soon: new Set<string>(), days: new Map<string, string>() };
   const soon = coming.soon;
   const left = new Map<string, number>();
+  const unread = new Set<string>();
   listings.forEach((product, i) => {
     const count = counts[i];
-    if (count !== null) left.set(product.id, count);
+    if (count === "unread") unread.add(product.id);
+    else if (count !== null) left.set(product.id, count);
   });
+
+  // With coming soon unknown, any product may not be out yet: each card draws no way to buy it and nothing for the
+  // cart, and says buying is not available just now, as the card on the creator's own site does (#2910). With only
+  // part of it read, a product read as coming soon keeps its waitlist; each other one is unknown.
+  if (!soonRead || soonRead.partial) for (const product of listings) if (!soon.has(product.id)) unread.add(product.id);
 
   // Which parts of the page have something to show (lib/store-order.ts): only those are drawn.
   const quoted = store.quotes.filter((quote) => index.some((item) => item.id === quote.p && !item.hidden));
@@ -416,17 +439,23 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {bw.searchButton}
                         </button>
                       </div>
-                      {wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
-                        <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
+                      {searchRefused ? (
+                        <p className="st-note mt-3 text-sm" role="status">{searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">
-                          <span className="font-semibold">{results.total ? bw.searchFound(results.total, searching) : bw.searchNone(searching)}</span>
+                          <span className="font-semibold">{results.total > results.listings.length
+                              ? bw.searchCut(results.listings.length, results.total, searching)
+                              : results.total
+                                ? bw.searchFound(results.total, searching)
+                                : bw.searchNone(searching)}</span>
                           <a href={pageHref(store.handle, 1, reachedOn !== null)} className="st-footer-link">
                             {bw.searchClear}
                           </a>
                         </p>
                       ) : null}
+                      {/* How the results are ordered (EU 2011/83/EU Art. 6a(1)(a)): searchStore keeps the creator's own product order, nothing is paid for. */}
+                      {results && results.total ? <p className="mt-1 text-sm">{bw.searchOrder(store.name)}</p> : null}
                     </form>
                   ) : null}
                   {/* The creator's collections, each a page of its own (lib/store-collections.ts). */}
@@ -460,6 +489,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             cart={cartOn && !soon.has(product.id) && cartable(product) && left.get(product.id) !== 0}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
                             grid
+                            unread={unread.has(product.id)}
                           />
                         ))}
                       </ul>
@@ -524,8 +554,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
                     </>
                   ) : (
-                    <p className="st-note mt-6 text-sm">
-                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody(store.name)}
+                    <p className="st-note mt-6 text-sm" data-no-payments>
+                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody}
+                      {/* A way to the creator only where there is one: never "write to them" with nowhere to write. */}
+                      {shown.contact ? <> <a href="#contact" className="underline underline-offset-2">{w.noPaymentsWrite(store.name)}</a></> : null}
                     </p>
                   )}
                 </>
@@ -645,9 +677,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                   </h2>
                   <div className="space-y-3">
                     {store.faq.map((item) => (
-                      <details key={item.q} className="st-card st-faq px-5 py-4 sm:px-6">
+                      // Each question opens from a 44 px row (.st-faq > summary, WCAG 2.5.5); the card's padding gives up what the row adds.
+                      <details key={item.q} className="st-card st-faq px-5 py-2 sm:px-6">
                         <summary className="cursor-pointer font-bold">{item.q}</summary>
-                        <p className="st-muted mt-2 whitespace-pre-line leading-relaxed [overflow-wrap:anywhere]">{item.a}</p>
+                        <p className="st-muted mb-2 mt-2 whitespace-pre-line leading-relaxed [overflow-wrap:anywhere]">{item.a}</p>
                       </details>
                     ))}
                   </div>
@@ -673,6 +706,8 @@ export default async function StorePage({ params, searchParams }: Params) {
 
           {/* "Visit us" (lib/visit-us.ts): the creator's address, hours and phone, as typed; no map, nothing looked up or tracked. */}
           {store.visitUs ? <VisitUsBlock visitUs={store.visitUs} language={store.language} /> : null}
+          {/* "About this store": facts worked out from the record, each shown only when the creator turns it on (lib/store-trust.ts). */}
+          <StoreTrustCard store={store} />
 
           <div className="mt-12 text-center">
             {/* The store's blog, once it has a post (lib/store-blog.ts): known from the record, with no read. */}

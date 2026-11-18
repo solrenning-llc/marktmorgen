@@ -24,6 +24,7 @@
  * so one planned before a move is recognised as out of date and dropped.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 
 export type Move = {
   /** The new start and end, in milliseconds. */
@@ -36,51 +37,97 @@ export type Move = {
 export const movedKey = (session: string) => `nl:call:moved:${session}`;
 export const REMINDER_QUEUE = "nl:call:remindq";
 
-/** A move is kept well past any call it could be about. */
+/**
+ * A move is kept this long after the call it moved to has ended (and never
+ * less): a dated session may be any distance ahead, so a flat time could run
+ * out before the call and leave the booking read as never moved.
+ */
 const MOVE_SECONDS = 200 * 86_400;
+
+/**
+ * And never longer than this, whatever the call's date: the privacy policy
+ * (app/privacy/page.tsx), lib/data-families.ts and the cost registry state it.
+ */
+const MOVE_MAX_SECONDS = 730 * 86_400;
 
 /** Reminders due sooner than this after the booking is made are not sent. */
 export const REMINDER_MIN_LEAD_MS = 60 * 60_000;
 
 export type Mark = "c" | "24" | "1";
 
-function parseMove(raw: unknown): Move | null {
-  if (typeof raw !== "string") return null;
+/**
+ * A kept move read exactly, or null: a JSON object whose start and end are finite numbers, the end after the start,
+ * and whose count is a whole number from zero up, as writeMove keeps it (CX-123 rule 24).
+ */
+function parseMove(raw: string): Move | null {
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as Move;
-    if (Number.isFinite(value.s) && Number.isFinite(value.e) && value.e > value.s && Number.isInteger(value.n)) {
-      return { s: value.s, e: value.e, n: value.n };
-    }
+    value = JSON.parse(raw);
   } catch {
-    // Unreadable: treated as never moved.
+    return null;
   }
-  return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { s, e, n } = value as Record<string, unknown>;
+  if (typeof s !== "number" || typeof e !== "number" || typeof n !== "number") return null;
+  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || !Number.isSafeInteger(n) || n < 0) return null;
+  return { s, e, n };
 }
 
-/** The moves recorded for these checkout sessions, by session. */
+/**
+ * The moves recorded for these checkout sessions, by session.
+ *
+ * Read exactly (CX-123 rule 24): only a value MGET answers null (a key that is gone, or holds no string) is a booking
+ * never moved. A pipeline or an MGET answered in another shape, a value that is not a string, or a string that is not
+ * a move throws UnknownReplyError, never "never moved": read at its old time, a moved booking would lose the reminder
+ * for its real time (lib/call-reminders.ts), be moved past MAX_MOVES (lib/calls.ts moveBooking), and have its
+ * affiliate lead approved before the call took place (lib/affiliate-leads.ts bookingEnds). Each caller refuses or
+ * tries again later on the throw.
+ */
 export async function readMoves(sessions: string[]): Promise<Map<string, Move>> {
   const found = new Map<string, Move>();
   const list = sessions.filter(Boolean);
   if (!list.length || !isRedisConfigured()) return found;
   // A hundred keys at one MGET, every MGET in one trip: a command for each hundred bookings, not one a booking
   // (lib/call-moves-read.ts, MOVES_PER_MGET, prices it; tests/plan-cost-registry.test.ts holds the two equal).
-  // A key that is gone, or holds no string, is answered null and read as never moved, as an unreadable move is.
   const perRead = 100;
   const lots: string[][] = [];
   for (let i = 0; i < list.length; i += perRead) lots.push(list.slice(i, i + perRead));
-  const replies = await redisPipeline(lots.map((lot) => ["MGET", ...lot.map(movedKey)]));
+  const replies = repliesFor(await redisPipeline(lots.map((lot) => ["MGET", ...lot.map(movedKey)])), lots.length);
+  if (!replies) throw new UnknownReplyError("the bookings' moves");
   lots.forEach((lot, l) => {
-    const values = Array.isArray(replies[l]) ? (replies[l] as unknown[]) : [];
+    const values = listSlots(replies[l]);
+    if (!values || values.length !== lot.length) throw new UnknownReplyError("the bookings' moves");
     lot.forEach((session, i) => {
-      const move = parseMove(values[i]);
-      if (move) found.set(session, move);
+      const raw = values[i];
+      if (raw === null) return;
+      const move = typeof raw === "string" ? parseMove(raw) : null;
+      if (!move) throw new UnknownReplyError("a booking's move");
+      found.set(session, move);
     });
   });
   return found;
 }
 
+/**
+ * Writes a booking's move, read exactly (CX-123 rule 24): written on an exact "OK". Any other reply is read back once:
+ * the key holding exactly this move (its count makes it unique) is written; anything else, or a read-back in another
+ * shape, throws UnknownReplyError, never "moved". lib/calls.ts moveBooking writes the move before the diary, the
+ * reminders and the emails, so the throw refuses the move before the buyer and the creator are told a time readMoves
+ * would not give (and a move that did land is not refused while readMoves already gives it).
+ */
 export async function writeMove(session: string, move: Move): Promise<void> {
-  await redisPipeline([["SET", movedKey(session), JSON.stringify(move), "EX", MOVE_SECONDS]]);
+  const value = JSON.stringify(move);
+  const keep = Math.min(MOVE_MAX_SECONDS, Math.max(0, Math.ceil((move.e - Date.now()) / 1000)) + MOVE_SECONDS);
+  const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", keep]]), 1);
+  if (replies?.[0] === "OK") return;
+  const kept = repliesFor(await redisPipeline([["GET", movedKey(session)]]), 1);
+  if (kept?.[0] !== value) throw new UnknownReplyError("a booking's move");
+}
+
+/** A ZADD of one member: 1 added, 0 already there (its score updated); anything else throws (rule 24). */
+function oneAdded(reply: unknown, what: string): void {
+  const n = countOf(reply);
+  if (n !== 0 && n !== 1) throw new UnknownReplyError(what);
 }
 
 export function reminderMember(callsId: string, handle: string, session: string, mark: Mark, start: number): string {
@@ -88,10 +135,15 @@ export function reminderMember(callsId: string, handle: string, session: string,
 }
 
 export function parseMember(member: string) {
-  const [callsId, handle, session, mark, start] = member.split("|");
+  const fields = member.split("|");
+  // Exactly the five fields reminderMember writes, the start a whole number of milliseconds: a blank start read as 0,
+  // a negative one or an extra field was taken for a member before (Claude 7, 13 November 2026).
+  if (fields.length !== 5) return null;
+  const [callsId, handle, session, mark, start] = fields;
   if (!callsId || !handle || !session || !["c", "24", "1"].includes(mark)) return null;
+  if (!/^\d{1,16}$/.test(start)) return null;
   const at = Number(start);
-  if (!Number.isFinite(at)) return null;
+  if (!Number.isSafeInteger(at)) return null;
   return { callsId, handle, session, mark: mark as Mark, start: at };
 }
 
@@ -111,9 +163,14 @@ export async function planReminders(callsId: string, handle: string, session: st
     if (at - now < REMINDER_MIN_LEAD_MS) continue;
     commands.push(["ZADD", REMINDER_QUEUE, at, reminderMember(callsId, handle, session, mark, start)]);
   }
+  const planned = commands.length;
   // A booking made or moved: the store's calendar feed makes its file again (lib/calendar-sync.ts, bookedCalendarFeed).
   commands.push(...changedCommands(callsId, now));
-  await redisPipeline(commands);
+  // Read exactly (rule 30): every reply in its shape, or the throw, never "planned"; the callers log it and go on.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies) throw new UnknownReplyError("a booking's reminders");
+  for (let i = 0; i < planned; i += 1) oneAdded(replies[i], "a booking's reminder");
+  changedRead(replies.slice(planned));
 }
 
 /**
@@ -133,6 +190,14 @@ const changedCommands = (callsId: string, now = Date.now()): (string | number)[]
   const credits = bookingCreditsKey(callsId, new Date(now).toISOString().slice(0, 10));
   return [["SET", bookingsChangedKey(callsId), String(now), "EX", CHANGED_SECONDS], ["INCRBY", credits, 1], ["EXPIRE", credits, 2 * 86_400]];
 };
+/** changedCommands' three replies, exactly: "OK", a count of one or more, and 1 or 0; anything else throws (rule 30). */
+const changedRead = (replies: unknown[]): void => {
+  const credits = countOf(replies[1]);
+  const kept = countOf(replies[2]);
+  if (replies.length !== 3 || replies[0] !== "OK" || credits === null || credits < 1 || (kept !== 0 && kept !== 1)) {
+    throw new UnknownReplyError("a store's bookings changed mark");
+  }
+};
 
 /**
  * A call refunded in full (lib/call-meetings.ts, the refund job): the feed's
@@ -141,7 +206,9 @@ const changedCommands = (callsId: string, now = Date.now()): (string | number)[]
  */
 export async function markBookingsChanged(callsId: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline(changedCommands(callsId, now));
+  const replies = repliesFor(await redisPipeline(changedCommands(callsId, now)), 3);
+  if (!replies) throw new UnknownReplyError("a store's bookings changed mark");
+  changedRead(replies);
 }
 
 /**
@@ -150,7 +217,9 @@ export async function markBookingsChanged(callsId: string, now = Date.now()): Pr
  */
 export async function planCheck(callsId: string, handle: string, session: string, start: number, at: number) {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["ZADD", REMINDER_QUEUE, at, reminderMember(callsId, handle, session, "c", start)]]);
+  const replies = repliesFor(await redisPipeline([["ZADD", REMINDER_QUEUE, at, reminderMember(callsId, handle, session, "c", start)]]), 1);
+  if (!replies) throw new UnknownReplyError("a booking's check");
+  oneAdded(replies[0], "a booking's check");
 }
 
 /** Drops the reminders planned for a booking's old time. */

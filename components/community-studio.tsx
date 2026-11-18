@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { MemberPreview } from "@/components/community-member-preview";
+import { type LockedPreviewData, MemberPreview } from "@/components/community-member-preview";
 import type { CommunityConfig, Space } from "@/lib/community";
 import {
   MAX_COMMENTS_PER_POST,
@@ -57,6 +57,18 @@ export type StudioMember = {
   answers: { q: string; a: string }[];
 };
 
+/** The community's figures; a count that could not be read (rule 24) is null, shown as not loaded, never as 0. */
+export type StudioTotals = { members: number | null; listed: number; posts: number; reach: number | null };
+
+/** One figure of the community, or "Not loaded" in its place when it could not be read. */
+function Figure({ value }: { value: number | null }) {
+  return value === null ? (
+    <p className="text-sm font-semibold text-ink">Not loaded</p>
+  ) : (
+    <p className="text-xl font-semibold tabular-nums">{value}</p>
+  );
+}
+
 type ProductChoice = { id: string; title: string; free: boolean; kind: string };
 
 const MESSAGES: Record<string, string> = {
@@ -76,15 +88,16 @@ const MESSAGES: Record<string, string> = {
   level: "Pick who may start posts here.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, first.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  not_confirmed: "We could not confirm that change just now. Reload the page to see where it stands, then try again.",
   setup_read_unavailable: "Your community could not be read just now, so nothing was changed. Try again in a moment.",
   report_read_unavailable: "This report could not be checked just now, so nothing was changed and it is still in the list. Try again in a moment.",
 };
 
 type Answer = { ok?: boolean; error?: string; config?: CommunityConfig };
 
-async function send(payload: Record<string, unknown>): Promise<Answer> {
+async function send(payload: Record<string, unknown>, route = "/api/store/community/manage"): Promise<Answer> {
   try {
-    const response = await fetch("/api/store/community/manage", {
+    const response = await fetch(route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -116,8 +129,10 @@ export function CommunityStudio({
   canSettings = true,
   isOwner = true,
   events = null,
+  approval = null,
   rewards = [],
   courses = [],
+  lockedPreview = null,
 }: {
   handle: string;
   address: string;
@@ -125,8 +140,9 @@ export function CommunityStudio({
   config: CommunityConfig | null;
   products: ProductChoice[];
   queue: QueueRow[] | null;
-  members: StudioMember[];
-  totals: { members: number; listed: number; posts: number; reach: number };
+  /** Null when the member list could not be read (rule 24): said so, never shown as nobody. */
+  members: StudioMember[] | null;
+  totals: StudioTotals;
   canEmail: boolean;
   /**
    * Whether this person may set the community up (lib/team-roles.ts,
@@ -138,19 +154,23 @@ export function CommunityStudio({
   isOwner?: boolean;
   /** The live events section (components/community-events-studio.tsx), drawn after the basics. */
   events?: React.ReactNode;
+  /** Approval before publishing and what waits for it (components/community-approval-studio.tsx), drawn beside the reports. */
+  approval?: React.ReactNode;
   /** Which course each level hands over (lib/community-points.ts). */
   rewards?: Reward[];
   /** The store's courses: what a level can hand over. */
   courses?: { id: string; title: string }[];
+  /** The way into each space shown locked, worked out on the server, for "View as a member" (542 [CM1]). */
+  lockedPreview?: LockedPreviewData | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ where: string; text: string } | null>(null);
 
-  async function run(where: string, payload: Record<string, unknown>, done: string): Promise<Answer> {
+  async function run(where: string, payload: Record<string, unknown>, done: string, route?: string): Promise<Answer> {
     setBusy(where);
     setError(null);
-    const answer = await send(payload);
+    const answer = await send(payload, route);
     setBusy(null);
     if (!answer.ok) {
       setError({ where, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
@@ -209,12 +229,14 @@ export function CommunityStudio({
             <Welcome config={config} busy={busy} run={run} problem={problem} />
             <Messages config={config} busy={busy} run={run} problem={problem} />
             <Room config={config} busy={busy} run={run} problem={problem} />
-            <Spaces config={config} products={products} busy={busy} run={run} problem={problem} />
+            <AboutPage handle={handle} config={config} busy={busy} run={run} problem={problem} />
+            <Spaces config={config} products={products} busy={busy} run={run} problem={problem} lockedPreview={lockedPreview} />
             <Levels config={config} rewards={rewards} courses={courses} busy={busy} run={run} problem={problem} />
           </>
         ) : (
           events
         )}
+        {approval}
         <Queue queue={queue} busy={busy} run={run} problem={problem} isOwner={isOwner} />
         <Members members={members} total={totals.members} busy={busy} run={run} problem={problem} />
       </div>
@@ -223,7 +245,7 @@ export function CommunityStudio({
   );
 }
 
-type Runner = (where: string, payload: Record<string, unknown>, done: string) => Promise<Answer>;
+type Runner = (where: string, payload: Record<string, unknown>, done: string, route?: string) => Promise<Answer>;
 type Problem = (where: string) => React.ReactNode;
 
 function Basics({
@@ -244,7 +266,7 @@ function Basics({
   busy: string | null;
   run: Runner;
   problem: Problem;
-  totals: { members: number; listed: number; posts: number; reach: number };
+  totals: StudioTotals;
   canEmail: boolean;
 }) {
   const [name, setName] = useState(config.name);
@@ -264,18 +286,21 @@ function Basics({
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.members}</p>
+          <Figure value={totals.members} />
           <p className="text-xs text-ink-soft">have come in</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.posts}</p>
+          <Figure value={totals.posts} />
           <p className="text-xs text-ink-soft">posts</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.reach}</p>
+          <Figure value={totals.reach} />
           <p className="text-xs text-ink-soft">want the community&apos;s emails</p>
         </div>
       </div>
+      {totals.members === null || totals.reach === null ? (
+        <p role="status" className="mt-3 text-sm text-ink">Some of these figures could not be loaded. Reload this page to check them.</p>
+      ) : null}
       {!canEmail ? (
         <p className="mt-3 text-sm text-ink-soft">
           Announcements show in the community on every plan. Emailing them is part of Pro, from your Email settings, and
@@ -407,6 +432,65 @@ function Messages({
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
           {problem("dm")}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/**
+ * The public About page (233 [SK1], lib/community-about.ts): off until the
+ * creator turns it on, and its counts a second choice. Off is off: the page
+ * answers not found.
+ */
+function AboutPage({
+  handle,
+  config,
+  busy,
+  run,
+  problem,
+}: {
+  handle: string;
+  config: CommunityConfig;
+  busy: string | null;
+  run: Runner;
+  problem: Problem;
+}) {
+  const [on, setOn] = useState(config.page.on);
+  const [counts, setCounts] = useState(config.page.counts);
+  const changed = on !== config.page.on || (on && counts !== config.page.counts);
+  return (
+    <section aria-labelledby="cm-about-page-title" className="card p-6 sm:p-8">
+      <h2 id="cm-about-page-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Public About page</h2>
+      <p className="mt-1 text-sm text-ink-soft">
+        A page anyone can open, and search engines can find, before joining: your description, the products that open
+        the community and are on sale now, with their prices. No post, lesson, event or member is ever on it.
+      </p>
+      <form
+        className="mt-5 space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (changed) run("about-page", { action: "about-page", on, counts: on && counts }, on ? "About page saved." : "About page switched off.");
+        }}
+      >
+        <label className="flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-paper">
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={on} onChange={(e) => setOn(e.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Show a public About page</span>
+            <span className="block text-ink-soft">Off, and the page does not exist.</span>
+          </span>
+        </label>
+        <label className={`flex min-h-[44px] items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 ${on ? "cursor-pointer hover:bg-paper" : "opacity-50"}`}>
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" disabled={!on} checked={on && counts} onChange={(e) => setCounts(e.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Show how many people joined and how many posts the last 30 days had</span>
+            <span className="block text-ink-soft">The real numbers, small ones too, counted at most six hours before. Never anybody&apos;s name.</span>
+          </span>
+        </label>
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
+          {config.page.on ? <a href={`/@${handle}/community/about`} className="btn btn-ghost">Open the About page</a> : null}
+          {problem("about-page")}
         </div>
       </form>
     </section>
@@ -608,6 +692,8 @@ function SpaceRow({
   // that means "this is the only space".
   const [keptFor, setKeptFor] = useState<string[]>(space.only);
   const [level, setLevel] = useState(space.level);
+  // What a member without the products sees of it (542 [CM1]): nothing, or its name and line, locked.
+  const [view, setView] = useState<SpaceView>(space.shown === true ? "locked" : "hidden");
   const where = `space-${space.id}`;
   const kept = open.filter((p) => space.only.includes(p.id));
   return (
@@ -617,8 +703,12 @@ function SpaceRow({
           className="space-y-3"
           onSubmit={async (event) => {
             event.preventDefault();
-            const answer = await run(where, { action: "space-edit", id: space.id, name, about, creatorOnly, only: keptFor, level: creatorOnly ? 0 : level }, "Space saved.");
-            if (answer.ok) setEditing(false);
+            // How it shows is kept apart from the rest of the space (app/api/store/community/space-view), and saved after it.
+            const viewChanged = keptFor.length > 0 && view !== (space.shown === true ? "locked" : "hidden");
+            const answer = await run(where, { action: "space-edit", id: space.id, name, about, creatorOnly, only: keptFor, level: creatorOnly ? 0 : level }, viewChanged ? "" : "Space saved.");
+            if (!answer.ok) return;
+            if (viewChanged && !(await run(where, { id: space.id, view }, "Space saved.", "/api/store/community/space-view")).ok) return;
+            setEditing(false);
           }}
         >
           <div>
@@ -635,6 +725,7 @@ function SpaceRow({
           </label>
           {!creatorOnly ? <LevelPicker id={`${where}-level`} level={level} setLevel={setLevel} /> : null}
           <OnlyPicker open={open} only={keptFor} setOnly={setKeptFor} />
+          {keptFor.length > 0 ? <ViewPicker id={`${where}-view`} view={view} setView={setView} /> : null}
           <div className="flex flex-wrap gap-2">
             <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null}>Save</button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
@@ -650,6 +741,7 @@ function SpaceRow({
               {kept.length ? (
                 <span className="tag ml-2 align-middle">{`Buyers of ${kept.length === 1 ? kept[0].title : `${kept.length} products`}`}</span>
               ) : null}
+              {kept.length && space.shown === true ? <span className="tag ml-2 align-middle">Visible and locked</span> : null}
             </p>
             {space.about ? <p className="text-sm text-ink-soft">{space.about}</p> : null}
           </div>
@@ -682,6 +774,35 @@ function SpaceRow({
   );
 }
 
+type SpaceView = "hidden" | "locked";
+
+/**
+ * What a member without the products a space is kept for sees of it (542 [CM1]).
+ * Either way they never see its posts, comments, members, files, events or a
+ * count of them; "Visible and locked" shows its name and one line, locked,
+ * with a button to the first of its products on sale now.
+ */
+function ViewPicker({ id, view, setView }: { id: string; view: SpaceView; setView: (next: SpaceView) => void }) {
+  const choice = (value: SpaceView, title: string, detail: string) => (
+    <label className="flex min-h-11 items-start gap-2 text-sm">
+      <input type="radio" name={id} className="mt-0.5 h-5 w-5 shrink-0" checked={view === value} onChange={() => setView(value)} />
+      <span className="min-w-0">
+        <span className="block font-semibold text-ink">{title}</span>
+        <span className="block text-ink-soft">{detail}</span>
+      </span>
+    </label>
+  );
+  return (
+    <fieldset>
+      <legend className="field-label">Members without one of these products</legend>
+      <div className="mt-2 space-y-1.5">
+        {choice("hidden", "Hidden", "They see no sign of the space.")}
+        {choice("locked", "Visible and locked", "They see its name and its one line, marked Locked, with a button to buy one of these products. Never its posts, comments or members, and no counts.")}
+      </div>
+    </fieldset>
+  );
+}
+
 /**
  * The products a space may be kept for: only those that already open the
  * community, because a space kept for a product that lets nobody in would
@@ -702,7 +823,7 @@ function OnlyPicker({
       <legend className="field-label">Keep it for the buyers of</legend>
       <p className="mt-1 text-xs text-ink-soft">
         Leave every box empty and the space is for every member. Check one or more and only members who have one of them see
-        the space, its posts and its address — everybody else sees no sign of it.
+        the space, its posts and its address. You choose below what everybody else sees.
       </p>
       <div className="mt-2 space-y-1.5">
         {open.map((product) => (
@@ -943,12 +1064,14 @@ function Spaces({
   busy,
   run,
   problem,
+  lockedPreview,
 }: {
   config: CommunityConfig;
   products: ProductChoice[];
   busy: string | null;
   run: Runner;
   problem: Problem;
+  lockedPreview: LockedPreviewData | null;
 }) {
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
@@ -969,7 +1092,7 @@ function Spaces({
       <ul className="mt-3 divide-y divide-line">
         {config.spaces.map((space, i) => (
           <SpaceRow
-            key={`${space.id}-${space.name}-${space.about}-${space.creatorOnly}-${space.level}`}
+            key={`${space.id}-${space.name}-${space.about}-${space.creatorOnly}-${space.level}-${space.shown === true}`}
             space={space}
             first={i === 0}
             last={i === config.spaces.length - 1}
@@ -981,7 +1104,7 @@ function Spaces({
         ))}
       </ul>
       {config.spaces.map((s) => <div key={s.id}>{problem(`space-${s.id}`)}</div>)}
-      <MemberPreview spaces={config.spaces} access={config.access} open={open} />
+      <MemberPreview spaces={config.spaces} access={config.access} open={open} locked={lockedPreview} />
 
       {!full ? (
         <form
@@ -1109,14 +1232,25 @@ function Members({
   run,
   problem,
 }: {
-  members: StudioMember[];
-  total: number;
+  members: StudioMember[] | null;
+  total: number | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
 }) {
   const [filter, setFilter] = useState("");
   const q = filter.trim().toLowerCase();
+  if (members === null || total === null) {
+    return (
+      <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="cm-members-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Members</h2>
+          <span className="tag">Not loaded</span>
+        </div>
+        <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">Members could not be loaded. Reload this page to see them.</p>
+      </section>
+    );
+  }
   const shown = q ? members.filter((m) => m.email.includes(q) || m.name.toLowerCase().includes(q)) : members;
   return (
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">

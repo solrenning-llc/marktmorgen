@@ -46,7 +46,7 @@ import { ENDED_INDEX, SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 import { readPodcast, savePodcast } from "@/lib/podcast";
 import type { ProductFile } from "@/lib/product-file";
 import { storageWords } from "@/lib/storage-quota";
-import { addOption, addProduct, claimHandle, setCommunity, setProductCourse, setProductFile, setProductPodcast, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, imageFolder, setCommunity, setProductCourse, setProductFile, setProductPodcast, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
 import { STREAM_API_ORIGIN, streamPath } from "@/lib/stream-rules";
 import { vaultPath } from "@/lib/vault-rules";
 import { store as redis } from "./redis-stub";
@@ -137,6 +137,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return json({ data: [...running.entries()].filter(([handle]) => query.includes(`'${handle}'`)).map(([, subscription]) => subscription), has_more: false });
     }
     if (path === "/subscriptions") return json({ data: [], has_more: false });
+    // A closing day expires the store's open plan checkouts (lib/closing-plan-guard.ts); none is open here.
+    if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
     const one = [...running.values()].find((subscription) => path === `/subscriptions/${String(subscription.id)}`);
     if (one) return json(one);
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
@@ -202,10 +204,15 @@ const hands: Hands = {
     for (const video of videos.values()) if (video.collectionId === collection) bytes += video.storageSize;
     return bytes;
   },
-  // Nothing here is kept in the host's own file store.
-  list: async (prefix) => (prefix.startsWith("stores/") ? [] : listFiles(prefix)),
-  remove: deleteFile,
+  // Nothing here is kept in the host's own file store but the stores' pictures (images/), held in `images`.
+  list: async (prefix) => (prefix.startsWith("stores/") ? [] : prefix.startsWith("images/") ? [...images.keys()].filter((path) => path.startsWith(prefix)) : listFiles(prefix)),
+  remove: async (paths) => {
+    const others = paths.filter((path) => !(path.startsWith("images/") && images.delete(path)));
+    if (others.length) await deleteFile(others);
+  },
 };
+/** The stores' pictures (product, link and page pictures, email pictures, buyers' review photos): images/<imageFolder>/. */
+const images = new Map<string, number>();
 
 /** The day a store's plan ended, as written on it. */
 const endedAt = async (email: string) => Date.parse((await storeForEmail(email))?.planEndedAt ?? "");
@@ -237,6 +244,21 @@ const clockAt = (ms: number) => {
   const shift = ms - realNow();
   Date.now = () => realNow() + shift;
 };
+/**
+ * lib/email.ts makes a sender asked to slow down (a 429) wait before it tries again: Resend 1 s then 2 s, Amazon 400 ms
+ * then 800 ms (its `pause`). Those two pauses, and no other timer (a request's cutoff stays on the real clock), are
+ * skipped here, with the test clock moved on by each, as if it had passed: the same tries, the same order and the same
+ * deadlines, without sitting through them.
+ */
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+  const stack = typeof ms === "number" && ms > 0 ? new Error().stack ?? "" : "";
+  if (/\bat pause\d* \(/.test(stack) && /\bat (?:async )?(?:resendOutcome|viaAmazon)\d* \(/.test(stack)) {
+    clockAt(Date.now() + ms!);
+    return realSetTimeout(fn, 0, ...args);
+  }
+  return realSetTimeout(fn, ms, ...args);
+}) as typeof setTimeout;
 
 async function main(): Promise<void> {
   // A synthetic company address, so the buyers' notice of a plan that ends from 31 October 2026 can go (lib/company-postal.ts).
@@ -380,7 +402,7 @@ async function main(): Promise<void> {
   const V = await endedAt(eve.email);
   for (const day of [0, M, W]) await closeOne(eve.email, V + day * DAY, hands);
   is("told three times, like anybody", mailTo(eve.email).map((m) => m.subject.slice(0, 7)), ["Eve Stu", "14 days", "7 days "]);
-  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
+  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
   const repaired = await closeOne(eve.email, V + C * DAY, hands);
   const eveNow = (await storeForEmail(eve.email))!;
   is("Stripe says the plan runs: nothing is removed and nobody is told it was", [repaired.state, repaired.note, objects.has((await readListing(eveNow, evesFile))!.file!.pathname), mailTo(eve.email).length], ["running", "Stripe says the plan runs", true, 3]);
@@ -393,13 +415,16 @@ async function main(): Promise<void> {
   await endPlan(kai.email);
   const K = await endedAt(kai.email);
   for (const day of [0, M, W]) await closeOne(kai.email, K + day * DAY, hands);
-  running.set("nobody-by-search", { id: "sub_kai0001", status: "trialing", created: 1_790_000_000, trial_end: 1_900_000_000, customer: "cus_kai0001", metadata: {}, items: { data: [{ price: { unit_amount: 2900, recurring: { interval: "month" } } }] } });
+  running.set("nobody-by-search", { id: "sub_kai0001", status: "trialing", created: 1_790_000_000, trial_end: 1_900_000_000, customer: "cus_kai0001", metadata: {}, cancel_at: null, cancel_at_period_end: false, items: { data: [{ price: { unit_amount: 2900, recurring: { interval: "month" } } }] } });
   const own = await closeOne(kai.email, K + C * DAY, hands);
   const kaiNow = (await storeForEmail(kai.email))!;
   is("asked about by its own number first: running, so nothing is removed", [own.state, own.note, kaiNow.subscriptionActive, kaiNow.planEndedAt, [...objects.keys()].filter((path) => path.startsWith(`vault/${kai.folder}/`)).length, mailTo(kai.email).length], ["running", "Stripe says the plan runs", true, "", 1, 3]);
 
   part("The day: what is removed, and what stays");
   const storeBefore = (await storeForEmail(ana.email))!;
+  // A store that stays (its plan ended before October 18, 2026) still shows its pictures: none of them is removed.
+  const anaPicture = `images/${await imageFolder(ana.email)}/${"a".repeat(32)}.webp`;
+  images.set(anaPicture, 50_000);
   const listed = (await readAllListings(storeBefore)).map((listing) => [listing.title, listing.priceCents]);
   const removed = await closeOne(ana.email, A + C * DAY, hands);
   is("with no plan at Stripe, what the store kept is removed", [removed.state, removed.note], ["removed", "6 files"]);
@@ -415,6 +440,7 @@ async function main(): Promise<void> {
   is("nothing of hers is left in the file store, the copy no record named among it", [...objects.keys()].filter((path) => path.startsWith(`vault/${ana.folder}/`)), []);
   is("nor at the video service, the video no lesson named among them", [...videos.values()].filter((video) => video.collectionId === ana.collection), []);
   is("what other stores keep is where it was", [[...objects.keys()].filter((path) => path.startsWith(`vault/${ben.folder}/`)).length, [...objects.keys()].filter((path) => path.startsWith(`vault/${eve.folder}/`)).length], [1, 1]);
+  is("and its pictures stay, for the store that stays", images.has(anaPicture), true);
   is("the store is still hers: its address, its name, every product and every price", [after.handle, after.name, now.map((listing) => [listing.title, listing.priceCents]), now.length], [storeBefore.handle, storeBefore.name, listed, 4]);
   const last = mailTo(ana.email)[3];
   is("she is told, once, what was removed and what was not", [mailTo(ana.email).length, last.subject, last.text.includes("have now been removed"), last.text.includes("Your store is still yours"), last.text.includes("Start\na plan again and you can put a file back on each product")], [4, "The files Ana Studio kept have been removed", true, true, true]);
@@ -536,7 +562,9 @@ async function main(): Promise<void> {
 
   part("Where it runs, and what the pages say");
   const job = read("app/api/cron/closing/route.ts");
-  is("the job is one of ours to run, one at a time", [/cronAllowed\(request\)/.test(job), /"nl:closing:lock", "1", "NX"/.test(job), /closeEnded\(/.test(job)], [true, true, true]);
+  // Changed (claude5/fix-cron-locks, CX-123 rule 24): the lock was a SET NX of "1" read as ours on any answer but nil;
+  // it is now claimMark with this run's own value (lib/claim-mark.ts), held exactly in tests/cron-locks-twelve.test.ts.
+  is("the job is one of ours to run, one at a time", [/cronAllowed\(request\)/.test(job), /claimMark\("nl:closing:lock", /.test(job), /closeEnded\(/.test(job)], [true, true, true]);
   const crons = (JSON.parse(read("vercel.json")) as { crons: { path: string; schedule: string }[] }).crons;
   const at = (path: string) => crons.find((cron) => cron.path === path)?.schedule;
   is("every day, after the check of every store's plan", [at("/api/cron/plans"), at("/api/cron/closing")], ["0 9 * * *", "30 9 * * *"]);
@@ -579,6 +607,10 @@ async function main(): Promise<void> {
       if (others.length) await hands.remove(others);
     },
   };
+  // Its pictures: a product's, and a buyer's review photo, both under its images folder (lib/review-photo.ts).
+  const zoeImages = await imageFolder(zoe.email);
+  const zoePictures = [`images/${zoeImages}/${"b".repeat(32)}.webp`, `images/${zoeImages}/${"c".repeat(24)}.jpg`];
+  for (const path of zoePictures) images.set(path, 80_000);
   await endPlan(zoe.email);
   const Z = await endedAt(zoe.email);
   is("it ended on that day or after", Z >= KEEP_NOTHING_FROM, true);
@@ -596,6 +628,9 @@ async function main(): Promise<void> {
   await closeOne(zoe.email, Z + W * DAY, zoeHands);
   const zoeGone = await closeOne(zoe.email, Z + (C + 1) * DAY, zoeHands);
   is("on its day its files go, its community's pictures with them, and the store closes", [zoeGone.state, [...objects.keys()].filter((path) => path.startsWith(`vault/${zoe.folder}/`)).length, pictures.size, await picturesKept(cf)], ["removed", 0, 0, 0]);
+  // The privacy policy (#closed-stores) says a closing store's files go that day; its pictures, a buyer's review photo
+  // among them, are files, and app/api/image serves them to anybody with the address.
+  is("its pictures go that day too, a buyer's review photo among them, and nobody else's", [zoePictures.map((path) => images.has(path)), images.has(anaPicture)], [[false, false], true]);
   is("nothing it sold is charged again: it had no Stripe account to stop", stripeAsked.filter((asked) => asked.startsWith("POST")).length, 0);
   const told = mailTo(zoe.email).length;
   const walked = await eraseClosed(Date.now() + 20_000, finishClosed, Z + (C + 1) * DAY + 3_600_000);

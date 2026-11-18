@@ -1,4 +1,5 @@
 import type { Deal, Stage } from "@/lib/crm-rules";
+import { StudioEmptyState } from "@/components/empty-state";
 import { type DealChannels, dealTotals, dealsByChannel } from "@/lib/deal-channels";
 import { formatMoney } from "@/lib/money";
 import { buyerLedger } from "@/lib/segments";
@@ -52,7 +53,7 @@ export function DealChannelsTable({ result, currency }: { result: DealChannels |
           Your sales could not be read just now, so this table is not shown. Your deals are all still here; open this page again in a few minutes.
         </p>
       ) : result.rows.length === 0 ? (
-        <p className="mt-4 text-ink-soft">No deals yet. Once you add some, this shows which channels bring the people your deals are with.</p>
+        <StudioEmptyState title="No deals yet" body="Once you add some, this shows which channels bring the people your deals are with." className="mt-4" />
       ) : (
         <ChannelRows result={result} currency={currency} />
       )}
@@ -66,7 +67,7 @@ function ChannelRows({ result, currency }: { result: DealChannels; currency: str
   const cell = (tally: { deals: number; cents: number }) => `${tally.deals} · ${money(tally.cents)}`;
   return (
     <>
-      <div className="mt-4 overflow-x-auto">
+      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Deals by channel, as a table">
         <table className="w-full min-w-[32rem] text-left text-sm">
           <caption className="sr-only">Your deals&apos; count and value by the channel their person first came from</caption>
           <thead>

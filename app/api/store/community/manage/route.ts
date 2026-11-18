@@ -15,7 +15,6 @@ import {
   moderateMember,
   newItemId,
   parseTarget,
-  readConfig,
   readConfigExact,
   readReportedTarget,
   saveConfig,
@@ -25,6 +24,7 @@ import {
 } from "@/lib/community";
 import { parseDmSetting } from "@/lib/community-dm";
 import { parseChatSetting } from "@/lib/community-chat";
+import { parseAboutSetting } from "@/lib/community-about-setting";
 import { forgetTicket } from "@/lib/community-access";
 import { dropCommunityImage } from "@/lib/community-files";
 import {
@@ -45,6 +45,7 @@ const ACTIONS = new Set([
   "settings",
   "messages",
   "room",
+  "about-page",
   "access",
   "space-add",
   "space-edit",
@@ -65,7 +66,9 @@ const MODERATION = new Set(["member", "dismiss", "report-hide", "report-delete"]
  * Everything the studio changes about the creator's community.
  *
  * `{ action: "enable", on }` switches it on or off (made the first time);
- * `{ action: "settings", name, about }`; `{ action: "access", products }`
+ * `{ action: "settings", name, about }`; `{ action: "about-page", on, counts }`
+ * shows or takes away the public About page (lib/community-about.ts) and its
+ * counts; `{ action: "access", products }`
  * chooses whose purchases let people in; `space-add`, `space-edit`,
  * `space-move` and `space-remove` look after the spaces; `{ action:
  * "member", key, muted?, removed? }` mutes, takes out or lets back a member;
@@ -122,8 +125,12 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, on, config });
     }
 
+    // The same exact read for every other action: a lost or off-shape reply
+    // refuses as unavailable, and only an exact absence is "not set up".
     const id = store.community?.id;
-    const config = id ? await readConfig(id) : null;
+    const read = id ? await exactSetup(id) : { config: null };
+    if (!read) return fail("setup_read_unavailable", 503);
+    const config = read.config;
     if (!id || !config) return fail("not_set_up");
     const save = async (next: CommunityConfig) => {
       await saveConfig(id, next);
@@ -157,6 +164,12 @@ export async function POST(request: NextRequest) {
           creatorOnly: body.creatorOnly === true,
         }),
       });
+    }
+
+    // The public About page, and whether it shows its counts. Off is off: the
+    // page answers not found, rather than merely being left unlinked.
+    if (action === "about-page") {
+      return save({ ...config, page: parseAboutSetting({ on: body.on === true, counts: body.counts === true }) });
     }
 
     if (action === "access") {
@@ -277,6 +290,12 @@ export async function POST(request: NextRequest) {
     // Switching the community on is the one change here that writes to the
     // store record, and a record at its ceiling refuses to grow.
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // A member's record read or written in another shape (CX-123 rule 24, lib/community.ts patchMember):
+    // the change is not known to be made, and the member is not known to be gone.
+    if (error instanceof UnknownReplyError) {
+      console.error("changing a community could not be confirmed", action, error);
+      return fail("not_confirmed", 503);
+    }
     // The reported post or comment was not read in its exact shape: nothing
     // was changed and the report is still waiting.
     if (error instanceof ReportQueueReadError) return fail("report_read_unavailable", 503);

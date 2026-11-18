@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/money";
+import { PLAN_TITLES } from "@/lib/plan";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -21,6 +22,7 @@ import {
   normaliseHex,
 } from "@/lib/store-look";
 import { MAX_PHOTO_BYTES, PHOTO_SIDE, photoUrl } from "@/lib/photo-limits";
+import { emailColourNotice } from "@/lib/email-theme";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -35,6 +37,7 @@ const MESSAGES: Record<string, string> = {
   empty: "That picture could not be read. Try a JPEG, PNG or WebP.",
   unreadable: "That picture could not be read. Try a JPEG, PNG or WebP.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  photo_wait: "Your photo could not be saved just now. Try again in a few minutes.",
 };
 
 type Status =
@@ -125,17 +128,20 @@ export function LookEditor({
   const [accent, setAccent] = useState(look.accent);
   const [badge, setBadge] = useState(look.badge);
   const [sold, setSold] = useState(look.sold);
+  const [since, setSince] = useState(look.since === true);
   const [font, setFont] = useState<FontId>(look.font);
   const [backdrop, setBackdrop] = useState<BackdropId>(look.backdrop);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const preset = ACCENTS.some((option) => option.hex === accent);
-  const changed = theme !== look.theme || accent !== look.accent || badge !== look.badge || sold !== look.sold || font !== look.font || backdrop !== look.backdrop;
+  const changed = theme !== look.theme || accent !== look.accent || badge !== look.badge || sold !== look.sold || since !== (look.since === true) || font !== look.font || backdrop !== look.backdrop;
   const colours = useMemo(() => lookColours({ theme, accent }), [theme, accent]);
   // Said out loud when the page will not paint exactly what was picked, so the
   // creator is never left wondering why their button is darker than their logo.
   const adjusted = colours.accent !== accent;
+  // Emails need 7:1 for every word, links included (369 [SU2]); when that moves the color, the creator is told which.
+  const emailNotice = useMemo(() => emailColourNotice({ theme, accent, font }), [theme, accent, font]);
 
   async function post(path: string, body: unknown): Promise<{ ok?: boolean; error?: string }> {
     const response = await fetch(path, {
@@ -150,7 +156,7 @@ export function LookEditor({
     if (status.kind === "working") return;
     setStatus({ kind: "working", what: "look" });
     try {
-      const expected = { theme, accent: normaliseHex(accent), badge, sold, font, backdrop };
+      const expected = { theme, accent: normaliseHex(accent), badge, sold, since, font, backdrop };
       const response = await fetch("/api/store/look", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -364,6 +370,7 @@ export function LookEditor({
                   : "The preview shows your page's theme and color, with an example product until you add one."
               }`}
             </p>
+            {emailNotice ? <p className="field-hint mt-2">{emailNotice}</p> : null}
           </fieldset>
 
           {/* Letters */}
@@ -441,8 +448,8 @@ export function LookEditor({
                 </span>
                 <span className="field-hint mt-1 block">
                   {canHideBadge
-                    ? "Your page carries your name and nothing of ours. Leaving Pro puts it back, and your choice here is kept for if you return."
-                    : "On Pro. Every page keeps the line until then — it is how a store brings us the next creator, which is part of what the lower price is."}
+                    ? `Your page carries your name and nothing of ours. Leaving the ${PLAN_TITLES.pro} plan puts it back, and your choice here is kept for if you return.`
+                    : `On the ${PLAN_TITLES.pro} plan. Every page keeps the line until then — it is how a store brings us the next creator, which is part of what the lower price is.`}
                 </span>
               </span>
             </label>
@@ -473,6 +480,31 @@ export function LookEditor({
             </label>
           </fieldset>
 
+          {/*
+            The month the store was opened here, in an "About this store" card
+            on the page (lib/store-trust.ts, 94 [D2-BUYER-TRUST] unit 2): read
+            from the store record, never typed.
+          */}
+          <fieldset disabled={working} className="mt-2">
+            <legend className="field-label">How long your store has been open</legend>
+            <label className="mt-2 flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={since}
+                onChange={(event) => setSince(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 accent-[var(--violet)]"
+              />
+              <span>
+                <span className="block text-[0.9375rem] font-medium text-ink">
+                  Show &ldquo;On Marktmorgen since&rdquo; with the month your store was made, in an &ldquo;About this store&rdquo; box on your page
+                </span>
+                <span className="field-hint mt-1 block">
+                  Taken from the date your store was made here. Nobody can type or change it, and buyers are told where it comes from.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+
           {status.kind === "error" ? (
             <p className="notice notice-error" role="alert">{status.message}</p>
           ) : null}
@@ -494,6 +526,7 @@ export function LookEditor({
                   setAccent(look.accent);
                   setBadge(look.badge);
                   setSold(look.sold);
+                  setSince(look.since === true);
                   setFont(look.font);
                   setBackdrop(look.backdrop);
                   setStatus({ kind: "idle" });

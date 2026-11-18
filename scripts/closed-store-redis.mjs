@@ -9,6 +9,10 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { build } from "esbuild";
+import { requireLoopbackRedis } from "./loopback-redis.mjs";
+
+// The wrapper serves Redis on loopback with this token; nothing else is reached.
+requireLoopbackRedis(process.env, "erasure-check");
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = mkdtempSync(join(tmpdir(), "nimbus-closed-store-"));

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import {
   BillingError,
+  endLapsed,
   isBillingConfigured,
   readSubscription,
   setCancelAtPeriodEnd,
@@ -53,9 +54,25 @@ export async function POST(request: NextRequest) {
     const state = await setCancelAtPeriodEnd(store.subscriptionId, intent === "cancel");
     // Leaving outright: a break that was set has nothing left to start again.
     if (intent === "cancel") await dropPause(store).catch((error) => console.error("dropping a break failed", error));
+    // The first payment after the trial failed: the plan is over here, but the
+    // subscription is still past_due with its invoice open, and setting it to
+    // stop at the period's end does not stop Stripe retrying that invoice. A
+    // store recorded as ended must leave nothing Stripe could still charge
+    // (Terms, section 8), so it is ended in Stripe now, without a final bill;
+    // when that fails, nothing is recorded and the creator is told to try again.
+    if (intent === "cancel" && state.state === "inactive" && state.reason === "past_due") {
+      try {
+        await endLapsed([store.subscriptionId]);
+      } catch (error) {
+        console.error("ending a lapsed subscription on cancel failed", error);
+        return away(origin, studio("billing=cancel-error"));
+      }
+    }
     if (state.state !== "active") {
-      await setSubscription(ref, { active: false });
-      return away(origin, studio("billing=ended"));
+      // Stripe has ended it; a store record not written (null) still holds the
+      // plan, so the creator is not told it ended. A throw lands in the catch.
+      const written = await setSubscription(ref, { active: false });
+      return away(origin, studio(written ? "billing=ended" : "billing=cancel-error"));
     }
     return away(origin, studio(intent === "cancel" ? "billing=canceling" : "billing=resumed"));
   } catch (error) {
@@ -65,8 +82,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof BillingError && (error.status === 400 || error.status === 404)) {
       const now = await readSubscription(store.subscriptionId);
       if (now.state === "inactive") {
-        await setSubscription(ref, { active: false });
-        return away(origin, studio("billing=ended"));
+        const written = await setSubscription(ref, { active: false }).catch((failure) => {
+          console.error("recording the ended subscription failed", failure);
+          return null;
+        });
+        return away(origin, studio(written ? "billing=ended" : "billing=cancel-error"));
       }
     }
     console.error("changing the cancellation failed", error);

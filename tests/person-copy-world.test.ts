@@ -43,8 +43,9 @@ async function main(): Promise<void> {
   const text = JSON.stringify(copy);
   is("the other person's address is not in it", text.includes(other), false);
   is("the store's owner's is not either", text.includes(OWNER), false);
-  const community = copy.sections.find((s) => s.module === "lib/community-erasure.ts")?.records[0] as { room: { text: string }[]; events: { event: string }[] } | undefined;
+  const community = copy.sections.find((s) => s.module === "lib/community-erasure.ts")?.records[0] as { room: { text: string }[]; events: { event: string }[]; privateMessages: { request: boolean; messages: { from: string; text: string }[] }[] } | undefined;
   is("what they said in the community's room, and the event they are coming to", [community?.room.map((m) => m.text), community?.events.map((e) => e.event)], [["hello room"], ["ev0001"]]);
+  is("their private conversation, whole", community?.privateMessages.map((c) => c.messages.map((m) => [m.from, m.text])), [[["you", "hi"]]]);
 
   part("After the erasure");
   const erased = await erasePerson(store, person, { kind: "person" });
@@ -58,6 +59,9 @@ async function main(): Promise<void> {
 
 /** Modules seedPerson writes nothing to for a person (see the log line above). */
 const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-confirmation-outbox.ts", "lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
+
+// 610 [WP9] unit 2: the world activates no license key on a device; its copy is held in tests/licence-activations.test.ts.
+EXPECTED_EMPTY.splice(EXPECTED_EMPTY.indexOf("lib/licence-keys.ts") + 1, 0, "lib/licence-activations.ts");
 
 main().catch((error) => {
   console.error(error);

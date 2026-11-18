@@ -33,8 +33,8 @@
  *
  *   nl:closing:paid:<folder>   hash  subscription -> its last payment (PaidPeriod), from the hold to the closing
  *   nl:closing:work:<folder>   hash  where the hold and the release stopped, the members not held yet
- *                                    ("f:<sub>"), those past the call budget ("o:<sub>"), and what is
- *                                    left of the budget ("calls")
+ *                                    ("f:<sub>"), those past the call budget ("o:<sub>"), what is
+ *                                    left of the budget ("calls") and the ending it was set for ("of")
  *   nl:closing:held            sorted set  a store's key -> when its plan ended, while its members are held
  *   nl:closing:final           sorted set  a store's key -> when its plan ended, from its closing day's start to its end
  *
@@ -44,10 +44,11 @@
  * counted for the creator's notices.
  */
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { type Store, saleHandles, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
 import { forgetCredit } from "@/lib/closing-credit";
@@ -72,9 +73,29 @@ export const FINAL_INDEX = "nl:closing:final";
 const SUB_ID = /^sub_[A-Za-z0-9]{6,64}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
+/** What became of a member's refund, as PaidPeriod.r names it. */
+const PAID_OUTCOMES: ReadonlySet<string> = new Set(["done", "short", "disputed", "pending", "none", "over"]);
 
 type Row = HeldSub & Record<string, unknown>;
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 type Cursor = { h: number; p: string };
+
+/**
+ * The rows of a list or search Stripe gave (rule 30). A reply that is not one
+ * (a JSON null, a string, a number, an object with no data array) is not an
+ * empty list, which would read as nothing to hold and the last page: it
+ * throws, so the member is tried again and the pages read again (Claude 6 on
+ * #3098, same class). The rows themselves are checked by each caller.
+ */
+const listOf = (reply: unknown): unknown[] => {
+  if (reply === null || typeof reply !== "object" || !Array.isArray((reply as { data?: unknown }).data)) throw new StripeListUnreadable("a list or search page with no data array");
+  return (reply as { data: unknown[] }).data;
+};
 
 const parseCursor = (raw: unknown): Cursor => {
   try {
@@ -120,9 +141,25 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
     query.append("expand[]", "data.customer");
     if (cursor.p) query.set("page", cursor.p);
     const found = await onAccount("GET", account, `/subscriptions/search?${query}`);
-    if (!(await each(Array.isArray(found.data) ? (found.data as Row[]) : []))) return false;
+    // Only the store's own sales of the handle searched (rule 30): a row the search gave that names another handle,
+    // or none, is not this store's member, and is never held, let go or written down.
+    const listed = listOf(found);
+    // Whether there is more is said exactly, or the page is not known to be the last (Claude 6 on #3108, rule 24):
+    // done on a page that does not say would leave the next pages' members never held, or held for good.
     const next = typeof found.next_page === "string" ? found.next_page : "";
-    cursor = found.has_more === true && next ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
+    if (typeof found.has_more !== "boolean" || (found.has_more && !next)) {
+      console.error("plan-closing: Stripe's search did not say whether more subscriptions follow; tried again");
+      return false;
+    }
+    // A row that is not an object is not "another store's" (Claude 4 on #3108): the page is read again, never passed.
+    if (listed.some((row) => row === null || typeof row !== "object" || Array.isArray(row))) {
+      console.error("plan-closing: Stripe's search gave a subscription that could not be read; tried again");
+      return false;
+    }
+    const rows = listed.filter((row): row is Row => (row as Row).metadata?.store === handles[cursor.h]);
+    if (rows.length < listed.length) console.error(`plan-closing: Stripe's search gave ${listed.length - rows.length} subscription(s) of another store; left alone`);
+    if (!(await each(rows))) return false;
+    cursor = found.has_more ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
     await redisPipeline([["HSET", workKey(folder), field, JSON.stringify(cursor)]]);
   }
   if (cursor.h >= handles.length) {
@@ -132,9 +169,39 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
   return false;
 }
 
-/** Sets the closing's budget of calls to the creator's Stripe account, once an ending, before any is made. */
-export async function startCallBudget(folder: string, calls: number): Promise<void> {
-  await redisPipeline([["DEL", workKey(folder)], ["HSET", workKey(folder), "calls", Math.max(0, Math.floor(calls))]]);
+/**
+ * KEYS[1] the closing's work hash; ARGV[1] the calls, ARGV[2] the ending
+ * (its plan's end, in ms). Sets the budget only when the hash is not already
+ * this ending's: 1 when set now (an earlier ending's work cleared first), 0
+ * when it was set for this ending already (its balance, cursors and set-aside
+ * calls kept), -1 when the key is not a hash (nothing deleted).
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const CALL_BUDGET_ONCE = `-- marktmorgen:closing-call-budget:v1
+local t = redis.call("TYPE", KEYS[1]).ok
+if t ~= "hash" and t ~= "none" then return -1 end
+if redis.call("HGET", KEYS[1], "of") == ARGV[2] then return 0 end
+redis.call("DEL", KEYS[1])
+redis.call("HSET", KEYS[1], "calls", ARGV[1], "of", ARGV[2])
+return 1`;
+
+/**
+ * Sets the closing's budget of calls to the creator's Stripe account, once an
+ * ending, before any is made. The budget is owned by its ending ("of", Codex S
+ * on #3309): two overlapping closeOne runs that both read no holdFrom start it
+ * once, and a late start never puts back calls already taken. Resolves when
+ * the script answers exactly 1 (set now) or 0 (set for this ending already);
+ * anything else (-1 for a key that is not a hash, text, null, a missing or an
+ * extra reply) throws UnknownReplyError (CX-123 rule 24): closeOne
+ * (lib/plan-closing.ts) then writes no holdFrom, so the budget is set the next
+ * day, never taken as set when it may not be there (every takeCalls would be
+ * refused, and no member held).
+ */
+export async function startCallBudget(folder: string, calls: number, ending: number): Promise<void> {
+  if (!Number.isSafeInteger(ending) || ending < 0) throw new Error("a closing's budget of Stripe calls needs the ending it is for");
+  const replies = repliesFor(await redisPipeline([["EVAL", CALL_BUDGET_ONCE, 1, workKey(folder), Math.max(0, Math.floor(calls)), String(ending)]]), 1);
+  const set = replies?.[0];
+  if (set !== 1 && set !== 0) throw new UnknownReplyError("a closing's budget of Stripe calls");
 }
 
 /**
@@ -156,26 +223,84 @@ export async function takeCalls(folder: string, n: number, from: "calls" | "rcal
   return false;
 }
 
+/** The invoice-payment statuses Stripe documents (https://docs.stripe.com/api/invoice-payment/object); anything else is unknown. */
+const PAYMENT_STATUSES: ReadonlySet<unknown> = new Set(["paid", "open", "canceled"]);
+
+/**
+ * The one payment an expanded payments list proves an invoice was paid by: "" unless the list says no more follow,
+ * every row is an object in a status Stripe documents, and exactly one is paid, naming a readable payment intent.
+ * A row that does not read or whose status is unknown may be another paid charge (Codex P, T and N1 on #4428), so it
+ * never lets the sole readable paid row stand for the invoice's one payment. undefined when the invoice lists none.
+ */
+function soleListedPayment(list: unknown): string | undefined {
+  if (list === undefined) return undefined;
+  const page = list && typeof list === "object" && !Array.isArray(list) ? (list as { has_more?: unknown; data?: unknown }) : null;
+  const rows = Array.isArray(page?.data) ? (page.data as unknown[]) : null;
+  if (!page || page.has_more !== false || !rows) return "";
+  const paid: string[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return "";
+    const { status, payment } = row as { status?: unknown; payment?: unknown };
+    if (!PAYMENT_STATUSES.has(status)) return "";
+    if (status !== "paid") continue;
+    const id = idOf(payment && typeof payment === "object" ? (payment as { payment_intent?: unknown }).payment_intent : undefined);
+    if (!INTENT_ID.test(id)) return "";
+    paid.push(id);
+  }
+  return paid.length === 1 ? paid[0] : "";
+}
+
 /** A member's last paid invoice, as its membership line says, with the payment it was paid by. */
 export function paidPeriodOf(invoice: Record<string, unknown>, email: string, intent = ""): PaidPeriod | null {
   // The payment it was paid by: on the invoice in older API versions, among its payments (expanded) in newer ones.
-  if (!intent) {
-    const payments = (invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | undefined)?.data ?? [];
-    const found = payments.find((p) => p.status === "paid")?.payment?.payment_intent;
-    const id = typeof found === "string" ? found : (found as { id?: unknown } | null)?.id;
-    if (typeof id === "string") intent = id;
-  }
+  // Only as the invoice's one payment (money review on #4428): exactly one paid among them, from a whole list of rows
+  // that all read. An invoice paid in more than one charge keeps none here, so the refund at closing reads every one
+  // of its payments (lib/closing-refunds.ts intentsOf) and gives back over all of them (#4411), never from the first.
+  // The invoice's own payment_intent names a payment, never that it is the only one: beside a listed payments page it
+  // is kept only when it is that page's sole paid payment (Codex P on #4428). The refund reads the invoice's payments
+  // again unless `one` says it was proven so here (Codex X5).
   if (invoice.status !== "paid" || typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return null;
   const line = membershipLineOf(invoice as Parameters<typeof membershipLineOf>[0]);
   const tot = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
   const cur = typeof invoice.currency === "string" ? invoice.currency.toLowerCase() : "";
   if (!line || !(tot > 0) || !cur) return null;
-  const direct = typeof invoice.payment_intent === "string" ? invoice.payment_intent : (invoice.payment_intent as { id?: unknown } | null)?.id;
-  const pi = typeof direct === "string" && INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
-  return { inv: invoice.id, ...(pi ? { pi } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
+  const direct = idOf(invoice.payment_intent);
+  const named = INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
+  const listed = soleListedPayment(invoice.payments);
+  const pi = listed === undefined ? named : listed && (!named || named === listed) ? listed : "";
+  return { inv: invoice.id, ...(pi ? { pi, one: 1 as const } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
 }
 
-const listOf = (reply: Record<string, unknown>) => (Array.isArray(reply.data) ? (reply.data as Record<string, unknown>[]) : []);
+/** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */
+const idOf = (value: unknown): string =>
+  typeof value === "string" ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : "";
+
+/**
+ * Whether an invoice Stripe listed for a member is the member's own (rule 30):
+ * a readable id, its subscription the one asked for wherever the API version
+ * names it (on the invoice, or under its parent in newer versions) and none
+ * naming another, and its customer the member's.
+ */
+function isOwnInvoice(invoice: Record<string, unknown>, sub: string, customer: string): boolean {
+  if (typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return false;
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const named = [idOf(invoice.subscription), idOf(parent?.subscription_details?.subscription)].filter(Boolean);
+  return named.length > 0 && named.every((one) => one === sub) && customer !== "" && idOf(invoice.customer) === customer;
+}
+
+/**
+ * The rows of a list Stripe gave for one member's invoices, every one checked
+ * to be the member's own. One that is not (another subscription's or
+ * customer's, or one naming none) is never acted on, and throws before any
+ * write: the list cannot be trusted to be the member's whole, so the member is
+ * tried again the next day (f:), never counted as held with its hold part done.
+ * A reply that is not a list throws the same way (listOf).
+ */
+function ownInvoices(reply: unknown, sub: string, customer: string, what: string): Record<string, unknown>[] {
+  const rows = listOf(reply);
+  if (rows.some((row) => !row || typeof row !== "object" || !isOwnInvoice(row as Record<string, unknown>, sub, customer))) throw new Error(`Stripe listed ${what} that is not the member's own`);
+  return rows as Record<string, unknown>[];
+}
 
 /**
  * Holds one member for an ending: its open invoices voided and its drafts
@@ -184,19 +309,29 @@ const listOf = (reply: Record<string, unknown>) => (Array.isArray(reply.data) ? 
  * membership written down (up to ten looked back, in one call); then its
  * collection paused. Every call is taken from the budget first, and its
  * refund's calls are set aside once it is held. Throws when Stripe could not
- * be asked; answers "over" when the budget did not cover it.
+ * be asked, or listed an invoice that is not the member's own (before any
+ * write, so the member is tried again whole); answers "over" when the budget
+ * did not cover it.
  */
 async function holdOne(account: string, folder: string, sub: Row, endedAt: number): Promise<"held" | "over"> {
   const id = sub.id as string;
   // Its open and draft invoices listed, its paid ones read, its hold and its release; and its refund's, set aside.
   const plan = isPaymentPlan(sub);
   if (!(await takeCalls(folder, 5 + (plan ? 0 : REFUND_CALLS_PER_MEMBER)))) return "over";
-  const open = listOf(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "open", limit: "10" })}`));
-  const drafts = listOf(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "draft", limit: "10" })}`)).filter((d) => typeof d.id === "string" && INVOICE_ID.test(d.id) && d.auto_advance !== false);
+  // Every list read and checked row by row before any write (ownInvoices): a row that is not the member's own decides nothing.
+  const customer = idOf(sub.customer);
+  const open = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "open", limit: "10" })}`), id, customer, "an open invoice");
+  const drafts = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "draft", limit: "10" })}`), id, customer, "a draft").filter((d) => d.auto_advance !== false);
+  let paid: Record<string, unknown>[] = [];
+  if (!plan) {
+    const query = new URLSearchParams({ subscription: id, status: "paid", limit: "10" });
+    query.append("expand[]", "data.payments");
+    paid = ownInvoices(await onAccount("GET", account, `/invoices?${query}`), id, customer, "a paid invoice");
+  }
   // A void each; a draft kept now and let go again on a release.
   if (!(await takeCalls(folder, open.length + 2 * drafts.length))) return "over";
   for (const invoice of open) {
-    if (typeof invoice.id === "string" && INVOICE_ID.test(invoice.id)) await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, undefined, undefined, `closing-void:${invoice.id}`);
+    await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id as string)}/void`, undefined, undefined, `closing-void:${invoice.id}`);
   }
   for (const invoice of drafts) {
     await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id as string)}`, new URLSearchParams({ auto_advance: "false", "metadata[closing_draft]": String(endedAt) }), undefined, `closing-draft:${invoice.id}:${endedAt}`);
@@ -204,9 +339,6 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
   if (drafts.length) await redisPipeline([["HSET", workKey(folder), `d:${id}`, drafts.map((d) => d.id).join(",")]]);
   const email = memberEmail(sub);
   if (!plan) {
-    const query = new URLSearchParams({ subscription: id, status: "paid", limit: "10" });
-    query.append("expand[]", "data.payments");
-    const paid = listOf(await onAccount("GET", account, `/invoices?${query}`));
     const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
     // The first reading is the one before any hold (HSETNX).
     if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
@@ -220,16 +352,52 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
 /** What a member with no address on Stripe is marked with: it cannot be told, and is counted. */
 const NO_ADDRESS = "-";
 
+/**
+ * One command's reply as the list of strings Redis's REST answers (HGETALL, HKEYS, ZRANGEBYSCORE), exactly one reply
+ * for the one command sent; `pairs` asks for an even length (fields and values, members and scores). Only a confirmed
+ * empty list means nothing is there (CX-123 rule 24): no reply, another shape or an odd list throws UnknownReplyError,
+ * so no refund, notice, release or deletion is decided on "nothing written down" read from a reply that said nothing.
+ */
+async function stringsOf(command: (string | number)[], what: string, pairs = false): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  const list = replies ? stringList(replies[0]) : null;
+  if (!list || (pairs && list.length % 2 !== 0)) throw new UnknownReplyError(what);
+  return list;
+}
+
+/**
+ * The members' payments a store wrote down (HSETNX on hold, savePaidPeriod since), field by field, every row read
+ * exactly: a row that does not parse into a payment is unknown and throws (rule 24), never "left out", so a member's
+ * refund is never settled, nor their payment deleted, on a row unread. With `subsOnly` (what the refunds act on), a
+ * field that is not a subscription is unknown too: the closing writes only subscriptions there.
+ */
+async function paidRows(folder: string, subsOnly: boolean): Promise<[string, PaidPeriod][]> {
+  const what = "a closing's members' payments (HGETALL)";
+  const flat = await stringsOf(["HGETALL", paidKey(folder)], what, true);
+  const out: [string, PaidPeriod][] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    let row: unknown;
+    try {
+      row = JSON.parse(flat[i + 1]);
+    } catch {
+      throw new UnknownReplyError(what);
+    }
+    const paid = row as PaidPeriod;
+    if ((subsOnly && !SUB_ID.test(flat[i])) || !row || typeof row !== "object" || Array.isArray(row) || typeof paid.amt !== "number" || !Number.isFinite(paid.amt) || typeof paid.inv !== "string") throw new UnknownReplyError(what);
+    out.push([flat[i], paid]);
+  }
+  return out;
+}
+
 /** The addresses of every member of this ending (held, past the budget or not held yet), payment plans included. */
 export async function memberAddresses(folder: string): Promise<string[]> {
   return (await membersOf(folder)).emails;
 }
 
-/** Every member of this ending: the addresses, and the members with none (by subscription). */
+/** Every member of this ending: the addresses, and the members with none (by subscription). Throws when it cannot be read: the members' notices then wait. */
 export async function membersOf(folder: string): Promise<{ emails: string[]; missing: string[]; unpaused: string[] }> {
   if (!isRedisConfigured()) return { emails: [], missing: [], unpaused: [] };
-  const [raw] = await redisPipeline([["HGETALL", workKey(folder)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = await stringsOf(["HGETALL", workKey(folder)], "a closing's members (HGETALL)", true);
   const fields = new Map<string, string>();
   for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], flat[i + 1]);
   const out = { emails: [] as string[], missing: [] as string[], unpaused: [] as string[] };
@@ -248,19 +416,39 @@ export async function membersOf(folder: string): Promise<{ emails: string[]; mis
   return out;
 }
 
+/**
+ * A store's score in the final line (one ZSCORE's pipeline), read exactly (CX-123 rule 24; Claude 5's second money
+ * review of #3279): null when Redis says it is not in the line, else the end of its plan (ms), a positive number or
+ * its numeric text, as Upstash answers a ZSCORE. Anything else, a reply missing included, is UnknownReplyError: never
+ * "not in its closing day", which would let a paid plan be written down for a store already closing.
+ */
+/** A sorted set's score, as Redis's text of it (or a number, from a client that parses it), when it is a positive number; null for anything else. */
+function positiveScore(raw: unknown): number | null {
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(raw) ? Number(raw) : Number.NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export function finalScoreOf(replies: unknown): number | null {
+  const reply = repliesFor(replies, 1);
+  if (!reply) throw new UnknownReplyError("a store's place in the final closing line");
+  const raw = reply[0];
+  if (raw === null) return null;
+  const value = positiveScore(raw);
+  if (value === null) throw new UnknownReplyError("a store's place in the final closing line");
+  return value;
+}
+
 /** Whether a store's closing day has begun: then no plan may be started for it (app/api/billing/checkout). Throws when it cannot be read. */
 export async function inClosingDay(ref: string): Promise<boolean> {
   // With no database there is no closing day to be in (the line lives there); one that does not answer throws, and the caller refuses.
   if (!isRedisConfigured()) return false;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, ref]]);
-  return score !== null && score !== undefined;
+  return finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) !== null;
 }
 
-/** How the hold stands: the members it could not reach yet, and those past the budget. */
+/** How the hold stands: the members it could not reach yet, and those past the budget. Throws when it cannot be read: the notice then says it could not check, never "every membership is paused". */
 export async function holdCounts(folder: string): Promise<{ failed: number; over: number }> {
   if (!isRedisConfigured()) return { failed: 0, over: 0 };
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const keys = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
+  const keys = await stringsOf(["HKEYS", workKey(folder)], "how a closing's hold stands (HKEYS)");
   return { failed: keys.filter((k) => k.startsWith("f:")).length, over: keys.filter((k) => k.startsWith("o:")).length };
 }
 
@@ -314,8 +502,8 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
   const folder = await storeFolder(storeRef(store));
   const account = store.stripeAccountId;
   if (!account) return holdCounts(folder);
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const ids = (Array.isArray(fields) ? (fields as unknown[]).map(String) : []).filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
+  // Never "nobody left to try again" from a reply that said nothing: it throws, and the next run reads it again.
+  const ids = (await stringsOf(["HKEYS", workKey(folder)], "the members a closing has not held yet (HKEYS)")).filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
   await inTurn(ids, until, async (id) => {
     try {
       if (!(await takeCalls(folder, 1))) {
@@ -323,6 +511,9 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
         return;
       }
       const sub = (await onAccount("GET", account, `/subscriptions/${encodeURIComponent(id)}?expand[]=customer`)) as Row;
+      // Another subscription's reply, or one with no id: nothing is known of this member. It stays to be tried again
+      // tomorrow (its call spent, as for any failed read), never dropped and never another subscription held in its place.
+      if (!isOwnReply(sub, id)) throw new Error("Stripe answered for another subscription");
       if (!chargeable(sub) || (sub.metadata?.store_hold === String(endedAt) && sub.pause_collection)) {
         await redisPipeline([["HDEL", workKey(folder), `f:${id}`]]);
         return;
@@ -348,10 +539,15 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
     const all = await inTurn(todo, until, async (sub) => {
       const id = sub.id as string;
       try {
+        // The drafts its hold kept, read before it is let go: a reply that is neither their list nor a confirmed absent
+        // field (null) is unknown (rule 24) and keeps the member held, never counted released with its drafts left behind
+        // nor its record of them deleted.
+        const replies = repliesFor(await redisPipeline([["HGET", workKey(folder), `d:${id}`]]), 1);
+        const kept = replies ? replies[0] : undefined;
+        if (kept !== null && (typeof kept !== "string" || !kept.split(",").every((d) => INVOICE_ID.test(d)))) throw new UnknownReplyError("the drafts a closing's hold kept (HGET)");
         await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, releaseBody(sub, nowSeconds), undefined, `closing-release:${id}:${sub.metadata?.store_hold}`);
         // The drafts its hold kept as drafts go on as they were (their calls were taken with the hold); voided invoices do not come back.
-        const [kept] = await redisPipeline([["HGET", workKey(folder), `d:${id}`]]);
-        for (const draft of typeof kept === "string" ? kept.split(",").filter((d) => INVOICE_ID.test(d)) : []) {
+        for (const draft of typeof kept === "string" ? kept.split(",") : []) {
           await onAccount("POST", account, `/invoices/${encodeURIComponent(draft)}`, new URLSearchParams({ auto_advance: "true", "metadata[closing_draft]": "" }), undefined, `closing-draft-back:${draft}:${sub.metadata?.store_hold}`);
         }
         if (typeof kept === "string") await redisPipeline([["HDEL", workKey(folder), `d:${id}`]]);
@@ -369,19 +565,52 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   return out;
 }
 
-/** The members' last payments a store has written down, by subscription. */
+/** One written-down payment, with every field the refunds and the notices read; null for anything else. */
+function paidRowOf(text: string): PaidPeriod | null {
+  let row: unknown;
+  try {
+    row = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const r = row as Record<string, unknown>;
+  // Money and times are whole smallest units and whole seconds, as paidPeriodOf and savePaidPeriod write them (rule 24:
+  // an amount that does not read is unknown, never 0 or "owed nothing"; Claude 1 cloud's MEDIUM on #4454).
+  const whole = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v);
+  const amount = (v: unknown) => v === undefined || (whole(v) && v >= 0);
+  if (typeof r.inv !== "string" || !INVOICE_ID.test(r.inv) || typeof r.e !== "string") return null;
+  if (!whole(r.amt) || r.amt <= 0 || typeof r.cur !== "string" || !/^[a-z]{3}$/.test(r.cur)) return null;
+  if (!whole(r.ps) || !whole(r.pe) || r.pe <= r.ps) return null;
+  if ((r.tot !== undefined && (!whole(r.tot) || r.tot <= 0)) || !amount(r.back) || !amount(r.want)) return null;
+  if (r.pi !== undefined && (typeof r.pi !== "string" || !INTENT_ID.test(r.pi))) return null;
+  if (r.r !== undefined && !PAID_OUTCOMES.has(r.r as string)) return null;
+  if ((r.f !== undefined && r.f !== 1) || (r.m !== undefined && r.m !== 1)) return null;
+  return row as PaidPeriod;
+}
+
+/**
+ * The members' last payments a store has written down, by subscription, read
+ * exactly (issue #4310, CX-123 rule 24): a reply that is not a list of
+ * subscription/row strings, or a row that does not read with its fields,
+ * throws UnknownReplyError. It is never "no members" or a member left out:
+ * the closing would then write its refunds done and delete this list, the
+ * only record of what each member paid for past the closing day. Its callers
+ * hold the closing and try again the next day.
+ */
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
   const out = new Map<string, PaidPeriod>();
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
-      if (SUB_ID.test(flat[i]) && typeof row.amt === "number" && typeof row.inv === "string") out.set(flat[i], row);
-    } catch {
-      // A row that cannot be read is left out, never guessed at.
-    }
+  const what = "a closing's members' payments (HGETALL)";
+  const replies = repliesFor(await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]), 1);
+  const flat = replies ? stringList(replies[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  for (let i = 0; i < flat.length; i += 2) {
+    const row = paidRowOf(flat[i + 1]);
+    // A hash names each field once: a subscription named twice is not the hash asked for, never a payment overwritten
+    // by the other (Codex T on #4454): unknown, so the closing stays held and is read again.
+    if (!SUB_ID.test(flat[i]) || !row || out.has(flat[i])) throw new UnknownReplyError(what);
+    out.set(flat[i], row);
   }
   return out;
 }
@@ -409,17 +638,35 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
   if (!isRedisConfigured()) return [];
   const out: Released[] = [];
   const flat: string[] = [];
-  for (let from = 0; from < 100_000; from += 500) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500]]);
-    const page = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-    flat.push(...page);
-    if (page.length < 1000) break;
+  // The whole line is read exactly before any store in it is acted on (rule 24): a page that is not members and
+  // scores is unknown, never "nobody is held" nor a page cut short; nothing is let go today and the line stays as it is.
+  try {
+    for (let from = 0; from < 100_000; from += 500) {
+      const page = await stringsOf(["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500], "the line of held stores (ZRANGEBYSCORE)", true);
+      // A score that is not the end of a plan is unknown, never "it ended on another day" (which would let a store still closing go).
+      for (let i = 1; i < page.length; i += 2) if (positiveScore(page[i]) === null) throw new UnknownReplyError("the line of held stores (ZRANGEBYSCORE)");
+      flat.push(...page);
+      if (page.length < 1000) break;
+    }
+  } catch (error) {
+    console.error("plan-closing: the line of held stores could not be read; no store is let go today", error);
+    return out;
   }
   for (let i = 0; i + 1 < flat.length; i += 2) {
     if (Date.now() > deadline) break;
     const key = flat[i];
     const endedAt = Number(flat[i + 1]);
-    const store = await storeForEmail(key).catch(() => null);
+    // Only a record Redis says is not there (nil) is gone. One that does not read (a failed request, a record that
+    // does not parse, or one under that key for another owner) is unknown (rule 24): the store stays in the line, its
+    // members held and its address kept (closingUnderway, lib/store.ts), and is read again the next day.
+    let store: Store | null;
+    try {
+      store = await storeForRefExact(key);
+    } catch (error) {
+      console.error("a held store's record could not be read; it stays held and is read again tomorrow", error);
+      out.push({ key, state: "held" });
+      continue;
+    }
     if (!store) {
       await redisPipeline([["ZREM", HELD_INDEX, key]]);
       out.push({ key, state: "gone" });
@@ -455,17 +702,7 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
 export async function heldPaymentsOf(store: Store, email: string): Promise<(PaidPeriod & { subscription: string })[]> {
   if (!isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const folder = await storeFolder(storeRef(store));
-  const [raw] = await redisPipeline([["HGETALL", paidKey(folder)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
-  const out: (PaidPeriod & { subscription: string })[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
-      if (typeof row.e === "string" && row.e.trim().toLowerCase() === address) out.push({ ...row, subscription: flat[i] });
-    } catch {
-      // Not a payment row: skipped, as the closing itself skips it.
-    }
-  }
-  return out;
+  // Throws when it cannot be read (rule 24): the person's copy is then not made, never made without their payment.
+  const rows = await paidRows(await storeFolder(storeRef(store)), false);
+  return rows.filter(([, row]) => typeof row.e === "string" && row.e.trim().toLowerCase() === address).map(([subscription, row]) => ({ ...row, subscription }));
 }

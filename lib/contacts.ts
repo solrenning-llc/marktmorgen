@@ -32,15 +32,18 @@
  * fingerprint of the address, so nothing but their own yes, given again,
  * puts them back on as someone who may be written to (forgetContactPerson).
  */
+import { stringList } from "@/lib/redis-reply";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
+import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
-import { type DataOwner, orderWrite } from "@/lib/order-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { DataRoomError, type DataStore, countData, dataKey, giveData, needData } from "@/lib/store-data";
+import { type DataOwner, fieldReleaseBytes, orderWriteIfSame, releaseOrderData } from "@/lib/order-data";
+import { DATA_STEP_BYTES, dataBytes, utf8Length } from "@/lib/store-data-rules";
+import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 
 /** How many product names one address keeps. */
 const MAX_TITLES = 20;
@@ -68,9 +71,11 @@ export type Contact = {
   unsubAt: string;
   /**
    * Why, when it was not their own unsubscribe: the address bounced for
-   * good, or they marked an email as spam. Absent when they left themselves.
+   * good, they marked an email as spam, or the email service refused the
+   * address itself when an email to the list was handed to it (lib/mail.ts
+   * sendTo). Absent when they left themselves.
    */
-  gone?: "bounced" | "complained";
+  gone?: "bounced" | "complained" | "refused";
   /** The token in their unsubscribe link, made the first time they are sent to. */
   t: string;
   /** Their name, when an import brought one (lib/imports.ts). "" when unknown. */
@@ -85,6 +90,15 @@ export type Contact = {
    * joined; absent when they did not, or took it back. Never set by an import.
    */
   clicks?: string;
+  /**
+   * Where the contact's room is counted (lib/store-data.ts): "c" the
+   * contacts' slot (a sign-up, an import, the API), "o" the orders' part (put
+   * on the list by an order, lib/order-data.ts). Set when the contact is
+   * first written and kept for good, so deleting it gives its room back
+   * where it was taken. Absent on contacts written before 4 November 2026,
+   * whose room is not known to be in either and is left counted.
+   */
+  r?: "c" | "o";
 };
 
 // Labels' rules live with the list's other pure rules, so a page may read them too (99 [E2-TAG-BROADCAST]).
@@ -103,8 +117,57 @@ export { MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH, readTags } from "@/
  * is for the company's own lists, which are not a store's.
  */
 const CONTACTS_SLOT = "ct";
+/** The orders' part of the room (lib/order-data.ts), where a contact an order put on the list is counted. */
+const ORDERS_SLOT = "o";
 export const TOKEN_BYTES = dataBytes(["0".repeat(40), "x".repeat(40 + 254 + 40)], 1) + 64;
-const contactBytes = (contact: Contact | null) => (contact ? dataBytes([JSON.stringify(contact)], 1) + TOKEN_BYTES : 0);
+/**
+ * A contact's record as the contacts' slot counts it: without its
+ * unsubscribe token and what leaving adds, which TOKEN_BYTES holds for it
+ * from the start and which are written without being counted again. So what
+ * the slot holds for a contact is always contactBytes of it, and deleting it
+ * gives back exactly that.
+ */
+function countedJson(contact: Contact): string {
+  const { t: _t, unsub: _u, unsubAt: _a, gone: _g, ...rest } = contact;
+  void _t;
+  void _u;
+  void _a;
+  void _g;
+  return JSON.stringify(rest);
+}
+const contactBytes = (contact: Contact | null) => (contact ? dataBytes([countedJson(contact)], 1) + TOKEN_BYTES : 0);
+
+/**
+ * What a write grows a contact counted in the orders' part by, the way
+ * lib/order-data.ts counts a value made longer: what it grew by and a quarter
+ * more, rounded up. A record made shorter gives nothing back there, as an
+ * order's own write does not, so what a deletion gives back (its field's own
+ * share, rounded down) is never more than all its writes took.
+ */
+function orderGrowth(before: Contact, next: Contact): number {
+  const grown = utf8Length(JSON.stringify(next)) - utf8Length(JSON.stringify(before));
+  return grown > 0 ? Math.ceil((grown * 5) / 4 / DATA_STEP_BYTES) * DATA_STEP_BYTES : 0;
+}
+
+/** A contact as it is written: where its room is counted, set once when it is first written (Contact.r). */
+function placed(next: Contact, before: Contact | null, byOrder: boolean): Contact {
+  const { r: _r, ...rest } = next;
+  void _r;
+  const r = before ? before.r : byOrder ? "o" : "c";
+  return r ? { ...rest, r } : rest;
+}
+
+type ContactPair = { before: Contact | null; next: Contact };
+const inOrders = (pair: ContactPair) => pair.before?.r === "o";
+/** What one write takes first: in the orders' part for a contact counted there, in the contacts' slot otherwise. */
+const pairCharge = (pair: ContactPair) => (inOrders(pair) ? orderGrowth(pair.before!, pair.next) : Math.max(0, contactBytes(pair.next) - contactBytes(pair.before)));
+
+/** The changes to the room for these amounts, by where each pair is counted. */
+function roomChanges(pairs: ContactPair[], amount: (pair: ContactPair) => number): { slot: string; bytes: number }[] {
+  const contacts = pairs.filter((p) => !inOrders(p)).reduce((sum, p) => sum + amount(p), 0);
+  const orders = pairs.filter(inOrders).reduce((sum, p) => sum + amount(p), 0);
+  return [...(contacts > 0 ? [{ slot: CONTACTS_SLOT, bytes: contacts }] : []), ...(orders > 0 ? [{ slot: ORDERS_SLOT, bytes: orders }] : [])];
+}
 
 /**
  * An order's writes, marked as such by orderRoom and nothing else. It used to
@@ -114,9 +177,13 @@ const contactBytes = (contact: Contact | null) => (contact ? dataBytes([JSON.str
  * with no owner, so never counted (edge tests of 4 November 2026).
  */
 const ORDER_ROOM: unique symbol = Symbol("an order's contact writes");
-export type OrderRoom = { readonly [ORDER_ROOM]: true; readonly order: DataOwner };
-/** The room for contacts an order puts on the list: charged by lib/order-data.ts at what each really adds. */
-export function orderRoom(owner: DataOwner): OrderRoom {
+export type OrderRoom = { readonly [ORDER_ROOM]: true; readonly order: DataStore };
+/**
+ * The room for contacts an order puts on the list: charged by
+ * lib/order-data.ts at what each really adds; a contact already counted in
+ * the contacts' slot stays counted there, at what the order changed.
+ */
+export function orderRoom(owner: DataStore): OrderRoom {
   return { [ORDER_ROOM]: true, order: owner };
 }
 const isOrderRoom = (room: ContactRoom): room is OrderRoom => room !== null && (room as Partial<OrderRoom>)[ORDER_ROOM] === true;
@@ -125,10 +192,10 @@ const isOrderRoom = (room: ContactRoom): room is OrderRoom => room !== null && (
 export type ContactRoom = DataStore | OrderRoom | null;
 
 /** Takes what writing these contacts over what they were grows the list by; nothing when the writes are an order's. */
-async function needContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[]): Promise<void> {
+async function needContacts(room: ContactRoom, pairs: ContactPair[]): Promise<void> {
   if (!room || isOrderRoom(room)) return;
-  const grown = pairs.reduce((sum, { before, next }) => sum + Math.max(0, contactBytes(next) - contactBytes(before)), 0);
-  if (grown > 0) await needData(room, [{ slot: CONTACTS_SLOT, bytes: grown }]);
+  const changes = roomChanges(pairs, pairCharge);
+  if (changes.length) await needData(room, changes);
 }
 
 /**
@@ -137,16 +204,45 @@ async function needContacts(room: ContactRoom, pairs: { before: Contact | null; 
  * when tried again), and what each one written shrank the record by (a label
  * taken off). Nothing when the writes are an order's.
  */
-async function settleContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[], written: boolean[]): Promise<void> {
+async function settleContacts(room: ContactRoom, pairs: ContactPair[], written: boolean[]): Promise<void> {
   if (!room || isOrderRoom(room)) return;
-  const back = pairs.reduce((sum, { before, next }, i) => {
-    const grown = contactBytes(next) - contactBytes(before);
-    return sum + (written[i] ? Math.max(0, -grown) : Math.max(0, grown));
-  }, 0);
-  if (back > 0) await giveData(room, [{ slot: CONTACTS_SLOT, bytes: back }]);
+  const at = new Map(pairs.map((p, i) => [p, i]));
+  // Not written: what it took goes back. Written smaller: only the contacts' slot gives the difference back.
+  const back = roomChanges(pairs, (p) => (written[at.get(p)!] ? (inOrders(p) ? 0 : Math.max(0, contactBytes(p.before) - contactBytes(p.next))) : pairCharge(p)));
+  if (back.length) await giveData(room, back);
 }
 
-export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
+/**
+ * An order's write to a contact counted in the contacts' slot: never refused
+ * (the order's room was held at its checkout and what it did not use is let
+ * go), and counted there at what it changes. What it grows by is counted
+ * BEFORE the write, and the write is made only once that count is confirmed
+ * (Codex X6 on #2576: counted after, a lost count left the stored growth
+ * uncounted): an unknown count throws UnknownReplyError, nothing written,
+ * the slot erring fuller if it landed after all. Returns the growth, for
+ * settleOrderWrite. A store with no room's key has nothing to count.
+ */
+async function countOrderWrite(owner: DataStore, before: Contact, next: Contact): Promise<number> {
+  const grown = contactBytes(next) - contactBytes(before);
+  if (grown > 0 && dataKey(owner) && !(await countData(owner, [{ slot: CONTACTS_SLOT, bytes: grown }])).ok) {
+    throw new UnknownReplyError("the contacts' room, counted before an order's write");
+  }
+  return grown;
+}
+
+/**
+ * After that write: written smaller, the slot gives back what it shrank by;
+ * not written, what was counted before goes back. A give-back that is lost
+ * leaves the slot fuller, never emptier.
+ */
+async function settleOrderWrite(owner: DataStore, grown: number, written: boolean): Promise<void> {
+  const back = written ? -grown : grown;
+  if (back > 0 && dataKey(owner)) await giveData(owner, [{ slot: CONTACTS_SLOT, bytes: back }]);
+}
+
+// The list's key lives in lib/contact-rules.ts (no imports), so a sender that only needs to read a row, such as the
+// community announcements (lib/community-mail.ts), does not pull in sign-in and email.
+export { leadsKey };
 export const agreedKey = (listId: string) => `nl:store:leads:${listId}:agreed`;
 export const unsubKey = (listId: string) => `nl:store:leads:${listId}:unsub`;
 export const tokenKey = (token: string) => `nl:mail:unsub:${token}`;
@@ -167,13 +263,14 @@ export function parseContact(raw: unknown): Contact | null {
       source: value.source === "free" || value.source === "buyer" || value.source === "import" ? value.source : "",
       unsub: value.unsub === true,
       unsubAt: typeof value.unsubAt === "string" ? value.unsubAt : "",
-      ...(value.unsub === true && (value.gone === "bounced" || value.gone === "complained") ? { gone: value.gone } : {}),
+      ...(value.unsub === true && (value.gone === "bounced" || value.gone === "complained" || value.gone === "refused") ? { gone: value.gone } : {}),
       t: typeof value.t === "string" && UNSUB_TOKEN.test(value.t) ? value.t : "",
       // Contacts written before imports kept names and labels have neither.
       name: typeof value.name === "string" ? value.name.slice(0, MAX_CONTACT_NAME) : "",
       tags: Array.isArray(value.tags) ? readTags(value.tags.filter((t): t is string => typeof t === "string")) : [],
       importedAt: typeof value.importedAt === "string" ? value.importedAt : "",
       ...(typeof value.clicks === "string" && value.clicks ? { clicks: value.clicks } : {}),
+      ...(value.r === "c" || value.r === "o" ? { r: value.r } : {}),
     };
   } catch {
     return null;
@@ -191,6 +288,12 @@ export type AddResult = {
   /** Newly recorded as having got or bought this product. */
   gotProduct: boolean;
   full: boolean;
+  /**
+   * A fenced write (upsertContact's `fence`) refused, nothing written: the fence was gone at the write, an erasure
+   * print to lift was written in or after the second the fence was issued, or a deletion this yes does not postdate
+   * was found (#4268).
+   */
+  gone?: true;
 };
 
 /**
@@ -213,101 +316,417 @@ export async function upsertContact(
     clicks?: boolean;
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
+    /**
+     * The confirmation link a yes was given by, which the person's erasure deletes, and the lifetime it was set with
+     * (EX seconds). Checked in one step with the write, together with the row and the deleted mark being as read
+     * (CONTACT_FENCED_WRITE_IF): the link gone, or an erasure print written in or after the second the link was
+     * issued, and nothing is written; the answer says `gone`, never retried. Not for an order's room.
+     */
+    fence?: { key: string; seconds: number };
   },
   /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
+  payRound?: () => Promise<boolean>,
 ): Promise<AddResult> {
   const none = { joined: false, gotProduct: false, full: false };
   if (!isRedisConfigured() || !listId) return none;
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return none;
   const key = leadsKey(listId);
-  const [raw, size, erased] = await redisPipeline([
-    ["HGET", key, email],
-    ["HLEN", key],
-    suppressedCommand(listId, email),
-  ]);
-  const before = parseContact(raw);
-  if (!before && Number(size) >= MAX_LEADS) return { ...none, full: true };
+  // Written only while the row and the address's deleted mark are still as read (writeContactIf): an unsubscribe,
+  // a complaint or a deletion that lands in between is never written over (consent audit of 9 November 2026).
+  // What changed meanwhile is read again and decided again; a deletion that landed since the first read wins.
+  let deletedAtFirst: boolean | null = null;
+  // A sign-up a public request pays for (a store's own room, not an order's): its first round, and the read back of an
+  // answer in another shape, fit what that request pays for; each round more, after a row changed meanwhile, is paid
+  // first, one public request of the store's (`payRound`), or not made: refused, for the visitor to try again (Codex Z
+  // on #3448, 6751568157). An order's goes round CONTACT_WRITE_TRIES times, inside the order's own compute.
+  const publicRoom = room !== null && !isOrderRoom(room);
+  // A fenced write (#4268) is never an order's; one refused by a deletion says so (`gone`), as one refused by its fence.
+  const fence = input.fence && !(room && isOrderRoom(room)) ? input.fence : undefined;
+  const refused: AddResult = fence ? { ...none, gone: true } : none;
+  for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
+    if (round > 0 && publicRoom && !(payRound && (await payRound().catch(() => false)))) break;
+    const replies = repliesFor(await redisPipeline([
+      ["HGET", key, email],
+      ["HLEN", key],
+      suppressedCommand(listId, email),
+    ]), 3);
+    // HGET answers text or nothing, HLEN a count, HEXISTS 0 or 1. Any other shape, or fewer replies than commands, is
+    // unknown (CX-123 rule 24): never "not on the list" (which wrote someone who unsubscribed back as a new contact who
+    // agreed, without why they were taken off or their link's token), never room on a full list, never "not deleted".
+    const raw = replies?.[0];
+    const size = countOf(replies?.[1]);
+    const erased = countOf(replies?.[2]);
+    if (!replies || (raw !== null && typeof raw !== "string") || size === null || erased === null || erased > 1) {
+      throw new UnknownReplyError("a contact's row, the list's size or whether the address was deleted");
+    }
+    const before = parseContact(raw);
+    if (!before && size >= MAX_LEADS) return { ...none, full: true };
 
-  const now = new Date().toISOString();
-  const wasMailable = before ? mailable(before) : false;
-  // Somebody deleted from this store is kept, by a fingerprint, from being
-  // written to again: only their own yes, given now, lifts it. A purchase
-  // without the box still records the purchase, as anyone's does.
-  const deleted = wasSuppressed(erased);
-  const ownYes = input.agreed && input.explicit;
-  const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
-  // A yes only undoes an unsubscribe when it was given after it: a thank-you
-  // page reloaded, or a download link opened again, repeats an old tick.
-  const saidAt = Date.parse(input.at || now);
-  const leftAt = Date.parse(before?.unsubAt || "");
-  const resubscribe =
-    Boolean(before?.unsub) &&
-    input.agreed &&
-    input.explicit &&
-    (!Number.isFinite(leftAt) || !Number.isFinite(saidAt) || saidAt > leftAt);
-  const titles = before ? [...before.titles] : [];
-  if (input.title && !titles.includes(input.title)) titles.push(input.title);
-  const ids = before ? [...before.ids] : [];
-  const gotProduct = Boolean(input.productId) && !ids.includes(input.productId!);
-  if (input.productId && gotProduct) ids.push(input.productId);
+    const now = new Date().toISOString();
+    const wasMailable = before ? mailable(before) : false;
+    // Somebody deleted from this store is kept, by a fingerprint, from being
+    // written to again: only their own yes, given after the deletion, lifts it.
+    // A purchase without the box, made after it, still records the purchase, as
+    // anyone's does.
+    const deleted = wasSuppressed(erased);
+    // Deleted between an earlier read and its write: what was read before the deletion is never written after it.
+    if (deletedAtFirst === null) deletedAtFirst = deleted;
+    else if (deleted && !deletedAtFirst) return refused;
+    // When they were deleted: the mark holds the second (lib/suppression.ts, suppressCommand), read exactly only for
+    // an address that has one. Gone between the two reads: read again.
+    const mark = deleted ? await textOrNil(["HGET", suppressedKey(listId), suppressionPrint(listId, email)], "when an address was deleted") : null;
+    if (deleted && mark === null) continue;
+    // What this call writes happened when `at` says (the order, the tick), or, with no `at`, now: after the mark,
+    // which was already there when it was read. Something from before the deletion, or from its same second, is
+    // never written after it: a thank-you page of an older order reloaded, a download link opened again. A mark in
+    // another shape is not known to be older, so nothing is written either.
+    // A fenced own yes (#4268) is placed by CONTACT_FENCED_WRITE_IF instead, against its link's issue time on Redis's
+    // clock, the mark's own: the app's `at` may run behind it, which would refuse a fresh yes. Its shape is still read here.
+    const ownYes = input.agreed && input.explicit;
+    if (deleted && !afterDeletion(mark, fence && ownYes ? undefined : input.at)) return refused;
+    const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
+    // A yes only undoes an unsubscribe when it was given after it: a thank-you
+    // page reloaded, or a download link opened again, repeats an old tick.
+    // With no `at`, now; a time given as "" or that does not parse is not known to be after anything.
+    const saidAt = Date.parse(input.at === undefined ? now : input.at);
+    const leftAt = Date.parse(before?.unsubAt || "");
+    const resubscribe =
+      Boolean(before?.unsub) &&
+      input.agreed &&
+      input.explicit &&
+      Number.isFinite(saidAt) &&
+      (!Number.isFinite(leftAt) || saidAt > leftAt);
+    const titles = before ? [...before.titles] : [];
+    if (input.title && !titles.includes(input.title)) titles.push(input.title);
+    const ids = before ? [...before.ids] : [];
+    const gotProduct = Boolean(input.productId) && !ids.includes(input.productId!);
+    if (input.productId && gotProduct) ids.push(input.productId);
 
-  const next: Contact = {
-    agreed,
-    agreedAt: before?.agreed ? before.agreedAt : agreed ? input.at || now : "",
-    firstAt: before?.firstAt || now,
-    lastAt: now,
-    titles: titles.slice(-MAX_TITLES),
-    ids: ids.slice(-MAX_TITLES),
-    source: before?.source || input.source,
-    unsub: resubscribe ? false : Boolean(before?.unsub),
-    unsubAt: resubscribe ? "" : before?.unsubAt ?? "",
-    // Their own yes, given since, clears why they were taken off as well.
-    ...(before?.gone && !resubscribe ? { gone: before.gone } : {}),
-    t: before?.t ?? "",
-    name: before?.name ?? "",
-    tags: before?.tags ?? [],
-    importedAt: before?.importedAt ?? "",
-  };
-  // Allowed only by their own tick, given with a yes to the list; kept once
-  // given, unless they left since — coming back, they are asked again.
-  const allowed = input.clicks === true && input.agreed && input.explicit;
-  const clicks = resubscribe ? (allowed ? input.at || now : "") : before?.clicks || (allowed ? input.at || now : "");
-  if (clicks) next.clicks = clicks;
-  if (deleted && !agreed) delete next.clicks;
-  await needContacts(room, [{ before, next }]);
-  const commands: (string | number)[][] = [["HSET", key, email, JSON.stringify(next)]];
-  if (agreed && !before?.agreed) commands.push(["INCR", agreedKey(listId)]);
-  if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
-  if (deleted && ownYes) commands.push(liftCommand(listId, email));
-  if (input.sid) commands.push(...joinedCommands(input.sid, email));
-  if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
-  else await redisPipeline(commands);
-  return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
+    const next: Contact = {
+      agreed,
+      agreedAt: before?.agreed ? before.agreedAt : agreed ? input.at || now : "",
+      firstAt: before?.firstAt || now,
+      lastAt: now,
+      titles: titles.slice(-MAX_TITLES),
+      ids: ids.slice(-MAX_TITLES),
+      source: before?.source || input.source,
+      unsub: resubscribe ? false : Boolean(before?.unsub),
+      unsubAt: resubscribe ? "" : before?.unsubAt ?? "",
+      // Their own yes, given since, clears why they were taken off as well.
+      ...(before?.gone && !resubscribe ? { gone: before.gone } : {}),
+      t: before?.t ?? "",
+      name: before?.name ?? "",
+      tags: before?.tags ?? [],
+      importedAt: before?.importedAt ?? "",
+    };
+    // Allowed only by their own tick, given with a yes to the list; kept once
+    // given, unless they left since — coming back, they are asked again.
+    const allowed = input.clicks === true && input.agreed && input.explicit;
+    const clicks = resubscribe ? (allowed ? input.at || now : "") : before?.clicks || (allowed ? input.at || now : "");
+    if (clicks) next.clicks = clicks;
+    if (deleted && !agreed) delete next.clicks;
+    // Where its room is counted, set once when it is first written (Contact.r, #2576).
+    const placedNext = placed(next, before, Boolean(room && isOrderRoom(room)));
+    await needContacts(room, [{ before, next: placedNext }]);
+    const counts = { agreed: agreed && !before?.agreed, left: resubscribe ? -1 : 0 } as const;
+    const joined = input.sid ? joinedCommands(input.sid, email) : [];
+    // An order's write to a row counted in the contacts' slot is not charged to the order (writeContactIf, inContacts):
+    // the slot is counted at what it changed once written.
+    const inContacts = Boolean(room && isOrderRoom(room) && before?.r === "c");
+    const counted = inContacts && room && isOrderRoom(room) && before ? { owner: room.order, grown: await countOrderWrite(room.order, before, placedNext) } : null;
+    const written = await writeContactIf(listId, email, raw, mark, placedNext, deleted && ownYes, counts, joined, room, fence, inContacts);
+    if (counted) await settleOrderWrite(counted.owner, counted.grown, written === true);
+    if (written === true) return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
+    // Changed meanwhile, or refused by its fence: what it took of the room goes back. Changed is read again; a fence
+    // gone (or a print it cannot lift) stays refused, never retried.
+    await settleContacts(room, [{ before, next: placedNext }], [false]);
+    if (written === "gone") return { ...none, gone: true };
+  }
+  throw new Error("a contact kept changing while it was written");
+}
+
+/**
+ * How many times a contact is read again when it changed between the read and the write.
+ */
+const CONTACT_WRITE_TRIES = 3;
+
+/**
+ * The most redis.call one run of CONTACT_WRITE_IF makes: the row's read, the mark's read, the row, the lifted mark,
+ * the agreed count, the left count (INCR or DECR, one of them) and the stores joined (SADD, EXPIREAT). Upstash bills
+ * a script as one command plus every call inside it (lib/capped-count.ts), so a script is 1 + this. Held against
+ * the script's text in tests/contacts-write-cost.test.ts.
+ */
+export const CONTACT_WRITE_CALLS = 8;
+
+/**
+ * The most redis.call one run of CONTACT_FENCED_WRITE_IF makes: CONTACT_WRITE_CALLS, and the fence's PTTL and, to
+ * place a print to lift in time, Redis's TIME (#4268). A waitlist confirmation's sign-up runs it, so a sign-up's
+ * round is priced at this, the dearer of the two. Held against the script's text in tests/contacts-write-cost.test.ts.
+ */
+export const CONTACT_FENCED_WRITE_CALLS = CONTACT_WRITE_CALLS + 2;
+
+/**
+ * The most database commands each path of this file's checked writes makes, a script counted as 1 plus its calls
+ * (review of #3448, 9 November 2026; held in tests/contacts-write-cost.test.ts and named in
+ * tests/plan-cost-registry.ts). Each is CONTACT_WRITE_TRIES rounds lost to a change made in between, and, once, the
+ * read back of an answer in another shape; a sign-up a public request pays for pays each round past its first
+ * (upsertPublic). The room's own charge scripts (lib/store-data.ts) are left out: the data
+ * room's line prices them. A sign-up (upsertContact) is a public request's work, not an order's, unless its room is
+ * an order's (orderRoom): there the checks add two reads inside ORDER_WRITE_IF_SAME, inside the order's own compute.
+ */
+export const CONTACT_COMMANDS_MOST = {
+  tries: CONTACT_WRITE_TRIES,
+  /**
+   * upsertContact: the row, the list's size and the deleted mark; the mark's time; the script and its calls, at the
+   * dearer script (a fenced sign-up's, CONTACT_FENCED_WRITE_CALLS).
+   */
+  upsertRound: 3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS,
+  upsert: CONTACT_WRITE_TRIES * (3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS) + 2,
+  /**
+   * upsertContact from a public request (a store's own room), what that request pays for: one round, and once the read
+   * back; each round more is paid first by a public request of its own (payRound), at most upsertRound commands each.
+   */
+  upsertPublic: (3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS) + 2,
+  /** unsubscribe: the link, the row, the script and the 3 calls it makes there (the row, the row written, the left count). */
+  unsubscribeRound: 1 + 1 + 1 + 3,
+  unsubscribe: CONTACT_WRITE_TRIES * (1 + 1 + 1 + 3),
+  /** noteProduct and takeBackClicks: the row, and the checked write (CAS_HSET: the script and its HGET and HSET). */
+  noteProductRound: 1 + 1 + 2,
+  noteProduct: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
+  takeBackRound: 1 + 1 + 2,
+  takeBack: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
+  /** tokensFor for `n` addresses: both reads, and for each a token's record, its checked write (1 + 2 calls) and, lost, the record taken back. */
+  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + n * (1 + 3 + 1)),
+} as const;
+
+/**
+ * Whether something that happened at `at` (an ISO time) is after the deletion whose mark holds `mark`, the second
+ * it was written: only from the next whole second on, since the deletion may have been made at any moment of its
+ * own. With no `at` it happens now, after a mark already read. Anything not read exactly (a mark that is not a
+ * count of seconds, a time given as "" or that does not parse) is not after.
+ */
+function afterDeletion(mark: string | null, at: string | undefined): boolean {
+  if (mark === null || !/^(0|[1-9][0-9]{0,15})$/.test(mark)) return false;
+  if (at === undefined) return true;
+  const when = Date.parse(at);
+  return Number.isFinite(when) && when >= (Number(mark) + 1) * 1000;
+}
+
+/**
+ * A contact's row written only while it and the address's deleted mark hold what was read, with the counts that go
+ * with it, in one step: KEYS[1] the list, KEYS[2] the store's deleted marks (lib/suppression.ts), KEYS[3] the
+ * list's count of those who agreed, KEYS[4] of those who left; ARGV[1] the address, ARGV[2] the SHA-1 of its row as
+ * read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark is not looked at),
+ * ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the write (their own
+ * yes, given after the deletion), ARGV[7] "1" to count one more who agreed, ARGV[8] "1" or "-1" for one more or
+ * one fewer who left; with KEYS[5] (the person's set of stores joined, lib/joined-stores.ts) ARGV[9] the store's id
+ * to add to it and ARGV[10] the day it ends. Answers 1 written, 0 changed (nothing written).
+ */
+export const CONTACT_WRITE_IF = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-write-if:v1",
+  'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
+  'local seen = ""',
+  "if cur then seen = redis.sha1hex(cur) end",
+  "if seen ~= ARGV[2] then return 0 end",
+  'if ARGV[4] ~= "" then',
+  '  local held = redis.call("HGET", KEYS[2], ARGV[4])',
+  '  local markSeen = ""',
+  "  if held then markSeen = redis.sha1hex(held) end",
+  "  if markSeen ~= ARGV[5] then return 0 end",
+  "end",
+  'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
+  'if ARGV[6] == "1" and ARGV[4] ~= "" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
+  'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
+  // The stores the address joined, with the row and only after the checks held: a deletion that won leaves no index.
+  "if #ARGV >= 10 then",
+  '  redis.call("SADD", KEYS[5], ARGV[9])',
+  '  redis.call("EXPIREAT", KEYS[5], ARGV[10])',
+  "end",
+  "return 1",
+].join("\n");
+
+/**
+ * CONTACT_WRITE_IF fenced by a link that the person's erasure deletes (#4268: a waitlist confirmation read before an
+ * erasure that completed meanwhile put the address back and lifted the print), all in one step. KEYS[1]..KEYS[4] and
+ * ARGV[1]..ARGV[8] as CONTACT_WRITE_IF; KEYS[5] the fence, ARGV[9] its whole lifetime in ms (it was set with that EX);
+ * with KEYS[6] (the person's set of stores joined) ARGV[10] the store's id and ARGV[11] the day it ends. Answers:
+ *   - 2 refused by the fence, nothing written, never to be retried: the fence is gone (an erasure that finished
+ *     deleted it), or a mark to lift was written in or after the second the fence was issued (PTTL against its
+ *     lifetime, on Redis's clock, as the mark's second is: lib/suppression.ts ERASED_PRINT); a fence with no expiry,
+ *     or a mark that is not a second, cannot be placed in time and is refused. erasePerson writes the mark first and
+ *     deletes the noted links last, so only a link issued after the erasure, a fresh yes, lifts the mark;
+ *   - 0 changed, nothing written: the row or the mark is not what was read (read again, as CONTACT_WRITE_IF's 0);
+ *   - 1 written, with its counts and the stores joined.
+ * Billed as one EVAL and its calls, at most CONTACT_FENCED_WRITE_CALLS; lib/redis-memory.ts runs the same steps.
+ */
+export const CONTACT_FENCED_WRITE_IF = [
+  "-- marktmorgen:contact-fenced-write-if:v3",
+  'local left = redis.call("PTTL", KEYS[5])',
+  "if left == -2 then return 2 end",
+  'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
+  'local seen = ""',
+  "if cur then seen = redis.sha1hex(cur) end",
+  "if seen ~= ARGV[2] then return 0 end",
+  "local held = false",
+  'if ARGV[4] ~= "" then',
+  '  held = redis.call("HGET", KEYS[2], ARGV[4])',
+  '  local markSeen = ""',
+  "  if held then markSeen = redis.sha1hex(held) end",
+  "  if markSeen ~= ARGV[5] then return 0 end",
+  "end",
+  'local lift = ARGV[6] == "1" and held',
+  "if lift then",
+  "  local at = tonumber(held)",
+  "  if left < 0 or not at then return 2 end",
+  '  local t = redis.call("TIME")',
+  "  local issued = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) - (tonumber(ARGV[9]) - left)",
+  "  if (at + 1) * 1000 > issued then return 2 end",
+  "end",
+  'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
+  'if lift then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
+  'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
+  "if #ARGV >= 11 then",
+  '  redis.call("SADD", KEYS[6], ARGV[10])',
+  '  redis.call("EXPIREAT", KEYS[6], ARGV[11])',
+  "end",
+  "return 1",
+].join("\n");
+
+/**
+ * Writes one contact's row, the lifting of its deleted mark when `lift`, and its counts, only while the row is
+ * still `raw` and the mark still `mark` (consent audit of 9 November 2026: a read and then a plain HSET wrote an
+ * unsubscribe, a complaint or a deletion made in between over). The stores the address joined (`joined`, how
+ * "delete me from every store" finds this one) are written with the row, after the checks, never before: one left
+ * over for a person whose deletion won would list this store for them for 13 quarters (review of #3448, MEDIUM 1).
+ * An order's are written by lib/order-data.ts and charged there at what they add, all in one script
+ * (ORDER_WRITE_IF_SAME); anybody else's in CONTACT_WRITE_IF, the counts with the row. True when
+ * written, false when the row or the mark changed meanwhile (nothing written). A reply in another shape is read
+ * back: the row holding exactly what was to be written (and the mark gone, when lifted) means the script ran,
+ * counts and all; anything else throws UnknownReplyError, never "not written" nor "written".
+ */
+async function writeContactIf(
+  listId: string,
+  email: string,
+  raw: string | null,
+  /** The address's deleted mark as read, null for none. */
+  mark: string | null,
+  next: Contact,
+  lift: boolean,
+  counts: { agreed: boolean; left: -1 | 0 | 1 },
+  joined: (string | number)[][],
+  room: ContactRoom,
+  /** upsertContact's `fence` (never an order's): the write runs CONTACT_FENCED_WRITE_IF, and "gone" is its refusal. */
+  fence?: { key: string; seconds: number },
+  /** An order's write to a row counted in the contacts' slot (Contact.r "c"): checked as anybody's, never charged to the order. */
+  inContacts = false,
+): Promise<boolean | "gone"> {
+  const key = leadsKey(listId);
+  const marks = suppressedKey(listId);
+  const print = suppressionPrint(listId, email);
+  const value = JSON.stringify(next);
+  const was = typeof raw === "string" ? sha1(raw) : "";
+  const markWas = mark === null ? "" : sha1(mark);
+  if (room && isOrderRoom(room) && dataKey(room.order) && !inContacts) {
+    const commands: (string | number)[][] = [
+      ...joined,
+      ["HSET", key, email, value],
+      ...(lift ? [liftCommand(listId, email)] : []),
+      ...(counts.agreed ? [["INCR", agreedKey(listId)]] : []),
+      ...(counts.left === 1 ? [["INCR", unsubKey(listId)]] : counts.left === -1 ? [["DECR", unsubKey(listId)]] : []),
+    ];
+    return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
+  }
+  // A room that is an order's but has no key of its own (dataKey) gets them here as well, in the same script.
+  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined, fence);
+}
+
+/**
+ * CONTACT_WRITE_IF for one row: true written, false changed meanwhile. `mark` null leaves the deleted mark unlooked
+ * at (unsubscribe: the row's own check keeps a deleted person from being written back). A reply in another shape is
+ * read back, as writeContactIf says; with `strict`, it is unknown at once (UnknownReplyError), never read back.
+ */
+async function writeRowIf(
+  listId: string,
+  email: string,
+  was: string,
+  value: string,
+  mark: { print: string; markWas: string; mark: string | null; lift: boolean } | null,
+  counts: { agreed: boolean; left: -1 | 0 | 1 },
+  strict = false,
+  /** joinedCommands: the person's set of stores joined, added to in the script after its checks. */
+  joined: (string | number)[][] = [],
+  /** A fence (upsertContact's): CONTACT_FENCED_WRITE_IF in place of CONTACT_WRITE_IF, its 2 answered as "gone". */
+  fence?: { key: string; seconds: number },
+): Promise<boolean | "gone"> {
+  const key = leadsKey(listId);
+  const marks = suppressedKey(listId);
+  const args = [email, was, value, mark?.print ?? "", mark?.markWas ?? "", mark?.lift ? "1" : "0", counts.agreed ? "1" : "0", String(counts.left)];
+  // joinedCommands is [SADD set sid, EXPIREAT set day]; anything else is not sent (no index is better than a wrong one).
+  const [add, expire] = joined;
+  const index = add?.[0] === "SADD" && expire?.[0] === "EXPIREAT" && joined.length === 2 && add[1] === expire[1];
+  const keys = [key, marks, agreedKey(listId), unsubKey(listId)];
+  const command: (string | number)[] = fence
+    ? ["EVAL", CONTACT_FENCED_WRITE_IF, index ? 6 : 5, ...keys, fence.key, ...(index ? [String(add[1])] : []), ...args, fence.seconds * 1000, ...(index ? [String(add[2]), String(expire[2])] : [])]
+    : ["EVAL", CONTACT_WRITE_IF, index ? 5 : 4, ...keys, ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])];
+  let result: unknown;
+  try {
+    result = repliesFor(await redisPipeline([command]), 1)?.[0];
+    if (fence && result === 2) return "gone";
+    if (result !== 0 && result !== 1) throw new UnknownReplyError("a contact's write");
+  } catch (error) {
+    if (strict) throw error instanceof UnknownReplyError ? error : new UnknownReplyError("a contact's write");
+    const read = repliesFor(await redisPipeline([["HGET", key, email], ["HGET", marks, mark?.print || "-"]]), 2);
+    const markFits = !mark ? true : mark.lift ? read?.[1] === null : read?.[1] === mark.mark;
+    if (!read || read[0] !== value || !markFits) throw new UnknownReplyError("a contact's write");
+    return true;
+  }
+  return result === 1;
 }
 
 /**
  * Notes that someone already on the list got a product, without adding
- * anyone who is not. Says whether they may be written to.
+ * anyone who is not. Says whether they may be written to. A row that changed
+ * under every try throws UnknownReplyError, the product not noted.
  */
-export async function noteProduct(listId: string, rawEmail: string, productId: string, title: string, order: DataOwner): Promise<boolean> {
+export async function noteProduct(listId: string, rawEmail: string, productId: string, title: string, order: DataStore): Promise<boolean> {
   if (!isRedisConfigured() || !listId) return false;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
-  const before = parseContact(raw);
-  if (!before) return false;
-  if (!before.ids.includes(productId)) {
+  const key = leadsKey(listId);
+  // Written only over the row it was decided from (consent audit of 9 November 2026): an unsubscribe, a complaint
+  // or a deletion that lands in between is never written over; a row that changed is read again and decided again.
+  for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
+    const [raw] = await redisPipeline([["HGET", key, email]]);
+    const before = parseContact(raw);
+    if (!before || typeof raw !== "string") return false;
+    if (before.ids.includes(productId)) return mailable(before);
     const next: Contact = {
       ...before,
       lastAt: new Date().toISOString(),
       ids: [...before.ids, productId].slice(-MAX_TITLES),
       titles: (before.titles.includes(title) ? before.titles : [...before.titles, title]).slice(-MAX_TITLES),
     };
-    // An order's: counted at what the record grew by (lib/order-data.ts).
-    await orderWrite(order, [["HSET", leadsKey(listId), email, JSON.stringify(next)]]);
+    const value = JSON.stringify(next);
+    // A row counted in the contacts' slot (Contact.r "c", #2576) stays counted there: written over the row read
+    // (casWrite) and its slot counted at what it changed. Any other is an order's: counted at what the record grew by
+    // (lib/order-data.ts), in the same step as the check.
+    if (before.r === "c") {
+      const grown = await countOrderWrite(order, before, next);
+      const [written] = await casWrite(key, [{ email, value, was: sha1(raw) }]);
+      await settleOrderWrite(order, grown, Boolean(written));
+      if (written) return mailable(before);
+      continue;
+    }
+    const written = dataKey(order)
+      ? (await orderWriteIfSame(order, [{ key, field: email, sha1: sha1(raw) }], [["HSET", key, email, value]])) !== null
+      : (await casWrite(key, [{ email, value, was: sha1(raw) }]))[0];
+    if (written) return mailable(before);
   }
-  return mailable(before);
+  throw new UnknownReplyError("a contact kept changing while a purchase was noted");
 }
 
 /** Whether this address may be written to now. */
@@ -341,7 +760,7 @@ export async function importContacts(
     const found = Array.isArray(rows) ? rows : [];
     const deleted = Array.isArray(prints) ? prints : [];
     const pairs: string[] = [];
-    const sizes: { before: Contact | null; next: Contact }[] = [];
+    const sizes: ContactPair[] = [];
     let newlyAgreed = 0;
     chunk.forEach((email, j) => {
       // Deleted from this store: an import never brings them back.
@@ -370,8 +789,9 @@ export async function importContacts(
         tags: before?.tags ?? [],
         importedAt: now,
       };
-      pairs.push(email, JSON.stringify(next));
-      sizes.push({ before, next });
+      const written = placed(next, before, false);
+      pairs.push(email, JSON.stringify(written));
+      sizes.push({ before, next: written });
       newlyAgreed += 1;
     });
     if (pairs.length) {
@@ -546,7 +966,7 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
   const deleted = Array.isArray(prints) ? prints : [];
   // Each write, with the fingerprint of what its address held when read.
   const writes: { email: string; value: string; was: string; row: number }[] = [];
-  const sizes: { before: Contact | null; next: Contact }[] = [];
+  const sizes: ContactPair[] = [];
   let newlyAgreed = 0;
   let newlyLeft = 0;
   const outcomes = rows.map((row, i): ContactOutcome => {
@@ -558,8 +978,9 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
     }
     if (decided.next) {
       const raw = existing[i];
-      writes.push({ email: row.email, value: JSON.stringify(decided.next), was: typeof raw === "string" ? sha1(raw) : "", row: i });
-      sizes.push({ before, next: decided.next });
+      const next = placed(decided.next, before, false);
+      writes.push({ email: row.email, value: JSON.stringify(next), was: typeof raw === "string" ? sha1(raw) : "", row: i });
+      sizes.push({ before, next });
     }
     if (decided.outcome === "added") newlyAgreed += 1;
     if (decided.outcome === "stopped") newlyLeft += 1;
@@ -592,6 +1013,8 @@ const sha1 = (value: string) => createHash("sha1").update(value).digest("hex");
 
 /** Sets each field only if it still holds what was read (by its SHA-1, "" for none); one step on the Redis side. */
 const CAS_HSET = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-cas-hset:v1",
   "local out = {}",
   "for i = 1, #ARGV, 3 do",
   '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
@@ -609,28 +1032,38 @@ const CAS_HSET = [
 
 /**
  * Writes each field that still holds what was read; says which were written.
- * Upstash runs the script; where a Redis does not (the local stand-ins), the
- * same check is made as a read just before the write, which keeps the rule
- * and only narrows the gap rather than closing it. A field that already holds
- * what was to be written counts as written: the script ran and only its
- * answer was lost, and reporting it as lost would leave that write out of
- * what its caller answers (and of an undo).
+ * The check and the write are one step, the script's, and never anything else:
+ * when it fails or its answer is unknown, nothing is written here. A read and
+ * then a plain HSET would not be one step, so an unsubscribe made between them
+ * would be written over and the person written to again (Codex G, #3116).
+ * When every field already holds what was to be written, the script ran and
+ * only its answer was lost: written, and answered so (an undo needs it). Any
+ * other read-back is unknown and throws UnknownReplyError, never "not written".
  */
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
     const [result] = await redisPipeline([["EVAL", CAS_HSET, 1, key, ...writes.flatMap((w) => [w.email, w.was, w.value])]]);
-    if (Array.isArray(result) && result.length === writes.length) return result.map((v) => Number(v) === 1);
+    // Each one exactly 1 (written) or 0 (changed meanwhile); anything else is read back below, never "not written".
+    const each = repliesFor(result, writes.length);
+    if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
     throw new Error("unexpected answer");
   } catch {
-    const [now] = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]);
-    const read = writes.map((_, i) => (Array.isArray(now) ? now[i] : null));
-    // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
-    const landed = writes.map((w, i) => read[i] === w.value);
-    const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
-    const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
-    if (pairs.length) await redisPipeline([["HSET", key, ...pairs]]);
-    return writes.map((_, i) => landed[i] || same[i]);
+    // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each. Anything else is unknown and
+    // throws, never "not written": a caller that undoes what it wrote alongside (tokensFor's token record) must not.
+    const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "a contact write's read-back");
+    // Every field holding what was to be written: the script ran and its answer was lost; written, never reported as lost.
+    if (writes.every((w, i) => read[i] === w.value)) return writes.map(() => true);
+    // Anything else: whether the script ran is not known, and nothing is written without its check (an unsubscribe
+    // made since this read would be written over). The caller answers "not known" and tries again later.
+    throw new UnknownReplyError("a contact write");
   }
+}
+
+/** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */
+function fieldsOf(reply: unknown, count: number, what: string): (string | null)[] {
+  const each = repliesFor(reply, count);
+  if (!each || each.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError(what);
+  return each as (string | null)[];
 }
 
 /**
@@ -667,7 +1100,7 @@ export async function changeLabels(
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
     const writes: { email: string; value: string; was: string }[] = [];
-    const sizes: { before: Contact | null; next: Contact }[] = [];
+    const sizes: ContactPair[] = [];
     try {
       const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
       pending.forEach((email, i) => {
@@ -738,13 +1171,34 @@ export async function tokensFor(
   // A row changed between the read and the write (a purchase noted, a name
   // added) is read again and tried again; one that left meanwhile is dropped.
   for (let round = 0; round < 3 && pending.length; round += 1) {
-    const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
-    const found = Array.isArray(rows) ? rows : [];
+    // Read only in its exact shape (CX-123 rule 24): an unknown answer is unknown, never "everyone left the list",
+    // so a send counts nobody as gone on it (lib/mail.ts sendTo stops for a retry).
+    const found = fieldsOf((await redisPipeline([["HMGET", key, ...pending]]))[0], pending.length, "the contacts for unsubscribe links");
+    // An address the store deleted (lib/suppression.ts) is never written to, whatever row exists for it: the mark
+    // is read for everyone who could be, exactly (rule 30 of the consent audit of 9 November 2026). A mark that
+    // cannot be read is unknown, never "nobody deleted": thrown, so a send stops for a retry.
+    const candidates = pending.filter((_, i) => {
+      const contact = parseContact(found[i]);
+      return contact !== null && mailable(contact) && typeof found[i] === "string";
+    });
+    const deleted = new Set<string>();
+    if (candidates.length) {
+      const reply = repliesFor(await redisPipeline([suppressedAmongCommand(listId, candidates)]), 1)?.[0];
+      let marks: (string | number | null)[];
+      try {
+        marks = wholeErasedReply(reply, candidates.length);
+      } catch {
+        throw new UnknownReplyError("the store's deleted addresses, before links are handed out");
+      }
+      candidates.forEach((email, j) => {
+        if (marks[j] !== null) deleted.add(email);
+      });
+    }
     const writes: { email: string; value: string; was: string; token: string }[] = [];
     pending.forEach((email, i) => {
       const raw = found[i];
       const contact = parseContact(raw);
-      if (!contact || !mailable(contact) || typeof raw !== "string") return;
+      if (!contact || !mailable(contact) || typeof raw !== "string" || deleted.has(email)) return;
       if (contact.clicks) counting?.add(email);
       if (contact.t) {
         out.set(email, contact.t);
@@ -758,7 +1212,14 @@ export async function tokensFor(
     // nowhere; then each contact only if it is still as it was read, so an
     // unsubscribe made meanwhile is never written over, and two sends at
     // once keep one token between them.
-    await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
+    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
+    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
+    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
+    const set = repliesFor(records, writes.length);
+    if (!set || set.some((reply) => reply !== "OK")) {
+      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
+      throw new UnknownReplyError("an unsubscribe link's record");
+    }
     const done = await casWrite(key, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);
@@ -770,13 +1231,29 @@ export async function tokensFor(
   return out;
 }
 
-/** Who an unsubscribe link belongs to, without acting on it. */
+/**
+ * One GET or HGET read exactly (CX-123 rule 24): its text, or null only for an
+ * exact nil. Any other answer is unknown and throws, so a link that exists is
+ * never said to be one nobody made.
+ */
+async function textOrNil(command: (string | number)[], what: string): Promise<string | null> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  const reply = replies?.[0];
+  if (!replies || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError(what);
+  return reply;
+}
+
+/**
+ * Who an unsubscribe link belongs to, without acting on it. Null only when
+ * Redis said so exactly: no such link, or its row gone or holding another
+ * token. A reply in another shape throws UnknownReplyError.
+ */
 export async function readUnsubToken(
   token: string,
-): Promise<{ listId: string; email: string; handle: string; contact: Contact } | null> {
+): Promise<{ listId: string; email: string; handle: string; contact: Contact; raw: string } | null> {
   if (!UNSUB_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const raw = await textOrNil(["GET", tokenKey(token)], "an unsubscribe link");
+  if (raw === null) return null;
   // listId|address|handle — an address may itself hold a "|".
   const first = raw.indexOf("|");
   const last = raw.lastIndexOf("|");
@@ -785,36 +1262,76 @@ export async function readUnsubToken(
   const email = raw.slice(first + 1, last);
   const handle = raw.slice(last + 1);
   if (!email) return null;
-  const [row] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  const row = await textOrNil(["HGET", leadsKey(listId), email], "the contact behind an unsubscribe link");
   const contact = parseContact(row);
-  return contact && contact.t === token ? { listId, email, handle, contact } : null;
+  return contact && row !== null && contact.t === token ? { listId, email, handle, contact, raw: row } : null;
 }
 
-/** Takes an address off the list for good. Safe to press twice. */
+/**
+ * Takes an address off the list for good. Safe to press twice. The row is
+ * written only over the one read, with the count of those who left
+ * (CONTACT_WRITE_IF), so a deletion, a complaint or a
+ * purchase noted in the same moment is never written over, and a person
+ * deleted meanwhile is never written back (consent audit of 9 November 2026):
+ * their row gone, the deletion has already done what the press asked, and the
+ * mark that keeps them off stays. Done only on the script answering exactly 1
+ * (written) or 0 (changed meanwhile, read again); any other answer, a write
+ * that throws, or a read of the link in another shape throws, and the door
+ * says "try again", never "Unsubscribed." (app/api/mail/unsubscribe, CX-123
+ * rule 24).
+ */
 export async function unsubscribe(token: string): Promise<{ listId: string; email: string } | null> {
-  const found = await readUnsubToken(token);
-  if (!found) return null;
-  const { listId, email, contact } = found;
-  if (contact.unsub) return { listId, email };
-  // Leaving takes back the permission to see their link use as well.
-  const { clicks: _left, ...kept } = contact;
-  void _left;
-  const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
-  const commands: (string | number)[][] = [["HSET", leadsKey(listId), email, JSON.stringify(next)]];
-  if (contact.agreed) commands.push(["INCR", unsubKey(listId)]);
-  await redisPipeline(commands);
-  return { listId, email };
+  let first: { listId: string; email: string } | null = null;
+  for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
+    const found = await readUnsubToken(token);
+    // Gone since the first read (deleted, or its link replaced): nothing is written back, and nobody is written to.
+    if (!found) return first;
+    const { listId, email, contact, raw } = found;
+    first = { listId, email };
+    if (contact.unsub) return first;
+    // Leaving takes back the permission to see their link use as well.
+    const { clicks: _left, ...kept } = contact;
+    void _left;
+    const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
+    // Counted with those who left in the same step as the row; exactly 1 or 0, anything else unknown (rule 24).
+    const written = await writeRowIf(listId, email, sha1(raw), JSON.stringify(next), null, { agreed: false, left: contact.agreed ? 1 : 0 }, true);
+    if (!written) continue;
+    return first;
+  }
+  throw new Error("a contact kept changing while it was unsubscribed");
+}
+
+/**
+ * Takes back the permission to see which links they use (lib/mail-clicks.ts, stopCounting): the row written
+ * without it only while it is still as read (casWrite), so an unsubscribe, a complaint or a deletion made in
+ * between is never written over, nor a deleted row written back (consent audit of 9 November 2026). A row that
+ * changed is read again; one that is gone, or no longer has it, is left as it is. Throws when the row cannot be
+ * read exactly, or kept changing.
+ */
+export async function takeBackClicks(listId: string, email: string): Promise<void> {
+  const key = leadsKey(listId);
+  for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
+    const raw = await textOrNil(["HGET", key, email], "a contact's row before its permission is taken back");
+    const contact = parseContact(raw);
+    if (!contact || !contact.clicks || raw === null) return;
+    const { clicks: _was, ...kept } = contact;
+    void _was;
+    const [written] = await casWrite(key, [{ email, value: JSON.stringify(kept satisfies Contact), was: sha1(raw) }]);
+    if (written) return;
+  }
+  throw new Error("a contact kept changing while its permission was taken back");
 }
 
 /**
  * Takes an address off a list because the sender said so: it bounced for
- * good, or its owner marked an email as spam. Counted with those who left,
- * and kept as firmly — an import never puts it back.
+ * good, its owner marked an email as spam, or the email service refused the
+ * address itself. Counted with those who left, and kept as firmly — an
+ * import never puts it back.
  *
  * True when this took somebody off who could be written to until now; false
  * when the list does not hold the address, or it had already left.
  */
-export async function stopWriting(listId: string, rawEmail: string, why: "bounced" | "complained"): Promise<boolean> {
+export async function stopWriting(listId: string, rawEmail: string, why: "bounced" | "complained" | "refused"): Promise<boolean> {
   if (!isRedisConfigured() || !listId) return false;
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH) return false;
@@ -822,7 +1339,11 @@ export async function stopWriting(listId: string, rawEmail: string, why: "bounce
   // Written only if the address still holds what was read: a purchase noted,
   // or their own unsubscribe, in the same moment is not written over.
   for (let round = 0; round < 3; round += 1) {
-    const [raw] = await redisPipeline([["HGET", key, email]]);
+    const replies = repliesFor(await redisPipeline([["HGET", key, email]]), 1);
+    const raw = replies?.[0];
+    // HGET answers text or nothing: any other shape is unknown (CX-123 rule 24), never "not on the list", so the
+    // sender's notice is not dropped while the address keeps being written to; thrown, it is heard again.
+    if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a contact's row before it is taken off");
     const contact = parseContact(raw);
     if (!contact || contact.unsub || typeof raw !== "string") return false;
     const { clicks: _left, ...kept } = contact;
@@ -852,27 +1373,55 @@ export async function listCounts(listId: string | null): Promise<ListCounts> {
 }
 
 /**
+ * How a walk of the list reads Redis: redisPipeline itself, or a download's
+ * metered read (lib/list-download.ts), which holds the units of a read before
+ * it is made, at `most`, the most bytes its reply can carry, and counts every
+ * byte it moved once it is made (second cost review of #3354).
+ */
+export type ListRead = (commands: (string | number)[][], most: number) => Promise<unknown[]>;
+/** A read that is not metered: the walk's own callers that are priced elsewhere (a broadcast, a whole export). */
+export const plainRead: ListRead = (commands) => redisPipeline(commands);
+/**
+ * The most bytes one contact of the list comes back as in a page of its walk:
+ * its address and its record at every cap a contact has, with the reply's
+ * framing. A review ceiling: 3,973 bytes for a record at every cap in
+ * tests/list-download-units.test.ts. A page that comes back larger is counted
+ * at what it moved all the same, once it is read.
+ */
+export const CONTACT_READ_BYTES = 4_500;
+/** The most bytes a page of the walk (HSCAN COUNT 1000) is held at before it is read. */
+export const LIST_PAGE_READ_BYTES = 1_000 * CONTACT_READ_BYTES;
+
+/**
  * Walks the whole list, page by page, calling `each` for every address. A
- * large list never has to fit in one answer from Redis.
+ * large list never has to fit in one answer from Redis. Each page is read
+ * through `read`, so a download holds its units before it is read.
  */
 export async function forEachContact(
   listId: string,
   each: (email: string, contact: Contact) => void,
+  read: ListRead = plainRead,
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    cursor = String(reply[0]);
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+    // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
+    // list, so an email is never sent to part of it as if to all, nor an export cut short as if whole.
+    const reply = repliesFor(repliesFor(await read([["HSCAN", key, cursor, "COUNT", 1000]], LIST_PAGE_READ_BYTES), 1)?.[0], 2);
+    const next = reply?.[0];
+    const flat = stringList(reply?.[1]);
+    const nextCursor = typeof next === "string" && /^\d+$/.test(next) ? next : countOf(next) !== null ? String(next) : null;
+    if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
+    cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const contact = parseContact(flat[i + 1]);
-      if (contact) each(String(flat[i]), contact);
+      if (contact) each(flat[i], contact);
     }
-    if (cursor === "0") break;
+    if (cursor === "0") return;
   }
+  // More pages than a full list can take: never read as the whole list.
+  throw new UnknownReplyError("a store's list that did not end");
 }
 
 /**
@@ -899,6 +1448,8 @@ export async function audience(
   keep?: (email: string) => boolean,
   /** Only people who carry this label (99 [E2-TAG-BROADCAST]), compared as a sequence compares one: case and spaces at the ends aside. Read from the same record, so no extra read. */
   label?: string,
+  /** How the list's pages are read: a download's metered read (lib/ad-audience.ts), or Redis itself. */
+  read: ListRead = plainRead,
 ): Promise<string[]> {
   const out: string[] = [];
   const wanted = label?.trim().toLocaleLowerCase() ?? "";
@@ -910,7 +1461,7 @@ export async function audience(
     if (wanted && !contact.tags.some((t) => t.trim().toLocaleLowerCase() === wanted)) return;
     if (keep && !keep(email)) return;
     out.push(email);
-  });
+  }, read);
   return out;
 }
 
@@ -963,16 +1514,53 @@ return 0`;
  * erasure, so the address is never written to again. Answers how many
  * records went. Safe to run twice.
  */
-export async function forgetContactPerson(listId: string | null, rawEmail: string): Promise<number> {
+export async function forgetContactPerson(listId: string | null, rawEmail: string, room?: DataStore): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
-  const contact = parseContact(raw);
-  if (!contact) return 0;
-  const commands: (string | number)[][] = [["HDEL", leadsKey(listId), email]];
-  if (contact.t) commands.push(["DEL", tokenKey(contact.t)]);
-  if (contact.agreed) commands.push(["EVAL", DECR_TO_ZERO, 1, agreedKey(listId)]);
-  if (contact.agreed && contact.unsub) commands.push(["EVAL", DECR_TO_ZERO, 1, unsubKey(listId)]);
-  await redisPipeline(commands);
-  return contact.t ? 2 : 1;
+  for (let tries = 0; tries < 3; tries += 1) {
+    // The erasure's mark, written again as the row goes (the last of its steps, lib/person-erasure.ts): a yes given
+    // while the erasure ran (a join confirmed with its link, lib/store-join.ts) lifted the one written first, and the
+    // person must not end with neither a row nor a mark (pre-review of 9 November 2026).
+    const [raw] = exactReplies(await redisPipeline([["HGET", leadsKey(listId), email], suppressCommand(listId, email)]), 2, "a contact's read");
+    if (raw === null) return 0;
+    if (typeof raw !== "string") throw new UnknownReply("a contact's read");
+    const contact = parseContact(raw);
+    // The row and its counts (CONTACT_FORGET, only while the row is still the one read) and its unsubscribe token,
+    // whose record holds the plain address, go in ONE request: a failed request leaves the row for the next try to
+    // find the token by, so the token is never left behind a deleted row (Claude 5 on #2576). The token goes even
+    // when the row changed in between: the person is being deleted, and the next try takes the row.
+    const commands: (string | number)[][] = [
+      ["EVAL", CONTACT_FORGET, 3, leadsKey(listId), agreedKey(listId), unsubKey(listId), email, raw, contact?.agreed ? "1" : "0", contact?.agreed && contact.unsub ? "1" : "0"],
+    ];
+    if (contact?.t) commands.push(["DEL", tokenKey(contact.t)]);
+    const replies = exactReplies(await redisPipeline(commands), commands.length, "a contact's deletion");
+    if (contact?.t) replyCount(replies[1], "a contact's token deletion");
+    const done = replies[0];
+    if (done === 0) continue;
+    if (done !== 1) throw new UnknownReply("a contact's deletion");
+    if (!contact) return 1;
+    // Its room goes back where it was taken (Contact.r); one written before that
+    // was recorded is not known to be in either place, and stays counted.
+    if (room && contact.r === "c") await giveData(room, [{ slot: CONTACTS_SLOT, bytes: contactBytes(contact) }]);
+    if (room && contact.r === "o") await releaseOrderData(room, fieldReleaseBytes(email, countedJson(contact)));
+    return contact.t ? 2 : 1;
+  }
+  throw new UnknownReply("a contact that kept changing while it was deleted");
 }
+
+/**
+ * Deletes a contact's row (KEYS[1] field ARGV[1]) only while it still holds the value read (ARGV[2]), and in the same
+ * step its place in the agreed and unsubscribed counts (KEYS[2], KEYS[3], when ARGV[3] and ARGV[4] are "1"), never
+ * below zero, so a row is never uncounted twice. 1 when deleted, 0 when the row changed. Modelled by
+ * lib/redis-memory.ts.
+ */
+export const CONTACT_FORGET = `-- marktmorgen:contact-forget:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HDEL", KEYS[1], ARGV[1])
+local function down(key)
+  local n = tonumber(redis.call("GET", key) or "0") or 0
+  if n > 0 then redis.call("DECR", key) end
+end
+if ARGV[3] == "1" then down(KEYS[2]) end
+if ARGV[4] == "1" then down(KEYS[3]) end
+return 1`;

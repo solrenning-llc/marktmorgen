@@ -50,19 +50,22 @@
  *   nl:adsrv:<statsId>          JSON { meta?, tiktok?, google?, pinterest?: sealed token, pinterestAccount?, testCode? }
  *   nl:adsrv:last:<statsId>     JSON { at, kind, meta?, tiktok?, google?, pinterest? }: the last answers, for the studio
  *   nl:adsrv:sent:<id>          an order, renewal or lead already sent (3 days; 40 for renewals)
- *   nl:adsrv:ctx:<token>        the request that opened a checkout (4 days)
+ *   nl:adsrv:ctx:<token>        the request that opened a checkout (4 days, deleted once its sale is known)
  *   nl:adsrv:sub:<subscription> the cookies and clicks a membership's renewals are sent with (400 days), never an address
  */
 import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
-import { type Store, saleHandles } from "@/lib/store";
+import { type Store, ensureListId, saleHandles, storeRef } from "@/lib/store";
 import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
+import { noteForErasure } from "@/lib/erasure-index";
+import { KEEP_UNLESS_ERASED, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wholeErasedReply } from "@/lib/suppression";
 
 export const META_GRAPH_VERSION = "v25.0";
 export type ServerPlatform = AdsServerPlatform;
@@ -119,17 +122,65 @@ function parse<T>(raw: unknown, fallback: T): T {
   }
 }
 
-async function readStored(statsId: string): Promise<Stored> {
-  if (!isRedisConfigured()) return {};
-  const [raw] = await redisPipeline([["GET", configKey(statsId)]]);
-  return parse<Stored>(raw, {});
+/**
+ * A kept JSON object read exactly (CX-123 rule 24): nil is nothing kept
+ * (null); a string holding a JSON object is it; anything else (no reply, not
+ * JSON, a list, a number) is unknown and throws, so the setup is never taken
+ * for empty and written back over the tokens it holds.
+ */
+function keptObject(raw: unknown, what: string): Record<string, unknown> | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError(what);
+  return parsed as Record<string, unknown>;
 }
 
+/** The sealed setup: {} when none is kept; every field a string, or it is unknown. */
+function storedOf(raw: unknown): Stored {
+  const kept = keptObject(raw, "the server conversions' setup") ?? {};
+  if (Object.values(kept).some((v) => typeof v !== "string")) throw new UnknownReplyError("the server conversions' setup");
+  return kept as Stored;
+}
+
+async function readStored(statsId: string): Promise<Stored> {
+  if (!isRedisConfigured()) return {};
+  const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("the server conversions' setup");
+  return storedOf(replies[0]);
+}
+
+const KINDS: readonly string[] = ["purchase", "renewal", "lead"] satisfies ConversionKind[];
+
+/**
+ * The platforms' last answers as deliver writes them, { at, kind?, ...answers }:
+ * null when none is kept; any other shape is unknown, never shown as a date.
+ */
+function lastOf(raw: unknown): ServerSetup["last"] {
+  const kept = keptObject(raw, "the platforms' last answers");
+  if (!kept) return null;
+  const exact = Object.entries(kept).every(([key, value]) =>
+    key === "at"
+      ? typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+      : key === "kind"
+        ? typeof value === "string" && KINDS.includes(value)
+        : (SERVER_PLATFORMS as readonly string[]).includes(key) && typeof value === "string",
+  );
+  if (!exact || !("at" in kept)) throw new UnknownReplyError("the platforms' last answers");
+  return kept as ServerSetup["last"];
+}
+
+/** Read exactly: an unknown setup throws, never an empty one (the route answers 503, the studio says so). */
 export async function serverSetup(statsId: string | null): Promise<ServerSetup> {
   if (!statsId || !isRedisConfigured()) return NO_SETUP;
-  const [raw, lastRaw] = await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]);
-  const stored = parse<Stored>(raw, {});
-  const last = parse<ServerSetup["last"]>(lastRaw, null);
+  const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("the server conversions' setup");
+  const stored = storedOf(replies[0]);
+  const last = lastOf(replies[1]);
   return {
     on: { meta: Boolean(stored.meta), tiktok: Boolean(stored.tiktok), google: Boolean(stored.google), pinterest: Boolean(stored.pinterest && stored.pinterestAccount) },
     pinterestAccount: stored.pinterestAccount ?? "",
@@ -147,7 +198,8 @@ export function platformsOn(setup: ServerSetup): ServerPlatform[] {
  * Keeps a platform's token, sealed, or forgets it (`token` empty). A token
  * that does not look like one is refused, so a pasted pixel id or a sentence
  * is said to be wrong at once rather than failing at the first sale.
- * Pinterest also needs the ad account its events go to.
+ * Pinterest also needs the ad account its events go to. A setup that cannot
+ * be read exactly throws before anything is written (the others' tokens stay).
  */
 export async function setServerToken(
   statsId: string,
@@ -174,7 +226,7 @@ export async function setServerToken(
   return "saved";
 }
 
-/** Meta's test event code, while the creator checks the events arrive (Events Manager, Test events); empty to stop. */
+/** Meta's test event code, while the creator checks the events arrive (Events Manager, Test events); empty to stop. Throws, writing nothing, on a setup that cannot be read. */
 export async function setTestCode(statsId: string, code: unknown): Promise<boolean> {
   const text = typeof code === "string" ? code.trim().toUpperCase() : "";
   if (text && !TEST_CODE.test(text)) return false;
@@ -421,7 +473,10 @@ export function googleBody(c: Conversion, buyer: BuyerRequest, nowSeconds: numbe
     ...(recent ? { timestamp_micros: c.at * 1_000_000 } : {}),
     ...(c.email ? { user_data: { sha256_email_address: [sha256(googleEmail(c.email))] } } : {}),
     ...(buyer.ip ? { ip_override: buyer.ip } : {}),
-    consent: { ad_user_data: "GRANTED", ad_personalization: "GRANTED" },
+    // The yes the buyer gave covers measuring which ads bring people here
+    // (lib/buyer-words/tracking-consent.ts), never personalized advertising or
+    // remarketing, and outside the countries that ask first no yes was given at all.
+    consent: { ad_user_data: "GRANTED", ad_personalization: "DENIED" },
     events: [
       {
         name: "purchase",
@@ -629,10 +684,16 @@ export async function customerType(store: Store, email: string | null, sessionId
   if (!email || !store.stripeAccountId) return null;
   try {
     const query = new URLSearchParams({ limit: "10", "customer_details[email]": email });
-    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as AdsSession[];
+    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
+    // A page in an unknown shape is a reading not made (CX-123 rule 24): unknown (null), as a failed read is.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of checkouts that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more checkouts in a shape that cannot be read");
+    const rows = listed.data as AdsSession[];
     const before = rows.some((row) => row.id !== sessionId && row.payment_status === "paid" && typeof row.created === "number" && row.created < created);
-    return before ? "returning" : "new";
+    if (before) return "returning";
+    // None earlier on this page while Stripe has more: an earlier paid checkout may be on the next one.
+    if (listed.has_more) throw new Error("Stripe has more checkouts for this address than one page");
+    return "new";
   } catch {
     return null;
   }
@@ -655,16 +716,77 @@ function conversionOf(store: Store, session: AdsSession, customer: Conversion["c
 const ordinary = (store: Store, s: AdsSession) =>
   s.status === "complete" && s.payment_status === "paid" && saleHandles(store).has(s.metadata?.store ?? "") && s.metadata?.kind !== "tip";
 
-/** Keeps what a membership's renewals are sent with: the cookies and clicks, never an address or a browser. */
-async function keepForRenewals(session: AdsSession, buyer: BuyerRequest): Promise<void> {
+/**
+ * Keeps what a membership's renewals are sent with: the cookies and clicks,
+ * never an address or a browser. They are the buyer's, so they are noted for
+ * erasure under the checkout's address (lib/erasure-index.ts), first and in
+ * the same pipeline as the write, and deleting the person deletes them
+ * (audit 12, privacy). A checkout with no address keeps nothing: nothing
+ * could find it. The write is made only while the address is not among the
+ * store's deleted people, in one step with that check (KEEP_UNLESS_ERASED),
+ * so an erasure that ran first is never undone by a late sale.
+ */
+async function keepForRenewals(store: Store, session: AdsSession, buyer: BuyerRequest, now = Date.now()): Promise<void> {
   const sub = typeof session.subscription === "string" ? session.subscription : "";
   if (!SUB.test(sub)) return;
+  const email = emailOf(session);
+  const notes = email ? noteForErasure(store.statsId, email, subKey(sub), now) : [];
+  if (!email || !notes.length) return;
   const { _fbp, _fbc, _ttp, ttclid, _epik, _ga, fbclid, epik, clickAt } = buyer.cookies;
-  const kept = Object.fromEntries(Object.entries({ _fbp, _fbc, _ttp, ttclid, _epik, _ga, fbclid, epik, clickAt }).filter(([, v]) => v));
-  await redisPipeline([["SET", subKey(sub), JSON.stringify(kept), "EX", SUB_SECONDS]]);
+  const kept = JSON.stringify(Object.fromEntries(Object.entries({ _fbp, _fbc, _ttp, ttclid, _epik, _ga, fbclid, epik, clickAt }).filter(([, v]) => v)));
+  // Only with the store's list (withList): a copy of the store read with none
+  // could be one read before an erasure gave it one (Codex M on #3324).
+  if (!store.listId) return;
+  await redisPipeline([...notes, ["EVAL", KEEP_UNLESS_ERASED, 2, subKey(sub), suppressedKey(store.listId), kept, SUB_SECONDS, suppressionPrint(store.listId, email)]]);
 }
 
-export type SendResult = "sent" | "already" | "off" | "invalid";
+export type SendResult = "sent" | "already" | "off" | "invalid" | "unknown";
+
+/**
+ * The store with its list of deleted people, so whether somebody was deleted
+ * can always be asked (Codex M on #3324, CXM-20261109-0153-DELTA). A store
+ * from before lists has none, and a copy of the store read before an erasure
+ * still says so after the erasure gave it one (lib/person-erasure.ts asks
+ * ensureListId first): asking nothing on that copy sent a deleted person's
+ * sale and renewal and kept their cookies again. So a copy with no list
+ * reads the store's list now, the erasure's own way (ensureListId, which
+ * gives one to a store that still has none; once a store, as every store made
+ * since #1680 already has one). null when it cannot: then nothing is sent and
+ * nothing kept.
+ */
+async function withList(store: Store): Promise<Store | null> {
+  if (store.listId) return store;
+  const listId = (await ensureListId(storeRef(store)).catch(() => null))?.listId;
+  return listId ? { ...store, listId } : null;
+}
+
+/**
+ * Whether a sale or a lead may go, asked in the pipeline that claims it, so
+ * it is read just before it is sent (audit 12, privacy). Every sending door
+ * first gives the store its list (withList), so it is always asked; an
+ * address it does not know could be a deleted one, and goes nowhere.
+ */
+const erasureAsk = (store: Store, email: string | null): (string | number)[][] =>
+  store.listId && email ? [suppressedCommand(store.listId, email)] : [];
+/** The answer to erasureAsk: only an exact "not deleted" (or nothing asked of a store with no list) lets it go. */
+const mayGo = (store: Store, email: string | null, reply: unknown): boolean =>
+  !store.listId || (Boolean(email) && markSeen(reply) === false);
+
+/**
+ * A sent mark taken with SET NX, read exactly (CX-123 rule 24): only the
+ * exact "OK" is this run's. nil is another run's; anything else (no reply,
+ * QUEUED, a list, a number) is not known, and nothing is sent on it, so a
+ * platform never gets one purchase twice on a guess. The mark is not let go
+ * either: it may be this run's, and it ends with its own time.
+ */
+export function markIsOurs(reply: unknown): boolean {
+  return reply === "OK";
+}
+
+/** An EXISTS of a sent mark, read exactly: 1 seen, 0 not seen, anything else unknown (null). */
+export function markSeen(reply: unknown): boolean | null {
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
 
 /**
  * The thanks page's faster way: the buyer's own browser, after its pixels
@@ -672,10 +794,12 @@ export type SendResult = "sent" | "already" | "off" | "invalid";
  * now rather than at the next pass. Sent with what the checkout kept when it
  * has it, and otherwise with this request's own.
  */
-export async function sendServerPurchase(store: Store, sessionId: unknown, buyer: BuyerRequest, now = Date.now()): Promise<SendResult> {
+export async function sendServerPurchase(copy: Store, sessionId: unknown, buyer: BuyerRequest, now = Date.now()): Promise<SendResult> {
   if (typeof sessionId !== "string" || !SESSION.test(sessionId)) return "invalid";
   // Not held to the store's own record of its platforms: a token saved before that record was kept still sends.
-  if (!store.statsId || !store.stripeAccountId || !isRedisConfigured()) return "off";
+  if (!copy.statsId || !copy.stripeAccountId || !isRedisConfigured()) return "off";
+  const store = await withList(copy);
+  if (!store?.statsId || !store.stripeAccountId) return "off";
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return "off";
   let session: AdsSession;
@@ -686,16 +810,33 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
   }
   const created = typeof session.created === "number" ? session.created : 0;
   if (!ordinary(store, session) || created < now / 1000 - 86400) return "invalid";
-  const [claimed, keptRaw] = await redisPipeline([
-    ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
-    ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
-  ]);
+  // What the checkout kept is read and deleted with the claim: its sale is
+  // known now, sent from here or not, and nothing reads it after (the five-
+  // minute pass reads it only before it claims). Whether the buyer was
+  // deleted from the store is asked with it.
+  const token = CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "";
+  const email = emailOf(session);
+  const asked = erasureAsk(store, email);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
+      ["GET", ctxKey(token || "none")],
+      ...(token ? [["DEL", ctxKey(token)]] : []),
+      ...asked,
+    ]),
+    2 + (token ? 1 : 0) + asked.length,
+  );
+  if (!replies) return "unknown";
+  const [claimed, keptRaw] = replies;
   if (claimed === null) return "already";
+  if (!markIsOurs(claimed)) return "unknown";
+  // A deleted person, or one not known not to be: nothing goes, and nothing is kept for renewals.
+  if (!mayGo(store, email, replies[replies.length - 1])) return "off";
   const kept = parse<BuyerRequest | null>(keptRaw, null);
   const used: BuyerRequest = kept ? { ...kept, cookies: { ...kept.cookies, ...buyer.cookies } } : buyer;
   const c = conversionOf(store, session, await customerType(store, emailOf(session), sessionId, created));
   await deliver(store, stored, c, used, now);
-  await keepForRenewals(session, used).catch(() => {});
+  await keepForRenewals(store, session, used, now).catch(() => {});
   return "sent";
 }
 
@@ -704,13 +845,17 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
  * last day whose checkout carried the buyer's yes and has not been sent yet.
  * Answers how many were sent.
  */
-export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Date.now(), deadline = Infinity): Promise<number> {
-  if (!store.statsId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
-  const due = rows.filter((row) => typeof row.id === "string" && SESSION.test(row.id) && CTX_TOKEN.test(row.metadata?.ads ?? "") && ordinary(store, row));
+export async function sendPaidOrders(copy: Store, rows: AdsSession[], now = Date.now(), deadline = Infinity): Promise<number> {
+  if (!copy.statsId || !sendsFromServer(copy) || !isRedisConfigured()) return 0;
+  const due = rows.filter((row) => typeof row.id === "string" && SESSION.test(row.id) && CTX_TOKEN.test(row.metadata?.ads ?? "") && ordinary(copy, row));
   if (!due.length) return 0;
-  const sent = await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = due.filter((_, i) => Number(sent[i]) !== 1);
+  // Read exactly: an order whose mark cannot be read waits for the next pass.
+  const sent = repliesFor(await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)])), due.length);
+  if (!sent) return 0;
+  const left = due.filter((_, i) => markSeen(sent[i]) === false);
   if (!left.length) return 0;
+  const store = await withList(copy);
+  if (!store?.statsId) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
   const kept = await redisPipeline(left.map((row) => ["GET", ctxKey(row.metadata?.ads as string)]));
@@ -720,12 +865,17 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
     const buyer = parse<BuyerRequest | null>(kept[i], null);
     // What the checkout kept is gone after four days, and an order that old is no longer worth an ad platform's while.
     if (!buyer) continue;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]);
-    if (claimed === null) continue;
+    // Claimed with what the checkout kept deleted (its sale is known now) and
+    // whether the buyer was deleted from the store, read just before sending.
+    const email = emailOf(row);
+    const asked = erasureAsk(store, email);
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS], ["DEL", ctxKey(row.metadata?.ads as string)], ...asked]), 2 + asked.length);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
+    if (!mayGo(store, email, claimed[claimed.length - 1])) continue;
     const created = typeof row.created === "number" ? row.created : 0;
     const c = conversionOf(store, row, await customerType(store, emailOf(row), row.id as string, created));
     if (await deliver(store, stored, c, buyer, now)) count += 1;
-    await keepForRenewals(row, buyer).catch(() => {});
+    await keepForRenewals(store, row, buyer, now).catch(() => {});
   }
   return count;
 }
@@ -746,16 +896,58 @@ type InvoiceRow = {
 };
 
 /**
- * Each membership renewal paid in the last day, as a purchase of its own, for
- * a membership whose first checkout carried the buyer's yes: one read of the
- * creator's invoices per pass, only on a store that sends from the server.
+ * The most pages of the day's paid invoices one renewals pass reads (100 each), as the member scores read
+ * memberships. A cap of its own, not lib/api-read-rules.ts's RENEWAL_PAGES (the numbers' renewals read).
  */
-export async function sendRenewals(store: Store, now = Date.now(), deadline = Infinity): Promise<number> {
-  if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
+const AD_RENEWAL_PAGES = 10;
+
+/**
+ * Each membership renewal paid in the last day, as a purchase of its own, for
+ * a membership whose first checkout carried the buyer's yes: the creator's
+ * invoices of the day, every page of them up to AD_RENEWAL_PAGES, read once per
+ * pass, only on a store that sends from the server. A day with more pages than
+ * the cap sends the renewals read and then fails for the unread rest.
+ */
+export async function sendRenewals(copy: Store, now = Date.now(), deadline = Infinity): Promise<number> {
+  if (!copy.statsId || !copy.stripeAccountId || !sendsFromServer(copy) || !isRedisConfigured()) return 0;
+  const store = await withList(copy);
+  if (!store?.statsId || !store.stripeAccountId) return 0;
   const since = Math.floor(now / 1000) - 86400;
-  const listed = (await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}`)) as { data?: unknown };
+  // A page in an unknown shape, more pages than the cap, or a pass out of time, is a reading not made
+  // (CX-123 rule 24): it fails as Stripe not answering does (the sweep logs it and tries again next pass),
+  // never as "no renewals".
+  const listedRows: InvoiceRow[] = [];
+  let whole = false;
+  let after = "";
+  for (let page = 0; page < AD_RENEWAL_PAGES; page += 1) {
+    // A pass past its deadline asks no page after the first: it fails as a page not read does, and the
+    // sweep tries again next pass, never "no renewals" (Claude 2, review 6707563715 on #3054).
+    if (page > 0 && Date.now() >= deadline) throw new Error("Stripe's paid invoices of the day not read: the pass ran out of time");
+    const listed = await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of invoices that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more invoices in a shape that cannot be read");
+    const pageRows = listed.data as InvoiceRow[];
+    listedRows.push(...pageRows);
+    if (!listed.has_more) {
+      whole = true;
+      break;
+    }
+    const last = pageRows[pageRows.length - 1];
+    if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of invoices with no last one to go on from");
+    after = last.id;
+  }
+  const count = await sendRenewalRows(store, store.statsId, listedRows, now, deadline);
+  // More pages than the cap: the renewals read in their exact shape are sent above, each a purchase of its
+  // own with its own mark, so nothing unread is taken as absent; the pass still fails for the unread rest,
+  // never "no renewals" (Claude 1, independent review on #3054 at 31b99d82: main sent the newest 100).
+  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages; ${count} renewal(s) of the pages read sent`);
+  return count;
+}
+
+/** Sends the renewals among invoice rows read in their exact shape, each once (its own SET NX mark); answers how many went. */
+async function sendRenewalRows(store: Store, statsId: string, listedRows: InvoiceRow[], now: number, deadline: number): Promise<number> {
   const handles = saleHandles(store);
-  const rows = ((Array.isArray(listed.data) ? listed.data : []) as InvoiceRow[]).filter((row) => {
+  const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     return Boolean(meta.ads) && handles.has(meta.store ?? "") && typeof row.amount_paid === "number" && row.amount_paid > 0;
@@ -765,23 +957,63 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     const raw = row.parent?.subscription_details?.subscription ?? row.subscription;
     return typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
   };
-  const marks = await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = rows.filter((_, i) => Number(marks[i]) !== 1);
+  // Read exactly: a renewal whose mark cannot be read waits for the next pass.
+  const marks = repliesFor(await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)])), rows.length);
+  if (!marks) return 0;
+  const left = rows.filter((_, i) => markSeen(marks[i]) === false);
   if (!left.length) return 0;
-  const stored = await readStored(store.statsId);
+  const stored = await readStored(statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
-  const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
+  const emailOfRow = (row: InvoiceRow) => (typeof row.customer_email === "string" ? row.customer_email : "");
+  // With the reads, whether each renewal's address was deleted from the store
+  // (lib/suppression.ts), read whole: a renewal of a deleted person is never
+  // sent, also from a record kept before it was noted for erasure, and that
+  // record goes. A reply not whole sends nothing this pass.
+  const asked = store.listId ? left.map(emailOfRow) : [];
+  const read = await redisPipeline([...left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]), ...(asked.length ? [suppressedAmongCommand(store.listId as string, asked)] : [])]);
+  const kept = repliesFor(read, left.length + (asked.length ? 1 : 0));
+  if (!kept) return 0;
+  let erased: (string | number | null)[];
+  try {
+    erased = asked.length ? wholeErasedReply(kept[left.length], asked.length) : [];
+  } catch {
+    return 0;
+  }
   let count = 0;
   for (let i = 0; i < left.length && Date.now() < deadline; i += 1) {
     const row = left[i];
     const cookies = parse<Record<string, string> | null>(kept[i], null);
     // Only a membership whose first payment was sent from here, with the buyer's yes.
     if (!cookies) continue;
+    // A deleted person: nothing goes, and what was kept for them goes.
+    if (asked.length && erased[i] !== null) {
+      await redisPipeline([["DEL", subKey(subOf(row))]]).catch(() => {});
+      continue;
+    }
+    // No address on the invoice: whether it was deleted is not known, so nothing goes this time.
+    if (!emailOfRow(row)) continue;
     // A renewal's mark is kept forty days: only while the store's data room
     // has space for it (lib/store-data.ts), else renewals wait for room.
     if (!(await keepFor(store, RENEWAL_MARK_BYTES, 40 * 86400, now))) break;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]);
-    if (claimed === null) continue;
+    // The reads above were made before this renewal's turn, and the person
+    // may have been deleted since (Codex P on #3324). So with the claim, and
+    // after it, the kept cookies are read again and whether the address was
+    // deleted is asked again; only what they say now is sent. An erasure
+    // writes the deleted address first and then deletes what was kept
+    // (lib/person-erasure.ts), so any erasure begun before this claim is
+    // seen here: only one begun after it can find this renewal on its way.
+    const keptAt = subKey(SUB.test(subOf(row)) ? subOf(row) : "none");
+    const again = erasureAsk(store, emailOfRow(row));
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400], ["GET", keptAt], ...again]), 2 + again.length);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
+    if (!mayGo(store, emailOfRow(row), claimed[2])) {
+      // Deleted since the reads (or not known not to be): nothing goes, and a record kept before its note goes now.
+      if (markSeen(claimed[2]) === true) await redisPipeline([["DEL", keptAt]]).catch(() => {});
+      continue;
+    }
+    const sendWith = parse<Record<string, string> | null>(claimed[1], null);
+    // Deleted with the person since the reads: nothing goes.
+    if (!sendWith) continue;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     const paidAt = Number(row.status_transitions?.paid_at) || Number(row.created) || Math.floor(now / 1000);
     const c: Conversion = {
@@ -794,7 +1026,7 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
       email: typeof row.customer_email === "string" ? row.customer_email : null,
       customer: "returning",
     };
-    if (await deliver(store, stored, c, { ip: "", userAgent: "", url: "", cookies }, now)) count += 1;
+    if (await deliver(store, stored, c, { ip: "", userAgent: "", url: "", cookies: sendWith }, now)) count += 1;
   }
   return count;
 }
@@ -808,9 +1040,18 @@ export function newLeadId(): string {
  * A sign-up for something free, a waitlist or the list, as a lead, from the
  * route that took it — only with the yes, and once. Answers whether it went.
  */
-export async function sendServerLead(store: Store, request: Requested, lead: { id: string; email: string; product: string }, now = Date.now()): Promise<boolean> {
-  if (!LEAD_ID.test(lead.id) || !store.statsId || !sendsFromServer(store) || !isRedisConfigured()) return false;
-  if (!allowedBy(request, store, now / 1000)) return false;
+export async function sendServerLead(
+  copy: Store,
+  request: Requested,
+  // `typed`: the address typed in the form when `email` is left empty so it is never sent (a waitlist, a free copy):
+  // only asked whether it was deleted from the store, never carried to a platform.
+  lead: { id: string; email: string; product: string; typed?: string },
+  now = Date.now(),
+): Promise<boolean> {
+  if (!LEAD_ID.test(lead.id) || !copy.statsId || !sendsFromServer(copy) || !isRedisConfigured()) return false;
+  if (!allowedBy(request, copy, now / 1000)) return false;
+  const store = await withList(copy);
+  if (!store?.statsId) return false;
   const stored = await readStored(store.statsId);
   const c: Conversion = {
     kind: "lead",
@@ -823,8 +1064,12 @@ export async function sendServerLead(store: Store, request: Requested, lead: { i
     customer: null,
   };
   if (!targets(store, stored, c).length) return false;
-  const [claimed] = await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]);
-  if (claimed === null) return false;
+  // Claimed with whether the address was deleted from the store: a lead of a deleted person goes nowhere.
+  const person = lead.email || lead.typed || null;
+  const asked = erasureAsk(store, person);
+  const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS], ...asked]), 1 + asked.length);
+  if (!claimed || !markIsOurs(claimed[0])) return false;
+  if (!mayGo(store, person, claimed[claimed.length - 1])) return false;
   const buyer: BuyerRequest = {
     ip: addressOf(request),
     userAgent: (request.headers.get("user-agent") ?? "").slice(0, 500),

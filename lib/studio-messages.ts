@@ -2,6 +2,7 @@
  * What every studio form says when the store's own checks turn a change
  * away (lib/studio-route.ts): each form's own words for these come first.
  */
+import { MAX_FAIR_PRODUCTS } from "@/lib/fair-price";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 
@@ -21,6 +22,8 @@ export const STUDIO_MESSAGES: Record<string, string> = {
     ? `A store without a plan holds up to ${SETUP_GB} GB, and this file does not fit in what is left. Start your plan to add more; trial storage is capped by the plan you choose.`
     : `A store holds up to ${SETUP_GB} GB until its plan starts, and this file does not fit in what is left. Plans are not on sale yet; until they are, delete a file you do not need to make room.`,
   upload_refresh: "Reload this page, then choose your file again.",
+  // Fair prices limited to more products than they can be (lib/fair-price.ts, MAX_FAIR_PRODUCTS): nothing was saved.
+  fair_products: `Fair prices can be limited to ${MAX_FAIR_PRODUCTS} products at most. Nothing was saved. Pick fewer, or choose every product.`,
   // What the store keeps in the database is past its data room (lib/store-data-rules.ts).
   store_full: "Your store's record space is full. Review old posts, drafts, pages or contacts. Remove only what you no longer need, then try the change again.",
   // A renewal Stripe could not collect (232 [CA1] unit 4, lib/plan-standing.ts renewalUnpaid).
@@ -33,4 +36,12 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
   slow_down: "Uploads can't start just now. Try again later.",
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
+  // The studio's picture door, capped before it signs (lib/picture-door.ts).
+  pictures_waiting: "Your store has many pictures uploaded in the last day that are not on a product, link or page yet, so this upload did not start. Add those pictures where you want them, or try again later.",
+  pictures_hourly: "Your store has started many picture uploads in the last hour, so this upload did not start. Try again in an hour.",
+  pictures_unavailable: "We could not check your store's picture uploads just now, so this upload did not start. Try again in a moment.",
+  // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.
+  page_unread: "A page could not be read just now, so nothing was changed. Reload, then try again.",
+  // The same, once a section update had already been counted toward the month (app/api/store/saved-blocks, apply).
+  page_unread_counted: "A page could not be read just now, so no page was changed. This try still counts toward this month's section updates. Reload, then try again.",
 };

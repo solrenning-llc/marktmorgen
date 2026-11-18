@@ -33,6 +33,7 @@ import { importedFor } from "@/lib/imported-purchases";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 const NOW = Math.floor(Date.now() / 1000);
 const BASE = "https://marktmorgen.com/@grouppend";
@@ -50,6 +51,9 @@ const chargesAsked: string[] = [];
 const unreadableCharges = new Set<string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     emails.push(JSON.parse(String(init?.body)) as Sent);

@@ -316,10 +316,15 @@ export default function PrivacyPage() {
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
           behalf and under its own privacy policy. A visitor who did not allow
-          ad measurement is never sent. We keep the token sealed; for four days,
-          the request that opened a checkout; for 400 days, the cookies and ad
+          ad measurement is never sent, and neither is a purchase, payment or
+          sign-up of somebody deleted from the store, unless it was already
+          being sent when they were deleted. We keep the token sealed; for
+          four days at the most, the request that opened a checkout, deleted
+          once its purchase is known; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
-          address or browser; for three days (40 for a membership payment) that
+          address or browser, deleted with the buyer when they are deleted
+          from the store;
+          for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.
         </p>
@@ -430,7 +435,11 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}
@@ -1052,11 +1061,21 @@ export default function PrivacyPage() {
           section&apos;s count. On a store&apos;s own page it sends the furthest
           item they saw &mdash; a product, a link or a part of the page &mdash;
           where it stood, and the item they clicked, if any, and we add one to
-          that day&apos;s count of it. Each page decides at random to send this
-          for one visitor in eight, and for nobody else. On a sales page it can
+          that day&apos;s count of it. Our server picks one page view in eight
+          at random and gives only that page a random code, good for two hours
+          from when the page was shown; the page sends this once, with that
+          code, and we keep the code for those two hours only, so the same reading is
+          never counted twice. Each store counts at most a set number of these
+          readings a month, the same for every store on its plan, and past it a
+          reading is not counted. We keep how many readings came that month,
+          and nothing about who sent them, until a day after the month ends. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
-          when asked what was stopping them from buying. No cookie is set and
+          when asked what was stopping them from buying. On a sales page it also
+          says how long the page was open in front of them, as one of six ranges
+          (from under 10 seconds to 10 minutes or more), measured until they first
+          switch to another tab or app or leave, and we add one to that
+          range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.
         </p>

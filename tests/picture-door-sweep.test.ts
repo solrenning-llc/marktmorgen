@@ -258,6 +258,54 @@ async function main(): Promise<void> {
     bend = null;
   }
 
+  part("One ZMSCORE and one ZREM answer what a ZSCORE and a ZREM a name answered, an absent name included (coordinator, #3347)");
+  {
+    // The same names asked both ways on the same data: on the list of unclaimed pictures, absent from it, and a name
+    // absent from the store's list too. The scores read and the members removed must be the same.
+    const present = [name(), name()];
+    const absent = [name(), name()];
+    const names = [present[0], absent[0], present[1], absent[1]];
+    const seed = () => {
+      redis.run(["DEL", UNCLAIMED, doors]);
+      for (const path of present) redis.run(["ZADD", UNCLAIMED, 5, path]);
+      for (const path of names) redis.run(["ZADD", doors, 5, path]);
+    };
+    seed();
+    const one = names.map((path) => redis.run(["ZSCORE", UNCLAIMED, path]));
+    const many = redis.run(["ZMSCORE", UNCLAIMED, ...names]);
+    is("ZMSCORE gives each name's ZSCORE, null for an absent one", many, one);
+    const gone = [...absent, name()];
+    const singles = gone.map((path) => redis.run(["ZREM", doors, path]) as number);
+    const leftBySingles = redis.run(["ZRANGE", doors, 0, -1]);
+    seed();
+    const together = redis.run(["ZREM", doors, ...gone]);
+    is("one ZREM of every name removes as many as one ZREM a name", together, singles.reduce((a, b) => a + b, 0));
+    is("and leaves the same members", redis.run(["ZRANGE", doors, 0, -1]), leftBySingles);
+    // Through the real code: a store at its cap whose left-behind notes mix both kinds keeps exactly the waiting ones.
+    redis.run(["DEL", UNCLAIMED, doors]);
+    const old = Date.now() - 2 * DAY;
+    const waiting: string[] = [];
+    for (let i = 0; i < door.PICTURE_DOOR_MAX; i += 1) {
+      const path = name();
+      redis.run(["ZADD", doors, old + i, path]);
+      if (i % 2 === 0) { redis.run(["ZADD", UNCLAIMED, old + i, path]); waiting.push(path); }
+    }
+    const opened = await uploaded();
+    is("the door opens once the left-behind notes are dropped", onStore(opened), true);
+    const kept = (redis.run(["ZRANGE", doors, 0, -1]) as string[]).filter((path) => path !== opened);
+    is("every note whose picture still waits for the sweep is kept", waiting.every((path) => kept.includes(path)), true);
+    is("and only those of the batch looked at whose picture is gone are dropped", kept.length, door.PICTURE_DOOR_MAX - (door.LEFT_BEHIND_BATCH / 2));
+    // A take reads the same way: a fresh note, a name never noted and a note past its day, in one ZMSCORE.
+    redis.run(["DEL", UNCLAIMED, doors]);
+    const fresh = await uploaded();
+    const never = name();
+    const stale = await uploaded();
+    age(stale, 2 * DAY);
+    const taken = await door.takePictureDoor([fresh, never, stale]);
+    is("only the fresh note is taken; the absent and the stale ones are not, and nothing throws", [...taken.keys()], [fresh]);
+    is("the stale one stays on both lists for the sweep", [onStore(stale), onList(stale)], [true, true]);
+  }
+
   part("The course job runs the sweep, and the registry says what the door keeps");
   const cron = readFileSync(join(process.cwd(), "app/api/cron/courses/route.ts"), "utf8");
   is("the course job calls sweepPictureDoors with the file store's delete", /sweepPictureDoors\(del\)/.test(cron), true);

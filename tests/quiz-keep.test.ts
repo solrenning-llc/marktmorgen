@@ -6,7 +6,7 @@
  *   - the draft holds every question of the try, answered or not, and only
  *     the quiz's own choices, never a hidden field;
  *   - it is put back only for exactly the same questions, when readable, not
- *     older than 30 days, not from the future and not empty;
+ *     older than 7 days, not from the future and not empty;
  *   - putting it back sets each question it names and leaves the others;
  *   - the quiz offers the keeping only while the student may answer, never
  *     to the owner or a visitor, nor after passing or with no tries left;
@@ -159,7 +159,11 @@ part("Said in every language, and in the privacy policy");
     if (lang !== "en") is(`${lang}: not left in English`, keys.filter((k) => w[k] === COURSES_WORDS.en[k]), []);
   }
   const privacy = readFileSync("app/privacy/page.tsx", "utf8");
-  is("the privacy policy names the key and when it goes", /id="quiz-drafts"[\s\S]{0,1400}<code>mm:quiz:<\/code>[\s\S]{0,900}30\s+days/.test(privacy), true);
+  // Review of #4324 (MEDIUM 2): a shared or school computer may hold a child's choices, so a draft is kept 7 days at
+  // most, enough for a reload, a dropped connection or leaving the page, and the words say 7.
+  is("a draft is kept 7 days at the most", QUIZ_KEEP_DAYS, 7);
+  is("the privacy policy names the key and when it goes", /id="quiz-drafts"[\s\S]{0,1400}<code>mm:quiz:<\/code>[\s\S]{0,900}7\s+days/.test(privacy) && !/id="quiz-drafts"[\s\S]{0,2600}30\s+days/.test(privacy), true);
+  is("and the register says the same days", PERSON_DATA.some((r) => r.file === "lib/quiz-keep-rules.ts" && r.what.includes("older than 7 days")), true);
   is("and says the button the student presses", privacy.includes("&quot;Clear my answers&quot;") && COURSES_WORDS.en.quizKeptClear === "Clear my answers", true);
   is("the personal data register says it is never ours", PERSON_DATA.some((r) => r.file === "lib/quiz-keep-rules.ts" && r.how === "none" && r.what.includes("#quiz-drafts")), true);
 }

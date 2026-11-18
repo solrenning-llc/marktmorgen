@@ -10,7 +10,7 @@
  * Synthetic stores and a stubbed email provider only.
  */
 import { claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { decisionsOf, fileAppeal, readAppeals } from "@/lib/takedown-appeals";
+import { MAX_TELL_TRIES, decisionsOf, fileAppeal, readAppeals } from "@/lib/takedown-appeals";
 import { moveAppeal } from "@/lib/takedown-appeal-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { paidPeriod } from "./billing-period-fixture";
@@ -114,6 +114,14 @@ async function main(): Promise<void> {
     k.appeal.state = "under_review";
   });
   is("a move whose time is not a time", await outcome(store), "unknown");
+  await restore();
+  // Only 0 to 3 inbox tries are ever written (Codex U on #3533): a count past them, or "told" with no try, is not read
+  // as "tries spent" (which hides "Send it again") but as unknown.
+  await rewrite(key, (k) => { k.tries = MAX_TELL_TRIES + 1; });
+  is("more inbox tries than the cap is unknown", await outcome(store), "unknown");
+  await restore();
+  await rewrite(key, (k) => { k.told = true; k.tries = 0; });
+  is("told without a counted try is unknown", await outcome(store), "unknown");
   await restore();
   is("the record put back reads again (control)", await outcome(store), "received");
   done();

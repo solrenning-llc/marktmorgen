@@ -14,7 +14,7 @@ import { POST } from "@/app/api/store/appeal/route";
 import StudioAppealsPage from "@/app/studio/appeals/page";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setSubscription, storeForEmail } from "@/lib/store";
-import { NUMBER_TRIES, TRIES_SPENT_WORDS, decisionsOf, fileAppeal, kindOfStrike, readAppeals } from "@/lib/takedown-appeals";
+import { NUMBER_TRIES, TRIES_SPENT_WORDS, decisionsOf, fileAppeal, kindOfStrike, readAppeals, sendAgain } from "@/lib/takedown-appeals";
 import { APPEAL_NUMBER } from "@/lib/takedown-appeal-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -203,6 +203,88 @@ async function main() {
   const recoveredNumber = recovered.ok ? recovered.kept.appeal.number : "";
   is("the next try takes that same number, so nothing is left behind", [recovered.ok, numbers() - lostBefore, redis.keys().includes(`nl:report:an:${recoveredNumber}`)], [true, 1, true]);
   is(`never more than ${NUMBER_TRIES} numbers a decision`, NUMBER_TRIES, 3);
+
+  part("A late retry cannot reopen a confirmed appeal or start another provider send");
+  const retryEmail = "appeal-concurrent@example.test";
+  await creator(retryEmail, "appealshopretry");
+  await noteTakedown(retryEmail, PRODUCT);
+  const retryStore = (await storeForEmail(retryEmail))!;
+  const retryKey = decisionsOf(retryStore)[0].key;
+  mailDown = true;
+  await fileAppeal(retryStore, retryKey, { explanation: "My saved request." }, new Date(), "https://marktmorgen.com");
+  mailDown = false;
+  const retrySent = sent.length;
+  let seeSaved!: () => void;
+  const saved = new Promise<void>((resolve) => { seeSaved = resolve; });
+  let resumeSaved!: () => void;
+  const resume = new Promise<void>((resolve) => { resumeSaved = resolve; });
+  let record = "";
+  let confirmed = false;
+  let rewound = false;
+  redis.pipeline = async (commands) => {
+    const replies = await realPipeline(commands);
+    if (!record && commands[0]?.[0] === "GET" && String(commands[0][1]).includes(":a:")) {
+      record = String(commands[0][1]);
+      seeSaved();
+      await resume;
+    }
+    if (confirmed && record) {
+      const raw = redis.run(["GET", record]);
+      if (typeof raw === "string" && JSON.parse(raw).told === false) rewound = true;
+    }
+    return replies;
+  };
+  const stale = sendAgain(retryStore, retryKey, "https://marktmorgen.com");
+  try {
+    await saved;
+    is("the current retry confirms its handoff", (await sendAgain(retryStore, retryKey, "https://marktmorgen.com"))?.ok, true);
+    confirmed = true;
+    resumeSaved();
+    const late = await stale;
+    const current = (await readAppeals(retryStore)).get(retryKey);
+    is("the late retry never rewinds the handoff and keeps attempt two", [rewound, late?.ok, current?.told, current?.tries, sent.length - retrySent], [false, true, true, 2, 1]);
+  } finally {
+    redis.pipeline = realPipeline;
+    resumeSaved();
+  }
+
+  part("A confirmed send preserves a newer attempt number");
+  await noteTakedown(retryEmail, LINK);
+  const nextStore = (await storeForEmail(retryEmail))!;
+  const nextKey = decisionsOf(nextStore).find((decision) => decision.kind === "link")!.key;
+  mailDown = true;
+  await fileAppeal(nextStore, nextKey, { explanation: "My pending request." }, new Date(), "https://marktmorgen.com");
+  mailDown = false;
+  const fakeProvider = globalThis.fetch;
+  let startedSend!: () => void;
+  const started = new Promise<void>((resolve) => { startedSend = resolve; });
+  let completeSend!: () => void;
+  const complete = new Promise<void>((resolve) => { completeSend = resolve; });
+  let firstAttempt = true;
+  globalThis.fetch = async (input, init) => {
+    if (firstAttempt && new URL(String(input)).hostname === "api.resend.com") {
+      firstAttempt = false;
+      const response = await fakeProvider(input, init);
+      startedSend();
+      await complete;
+      return response;
+    }
+    return fakeProvider(input, init);
+  };
+  const pendingSend = sendAgain(nextStore, nextKey, "https://marktmorgen.com");
+  try {
+    await started;
+    mailDown = true;
+    is("the newer attempt is unconfirmed", (await sendAgain(nextStore, nextKey, "https://marktmorgen.com"))?.ok, false);
+    completeSend();
+    await pendingSend;
+    const current = (await readAppeals(nextStore)).get(nextKey);
+    is("the handoff is confirmed with the latest attempt number", [current?.told, current?.tries], [true, 3]);
+  } finally {
+    mailDown = false;
+    globalThis.fetch = fakeProvider;
+    completeSend();
+  }
 
   part("A request kept whose next step's answer is lost is never said to be not kept");
   // Claude 3 cloud K, LEVE 1 on 27dded69: the record is written, then the reply to counting the inbox try is lost.

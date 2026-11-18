@@ -322,10 +322,18 @@ export function WaitlistPanel({
           {launch.stopped
             ? `The waitlist email stopped because your store stayed switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} went out. Whoever did not get it is still on the waitlist. To email them, mark it coming soon again, then put it on sale.`
             : launch.finished
-              ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
+              ? launch.total === 0
+                ? "Launched. Nobody on the waitlist had confirmed, so no email went out."
+                : `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
               : view.switchedOff
                 ? `Paused while your store is switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails sent so far. The rest go out by themselves once your store is back on. If it is still switched off on ${dayWords(new Date((launch.started + LAUNCH_HOLD_SECONDS) * 1000).toISOString().slice(0, 10))}, the email stops, and whoever did not get it stays on the waitlist.`
-                : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+                : launch.total === 0
+                  ? // Nobody to email: only the waitlist's deletion is left, done by the next run.
+                    "On sale. Nobody on the waitlist had confirmed, and the waitlist is being deleted."
+                  : launch.cursor >= launch.total
+                    ? // Every email went: only the waitlist's deletion is left, done by the next run.
+                      `On sale. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out, and the waitlist is being deleted.`
+                    : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
         </p>
       ) : null}
 

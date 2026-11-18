@@ -353,7 +353,7 @@
     "store-email": 7,
     "transactional-email": 15,
     "list-email": 0,
-    "visits": 89
+    "visits": 90
    },
    "coefYear": {
     "ai": 0,
@@ -6523,23 +6523,23 @@
      }
     }
    ],
-   "baseMonth": 2419,
+   "baseMonth": 2420,
    "baseYear": 28500,
    "coefMonth": {
-    "ai": 637,
-    "video": 93,
-    "storage": 411,
-    "orders": 316,
-    "store-email": 73,
-    "transactional-email": 94,
+    "ai": 636,
+    "video": 92,
+    "storage": 410,
+    "orders": 315,
+    "store-email": 72,
+    "transactional-email": 93,
     "list-email": 900,
-    "visits": 1048
+    "visits": 1047
    },
    "coefYear": {
     "ai": 7643,
     "video": 1106,
     "storage": 2435,
-    "orders": 3785,
+    "orders": 3786,
     "store-email": 872,
     "transactional-email": 1126,
     "list-email": 10800,

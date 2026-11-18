@@ -8,6 +8,9 @@ import { HelpTopics } from "@/components/help-topics";
 import { HelpAnswerTools } from "@/components/help-answer-tools";
 import { answerSummary, helpAnswer, helpAnswerPath, helpPagePaths, sectionNeighbors, helpTopics } from "@/lib/help-pages";
 
+// All help answers are known at build time.
+export const dynamicParams = false;
+
 /**
  * One answer of the help center on a page of its own (564 [HC1]): the trail
  * above it, the question as the page's title, the answer as /help shows it,

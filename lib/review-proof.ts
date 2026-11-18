@@ -375,7 +375,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       // rows are still marked (Codex P on #2774).
       let listed: StripePage;
       try {
-        listed = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`), refundRowKnown);
+        const raw = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
+        const latest = Math.floor(Date.now() / 1000) + 300;
+        listed = readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
       } catch (error) {
         if (!(error instanceof StripeListUnreadable)) throw error;
         console.error("reading refunds for reviews: a page in another shape", error);

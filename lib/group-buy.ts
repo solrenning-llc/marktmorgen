@@ -53,7 +53,7 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
@@ -96,6 +96,8 @@ export type Group = {
   h?: number;
 };
 
+/** The shape of a charge's id, read before a purchase for several hands out places (PAYMENT_ID is below). */
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{3,252}$/;
 const groupKey = (id: string) => `nl:grp:${id}`;
 const membersKey = (id: string) => `nl:grp:${id}:m`;
 /** The count kept before 5 November 2026: no longer written, still deleted with the purchase. */
@@ -361,6 +363,8 @@ export async function settleGroup(input: {
   const id = session.metadata?.group ?? "";
   const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
+  // Given back before it was first confirmed (#4494, kept as revoked with no paid time): nothing to settle or send.
+  if (!group.paid && group.revoked) return "already";
   // Paid already. The receipt with the link that hands out the places comes after the write that marks it paid, so
   // a run whose reply to that write came back in another shape threw before sending it (#2872 review M1): a later run
   // with no "sent" mark (the caller checked) still sends it, once (its own idempotency key), while that is recent.
@@ -392,6 +396,49 @@ export async function settleGroup(input: {
   // Stripe gives the payment as its id, or whole when the caller asked for it.
   const intent = session.payment_intent as { id?: unknown } | string | null | undefined;
   const pi = typeof intent === "string" ? intent : typeof intent?.id === "string" ? intent.id : "";
+  // A checkout stays "paid" at Stripe after its money is given back, and the sweep reads refunds before it settles the
+  // day's checkouts: a purchase refunded before this point has had its refund read, and passed, while nl:grp:pi: (set
+  // below) did not exist yet, so no later run takes its places back. So the payment is asked about here, before any
+  // place exists. Given back: kept as revoked, nothing settled or sent. An answer that does not read, or that is not
+  // this payment's own (rule 30), throws: nothing is written, and the next run asks again.
+  // A positive checkout, or one that names a PaymentIntent, needs a readable payment on the store's current account,
+  // and the answer must be that PaymentIntent, succeeded, with its expanded charge tied to it (Codex X4 and N1 on
+  // #4494; fix as Codex X5 proposed). Only a free checkout, with no PaymentIntent, is settled with no read.
+  try {
+    // Only a checkout that reads as free (a total of exactly zero) and names no PaymentIntent is settled unread; a total
+    // that does not read is not taken for zero, so its payment is read (its receipt still leaves the amount out).
+    const free = session.amount_total === 0 && !pi;
+    if (!free) {
+      const account = store.stripeAccountId;
+      if (!PAYMENT_ID.test(pi) || typeof account !== "string" || !account) throw new UnknownReplyError("a purchase for several's payment");
+      const payment = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
+      if (!payment || typeof payment !== "object" || Array.isArray(payment)) throw new UnknownReplyError("a purchase for several's payment");
+      const read = payment as { id?: unknown; object?: unknown; status?: unknown; latest_charge?: unknown };
+      const charge = read.latest_charge;
+      if (read.id !== pi || read.object !== "payment_intent" || read.status !== "succeeded" || !charge || typeof charge !== "object" || Array.isArray(charge)) {
+        throw new UnknownReplyError("a purchase for several's payment");
+      }
+      const chargeRead = charge as { id?: unknown; object?: unknown; payment_intent?: unknown; refunded?: unknown; disputed?: unknown };
+      const charged = chargeRead.payment_intent;
+      const chargedId = typeof charged === "string"
+        ? charged
+        : charged && typeof charged === "object" && !Array.isArray(charged) ? (charged as { id?: unknown }).id : "";
+      if (typeof chargeRead.id !== "string" || !CHARGE_ID.test(chargeRead.id) || chargeRead.object !== "charge" || chargedId !== pi ||
+          typeof chargeRead.refunded !== "boolean" || typeof chargeRead.disputed !== "boolean") {
+        throw new UnknownReplyError("a purchase for several's payment");
+      }
+      if (await givenBack(account, payment)) {
+        if (!(await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS))) {
+          throw new UnknownReplyError("a revoked purchase for several's record");
+        }
+        await releaseMark(settling, mark);
+        return "already";
+      }
+    }
+  } catch (error) {
+    await releaseMark(settling, mark).catch(() => undefined);
+    throw error;
+  }
   // A bundle hands over what it held when it was paid for, to every place.
   const items = bundleFromMeta(session.metadata ?? null, "bundle");
   // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
@@ -1340,7 +1387,10 @@ export async function revokeRefundedGroups(
     if (from) query.set("starting_after", from);
     try {
       const raw = await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION);
-      const page = readStripePage(raw, refundRowKnown);
+      const latest = now() + 300;
+      const timeInWindow = (created: unknown): created is number =>
+        typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= latest;
+      const page = readStripePage(raw, (row) => timeInWindow(ownField(row, "created")) && refundRowKnown(row));
       // A page that read is a plain object whose own data is a list: its rows are looked at again, slot by slot.
       const data = ownField(raw as Record<string, unknown>, "data") as unknown[];
       const readable = new Set<unknown>(page.rows);
@@ -1354,7 +1404,7 @@ export async function revokeRefundedGroups(
         if (readable.has(row)) continue;
         const created = plainObject(row) ? ownField(row, "created") : undefined;
         // A time Stripe could have given this list (inside its window, not ahead of now); otherwise the pass's start.
-        const at = typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= now() + 300 ? created : since + 300;
+        const at = timeInWindow(created) ? created : since + 300;
         holdAt = holdAt === null ? at : Math.min(holdAt, at);
       }
       const last = data.length > 0 ? slot(data.length - 1) : undefined;

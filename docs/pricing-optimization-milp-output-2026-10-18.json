@@ -5,7 +5,7 @@
    "scenario": "-0.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 971.6464,
+   "objective": 971.6389,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -52,7 +52,7 @@
    "scenario": "-0.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 983.7723,
+   "objective": 983.7662,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -99,7 +99,7 @@
    "scenario": "-1",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 342.2358,
+   "objective": 342.233,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -146,7 +146,7 @@
    "scenario": "-1",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 346.4939,
+   "objective": 346.4913,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -193,7 +193,7 @@
    "scenario": "-1.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 173.21,
+   "objective": 173.2042,
    "plans": {
     "creator": {
      "monthCents": 18900,
@@ -240,7 +240,7 @@
    "scenario": "-1.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 248.6666,
+   "objective": 248.6498,
    "plans": {
     "creator": {
      "monthCents": 14900,
@@ -287,7 +287,7 @@
    "scenario": "-2",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 91.7306,
+   "objective": 91.7274,
    "plans": {
     "creator": {
      "monthCents": 18900,
@@ -334,7 +334,7 @@
    "scenario": "-2",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 190.7934,
+   "objective": 190.7793,
    "plans": {
     "creator": {
      "monthCents": 14900,

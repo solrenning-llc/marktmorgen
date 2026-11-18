@@ -60,9 +60,10 @@ export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
 /**
  * The refund made here before under this invoice, from Stripe's list read exactly: null when the whole list holds
  * none that stands (failed and canceled ones do not), or "unknown" when the list is not whole or a row under this
- * invoice does not read as a refund of this payment.
+ * invoice does not read as a refund of this payment. `mark` is the metadata key the refund names its invoice under:
+ * a closing's (closing_refund) or a payment plan's late payment (plan_late_refund, lib/plan-late-refunds.ts).
  */
-export function priorRefund(list: unknown, intent: string, invoice: string, currency: string): { state: "done" | "pending"; amount: number } | null | "unknown" {
+export function priorRefund(list: unknown, intent: string, invoice: string, currency: string, mark = "closing_refund"): { state: "done" | "pending"; amount: number } | null | "unknown" {
   if (!list || typeof list !== "object" || Array.isArray(list)) return "unknown";
   const field = (value: unknown, key: string): unknown =>
     value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
@@ -76,9 +77,9 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
     const meta = field(row, "metadata");
     if (typeof id !== "string" || !REFUND_ID.test(id)) return "unknown";
     if (meta !== null && (!meta || typeof meta !== "object" || Array.isArray(meta))) return "unknown";
-    const mark = field(meta, "closing_refund");
-    if (mark !== undefined && typeof mark !== "string") return "unknown";
-    if (mark !== invoice) continue;
+    const named = field(meta, mark);
+    if (named !== undefined && typeof named !== "string") return "unknown";
+    if (named !== invoice) continue;
     const amount = field(row, "amount");
     if (!Number.isSafeInteger(amount) || (amount as number) <= 0) return "unknown";
     const state = refundState(row, intent, amount as number, currency);
@@ -87,6 +88,26 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
     return { state, amount: amount as number };
   }
   return null;
+}
+
+/**
+ * How many refunds under this invoice Stripe's whole list confirms failed or canceled (Codex X8, #4480). Read only
+ * after priorRefund found none that stands, so every row already reads. A confirmed failure gave nothing back, and
+ * the next attempt goes under a key of its own: under the same key Stripe would replay the failed (or earlier
+ * pending) answer instead of trying again. An unknown outcome is never counted, so its retry keeps the same key.
+ * `mark` is the metadata field naming the invoice, as priorRefund's (a plan's late refunds use plan_late_refund).
+ */
+export function failedRefunds(list: unknown, intent: string, invoice: string, currency: string, mark = "closing_refund"): number {
+  const field = (value: unknown, key: string): unknown =>
+    value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+  const rows = field(list, "data");
+  if (!Array.isArray(rows)) return 0;
+  let failed = 0;
+  for (const row of rows) {
+    if (field(field(row, "metadata"), mark) !== invoice) continue;
+    if (refundState(row, intent, field(row, "amount") as number, currency) === "failed") failed += 1;
+  }
+  return failed;
 }
 
 export function refundState(refund: unknown, intent: string, amount: number, currency: string): "done" | "pending" | "failed" | "unknown" {
@@ -212,7 +233,7 @@ const CURRENCY = /^[a-z]{3}$/;
  * twice throws, so the run counts its members failed and tries again; it is never an empty balance, which on the
  * closing day would record every member as a final "short" and tell them the creator's balance did not cover it.
  */
-async function available(account: string): Promise<Map<string, number>> {
+export async function available(account: string): Promise<Map<string, number>> {
   const balance = objectOf(await onAccount("GET", account, "/balance"));
   if (!balance || balance.object !== "balance" || !Array.isArray(balance.available)) throw new Error("the account's balance did not read");
   const out = new Map<string, number>();
@@ -401,6 +422,8 @@ export async function giveBackUnused(
           else out.done.push({ sub: row.sub, amount: prior.amount, cur: row.paid.cur });
           continue;
         }
+        // Confirmed failures under this invoice move the key on (#4480); with none it is the key used before.
+        const failures = failedRefunds(made, intent, row.paid.inv, row.paid.cur);
         const refunded = charge.amount_refunded as number;
         const give = Math.min(stillToGive(row.unused, refunded), Math.max(0, (row.paid.tot ?? row.paid.amt) - refunded));
         if (give <= 0) {
@@ -422,7 +445,7 @@ export async function giveBackUnused(
             "/refunds",
             new URLSearchParams({ payment_intent: intent, amount: String(give), reason: "requested_by_customer", "metadata[closing_refund]": row.paid.inv, "metadata[store_closing]": "unused_time" }),
             undefined,
-            `closing-refund:${row.paid.inv}`,
+            failures === 0 ? `closing-refund:${row.paid.inv}` : `closing-refund:${row.paid.inv}:${failures}`,
           );
         } catch (error) {
           if (error instanceof StripeError && error.code === "balance_insufficient") {
@@ -445,7 +468,8 @@ export async function giveBackUnused(
         // this payment, for this amount, in one of Stripe's own states counts. Succeeded is done; pending or
         // requires_action is made and waiting; failed or canceled gave nothing back and the member stays to be
         // reconciled; any other answer is unknown, never "done", and is tried again under the same idempotency key, so
-        // Stripe answers with the same refund instead of making a second one.
+        // Stripe answers with the same refund instead of making a second one. Only a failure the list confirms on a
+        // later pass moves the key on (#4480).
         const state = refundState(refund, intent, give, row.paid.cur);
         if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
         if (state === "failed") {

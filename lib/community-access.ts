@@ -350,6 +350,8 @@ export async function maySeeSpace(
   config: CommunityConfig,
   space: { id: string; only: string[] },
   viewer: { owner: boolean; email: string },
+  /** `strict` as holdsTicket's, for deciding who an email goes to: an answer that could not be had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
   if (viewer.owner) return true;
   // The same rule the creator's "View as a member" uses (lib/community-gate.ts).
@@ -358,7 +360,7 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v));
+  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v), options);
 }
 
 const spaceOkKey = (community: string, space: string, email: string) => `nl:cm:${community}:sp:ok:${space}:${emailKey(email)}`;
@@ -636,5 +638,10 @@ export async function forgetAccessPerson(id: string, email: string, spaceIds: st
     ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
     ["HDEL", `nl:cm:${id}:wel`, key],
   ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // DEL's and HDEL's own counts only (CX-123 rule 24): any other answer throws, so the erasure is never reported done on it.
+  const exact = repliesFor(replies, 2);
+  const removed = countOf(exact?.[0]);
+  const welcomed = countOf(exact?.[1]);
+  if (removed === null || welcomed === null) throw new UnknownReplyError("the community access answers forgotten");
+  return removed + welcomed;
 }

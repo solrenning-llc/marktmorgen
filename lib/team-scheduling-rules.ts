@@ -34,7 +34,7 @@
  */
 import { PLAN_TITLES, type Tier } from "@/lib/plan";
 import { type PlanFields, standingOf } from "@/lib/plan-standing";
-import { BUFFERS, type Busy, type CallSetup, type Day, MAX_RANGES_PER_DAY, NOTICE_CHOICES, type Range, isTimeZone, zonedToUtc } from "@/lib/call-setup";
+import { BUFFERS, type Busy, type CallSetup, type Day, MAX_RANGES_PER_DAY, NOTICE_CHOICES, type Range, firstInstantFrom, isTimeZone, zonedToUtc } from "@/lib/call-setup";
 
 export type TeamMode = "round_robin" | "collective";
 
@@ -315,12 +315,17 @@ export function dayBounds(ms: number, tz: string): [number, number] {
   return [startOfDay(p.year, p.month, p.day, tz), startOfDay(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), tz)];
 }
 
-/** Whether [start, end) fits inside one of the host's stretches on that day of theirs. */
+/**
+ * Whether [start, end) fits inside one of the host's stretches on that day of
+ * theirs. A stretch edge the clocks skip that day (24:00 the night midnight is
+ * skipped, 02:30 when 02:00 jumps to 03:00) is the moment they jump past it,
+ * so the stretch is kept, never dropped.
+ */
 export function inHostHours(host: Pick<TeamHost, "tz" | "weekly">, start: number, end: number): boolean {
   const p = localDay(start, host.tz);
   for (const [from, to] of host.weekly[p.weekday] ?? []) {
-    const a = zonedToUtc(p.year, p.month, p.day, from, host.tz);
-    const b = zonedToUtc(p.year, p.month, p.day, to, host.tz);
+    const a = firstInstantFrom(p.year, p.month, p.day, from, host.tz);
+    const b = firstInstantFrom(p.year, p.month, p.day, to, host.tz);
     if (a === null || b === null) continue;
     if (start >= a && end <= b) return true;
   }

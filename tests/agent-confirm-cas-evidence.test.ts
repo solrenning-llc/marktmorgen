@@ -6,9 +6,10 @@
  * creator's edit stays, the proposal is refused as changed since, and the
  * description's room stays what it holds.
  */
-import { addProduct, claimHandle, ensureStatsId, setProductAbout, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductAbout, setProductSummary, setSubscription, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
 import { readAbout, writeAbout } from "@/lib/product-about";
-import { proposeDescription } from "@/lib/agent-propose";
+import { proposeDescription, proposeSummary } from "@/lib/agent-propose";
 import { confirmFor, undoFor } from "@/lib/agent-confirm";
 import { dataKey } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -86,6 +87,27 @@ async function main(): Promise<void> {
   }
   is("the undo is refused as changed since", [editedAgain, undone], [true, { ok: false, error: "changed_since" }]);
   is("and the creator's newer edit stays", await readAbout(statsId, product), "Edited again by the creator.");
+
+  part("The summary: a creator's edit between the read and the lock stays");
+  const summaryProposal = JSON.parse((await proposeSummary(await fresh(), "key-1", { product, summary: "The agent's summary." })).content[0].text).proposal as string;
+  let summaryEdited = false;
+  redis.pipeline = async (commands) => {
+    if (!summaryEdited && commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === lockKey) {
+      summaryEdited = true;
+      redis.pipeline = base;
+      if (!(await setProductSummary(OWNER, product, "The creator's own summary.")).ok) throw new Error("studio edit refused");
+      redis.pipeline = spy3;
+    }
+    return base(commands);
+  };
+  const spy3 = redis.pipeline;
+  let summaryResult;
+  try {
+    summaryResult = await confirmFor({ ...(await fresh()), statsId }, OWNER, [summaryProposal], OWNER);
+  } finally {
+    redis.pipeline = base;
+  }
+  is("refused as changed since, the creator's summary kept", [summaryEdited, summaryResult.refused.map((r) => r.why), (await readListing(await fresh(), product))?.summary], [true, ["changed_since"], "The creator's own summary."]);
   done();
 }
 

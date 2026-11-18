@@ -76,6 +76,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "companies", title: "See the companies you sell to", segment: "companies", permission: "orders", words: ["company", "companies", "business", "school", "team", "organization", "b2b", "client"] },
   { id: "plan-bills", title: "See what you paid for your Marktmorgen plan", segment: "invoices", permission: "billing", words: ["billing history", "plan receipt", "subscription billing", "what i paid", "plan payments"] },
   { id: "blog", title: "Write a blog post", segment: "blog", permission: "page", words: ["blog", "post", "article", "seo", "write", "search engine"] },
+  { id: "first-product", title: "Make your first product", segment: "first-product", permission: "products", words: ["first product", "create", "guide", "pdf", "draft"] },
   { id: "forms", title: "Make a form, a survey or a quiz", segment: "forms", permission: "page", words: ["form", "survey", "quiz", "application", "questionnaire", "questions"] },
   { id: "meetings", title: "Get a video call link for each booking", segment: "meetings", permission: "settings", words: ["zoom", "google meet", "video call", "meeting", "call link", "webinar"] },
   { id: "community", title: "Run your members' community", segment: "community", permission: "community", words: ["community", "members", "forum", "group", "space", "posts"] },

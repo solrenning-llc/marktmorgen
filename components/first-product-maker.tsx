@@ -365,7 +365,7 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
                       <legend className="field-hint">{PRICE_WORDS.points}</legend>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {startingPoints(currency).map((cents) => (
-                          <button key={cents} type="button" className="btn btn-secondary btn-sm min-h-11" aria-pressed={price === String(cents / 100)} onClick={() => { setPrice(String(cents / 100)); setDraftState({ kind: "idle" }); }}>
+                          <button key={cents} type="button" className="btn btn-secondary btn-sm inline-flex min-h-11 items-center justify-center" aria-pressed={price === String(cents / 100)} onClick={() => { setPrice(String(cents / 100)); setDraftState({ kind: "idle" }); }}>
                             {formatMoney(cents, currency)}
                           </button>
                         ))}

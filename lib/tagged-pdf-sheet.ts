@@ -13,43 +13,87 @@ const W = 612;
 const H = 792;
 const MARGIN = 72;
 const WIDTH = W - 2 * MARGIN;
+// A visual-only work bound. It matches FIRST_PRODUCT_LONG_WORD without inserting separators into source text.
+const LAYOUT_WORD_CHARS = 40;
 
 /**
  * The lines a paragraph takes at this size and width: words kept whole, a word longer than the width cut where it
  * must be. Each word is measured once and the line's width is the sum of its words and spaces, so the work grows
  * with the text, never with the text times the line (independent review of 490 [PP1], 12 November 2026).
  */
-export function wrap(font: Pick<PDFFont, "widthOfTextAtSize">, text: string, size: number, width: number): string[] {
-  const out: string[] = [];
+type WrappedLine = { draw: string; actual: string; replace: boolean };
+
+function wrappedText(font: Pick<PDFFont, "widthOfTextAtSize">, text: string, size: number, width: number): WrappedLine[] {
+  const out: WrappedLine[] = [];
   const space = font.widthOfTextAtSize(" ", size);
-  for (const paragraph of text.split("\n")) {
+  for (const [paragraphAt, paragraph] of text.split("\n").entries()) {
     let line = "";
     let lineWidth = 0;
-    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
-      const wordWidth = font.widthOfTextAtSize(word, size);
-      const tried = line ? lineWidth + space + wordWidth : wordWidth;
-      if (tried <= width) {
-        line = line ? `${line} ${word}` : word;
-        lineWidth = tried;
-        continue;
-      }
-      if (line) out.push(line);
-      // A word wider than the line is cut into pieces that fit.
-      let rest = word;
-      let restWidth = wordWidth;
-      while (restWidth > width) {
-        let cut = Array.from(rest).length - 1;
-        while (cut > 1 && font.widthOfTextAtSize(Array.from(rest).slice(0, cut).join(""), size) > width) cut -= 1;
-        out.push(Array.from(rest).slice(0, cut).join(""));
-        rest = Array.from(rest).slice(cut).join("");
-        restWidth = font.widthOfTextAtSize(rest, size);
-      }
-      line = rest;
-      lineWidth = restWidth;
+    let actual = "";
+    let replace = false;
+    let consumed = 0;
+    let first = true;
+    const words = [...paragraph.matchAll(/\S+/g)];
+    if (!words.length) {
+      out.push({ draw: "", actual: `${paragraphAt ? "\n" : ""}${paragraph}`, replace: false });
+      continue;
     }
-    out.push(line);
+    for (const found of words) {
+      const originalWord = found[0];
+      const originalBefore = `${first && paragraphAt ? "\n" : ""}${paragraph.slice(consumed, found.index)}`;
+      first = false;
+      consumed = found.index + originalWord.length;
+      const letters = Array.from(originalWord);
+      const visualWords = Array.from({ length: Math.ceil(letters.length / LAYOUT_WORD_CHARS) }, (_, at) => letters.slice(at * LAYOUT_WORD_CHARS, (at + 1) * LAYOUT_WORD_CHARS).join(""));
+      for (const [visualAt, word] of visualWords.entries()) {
+        const before = visualAt ? "" : originalBefore;
+        const splitForWork = visualWords.length > 1;
+        const wordWidth = font.widthOfTextAtSize(word, size);
+        const tried = line ? lineWidth + (before ? space : 0) + wordWidth : wordWidth;
+        if (tried <= width) {
+          line = line ? `${line}${before ? " " : ""}${word}` : word;
+          lineWidth = tried;
+          actual += before + word;
+          replace ||= splitForWork;
+          continue;
+        }
+        if (line) out.push({ draw: line, actual, replace });
+        // A word wider than the line is cut into pieces that fit.
+        let rest = word;
+        let restWidth = wordWidth;
+        let wordPrefix = before;
+        while (restWidth > width) {
+          const letters = Array.from(rest);
+          // Find the widest fitting prefix in logarithmic probes. Walking back from the end makes a long pasted
+          // token quadratic; the PDF request is costed on linear/bounded layout work.
+          let low = 1;
+          let high = letters.length - 1;
+          while (low < high) {
+            const middle = Math.ceil((low + high) / 2);
+            if (font.widthOfTextAtSize(letters.slice(0, middle).join(""), size) <= width) low = middle;
+            else high = middle - 1;
+          }
+          const cut = low;
+          const piece = letters.slice(0, cut).join("");
+          out.push({ draw: piece, actual: wordPrefix + piece, replace: true });
+          wordPrefix = "";
+          rest = letters.slice(cut).join("");
+          restWidth = font.widthOfTextAtSize(rest, size);
+        }
+        line = rest;
+        lineWidth = restWidth;
+        actual = wordPrefix + rest;
+        replace = splitForWork || wordWidth > width;
+      }
+    }
+    actual += paragraph.slice(consumed);
+    out.push({ draw: line, actual, replace });
   }
   return out;
+}
+
+export function wrap(font: Pick<PDFFont, "widthOfTextAtSize">, text: string, size: number, width: number): string[] {
+  return wrappedText(font, text, size, width).map((line) => line.draw);
 }
 
 /** One piece of a sheet: a title (H1), a heading (H2) or a paragraph (P), in reading order. */
@@ -81,7 +125,7 @@ export async function taggedSheetPdf(texts: SheetText[], meta: { title: string; 
     // A heading is never left alone at the foot of a page: it moves on with the first line of what follows.
     const next = texts[at + 1];
     if (role !== "P" && next && y - lead(role) - lead(next.role) < MARGIN) turn();
-    const lines = wrap(font, text, size, WIDTH);
+    const lines = wrappedText(font, text, size, WIDTH);
     let from = 0;
     while (from < lines.length) {
       if (y - lead(role) < MARGIN) turn();
@@ -90,7 +134,13 @@ export async function taggedSheetPdf(texts: SheetText[], meta: { title: string; 
       const chunk = lines.slice(from, from + room);
       const current = page;
       const top = y;
-      tag.text(role, () => chunk.forEach((line, i) => current.drawText(line, { x: MARGIN, y: top - lead(role) * (i + 1), size, font, color: ink })));
+      // Visual wrapping may split one unbroken token across lines. ActualText keeps the element's source text
+      // exact for copy, search and assistive technology instead of exposing inferred spaces or line breaks.
+      tag.text(
+        role,
+        () => chunk.forEach((line, i) => current.drawText(line.draw, { x: MARGIN, y: top - lead(role) * (i + 1), size, font, color: ink })),
+        chunk.some((line) => line.replace) ? chunk.map((line) => line.actual).join("") : undefined,
+      );
       y -= lead(role) * chunk.length;
       from += chunk.length;
     }

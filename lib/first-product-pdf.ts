@@ -9,8 +9,8 @@
  * the format and the answers, so the browser cannot send more parts, or other kinds, than the format has.
  *
  * The work is bounded before it starts: a part holds at most FIRST_PRODUCT_MAX_PART characters, the whole file
- * FIRST_PRODUCT_MAX_TEXT and FIRST_PRODUCT_MAX_BREAKS line breaks, and a run of letters with no space longer than FIRST_PRODUCT_LONG_WORD (a pasted link)
- * is broken into pieces of that length, so the line layout never has to search a long word letter by letter.
+ * FIRST_PRODUCT_MAX_TEXT and FIRST_PRODUCT_MAX_BREAKS line breaks. Long unbroken runs stay byte-for-byte intact;
+ * the bounded sheet layout wraps them for drawing without rewriting the creator's text.
  * Made on request and kept nowhere. Server only (the fonts).
  */
 import { FIRST_FORMATS, type FirstFormat, outlineFor, placeholderTitle } from "@/lib/first-product";
@@ -19,7 +19,7 @@ import { type SheetText, taggedSheetPdf } from "@/lib/tagged-pdf-sheet";
 import { FIRST_PRODUCT_MADE_FORMATS, FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT } from "@/lib/first-product-limits";
 
 export { FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT };
-/** A run of letters with no space longer than this is broken into pieces of this length. */
+/** Legacy layout threshold kept for the priced-work registry; it must never be inserted into creator text. */
 export const FIRST_PRODUCT_LONG_WORD = 40;
 /** The largest request body the route reads: the whole file's text at four bytes a letter, with room for JSON. */
 export const FIRST_PRODUCT_BODY_BYTES = 300_000;
@@ -52,23 +52,12 @@ function clean(raw: unknown): string {
 
 const breaks = (text: string) => (text.match(/\n/g) ?? []).length;
 
-/** A run of letters with no space longer than FIRST_PRODUCT_LONG_WORD, cut into pieces of that length. */
+/**
+ * Kept for callers of the original helper: layout is now responsible for visual wrapping, so semantic text is
+ * returned unchanged. Inserting U+0020 here breaks links, search, copy and assistive reading.
+ */
 export function breakLongWords(text: string): string {
-  return text
-    .split("\n")
-    .map((line) =>
-      line
-        .split(" ")
-        .map((word) => {
-          const letters = Array.from(word);
-          if (letters.length <= FIRST_PRODUCT_LONG_WORD) return word;
-          const pieces: string[] = [];
-          for (let i = 0; i < letters.length; i += FIRST_PRODUCT_LONG_WORD) pieces.push(letters.slice(i, i + FIRST_PRODUCT_LONG_WORD).join(""));
-          return pieces.join(" ");
-        })
-        .join(" "),
-    )
-    .join("\n");
+  return text;
 }
 
 /**

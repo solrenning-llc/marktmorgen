@@ -107,8 +107,11 @@ export class PageTagger {
    */
   text(role: TagRole, draw: () => void, actualText?: string, cell?: { scope: CellScope }): void {
     const mcid = this.mcids++;
-    // An inline property list, `<< /MCID n >>`: pdf-lib writes a dictionary operand as it writes any object.
-    const props = this.pdf.context.obj({ MCID: mcid }) as unknown as PDFName;
+    // Include replacement text in the content stream as well as the structure tree, for text extraction.
+    const props = this.pdf.context.obj({
+      MCID: mcid,
+      ...(actualText ? { ActualText: PDFHexString.fromText(actualText) } : {}),
+    }) as unknown as PDFName;
     this.page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [PDFName.of(role), props]));
     draw();
     this.page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));

@@ -71,6 +71,11 @@ export type ErasureSize = {
   /** Dropped courses read whole (their lessons and modules), the person having a record there. */
   droppedRecords: number;
   /**
+   * Products noted in the store's set of products with private podcast feeds (lib/podcast-access.ts, nl:pod:pids:),
+   * removed ones included, which a deletion looks for the person's feeds in beside the catalog (#4471).
+   */
+  podcastProducts: number;
+  /**
    * The lines of the person's index of API answers kept under an Idempotency-Key (lib/api-idempotency.ts,
    * idempotentLines): each a record to delete and a line to take out (since 12 November 2026, review of #3542).
    */
@@ -85,11 +90,14 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
- * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (since 12 November 2026) the four on
- * a person's index of kept API answers (lib/api-idempotency.ts: its count, then the erasure's mark, its expiry and the
- * read), whatever it lists: 551 before them.
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4471) the private podcast feeds of
+ * removed products: the count of the store's noted products (SCARD), their set read with whether the walk of feeds
+ * granted before the note is done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most
+ * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (since 12 November 2026) the four on a person's index of kept
+ * API answers (lib/api-idempotency.ts: its count, then the erasure's mark, its expiry and the read), whatever it lists:
+ * 558 before them.
  */
-export const ERASE_FIXED_COMMANDS = 555;
+export const ERASE_FIXED_COMMANDS = 562;
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; and (since 12 November 2026) the four on the index of kept API answers, under 1,000 bytes
@@ -120,6 +128,11 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   // ZREM (64), each quoted: under 250 bytes.
   apiAnswers: [0, 300],
   apiAnswerBatches: [2, 0],
+  // A noted podcast product (#4471, lib/podcast-access.ts): the GET of the person's index for it, and its index's and
+  // cached answer's names in the deletion's DEL; its member in the set read (an id of at most 80 bytes), its index's
+  // name in a SCAN page (at most 204 bytes) and the index's reply (a 48-character token): counted at 1,000 bytes. A
+  // product still in the catalog is counted here too, over what it costs.
+  podcastProducts: [1, 1_000],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;

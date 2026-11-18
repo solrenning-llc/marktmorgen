@@ -25,8 +25,7 @@ import { addMonthsMs, allowanceWindow, anchorAfter, windowAt, windowId, type All
 import { takeAllowance } from "@/lib/store-allowance";
 import { ALLOWANCE_KINDS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { MOST_CORRECT_READING } from "@/lib/receiving-costs";
-import { netOf, worstCost } from "./plan-cost-model";
+import { worstMonthKept } from "./worst-month-kept";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -539,18 +538,16 @@ async function main(): Promise<void> {
     is("10g: a stop written inside the grace keeps the anchor", anchorAfter(lastPaidG, inGraceG, Date.UTC(2027, 3, 29, 11))?.subscriptionId, SUB);
 
     part("11. The worst month this keeps: one window per paid month, every limit used (the figures in the PR body)");
-    // The repository's own model: a month's receipts after every fee and reserve (netOf, lib/receiving-costs.ts), less
-    // every cost line at its limit (worstCost, tests/plan-cost-registry.ts), then the LC rule's taxes on that profit:
-    // IRPF 15% and IOF 0.38% (MOST_CORRECT_READING), the IOF taken on the profit sent home before the IRPF.
-    const taxShare = (MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000;
-    const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
+    // The repository's own model, one formula (tests/worst-month-kept.ts): a month's receipts after every fee and
+    // reserve, less every cost line at its limit, then the LC rule's taxes on that profit.
     // MR (owner, 27 October 2026): no plan may lose money in its worst month, on a monthly plan or in a month of a
     // yearly one. That is what is checked here, above zero, and no figure is written: every cost change used to edit
     // the figures and the notes beside them, and two such pull requests always conflicted on these lines (AGENTS.md
-    // AC (n); 33 of the 80 conflicts measured on 18 November 2026). The exact figures are in the generated documents
-    // (docs/margin-alignment-2026-10-18.md and the pricing documents), whose own tests fail when they are stale.
-    const month = worstMonth("month");
-    const year = worstMonth("year");
+    // AC (n); 33 of the 80 conflicts measured on 18 November 2026). The six exact figures are in
+    // docs/margin-alignment-2026-10-18.md, from the same formula, held by that document's staleness test (Claude 4's
+    // LOW on #4854). A refunded Store first year under US$66 is held by tests/email-logo-region.test.ts.
+    const month = worstMonthKept("month");
+    const year = worstMonthKept("year");
     is(`11: Store, Studio and Scale keep more than zero in their worst month on a monthly plan (now ${month.join(", ")})`, month.every((v) => Number(v) > 0), true);
     is(`11: and in a month of a yearly plan, a twelfth of the year paid (now ${year.join(", ")})`, year.every((v) => Number(v) > 0), true);
   } finally {

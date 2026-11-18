@@ -83,10 +83,10 @@ import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
-import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
-import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
+import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
@@ -1517,7 +1517,8 @@ export const HELD_EXPOSURE = {
 /**
  * DONO-3 company work for a closing store at or past its day (fourth pre-review, LEVE 3), outside paid-unit
  * COST_LINES like HELD_EXPOSURE, at most per store per daily run of the closing job:
- *   - kept past the published time: GET of its record, SET of its reason when it changes (overdueWhy), and the
+ *   - kept past the published time: GET of its record, its reason when it changes (overdueWhy) written only over the
+ *     state just read (CLOSING_STATE_SAVE's EVAL with its TYPE, GET and SET; Claude 4's LOW on #3501), and the
  *     monthly count's EVAL (HELD_ONCE);
  *   - its creator account refusing us: SET of its record (refusedFrom, refusedLast), HSET+EXPIRE of the day's
  *     account note, and four HLEN of the two days' notes; an account that answers: HSET+EXPIRE and, after a
@@ -1538,7 +1539,7 @@ export const HELD_EXPOSURE = {
  * number of stores in this state are unknown, never zero: no monthly total is certified here.
  */
 export const CLOSING_DEADLINE_WORK = {
-  overdueCommandsPerRun: 3,
+  overdueCommandsPerRun: 1 + (1 + 3) + 1,
   refusalCommandsPerRun: 1 + 2 + 4,
   silenceCommandsPerRun: 1 + 2 + 4,
   renewalNoticeCommandsOnce: 1,
@@ -2476,8 +2477,10 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "tests/store-data-registry.ts", names: ["closingBytes", "followedBytes", "TRIAL_UNITS"] },
       { file: "lib/data-families.ts", names: ["FOLLOWED_FAMILIES", "CLOSING"] },
       { file: "lib/order-data.ts", names: ["ORDER_KEY_BYTES"] },
+      { file: "lib/plan-closing.ts", names: ["stateSaver", "const check = async", "await save.check();", "await saveFinal.check();", "closeOne"] },
+      { file: "lib/closing-buyers-rules.ts", names: ["BUYER_NOTICE_DAYS", "BUYER_SEND_DAYS"] },
     ],
-    basis: "Once for each store, so against each of its payments: a store that paid one month and closed carries all of it in that month's margin. Its keys deleted, the room's at the fewest bytes a key it counts can weigh and the rest at a mark's, DEL_BATCH at a command, each name sent back once: no longer than KEY_NAME_BYTES, and never more than that share of a key beside the ORDER_KEY_BYTES the room charges it, which the registry counts beside every key too (what Redis keeps beside it); its ENDED_STORE_EXPORTS whole exports once its plan has ended, its own and never refused, each at the largest store there can be: its room and its record, every product, course, lesson, post and form there can be, read together, and every page of its sales at Stripe; its ENDED_LIST_DOWNLOADS list downloads once its plan has ended, its own and never taken from its studio figure, each at the largest list its room and its record can hold (endedListDownloadCost); what its followers read, the room and what they read outside it, FOLLOW_BATCH entries at a command; and its last steps' commands, for its owner and every one of its team as a host. The walk's own time is its schedule's. Its id left in a person's records across stores that are the company's (the lists they joined, an affiliate's hub: tests/store-data-registry.ts) is the company's as those records are, and runs out with the quarter it was written in (lib/joined-stores.ts).  Reading the whole database to find its keys is the company's, a scheduled job bounded by its schedule (docs/funded-exposure-review.md). What an order leaves for it, a buyer's library entry and a renewal to stop, is in the order's cost (ORDER_COST); what it writes once its plan has ended is a store that pays nothing's, in the share of those (nonPayingWorst). A store its owner deletes from the studio (lib/store.ts deleteStore) takes the same walk instead, once, and never also closes, since its record goes with it: its marks read and its entry written under its lock (queueDeleted, the same reads as prepareStore's), its record read again and its entry rewritten or dropped when a walk begins (admitDeleted), each in one script and only over the exact entry read (BATCH_SWAP: the same one command as the plain write it replaces, with Lua's own HGET inside it), and its keys deleted and followed as a closed store's, with no export and no closing record; so its cost is this line's, already in its payments' worst case or, for a store that never paid, in nonPayingWorst (closureCost(\"creator\", true)), and its commands are within PREPARE_COMMANDS: its marks' reads within the hundred, and none of the (1 + MAX_TEAM) × (2 × 50 + 5) a closing store's hosts' claims take, in whose place its admission, once its record reads gone, does again what its delete does after the record (Claude 6's two LOWs and reviewer C3 on #3670): one DELETED_HOLD script for each address that still led to it (MAX_ADDRESSES at the most) and four removals (settleDeletedStore), and its webhooks, API keys and assistant notes forgotten once more (forgetBoth, FORGET_TRY_COMMANDS less the line's four) or, when that fails, the line's own commands (queueStoreForget, within those four), so at most 1 + MAX_ADDRESSES + 4 + FORGET_TRY_COMMANDS + 1 commands an admission, run again only on a run after one not confirmed. Its later tries in that line are the company's, as a delete's are (FORGET_TRIES).",
+    basis: "Once for each store, so against each of its payments: a store that paid one month and closed carries all of it in that month's margin. Its keys deleted, the room's at the fewest bytes a key it counts can weigh and the rest at a mark's, DEL_BATCH at a command, each name sent back once: no longer than KEY_NAME_BYTES, and never more than that share of a key beside the ORDER_KEY_BYTES the room charges it, which the registry counts beside every key too (what Redis keeps beside it); its ENDED_STORE_EXPORTS whole exports once its plan has ended, its own and never refused, each at the largest store there can be: its room and its record, every product, course, lesson, post and form there can be, read together, and every page of its sales at Stripe; its ENDED_LIST_DOWNLOADS list downloads once its plan has ended, its own and never taken from its studio figure, each at the largest list its room and its record can hold (endedListDownloadCost); what its followers read, the room and what they read outside it, FOLLOW_BATCH entries at a command; and its last steps' commands, for its owner and every one of its team as a host; and its daily visits from its plan's end to the walk (closeOne), CLOSING_VISIT_DAYS of them, each at CLOSING_VISIT_COMMANDS commands with the check that its closing state is still the one it read (one GET, Claude 7 on #3501) and its record read back (closingVisitCost, measured in tests/closing-visit-cost.test.ts); a store held past those days is visited again each day as a company exposure with no reviewed ceiling (CLOSING_HELD_VISITS, unknown, never zero). The walk's own time is its schedule's. Its id left in a person's records across stores that are the company's (the lists they joined, an affiliate's hub: tests/store-data-registry.ts) is the company's as those records are, and runs out with the quarter it was written in (lib/joined-stores.ts).  Reading the whole database to find its keys is the company's, a scheduled job bounded by its schedule (docs/funded-exposure-review.md). What an order leaves for it, a buyer's library entry and a renewal to stop, is in the order's cost (ORDER_COST); what it writes once its plan has ended is a store that pays nothing's, in the share of those (nonPayingWorst). A store its owner deletes from the studio (lib/store.ts deleteStore) takes the same walk instead, once, and never also closes, since its record goes with it: its marks read and its entry written under its lock (queueDeleted, the same reads as prepareStore's), its record read again and its entry rewritten or dropped when a walk begins (admitDeleted), each in one script and only over the exact entry read (BATCH_SWAP: the same one command as the plain write it replaces, with Lua's own HGET inside it), and its keys deleted and followed as a closed store's, with no export and no closing record; so its cost is this line's, already in its payments' worst case or, for a store that never paid, in nonPayingWorst (closureCost(\"creator\", true)), and its commands are within PREPARE_COMMANDS: its marks' reads within the hundred, and none of the (1 + MAX_TEAM) × (2 × 50 + 5) a closing store's hosts' claims take, in whose place its admission, once its record reads gone, does again what its delete does after the record (Claude 6's two LOWs and reviewer C3 on #3670): one DELETED_HOLD script for each address that still led to it (MAX_ADDRESSES at the most) and four removals (settleDeletedStore), and its webhooks, API keys and assistant notes forgotten once more (forgetBoth, FORGET_TRY_COMMANDS less the line's four) or, when that fails, the line's own commands (queueStoreForget, within those four), so at most 1 + MAX_ADDRESSES + 4 + FORGET_TRY_COMMANDS + 1 commands an admission, run again only on a run after one not confirmed. Its later tries in that line are the company's, as a delete's are (FORGET_TRIES).",
   },
 ];
 
@@ -2511,6 +2514,41 @@ export const WALK_START_READ_COMMANDS = 1;
  */
 export const PLAN_RUNS_READ_COMMANDS = 1;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS;
+
+/**
+ * Commands one daily visit of a closing store sends at the most (lib/plan-closing.ts, closeOne), outside what a
+ * buyer's or a member's share already prices (CLOSING_BUYER_COST): its place in the final line, its record, the
+ * creator's break, its closing state read, the check that the state is still the one the visit read before it acts
+ * on it (stateSaver's check: one GET, also before the lost-day branch stops renewals), its start or a save, the hold
+ * line and its work's counts. A review ceiling over every visit of a whole closing measured in
+ * tests/closing-visit-cost.test.ts, the lost-day branch's included (Claude 7 on #3501, 6891502895 and 6892785667).
+ */
+export const CLOSING_VISIT_COMMANDS = 16;
+/** What one such visit reads back at the most: its record at MAX_STORE_BYTES, and 128 KB for its state, its marks and its work's counts (as HELD_EXPOSURE's retry). */
+export const CLOSING_VISIT_REPLY_BYTES = MAX_STORE_BYTES + 128 * 1024;
+/**
+ * The days a closing store is visited, once a day, from its plan's end to the walk: its CLOSING_DAYS, the week a late
+ * last notice adds, the day its buyers' notices may start early, its closing day, and, when its state and its address
+ * mark were both lost, a notice's length more (its buyers not told yet are told first) and the day it then closes;
+ * and, once closed ("removed"), the ERASE_WITHIN_DAYS it stays in the final line until the walk deletes its records
+ * and takes it out (lib/closed-store-data.ts), each day visited again (Claude 5 on #3501, 6907073223 and 6914305400).
+ */
+export const CLOSING_VISIT_DAYS = CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS + 1 + BUYER_NOTICE_DAYS + 1 + ERASE_WITHIN_DAYS;
+/** One daily visit of a closing store, in dollars: its commands and what it reads back. */
+export function closingVisitCost(): number {
+  return CLOSING_VISIT_COMMANDS * COMMAND + CLOSING_VISIT_REPLY_BYTES * DB_BYTE;
+}
+/**
+ * A closing store held past those days (no company postal address yet, a notice that could not be sent, Stripe that
+ * could not be asked) is visited again every day, at closingVisitCost, for as long as it is held. No reviewed ceiling
+ * bounds how many are held or for how long, so the complete figure is unknown (null), never zero, as HELD_EXPOSURE's:
+ * a company exposure outside the paid units, not a part of closure.
+ */
+export const CLOSING_HELD_VISITS = { monthlyVisits: 31, reviewedHeldStoreCeiling: null, reviewedHeldDaysCeiling: null, completeMonthlyCostUsd: null } as const;
+/** One held closing store's visits in a month, modeled; the complete figure stays unknown (null). */
+export function closingHeldMonthlyExposure(): { modeledUsd: number; completeUsd: null } {
+  return { modeledUsd: CLOSING_HELD_VISITS.monthlyVisits * closingVisitCost(), completeUsd: null };
+}
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command, each page with a read of the store's fields' values for its people a field (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {
@@ -2560,7 +2598,7 @@ export function endedListDownloadCost(bytes: number): number {
  * of this plan, or a free trial's (`trial`, its room and its units). The
  * parts are said in the basis of the line closure.
  */
-export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; prepare: number; total: number } {
+export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; prepare: number; visits: number; total: number } {
   const room = trial ? NON_PAYING_DATA_ROOM_BYTES.trial : DATA_ROOM_BYTES[tier];
   const roomKeys = room / ORDER_KEY_BYTES;
   const keys = roomKeys + closingBytes(tier, trial) / MARK;
@@ -2572,9 +2610,10 @@ export function closureCost(tier: Tier, trial = false): { deletes: number; follo
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
     prepare: PREPARE_COMMANDS * COMMAND,
+    visits: CLOSING_VISIT_DAYS * closingVisitCost(),
     total: 0,
   };
-  out.total = out.deletes + out.follows + out.exports + out.lists + out.prepare;
+  out.total = out.deletes + out.follows + out.exports + out.lists + out.prepare + out.visits;
   return out;
 }
 
@@ -2874,6 +2913,9 @@ export const NOT_A_COST: Record<string, string> = {
   DISPUTE_READS_PER_READING: "Questions about a dispute (GET /disputes?charge=) one reading of a store's booked calls may ask Stripe, only for a charge Stripe marks as disputed (lib/calls.ts, callOrLost; lib/refunds.ts, keptUnlessLost); one for a booking read alone (paidCall). Past it, or when Stripe cannot be asked, the booking keeps its time. No store command and no other call; Stripe bills no API call: bounded by the readings the store's own pages and jobs already make, whose costs are their own lines.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",
+  UPDATE_END_NOTICE_TRIES: "Tries, a day apart, of the one company email that tells a creator a product update which waited to the end of its 60 days was not sent to everyone (lib/product-updates.ts, tellEnded; Claude 7 on #3403, MEDIUM 1): at most UPDATE_END_NOTICE_TRIES emails on the company meter for each such send, under one idempotency key, and a send waits only while its store is switched off or its plan has no email, so at most one a send. Like the mail job's other company notices, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
+  UPDATE_HELD_LOOK_SECONDS: "How long a product update held while its store is switched off rests between looks (lib/product-updates.ts, hold and advanceUpdates; Claude 7 on #3403, MEDIUM 2): out of the five-minute queue (nl:updq) into nl:updheld, so a held send is read once a day, not every run: at most 60 looks in its 60 days (and UPDATE_END_NOTICE_TRIES - 1 more while its creator's notice is retried), each the lock's claim and release, the send's GET, its store's read and one SET, then one ZADD and, once it is confirmed, one SREM (Codex V on #3403: the source is kept until the destination is confirmed), instead of the 17,280 runs of a send polled every five minutes; each run of the mail job adds one ZRANGEBYSCORE of the held set and, when any are due, one SADD and, once it is confirmed, one ZREM. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
+  UPDATE_HELD_PER_RUN: "Held product updates one run of the mail job puts back in the queue at most (lib/product-updates.ts, advanceUpdates): one ZRANGEBYSCORE with this LIMIT, then one SADD and one ZREM; the rest wait for the next run. The cost of each held send is UPDATE_HELD_LOOK_SECONDS's.",
   VERCEL_CPU_MICRO_USD_PER_HOUR: "A rate, not a cap.",
   ASKS_PER_TEN_MINUTES: "A burst limit under ANSWERS_MONTHLY (line ai).",
   STORE_ASKS_PER_MINUTE: "A burst limit under ANSWERS_MONTHLY (line ai).",
@@ -3015,7 +3057,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],
   "app/api/store/mail/route.ts": MONTHLY, "lib/api-write.ts": MONTHLY, "lib/community-mail.ts": MONTHLY, "lib/flows.ts": MONTHLY,
-  "lib/imports.ts": MONTHLY, "lib/product-updates.ts": MONTHLY, "lib/review-requests.ts": MONTHLY,
+  "lib/imports.ts": MONTHLY, "lib/product-updates.ts": ["monthly", "company"], "lib/review-requests.ts": MONTHLY,
   "lib/mail.ts": ["monthly", "company"],
   "lib/call-packages.ts": ORDER, "lib/call-reminders.ts": ORDER, "lib/free.ts": ORDER, "lib/gifts.ts": ORDER, "lib/group-buy.ts": ["order", "store"],
   // Active shipment delivery uses sendQueuedShipmentMail in lib/email.ts.

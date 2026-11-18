@@ -10,8 +10,8 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.39% / 60.14% | 12.13% | 434 | $69 / $690 |
-| Studio | **$869 / $8,690** | every #553 figure, none cut | 61.17% / 60.85% | 12.43% | 17 | $449 / $4,490 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.39% / 60.14% | 12.13% | 435 | $69 / $690 |
+| Studio | **$869 / $8,690** | every #553 figure, none cut | 61.16% / 60.85% | 12.43% | 17 | $449 / $4,490 |
 | Scale | **$1,799 / $17,990** | every #553 figure, none cut | 61.24% / 60.90% | 12.46% | 8 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).
@@ -142,7 +142,7 @@ R² 0.635 (adjusted 0.552), main; 0.678 (adjusted 0.620), robustness. Each step 
 
 **Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to twice today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).
 
-**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 4¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
+**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 3¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
 
 **Objective.** Demand at each price is q = (price ÷ the band's median price)^ε, one scenario for each ε in −0.5, −1, −1.5 and −2; the objective is the sum over plans of q times the monthly payment's net at full use: **a profit index in dollars per customer the band's median price would bring**, comparable within a scenario only. No scenario is a measurement: no sale has ever been open.
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 434 |
+| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 435 |
 | Studio | $869 | 21.0% | 20.6% / 1.4% / 10.6% / 21.0% | 17 |
 | Scale | $1,799 | 23.6% | 23.6% / 1.6% / 11.9% / 23.5% | 8 |
 
@@ -178,14 +178,14 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: none finite | $79: none finite | $99: none finite | $129: none finite |
-| Studio | $449: none finite | $559: none finite | $669: 2034 | $889: 15 |
+| Studio | $449: none finite | $559: none finite | $669: 2106 | $889: 15 |
 | Scale | $999: none finite | $1,239: none finite | $1,489: 25 | $1,989: 6 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
 
 | Plan | ε -0.5: C over A | ε -1: C over A | ε -1.5: C over A | ε -2: C over A |
 | --- | --- | --- | --- | --- |
-| Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.13× ($149 against $189) | 1.27× ($149 against $189) |
+| Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.12× ($149 against $189) | 1.27× ($149 against $189) |
 | Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.40× ($349 against $679) | 1.95× ($349 against $679) |
 | Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.45× ($649 against $1,359) | 2.10× ($649 against $1,359) |
 
@@ -202,7 +202,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Studio | ai | 4 | $599 | 1.06× | 1.13× |
 | Studio | video | 3 | $669 | 1.01× | 1.01× |
 | Studio | storage | 4 GB | $649 | 1.02× | 1.05× |
-| Studio | orders | 45 | $659 | 1.01× | 1.03× |
+| Studio | orders | 45 | $659 | 1.02× | 1.03× |
 | Studio | store-email | 30 | $669 | 1.01× | 1.01× |
 | Studio | transactional-email | 40 | $669 | 1.01× | 1.01× |
 | Studio | list-email | 700 | $539 | 1.12× | 1.26× |

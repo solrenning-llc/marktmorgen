@@ -489,7 +489,12 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
           left = true;
           continue;
         }
-        if (standing === "shut" && (await withdrawForRefund(product.course!.id, sale!.email))) withdrawn += 1;
+        if (standing !== "shut") continue;
+        const done = await withdrawForRefund(product.course!.id, sale!.email);
+        if (done.changed) withdrawn += 1;
+        // The student's list walked only part way (lib/certificate.ts, REFUND_WALK_IDS): the row comes back on a later
+        // pass, inside the month's checks, and goes on from the walk's place.
+        if (done.more) left = true;
       }
       if (left) return await wait();
       // Marked read once handled: a pass that stops halfway leaves it to the next, which does the same again.

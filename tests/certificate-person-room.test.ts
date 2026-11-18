@@ -51,14 +51,14 @@ async function main(): Promise<void> {
   const beforeEve = await used();
   const eve = await issueCertificate(input("eve@example.com", "Eve Stone"));
   if (!eve.ok) throw new Error("not issued");
-  is("withdrawn for the refund", await withdrawForRefund(course.id, "eve@example.com"), true);
+  is("withdrawn for the refund", (await withdrawForRefund(course.id, "eve@example.com")).changed, true);
   is("Eve deleted", await forgetCertificatesPerson([course.id], "eve@example.com", ROOM), 1);
   is("the room is back where it was, not below it", await used(), beforeEve);
   const beforeFay = await used();
   const fay = await issueCertificate(input("fay@example.com", "Fay Lin"));
   if (!fay.ok) throw new Error("not issued");
   is("withdrawn by the creator first", await withdrawCertificate(course.id, fay.certificate.id), true);
-  is("then the refund marks it", await withdrawForRefund(course.id, "fay@example.com"), true);
+  is("then the refund marks it", (await withdrawForRefund(course.id, "fay@example.com")).changed, true);
   is("Fay deleted", await forgetCertificatesPerson([course.id], "fay@example.com", ROOM), 1);
   is("the room is back where it was for her too", await used(), beforeFay);
 

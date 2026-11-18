@@ -1503,11 +1503,16 @@ export const CERTIFICATE_PASS_RUN_BYTES = 2 * (2 * 100 * LOST_DISPUTE_PAGES + 10
  * Commands of one of the month's checks, at the most (a row marked handled, or a course its checkout gave): the INCRBY and
  * EXPIRE that take it, the listing's GET and SCARD, the buyer's courses (DEL of the kept answer, courseLedger's
  * pipeline of three and its SET, and a community's earned courses), the withdrawal (the slot's HGET and GET, the
- * record's GET, SET XX, HGET and HDEL, the slot read again, the student's list's SMEMBERS and MGET and a mark on an
- * earlier one) and the row's ZADD and EXPIRE, or, for a row left unknown, the ZADD and EXPIRE of its wait in their
- * place (tests/certificate-refund-pass-cost.test.ts measures one under it).
+ * record's GET, SET XX, HGET and HDEL, the slot read again, then one step of the walk of the student's list) and the
+ * row's ZADD and EXPIRE, or, for a row left unknown, the ZADD and EXPIRE of its wait in their place
+ * (tests/certificate-refund-pass-cost.test.ts measures one under it). The walk's step, at its worst (lib/certificate.ts
+ * withdrawForRefund; Codex N1, U and X6 on #3409: the list was read whole with SMEMBERS, with no ceiling): its place's
+ * GET and its kept ids' LRANGE, a SSCAN page and its SET, RPUSH and EXPIRE, the MGET of REFUND_WALK_IDS records, the
+ * withdrawal of one still standing (its GET, SET XX, HGET and HDEL), the LTRIM and LLEN, and the end's SET and DEL:
+ * 15 where the whole read took 3 (SMEMBERS, MGET and a mark), whatever the list holds
+ * (tests/certificate-refund-walk-bound.test.ts).
  */
-export const CERTIFICATE_PASS_CHECK_COMMANDS = 32;
+export const CERTIFICATE_PASS_CHECK_COMMANDS = 32 - 3 + 15;
 
 /**
  * Commands of one take of the part of the month's checks kept for rows tried again (second focal review of #3409,

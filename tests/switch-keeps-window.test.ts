@@ -641,7 +641,10 @@ async function main(): Promise<void> {
     // costs together: 44.31, 309.47 and 693.74, the same as main; still above zero (MR). Cost is not lowered.
     // Merge of main into #3409 (18 November 2026, Claude 6 cloud, main e5c3badd09): main's model and this PR's lines
     // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 44.29, 309.40 and 693.42 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.29", "309.40", "693.42"]);
+    // #3409, the refund's walk of a student's list priced per check (Codex N1, U and X6; CERTIFICATE_PASS_CHECK_COMMANDS
+    // 32 -> 44): Studio 309.40 -> 309.38 and Scale 693.42 -> 693.32 a month, yearly 36.24, 254.27, 570.14 -> 36.23,
+    // 254.25, 570.04; figures as the model computes them, still above zero (MR). Cost is raised, not lowered.
+    is("11: Store, Studio and Scale keep 44.29, 309.38 and 693.32 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.29", "309.38", "693.32"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -697,7 +700,7 @@ async function main(): Promise<void> {
     // together, yearly 36.25, 254.64, 570.90 -> 36.25, 254.64, 570.89; as the model computes them, still above zero (MR); no cost lowered.
     // Merge of main dadc1cafe9 into #4831 (18 November 2026, Claude 5 ibqho): 36.25, 254.34 and 570.46, the same as main;
     // figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: and 36.24, 254.27 and 570.14 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.24", "254.27", "570.14"]);
+    is("11: and 36.23, 254.25 and 570.04 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.23", "254.25", "570.04"]);
   } finally {
     Date.now = realNow;
   }

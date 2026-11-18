@@ -6,7 +6,8 @@
  * Synthetic data only (tests/community-mail-read-world.ts).
  */
 import { advanceAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
-import { batchKeptKey } from "@/lib/batch-count";
+import { readFileSync } from "node:fs";
+import { BATCH_KEPT_SECONDS, batchKeptKey } from "@/lib/batch-count";
 import { db, members, released, reserved, reset, sent, setBatchAnswer, store } from "./community-mail-read-world";
 import { done, is, part } from "./check";
 
@@ -77,19 +78,23 @@ async function main(): Promise<void> {
   is("and sent after that: still counted once", [held(), after?.status], [2, "sent"]);
 
   /*
-   * Amazon's lost answer is not Resend's (#4073 MEDIUM 1, Claude 3 cloud G): Amazon has no key that drops a second
-   * post, so the same batch tried again writes again to whoever Amazon took and did not confirm. Its count is kept,
-   * never given back, and never marked: the retry is counted again, as it may be a second real email.
+   * Amazon's lost answer is kept and marked like Resend's (Codex X6 on #4073, replacing #4073 MEDIUM 1): the same batch
+   * tried again never posts to whoever Amazon may have taken (lib/email.ts dispatchBatch, notMaybeTaken; held in
+   * tests/outage-ses-batch-uncertain.test.ts), so counting the retry again charged the store for emails that never went.
    */
-  part("A batch Amazon may have taken keeps its count, and its retry is counted again");
+  part("A batch Amazon may have taken keeps its count, and its retry is counted once");
   seed();
   setBatchAnswer("unconfirmed");
   const unsure = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
   is("Amazon's answer lost: the two emails stay counted, the job tried again later", [held(), unsure?.status, unsure?.failures], [2, "sending", 1]);
-  is("no mark excuses its retry", db.run(["EXISTS", batchKeptKey(`cm:${id}:0:${keys.length}`, members.map((m) => m.e))]), 0);
+  is("its count is marked for the retry", db.run(["EXISTS", batchKeptKey(`cm:${id}:0:${keys.length}`, members.map((m) => m.e))]), 1);
   setBatchAnswer("sent");
   const again = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
-  is("tried again and sent: counted again, two posts, two counts", [held(), again?.status], [4, "sent"]);
+  is("tried again and sent: counted once, not twice", [held(), again?.status], [2, "sent"]);
+  // The kept mark always ends before Amazon's possibly-taken mark (written first, before Amazon is asked): a retry
+  // that Amazon could write to again (the possibly-taken mark gone) is never excused from its count.
+  const maybeSeconds = /const DID_SECONDS = (\d+) \* 86_400;/.exec(readFileSync("lib/ses.ts", "utf8"));
+  is("the kept mark (23 hours) ends before Amazon's possibly-taken mark (two days)", Boolean(maybeSeconds) && BATCH_KEPT_SECONDS < Number(maybeSeconds![1]) * 86_400, true);
 
   // Once sent, the batch's mark goes: nothing is left to excuse a later batch from its count.
   is("no mark is left once the batch was sent", db.run(["EXISTS", batchKeptKey(`cm:${id}:0:${keys.length}`, members.map((m) => m.e))]), 0);

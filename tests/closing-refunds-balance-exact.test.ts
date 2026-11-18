@@ -24,6 +24,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input instanceof Request ? input.url : input));
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/balance") return Response.json(balance);
+  // The invoice and its whole list of payments, read before every refund since #4428 (Codex X5: a payment kept when the
+  // member was held is a hint, never proof that it is the invoice's only one): paid by this one payment.
+  if (path.startsWith("/invoices/")) return Response.json({ id: decodeURIComponent(path.slice("/invoices/".length)), object: "invoice", payment_intent: null });
+  if (path === "/invoice_payments") return Response.json({ object: "list", has_more: false, data: [{ id: "inpay_onepayment", object: "invoice_payment", invoice: url.searchParams.get("invoice"), status: "paid", payment: { type: "payment_intent", payment_intent: INTENT } }] });
   if (path === `/payment_intents/${INTENT}`) return Response.json({ id: INTENT, object: "payment_intent", latest_charge: charge });
   if (path === "/refunds" && init?.method === "POST") {
     posts += 1;

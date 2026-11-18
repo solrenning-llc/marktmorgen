@@ -627,9 +627,27 @@ export async function forgetCrm(statsId: string | null): Promise<void> {
     throw error;
   });
   const answers = fields ? [fieldsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))] : [];
-  await redisPipeline([["DEL", stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers]]);
-  await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
+  const keys = [stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers];
+  // Each DEL's own count read exactly (#4675, CX-123 rule 24): a whole number from 0 to the keys sent. A reply
+  // that is missing or of another shape is unknown and throws, so the store's closing never counts it as done.
+  // The first DEL's verdict is kept, and the DEL under the tasks' lock is sent all the same, so tasks written back by
+  // a change read before the first DEL still go when its reply could not be read; then the first failure is thrown
+  // (Claude 6 on #4693), as an unread fields record is (delete everything that can go, then say what could not).
+  let first: unknown = null;
+  try {
+    confirmDeleted(await redisPipeline([["DEL", ...keys]]), keys.length, "a store's CRM records");
+  } catch (error) { first = error; }
+  try {
+    confirmDeleted(await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]])), 1, "a store's CRM tasks");
+  } catch (error) { first ??= error; }
+  if (first) throw first;
   if (!fields) throw new CrmSchemaReadUnavailable();
+}
+
+/** One DEL's own count, read exactly: a whole number from 0 to the keys it was sent, or UnknownReplyError. */
+function confirmDeleted(replies: unknown, keys: number, what: string): void {
+  const count = replyCount(repliesFor(replies, 1)?.[0]);
+  if (count === null || count > keys) throw new UnknownReplyError(what);
 }
 
 /** One person's value of a field deleted, answered with what it was (null when there was none). */
@@ -865,8 +883,12 @@ export async function readPersonTasks(statsId: string | null, person: string): P
  */
 export async function taskPeople(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [fields, counted] = await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]);
-  return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
+  // Rule 24: HLEN and HEXISTS as Redis answered them, or unknown; never "nobody has tasks".
+  const replies = repliesFor(await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]), 2);
+  const fields = replyCount(replies?.[0]);
+  const counted = replies?.[1];
+  if (fields === null || (counted !== 0 && counted !== 1)) throw new TasksUnreadable("the store's task count reply");
+  return Math.max(0, fields - counted);
 }
 
 /**
@@ -969,7 +991,11 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (added > 0 && count === null) {
     // No count yet: none is needed for a store with no tasks; one that has
     // some has every task read, once, paid for first.
-    const people = Math.max(0, (Number(fields) || 0) - (kept === null || kept === undefined ? 0 : 1));
+    // Rule 24: a reply that is not a whole count is unknown, never a store with
+    // no tasks, which would start the count over from this change alone.
+    const fieldCount = replyCount(fields);
+    if (fieldCount === null) throw new TasksUnreadable("the store's task count reply");
+    const people = Math.max(0, fieldCount - (kept === null || kept === undefined ? 0 : 1));
     if (people > 0) {
       const units = tasksRecountUnits(people);
       if (units > paid) return { units };
@@ -1027,6 +1053,9 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
 /** How many deals the store keeps: what deleting a person reads (lib/person-erasure.ts). */
 export async function dealCount(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["HLEN", dealsKey(statsId)]]);
-  return Number(n) || 0;
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const n = replyCount(repliesFor(await redisPipeline([["HLEN", dealsKey(statsId)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the count of the store's deals");
+  return n;
 }

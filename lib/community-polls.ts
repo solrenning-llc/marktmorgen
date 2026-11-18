@@ -127,7 +127,9 @@ const VOTE_TRIES = 5;
 /**
  * A member's vote record (KEYS[1], field ARGV[1]) set to ARGV[3] ("" deletes it) only while it still holds ARGV[2]
  * ("" for none), with the tally (KEYS[2]) moved by each option and delta pair from ARGV[6] and the member's trace entry
- * ARGV[4] (KEYS[3]) added ("1") or removed ("-1") in the same step. 1 when written, 0 when the record had changed.
+ * ARGV[4] (KEYS[3]) added ("1") or removed ("-1") in the same step. 1 when written, 2 when written and the SREM took
+ * the trace entry out (it comes back to the room only then: a deletion of the member takes the whole trace), 0 when the
+ * record had changed.
  */
 export const POLL_VOTE_SWAP = `-- marktmorgen:community-poll-vote:v1
 local held = redis.call('HGET', KEYS[1], ARGV[1])
@@ -135,7 +137,7 @@ if not held then held = '' end
 if held ~= ARGV[2] then return 0 end
 for i = 6, #ARGV, 2 do redis.call('HINCRBY', KEYS[2], ARGV[i], ARGV[i + 1]) end
 if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
-if ARGV[5] == '1' then redis.call('SADD', KEYS[3], ARGV[4]) elseif ARGV[5] == '-1' then redis.call('SREM', KEYS[3], ARGV[4]) end
+if ARGV[5] == '1' then redis.call('SADD', KEYS[3], ARGV[4]) elseif ARGV[5] == '-1' and redis.call('SREM', KEYS[3], ARGV[4]) == 1 then return 2 end
 return 1`;
 
 /**
@@ -212,8 +214,10 @@ async function castVote(id: string, post: string, who: string, picked: string[],
       if (taken.length) await giveData(room, taken);
       continue;
     }
-    if (swapped !== 1) throw new UnknownReply(what);
-    if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
+    if (swapped !== 1 && swapped !== 2) throw new UnknownReply(what);
+    // The trace's entry comes back only when this took it out (2; a deletion of the member takes the whole trace).
+    const untraced = traceOut && swapped === 2;
+    if (grown < 0 || untraced) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(untraced ? [TRACE_ENTRY] : [])]);
     return true;
   }
   throw new Error("The member's vote kept changing; nothing was counted");
@@ -301,10 +305,15 @@ export async function votesOf(id: string, who: string, postIds: string[]): Promi
   const out: { post: string; picked: string[] }[] = [];
   for (let i = 0; i < postIds.length; i += 500) {
     const batch = postIds.slice(i, i + 500);
-    const replies = await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who]));
+    // Read exactly (rule 24): only null is no vote. A vote is kept with at least one choice (vote() deletes the field
+    // otherwise), so any other reply, an empty one or a pipeline of another length is unknown, never "did not vote".
+    const replies = repliesFor(await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who])), batch.length);
+    if (!replies) throw new UnknownReplyError("a member's poll votes");
     batch.forEach((post, k) => {
       const raw = replies[k];
-      if (typeof raw === "string" && raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
+      if (raw === null) return;
+      if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a member's poll votes");
+      out.push({ post, picked: raw.split(",").filter(Boolean) });
     });
   }
   return out;

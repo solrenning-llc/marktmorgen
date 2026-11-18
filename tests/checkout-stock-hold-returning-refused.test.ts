@@ -80,6 +80,7 @@ async function main(): Promise<void> {
   const press = async (fields: Record<string, string>) => {
     const f = new FormData();
     f.set("handle", "hold4409shop");
+    f.set("billing_country", "US");
     f.set("product", dropId);
     for (const [k, v] of Object.entries(fields)) f.set(k, v);
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "x-forwarded-for": "198.51.100.77" } }));

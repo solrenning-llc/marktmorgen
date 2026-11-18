@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   if (!(await setProductBundle(OWNER, ids.Set, [ids.Bread, ids.Starter])).ok) throw new Error("bundle not set");
 
   part("A bundle and a product it already hands over, in one cart");
-  const form = withConsent(new URLSearchParams([["handle", "huntcbundle"], ["id", ids.Set], ["id", ids.Bread]]));
+  const form = withConsent(new URLSearchParams([["handle", "huntcbundle"], ["billing_country", "US"], ["id", ids.Set], ["id", ids.Bread]]));
   const response = await payCart(new NextRequest("https://marktmorgen.test/api/store/cart", {
     method: "POST",
     headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   redis.run(["SREM", `nl:wl:${statsId}:soon`, ids.Set]);
 
   part("A bundle and a product it does not hold still check out together");
-  const other = withConsent(new URLSearchParams([["handle", "huntcbundle"], ["id", ids.Set], ["id", ids.Jam]]));
+  const other = withConsent(new URLSearchParams([["handle", "huntcbundle"], ["billing_country", "US"], ["id", ids.Set], ["id", ids.Jam]]));
   await payCart(new NextRequest("https://marktmorgen.test/api/store/cart", {
     method: "POST",
     headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },

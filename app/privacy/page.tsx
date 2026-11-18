@@ -29,7 +29,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -75,7 +75,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you type for the bottom of your emails goes in those
+          emails only; it is shown on your store&apos;s public policies page too only
+          if you check the box for that where you type it, and comes off the
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When
@@ -425,7 +429,11 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}
@@ -1047,11 +1055,21 @@ export default function PrivacyPage() {
           section&apos;s count. On a store&apos;s own page it sends the furthest
           item they saw &mdash; a product, a link or a part of the page &mdash;
           where it stood, and the item they clicked, if any, and we add one to
-          that day&apos;s count of it. Each page decides at random to send this
-          for one visitor in eight, and for nobody else. On a sales page it can
+          that day&apos;s count of it. Our server picks one page view in eight
+          at random and gives only that page a random code, good for two hours
+          from when the page was shown; the page sends this once, with that
+          code, and we keep the code for those two hours only, so the same reading is
+          never counted twice. Each store counts at most a set number of these
+          readings a month, the same for every store on its plan, and past it a
+          reading is not counted. We keep how many readings came that month,
+          and nothing about who sent them, until a day after the month ends. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
-          when asked what was stopping them from buying. No cookie is set and
+          when asked what was stopping them from buying. On a sales page it also
+          says how long the page was open in front of them, as one of six ranges
+          (from under 10 seconds to 10 minutes or more), measured until they first
+          switch to another tab or app or leave, and we add one to that
+          range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.
         </p>
@@ -1583,8 +1601,10 @@ export default function PrivacyPage() {
           themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
-          every connection that user made, with its tokens, at once. If the
-          creator withdraws our access in their Google account, we stop using
+          every connection that user made, with its tokens, at once. We then
+          keep, for one day, a scrambled form of that Zoom user ID and the time
+          Zoom told us, only so that a connection being finished at that very
+          moment is not kept either. If the creator withdraws our access in their Google account, we stop using
           the connection and tell them, and disconnecting deletes it.
         </p>
         <p id="meta-ads" className="scroll-mt-24">

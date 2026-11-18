@@ -335,7 +335,12 @@ export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<s
   try {
     const [reply] = await redisPipeline([["HMGET", key, ...ids.map((id) => `b:${id}`)]]);
     if (!Array.isArray(reply) || reply.length !== ids.length) return null;
-    return new Set(ids.filter((_, i) => Number(reply[i] ?? 0) > 0));
+    // Read exactly (Codex P on #4846, MEDIUM): HMGET answers a share the pool's script wrote as a decimal whole number
+    // of bytes (it writes only above zero) and nothing for a slot without one. Any other value is not a share the pool
+    // wrote: the pool is unreadable, never "not held" (a share taken twice) nor "held" (a product counted nowhere).
+    const shares = reply.map((value) => (value === null ? 0 : typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null));
+    if (shares.some((share) => share === null)) return null;
+    return new Set(ids.filter((_, i) => (shares[i] ?? 0) > 0));
   } catch {
     return null;
   }

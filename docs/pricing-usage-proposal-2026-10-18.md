@@ -20,7 +20,7 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
 | Store | $136.90 | $1,432.75 | $69 / $690 |
-| Studio | $275.30 | $3,062.35 | $449 / $4,490 |
+| Studio | $275.30 | $3,062.40 | $449 / $4,490 |
 | Scale | $492.80 | $5,631.95 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.

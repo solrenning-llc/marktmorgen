@@ -28,9 +28,13 @@
  * built); a service a person gives live (its UK treatment is not recorded); the Isle of Man (inside the UK's VAT area
  * for some purposes, not settled here); a UK business's reverse charge (checking a UK VAT number needs an HMRC
  * developer application, an account not authorised): every UK buyer is charged UK VAT as a consumer, which never
- * understates the tax; whether an e-publication's zero rate applies (VAT Notice 701/10 not read): the standard rate.
+ * understates the tax; an e-publication (zero-rated in the UK under VAT Act 1994 Sch. 8 Group 3 as extended by
+ * SI 2020/459; VAT Notice 701/10 not read here, so what falls inside Group 3 is not settled): the TX policy forbids
+ * choosing the reading with more tax, so an electronic service is collected only when the product is classified as not
+ * an e-publication (`publication: false`), and an e-publication or an unclassified product is refused, never charged 20%.
  */
 import type { EuSupply } from "@/lib/eu-vat-supply";
+import { decimalsOf, isCurrency } from "@/lib/money";
 import { ukVatCollectOn } from "@/lib/vat-registrations";
 
 /**
@@ -98,10 +102,18 @@ export type UkCheckout =
   | { kind: "outside"; country: string }
   | { kind: "free" }
   | { kind: "collect"; vat: UkVat; place: Extract<UkPlace, { kind: "uk" }> }
-  | { kind: "refuse"; reason: "place" | "goods" | "human" | "supply" | "review" | "rate-expired" };
+  | { kind: "refuse"; reason: "place" | "goods" | "human" | "supply" | "review" | "rate-expired" | "publication" };
 
 /** What a checkout does with one sale for UK VAT before it opens. */
-export function ukCheckout(input: { supply: EuSupply; priceCents: number; items: { ip: unknown; billing: unknown; card?: unknown }; reviewed?: boolean; now?: Date }): UkCheckout {
+export function ukCheckout(input: {
+  supply: EuSupply;
+  priceCents: number;
+  items: { ip: unknown; billing: unknown; card?: unknown };
+  reviewed?: boolean;
+  now?: Date;
+  /** Whether the product is an e-publication (UK zero rate); only an explicit `false` lets UK VAT be collected at 20%. */
+  publication?: boolean;
+}): UkCheckout {
   const now = input.now ?? new Date();
   const place = ukPlace(input.items);
   const clockOk = now instanceof Date && Number.isFinite(now.getTime());
@@ -114,6 +126,7 @@ export function ukCheckout(input: { supply: EuSupply; priceCents: number; items:
   if (!clockOk) return { kind: "refuse", reason: "rate-expired" };
   if ((input.reviewed ?? ukVatCollectOn({ now })) !== true) return { kind: "refuse", reason: "review" };
   if (now.toISOString().slice(0, 10) > UK_VAT_RATE_VALID_UNTIL) return { kind: "refuse", reason: "rate-expired" };
+  if (input.publication !== false) return { kind: "refuse", reason: "publication" };
   const vat = ukVatOnTop(input.priceCents);
   if (!vat) return { kind: "refuse", reason: "supply" };
   return { kind: "collect", vat, place };
@@ -149,7 +162,12 @@ function vatInPence(vatCents: number, currency: string, suppliedOn: string, ster
   return pence === null ? null : { pence, rate: sterling };
 }
 
-const NOT_HUNDREDTHS = new Set(["BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF", "BHD", "JOD", "KWD", "OMR", "TND"]);
+/** The invoice currency, upper case, when it is a store currency (lib/money.ts) written in hundredths; otherwise null. */
+function hundredthsCurrency(value: unknown): string | null {
+  if (typeof value !== "string" || !/^[a-z]{3}$/i.test(value)) return null;
+  const lower = value.toLowerCase();
+  return isCurrency(lower) && decimalsOf(lower) === 2 ? lower.toUpperCase() : null;
+}
 
 export type UkInvoice = {
   number: string;
@@ -193,12 +211,13 @@ export function ukInvoice(input: {
   if (!s || !text(s.name, 300) || !text(s.address, 600) || typeof s.vatNumber !== "string" || !/^\d{9}$/.test(s.vatNumber)) return null;
   const c = input.customer;
   if (!c || !text(c.name, 300) || !text(c.address, 600) || !text(input.description, 200)) return null;
-  if (typeof input.currency !== "string" || !/^[A-Z]{3}$/.test(input.currency) || NOT_HUNDREDTHS.has(input.currency)) return null;
+  const currency = hundredthsCurrency(input.currency);
+  if (!currency) return null;
   const vat = input.vat;
   if (!vat || !whole(vat.priceCents) || vat.priceCents <= 0 || vat.basisPoints !== UK_VAT_RATE.basisPoints) return null;
   const expected = ukVatOnTop(vat.priceCents);
   if (!expected || expected.vatCents !== vat.vatCents || expected.totalCents !== vat.totalCents) return null;
-  const sterling = vatInPence(vat.vatCents, input.currency, suppliedOn, input.sterling);
+  const sterling = vatInPence(vat.vatCents, currency, suppliedOn, input.sterling);
   if (!sterling) return null;
   return {
     number: input.number,
@@ -208,7 +227,7 @@ export function ukInvoice(input: {
     customer: { name: c.name.trim(), address: c.address.trim() },
     description: input.description.trim(),
     quantity: 1,
-    currency: input.currency,
+    currency,
     unitPriceCents: vat.priceCents,
     amountExVatCents: vat.priceCents,
     rateBasisPoints: vat.basisPoints,

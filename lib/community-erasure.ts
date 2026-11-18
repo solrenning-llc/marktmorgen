@@ -10,8 +10,9 @@
  *   - what they were told, the devices they let us notify, their private
  *     conversations and requests, what they said in the room and the leave
  *     they held there;
- *   - their answers to whether they are coming to each live event, and the
- *     answers kept about whether they may come in;
+ *   - their answers to whether they are coming to each live event, their
+ *     places and check-ins in challenges, and the answers kept about whether
+ *     they may come in;
  *   - the record behind the unsubscribe link in the announcements they got;
  *   - what they sent that waits for the creator's approval, the notes about
  *     what was not published, and how many of theirs were approved
@@ -23,9 +24,12 @@
  * so before anyone deletes.
  */
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { traceKey } from "@/lib/community-trace";
-import { DamagedConfigError, forgetMemberRecord, readConfigExact, readMember } from "@/lib/community";
+import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
+import { SET_TAKE_COUNT } from "@/lib/redis-take";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { giveData } from "@/lib/store-data";
+import { DamagedConfigError, forgetMemberRecord, readConfigExact, readMemberRecord } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -35,8 +39,10 @@ import { forgetDmPerson } from "@/lib/community-dm";
 import { forgetChatPerson } from "@/lib/community-chat";
 import { forgetGrantPerson } from "@/lib/chat-grant";
 import { forgetRsvpsPerson } from "@/lib/community-events";
+import { forgetChallengesPerson } from "@/lib/community-challenges";
 import { forgetAccessPerson } from "@/lib/community-access";
 import { unindexMember } from "@/lib/community-index";
+import type { DataStore } from "@/lib/store-data";
 import { forgetHeldPerson } from "@/lib/community-approval";
 
 /**
@@ -46,9 +52,11 @@ import { forgetHeldPerson } from "@/lib/community-approval";
  * came back in an unknown shape (CX-123 rule 24) does not leave the steps after
  * it undone in this pass. Then, if any step could not finish, this throws the
  * first such error, so the erasure is said as not finished (lib/person-erasure.ts)
- * and a retry, keyed by the same member, reaches what is left.
+ * and a retry, keyed by the same member, reaches what is left. `room`, the
+ * store, gets back the room what is deleted was counted in, where a module
+ * counts it per person (the challenges).
  */
-export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
+export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
   const failures: unknown[] = [];
   let records = 0;
   const step = async (run: () => Promise<number | void>) => {
@@ -70,39 +78,51 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
     throw error;
   });
   // Their record is the only place that names their handle and their unsubscribe token: it is read first and
-  // deleted last, and only once what it names is gone, so a step that fails leaves it for the retry (Claude 6 on #2957).
-  const named = await readMember(id, who).then(
-    (member) => ({ member }),
+  // deleted last, and only once what it names is gone, so a step that fails leaves it for the retry (Claude 6 on #2957,
+  // Claude 5 on #2576). It is read with the exact text it is kept as, and taken only while it still holds it.
+  const named = await readMemberRecord(id, who).then(
+    (read) => ({ read }),
     (error: unknown) => {
       failures.push(error);
       return null;
     },
   );
   const beforeNamed = failures.length;
-  const handle = named?.member?.h;
-  const unsub = named?.member?.t;
+  const handle = named?.read?.member?.h;
+  const unsub = named?.read?.member?.t;
   if (handle) await step(() => forgetHandle(id, handle, who));
   if (unsub) await step(() => forgetCommunityUnsub(unsub));
   const namedGone = named !== null && failures.length === beforeNamed;
   await step(() => unindexMember(id, who));
-  // Their trace (lib/community-trace.ts): what they wrote and did, by reference. DEL's own count only (CX-123 rule 24).
+  // Their trace (lib/community-trace.ts): what they wrote and did, by
+  // reference; counted and deleted in one step, each entry's room given back once.
+  // Read exactly (Claude 6's note on #2576): a reply that is not one whole count is unknown, never "nothing was
+  // there", so the person is not reported deleted with the trace maybe kept, and no room is given back for it.
   await step(async () => {
-    const traced = countOf(repliesFor(await redisPipeline([["DEL", traceKey(id, who)]]), 1)?.[0]);
-    // One key: 0 or 1, nothing else (Codex X5 on #3095).
-    if (traced !== 0 && traced !== 1) throw new UnknownReplyError("a member's trace deleted");
-    return traced;
+    const [traced] = exactReplies(await redisPipeline([["EVAL", SET_TAKE_COUNT, 1, traceKey(id, who)]]), 1, "a member's trace deletion");
+    const entries = replyCount(traced, "a member's trace deletion");
+    if (room && entries > 0) await giveData(room, [{ ...TRACE_ENTRY, bytes: entries * TRACE_ENTRY.bytes }]);
+    return entries ? 1 : 0;
   });
   await step(() => forgetPointsPerson(id, who));
   await step(() => forgetNoticesPerson(id, who));
-  await step(() => forgetPushPerson(id, who));
-  await step(() => forgetDmPerson(id, who));
+  await step(() => forgetPushPerson(id, who, room));
+  await step(() => forgetDmPerson(id, who, room));
   await step(() => forgetChatPerson(id, who));
   await step(() => forgetGrantPerson(id, who));
-  await step(() => forgetRsvpsPerson(id, who, email));
+  await step(() => forgetRsvpsPerson(id, who, email, room));
+  await step(() => forgetChallengesPerson(id, who, room));
   await step(() => forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds));
   await step(() => forgetHeldPerson(id, who));
-  if (namedGone) {
-    await step(() => forgetMemberRecord(id, who));
+  if (namedGone && named) {
+    await step(async () => {
+      if (await forgetMemberRecord(id, who, named.read?.raw ?? null, room)) return named.read ? 1 : 0;
+      // Not what was read any more: gone (another deletion of the same person took it) is done; changed (a step above
+      // wrote it again) is not taken here, so the erasure is said as not finished and its retry reads it again and
+      // deletes what it names first.
+      if ((await readMemberRecord(id, who)) === null) return 0;
+      throw new UnknownReplyError("a member's record that changed while it was deleted");
+    });
   }
   if (failures.length) throw failures[0];
   return records;

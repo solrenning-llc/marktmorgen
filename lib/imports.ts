@@ -1883,6 +1883,16 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     // The same once the plan has ended (the original 4c, newCostCode): the
     // store is closing, and its records go with it on the closing day.
     if (newCostCode(store, Date.now() / 1000)) {
+      // Never longer than the record's own keeping (Claude 7 on #3980): past it, the paused import ends, says so, and
+      // leaves the five-minute job's line, so a store nobody pays costs no pass after that. What was brought in stays.
+      if (Date.now() - job.at > KEEP_SECONDS * 1000) {
+        await note(job, [{ line: 0, column: "", problem: `The store's plan was not paid for ${KEEP_SECONDS / 86_400} days while this import waited, so it stopped. What was already brought in stays. Start the import again once the plan is paid.`, value: "" }], "errors");
+        job.state = "failed";
+        job.finishedAt = Date.now();
+        await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, heldLeft(job), store);
+        await releaseBusy(job);
+        return job;
+      }
       const [, , , holder] = await redisPipeline([saveJob(job), ["EXPIRE", mailKey(id), KEEP_SECONDS], ["EXPIRE", errorsKey(id), KEEP_SECONDS], ["GET", busyKey(job.sid)]]);
       // The store's one-import slot only while this import holds it.
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);

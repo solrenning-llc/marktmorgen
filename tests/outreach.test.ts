@@ -36,6 +36,8 @@ import {
   stopUrl,
 } from "@/lib/outreach";
 import {
+  type OutreachGoal,
+  type PitchStatus,
   MAX_LINK_CHARS,
   MAX_PITCH_BODY,
   OPEN_COUNTRIES_WORDS,
@@ -58,6 +60,7 @@ import {
   robotsAllows,
   robotsDisallows,
 } from "@/lib/outreach-rules";
+import { outreachResults } from "@/lib/outreach-results";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -315,6 +318,41 @@ async function main(): Promise<void> {
     is(`a ${marked} pitch keeps its mark`, (await listPitches(store)).find((p) => p.id === answered.pitch.id)?.status, marked);
     is(`and the business is closed to the store all the same`, (await readStopLink(answered.pitch.stop))?.stopped, true);
   }
+  // Codex X7 on #4123 (X7-20261118-0422): "What your pitches did" says both, the answer and the request to stop. A
+  // replied or deal pitch whose business pressed stop is counted as answered and as asked to stop.
+  const tally = (pitches: { goal: OutreachGoal; status: PitchStatus; stoppedAt?: number }[]) => {
+    const filler = Array.from({ length: 5 }, () => ({ goal: input.goal, status: "sent" as const }));
+    const results = outreachResults([...pitches, ...filler]);
+    if (results.kind !== "rows") throw new Error(`not enough to count: ${results.kind}`);
+    return ["answered", "deals", "stopped"].map((k) => results.rows.reduce((sum, r) => sum + (r[k as "answered" | "deals" | "stopped"] as number), 0));
+  };
+  is("the card counts the two answers, the deal and all three asked to stop", tally(await listPitches(store)), [2, 1, 3]);
+  // Codex V on #4123 (V-20261118-0426): the creator marks the answer while the business's stop is being written. The
+  // mark stays, the business is closed, and the stop is still counted.
+  for (const marked of ["replied", "deal"] as const) {
+    const domain = marked === "replied" ? "ashgrove.com" : "pinehill.com";
+    const answered = await startPitch(store, { ...input, page: `https://${domain}/contact`, email: `hello@${domain}`, company: domain }, { reader: site({ [`https://${domain}/contact`]: `<p>hello@${domain}</p>` }), now: NOW + 175 });
+    if (!answered.ok) throw new Error(`no pitch to ${domain}: ${answered.reason}`);
+    await setPitchStatus(store, answered.pitch.id, "sent", NOW + 176);
+    const original = redis.pipeline.bind(redis);
+    let markedDuringStop = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!markedDuringStop && commands.some((command) => command[0] === "SADD" && command[2] === domain)) {
+        markedDuringStop = true;
+        is(`marked ${marked} during the stop`, (await setPitchStatus(store, answered.pitch.id, marked, NOW + 177))?.status, marked);
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    try {
+      is(`the business presses stop while its pitch is marked ${marked}`, await stopFromLink(answered.pitch.stop, false, NOW + 178), true);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("the creator's mark landed during the stop", markedDuringStop, true);
+    is(`a ${marked} marked during the stop keeps its mark`, (await listPitches(store)).find((p) => p.id === answered.pitch.id)?.status, marked);
+    is("and the business is closed to the store all the same", (await readStopLink(answered.pitch.stop))?.stopped, true);
+  }
+  is("and the card counts those stops too", tally(await listPitches(store)), [4, 2, 5]);
 
   part("Closed to every store");
   const two = await claimHandle("other@example.com", "bakes", "Bakes by Mo", "");

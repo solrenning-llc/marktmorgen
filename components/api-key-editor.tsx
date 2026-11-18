@@ -291,7 +291,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
         <div className="notice notice-error mt-4" role="alert">
           <p>{error}</p>
           {error === MESSAGES.reauth ? (
-            <Link href="/signin?status=reauth" className="btn btn-secondary mt-3">
+            <Link href="/signin?status=reauth-key" className="btn btn-secondary mt-3">
               Log in again
             </Link>
           ) : null}

@@ -17,7 +17,7 @@ import { newAddressProblem, normaliseHandle } from "@/lib/store";
 import { ForgetInboxDrafts } from "@/components/forget-inbox-drafts";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
-const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
+const RETURNING_STATUSES = new Set(["reauth", "reauth-key", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
 function isReturning(params: { [key: string]: string | string[] | undefined }): boolean {
   return params.to === "login" || (typeof params.status === "string" && RETURNING_STATUSES.has(params.status));
 }
@@ -113,6 +113,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   reauth: {
     title: "Log in again to add a passkey",
     body: "A passkey keeps working after a session ends, so adding one needs a login from the last 15 minutes. Log in below with a link sent to your email, or with a passkey you already have, and your studio opens at the spot to add it.",
+  },
+  "reauth-key": {
+    title: "Log in again to make an API key",
+    body: "An API key keeps working after a session ends, so making one needs a login from the last 15 minutes. Log in below with a link sent to your email, or with a passkey you already have, then open API keys again in your studio.",
   },
   "invite-other": {
     title: "You are logged in with another address",

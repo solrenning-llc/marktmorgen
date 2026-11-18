@@ -113,7 +113,7 @@ part("A quiz the creator changed never gets an old draft (review of #4324, LOW 3
 
 part("Putting it back");
 {
-  const draft = { at: NOW, shown, tries: 0, answers: { q_aaaaaaaaaaa1: [0], q_aaaaaaaaaaa2: [] } };
+  const draft = { at: NOW, shown, tries: 0, version: "", answers: { q_aaaaaaaaaaa1: [0], q_aaaaaaaaaaa2: [] } };
   is("each named question as the draft says", inputs.slice(0, 4).map((i) => checkedAfter(i, draft)), [true, false, false, false]);
   is("a question the draft does not name keeps its state", checkedAfter({ name: "q_bbbbbbbbbbb1", value: "0", checked: true }, draft), true);
 }

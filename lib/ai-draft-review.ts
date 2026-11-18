@@ -290,7 +290,10 @@ function wordKey(written: string, code: string): string {
   return word;
 }
 
-/** What digits stand for: "$1,200", "1200" and "1.2K" are one; "19,99" is 19.99; "$19", "19%" and "19" are one; "10m" is 10, "$10m" ten million. */
+/**
+ * What digits stand for, as a magnitude: "$1,200", "1200" and "1.2K" are one; "19,99" is 19.99; "10m" is 10, "$10m"
+ * ten million. A percentage is told apart by numbersIn, which adds its "%" to the key.
+ */
 function digitsKey(written: string): string {
   const bare = written.replace(/[$€£%\s]/g, "");
   // A lowercase "m" is minutes or meters ("a 10m call") unless it follows a currency sign ("$10m").
@@ -303,6 +306,9 @@ function digitsKey(written: string): string {
   return Number.isFinite(value) ? String(value) : plain;
 }
 
+/** A percentage written out after the digits ("19 percent", "20 pour cent"), read in the languages the drafts use. */
+const PERCENT_WORD = /[ \t]+(?:percent|pour[ \t]+cent|por[ \t]+ciento|por[ \t]+cento|prozent|per[ \t]+cento|procent)(?![\p{L}\p{N}])/iuy;
+
 /** Each number in a text, as written and by what it stands for, in the order they appear. */
 function numbersIn(original: string, codes: readonly string[]): { written: string; key: string; at: number }[] {
   const text = original.replace(LINK, (address) => " ".repeat(address.length));
@@ -312,7 +318,13 @@ function numbersIn(original: string, codes: readonly string[]): { written: strin
     const after = (match.index ?? 0) + match[0].length;
     if (notAFigureAfter(text, after) || labelsAPart(text, match.index ?? 0, (match.index ?? 0) + written.length)) continue;
     const millions = /\dm$/.test(written) && sticky(AUDIENCE, text, after);
-    found.push({ written, key: digitsKey(millions ? `${written.slice(0, -1)}M` : written), at: match.index ?? 0 });
+    // A percentage is its own figure (Claude 5, Codex N4 and P on #3437): a price or a count of the same size never
+    // supplies it, nor it them, so "19%" and "19 percent" key as "19%", "$19" and "19" as "19".
+    PERCENT_WORD.lastIndex = after;
+    const percentWord = written.endsWith("%") ? undefined : PERCENT_WORD.exec(text)?.[0];
+    const unit = written.endsWith("%") || percentWord ? "%" : "";
+    const magnitude = digitsKey(millions ? `${written.slice(0, -1)}M` : written);
+    found.push({ written: written + (percentWord ?? ""), key: magnitude + unit, at: match.index ?? 0 });
   }
   for (const code of codes) {
     for (const match of text.matchAll(WORD_PATTERNS[code])) {

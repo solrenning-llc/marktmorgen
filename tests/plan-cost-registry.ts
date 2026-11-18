@@ -1379,7 +1379,8 @@ export const HELD_EXPOSURE = {
  * still-retained outside-room keys are charged at peak for the whole month. */
 export function heldStoreMonthlyExposure(tier: Tier) {
   const fileBytes = paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES;
-  const databaseBytes = DATA_ROOM_BYTES[tier] + reservePeakBytes(tier) + HELD_EXPOSURE.indexBytesPerStore;
+  // The room, the beside pool a held store keeps outside it (C1-20261117; Claude 4 Z on #4846), the peak outside-room keys.
+  const databaseBytes = DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reservePeakBytes(tier) + HELD_EXPOSURE.indexBytesPerStore;
   const retentionUsd = fileBytes / GB * STORAGE_PER_GB * 31 / 30 + databaseBytes * DB_BYTE_MONTH * 31 / 30;
   const retryUsd = heldRecheckMemoryUsd() + HELD_EXPOSURE.retryCommands * COMMAND + HELD_EXPOSURE.retryReplyBytes * DB_BYTE;
   return { fileBytes, databaseBytes, retentionUsd, retryUsd, modeledMonthlyUsd: retentionUsd + 31 * retryUsd, completeMonthlyUsd: null };

@@ -327,6 +327,15 @@ export function poolTakeCommands(slots: number): number {
  */
 export const BESIDE_SAVE_COMMANDS = 1 + 2 * poolTakeCommands(1);
 
+/**
+ * What one TAKE_DATA on a store's room bills at the most: its EVAL, HGET "#" and HGET "~", the months that are over
+ * read and removed (DATA_EXPIRED_COMMANDS), an HGET and a write a slot, and HSET "~" and HSET "#" (the beside pool's
+ * sweep, lib/store.ts MOVE_BESIDE_BATCH_COMMANDS; held in tests/beside-pool-commands.test.ts).
+ */
+export function takeDataCommands(slots: number): number {
+  return 1 + 4 + DATA_EXPIRED_COMMANDS + 2 * slots;
+}
+
 /** Which of these products have their share in the pool; null when it cannot be read. */
 export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<string> | null> {
   if (ids.length === 0) return new Set();

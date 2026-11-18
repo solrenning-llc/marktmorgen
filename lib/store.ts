@@ -160,7 +160,7 @@ import {
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
 import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
-import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, roomSlots, takeBeside, takeData } from "@/lib/store-data";
+import { besideHeld, besideSwept, giveBeside, giveData, markBesideSwept, noteData, poolTakeCommands, roomSlots, takeBeside, takeData, takeDataCommands } from "@/lib/store-data";
 import { BESIDE_PRODUCT_BYTES as BESIDE_PRODUCT, besidePoolFor } from "@/lib/store-data-rules";
 import { standingOf } from "@/lib/plan-standing";
 import { type Collection, type CollectionsProblem, MAX_PAIRS, collectionsWithout, parseCollections, readCollectionsInput, readProductIds } from "@/lib/store-collections";
@@ -2474,7 +2474,11 @@ export async function setSubscription(
   // A store that starts paying (from a trial, from nothing, back from an end): what its products keep beside them moves
   // to its beside pool, after the lock is let go (moveBesideToPool takes it a batch at a time). Never on a write that
   // finds it paying already, so opening the studio sweeps nothing; a sweep that fails leaves the room fuller.
-  if (result && standingAtStart !== "paid" && standingOf(result) === "paid") await moveBesideToPool(email);
+  // A sweep that cannot run is caught here (Claude 4's LOW on #4847): the plan is saved, and what stays in the room
+  // errs fuller and moves when it is saved again.
+  if (result && standingAtStart !== "paid" && standingOf(result) === "paid") {
+    await moveBesideToPool(email).catch((error) => console.error("sweeping a store's products into its beside pool failed", error));
+  }
   return result ?? null;
 }
 
@@ -3752,16 +3756,17 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
-/** Takes something off the store. Returns the product as it was, for its files. */
 /** How many products the beside pool's sweep moves a lock at the most (C1-20261117-1500-c6c4-1, PR 2). */
 export const MOVE_BESIDE_BATCH = 250;
 /**
  * The most batches one sweep runs: enough for MAX_PRODUCTS. Each batch, under the store's lock, at the most: the lock
  * taken and let go, the store read (withStore), the pool's fields and the room's slots read (two HMGETs), the lock
- * held on (holdLock), the pool's EVAL and the room's EVAL; and the sweep's mark read and written once a sweep.
+ * held on (holdLock), then the pool's TAKE_DATA taking the batch's shares and the room's giving them back, each at
+ * its inner commands as Upstash bills them (lib/store-data.ts, poolTakeCommands and takeDataCommands; Claude 4's
+ * MEDIUM on #4847); and the sweep's mark read and written once a sweep.
  */
 export const MOVE_BESIDE_BATCHES = Math.ceil(MAX_PRODUCTS / MOVE_BESIDE_BATCH);
-export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + 2;
+export const MOVE_BESIDE_BATCH_COMMANDS = 3 + 1 + 2 + 1 + poolTakeCommands(MOVE_BESIDE_BATCH) + takeDataCommands(MOVE_BESIDE_BATCH);
 export const MOVE_BESIDE_SWEEP_COMMANDS = 2;
 
 /**
@@ -3804,6 +3809,7 @@ export async function moveBesideToPool(email: string): Promise<number> {
   return moved;
 }
 
+/** Takes something off the store. Returns the product as it was, for its files. */
 export async function removeProduct(
   email: string,
   id: string,

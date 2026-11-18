@@ -575,7 +575,8 @@ async function main(): Promise<void> {
     // priced whole in every month, costs Store's monthly worst month a cent: 44.32 where 44.33 was. Cost added, not lowered.
     // The beside pool's inner commands on product saves (BESIDE_SAVE_COMMANDS, Claude 4 on #4847), priced on every studio
     // request: a cost added, not lowered (Claude 6 local, 18 November 2026): 44.28, 309.72 and 694.08.
-    is("11: Store, Studio and Scale keep 44.28, 309.72 and 694.08 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.28", "309.72", "694.08"]);
+    // The sweep's batch at both TAKE_DATA scripts' inner commands (Claude 4's MEDIUM on #4847): 44.27, 309.70 and 694.07.
+    is("11: Store, Studio and Scale keep 44.27, 309.70 and 694.07 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.27", "309.70", "694.07"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -605,7 +606,8 @@ async function main(): Promise<void> {
     // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
     // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
     // The same on the yearly month: 36.22, 254.59 and 570.81.
-    is("11: and 36.22, 254.59 and 570.81 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.22", "254.59", "570.81"]);
+    // The same sweep on the yearly month: 36.21, 254.58 and 570.80.
+    is("11: and 36.21, 254.58 and 570.80 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.21", "254.58", "570.80"]);
   } finally {
     Date.now = realNow;
   }

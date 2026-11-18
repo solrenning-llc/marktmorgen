@@ -297,7 +297,7 @@ async function main() {
   let lostCount = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await realPipeline(commands);
-    if (!lostCount && commands[0]?.[0] === "SET" && commands[0].includes("XX")) {
+    if (!lostCount && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:appeal-swap:v1")) {
       lostCount = true;
       throw new Error("reply lost");
     }

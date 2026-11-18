@@ -271,6 +271,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/takedown-appeals.ts compares the exact current row before updating it.
+        if (key.startsWith("-- marktmorgen:appeal-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, record, from, to, seconds] = args;
+          const current = this.run(["GET", record]);
+          if (current !== from) return current;
+          this.run(["SET", record, to, "EX", seconds]);
+          return 1;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

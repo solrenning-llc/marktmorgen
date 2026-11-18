@@ -194,11 +194,7 @@ export async function inviteMembers(
     // the catalog was read, was not written: its room goes back.
     const unwritten = made.filter((_, i) => answers[i] !== 1).reduce((sum, m) => sum + m.bytes, 0);
     if (unwritten > 0) await giveData(store, [{ slot: INVITES_SLOT, bytes: unwritten }], now);
-    // One already invited by this same job and not kept was written by an earlier try of this step that failed before
-    // its email was seen to (issue #3957): here its link and reminder were written with it, in that same step, so only
-    // its answer changes: it answers as new, so the import queues its email and counts it as added.
-    const again = await ownInvites(statsId, job, made.filter((_, i) => answers[i] === 0));
-    return made.map(({ field }, i) => (answers[i] === 1 || again.has(field) ? field : answers[i] === -1 ? false : answers[i] === -2 ? "gone" : null));
+    return made.map(({ field }, i) => (answers[i] === 1 ? field : answers[i] === -1 ? false : answers[i] === -2 ? "gone" : null));
   }
   const answers = await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
   // An address already invited to that membership was not written: its room goes back.

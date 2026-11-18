@@ -200,6 +200,9 @@ export async function giveRefund(
     return fail("unavailable");
   }
   if (!ofThisStore(store, charge)) return fail("not_found");
+  // The refund is sent on the charge the form named, so its ownership, state and ceiling are read only from that very
+  // charge: an answer for another one is never taken for it (Codex U on #3678, MEDIUM money).
+  if (charge.id !== chargeId) return fail("unreadable");
 
   // A refund this same form already made, read off the charge's refunds by its mark, before anything is sent: Stripe
   // keeps a key only about a day, so a form sent again later would otherwise refund twice (Claude 3 and Codex G on

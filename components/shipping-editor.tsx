@@ -34,7 +34,6 @@ const MESSAGES: Record<string, string> = {
   ship_membership: "A product you ship is sold once, not as a membership.",
   ship_call: "A call delivers a time, so it cannot be shipped.",
   ship_options: "A product you ship has one price. Take its options off first.",
-  ship_pwyw: "A product you ship has a set price, so buyers cannot choose it.",
   ship_plan: "A product you ship is paid in full. Stop its payment plan first.",
   ship_delivery: "This product already hands over a file, a link, a course, a podcast or a bundle. Take that off first, or make a new product to ship.",
   store_full: "Your store is full. Remove something before adding more.",

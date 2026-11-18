@@ -223,8 +223,12 @@ export const WAIT_CONFIRM_CALLS = 3;
  */
 export const WAIT_CONFIRM_UNITS = 1;
 
-/** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false; reason?: "busy" }> {
+/**
+ * Presses the button in the email: the address now counts, and joins the creator's list if it asked to. `first` is
+ * true when this press found the spot unconfirmed, false on any press after; read and then written in two trips, so
+ * two presses at once can both see true: a filter only, never a count (lib/path-lead.ts decides once).
+ */
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string; first: boolean } | { ok: false; reason?: "busy" }> {
   // Switched off after notices about its content: the spot does not count and joins no list (lib/store-join.ts listOpen).
   if (store?.suspended) return { ok: false };
   const grant = await readWaitToken(token);
@@ -251,7 +255,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     });
     if (added?.gone) return { ok: false };
   }
-  return { ok: true, productId: grant.p };
+  return { ok: true, productId: grant.p, first: !entry.ok };
 }
 
 /** Takes an address off a waitlist. */

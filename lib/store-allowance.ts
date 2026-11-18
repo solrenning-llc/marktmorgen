@@ -105,8 +105,10 @@ export async function takeAllowance(given: AllowanceStore, kind: AllowanceKind, 
     const counted = acknowledgedAllowanceCount(reply, n);
     if (counted === null) return refuse("unknown", "This can't be counted right now. Try again in a minute.");
     if (counted <= limit) return { ok: true, left: limit - counted };
-    // Over: what this asked for is given back, so a refused use costs the figure nothing.
-    await redisPipeline([["DECRBY", k, n]]).catch(() => {});
+    // Over: what this asked for is given back, so a refused use costs the figure nothing. Through GIVE_ALLOWANCE_BACK,
+    // never a bare DECRBY: a counter gone between the count and this (its expiry, the store erased) is not made again
+    // below zero with no expiry (Codex L on #4072).
+    await redisPipeline([["EVAL", GIVE_ALLOWANCE_BACK, 1, k, n]]).catch(() => {});
     const reset = resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0);
     return { ok: false, reason: "used", limit, message: usedWords(kind, limit, reset, standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")), left: Math.max(0, limit - (counted - n)), reset };
   } catch {
@@ -148,9 +150,11 @@ export async function forceAllowance(store: AllowanceStore, kind: AllowanceKind,
 export async function giveAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<void> {
   if (!Number.isSafeInteger(n) || n < 1) return;
   const window = allowanceWindow(store, now);
-  const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) return;
-  await redisPipeline([["DECRBY", key(kind, id, window.id), n]]).catch(() => {});
+  if (!window) return;
+  // Through giveAllowanceIn: a counter gone between the take and this (its expiry, the store erased) is never made
+  // again below zero with no expiry, which gave the window n more uses than the plan has and kept the key for ever
+  // (Claude 7, Redis race hunt). The same single DECRBY when the counter is there and stays at zero or more.
+  await giveAllowanceIn(store, kind, n, window.id, now);
 }
 
 /** What holding for a later moment answered: the window it is held in, or why nothing was held. */
@@ -203,13 +207,30 @@ export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind
     const counted = acknowledgedAllowanceCount(reply, n);
     if (counted === null) return unknown;
     if (counted <= limit) return { ok: true, window: target.id };
-    await redisPipeline([["DECRBY", k, n]]).catch(() => {});
+    // Given back as takeAllowance gives back a refused use: one script, a missing counter never made again (Codex L on #4072).
+    await redisPipeline([["EVAL", GIVE_ALLOWANCE_BACK, 1, k, n]]).catch(() => {});
     const left = Math.max(0, limit - (counted - n));
     return { ok: false, reason: "used", message: `This needs ${n.toLocaleString("en-US")} of your ${KIND_WORDS[kind].many} in the month it is set for (from ${from}, UTC), and ${left === 0 ? "none are left" : left === 1 ? "only 1 is left" : `only ${left.toLocaleString("en-US")} are left`} for that month after what is already set aside in it. Choose another day.` };
   } catch {
     return unknown;
   }
 }
+
+/**
+ * Gives back ARGV[1] to one window's counter in one step, so no take running at
+ * the same time ever reads it below zero (Codex V on #4072): a counter that is
+ * not there (expired, erased) is left missing rather than made again, and one
+ * that would fall below zero stops at zero with its expiry kept. Answers the
+ * counter after it, or -1 when it was not there.
+ */
+export const GIVE_ALLOWANCE_BACK = `-- marktmorgen:allowance-give-back:v1
+if redis.call("EXISTS", KEYS[1]) == 0 then return -1 end
+local after = redis.call("DECRBY", KEYS[1], ARGV[1])
+if after < 0 then
+  redis.call("INCRBY", KEYS[1], -after)
+  return 0
+end
+return after`;
 
 /**
  * Gives back `n` of a kind held in the window named `window` (holdAllowanceAt)
@@ -223,13 +244,9 @@ export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind
   if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (LONGEST_WINDOW_DAYS + 1) * 86_400_000) return;
   const id = idOf(store);
   if (!id || !isRedisConfigured()) return;
-  const k = key(kind, id, window);
   try {
-    // Only a counter that is there: one gone (expired, erased) is not made again below zero, with no expiry.
-    const reply = ownAllowanceReplies(await redisPipeline([["DECRBY", k, n]]), 1);
-    const after = reply?.[0];
-    // Redis integer commands answer numbers. A missing counter can fall no lower than -n.
-    if (typeof after === "number" && Number.isSafeInteger(after) && after >= -n && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+    // One script (GIVE_ALLOWANCE_BACK): never a moment below zero, a missing counter never made again.
+    await redisPipeline([["EVAL", GIVE_ALLOWANCE_BACK, 1, key(kind, id, window), n]]);
   } catch {
     // Best effort: counted higher, never lower.
   }

@@ -619,7 +619,9 @@ async function main(): Promise<void> {
     // Merge of main into #3411 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
     // Merge of main into #3476 (18 November 2026, Claude 6 cloud, main f3b01adfe7): main's model and this PR's lines
     // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 44.31, 309.47 and 693.74 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.31", "309.47", "693.74"]);
+    // #3980 (18 November 2026, Claude 1 cloud): a paused import's passes priced (Codex L), 44.31, 309.47, 693.74 ->
+    // 44.26, 309.42, 693.69; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 44.26, 309.42 and 693.69 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.26", "309.42", "693.69"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -669,7 +671,8 @@ async function main(): Promise<void> {
     // Merge of main e023347098 into #2571 (18 November 2026, Claude 3 local): main's costs (#3591, #4246) and this PR's
     // time-on-page readings together, yearly 36.27, 254.70, 571.13 -> 36.25, 254.65, 570.91; figures as the model computes
     // them, still above zero (MR). Cost is not lowered.
-    is("11: and 36.25, 254.34 and 570.46 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.25", "254.34", "570.46"]);
+    // #3980, the same on the yearly month: 36.25, 254.34, 570.46 -> 36.20, 254.29, 570.41.
+    is("11: and 36.20, 254.29 and 570.41 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.20", "254.29", "570.41"]);
   } finally {
     Date.now = realNow;
   }

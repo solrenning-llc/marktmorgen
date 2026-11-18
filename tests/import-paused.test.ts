@@ -172,7 +172,7 @@ async function main() {
   const named = imports as unknown as Record<string, unknown>;
   const passCommands = named.PAUSED_IMPORT_PASS_COMMANDS;
   const passes = named.PAUSED_IMPORT_PASSES;
-  const measured = await (async () => {
+  const measure = async () => {
     const real = redis.pipeline.bind(redis);
     let commands = 0;
     let bytes = 0;
@@ -188,11 +188,22 @@ async function main() {
       redis.pipeline = real;
     }
     return { commands, bytes };
-  })();
+  };
+  // The pass above worked on it; until PAUSED_IMPORT_CHECK_SECONDS have gone by, the job only reads its record and goes on.
+  const skipped = await measure();
   is("(control) the pass left it waiting", (await jobOf(ended, endedId))?.state, "queued");
+  is(`a pass before then only reads its record (measured ${skipped.commands} commands, ${skipped.bytes} bytes)`, skipped.commands <= imports.PAUSED_IMPORT_SKIP_COMMANDS && skipped.bytes <= imports.PAUSED_IMPORT_SKIP_BYTES, true);
+  // Once that time has gone by, a pass works on it again.
+  const waiting = JSON.parse((await redis.pipeline([["GET", `nl:import:${endedId}`]]))[0] as string) as { pausedUntil?: number };
+  const every = imports.PAUSED_IMPORT_CHECK_SECONDS * 1000;
+  is("(control) the import says when it is next worked on", typeof waiting.pausedUntil === "number" && waiting.pausedUntil > Date.now() + every - 100_000 && waiting.pausedUntil <= Date.now() + every, true);
+  await redis.pipeline([["SET", `nl:import:${endedId}`, JSON.stringify({ ...waiting, pausedUntil: Date.now() - 1 })]]);
+  const measured = await measure();
+  is("(control) and that pass left it waiting too", (await jobOf(ended, endedId))?.state, "queued");
   is(`a pass's commands are within PAUSED_IMPORT_PASS_COMMANDS (measured ${measured.commands})`, typeof passCommands === "number" && measured.commands <= passCommands, true);
   const passBytes = named.PAUSED_IMPORT_PASS_BYTES;
   is(`and its bytes within PAUSED_IMPORT_PASS_BYTES, a whole store record's worst included (measured ${measured.bytes})`, typeof passBytes === "number" && measured.bytes <= passBytes && passBytes >= MAX_STORE_BYTES, true);
+  is("passes that work on it: one every PAUSED_IMPORT_CHECK_SECONDS, the first and the one that ends it included", imports.PAUSED_IMPORT_CHECKS, Math.floor(IMPORT_KEEP_SECONDS / imports.PAUSED_IMPORT_CHECK_SECONDS) + 2);
   is("every pass its keeping allows, one every five minutes, ends included", passes, Math.floor(IMPORT_KEEP_SECONDS / 300) + 1);
   const line = COST_LINES.find((l) => l.id === "imports");
   is("and the imports line names all three", ["PAUSED_IMPORT_PASSES", "PAUSED_IMPORT_PASS_COMMANDS", "PAUSED_IMPORT_PASS_BYTES"].every((name) => line?.sources.some((src) => src.file === "lib/imports.ts" && src.names.includes(name))), true);

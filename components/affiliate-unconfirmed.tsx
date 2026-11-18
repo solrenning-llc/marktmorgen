@@ -41,6 +41,9 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ ref: string; text: string } | null>(null);
+  // After an approval the panel stays, even with no line left, so its heading keeps the focus it was given
+  // (Claude 4's LOW 1 on #3485 @eff4ed6779, WCAG 2.4.3).
+  const [cleared, setCleared] = useState(false);
   const confirmButton = useRef<HTMLButtonElement>(null);
   // Where the focus goes after approving (Codex X6, LOW on #3485): the heading once the line is gone, the message on a failure.
   const heading = useRef<HTMLHeadingElement>(null);
@@ -67,15 +70,18 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
     if (problem) message.current?.focus();
   }, [problem]);
 
-  if (!lines.length) return null;
+  if (!lines.length && !cleared) return null;
 
   async function approve(ref: string) {
+    // The confirm button stays focusable while a request runs (aria-disabled, LOW 2), so a second press is refused here.
+    if (busy !== null) return;
     setBusy(ref);
     setProblem(null);
     const failed = await confirmLine(ref);
     setBusy(null);
     if (failed) return setProblem({ ref, text: failed });
     setAsking(null);
+    setCleared(true);
     toast("Approved. It counts as owed and joins your payment batch, unless a hold on your store or on this affiliate still keeps it out.");
     heading.current?.focus();
     router.refresh();
@@ -86,12 +92,15 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
       <h2 id="unconfirmed-title" ref={heading} tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
         Commissions waiting for a buyer check
       </h2>
+      {lines.length ? (
       <p className="mt-2 text-sm text-ink-soft">
         {`These sales did not give us the buyer's email, or we could not read an affiliate's record, so we cannot tell whether the buyer is the affiliate who made the sale or the affiliate who invited them. For a sale, we keep looking for ${days} days and decide on our own if the email turns up. A membership's renewal cannot be looked up again, so it waits for you. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
       </p>
+      ) : null}
       <p className="mt-2 text-sm text-ink-soft" role="status">
-        {total > lines.length ? `Showing ${lines.length} of ${total} waiting.` : `${total} waiting.`}
+        {!lines.length ? "No commissions are waiting for a buyer check now." : total > lines.length ? `Showing ${lines.length} of ${total} waiting.` : `${total} waiting.`}
       </p>
+      {lines.length ? (
       <ul className="mt-4 divide-y divide-line">
         {lines.map((line) => {
           const open = asking === line.ref;
@@ -132,7 +141,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
                     Approve only if you know the buyer is neither this affiliate nor the affiliate they invited who made the sale. It counts as owed and joins your payment batch, unless a hold on your store or on this affiliate still keeps it out. You cannot undo it here. If it was a mistake, record a smaller payout.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button ref={confirmButton} type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center" disabled={busy !== null} onClick={() => approve(line.ref)}>
+                    <button ref={confirmButton} type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center" aria-disabled={busy !== null} onClick={() => approve(line.ref)}>
                       Yes, approve it
                     </button>
                     <button
@@ -160,6 +169,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
           );
         })}
       </ul>
+      ) : null}
     </section>
   );
 }

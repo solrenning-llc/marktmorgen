@@ -44,7 +44,7 @@ import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
-import { inviteField, inviteForCopy } from "@/lib/move-members";
+import { inviteField, inviteForCopy, withPendingInvites } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
@@ -181,6 +181,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
+  "lib/ad-events.ts": { how: "passing", days: 4, what: "What a checkout you opened with your yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
   "lib/imports.ts": { how: "copied", what: "Rows of a file the store imported from another platform that name you, kept 14 days from the import, and whether an email to you from that import still waits" },
   "lib/webhooks.ts": { how: "copied", what: "What the store's own systems were sent about you by its webhooks, kept for a week as they received it" },
@@ -430,7 +431,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
-    for (const productId of s.productIds) {
+    // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).
+    for (const productId of await withPendingInvites(s.statsId, s.productIds)) {
       const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
       if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
       if (!invite) continue;

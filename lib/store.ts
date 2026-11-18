@@ -1468,58 +1468,57 @@ function unknownIdReply(): never {
 export async function accountStores(email: string): Promise<Store[]> {
   if (!isRedisConfigured()) return [];
   const address = email.toLowerCase();
-  const [first, members] = await redisPipeline([
+  // Read exactly (rule 24): a reply cut short or of another shape throws, never a shorter list. Callers read "no
+  // other store" as leave to delete what the owner's other stores share (lib/closed-store-data.ts), to make a second
+  // Stripe customer (billing checkout), or to move only the first store and drop the account's list (moveAccount).
+  const listed = repliesFor(await redisPipeline([
     ["GET", await ownerKey(address)],
     ["SMEMBERS", await accountKey(address)],
-  ]);
-  const ids = Array.isArray(members)
-    ? members.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id))
+  ]), 2);
+  const ids = listed ? storeIdList(listed[1]) : null;
+  if (!listed || !ids) throw new UnknownReplyError("an account's stores");
+  const records = ids.length
+    ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length)
     : [];
-  const others = ids.length
-    ? (await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))))
-        .map(parseStore)
-        .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    : [];
-  const main = parseStore(first);
+  if (!records) throw new UnknownReplyError("an account's other stores");
+  const others = records
+    // A null is an id whose store is gone; anything else must be a store record.
+    .map((raw) => (raw === null ? null : exactStore(raw, "an account's other store")))
+    .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const main = listed[0] === null ? null : exactStore(listed[0], "an account's first store");
   return main ? [main, ...others] : others;
 }
 
 /**
- * accountStores read exactly (SG2 rule 24; Claude 5's LOW 3 on #2271): every reply in its shape, or
- * UnknownReplyError, never fewer stores. An id listed whose record is gone (nil) is not a store; a record there
- * that does not read as one is unknown. For a caller that decides by every
- * store of the account (app/api/auth/move: whether any of them pays). A store whose record names another owner is
- * left out, as accountStores leaves it out.
+ * An account's SMEMBERS of other store ids read exactly: a list of text in which every member is a store id this
+ * version reads, or null. A member in another form (written by a later version, or damaged) is unknown, never left
+ * out: a shorter list reads as "no other store", which lets a closing erase a shared Stripe account's records and a
+ * move drop the account's list with that store still in it (Codex review on #3889).
+ */
+function storeIdList(reply: unknown): string[] | null {
+  const members = stringList(reply);
+  return members && members.every((id) => STORE_ID_PATTERN.test(id)) ? members : null;
+}
+
+/** A store record that must read: text that parses as a store, or UnknownReplyError. */
+function exactStore(raw: unknown, what: string): Store {
+  const store = parseStore(raw);
+  if (!store) throw new UnknownReplyError(what);
+  return store;
+}
+
+/**
+ * Every store of the account, read exactly (SG2 rule 24; Claude 5's LOW 3 on #2271), for a caller that decides by
+ * every store of it (app/api/auth/move: whether any of them pays). Since #3889 main's accountStores reads exactly
+ * too (storeIdList, exactStore); this adds what the move needs besides: Redis not configured is unknown, never "no
+ * store", and a first store's record kept under this address that names another address (only a half-finished move
+ * leaves one) is left out, as storeForEmail leaves it out.
  */
 export async function accountStoresExact(email: string): Promise<Store[]> {
   if (!isRedisConfigured()) throw new UnknownReplyError("an account's stores");
   const address = email.toLowerCase();
-  const replies = repliesFor(await redisPipeline([
-    ["GET", await ownerKey(address)],
-    ["SMEMBERS", await accountKey(address)],
-  ]), 2);
-  const ids = replies ? stringList(replies[1]) : null;
-  if (!replies || (replies[0] !== null && typeof replies[0] !== "string") || !ids || ids.some((id) => !STORE_ID_PATTERN.test(id))) {
-    throw new UnknownReplyError("an account's stores");
-  }
-  const owns = (store: Store | null): store is Store => store !== null && store.email.toLowerCase() === address;
-  const first = replies[0] === null ? null : parseStore(replies[0]);
-  if (replies[0] !== null && first === null) throw new UnknownReplyError("an account's first store");
-  // As storeForEmail: a first store's record kept under this address names it, or there is none here.
-  const main = first !== null && storeRef(first).toLowerCase() === address ? first : null;
-  const read = ids.length ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length) : [];
-  if (!read) throw new UnknownReplyError("an account's stores");
-  const others: Store[] = [];
-  for (const raw of read) {
-    if (raw === null) continue;
-    const store = typeof raw === "string" ? parseStore(raw) : null;
-    if (store === null) throw new UnknownReplyError("an account's store");
-    // A store whose record says it belongs to someone else (only a half-finished move leaves one) is not listed, as in accountStores.
-    if (owns(store) && store.extra) others.push(store);
-  }
-  others.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return main ? [main, ...others] : others;
+  return (await accountStores(email)).filter((store) => store.extra || storeRef(store).toLowerCase() === address);
 }
 
 /**
@@ -2665,8 +2664,10 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string, cop
         ? stored === recordJson(left) && left.email.toLowerCase() === leftAt && (await copyPrint(left)) === copy
         : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" });
       if (!untouched) return null;
-      const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
-      const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
+      const read = repliesFor(await redisPipeline([["SMEMBERS", await accountKey(from)]]), 1);
+      // Rule 30: the same exact read as accountStores; an unknown member stops the repair before any write.
+      const extras = read ? storeIdList(read[0]) : null;
+      if (!extras) throw new UnknownReplyError("an account's stores");
       for (const sid of extras) {
         const back = await withStore(extraRef(sid), async (extra, _save, held) => {
           if (extra.email.toLowerCase() === home) return true;
@@ -2697,11 +2698,15 @@ export async function moveAccount(
     // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
-    const [existing, theirs] = await redisPipeline([
+    const read = repliesFor(await redisPipeline([
       ["GET", await ownerKey(to)],
       ["SCARD", await accountKey(to)],
-    ]);
-    if ((typeof existing === "string" && existing) || Number(theirs) > 0) {
+    ]), 2);
+    // A count that does not read is unknown (rule 24), never NaN passed as "it owns no store".
+    const theirs = read ? countOf(read[1]) : null;
+    if (!read || theirs === null) throw new UnknownReplyError("the stores of the address moved to");
+    const existing = read[0];
+    if ((typeof existing === "string" && existing) || theirs > 0) {
       return { ok: false, reason: "taken" };
     }
 

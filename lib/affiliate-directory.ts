@@ -552,7 +552,9 @@ async function otherBuildsPage(): Promise<DirectoryPage | null> {
     if (!Array.isArray(replies) || replies.length !== 2) return null;
     const [kept, mark] = replies;
     const page = typeof kept === "string" ? keptPage(kept) : null;
-    if (page) return page;
+    // The same exact row check as the first read (Codex CX1 on #3062): a kept page with any row out of shape is never
+    // shown, so the wait ends and the visit is told the list could not be checked.
+    if (page) return page.rows.every(isDirectoryRow) ? page : null;
     if (mark !== "building") return null;
   }
   return null;

@@ -177,6 +177,12 @@ export type PaidPeriod = {
   /** The invoice paid, and the payment it was paid by when Stripe named it. */
   inv: string;
   pi?: string;
+  /**
+   * `pi` was proven the invoice's only payment when it was held (#4428): its own payment_intent with no list of
+   * payments beside it, or the sole paid one of a whole list of rows that all read. A `pi` without it (held before
+   * #4428, which kept the first paid one) is a hint only, and the refund reads the invoice's payments again (Codex X5).
+   */
+  one?: 1;
   /** What its membership line came to, its share of the tax with it, in the currency's smallest unit, and the currency. */
   amt: number;
   /** What the whole invoice took: a refund never goes past it. */

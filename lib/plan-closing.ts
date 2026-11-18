@@ -1612,6 +1612,9 @@ async function refuseLatePlans(store: Store): Promise<true | StripeFailure> {
  * written to again.
  */
 export async function finishClosed(entry: Batched, now = Date.now()): Promise<void> {
+  // A store walked by its own ids only: another store holds its address now, so nothing is written there (Claude 7's
+  // ALTO 1 on #3643).
+  if (entry.marksOnly) return;
   const key = stateKey(entry.ref);
   const [raw] = exactly(await redisPipeline([["GET", key]]), 1, "a closed store's closing state");
   await redisPipeline([["SET", key, JSON.stringify({ ...readState(raw), erased: now }), "EX", ERASED_KEPT_DAYS * 86_400]]);

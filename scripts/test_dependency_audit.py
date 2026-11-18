@@ -6,6 +6,8 @@ from pathlib import Path
 import check_dependency_audit
 from check_dependency_audit import review
 from check_dependency_runtime import check_traces
+# The one dated exception's own cases (GHSA-fc5q-39xc-vjpf) run with these, from the workflow's single command.
+from test_dependency_audit_picomatch import PicomatchExceptionTests  # noqa: F401
 
 
 def report(values=None):
@@ -25,15 +27,18 @@ def finding(severity="high"):
 
 class GateTests(unittest.TestCase):
     def test_clean_audit_passes(self):
-        self.assertIsNone(review(report(), report()))
+        self.assertEqual(review(report(), report()), [])
 
     def test_low_and_moderate_findings_pass(self):
         for severity in ["low", "moderate"]:
-            self.assertIsNone(review(finding(severity), finding(severity)))
+            self.assertEqual(review(finding(severity), finding(severity)), [])
 
-    def test_no_exception_list_remains(self):
-        for name in ["REVIEWED", "ADVISORY", "EXPIRES"]:
+    def test_only_the_one_dated_exception_exists(self):
+        # The withdrawn braces exception stays gone; the one exception is GHSA-fc5q-39xc-vjpf, dated, development-only.
+        for name in ["REVIEWED", "EXPIRES"]:
             self.assertFalse(hasattr(check_dependency_audit, name))
+        self.assertEqual(check_dependency_audit.ADVISORY, "https://github.com/advisories/GHSA-fc5q-39xc-vjpf")
+        self.assertEqual(check_dependency_audit.EXCEPTION_LAST_DAY.isoformat(), "2026-12-01")
 
     def test_development_high_or_critical_refuses(self):
         for severity in ["high", "critical"]:
@@ -64,6 +69,13 @@ class GateTests(unittest.TestCase):
             trace.write_text(json.dumps({"files": ["../node_modules/braces/index.js"]}))
             with self.assertRaises(ValueError):
                 check_traces(folder)
+            # The picomatch chain of GHSA-fc5q-39xc-vjpf is development-only too (Next's own compiled copy is not it).
+            for package in ["picomatch", "tinyglobby", "fdir"]:
+                trace.write_text(json.dumps({"files": ["../node_modules/" + package + "/index.js"]}))
+                with self.assertRaises(ValueError):
+                    check_traces(folder)
+            trace.write_text(json.dumps({"files": ["../node_modules/next/dist/compiled/picomatch/index.js"]}))
+            self.assertEqual(check_traces(folder), 1)
 
 
 if __name__ == "__main__":

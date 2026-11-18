@@ -370,9 +370,14 @@ async function main(): Promise<void> {
   for (const page of ["app/[handle]/p/[product]/page.tsx", "app/[handle]/book/[product]/page.tsx", "app/[handle]/free/page.tsx", "app/[handle]/waitlist/page.tsx"]) {
     is(`${page.split("/")[2]}: somebody who arrives straight at it is counted`, /<StoreTracking[^>]*\bpresence\b/.test(read(page).replace(/\s+/g, " ")), true);
   }
-  for (const page of ["app/[handle]/page.tsx", "app/[handle]/p/[product]/page.tsx"]) {
-    is(`${page.includes("/p/") ? "a product's page" : "the store's page"} rests with the store, before anything else is read for it`, /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/.test(read(page)), true);
-  }
+  is("the store's page rests with the store, before anything else is read for it", /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/.test(read("app/[handle]/page.tsx")), true);
+  // Rule 23 (traffic audit, 9 November 2026): the product page counts itself inside the load its title shares, before
+  // the product is read, and draws the resting page from it (tests/public-admission-before-read.test.ts runs it).
+  const productPage = read("app/[handle]/p/[product]/page.tsx");
+  is("a product's page rests with the store, before anything else is read for it", [
+    /if \(await isResting\(store\)\) return \{ store, asked, resting: true \};\s*\/\/ The id alone[^\n]*\n\s*const product = await readListing\(/.test(productPage),
+    /if \(found\.resting\) return <StoreResting store=\{found\.store\} \/>;/.test(productPage),
+  ], [true, true]);
   const resting = read("components/store-resting.tsx");
   is("a resting page keeps the way back to what a buyer has, and counts nothing", [/\/orders/.test(resting), /\/community/.test(resting), /StoreTracking|StoreBeacon/.test(resting.replace(/\/\*[\s\S]*?\*\//, ""))], [true, true, false]);
   for (const page of ["app/[handle]/orders", "app/[handle]/manage", "app/api/store/download"]) {
@@ -389,7 +394,7 @@ async function main(): Promise<void> {
   ], [true, true, true]);
   is("courses, the community and podcasts rest only at the whole figure", [/isResting\(store, undefined, "buyer"\)/.test(readDir("app/[handle]/course")), /isResting\(store, Date\.now\(\), "buyer"\)/.test(read("lib/community-page.ts")), /isResting\(store, Date\.now\(\), "buyer", \{ shared: true \}\)/.test(read("app/api/store/podcast/feed/[token]/route.ts"))], [true, true, true]);
   const job = read("app/api/cron/usage/route.ts");
-  is("the daily job writes and never bills visits, and it is scheduled", [/settleAllVisits/.test(job), /firstWordOnVisits\(folder, month\)/.test(job), /\/api\/cron\/usage/.test(read("vercel.json"))], [false, true, true]);
+  is("the daily job writes and never bills visits, and it is scheduled", [/settleAllVisits/.test(job), /takeVisitsWord\(folder, month\)/.test(job), /\/api\/cron\/usage/.test(read("vercel.json"))], [false, true, true]);
 
   part("What the pages say");
   const terms = read("app/terms/page.tsx");

@@ -1492,18 +1492,37 @@ export class MemoryRedis {
           });
         }
         // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
-        // deleted people (-1, nothing written).
-        if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {
-          const [, erased, invites, ...rest] = args;
-          const n = rest.length / 3;
+        // deleted people (-1, nothing written) and its membership is not marked removed (-2, nothing written); a new one's
+        // link SET with it, and the reminders in one ZADD.
+        if (key.startsWith("-- marktmorgen:invite-unless-erased:v2\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const n = argv.length / 7;
+          if (!Number.isInteger(n) || n < 1 || keys.length !== 3 + 2 * n) throw new Error("ERR invite-unless-erased: wrong number of keys or arguments");
+          const [erased, invites, due] = keys;
           if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
-          this.scriptCalls += 1;
-          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => rest[3 * i])]) as unknown[];
-          return Array.from({ length: n }, (_, i) => {
+          this.scriptCalls += 2;
+          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => argv[7 * i])]) as unknown[];
+          const gone = this.run(["MGET", ...Array.from({ length: n }, (_, i) => keys[4 + 2 * i])]) as unknown[];
+          const queued: (string | number)[] = [];
+          const out = Array.from({ length: n }, (_, i) => {
             if (found[i] !== null) return -1;
+            if (gone[i] !== null) return -2;
             this.scriptCalls += 1;
-            return this.run(["HSETNX", invites, rest[3 * i + 1], rest[3 * i + 2]]);
+            const made = this.run(["HSETNX", invites, argv[7 * i + 1], argv[7 * i + 2]]);
+            if (made === 1) {
+              this.scriptCalls += 1;
+              this.run(["SET", keys[3 + 2 * i], argv[7 * i + 3], "EX", argv[7 * i + 4]]);
+              if (argv[7 * i + 5] !== "") queued.push(argv[7 * i + 5], argv[7 * i + 6]);
+            }
+            return made;
           });
+          if (queued.length) {
+            this.scriptCalls += 1;
+            this.run(["ZADD", due, ...queued]);
+          }
+          return out;
         }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];

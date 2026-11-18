@@ -572,11 +572,17 @@ async function main(): Promise<void> {
     // one cent less kept on Studio and Scale monthly, still above zero (MR); figures as the model computes them with
     // main's costs and #3440's together. The yearly figures are unchanged.
     // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #3591 (16 November 2026): main's costs with this PR's (path leads counted only once confirmed), as the model computes them;
+    // still above zero (MR). No cost lowered.
+    // Merge of main 05d01ad7ac into #3591 (16 November 2026, Claude 3 cloud R): main's model and this PR together cost
+    // Studio and Scale one cent more in the monthly worst month: 313.79 and 703.15; still above zero (MR), cost not lowered.
+    // Merge of main into #3591 (16 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
+    // 44.34, 311.91, 697.49 -> 44.34, 311.90, 697.47; figures as the model computes them, still above zero (MR); no cost lowered.
     // Merge of main into #4246 (17 November 2026, Claude 3 cloud T): main's costs (#2803's picture uploads) and this PR's
     // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3597 (17 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
-    // 44.33, 309.84, 694.42 -> 44.33, 309.83, 694.41; figures as the model computes them, still above zero (MR); no cost lowered.
-    is("11: Store, Studio and Scale keep 44.33, 309.83 and 694.41 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.33", "309.83", "694.41"]);
+    // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
+    // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 44.33, 309.83 and 694.40 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.33", "309.83", "694.40"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -605,9 +611,13 @@ async function main(): Promise<void> {
     // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
     // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
     // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #3591 (16 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
+    // 36.28, 256.78, 574.21 -> 36.28, 256.77, 574.19; figures as the model computes them, still above zero (MR); no cost lowered.
+    // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
+    // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #3597 (17 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
-    // 36.28, 254.71, 571.15 -> 36.28, 254.71, 571.14; figures as the model computes them, still above zero (MR); no cost lowered.
-    is("11: and 36.28, 254.71 and 571.14 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.28", "254.71", "571.14"]);
+    // 36.27, 254.70, 571.13 -> 36.27, 254.70, 571.12; figures as the model computes them, still above zero (MR); no cost lowered.
+    is("11: and 36.27, 254.70 and 571.12 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.27", "254.70", "571.12"]);
   } finally {
     Date.now = realNow;
   }

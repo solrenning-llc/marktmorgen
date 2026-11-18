@@ -21,6 +21,11 @@
  *     nothing anybody bought is ever affected.
  *   - Only for a PDF up to MAX_STAMP_BYTES that pdf-lib can read. Anything
  *     else simply has no preview, and the studio says why.
+ *   - Kept only within the store's storage (lib/pdf-stamp.ts
+ *     writeWithinStorage), its measurement paid for from the store's public
+ *     requests first. A store without room shows no preview it has not made
+ *     yet, and is not measured again for an hour (noRoomKey), however many
+ *     people ask for one.
  *   - A PDF pdf-lib cannot open (an owner password, damage) is read and
  *     parsed once: it is noted "unreadable" in the stamp's own note
  *     (lib/pdf-stamp.ts, problemKey), which takes no data room and which the
@@ -31,10 +36,11 @@
  */
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
-import { readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
-import { copyFolder, problemKey } from "@/lib/pdf-stamp";
+import { copyFolder, problemKey, roomNotedOut, writeWithinStorage } from "@/lib/pdf-stamp";
+import type { CopyMeter } from "@/lib/stamp-cost-rules";
 import { type DataStore, dataUsed, keepFor } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -78,12 +84,14 @@ export async function firstPages(bytes: Uint8Array, pages: number): Promise<Uint
 
 /**
  * The preview of this file at this many pages: kept, or made now. Null when
- * the file cannot have one. Never throws.
+ * the file cannot have one, or its store has no room to keep it. `meter` pays
+ * for measuring the store's storage before it is kept (lib/stamp-cost-rules.ts).
+ * Never throws.
  *
  * Every Redis reply is read in its exact shape (rule 24): anything else is
  * unknown and means no preview right now, with no file read and no room taken.
  */
-export async function previewCopy(file: ProductFile, pages: number, store: DataStore): Promise<ProductFile | null> {
+export async function previewCopy(file: ProductFile, pages: number, store: DataStore, meter: CopyMeter): Promise<ProductFile | null> {
   if (!previewable(file) || pages < 1) return null;
   const key = previewKey(file, pages);
   try {
@@ -108,6 +116,8 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
       const room = await dataUsed(store);
       if (!room || room.used + PREVIEW_RECORD_BYTES + MONTH_FIELD_BYTES > contentRoomFor(store)) return null;
     }
+    // A store found without room lately is neither read nor measured again for a preview it cannot keep.
+    if (await roomNotedOut(file)) return null;
     const original = await readFileWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) return null;
     let bytes: Uint8Array;
@@ -123,7 +133,8 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     const base = file.name.replace(/\.pdf$/i, "") || "preview";
     const name = `${base} (preview).pdf`;
     const pathname = `${copyFolder(file)}preview-${pages}-${sha(file.addedAt).slice(0, 12)}.pdf`;
-    await writeFileWhole(pathname, bytes, "application/pdf");
+    // A new file in the store's folder: made only within its plan's storage (lib/pdf-stamp.ts writeWithinStorage).
+    if ((await writeWithinStorage(file, pathname, bytes, "application/pdf", store, meter)) !== "kept") return null;
     const copy: ProductFile = { pathname, name, bytes: bytes.byteLength, contentType: "application/pdf", addedAt: new Date().toISOString() };
     if (isRedisConfigured()) {
       const saved = repliesFor(await redisPipeline([["SET", key, JSON.stringify(copy), "EX", PREVIEW_SECONDS]]), 1);

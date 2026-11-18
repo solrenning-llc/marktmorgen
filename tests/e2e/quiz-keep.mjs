@@ -73,6 +73,10 @@ try {
   };
   const picked = () => tab.evaluate(() => [...document.querySelectorAll('input[name^="q_"]')].map((i) => i.checked));
   const kept = () => tab.evaluate((k) => localStorage.getItem(k), ADA);
+  // QuizKeep puts a draft back, or forgets it, in an effect after the form is drawn: wait for it before reading
+  // (review of #4324, LOW 4), never read what the page held a moment before.
+  const putBack = (count) => tab.waitForFunction((n) => document.querySelectorAll('input[name^="q_"]:checked').length === n, count);
+  const forgotten = () => tab.waitForFunction((k) => localStorage.getItem(k) === null, ADA);
   const status = () => tab.getByRole("status").textContent();
 
   await open(ada);
@@ -83,6 +87,7 @@ try {
   is("nothing was sent", sent.length, 0);
 
   await open(ada);
+  await putBack(2);
   is("coming back puts the choices back", await picked(), [false, true, false, true]);
   await tab.getByRole("status").filter({ hasText: "are back" }).waitFor();
   is("and says so in the status line that was there, empty, before", await status(), BACK);
@@ -91,12 +96,14 @@ try {
   await tab.getByText("monthly quiz submission allowance").waitFor();
   is("the server refused the try (429): the draft is still there", [sent.length, JSON.parse(await kept()).answers], [1, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] }]);
   await open(ada);
+  await putBack(2);
   is("and the lesson puts the answers back", await picked(), [false, true, false, true]);
 
   answer = "offline";
   await tab.getByRole("button", { name: "Check my answers" }).click().catch(() => {});
   await tab.waitForTimeout(300);
   await open(ada);
+  await putBack(2);
   is("the connection dropped on sending: still put back", await picked(), [false, true, false, true]);
 
   await open(bo);
@@ -104,6 +111,7 @@ try {
   is("and the first student's draft is left alone", JSON.parse(await kept()).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] });
 
   await open(adaAfterRecordedTry);
+  await forgotten();
   is("once the server recorded a try, the draft is never put back, and is forgotten", [await picked(), await kept()], [[false, false, false, false], null]);
 
   await open(ada);
@@ -115,11 +123,13 @@ try {
 
   await tab.getByLabel("A").check();
   await open(adaQuizChanged);
+  await forgotten();
   is("a quiz the creator changed since never gets the old choices, and they are forgotten (review of #4324)", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);
 
   await open(ada);
   await tab.getByLabel("A").check();
   await open(adaOtherQuestions);
+  await forgotten();
   is("a try with other questions never gets them, and they are forgotten", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);
 
   await context.addInitScript(() => {

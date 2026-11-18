@@ -890,6 +890,13 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           return this.run(["HDEL", purchases, field]);
         }
+        // lib/paypal-payouts.ts AUTOPAY_IF: the auto-payout switch written only onto the exact app record read.
+        if (key.startsWith("-- marktmorgen:paypal-autopay-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, record, was, next] = args;
+          if (this.run(["GET", record]) !== was) return 0;
+          this.run(["SET", record, next]);
+          return 1;
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;

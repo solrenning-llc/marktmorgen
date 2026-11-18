@@ -1810,6 +1810,39 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
   return { sales, partial };
 }
 
+type PathSaleIdentity = { order: string; paymentIntent: string; cents: number; currency: string; refunded: boolean };
+
+// Compare the sales, refund marks and watch scores at one Redis read
+// boundary. Only the verdict comes back to the Path visit.
+const PATH_PAYPAL_SALES_MATCH = `-- marktmorgen:path-paypal-sales-match:v1
+local orders = {}
+for i = 1, #KEYS - 2 do orders[i] = ARGV[4 + (i - 1) * 5] end
+local rows = redis.call("MGET", unpack(KEYS, 3))
+local refunds = redis.call("ZMSCORE", KEYS[1], unpack(orders))
+local watch = redis.call("ZMSCORE", KEYS[2], unpack(orders))
+for i = 1, #orders do
+  if not rows[i] then return 0 end
+  local ok, paid = pcall(cjson.decode, rows[i])
+  local offset = 4 + (i - 1) * 5
+  if not ok or type(paid) ~= "table" or paid.store ~= ARGV[1] or paid.merchant ~= ARGV[2]
+    or paid.order ~= orders[i] or type(paid.capture) ~= "string" or "paypal:" .. paid.capture ~= ARGV[offset + 1]
+    or paid.cents ~= tonumber(ARGV[offset + 2]) or paid.currency ~= ARGV[offset + 3]
+    or paid.live ~= true or paid.takenOff ~= nil or paid.blind ~= nil then return 0 end
+  if (refunds[i] ~= false) ~= (ARGV[offset + 4] == "1") then return 0 end
+  if watch[i] and tonumber(watch[i]) <= tonumber(ARGV[3]) then return 0 end
+end
+return 1`;
+
+export async function pathPayPalSalesMatch(statsId: string | null, merchant: string, sales: PathSaleIdentity[], now: number): Promise<boolean> {
+  if (!sales.length) return true;
+  if (!statsId || !isRedisConfigured() || sales.some((sale) => !ORDER_ID.test(sale.order))) return false;
+  const reply = repliesFor(await redisPipeline([[
+    "EVAL", PATH_PAYPAL_SALES_MATCH, sales.length + 2, refundedKey(statsId), watchKey(statsId), ...sales.map((sale) => paidKey(sale.order)),
+    statsId, merchant, now - WATCH_LATE_SECONDS, ...sales.flatMap((sale) => [sale.order, sale.paymentIntent, sale.cents, sale.currency, sale.refunded ? "1" : "0"]),
+  ]]), 1);
+  return reply?.[0] === 1;
+}
+
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */
 export const paypalOrderKeys = (order: string): string[] => (ORDER_ID.test(order) ? [orderKey(order), paidKey(order)] : []);
 

@@ -1170,8 +1170,10 @@ export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
  * and score at 64 bytes. Four commands, read by a PayPal-only store as by one that also sells through Stripe. A fifth,
  * since Codex X4's MEDIUM on #3443: the refund watch's late orders (readPayPalWatchLate, a range of REFUND_WATCH_BATCH
  * and one, each listed order at 64 bytes), whose refund state is not known now.
+ * The final consistency check adds one script, one MGET and two ZMSCORE
+ * calls on Redis, returning one integer instead of transferring the records again.
  */
-export const PATH_PAYPAL_COMMANDS = 5;
+export const PATH_PAYPAL_COMMANDS = 9;
 export const PATH_PAYPAL_BYTES = (PATH_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES + (PATH_SALE_PAGES * 100 + 1 + 2 * (PAYPAL_REFUNDS_READ + 1) + REFUND_WATCH_BATCH + 1) * 64;
 export const PATH_READ = request("heavy", 26 + PATH_PAYPAL_COMMANDS, LIFE_WRITE_MAX * 96 + 20_480 + PATH_PAYPAL_BYTES) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 

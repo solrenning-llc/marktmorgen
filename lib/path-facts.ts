@@ -36,7 +36,7 @@ import { KIND } from "@/lib/catalog";
 import {saleHandles,type Store} from "@/lib/store";
 import {pathGrowthMoney,type PathGrowthMoney} from "@/lib/path-growth-money";
 import { readLifeRecord, readPaidSales, readStoreRefunds, readsSales } from "@/lib/stats";
-import { paypalPaymentId, paypalRefundWatch, readPayPalRefundsDetail, readPayPalWatchLate } from "@/lib/paypal-sales";
+import { pathPayPalSalesMatch, paypalPaymentId, paypalRefundWatch, readPayPalRefundsDetail, readPayPalWatchLate } from "@/lib/paypal-sales";
 import { countLinks } from "@/lib/short-links";
 import { sellsInTestMode } from "@/lib/stripe-connect";
 import { type PathFacts, SOCIAL_SOURCES } from "@/lib/path-rules";
@@ -160,12 +160,16 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
       refunds = null;
     }
   }
-  if (refunds !== null && livePayPal.length) {
+  if (refunds !== null && watched && livePayPal.length) {
     try {
       // PayPal's refunds in full, as its refund watch wrote them down; any it could not all read leaves the money unknown.
       // With them, the orders the refund watch is late on: a sale whose blind mark or PayPal's word could not be written
       // is put back late, so its refund state is not known now (Codex X4 on #3443).
-      const [read, late] = await Promise.all([readPayPalRefundsDetail(store.statsId, since(livePayPal)), readPayPalWatchLate(store.statsId, Math.floor(now / 1000))]);
+      // A watch that finished before the late-order check has already
+      // recorded any full refund. Read that ledger afterwards, then verify
+      // that the sale records used for the amount are still the same.
+      const late = await readPayPalWatchLate(store.statsId, Math.floor(now / 1000));
+      const read = await readPayPalRefundsDetail(store.statsId, since(livePayPal));
       // A PayPal refund names its own payment, so one whose sale the path did not count gives nothing back of a sale it
       // did: it is left out, never taken off a Stripe sale that names no payment (Claude 6's L2 on #3443).
       const counted = new Set(livePayPal.map((s) => s.paymentIntent));
@@ -173,9 +177,16 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
       // A refund whose sale's record has expired (400 days after the sale) is of a sale the path does not count: it
       // leaves the money known. One of a sale it counts, or a reading cut short, leaves it unknown (cloud I's
       // MEDIUM 1 on #3443).
-      const countedOrders = new Set(livePayPal.map((s) => String(s.row.id ?? "").replace(/^paypal:/, "")));
+      const knownRefunds = new Set(read.rows.map((row) => row.order));
+      const identities = livePayPal.map((s) => {
+        const order = String(s.row.id ?? "").replace(/^paypal:/, "");
+        return { order, paymentIntent: s.paymentIntent, cents: s.cents, currency: s.currency, refunded: knownRefunds.has(order) };
+      });
+      const countedOrders = new Set(identities.map((sale) => sale.order));
       const unknown = read.cut || late.cut || read.gone.some((order) => countedOrders.has(order)) || late.orders.some((order) => countedOrders.has(order));
-      refunds = unknown ? null : [...refunds, ...own];
+      const checkedAt = Math.floor(Math.max(now, Date.now()) / 1000);
+      const same = !unknown && await pathPayPalSalesMatch(store.statsId, watched, identities, checkedAt);
+      refunds = same ? [...refunds, ...own] : null;
     } catch (error) {
       console.error("reading a store's PayPal refunds for its path failed", store.handle, error);
       refunds = null;

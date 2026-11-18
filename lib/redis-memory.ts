@@ -217,6 +217,30 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        if (key.startsWith("-- marktmorgen:path-paypal-sales-match:v1\n")) {
+          const count = Number(args[0]) - 2;
+          if (!Number.isSafeInteger(count) || count < 1 || args.length !== 6 + 6 * count) return 0;
+          const [, refundedKey, watchKey] = args;
+          const [statsId, merchant, late, ...expected] = args.slice(3 + count);
+          for (let i = 0; i < count; i += 1) {
+            const [order, capture, amount, currency, refunded] = expected.slice(5 * i, 5 * (i + 1));
+            const row = this.run(["GET", args[i + 3]]);
+            if (typeof row !== "string") return 0;
+            try {
+              const paid = JSON.parse(row);
+              if (!paid || paid.store !== statsId || paid.merchant !== merchant || paid.order !== order
+                || typeof paid.capture !== "string" || `paypal:${paid.capture}` !== capture
+                || paid.cents !== Number(amount) || paid.currency !== currency
+                || paid.live !== true || paid.takenOff !== undefined || paid.blind !== undefined) return 0;
+              if ((this.run(["ZSCORE", refundedKey, order]) !== null) !== (refunded === "1")) return 0;
+              const watchedAt = this.run(["ZSCORE", watchKey, order]);
+              if (watchedAt !== null && Number(watchedAt) <= Number(late)) return 0;
+            } catch {
+              return 0;
+            }
+          }
+          return 1;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

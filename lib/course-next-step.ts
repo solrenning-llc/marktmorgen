@@ -5,12 +5,10 @@
  * Read in order, from the cheapest, and only as far as needed: the creator's
  * choice (kept on the course, no read), the "No thanks" this browser keeps (a
  * cookie, no read), the product (one listing read), and only when all of that
- * lets the card show, what the student already has from the store, read from
- * the creator's Stripe account and the purchases brought over
- * (lib/cart-offers.ts ownedBeforeCart), which takes CART_OFFER_REQUEST_UNITS
- * of the store's public requests before anything is read and answers null
- * without them. Null, or any read that fails, shows no card: unknown is never
- * "does not have it".
+ * lets the card show, what the student already has from the store. The first
+ * of CART_OFFER_REQUEST_UNITS is taken before the listing; the rest are taken
+ * before the Stripe/imported/PayPal reads. Null, or any read that fails, shows
+ * no card: unknown is never "does not have it".
  *
  * The "No thanks" is kept in the student's own browser, under
  * nextStepCookie(course), for NEXT_STEP_NO_SECONDS: nothing about it is kept
@@ -22,7 +20,9 @@ import { readListing } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { offerable } from "@/lib/next-offer-rules";
 import { MIN_BUNDLE_ITEMS } from "@/lib/bundle-rules";
-import { ownedBeforeCart } from "@/lib/cart-offers";
+import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
+import { ownedHere } from "@/lib/next-offer";
+import { takeBuyerRead } from "@/lib/buyer-actions";
 import { nextStepShown } from "@/lib/course-next-step-rules";
 import { ownKey } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -58,12 +58,16 @@ export async function nextStepFor(input: {
   const { store, course, courseProductId } = input;
   const step = course.nextStep ?? null;
   if (!step || input.dismissed) return null;
+  // The listing is an extra read for this card: take its first unit before it, not after it.
+  if (!(await takeBuyerRead(store, 1).catch(() => false))) return null;
   const listing = await readListing(store, step.productId).catch(() => "unknown" as const);
   const sellable = (product: Listing) => canSellProduct(store, product);
   const product = listing === "unknown" ? "unknown" : listing ? { id: listing.id, onSale: offerable(listing, new Set(), sellable), left: null } : null;
   // Everything but what the student has: when this already keeps the card away, nothing more is read or paid for.
   if (!nextStepShown({ step, courseProductId, product, owned: false, dismissed: false }).shown || listing === "unknown" || !listing) return null;
-  const owned = await ownedBeforeCart(store, input.email).catch(() => null);
+  // The remaining units are still taken before any ownership/provider read; the total stays unchanged.
+  if (!(await takeBuyerRead(store, CART_OFFER_REQUEST_UNITS - 1).catch(() => false))) return null;
+  const owned = await ownedHere(store, input.email).catch(() => null);
   if (owned === null) return null;
   // What was bought through PayPal is kept apart (lib/paypal-sales.ts, ownKey), never in the Stripe lists above: the
   // product and each product of its bundle, read exactly; unknown shows no card (focal on #3530, MEDIUM).

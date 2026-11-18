@@ -70,8 +70,8 @@ export function CourseNextStep({
 
   return (
     <form onSubmit={save} className="mt-4 grid max-w-2xl gap-4" data-next-step-form="">
-      <label className="block" htmlFor={`${id}-product`}>
-        <span className="field-label">Product to suggest next</span>
+      <div className="block">
+        <label className="field-label" htmlFor={`${id}-product`}>Product to suggest next</label>
         <select id={`${id}-product`} className="field mt-1" value={picked} onChange={(e) => setPicked(e.target.value)} aria-describedby={`${id}-product-help`}>
           <option value="">None: show no next step</option>
           {choices.map((choice) => (
@@ -84,10 +84,10 @@ export function CourseNextStep({
           Students who already have it never see it, nor those who said &quot;No thanks&quot; in the browser they use. Nobody sees it while it is a draft or sold out.
           Products with a limited number, free products and bundles the student builds are never shown, so they cannot be saved here.
         </span>
-      </label>
+      </div>
       {picked ? (
-        <label className="block" htmlFor={`${id}-line`}>
-          <span className="field-label">Your line (optional)</span>
+        <div className="block">
+          <label className="field-label" htmlFor={`${id}-line`}>Your line (optional)</label>
           <textarea
             id={`${id}-line`}
             className="field mt-1"
@@ -102,10 +102,10 @@ export function CourseNextStep({
             One calm sentence in your own words. The card already shows the product and its price. Leave out discounts, numbers,
             quotes, links and words that rush, like &quot;now&quot; or &quot;last&quot;.
           </span>
-          <span id={`${id}-line-count`} className={`mt-1 block text-sm ${over ? "font-semibold text-danger" : "text-ink-soft"}`}>
+          <span id={`${id}-line-count`} className={`mt-1 block text-sm ${over ? "font-semibold text-danger-text" : "text-ink-soft"}`}>
             {`${used} of ${maxLine} characters`}
           </span>
-        </label>
+        </div>
       ) : null}
       {/* Always there, so focus is never lost with it after a save (review of #3530, WCAG 2.4.3); it says when there is nothing to save. */}
       <p>

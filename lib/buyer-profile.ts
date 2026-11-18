@@ -43,6 +43,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { saleChannel } from "@/lib/stats";
@@ -170,6 +172,8 @@ function parsePersonNotes(replies: unknown): PersonNote[] {
 /** Where notes about people are counted in the store's data room (lib/store-data.ts). */
 const NOTES_SLOT = "pn";
 const noteBytes = (note: PersonNote) => dataBytes([note.id, JSON.stringify({ at: note.at, by: note.by, text: note.text })], 1);
+/** What one note took when it was added (addPersonNote): its own bytes and its person's place, given back whole when it goes. */
+const noteTaken = (person: string, id: string, json: string) => dataBytes([id, json], 1) + dataBytes([person], 1);
 
 /** A buyer's notes, newest first; throws UnknownReplyError when they could not be read exactly (parsePersonNotes). */
 export async function readPersonNotes(statsId: string | null, person: string): Promise<PersonNote[]> {
@@ -188,7 +192,7 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   const id = randomBytes(4).toString("hex");
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
-  await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
+  await needData(room, [{ slot: NOTES_SLOT, bytes: noteTaken(person, id, json) }]);
   // Each reply read exactly (rule 24; Codex X5 on #3159): HSET answers 1 for a new field, the two EXPIREs 1, SADD 0 or 1.
   // Anything else is unknown: the note may or may not be kept, so its room stays taken and the save is not answered
   // as done.
@@ -210,7 +214,8 @@ export async function addPersonNote(statsId: string, person: string, by: string,
     // already gone (its room went with it), and any other reply keeps its room (never given back on a guess).
     const removed = repliesFor(await redisPipeline(dropped.map((n) => ["HDEL", notesKey(statsId, person), n.id])), dropped.length);
     const gone = removed ? dropped.filter((_, i) => countOf(removed[i]) === 1) : [];
-    if (gone.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: gone.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    // Each with its person's place, as it was taken (noteTaken).
+    if (gone.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: gone.reduce((sum, n) => sum + noteBytes(n) + dataBytes([person], 1), 0) }]);
     if (!removed || gone.length + removed.filter((r) => countOf(r) === 0).length !== dropped.length) {
       console.error("pruning a buyer's oldest notes was not confirmed; their room stays counted", dropped.length);
     }
@@ -268,7 +273,7 @@ export async function removePersonNote(statsId: string, person: string, id: unkn
   if (typeof id === "string" && NOTE_ID.test(id) && PERSON_KEY.test(person) && isRedisConfigured()) {
     const gone = (await readPersonNotes(statsId, person)).find((n) => n.id === id);
     const [removed] = repliesFor(await redisPipeline([["HDEL", notesKey(statsId, person), id]]), 1) ?? [null];
-    if (gone && countOf(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) }]);
+    if (gone && countOf(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) + dataBytes([person], 1) }]);
   }
   return readPersonNotes(statsId, person);
 }
@@ -803,11 +808,23 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   };
 }
 
-/** Deletes the team's notes about one person (lib/person-erasure.ts). */
-export async function forgetNotesPerson(statsId: string | null, person: string): Promise<number> {
+/**
+ * Deletes the team's notes about one person (lib/person-erasure.ts), and
+ * gives back to `room`, when it is given, what each note took when it was
+ * added: its own bytes and its person's place. The notes are read and
+ * deleted in one step, so two deletions at once give them back once. A reply
+ * that is not exactly the two asked for throws (UnknownReply): the notes are
+ * not taken for gone and nothing is given back.
+ */
+export async function forgetNotesPerson(statsId: string | null, person: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]);
-  return Number(gone) || 0;
+  const what = "the deletion of a person's notes";
+  const [taken, who] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]), 2, what);
+  const notes = takenPairs(taken, what);
+  replyCount(who, what);
+  const freed = notes.reduce((sum, [id, json]) => sum + noteTaken(person, id, json), 0);
+  if (room && freed > 0) await giveData(room, [{ slot: NOTES_SLOT, bytes: freed }]);
+  return notes.length ? 1 : 0;
 }
 
 /** Spends a search's token once the person it found is deleted (lib/person-erasure.ts). */

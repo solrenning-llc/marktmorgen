@@ -39,7 +39,8 @@ export const VAT_COMMERCIAL_REVIEWS: readonly VatCommercialReview[] = [];
 /** The Member States accepted as the OSS Member State of identification, with their ISO 3166-1 numeric code. */
 export const OSS_IDENTIFICATION_CODES: Readonly<Record<string, string>> = { IE: "372" };
 
-type SwitchInput = {
+/** What a switch may be asked with besides the clock: tests only (a checkout passes it through whole, never a bare yes). */
+export type SwitchInput = {
   reviewed?: boolean;
   seller?: { legalName: string; address: string };
   eu?: { memberState: string; vatNumber: string; effectiveFrom: string };

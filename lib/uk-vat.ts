@@ -35,12 +35,12 @@
  */
 import type { EuSupply } from "@/lib/eu-vat-supply";
 import { decimalsOf, isCurrency } from "@/lib/money";
-import { ukVatCollectOn } from "@/lib/vat-registrations";
+import { type SwitchInput, ukVatCollectOn } from "@/lib/vat-registrations";
 
 /**
  * Collecting UK VAT is built but off: the constant lives in lib/vat-registrations.ts (unit 4), whose ukVatCollectOn()
- * also needs the owner's UK VAT registration and commercial review; a checkout asks that switch unless a test passes
- * its own `reviewed`.
+ * also needs the owner's UK VAT registration and commercial review; a checkout always asks that whole switch (a test
+ * may only give it its inputs, `vatSwitch`).
  */
 export { UK_VAT_COLLECT_REVIEWED } from "@/lib/vat-registrations";
 
@@ -109,7 +109,12 @@ export function ukCheckout(input: {
   supply: EuSupply;
   priceCents: number;
   items: { ip: unknown; billing: unknown; card?: unknown };
-  reviewed?: boolean;
+  /**
+   * What ukVatCollectOn() (lib/vat-registrations.ts) is asked with besides the clock; tests only. The checkout always
+   * decides through the whole switch (the reviewed constant, the UK registration and the owner's review together):
+   * no caller can stand in for it with a bare yes (Codex X3's LOW on #4575).
+   */
+  vatSwitch?: Omit<SwitchInput, "now">;
   now?: Date;
   /** Whether the product is an e-publication (UK zero rate); only an explicit `false` lets UK VAT be collected at 20%. */
   publication?: boolean;
@@ -124,7 +129,7 @@ export function ukCheckout(input: {
   if (input.supply === "human") return { kind: "refuse", reason: "human" };
   if (input.supply !== "ess") return { kind: "refuse", reason: "supply" };
   if (!clockOk) return { kind: "refuse", reason: "rate-expired" };
-  if ((input.reviewed ?? ukVatCollectOn({ now })) !== true) return { kind: "refuse", reason: "review" };
+  if (ukVatCollectOn({ ...(input.vatSwitch ?? {}), now }) !== true) return { kind: "refuse", reason: "review" };
   if (now.toISOString().slice(0, 10) > UK_VAT_RATE_VALID_UNTIL) return { kind: "refuse", reason: "rate-expired" };
   if (input.publication !== false) return { kind: "refuse", reason: "publication" };
   const vat = ukVatOnTop(input.priceCents);

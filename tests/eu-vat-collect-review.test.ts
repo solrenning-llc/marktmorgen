@@ -11,6 +11,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { EU_VAT_COLLECT_REVIEWED, euCheckout } from "@/lib/eu-vat-checkout";
 import type { EuVatRate } from "@/lib/eu-vat-amount";
+import { EU_SWITCH_ON } from "./vat-switch-on";
 
 const rates: EuVatRate[] = [{ country: "DE", basisPoints: 1900, source: "https://example.invalid/de", readOn: "2026-11-13" }];
 const de = { ip: "DE", billing: "DE" };
@@ -38,17 +39,17 @@ test("unreviewed, a complete collect record still collects nothing: the sale is 
 });
 
 test("reviewed, a consumer is collected on top as before", () => {
-  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, reviewed: true }).kind, "collect");
+  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, vatSwitch: EU_SWITCH_ON }).kind, "collect");
 });
 
 test("reviewed, a business whose number VIES answered valid, fresh, for the same country is reverse-charged, never collected", () => {
-  const rc = euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, reviewed: true, business: verified, now });
+  const rc = euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, vatSwitch: EU_SWITCH_ON, business: verified, now });
   assert.equal(rc.kind, "reverse-charge");
   assert.equal((rc as { vatNumber: string }).vatNumber, "DE123456789");
   assert.deepEqual((rc as { vies: unknown }).vies, verified.vies, "VIES's answer at the sale is kept");
   const gr = { ip: "GR", billing: "GR" };
   const grRates: EuVatRate[] = [{ country: "GR", basisPoints: 2400, source: "https://example.invalid/gr", readOn: "2026-11-13" }];
-  const greek = euCheckout({ supply: "ess", priceCents: 1000, items: gr, rates: grRates, records: collecting, reviewed: true, business: { vatNumber: "EL 123 456 789", vies: answer("valid", "GR") }, now });
+  const greek = euCheckout({ supply: "ess", priceCents: 1000, items: gr, rates: grRates, records: collecting, vatSwitch: EU_SWITCH_ON, business: { vatNumber: "EL 123 456 789", vies: answer("valid", "GR") }, now });
   assert.equal(greek.kind, "reverse-charge");
   assert.equal((greek as { vatNumber: string }).vatNumber, "EL123456789", "Greece's VAT prefix is EL");
 });
@@ -71,7 +72,7 @@ test("reviewed, every other business answer charges the consumer's VAT on top an
     { vatNumber: 123, vies: answer("valid") },
     { vatNumber: "US123456789", vies: answer("valid", "US") },
   ]) {
-    const sale = euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, reviewed: true, business, now });
+    const sale = euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, vatSwitch: EU_SWITCH_ON, business, now });
     assert.equal(sale.kind, "collect", JSON.stringify(business));
     const collected = sale as { vat: { vatCents: number; totalCents: number }; vies: unknown };
     assert.equal(collected.vat.vatCents, 190);
@@ -85,34 +86,34 @@ test("under refuse-consumers, a VIES-confirmed business is still reverse-charged
   // Explicit decision (review of 15/11/2026, finding 7): art. 196 makes the business liable, so no OSS supply is made;
   // in practice the reviewed switch (lib/vat-registrations.ts) still needs the OSS registration before anything runs.
   const refusing = [record("refuse-consumers")];
-  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: refusing, reviewed: true, business: verified, now }).kind, "reverse-charge");
+  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: refusing, vatSwitch: EU_SWITCH_ON, business: verified, now }).kind, "reverse-charge");
 });
 
 test("a moment that is not one never throws: the sale is refused", () => {
   for (const bad of [new Date(Number.NaN), new Date(8.64e15 + 1)]) {
-    const sale = euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, reviewed: true, now: bad });
+    const sale = euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, vatSwitch: EU_SWITCH_ON, now: bad });
     assert.equal(sale.kind, "refuse", String(bad));
-    assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, reviewed: true, business: verified, now: bad }).kind, "refuse");
+    assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, vatSwitch: EU_SWITCH_ON, business: verified, now: bad }).kind, "refuse");
   }
 });
 
 test("a business charged VAT still needs the collect treatment: under refuse-consumers it is refused, never sold untaxed", () => {
   const refusing = [record("refuse-consumers")];
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: refusing, reviewed: true, business: { vatNumber: "DE123456789", vies: answer("unavailable") }, now }),
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: refusing, vatSwitch: EU_SWITCH_ON, business: { vatNumber: "DE123456789", vies: answer("unavailable") }, now }),
     { kind: "refuse", reason: "treatment" });
 });
 
 test("past the official table's review date no EU sale is collected: refused as rates-expired", () => {
-  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, reviewed: true, now }).kind, "collect");
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, reviewed: true, now: new Date("2027-01-01T00:00:00.000Z") }),
+  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, vatSwitch: EU_SWITCH_ON, now }).kind, "collect");
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, vatSwitch: EU_SWITCH_ON, now: new Date("2027-01-01T00:00:00.000Z") }),
     { kind: "refuse", reason: "rates-expired" });
   // A business answered "unavailable" is charged VAT, so the expired table refuses it too.
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, reviewed: true, now: new Date("2027-01-01T00:00:00.000Z"), business: { vatNumber: "DE123456789", vies: answer("unavailable", "DE", "123456789", "2026-12-31T23:59:00.000Z") } }),
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting, vatSwitch: EU_SWITCH_ON, now: new Date("2027-01-01T00:00:00.000Z"), business: { vatNumber: "DE123456789", vies: answer("unavailable", "DE", "123456789", "2026-12-31T23:59:00.000Z") } }),
     { kind: "refuse", reason: "rates-expired" });
 });
 
 test("reviewed, a business still needs a complete EU record, an electronically supplied service and agreeing evidence", () => {
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, reviewed: true, business: verified, now }), { kind: "refuse", reason: "record" });
-  assert.deepEqual(euCheckout({ supply: "goods", priceCents: 1000, items: de, rates, records: collecting, reviewed: true, business: verified, now }), { kind: "refuse", reason: "goods" });
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "DE", billing: "FR" }, rates, records: collecting, reviewed: true, business: verified, now }), { kind: "refuse", reason: "place" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, vatSwitch: EU_SWITCH_ON, business: verified, now }), { kind: "refuse", reason: "record" });
+  assert.deepEqual(euCheckout({ supply: "goods", priceCents: 1000, items: de, rates, records: collecting, vatSwitch: EU_SWITCH_ON, business: verified, now }), { kind: "refuse", reason: "goods" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "DE", billing: "FR" }, rates, records: collecting, vatSwitch: EU_SWITCH_ON, business: verified, now }), { kind: "refuse", reason: "place" });
 });

@@ -153,6 +153,7 @@ import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POL
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { UNWRITTEN_LINKS_PER_RUN, UNWRITTEN_LINK_COMMANDS } from "@/lib/winback-send";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -302,6 +303,8 @@ export const TRANSACTIONAL: Record<Tier, number> = {
 const micro = (n: number) => n / 1_000_000;
 /** One database command, a byte moved through the database, a byte kept there a month. */
 export const COMMAND = micro(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1_000_000;
+/** The plans cron's runs in the longest month: one a day (vercel.json, /api/cron/plans at 09:00 UTC). */
+export const COME_BACK_RUNS_PER_MONTH = 31;
 export const DB_BYTE = micro(UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9;
 export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
@@ -1832,6 +1835,20 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/payment-recovery.ts", names: ["const CARD_PAGES = 5", "releaseMark(key, value)"] },
     ],
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
+  },
+  {
+    id: "come-back-unwritten-links",
+    feature: "A come-back offer whose link was not written as asked: the whole offer, from its first mark to the link taken back and the run's two marks let go, with nothing sent (Claude 7 and Claude 5 on #3889, 16 November 2026)",
+    monthlyUsd: () => COME_BACK_RUNS_PER_MONTH * UNWRITTEN_LINKS_PER_RUN * UNWRITTEN_LINK_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/winback-send.ts", names: ["UNWRITTEN_LINK_COMMANDS", "UNWRITTEN_LINKS_PER_RUN", "if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;", "releaseMark(onceKey(statsId, email, product.id), onceValue)", "releaseMark(sentKey(account, subId), claim)"] },
+      { file: "lib/claim-mark.ts", names: ["claimMark", "[\"GET\", key]"] },
+      { file: "lib/contacts.ts", names: ["round < 3", "CAS_HSET", "a contact write's read-back"] },
+      { file: "lib/erasure-index.ts", names: ["noteForErasure"] },
+      { file: "lib/redis-lock.ts", names: ["RELEASE"] },
+      { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
+    ],
+    basis: "At its worst a run's offer fails its link write after every step at its worst: UNWRITTEN_LINK_COMMANDS commands from its first mark to the end (both marks read back, the unsubscribe token lost twice and read back the third time, the link and its three erasure notes, the link's DEL and two RELEASE scripts at one plus their two calls). The first such failure stops the store's run (UNWRITTEN_LINKS_PER_RUN), and the offer is looked at again on the next run, one run a day (the plans cron at 09:00 UTC), COME_BACK_RUNS_PER_MONTH runs a month. A failure that sends nothing takes nothing from the store's email figure, so it is priced here, not in store-email. Held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.",
   },
   {
     id: "ai",

@@ -39,9 +39,10 @@ export function DateLeaf({ event, size = "md", locale = "en-US" }: { event: Pick
   );
 }
 
-/** How many are coming, and how many places are left, in a few words. */
-export function placesWords(store: Pick<Store, "language">, event: CommunityEvent, going: number): string {
+/** How many are coming, and how many places are left, in a few words; a count that could not be read is said so. */
+export function placesWords(store: Pick<Store, "language">, event: CommunityEvent, going: number | null): string {
   const w = communityWords(store.language);
+  if (going === null) return w.countUnchecked;
   const people = w.goingCount(going);
   if (!event.cap) return people;
   const left = Math.max(0, event.cap - going);
@@ -59,8 +60,10 @@ export function EventCard({
 }: {
   store: Store;
   event: CommunityEvent;
-  going: number;
-  mine: boolean;
+  /** Null when it could not be read (lib/community-events.ts rsvpNumbers). */
+  going: number | null;
+  /** Null when it could not be read: never shown as going or not going. */
+  mine: boolean | null;
   /** Kept for the buyers of products this reader does not have. */
   locked: boolean;
   /** When the page is drawn (eventClock). */
@@ -81,7 +84,7 @@ export function EventCard({
             {event.cancelled ? <span className="cm-badge cm-badge-warn">{w.canceled}</span> : null}
             {live ? <span className="cm-badge cm-badge-creator ev-live">{w.onNow}</span> : null}
             {!live && open ? <span className="cm-badge cm-badge-accent">{w.doorsOpen}</span> : null}
-            {mine && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
+            {mine === true && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
             {locked ? <span className="cm-badge">{w.forSomeMembers}</span> : null}
             {over && event.replay ? <span className="cm-badge cm-badge-accent">{w.replay}</span> : null}
           </p>
@@ -92,7 +95,7 @@ export function EventCard({
           {!event.cancelled ? (
             <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold">
               <span>{eventWhenIn(store, event, now)}</span>
-              <span className="st-muted">{over ? w.rsvpd(going) : placesWords(store, event, going)}</span>
+              <span className="st-muted">{over ? (going === null ? w.countUnchecked : w.rsvpd(going)) : placesWords(store, event, going)}</span>
             </p>
           ) : null}
         </div>

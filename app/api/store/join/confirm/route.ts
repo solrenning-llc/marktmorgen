@@ -6,8 +6,9 @@ import { JOIN_TOKEN, confirmJoin, readJoinToken } from "@/lib/store-join";
 import { enroll } from "@/lib/flows";
 import { queuePerson } from "@/lib/email-sync";
 import { allowedBy, newLeadId, sendServerLead, sendsFromServer } from "@/lib/ad-events";
-import { emitEvent } from "@/lib/webhooks";
+import { emitOrKeep } from "@/lib/webhook-outbox";
 import { recordLead } from "@/lib/affiliate-leads";
+import { countConfirmedLead } from "@/lib/path-lead";
 
 /** The button on the page an emailed sign-up link opens: the address joins the creator's list. */
 export async function POST(request: NextRequest) {
@@ -32,6 +33,9 @@ export async function POST(request: NextRequest) {
       // The creator's welcome sequence, when they have one for people who join,
       // and their own email platform, when they connected one (lib/email-sync.ts).
       await enroll(store, result.grant.e, { joined: result.added.joined });
+      // A lead for Marktmorgen Path when the link makes the address newly mailable on the list; the address counts
+      // once for the store, two presses at once included (lib/path-lead.ts; 13 [D10]). An unknown answer is logged.
+      if (result.added.joined) await countConfirmedLead(store, result.grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
       // A sign-up an affiliate brought, where the store pays per sign-up: credited now that it is confirmed,
       // and only for an address new to the list (lib/affiliate-leads.ts).
       if (result.grant.a && result.added.joined) {
@@ -47,8 +51,9 @@ export async function POST(request: NextRequest) {
       }
       // The creator's webhooks hear of it once, however often the button is pressed.
       const grant = result.grant;
+      // One that could not be queued now is kept, and the five-minute job tries it again (lib/webhook-outbox.ts, #4275).
       after(() =>
-        emitEvent(store, "list.joined", `join|${grant.e}|${grant.at}`, {
+        emitOrKeep(store, "list.joined", `join|${grant.e}|${grant.at}`, {
           email: grant.e,
           // The second box: they allowed their link use in sequences to be seen (lib/mail-clicks.ts).
           allowed_link_tracking: grant.k === true,
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
           // The creator's own site it was asked from, through the checkout script (lib/embed-sites.ts).
           site: grant.w ?? null,
           requested_at: grant.at || null,
-        }).catch((error) => console.error("queueing the list.joined webhook failed", error)),
+        }),
       );
       const at = Date.now();
       after(() =>

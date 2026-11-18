@@ -35,10 +35,10 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | FOLLOW-UP-CHARGE | 10 |
 | NEW-CHARGE | 20 |
 | TOTALS | 35 |
-| PAST-SALE | 5 |
+| PAST-SALE | 4 |
 | SETTING | 43 |
 | OTHER | 3 |
-| All | 116 |
+| All | 115 |
 
 ## The files
 
@@ -99,7 +99,8 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/mcp-tools.ts` | TOTALS | 248–277: revenue in the store's currency, sales_in_another_currency apart (unit 2d) | yes |
 | `lib/member-health.ts` | TOTALS | 164–170: each member's monthly amount in its own currency; 196–200 the at-risk total in the store's, the rest counted (unit 2e) | yes |
 | `lib/membership-numbers.ts` | TOTALS | 523/541: membership numbers and MRR movements in the store's currency | partly: "elsewhere" for live subscriptions only |
-| `lib/next-actions-rules.ts` | TOTALS | 247: "Do this next" ranks recorded money only in the store's currency (`options.currency`); another currency is never compared or converted | no |
+| `lib/next-actions-read.ts` | TOTALS | 70: the kept memberships reading's own currency (`numbers.currency`) goes with each amount it hands to "Do this next"; no amount without it, and none while any live membership is in another currency (`elsewhere`), never converted | partly: money only when every live membership is in the reading's currency, else not known |
+| `lib/next-actions-rules.ts` | TOTALS | 256: "Do this next" ranks recorded money only in the store's currency (`options.currency`); another currency is never compared or converted | partly: said in its own currency, ranked after known money by count, never compared or converted |
 | `lib/meta-ads.ts` | TOTALS | 611: ad spend only for an account in the store's currency | partly: refused |
 | `lib/meta-routes.ts` | TOTALS | 84/88: Meta picks an account in the store's currency | partly |
 | `lib/path-facts.ts` | TOTALS | 81/123: Path's revenue in the store's currency only | partly: other sales count, not their money |
@@ -111,10 +112,10 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/store-alerts.ts` | TOTALS | 205/209: daily alerts against the goal in the store's currency | partly |
 | `lib/tax-threshold.ts` | TOTALS | 119: the text scan also matches `s.currency` inside `totals.currency`; this is the supplied tax ledger's currency, not the store setting | yes: the ledger is totalled in its own currency, the threshold requires its rule currency, and incomplete or mismatched evidence stays unknown; no conversion or sales approval |
 | `app/studio/people/page.tsx` | PAST-SALE | 200: a buyer's sale in the sale's own currency | yes |
+| `lib/ad-context.ts` | SETTING | 49: an ad's price is checked against the product's price in the store's currency (632 [AA2] (m)) | no |
 | `lib/ad-events.ts` | PAST-SALE | 575/719: the session's or invoice's currency, else the store's | yes |
 | `lib/api-read.ts` | PAST-SALE | 189: the bookings API labels a paid call with the store's currency; 44/59 settings | no (189) |
 | `lib/course-paid-observation.ts` | PAST-SALE | 71–76: the paid session, line item, payment and charge must match the original receipt currency | yes: compares the paid currency with the frozen original, without conversion or borrowing the current store setting |
-| `lib/group-buy.ts` | PAST-SALE | 243: the group receipt in the session's currency | yes |
 | `app/[handle]/affiliates/page.tsx` | SETTING | 249–250, 510–512: the creator's lead and bonus terms | no |
 | `lib/course-confirmation-origin.ts` | SETTING | 114–127: an unadmitted course candidate freezes the store currency with its original price and consent text | yes: this is an immutable original-setting snapshot, not proof of payment or an active charge; paid observation must separately match it |
 | `app/[handle]/p/[product]/page.tsx` | SETTING | 188–200: structured data priceCurrency and prices | no (unit 3: what the page says) |

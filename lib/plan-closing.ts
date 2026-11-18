@@ -1175,7 +1175,6 @@ async function closeStore(key: string, now: number, hands: Hands, until: number,
       console.error("checking a closing store platform coverage failed", error);
       return stripeFailure(error);
     });
-    const saveFinal = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
     // Our platform key giving no answer about a late plan is ours or Stripe's, never the creator's: it holds, with
     // no deadline (Claude 3's H1 on #3463). Only the creator's own account's silence lapses (silenceLapses).
     if (latePlansChecked !== true) {

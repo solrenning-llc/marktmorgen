@@ -353,6 +353,54 @@ async function main(): Promise<void> {
     is("the blind mark and the new place unconfirmed: the money is unknown, no sale counted as kept", await money(store), [0, null]);
   }
 
+  part("A Path reading does not combine stale sales and a finished refund watch");
+  {
+    const { store, statsId } = await setup();
+    captureStatus.set("CAPTURE1", "PARTIALLY_REFUNDED");
+    redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, "1", order(1)]);
+    const normal = redis.pipeline;
+    let watched = false;
+    redis.pipeline = async (commands) => {
+      const rows = await normal(commands);
+      if (!watched && commands[0]?.[0] === "MGET" && commands[0].includes(`nl:ppsell:paid:${order(1)}`)) {
+        watched = true;
+        await watchPayPal(store, now * 1000 + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
+      }
+      return rows;
+    };
+    try {
+      const read = await money(store);
+      is("the watch ran between the sales and refunds reads", watched, true);
+      is("after a partial refund recorded in that watch, the next stand-alone read takes the sale off", await money(store), [1, 1500]);
+      is("the concurrent reading leaves inconsistent totals unknown", read, [0, null]);
+    } finally {
+      redis.pipeline = normal;
+    }
+  }
+
+  part("A full refund recorded after the Path refund list was read invalidates the total");
+  {
+    const { store, statsId } = await setup();
+    const normal = redis.pipeline;
+    let refunded = false;
+    redis.pipeline = async (commands) => {
+      const reply = await normal(commands);
+      if (!refunded && commands[0]?.[0] === "ZRANGEBYSCORE" && commands[0]?.[1] === `nl:ppsell:refunded:${statsId}`) {
+        refunded = true;
+        redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, now, order(1)]);
+      }
+      return reply;
+    };
+    try {
+      const read = await money(store);
+      is("the full refund was recorded after the first list", refunded, true);
+      is("the concurrent reading marks the total unknown", read, [0, null]);
+      is("the next reading takes the new refund off", await money(store), [1, 1500]);
+    } finally {
+      redis.pipeline = normal;
+    }
+  }
+
   part("L2: a PayPal refund of a sale the Path did not count is never taken off another sale");
   {
     const { store, statsId } = await setup();

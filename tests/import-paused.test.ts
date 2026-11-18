@@ -14,9 +14,11 @@ import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { GET as importGet, POST as importPost } from "@/app/api/store/import/route";
 import { POST as funnelPost } from "@/app/api/store/import/funnel/route";
-import { claimHandle, ensureListId, ensureStatsId, recordPlanDispute, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { MAX_STORE_BYTES, claimHandle, ensureListId, ensureStatsId, recordPlanDispute, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import * as imports from "@/lib/imports";
 import { IMPORT_KEEP_SECONDS, RAW_DAYS, advanceImports, jobOf, runImport, startImport } from "@/lib/imports";
+import { COST_LINES } from "./plan-cost-registry";
 import { FUNNEL_PAUSED, IMPORTS_PAUSED, IMPORT_ALLOWANCES, IMPORT_ROWS_KEPT_DAYS, importAllowanceFor } from "@/lib/import-limits";
 import { costsPaused, newCostCode } from "@/lib/plan-standing";
 import { leadsKey } from "@/lib/contacts";
@@ -164,6 +166,37 @@ async function main() {
   const endedOne = await importGet(new NextRequest(`https://marktmorgen.com/api/store/import?id=${endedId}`, { headers: { cookie, host: "marktmorgen.com" } }));
   is("where it stands still reads", [endedOne.status, ((await endedOne.json()) as { import?: { state?: string } }).import?.state], [200, "queued"]);
 
+  part("A paused import's passes are priced (Codex L on #3980, L-20261118-1452)");
+  // Each five-minute pass over it, until it ends, costs commands and reads the store: counted here, and priced in the
+  // imports line of tests/plan-cost-registry.ts for every one of the passes its keeping allows.
+  const named = imports as unknown as Record<string, unknown>;
+  const passCommands = named.PAUSED_IMPORT_PASS_COMMANDS;
+  const passes = named.PAUSED_IMPORT_PASSES;
+  const measured = await (async () => {
+    const real = redis.pipeline.bind(redis);
+    let commands = 0;
+    let bytes = 0;
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      commands += batch.length;
+      const replies = await real(batch);
+      bytes += Buffer.byteLength(JSON.stringify(batch)) + Buffer.byteLength(JSON.stringify(replies ?? null));
+      return replies;
+    }) as typeof redis.pipeline;
+    try {
+      await advanceImports(Date.now() + 30_000);
+    } finally {
+      redis.pipeline = real;
+    }
+    return { commands, bytes };
+  })();
+  is("(control) the pass left it waiting", (await jobOf(ended, endedId))?.state, "queued");
+  is(`a pass's commands are within PAUSED_IMPORT_PASS_COMMANDS (measured ${measured.commands})`, typeof passCommands === "number" && measured.commands <= passCommands, true);
+  const passBytes = named.PAUSED_IMPORT_PASS_BYTES;
+  is(`and its bytes within PAUSED_IMPORT_PASS_BYTES, a whole store record's worst included (measured ${measured.bytes})`, typeof passBytes === "number" && measured.bytes <= passBytes && passBytes >= MAX_STORE_BYTES, true);
+  is("every pass its keeping allows, one every five minutes, ends included", passes, Math.floor(IMPORT_KEEP_SECONDS / 300) + 1);
+  const line = COST_LINES.find((l) => l.id === "imports");
+  is("and the imports line names all three", ["PAUSED_IMPORT_PASSES", "PAUSED_IMPORT_PASS_COMMANDS", "PAUSED_IMPORT_PASS_BYTES"].every((name) => line?.sources.some((src) => src.file === "lib/imports.ts" && src.names.includes(name))), true);
+
   part("A paused import waits as long as its own record is kept, never longer (Claude 7 on #3980, reconfirmed by Claude 4 and Codex N1)");
   // Each five-minute pass of a paused import writes its record and renews its keys; on a store nobody pays that was
   // forever. Past IMPORT_KEEP_SECONDS from its start it ends, says so, and leaves the job's line.
@@ -171,10 +204,27 @@ async function main() {
   const aged = JSON.parse(kept) as { at: number };
   aged.at = Date.now() - (IMPORT_KEEP_SECONDS + 3600) * 1000;
   await redis.pipeline([["SET", `nl:import:${endedId}`, JSON.stringify(aged)]]);
-  const lapsed = await runImport(endedId, Date.now() + 30_000);
+  // The pass that ends it, counted as the five-minute job makes it (its list read and its record read before runImport).
+  const realPipeline = redis.pipeline.bind(redis);
+  let endCommands = 2;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    endCommands += batch.length;
+    return realPipeline(batch);
+  }) as typeof redis.pipeline;
+  let lapsed: Awaited<ReturnType<typeof runImport>>;
+  try {
+    lapsed = await runImport(endedId, Date.now() + 30_000);
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  const passLimit = (imports as unknown as Record<string, unknown>).PAUSED_IMPORT_PASS_COMMANDS;
+  is(`the pass that ends it is within PAUSED_IMPORT_PASS_COMMANDS too (measured ${endCommands})`, typeof passLimit === "number" && endCommands <= passLimit, true);
   is("it ends as failed, with nothing applied", [lapsed?.state, lapsed?.done], ["failed", 0]);
   is("it leaves the five-minute job's line", await redis.pipeline([["SISMEMBER", "nl:imports:active", endedId]]), [0]);
   is("and the next pass writes nothing more", (await runImport(endedId, Date.now() + 30_000))?.state, "failed");
+  // Codex L on #3980 (LEVE): a plan that ended, or that the creator paused, was not necessarily left unpaid.
+  const said = String((await redis.pipeline([["LRANGE", `nl:import:${endedId}:errors`, 0, -1]]))[0] ?? "");
+  is("the words do not say the plan was unpaid when it ended", [/not paid/.test(said), /plan/.test(said)], [false, true]);
 
   part("What the creator is told");
   is("the days the words promise are the days the rows are kept", IMPORT_ROWS_KEPT_DAYS, RAW_DAYS);

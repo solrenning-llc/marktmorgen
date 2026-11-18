@@ -89,6 +89,10 @@ is("a given number before a comma", safely(() => unsourcedNumbers(["40 recipes"]
 is("the price field '19', the draft '$19'", safely(() => unsourcedNumbers(["Only $19"], ["", ...givenTexts({ kind: "product", title: "Bread", price: "19" })])), []);
 is("notes '$19', the draft '19 dollars'", safely(() => unsourcedNumbers(["19 dollars"], "$19")), []);
 is("notes '20%', the draft '20 percent'", safely(() => unsourcedNumbers(["20 percent off"], "20%")), []);
+// Codex N4 and P, Claude 5 on #3437: a price, a count and a percentage of the same size are not the same figure.
+is("a given price does not supply a draft percentage", safely(() => unsourcedNumbers(["19% of buyers finish in a week"], givenTexts({ price: "$19" }), "en")), ["19%"]);
+is("a given count does not supply a percentage written in words", safely(() => unsourcedNumbers(["19 percent of buyers finish"], "19 buyers", "en")), ["19 percent"]);
+is("a given percentage does not supply a draft count", safely(() => unsourcedNumbers(["19 buyers finished"], "19% finished", "en")), ["19"]);
 is("'$1,200' is listed as written", safely(() => unsourcedNumbers(["Earn $1,200 a month"], "")), ["$1,200"]);
 is("'$5K' is listed as written", safely(() => unsourcedNumbers(["Earn $5K a month"], "")), ["$5K"]);
 is("'1.5M' is listed as written", safely(() => unsourcedNumbers(["1.5M views"], "")), ["1.5M"]);

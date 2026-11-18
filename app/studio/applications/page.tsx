@@ -31,6 +31,7 @@ export default async function StudioApplicationsPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const listed = await listApplications(store, now);
   const titles = listed && listed.length ? await readTitles(store).catch(() => null) : new Map<string, string>();

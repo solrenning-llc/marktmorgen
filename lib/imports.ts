@@ -93,6 +93,7 @@ import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailD
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, moveTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { stopTags } from "@/lib/mail-health-rules";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
@@ -1731,6 +1732,11 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       const listId = await listFor(store).catch(() => {
         throw new UnknownReplyError("the store's list");
       });
+      // Every store email names its list (stopTags), so a bounce for good or a spam report on it takes the address off
+      // that list too (ALL-160 item 7; Codex L and U on #4245). The list read here, so a store given its list just now
+      // has it named as well.
+      const suppression = stopTags({ listId });
+      for (const message of messages) message.tags = { ...message.tags, ...suppression };
       const tos = messages.map((m) => m.to);
       deleted = await deletedAmong(listId, tos);
       refused = await leftListAmong(listId, tos);
@@ -2240,7 +2246,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             html: letterHtml(store, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
-            tags: moveTags(store),
+            tags: { ...moveTags(store), ...stopTags(store) },
           },
         ],
         `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },

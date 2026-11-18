@@ -19,6 +19,18 @@ import { done, is, part } from "./check";
 
 const FOLDER = "fedcba9876543210fedcba9876543210";
 
+/**
+ * The kept copy of a sale (lib/pdf-stamp.ts stampedDelivery, #3899, with a store whose public requests always have
+ * room), null where the file is handed over as uploaded; a copy made on the fly or a request to try again fails the
+ * test, as in tests/epub-stamp-download.test.ts.
+ */
+async function stampedCopy(file: Parameters<typeof stamp.stampedDelivery>[0], sale: Parameters<typeof stamp.stampedDelivery>[1], store: Parameters<typeof stamp.stampedDelivery>[2]) {
+  const answer = await stamp.stampedDelivery(file, sale, store, { take: async () => true, give: async () => {} });
+  if (answer.kind === "fly" || answer.kind === "retry") throw new Error(`a copy was expected to be kept, not "${answer.kind}"`);
+  return answer.kind === "kept" ? answer.copy : null;
+}
+
+
 async function pdfFile(name: string, at: string): Promise<ProductFile> {
   const doc = await PDFDocument.create();
   doc.addPage([300, 400]);
@@ -35,25 +47,37 @@ async function main(): Promise<void> {
 
   part("Its record not kept: the copy already made is handed over again, the original never read again");
   const file = await pdfFile("Planner.pdf", "2026-11-08T12:00:01.000Z");
-  const first = await stamp.stampedCopy(file, sale, shop);
+  const first = await stampedCopy(file, sale, shop);
   is("the first download makes the copy", [Boolean(first), first ? world.files.has(first.pathname) : false], [true, true]);
   const made = first ? world.files.get(first.pathname) : undefined;
   // As when the store's data room had no space for the record (keepFor refused), or the record expired.
   await redis.pipeline([["DEL", stamp.copyKey(sale.reference, file)]]);
   // The original is taken away, so a download that read it again would hand over nothing stamped.
   world.files.delete(file.pathname);
-  const again = await stamp.stampedCopy(file, sale, shop);
+  const again = await stampedCopy(file, sale, shop);
   is("the next download hands over the same copy", again?.pathname, first?.pathname);
   is("as it is, not written again", first ? world.files.get(first.pathname) === made : false, true);
   is("with its size and kind", [again?.bytes, again?.contentType, again?.name], [made?.byteLength, "application/pdf", "Planner.pdf"]);
 
   part("Control: a copy that is gone is made again from the original");
   const other = await pdfFile("Journal.pdf", "2026-11-08T12:00:02.000Z");
-  const once = await stamp.stampedCopy(other, sale, shop);
+  const once = await stampedCopy(other, sale, shop);
   if (once) world.files.delete(once.pathname);
   await redis.pipeline([["DEL", stamp.copyKey(sale.reference, other)]]);
-  const remade = await stamp.stampedCopy(other, sale, shop);
+  const remade = await stampedCopy(other, sale, shop);
   is("stamped again at its path", [remade?.pathname, remade ? world.files.has(remade.pathname) : false], [once?.pathname, true]);
+
+  part("A store found without room: a copy already in the file store is handed over, never stamped on the fly (#3899 with #4237)");
+  const kept = await pdfFile("Workbook.pdf", "2026-11-08T12:00:03.000Z");
+  const madeFirst = await stampedCopy(kept, sale, shop);
+  const keptBytes = madeFirst ? world.files.get(madeFirst.pathname) : undefined;
+  await redis.pipeline([["DEL", stamp.copyKey(sale.reference, kept)], ["SET", stamp.noRoomKey(FOLDER), "1", "EX", 3600]]);
+  world.files.delete(kept.pathname);
+  const taken: number[] = [];
+  const answer = await stamp.stampedDelivery(kept, sale, shop, { take: async (units: number) => (taken.push(units), true), give: async () => {} });
+  is("control: the store is noted without room", await stamp.roomNotedOut(kept), true);
+  is("the copy found by its HEAD is handed over as kept", [answer.kind, answer.kind === "kept" ? answer.copy.pathname : null], ["kept", madeFirst?.pathname]);
+  is("not stamped on the fly, nor written again, and no fly units taken", [madeFirst ? world.files.get(madeFirst.pathname) === keptBytes : false, taken], [true, []]);
   done();
 }
 

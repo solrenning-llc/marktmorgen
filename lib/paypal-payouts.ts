@@ -297,6 +297,20 @@ function receiverPrint(address: string): string {
   const key = deriveKey(RECEIVER_PRINT_LABEL);
   return key ? createHmac("sha256", key).update(address).digest("hex") : "";
 }
+/**
+ * An address as compared (Claude 4's MÉDIO on #4682): trimmed and in lower case, as an email address is matched, so a
+ * receiver PayPal gives back in another letter case is the same receiver. A batch is printed this way from now on.
+ */
+const receiverKey = (address: string) => address.trim().toLowerCase();
+/**
+ * Whether an address is the receiver a line kept the print of: printed as compared, or exactly as a batch sent before
+ * this change printed it. Never true without a print or without a key to print with.
+ */
+function sameReceiver(address: string, print: string | undefined): boolean {
+  if (!print) return false;
+  const compared = receiverPrint(receiverKey(address));
+  return Boolean(compared) && (compared === print || receiverPrint(address) === print);
+}
 
 /** The body PayPal is sent for one batch (payments_payouts_batch_v1, create_payout_request). */
 export function batchBody(store: Store, lines: BatchLine[], senderBatchId: string): string {
@@ -494,7 +508,7 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
       // `p`: the app the money is asked from, so a retry of an unknown answer never comes from another account (#4448).
       const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => {
-        const r = receiverPrint(receiverOf(l));
+        const r = receiverPrint(receiverKey(receiverOf(l)));
         return { a: l.affiliate.id, c: l.cents, ...(r ? { r } : {}) };
       }), ...(sender ? { p: sender } : {}) };
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
@@ -616,7 +630,10 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       out.waiting += sent.lines.length;
       continue;
     }
-    const statusOf = new Map<string, { status: string; item: string }>();
+    const statusOf = new Map<string, { status: string; item: string; receiver: string }>();
+    // Every item id and every sender item id once across all the pages read (#4656): a read that repeats either is
+    // ambiguous evidence, so the whole batch stays on its way and is read again next time, never booked on it.
+    const itemIds = new Set<string>();
     let batchStatus = "";
     try {
       for (let page = 1; page <= 10; page += 1) {
@@ -624,9 +641,13 @@ export async function settlePayPal(store: Store): Promise<Settled> {
         batchStatus = String((data.batch_header as { batch_status?: unknown } | undefined)?.batch_status ?? "");
         const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
         for (const item of items) {
-          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown };
+          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown; receiver?: unknown };
           const aff = typeof detail.sender_item_id === "string" ? detail.sender_item_id : "";
-          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: String(item.payout_item_id ?? "") });
+          const itemId = String(item.payout_item_id ?? "");
+          if (aff && statusOf.has(aff)) throw new Error("a PayPal batch read repeats a sender item id");
+          if (itemId && itemIds.has(itemId)) throw new Error("a PayPal batch read repeats a payout item id");
+          if (itemId) itemIds.add(itemId);
+          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: itemId, receiver: typeof detail.receiver === "string" ? detail.receiver : "" });
         }
         const pages = Number(data.total_pages) || 1;
         if (page >= pages) break;
@@ -641,6 +662,20 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
+      // Paid to the receiver it was sent to (#4657): a line that kept the receiver's print is booked only when the
+      // receiver PayPal answers has that same print. Another receiver, none, or no key to print with keeps it on
+      // its way. A line from before prints were kept is read as it always was.
+      // The same for an item that did not pay (Claude 5 on #4682, MÉDIO): another receiver's item proves neither the
+      // payment nor its failure, so it never releases the line to be owed and paid again. A batch PayPal DENIED or
+      // CANCELED as a whole speaks for every line, whatever its items say, and still releases them.
+      const itemLevel = batchStatus !== "DENIED" && batchStatus !== "CANCELED";
+      if (itemLevel && got && line.r && ((status === PAID && got.item) || NOT_PAID.has(status)) && !sameReceiver(got.receiver, line.r)) {
+        // Said where the operator reads it (Claude 5's LEVE): the line stays on its way, and the affiliate is left out
+        // of the next payouts, until a read names the receiver it was sent to.
+        console.error("a PayPal payout item names another receiver than the one its line was sent to; the line stays on its way", batch, line.a, status);
+        still.push(line);
+        continue;
+      }
       if (status === PAID && got?.item) {
         // The line leaves the open batch only when the book is confirmed to hold its payout (Claude 2 on #3272,
         // finding 1): a line dropped with nothing in the book is owed again, and the next payday pays it twice.
@@ -729,7 +764,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
       const again: BatchLine = { affiliate: row.affiliate, cents: line.c };
       // The same recipient or none (review of Codex H2 on #2681, GRAVE): if the affiliate's PayPal address changed
       // since the first request, or the batch kept no fingerprint of it, the retry could pay someone else.
-      if (!line.r || receiverPrint(receiverOf(again)) !== line.r) return needsManualCheck(statsId, field, sent);
+      if (!sameReceiver(receiverOf(again), line.r)) return needsManualCheck(statsId, field, sent);
       lines.push(again);
     }
     // The try is counted before it is made, so a run that stops halfway never tries twice in a day.

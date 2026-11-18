@@ -620,7 +620,10 @@ async function main(): Promise<void> {
     // Merge of main e023347098 into #2571 (18 November 2026, Claude 3 local): main's costs (#3591, #4246) and this PR's
     // time-on-page readings together, yearly 36.27, 254.70, 571.13 -> 36.25, 254.65, 570.91; figures as the model computes
     // them, still above zero (MR). Cost is not lowered.
-    is("11: and 36.25, 254.65 and 570.91 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.25", "254.65", "570.91"]);
+    // Merge of main 307e08fae7 into #3989 (18 November 2026, Claude 1 cloud c1-conflitos-6): main's costs (#2571's
+    // time-on-page readings) and this PR's course "reached" trigger together cost Scale's yearly month one cent more:
+    // 570.90 where 570.91 was; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: and 36.25, 254.65 and 570.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.25", "254.65", "570.90"]);
   } finally {
     Date.now = realNow;
   }

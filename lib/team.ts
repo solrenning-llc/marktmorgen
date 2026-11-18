@@ -405,10 +405,16 @@ export async function memberStoresExact(email: string, other?: string): Promise<
   const found: { store: Store; role: TeamRole }[] = [];
   // The ids read exactly that are no store this person serves: out of the index when it is longer than is read.
   const stale: string[] = [];
+  // Of those, the ones whose team was read without them: only these can have been joined between the read and the
+  // SREM, so only these are read again and put back (Claude 4's LEVE on #3660). An id with no store (nil) or a store
+  // they own, whose team still lists them, is no store they serve whoever joins: it leaves the index for good, so the
+  // read past gets further every read (decideCalendarRuns).
+  const offTeam: string[] = [];
   for (const sid of ids.slice(0, MEMBER_STORES_READ)) {
     const member = (await readTeam(sid)).members.find((m) => m.email === address);
     if (!member) {
       stale.push(sid);
+      offTeam.push(sid);
       continue;
     }
     const store = await storeForIdExact(sid);
@@ -426,7 +432,7 @@ export async function memberStoresExact(email: string, other?: string): Promise<
       // was there): each id taken out is read again, and put back when the person is on its team now, or when that
       // read is not known (Claude 1 C3 on #3660). A join saved after this read adds the id itself, after the SREM.
       const back: string[] = [];
-      for (const sid of stale) {
+      for (const sid of offTeam) {
         const now = await readTeam(sid).catch(() => null);
         if (!now || now.members.some((m) => m.email === address)) back.push(sid);
       }

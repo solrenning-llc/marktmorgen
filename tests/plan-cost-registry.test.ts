@@ -12,8 +12,9 @@ import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
-import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
-import { TEST_SALES_PAGES } from "@/lib/broadcasts";
+import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
+import { BENEFIT_PAGE_UNITS, BENEFIT_STRIPE_PAGES } from "@/lib/tier-benefit-rules";
+import { TEST_SALES_PAGES, broadcastSizesBytes } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/person-agenda";
 import { IncludedBytes, PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, sentUnits } from "@/lib/sent-bytes";
@@ -24,7 +25,7 @@ import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
-  codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
+  codesWork, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
   BUNDLE_CHOICES_MOST, BUNDLE_PAGE_LISTINGS, BUNDLE_SEARCH_STRETCH, IMPORTS_MOST, IMPORTS_READ, bundleChoicesWork, importsWork,
@@ -51,13 +52,16 @@ import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { WINBACK_OPEN_REQUEST_UNITS } from "@/lib/winback";
+import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_PROGRESS_COMMANDS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -69,10 +73,14 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
-import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
+import { LIBRARY_WAITING_UNITS, PRODUCT_CARD_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
 import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { BOOK_POST_EXTRA_UNITS, BOOK_STRIPE_READS, bookTimesUnits } from "@/lib/book-page-rules";
+import { DISPUTE_READS_PER_READING } from "@/lib/calls";
+import { CALENDAR_CALLS, CALENDAR_STRIPE_PAGES, LISTING_READ_BYTES } from "@/lib/read-ceilings";
+import { BOOK_DIARY_ENTRY_BYTES, BOOK_POST_READ, bookTimesRead, readShapeCost } from "./plan-cost-registry";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -271,6 +279,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`a community search: ${1 + searchUnits({ room: false, conversations: 0 })} requests with its page, ${1 + searchUnits({ room: true, conversations: 3 })} with the room and three conversations ($${searchRead({ room: true, conversations: 3 }).toFixed(6)})`);
   // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
   assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
+  // A product's shared card is PRODUCT_CARD_UNITS public requests, all taken before its picture is read and it is drawn (reviews of #4211).
+  assert.ok(PRODUCT_CARD_UNITS * laterPageCost() >= PRODUCT_CARD_READ, `${PRODUCT_CARD_UNITS} x ${laterPageCost()} < ${PRODUCT_CARD_READ}`);
+  console.log(`a product's shared card: ${PRODUCT_CARD_UNITS} requests ($${(PRODUCT_CARD_UNITS * laterPageCost()).toFixed(6)}) against $${PRODUCT_CARD_READ.toFixed(6)} at its worst`);
   console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
@@ -287,6 +298,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // Opening a come-back link's checkout reads whether the person has a membership still running (lib/winback-send.ts): WINBACK_OPEN_REQUEST_UNITS
+  // public requests, taken before it, more than its calls to the creator's Stripe account cost.
+  assert.ok(WINBACK_OPEN_REQUEST_UNITS * laterPageCost() >= WINBACK_OPEN_READ, `${WINBACK_OPEN_REQUEST_UNITS} x ${laterPageCost()} < ${WINBACK_OPEN_READ}`);
+  console.log(`a come-back link's running-membership reading: $${WINBACK_OPEN_READ.toFixed(6)} at most, counted as ${WINBACK_OPEN_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
   // at every size, from an empty program or store to the largest, the requests cost more than the reads.
   const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 1_000, 5_000, 50_000, 1_000_000];
@@ -311,6 +326,23 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And the card's own wait on Redis, held by a test rather than only a comment (Claude 5 on #1969).
   assert.ok(LIBRARY_WAITING_UNITS * laterPageCost() >= libraryWaitingRead() + libraryCardWait(), `library card with its wait: ${LIBRARY_WAITING_UNITS} x ${laterPageCost()} < ${libraryWaitingRead()} + ${libraryCardWait()}`);
   assert.ok((LIBRARY_WAITING_UNITS - 1) * laterPageCost() < libraryWaitingRead(), `library card: ${LIBRARY_WAITING_UNITS} units, one more than needed`);
+  // A booking page's open times (traffic audit, 9 November 2026; lib/book-page-rules.ts): taken before the creator's
+  // Stripe account is asked, at every size of store more than they cost at their worst, and not a request more than needed
+  // for a store with no call listing to read. Their Stripe reads are lib/calls.ts's pages and disputes, which may not move apart.
+  assert.equal(BOOK_STRIPE_READS, CALENDAR_STRIPE_PAGES + DISPUTE_READS_PER_READING);
+  for (let listings = 0; listings <= MAX_PRODUCTS; listings += 1) assert.ok(bookTimesUnits(listings) * laterPageCost() >= bookTimesRead(listings), `booking times, ${listings} call listings: ${bookTimesUnits(listings)} x ${laterPageCost()} < ${bookTimesRead(listings)}`);
+  assert.ok((bookTimesUnits(0) - 1) * laterPageCost() < bookTimesRead(0), `booking times: ${bookTimesUnits(0)} units, one more than needed`);
+  for (const odd of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) assert.equal(bookTimesUnits(odd), bookTimesUnits(MAX_PRODUCTS), `an unknown count of call listings (${odd}) is priced at the most`);
+  // Booking a time from a package, at its dearest (Claude 7's MEDIUM 1 on #3478): the browser's earlier hold let go
+  // (its diary read and one Stripe /expire), prepareSession (the package's checkout read, its charge's disputes read and
+  // the session's coupon made: three Stripe calls), and, when another tab took the last session, this hold let go again
+  // (its diary read and one more /expire). Five Stripe calls and two diaries of up to twice CALENDAR_CALLS entries, never
+  // the two calls of the path with a discount code.
+  const bookPostDearest = readShapeCost({ seconds: 1.3, cpu: 0.2, commands: 30, dbBytes: 2 * LISTING_READ_BYTES + 2 * (2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES), outBytes: 2_048, stripePages: 1 + 3 + 1 });
+  assert.ok(BOOK_POST_READ >= bookPostDearest, `booking a time is priced at the package path's five Stripe calls and two diaries: ${BOOK_POST_READ} < ${bookPostDearest}`);
+  // Booking a time takes its times and BOOK_POST_EXTRA_UNITS more (review of #3478): the request no page counted and its Stripe calls.
+  for (let listings = 0; listings <= MAX_PRODUCTS; listings += 1) assert.ok((bookTimesUnits(listings) + BOOK_POST_EXTRA_UNITS) * laterPageCost() >= bookTimesRead(listings) + BOOK_POST_READ, `booking a time, ${listings} call listings`);
+  console.log(`a booking page's times: ${bookTimesUnits(1)} requests besides the page for a store with one call ($${bookTimesRead(1).toFixed(6)} at most), ${bookTimesUnits(MAX_PRODUCTS)} at the largest`);
   const typicalBook = { fields: 50 + 50 + 1_000 + 40 + 20, rows: 5, listings: 20, stripePages: 23 };
   const typicalLoad = { sliceBytes: 12_000, listings: 3, codes: null };
   console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once a day; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);
@@ -361,6 +393,16 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
   console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
+  // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
+  // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.
+  assert.equal(STUDIO_REQUEST_BYTES, 50_000);
+  assert.ok(read("tests/plan-cost-registry.ts").includes(`studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, ${STUDIO_REQUEST_BYTES.toLocaleString("en-US").replace(/,/g, "_")})`), "UNIT_COST.studio is priced at STUDIO_REQUEST_BYTES");
+  for (const flows of [0, 1, 50_000, 400_000, 8_000_000]) for (const versions of [0, 1, 50_000, 4_000_000]) {
+    const size = { flows, versions, largest: Math.min(versions, 400_000) };
+    for (const [path, commands, bytes] of [["list", 4, listVersionsBytes(size)], ["restore", 14, restoreBytes(size)], ["restore again", 8, restoreTryBytes(size)], ["keep", 8, keepVersionBytes(size, 400_000)]] as const) {
+      assert.ok(flowHistoryUnits(bytes) * UNIT_COST.studio >= request("studio", commands, bytes), `${path} ${flows}/${versions}: ${flowHistoryUnits(bytes)} x ${UNIT_COST.studio} < ${request("studio", commands, bytes)}`);
+    }
+  }
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });
@@ -412,6 +454,14 @@ test("a companies request fits its studio requests, and each page that reads eve
  console.log(`the fullest companies page: ${STUDIO_PAGE_UNITS} + ${COMPANIES_READ_UNITS} + ${sent} studio requests, and its reading of the buyers when Stripe is read`);
 });
 
+test("a reading of who is owed a membership benefit fits the studio requests counted before its pages, at every number of pages, and no fewer would do", () => {
+ // Claude 7's cost MEDIUM on #3014: every page load and every give or undo press reads Stripe and the marks owed.
+ for (let pages = 1; pages <= BENEFIT_STRIPE_PAGES; pages += 1) {
+  assert.ok(benefitsRead(pages) <= UNIT_COST.studio * BENEFIT_PAGE_UNITS * pages, `${pages} pages: ${benefitsRead(pages)} > ${pages} x ${BENEFIT_PAGE_UNITS} x ${UNIT_COST.studio}`);
+ }
+ assert.ok(benefitsRead(1) > UNIT_COST.studio * (BENEFIT_PAGE_UNITS - 1), `${benefitsRead(1)} <= ${BENEFIT_PAGE_UNITS - 1} x ${UNIT_COST.studio}: lower BENEFIT_PAGE_UNITS`);
+});
+
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {
  assert.ok(BUYER_LEDGER <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${BUYER_LEDGER} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
  assert.ok(BUYER_LEDGER > UNIT_COST.studio * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${UNIT_COST.studio}: lower BUYER_LEDGER_UNITS`);
@@ -424,7 +474,7 @@ test("what the buyers' copy and the imported buyers weigh is counted a studio re
  assert.ok(IMPORTED_BUYER_BYTES >= 2 * (254 + 10), "an imported buyer is read and written in the copy: never priced as less");
  // BUYER_LEDGER prices Stripe's pages and rows only; the imported are counted by size, so the source must count them.
  const source = read("lib/segments.ts");
- assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved, included)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
+ assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, true) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved, included)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
  assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GETRANGE", ledgerKey(store.statsId)'), "the copy is measured and counted before it is read, and read no further");
  // PayPal's reading is counted in full (round 5, H1): what ledgerReadBytes counts for the most PayPal kept covers PAYPAL_LEDGER.
  const paypalUnits = ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER }));
@@ -591,6 +641,8 @@ test("an API reading that reads more than a page takes further requests that cov
     for (const paypal of [0, 1_000, 40_000]) covers(addWork(emails, mailRevenueColdWork(paypal, revenueBytes)), `emails and what they sold, in one go ${paypal}/${revenueBytes}`);
   }
   for (const paypal of [0, 9, 1_000, 40_000]) for (const kept of [undefined, 1, 172_000, 3_000_000]) covers(mailRevenueColdWork(paypal, kept), `what the emails sold ${paypal}/${kept}`);
+  // Asking get_emails' emails' sizes, taken before the script is sent (Codex J 5811457165 on #3034), at every count it can ask.
+  for (let broadcasts = 0; broadcasts <= EMAILS_BROADCASTS; broadcasts += 1) covers(emailsSizesWork(broadcasts, broadcastSizesBytes(broadcasts)), `emails' sizes ${broadcasts}`);
   // The numbers kept an hour: read anew with their keeping, and from the copy at every size it can have.
   for (const paypalSales of [0, 2_000, 50_000]) for (const paypalRefunds of [0, 500, 9_000]) covers(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales, paypalRefunds }), NUMBERS_KEEP_WORK), `numbers kept ${paypalSales}/${paypalRefunds}`);
   for (const bytes of [1, 999, 50_000, 400_000, NUMBERS_KEPT_BYTES + 64]) for (const sent of [0, 2, 30_000, NUMBERS_SENT_BYTES, 3_000_000]) covers(keptNumbersWork(bytes, sent), `numbers from the copy ${bytes}/${sent}`);
@@ -667,8 +719,15 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/mcp-tools.ts", "membershipNumbersPaid(store", "await titlesFor(store, n.byProduct");
   before("lib/mcp-tools.ts", "if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken)))", "await readListings(store, missing)");
   before("lib/membership-numbers.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "/subscriptions?");
-  before("lib/mcp-tools.ts", "const settle = await meter.hold(held);", "listBroadcasts(store.listId, EMAILS_BROADCASTS)");
-  before("lib/mcp-tools.ts", "said.refused = await meter.charge(said.second, held);", "const refused = await settle(due);");
+  // Regra 23 (#3034's siblings): get_emails reads its emails without their bodies, only those measured (was "listBroadcasts(store.listId, EMAILS_BROADCASTS)").
+  // Asking the emails' sizes is taken before the script is sent, and a refusal is handed back before anything else (Codex J 5811457165 on #3034).
+  before("lib/broadcasts.ts", "const paid = await paySizes(ids.length);", "const sized = await headsOf(");
+  // Regra 23 (merge of #3034 with main): the call now also passes { expired: "skip" } (main's 57ca6e5a3), so the needle
+  // ends at paySizes; the order it holds (the charge before the measure) is unchanged.
+  before("lib/mcp-tools.ts", "const refused = await meter.charge(units, 0);", "measureBroadcastHeads(store.listId, EMAILS_BROADCASTS, paySizes");
+  before("lib/mcp-tools.ts", "if (sizing.refused) return sizing.refused;", "const settle = await meter.hold(held);");
+  before("lib/mcp-tools.ts", "const settle = await meter.hold(held);", "readMeasuredHeads(sizes, regrow)");
+  before("lib/mcp-tools.ts", "said.refused = await meter.charge(said.second, sizing.units + held);", "const refused = await settle(due);");
   before("lib/mcp-tools.ts", "const refused = await settle(due);", "currency: store.currency,");
   before("lib/mcp-tools.ts", "const held = await meter.hold(most);", "await readPaths(store.statsId)");
   before("lib/api-read.ts", "const settle = await hold(held);", "const { out, work } = await read();");
@@ -690,7 +749,7 @@ test("an API reading that reads more than a page takes further requests that cov
   assert.ok(apiReadUnits(eventsWork()) >= apiReadUnits(EVENTS_PROBE_MOST), "the most a reading of events takes holds its measuring");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codesWork()));", "listCodes(");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));", "createCode(");
-  before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await listCodes(account);");
+  before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await findCode(account, id);");
   before("app/api/mcp/route.ts", "const read = await apiNumbers(store,", "await tool(read.data)");
   before("app/api/mcp/route.ts", "const refused = await read.settle(", "result(id, answer)");
   // The bundle choices and the imports set aside their most before any of their records is read, and settle before sending.

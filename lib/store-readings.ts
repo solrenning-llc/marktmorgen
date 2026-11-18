@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { windowCountBy } from "@/lib/window-count";
 import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -146,15 +147,17 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
   const key = dayKey(store.statsId, utcDay(now));
   const heavyKey = `${key}:heavy`;
   try {
-    const [, raw, , , rawHeavy] = await redisPipeline([
+    const [, raw, , rawHeavy, heavyExpire] = await redisPipeline([
       ["SET", key, "0", "NX", "EX", 2 * 86_400],
       ["INCRBY", key, 1],
       ["EXPIRE", key, 2 * 86_400, "NX"],
-      ...(heavy ? [["SET", heavyKey, "0", "NX", "EX", 2 * 86_400], ["INCRBY", heavyKey, 1]] : []),
+      // The heavy count as lib/window-count.ts counts: INCRBY, then the expiry when the key has none, so a key that
+      // expires between two commands never comes back without one (Claude 7 on #3369).
+      ...(heavy ? windowCountBy(heavyKey, 2 * 86_400, 1) : []),
     ]);
     const n = Number(raw);
     const h = heavy ? Number(rawHeavy) : 0;
-    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && h < 1)) return false;
+    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && (h < 1 || (heavyExpire !== 0 && heavyExpire !== 1)))) return false;
     if (n <= STORE_READINGS_PER_DAY && h <= HEAVY_READINGS_PER_DAY) return true;
     await redisPipeline([["DECRBY", key, 1], ...(heavy ? [["DECRBY", heavyKey, 1]] : [])]).catch(() => {});
     return false;
@@ -402,4 +405,34 @@ export async function forgetReadingsPerson(statsId: string | null): Promise<numb
   // erasure says this part did not finish (lib/person-erasure.ts) while a copy naming the person may still be kept.
   if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of the store's kept sales and memberships readings");
   return gone;
+}
+
+/**
+ * The store's kept memberships reading as it is, never read again ("Do this next", 484 [IT1] complement WG, unit 2;
+ * lib/next-actions-read.ts): one GET, no supplier, nothing taken from the day's readings, so it is inside the three
+ * kept readings KEPT_READINGS_SHAPE already prices for a studio page (lib/read-ceilings.ts). null when no copy is
+ * kept (none read yet, or it expired); "unknown" when the database did not answer or the copy is not in its shape,
+ * never taken for none (CX-123 rule 24).
+ */
+export async function keptMembersCopy(store: Pick<Store, "statsId">): Promise<{ at: number; value: Numbers | null } | null | "unknown"> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  let replies: unknown;
+  try {
+    replies = await redisPipeline([["GET", copyKey("members", store.statsId)]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(replies) || replies.length !== 1) return "unknown";
+  const raw: unknown = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) return "unknown";
+  try {
+    const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown };
+    if (typeof parsed.at !== "number" || !Number.isFinite(parsed.at)) return "unknown";
+    if (parsed.value === null) return { at: parsed.at, value: null };
+    if (!parsed.value || typeof parsed.value !== "object") return "unknown";
+    return { at: parsed.at, value: parsed.value as Numbers };
+  } catch {
+    return "unknown";
+  }
 }

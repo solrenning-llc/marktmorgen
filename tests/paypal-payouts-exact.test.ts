@@ -38,14 +38,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const batch = /^\/v1\/payments\/payouts\/(BATCH\d+ABC)$/.exec(url.pathname)?.[1];
   if (batch) {
-    const items = created[Number(batch.slice(5, -3)) - 1].items as { sender_item_id: string }[];
+    const items = created[Number(batch.slice(5, -3)) - 1].items as { sender_item_id: string; receiver?: string }[];
     return json({
       batch_header: { payout_batch_id: batch, batch_status: "SUCCESS" },
       total_pages: 1,
       items: items.map((item, i) => ({
         payout_item_id: `ITEM${batch}${i}`,
         transaction_status: itemStatus[item.sender_item_id] ?? "PENDING",
-        payout_item: { sender_item_id: item.sender_item_id },
+        payout_item: { sender_item_id: item.sender_item_id, receiver: item.receiver },
       })),
     });
   }

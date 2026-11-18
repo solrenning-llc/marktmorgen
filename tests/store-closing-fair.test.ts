@@ -197,6 +197,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (status === "open") return json({ object: "list", data: row.open?.status === "open" ? [{ id: row.open.id, status: "open", ...ownerOf(row) }] : [], has_more: false });
     return json({ object: "list", data: [], has_more: false });
   }
+  // One paid invoice read alone, and its list of payments: read before every refund since #4428 (Codex P and X5). Each
+  // paid invoice here was paid by its own one payment.
+  const paidOne = (id: string | null) => [...world.subs.values()].flatMap(paidInvoicesOf).find((inv) => inv.id === id) as { id: string; payment_intent?: unknown } | undefined;
+  const readOne = path.match(/^\/invoices\/(in_\w+)$/);
+  if (readOne && method === "GET") {
+    const inv = paidOne(readOne[1]);
+    return inv ? json(inv) : json({ error: { message: `no such invoice ${readOne[1]}` } }, 404);
+  }
+  if (path === "/invoice_payments" && method === "GET") {
+    const inv = paidOne(url.searchParams.get("invoice"));
+    return json({ object: "list", has_more: false, data: inv ? [{ id: `inpay_${inv.id.slice(3)}`, object: "invoice_payment", invoice: inv.id, status: "paid", payment: { type: "payment_intent", payment_intent: inv.payment_intent } }] : [] });
+  }
   const drafted = path.match(/^\/invoices\/(in_\w+)$/);
   if (drafted && method === "POST") {
     const row = [...world.subs.values()].find((s) => s.draft?.id === drafted[1]);
@@ -436,6 +448,36 @@ async function main() {
   is("on the day, each member's proportional part is refunded, once, and the one already refunded is not", world.refunds.map((r) => [r.payment_intent, r.amount, r.metadata.closing_refund]).sort(), [["pi_benmonth", unusedMonth, "in_benmonth"], ["pi_benyear", unusedYear, "in_benyear"]].filter(([, n]) => Number(n) > 0).sort());
   is("a refund twice is impossible: the next day refunds nothing", [(await daily(ben, B, CLOSING_DAYS + 1, CLOSING_DAYS + 1)).length, world.refunds.length], [1, [unusedYear, unusedMonth].filter((n) => n > 0).length]);
   void benDone;
+
+  part("A closing day whose own record could not be written: refunded from that day, not from a later run");
+  {
+    world.refunds.length = 0;
+    const zed = await storeWith("zed");
+    const zedYear = member("zed", "zedyear", 12_000, S(Date.UTC(2027, 8, 1)), { metadata: { store: "zed", yearly: "1" } });
+    clockAt(Date.UTC(2026, 10, 3, 13));
+    const Zd = await ended(zed);
+    await daily(zed, Zd, 0, CLOSING_DAYS - 1);
+    const zedDay = (await closingOf((await storeForEmail(zed))!, Zd + (CLOSING_DAYS - 1) * DAY))!.day;
+    // On the closing day the write of the day itself fails once (Redis down for that one command).
+    const healthy = redis.pipeline;
+    let dropped = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!dropped && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:plan:closing:") && /"day":/.test(String(commands[0][2])) && !/"renewals":/.test(String(commands[0][2]))) {
+        dropped += 1;
+        throw new Error("stand-in Redis down for the closing day's own record");
+      }
+      return healthy(commands);
+    }) as typeof redis.pipeline;
+    const failedAt = Zd + CLOSING_DAYS * DAY + 60_000;
+    clockAt(failedAt);
+    try { await closeOne(zed, failedAt, hands, Number.POSITIVE_INFINITY); } catch { /* the run stops; the next one carries on */ }
+    redis.pipeline = healthy;
+    is("the closing day's own record failed once", dropped, 1);
+    is("while it is not written, the day shown is the closing day, the same an hour later", [(await closingOf((await storeForEmail(zed))!, failedAt))?.day, (await closingOf((await storeForEmail(zed))!, failedAt + 3_600_000))?.day], [zedDay, zedDay]);
+    await daily(zed, Zd, CLOSING_DAYS + 3, CLOSING_DAYS + 3);
+    const zedOwed = unusedOf({ amt: 12_000, ps: zedYear.pe - 365 * 86_400, pe: zedYear.pe }, zedDay);
+    is("the member is refunded the unused part from the closing day, not from the run that finished it", world.refunds.map((r) => [r.payment_intent, r.amount]), [["pi_zedyear", zedOwed]]);
+  }
 
   part("A balance that does not cover a refund: never made, the member told");
   world.refunds.length = 0;

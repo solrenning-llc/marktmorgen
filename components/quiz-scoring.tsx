@@ -117,7 +117,7 @@ export function QuizScoringCheck({ form, onSpread }: { form: FormDef; onSpread: 
       )}
 
       {ranged.length ? (
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Totals and results, as a table">
           <table className="w-full min-w-[20rem] text-left text-sm">
             <thead>
               <tr className="text-ink-soft">

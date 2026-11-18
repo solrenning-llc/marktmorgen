@@ -7,8 +7,10 @@ const key = (folder: string) => {
   if (!/^[a-f0-9]{32}$/.test(folder)) throw new Error("storage_folder");
   return "nl:storage:pending:" + folder;
 };
-const RELEASE = 'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
-const WRITE = 'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end redis.call("SET", KEYS[2], ARGV[2]) return 1';
+// The same two atomic steps as lib/redis-lock.ts's release and fenced set, under their names, so the repository's
+// in-memory Redis (lib/redis-memory.ts) runs them as Upstash does for every caller's tests.
+const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+const WRITE = '-- marktmorgen:fenced-set:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[2], ARGV[2]) return 1 else return 0 end';
 
 function decode(raw: unknown): StorageReservation[] {
   if (raw === null) return [];

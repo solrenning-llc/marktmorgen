@@ -1,5 +1,6 @@
 "use client";
 
+import { importBatches } from "@/lib/import-batches";
 import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -35,8 +36,6 @@ export type ImportView = {
 
 export type ImportSource = "csv" | "clickfunnels";
 
-/** Rows sent in one request: the server's own limit (lib/imports.ts, BATCH_ROWS). */
-const BATCH = 1_000;
 /** The biggest file read here. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -137,11 +136,13 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   busy: "Another import is running on this store. Wait for it to finish, or cancel it, and start this one after.",
   too_many: "That is more rows than this import takes. Split the file and bring it in parts.",
+  row_too_large: "One row of this file is too large to send. Shorten its longest cells, like a description, and choose the file again.",
   consent: "Check the box to confirm these people agreed to receive your emails. Nobody is added without it.",
   email: "Emailing buyers needs your store's plan to be active. Uncheck the box, or start your plan first.",
   members_email: "Moving members needs your store's plan to be active: each member is emailed their own link.",
   stripe: "Members keep their membership by paying on your own Stripe account. Connect Stripe first.",
   stopped: "Check the box to confirm you will stop these memberships renewing where they are now.",
+  address: "Each member's email shows your postal address, as your other emails do. Save it under Email in your studio, then start this import again.",
   date_order: "Choose how this file writes dates, from the list above the first rows.",
   list: "Your store's list could not be set up. Try again in a moment.",
   store: "Open the studio once, then come back here.",
@@ -442,6 +443,8 @@ export function ImportTool({
     consentColumn: kind === "contacts" ? (mapping.consent ?? -1) >= 0 : undefined,
     tags: kind === "contacts" ? tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
     email: kind === "purchases" ? email : undefined,
+    // Whether the file has a status column: with one, an empty status gives nothing (lib/clickfunnels-csv.ts).
+    statusColumn: kind === "purchases" ? (mapping.status ?? -1) >= 0 : undefined,
     stopped: kind === "members" ? stopped : undefined,
     dateOrder: kind === "members" ? dateOrder : undefined,
   });
@@ -462,12 +465,20 @@ export function ImportTool({
     const collected: PreviewRow[] = [];
     let room: number | null = null;
     try {
-      for (let from = 0; from < rows.length; from += BATCH) {
+      // Cut by rows and by weight, so no request is heavier than the server takes (lib/import-batches.ts).
+      const previewBody = (slice: string[][]) => ({ action: "preview", ...options(), rows: slice });
+      const batches = importBatches(rows, previewBody);
+      if (!batches) {
+        setError(MESSAGES.row_too_large);
+        setDry(null);
+        return;
+      }
+      for (const [from, to] of batches) {
         const data = (await (
           await fetch("/api/store/import", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "preview", ...options(), rows: rows.slice(from, from + BATCH) }),
+            body: JSON.stringify(previewBody(rows.slice(from, to))),
           })
         ).json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; rows?: PreviewRow[]; room?: number | null };
         if (!data.ok || !Array.isArray(data.rows)) {
@@ -477,7 +488,7 @@ export function ImportTool({
         }
         if (room === null && typeof data.room === "number") room = data.room;
         collected.push(...data.rows);
-        setChecking(Math.min(rows.length, from + BATCH));
+        setChecking(to);
       }
       setDry(tally(kind, collected, room, signature));
     } catch {
@@ -528,8 +539,17 @@ export function ImportTool({
       }
       current = begun.import;
       setJob(current);
-      for (let from = 0; from < rows.length; from += BATCH) {
-        const sent = await post({ action: "rows", id: current.id, rows: rows.slice(from, from + BATCH) });
+      const id = current.id;
+      const rowsBody = (slice: string[][]) => ({ action: "rows", id, rows: slice });
+      const batches = importBatches(rows, rowsBody);
+      if (!batches) {
+        setError(MESSAGES.row_too_large);
+        await post({ action: "cancel", id }).catch(() => null);
+        setJob(null);
+        return;
+      }
+      for (const [from, to] of batches) {
+        const sent = await post(rowsBody(rows.slice(from, to)));
         if (!sent.ok || !sent.import) {
           setError(MESSAGES[sent.error ?? ""] ?? MESSAGES.server_error);
           await post({ action: "cancel", id: current.id }).catch(() => null);
@@ -666,7 +686,7 @@ export function ImportTool({
                 </div>
               </fieldset>
 
-              <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-line">
+              <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-line" tabIndex={0} role="region" aria-label="The first rows, as a table">
                 <table className="w-full min-w-[28rem] text-left text-sm">
                   <caption className="px-4 pt-3 text-left text-xs font-bold text-ink-soft">The first rows, as they will be read</caption>
                   <thead>
@@ -947,7 +967,7 @@ function DryRunReport({ kind, dry }: { kind: ImportKind; dry: DryRun }) {
         ))}
       </dl>
       {notable.length ? (
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Rows worth a look, as a table">
           <table className="w-full min-w-[28rem] text-left text-sm">
             <caption className="text-left text-xs font-bold text-ink-soft">
               {notable.length > 50 ? `The first 50 of ${notable.length.toLocaleString("en-US")} rows worth a look` : "Rows worth a look"}

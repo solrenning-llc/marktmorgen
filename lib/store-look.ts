@@ -124,6 +124,14 @@ export type StoreLook = {
    * real, read from their own Stripe account, and theirs to show or not.
    */
   sold: boolean;
+  /**
+   * Whether the store page's "About this store" card says the month the store
+   * was opened on Marktmorgen (lib/store-trust.ts, 94 [D2-BUYER-TRUST] unit 2),
+   * read from the store record, never typed. Off unless the creator turns it on.
+   * Optional only so a look written before it existed still type-checks;
+   * parseLook always gives it.
+   */
+  since?: boolean;
   /** The letters of the page (FONTS). Modern unless the creator picks another. */
   font: FontId;
   /** What lies behind the cards (BACKDROPS). Plain unless the creator picks another. */
@@ -162,6 +170,8 @@ export function parseLook(raw: unknown): StoreLook {
     badge: value.badge !== false,
     // Only an explicit true: every store saved before this existed keeps it off.
     sold: value.sold === true,
+    // Only an explicit true, like sold: a store saved before this existed keeps it off.
+    since: value.since === true,
     font: isFont(value.font) ? value.font : DEFAULT_LOOK.font,
     backdrop: isBackdrop(value.backdrop) ? value.backdrop : DEFAULT_LOOK.backdrop,
   };

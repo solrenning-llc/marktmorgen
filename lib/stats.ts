@@ -29,7 +29,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
-import { type DiscountElsewhere, type DiscountRow, discountElsewhere, discountImpact } from "@/lib/discount-impact";
+import { type DiscountCodeRow, type DiscountElsewhere, type DiscountRow, discountCodes, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
@@ -44,7 +44,7 @@ import { plainAmount } from "@/lib/money";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
-import { reachRows } from "@/lib/page-read";
+import { type ReadingsPartial, reachRows, readingsPartial } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
 import { type TaxSummary, taxSummary } from "@/lib/tax-summary";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
@@ -68,10 +68,34 @@ const MAX_SOURCES = 40;
  * and the day's totals stay right. A day of a busy store names some 60.
  */
 export const DAY_FIELDS_MAX = 100;
+/**
+ * The most fields a day's record may have when a reach beacon adds one (#4608): below DAY_FIELDS_MAX, so the
+ * store page's reach fields, which any visitor can name through app/api/store/read, never take the last places of
+ * the day. Past this, a new reach field counts under "~"; views, sources, countries and answers keep their room, and
+ * the day's first view still gives the record its end.
+ */
+export const REACH_FIELDS_MAX = 70;
 /** The most fields the all-time record may have between the trims that read it (readLife): its own and LIFE_MAX_FIELDS of counts. */
 export const LIFE_WRITE_MAX = 2_100;
 
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * The counts one capped-count EVAL answered (lib/capped-count.ts), read exactly: a list of `fields` whole numbers
+ * at or above zero, each a number or its decimal text. Anything else is not known (rule 24), never "not the first".
+ */
+function knownCounts(replies: unknown, fields: number): number[] | null {
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const reply: unknown = replies[0];
+  if (!Array.isArray(reply) || reply.length !== fields) return null;
+  const out: number[] = [];
+  for (const value of reply as unknown[]) {
+    const n = typeof value === "number" ? value : typeof value === "string" && /^(0|[1-9][0-9]{0,15})$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+    out.push(n);
+  }
+  return out;
+}
 const countsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}`;
 const visitorsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}:u`;
 const lifeKey = (statsId: string) => `nl:stats:${statsId}:life`;
@@ -186,14 +210,36 @@ export async function recordHit(
     // day, because every visit's cost is held to what a plan charges for it
     // (tests/traffic-cost.ts). The day's count only, not the all-time
     // record, so "all time" has no figure for it rather than a wrong one.
-    const [opened] = await cappedCount(counts, DAY_FIELDS_MAX, [{ field: `pv:${hit.id}`, by: 1 }]);
-    if (opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+    // An answer that is not known (lost after the write, or in another shape) may be the day's first write too:
+    // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
+    let opened: number | null = null;
+    try {
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+    } catch (error) {
+      console.error("counting a product page's view failed", error);
+    }
+    if (opened === null || opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]).catch(() => null);
     return null;
   } else {
     return null;
   }
-  const [counted, ...results] = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
-  const values = Array.isArray(counted) ? counted.map(Number) : [];
+  // The expiries an unknown answer still sends: what this hit may have written first today. Never the all-time
+  // record's start, which only a known first write may say (rule 24).
+  const unknownExpiries = (): (string | number)[][] => [
+    ["EXPIRE", counts, TTL_SECONDS],
+    ...(hit.kind === "view" ? [["EXPIRE", liveKey(store.statsId as string), 86400], ["EXPIRE", visitorsKey(store.statsId as string, day), TTL_SECONDS]] : []),
+  ];
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+  } catch (error) {
+    // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
+    await redisPipeline(unknownExpiries()).catch(() => null);
+    throw error;
+  }
+  const [counted, ...results] = Array.isArray(replies) ? replies : [];
+  const known = knownCounts([counted], tally.length);
+  const values = known ?? [];
   // Written once, not on every hit (11 October 2026: every visit's commands
   // are a cost held to what a plan charges, tests/traffic-cost.ts, and these
   // three were sent on every page view though they change nothing after the
@@ -201,30 +247,61 @@ export async function recordHit(
   // — so filling it from the kept days never counts that day or any after it
   // twice — with the day's first write of this kind; the visitors' expiry with
   // the visitor new to the day, who is a visitor for all time too.
-  const follow: (string | number)[][] = [];
+  const follow: (string | number)[][] = known ? [] : unknownExpiries();
   if (firstAt >= 0 && values[firstAt] === 1) {
     follow.push(["EXPIRE", counts, TTL_SECONDS], ["HSETNX", life, "started", day]);
     // Those who were on before today let go once a day, so a store viewed
     // every day and never looked at live keeps a day of them, not every one.
     if (hit.kind === "view") follow.push(["ZREMRANGEBYSCORE", liveKey(store.statsId), 0, now - 30 * 60_000], ["EXPIRE", liveKey(store.statsId), 86400]);
   }
-  if (pfAt >= 0 && Number(results[pfAt]) === 1) {
+  if (pfAt >= 0 && (results[pfAt] === 1 || results[pfAt] === "1")) {
     follow.push(["HINCRBY", life, "u", 1], ["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
+  } else if (pfAt >= 0 && results[pfAt] !== 0 && results[pfAt] !== "0") {
+    // Not known whether this visitor was new to the day: the day's visitors keep their expiry, and nobody is counted.
+    follow.push(["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
   }
-  if (follow.length) await redisPipeline(follow);
+  // Each key's expiry once: an unknown answer already sends the visitors' expiry, and a visitor new to the day would
+  // send it again (Claude 1's review of #3676).
+  const expiring = new Set<string>();
+  const once = follow.filter((c) => c[0] !== "EXPIRE" || (!expiring.has(String(c[1])) && Boolean(expiring.add(String(c[1])))));
+  if (once.length) await redisPipeline(once);
   // The store page's views so far today, for the busy-day alert (lib/stats-report.ts).
   return hit.kind === "view" ? values[firstAt] || null : null;
 }
 
 /**
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
- * item seen and the one clicked, on the day's record, which the day's first
- * view has already given its expiry. One command, and only for the visitors
- * the page chose to measure.
+ * item seen and the one clicked, on the day's record. A reading may come
+ * on a day with no view yet (its token is good for two hours, so a page shown
+ * at 23:30 UTC may be read at 00:30), so it gives the day's record its expiry
+ * itself (Claude 5 on #2571). Two commands, and only for the visitors the
+ * page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  const counts = countsKey(statsId, dayKey(now));
+  try {
+    // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
+    // keep their room.
+    await cappedCount(counts, REACH_FIELDS_MAX, [{ field, by: 1 }]);
+  } finally {
+    // Sent whatever the count answered: an answer lost after the write leaves the record as it would be.
+    await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+  }
+}
+
+/** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
+export const CONFIRMED_LEAD_FIELD = "lc";
+/**
+ * One confirmed lead on the store's all-time record, for lib/path-lead.ts,
+ * which sends it once an address's mark is newly taken. A HINCRBY of its own,
+ * outside the record's capped count (cappedCount), as "u" is: a record already
+ * at LIFE_WRITE_MAX would put a new field under "~" and Path would never see
+ * it (review 6748073377 of #3431, L4). One field more at the most, and its
+ * answer is exactly the new count, which the caller reads.
+ */
+export function confirmedLeadCommand(statsId: string): (string | number)[] {
+  return ["HINCRBY", lifeKey(statsId), CONFIRMED_LEAD_FIELD, 1];
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -500,6 +577,8 @@ export type Stats = {
   previousTrafficAvailable?: Record<"d7" | "d30" | "d90", boolean>;
   /** Everything since `since`, or null when it could not be read. */
   life: (WindowStats & { since: string }) | null;
+  /** Whether this window's page readings went past their ceiling, so time on page and reading depth are partial (lib/page-read.ts). */
+  readsPartial?: ReadingsPartial | "unknown" | null;
 };
 
 const ranked = (map: Map<string, number>): Ranked =>
@@ -663,11 +742,14 @@ export async function readStats(store: Store, now = Date.now()): Promise<Stats |
     d30: { visitors: Number(results[base + 4]) || 0, ...sum(days.slice(-60, -30)) },
     d90: { visitors: Number(results[base + 5]) || 0, ...olderTotals },
   };
-  const life = await readLife(store, now).catch((error) => {
-    console.error("reading all-time counts failed", error);
-    return null;
-  });
-  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life };
+  const [life, readsPartial] = await Promise.all([
+    readLife(store, now).catch((error) => {
+      console.error("reading all-time counts failed", error);
+      return null;
+    }),
+    readingsPartial(store, now),
+  ]);
+  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life, readsPartial };
 }
 
 /**
@@ -703,7 +785,7 @@ export async function campaignViews(
 }
 
 /** Fields the all-time record keeps for itself rather than as counts. */
-const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap"]);
+const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap", CONFIRMED_LEAD_FIELD]);
 /** Beyond this many fields, the smallest sources and tags are let go. */
 const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
@@ -957,7 +1039,7 @@ export type SalesStats = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (lib/discount-impact.ts); null with no discounted sale. */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[] };
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[]; codes: DiscountCodeRow[] };
   /** When buyers bought over the 90 days: checkouts by hour of the week in UTC, Sunday 0:00 first (hoursOfWeek). */
   hours?: { sales: number[]; cents: number[] };
 };
@@ -1626,8 +1708,10 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
 /**
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
- * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none; an answer in any other
+ * where visits came from (r:<source>), the visitors (u) and the confirmed
+ * leads (lc: addresses that used their confirmation link, lib/path-lead.ts),
+ * which Marktmorgen Path reads; the addresses only asked for (fs:<channel>)
+ * are there too, for the store's numbers, never as Path's leads. Empty when there is none; an answer in any other
  * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {
@@ -1883,11 +1967,14 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     !(out.refundsIn?.d90 ?? []).some((r) => r.source === UNRECORDED);
   out.levers = measureSalesLevers(read,store.currency,readPartial,now);
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
+  const refundedIntents = new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean));
   out.discounts = {
-    rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
+    rows: discountImpact(read, refundedIntents, store.currency, now, STATS_DAYS),
     refundsRead: refundRows !== null,
     // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
     elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
+    // The same checkouts by the code they used (760 [STN7], unit 2), from the same sales: nothing more is read.
+    codes: discountCodes(read, refundedIntents, store.currency, now, STATS_DAYS),
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),
@@ -2196,6 +2283,8 @@ export type StatsData = {
    * clicked it, in the order of the page. Measured on one visitor in eight.
    */
   reach: Record<"d7" | "d30" | "d90", { visitors: number; rows: ReachItem[] }>;
+  /** Set when this month's page readings reached their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
+  readsPartial?: ReadingsPartial | "unknown" | null;
   /**
    * The stretch of days just before each window, to set the window beside:
    * the 7 days before the last 7, and so on. Sales and money are null where
@@ -2241,7 +2330,7 @@ export type StatsData = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (SalesStats.discounts). */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[] } | null;
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[]; codes?: DiscountCodeRow[] } | null;
   /** Checkouts by hour of the week in UTC over the 90 days (SalesStats.hours); the browser turns them to its own time. */
   hours?: { sales: number[]; cents: number[] } | null;
   /**
@@ -2522,6 +2611,7 @@ export function studioStats(
       d30: reachItems(store, w.d30.reach ?? {}, titles),
       d90: reachItems(store, w.d90.reach ?? {}, titles),
     },
+    readsPartial: stats.readsPartial ?? null,
   };
 }
 

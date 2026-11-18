@@ -1204,6 +1204,7 @@ function OptionsBlock({
       )}
 
       <ul className="mt-3 space-y-2">
+        {/* oxlint-disable-next-line react/refs -- the ref is read only inside ref callbacks and event handlers, not during render; oxlint's port flags the enclosing callback */}
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
             {editingId === option.id ? (() => {
@@ -1457,6 +1458,7 @@ function OptionsBlock({
       {adding
         ? form(
             "Add this price",
+            // oxlint-disable-next-line react/refs -- run() reads its in-flight ref only when the form is submitted, not during render; oxlint's port flags the callback
             () =>
               run(
                 { action: "add", id: product.id, label, price, details, best, ...(shipped ? { sku } : {}) },
@@ -1955,6 +1957,16 @@ export function ProductEditor({
   const editorReady = useSyncExternalStore(subscribeEditorReady, editorClientReady, editorServerReady);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // The focus follows a card's edit form (WCAG 2.4.3): into its first field when it opens, and back to that product's
+  // Edit when it closes, by Cancel or a save; not when it closed because a new product is being added.
+  const editedLast = useRef<string | null>(null);
+  useEffect(() => {
+    const was = editedLast.current;
+    editedLast.current = editingId;
+    if (was === editingId) return;
+    if (editingId !== null) requestAnimationFrame(() => document.getElementById(`product-title-${editingId}`)?.focus());
+    else if (was !== null && !adding) requestAnimationFrame(() => document.getElementById(`product-edit-${was}`)?.focus());
+  }, [editingId, adding]);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   // The form as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
@@ -2454,6 +2466,7 @@ export function ProductEditor({
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
                   <button
+                    id={`product-edit-${product.id}`}
                     type="button"
                     onClick={() => startEditing(product)}
                     className={quiet}

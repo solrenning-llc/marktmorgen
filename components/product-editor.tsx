@@ -2418,13 +2418,16 @@ export function ProductEditor({
               );
               const priceChanged = review !== null;
               const save = () => {
+                const opening = aboutFor.current;
                 const payload = payloadOf(draft);
                 if (aboutUnread && !draft.about) delete payload.about;
                 run(
                   { action: "edit", id: product.id, ...payload, rev: openedRev },
                   () => {
-                    // Only this product's editor closes (Codex L on #4238): another product opened while the save
-                    // was on its way keeps its editor, its typed words and its own price check.
+                    // Only the opening that submitted this save closes (Codex L and X4 on #4238): another product,
+                    // or the same product canceled and opened again while the save was on its way, keeps its editor,
+                    // its typed words and its own price check.
+                    if (aboutFor.current !== opening) return;
                     setEditingId((current) => (current === product.id ? null : current));
                     setPriceReview((current) => (current === product.id ? null : current));
                   },
@@ -2456,6 +2459,7 @@ export function ProductEditor({
                   save();
                 }}
                 onCancel={() => {
+                  aboutFor.current += 1;
                   setEditingId(null);
                   setPriceReview(null);
                   setError(null);

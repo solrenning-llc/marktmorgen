@@ -134,6 +134,40 @@ async function main(): Promise<void> {
   const lookAgain = Number((await redis.pipeline([["ZSCORE", `nl:ppsell:watch:${store.statsId}`, unsure.order]]))[0]);
   is("looked at again in about an hour", lookAgain >= Math.floor(Date.now() / 1000) + 3000, true);
 
+  // Codex P on #4131: one partial-refund mark that cannot be read is unknown for that order only; the pass goes on.
+  part("One unavailable partial-refund lookup leaves later orders in the same pass eligible for review");
+  const unavailable = await sell();
+  const next = await sell();
+  const partialKey = `nl:ppsell:partback:${store.statsId}`;
+  const refundWatch = `nl:ppsell:watch:${store.statsId}`;
+  captures.set(unavailable.capture, "PARTIALLY_REFUNDED");
+  captures.set(next.capture, "PARTIALLY_REFUNDED");
+  await pipeline([["ZADD", refundWatch, "0", unavailable.order, "1", next.order]]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some(([op, key, field]) => op === "HEXISTS" && key === partialKey && field === `paypal:${unavailable.capture}`)) {
+      throw new Error("synthetic read unavailable");
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  let finished = false;
+  try {
+    await watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {}, refunded: async () => {} });
+    finished = true;
+  } catch {
+    // The check below records whether the pass can continue after a single unavailable read.
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  const passedAt = Math.floor(Date.now() / 1000);
+  const [rescheduled, keptNext] = await pipeline([
+    ["ZSCORE", refundWatch, unavailable.order],
+    ["HEXISTS", partialKey, `paypal:${next.capture}`],
+  ]);
+  is("a single unavailable read does not stop the pass", finished, true);
+  is("the unread order is moved back for its next look", Number(rescheduled) >= passedAt + 3000, true);
+  is("the following partial refund is still recorded", keptNext, 1);
+  await pipeline([["ZREM", refundWatch, unavailable.order, next.order]]);
+
   part("A reading of the marks in another shape is unknown: no payout is made on the book");
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await pipeline(commands);

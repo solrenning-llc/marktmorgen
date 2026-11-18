@@ -236,6 +236,22 @@ function scriptOf(room: string, commands: Command[], script: string = ORDER_WRIT
   return ["EVAL", script, keys.length, ...keys, ...argv];
 }
 
+/**
+ * One script that runs ORDER_WRITE's body inside a step of its own (as ORDER_WRITE_ONCE does): ORDER_WRITE's keys and
+ * arguments for `commands`, then `extraKeys` after its keys and `extraArgs` after its arguments, for the wrapping
+ * script to read (and take off ARGV's end) before it runs the body. Commands are checked as orderWrite checks them.
+ */
+export function orderScriptWith(owner: DataOwner, commands: Command[], script: string, extraKeys: string[], extraArgs: (string | number)[]): (string | number)[] {
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("an order's wrapped write is one script of at least one command");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  const room = dataKey(owner);
+  if (!room) throw new Error("an order's wrapped write needs its store's room");
+  const [, , count, ...rest] = scriptOf(room, commands, script);
+  const keys = rest.slice(0, Number(count));
+  const argv = rest.slice(Number(count));
+  return ["EVAL", script, Number(count) + extraKeys.length, ...keys, ...extraKeys, ...argv, ...extraArgs.map(String)];
+}
+
 /** Whether a reply is a whole count from `low` to `high` (inclusive). */
 const between = (reply: unknown, low: number, high: number): boolean => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= low && reply <= high;
 

@@ -103,7 +103,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
-  "nl:stamp:drop",
+  "nl:stamp:drop", "nl:stamp:noroom:",
   "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
@@ -119,7 +119,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
-  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:",
+  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:", "nl:ppsell:try:",
   // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
   "nl:tip:co:",
 ];
@@ -394,6 +394,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
   // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
   "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),
+  // A PayPal order's count of capture tries (lib/paypal-sales.ts, watchFirst): a number named by the order, gone
+  // within the thirty days from its opening that its record keeps at most.
+  "nl:ppsell:try:": X(30),
   // The receipt as first made (lib/paypal-delivery.ts), so every try sends the same bytes: the store's words and the
   // buyer's address, named by the order, gone within RECEIPT_MAIL_SECONDS, and with the person (lib/erasure-index.ts).
   "nl:ppsell:mail:": er(1),
@@ -442,6 +445,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
   "nl:stamp:drop": C,
+  // A store found without room for a new stamped copy or preview: one mark a store, kept NO_ROOM_NOTE_SECONDS (an hour), erased with it.
+  "nl:stamp:noroom:": E,
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:back:": E, "nl:stock:lock:": E,
   "nl:storage:pending:": X(1),

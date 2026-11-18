@@ -13,9 +13,15 @@
  *   - a checkout still open waits; one never paid, or that is neither a plan
  *     nor a membership with an end, is let go without any change;
  *   - the job settles each pending plan once and keeps an open one for two days;
+ *   - an end already set counts only when it is the plan's own: a later one (set
+ *     by hand, or left from before) is brought back to it; an earlier one (the
+ *     buyer stopped it) is kept and watched (tests/payment-plan-stuck.test.ts);
+ *   - plans the job cannot settle (an account that answers 403) never keep a
+ *     new plan from its end: they wait in a line of their own, taken in turn,
+ *     and no run reads Stripe for more than its limit;
  *   - a reply that is not the checkout or subscription asked for (another id,
  *     or none) decides nothing: it is never settled, so the job keeps the plan
- *     and asks again on its next pass.
+ *     in its line of plans tried and asks again on its next pass.
  */
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
 import { store as redis } from "./redis-stub";
@@ -29,6 +35,10 @@ const DAY = 86_400;
 const sessions: Record<string, Record<string, unknown>> = {};
 const subscriptions: Record<string, Record<string, unknown>> = {};
 const updates: { id: string; body: URLSearchParams }[] = [];
+/** A connected account that refuses every call, as one disconnected from the platform does. */
+const STUCK = "acct_1TestPlansStk1";
+/** How many times each checkout was read, to see which plans a run looked at. */
+const reads: Record<string, number> = {};
 /** What Stripe answers to an update, when a case needs a reply other than the subscription. */
 const updateReplies: Record<string, Record<string, unknown>> = {};
 
@@ -45,6 +55,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer(raw.get(`${method} ${path}`));
   }
   const session = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)$/.exec(path);
+  if (session) reads[session[1]] = (reads[session[1]] ?? 0) + 1;
+  if ((init?.headers as Record<string, string> | undefined)?.["Stripe-Account"] === STUCK) {
+    return answer({ error: { type: "invalid_request_error", message: "The account does not have access" } }, 403);
+  }
   if (session) return sessions[session[1]] ? answer(sessions[session[1]]) : answer({ error: { message: "No such checkout" } }, 404);
   const sub = /^\/subscriptions\/(sub_[A-Za-z0-9]+)$/.exec(path);
   if (sub && method === "GET") return answer(subscriptions[sub[1]] ?? {});
@@ -63,6 +77,15 @@ const checkout = (id: string, meta: Record<string, string>, over: Record<string,
 
 async function main(): Promise<void> {
   redis.clear();
+  // Rule 23 (the review of #3367, item 3): these cases ran on the real clock, where every plan's own end (2026) was
+  // already past, so they sent Stripe a cancel_at in the past, which it documents as a future time; a plan past its
+  // own end is now ended at once (tests/payment-plan-stuck.test.ts). They now run the day after ANCHOR, before every
+  // plan's own end, and check the same ends.
+  const trueNow = Date.now;
+  const beforeEnds = () => {
+    Date.now = () => (ANCHOR + DAY) * 1000;
+  };
+  beforeEnds();
 
   part("Three monthly payments end with the third period");
   sessions.cs_test_plan00000001 = checkout("cs_test_plan00000001", { kind: "plan", plan_payments: "3", plan_interval: "month" });
@@ -113,7 +136,73 @@ async function main(): Promise<void> {
   const second = await settlePlans();
   is("run again: only the open one is looked at, and nothing is changed twice", [second.done, second.open, updates.length], [0, 1, 4]);
 
+  part("An end already set counts only when it is no later than the plan's own");
+  sessions.cs_test_late00000001 = checkout("cs_test_late00000001", { kind: "plan", plan_payments: "3", plan_interval: "month" });
+  const own = addPeriods(ANCHOR, "month", 3);
+  subscriptions.sub_late00000001 = { id: "sub_late00000001", status: "active", billing_cycle_anchor: ANCHOR, cancel_at: addPeriods(ANCHOR, "month", 5) };
+  const before8 = updates.length;
+  is("an end two payments too late is not the plan's end", await finishPlan(ACCOUNT, "cs_test_late00000001"), "done");
+  is("it is brought back to the close of the third period", [updates.length - before8, Number(updates.at(-1)?.body.get("cancel_at")), updates.at(-1)?.id], [1, own, "sub_late00000001"]);
+  sessions.cs_test_same00000001 = checkout("cs_test_same00000001", { kind: "plan", plan_payments: "3", plan_interval: "month" });
+  subscriptions.sub_same00000001 = { id: "sub_same00000001", status: "active", billing_cycle_anchor: ANCHOR, cancel_at: own };
+  sessions.cs_test_soon00000001 = checkout("cs_test_soon00000001", { kind: "plan", plan_payments: "3", plan_interval: "month" });
+  // The buyer stopped it after the second payment: ending sooner never charges more, so it is left as it is.
+  subscriptions.sub_soon00000001 = { id: "sub_soon00000001", status: "active", billing_cycle_anchor: ANCHOR, cancel_at: addPeriods(ANCHOR, "month", 2) };
+  const before9 = updates.length;
+  // On a clock after the plan's own end (April 2026), which has come with the earlier end in place, it is settled;
+  // before its own end an earlier one is "early" and watched (tests/payment-plan-stuck.test.ts, P2).
+  Date.now = () => (own + DAY) * 1000;
+  is("the plan's own end, and an earlier one, are kept", [await finishPlan(ACCOUNT, "cs_test_same00000001"), await finishPlan(ACCOUNT, "cs_test_soon00000001"), updates.length - before9], ["done", "done", 0]);
+  beforeEnds();
+
+  part("Plans that cannot be settled never keep a new one from its end");
+  redis.clear();
+  const realError = console.error;
+  console.error = () => {};
+  const realNow = Date.now;
+  let clock = Math.floor(realNow() / 1000) * 1000;
+  const nextDay = () => {
+    clock += DAY * 1000;
+    Date.now = () => clock;
+  };
+  nextDay();
+  const stuck = Array.from({ length: 250 }, (_, i) => `cs_test_stuck${String(i).padStart(8, "0")}`);
+  for (const id of stuck) await rememberPlan(STUCK, id);
+  const day1 = await settlePlans();
+  const looked1 = Object.keys(reads).filter((id) => id.startsWith("cs_test_stuck")).length;
+  is("a run reads at most its limit", [day1.failed, looked1], [200, 200]);
+  nextDay();
+  for (const id of stuck) reads[id] = 0;
+  sessions.cs_test_newp00000001 = checkout("cs_test_newp00000001", { kind: "plan", plan_payments: "4", plan_interval: "month" });
+  subscriptions.sub_newp00000001 = { id: "sub_newp00000001", status: "active", billing_cycle_anchor: ANCHOR };
+  await rememberPlan(ACCOUNT, "cs_test_newp00000001");
+  reads.cs_test_newp00000001 = 0;
+  const before11 = updates.length;
+  const day2 = await settlePlans();
+  is("the next run gives the new plan its end, with 200 stuck plans already waiting", [updates.length - before11, updates.at(-1)?.id, day2.done], [1, "sub_newp00000001", 1]);
+  is("and still reads no more than its limit", stuck.reduce((sum, id) => sum + (reads[id] ?? 0), 0) + (reads.cs_test_newp00000001 ?? 0) <= 200, true);
+  nextDay();
+  for (const id of stuck) reads[id] = 0;
+  await settlePlans();
+  nextDay();
+  await settlePlans();
+  is("taken in turn: over two more runs every stuck plan is tried again", stuck.filter((id) => !reads[id]).length, 0);
+  // Review of claude5/plans-stuck-entries (rule 23): stuck plans now wait longer each time, so one more day passes
+  // first and every one of the 250 is due again; the share asserted below is unchanged.
+  nextDay();
+  const fresh = Array.from({ length: 300 }, (_, i) => `cs_test_open${String(i).padStart(9, "0")}`);
+  for (const id of fresh) {
+    sessions[id] = checkout(id, { kind: "plan", plan_payments: "3", plan_interval: "month" }, { status: "open", subscription: null });
+    await rememberPlan(ACCOUNT, id);
+  }
+  nextDay();
+  const busy = await settlePlans();
+  is("a busy day of new checkouts shares the run half and half with the plans waiting", [busy.open, busy.failed], [100, 100]);
+  Date.now = realNow;
+  console.error = realError;
+
   part("A reply for another checkout or subscription decides nothing");
+  const before10 = updates.length;
   sessions.cs_test_plan00000008 = checkout("cs_test_plan00000008", { kind: "plan", plan_payments: "3", plan_interval: "month" });
   subscriptions.sub_plan00000008 = { id: "sub_someoneElse0001", status: "active", cancel_at: ANCHOR + 90 * DAY, billing_cycle_anchor: ANCHOR };
   is("a subscription reply with another id and an end is not taken as this plan's end", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000008")), true);
@@ -122,7 +211,9 @@ async function main(): Promise<void> {
   is("a subscription reply with no id, canceled, is not taken as this plan's end", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000009")), true);
   sessions.cs_test_plan00000010 = checkout("cs_test_someoneElse1", { kind: "plan", plan_payments: "3", plan_interval: "month" }, { status: "expired", subscription: null });
   is("a checkout reply for another checkout does not let the plan go", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000010")), true);
-  is("none of them changed any subscription", updates.length, 4);
+  // Merged with claude5/plans-stuck-entries (rule 23): counted from this part's start, since the parts before it now
+  // change more subscriptions; still none here.
+  is("none of them changed any subscription", updates.length - before10, 0);
   sessions.cs_test_plan00000011 = checkout("cs_test_plan00000011", { kind: "plan", plan_payments: "3", plan_interval: "month" });
   subscriptions.sub_plan00000011 = { id: "sub_plan00000011", status: "active", billing_cycle_anchor: ANCHOR };
   updateReplies.sub_plan00000011 = { id: "sub_someoneElse0002", cancel_at: addPeriods(ANCHOR, "month", 3) };
@@ -138,6 +229,9 @@ async function main(): Promise<void> {
     is(`an update answered with its own id and ${name} is not settled`, await unsettled(finishPlan(ACCOUNT, `cs_test_plan000000${n}x`)), true);
     delete updateReplies[id];
   }
+  // Merged with claude5/plans-stuck-entries: the lines start empty here, as the stuck and open plans above are no
+  // part of these counts; an unread plan waits in the line of plans tried and is due again at once.
+  redis.clear();
   await rememberPlan(ACCOUNT, "cs_test_plan00000008");
   const third = await settlePlans();
   const fourth = await settlePlans();
@@ -172,6 +266,7 @@ async function main(): Promise<void> {
   is("the job keeps a plan whose read was answered with null and asks again", [fifth.failed, fifth.done, fifth.dropped, sixth.failed, sixth.dropped], [2, 0, 0, 2, 0]);
   raw.clear();
 
+  Date.now = trueNow;
   done();
 }
 

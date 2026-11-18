@@ -179,6 +179,36 @@ part("Old or unreadable drafts go whenever a lesson or the library opens, and al
   is("and the register too", PERSON_DATA.some((r) => r.file === "lib/quiz-keep-rules.ts" && /a lesson or the library opens/.test(r.what) && /sign out/.test(r.what)), true);
 }
 
+part("The key in the browser says nothing about the course (review of #4324, MEDIUM 6)");
+{
+  // On a shared computer, and to any third-party pixel on the store's own origin (components/store-pixels.tsx), a key
+  // naming the store, the product and the lesson told who took which course. The key is now only the prefix and the
+  // server's code for the course, the lesson and the student (deviceQuizKey), and a key in the old shape is removed.
+  const keyBefore = process.env.NIMBUS_DATA_KEY;
+  process.env.NIMBUS_DATA_KEY = "k".repeat(64);
+  try {
+    const code = keepKey.deviceQuizKey as unknown as (course: string, lesson: string, email: string) => string | null;
+    const keyOf = keepRules.quizKeepKey as unknown as (who: string) => string;
+    const one = code("course1", "lesson1", "ada@example.com");
+    is("a code per course, lesson and student", [Boolean(one && /^[0-9a-f]{32}$/.test(one)), one !== code("course1", "lesson2", "ada@example.com"), one !== code("course2", "lesson1", "ada@example.com"), one !== code("course1", "lesson1", "bo@example.com"), one === code("course1", "lesson1", " ADA@example.com ")], [true, true, true, true, true]);
+    is("the key is the prefix and that code, nothing else", /^mm:quiz:[0-9a-f]{32}$/.test(keyOf(one ?? "")) && keyOf(one ?? "") === `mm:quiz:${one}`, true);
+  } finally {
+    if (keyBefore === undefined) delete process.env.NIMBUS_DATA_KEY;
+    else process.env.NIMBUS_DATA_KEY = keyBefore;
+  }
+  const kept = new Map<string, string>([
+    ["mm:quiz:shop:prod:lesson1:" + "a".repeat(32), JSON.stringify(draftOf(inputs, shown, 0, NOW - 60_000))],
+    ["mm:quiz:" + "b".repeat(32), JSON.stringify(draftOf(inputs, shown, 0, NOW - 60_000))],
+  ]);
+  const storage = { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, getItem: (k: string) => kept.get(k) ?? null, removeItem: (k: string) => void kept.delete(k) };
+  keepRules.sweepQuizDrafts(storage, NOW);
+  is("the sweep removes a key in the old, readable shape, however fresh, and keeps an opaque one", [...kept.keys()], ["mm:quiz:" + "b".repeat(32)]);
+  const lessonPage = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
+  is("the lesson page makes the code from the course, the lesson and the student", /deviceQuizKey\(course\.id, lesson\.id, student\.email\)/.test(lessonPage), true);
+  const policy = readFileSync("app/privacy/page.tsx", "utf8");
+  is("the privacy policy no longer says the key names the store, the course and the lesson", /followed by the store, the course, the lesson/.test(policy), false);
+}
+
 part("Said in every language, and in the privacy policy");
 {
   const keys = ["quizKeptBack", "quizKeptClear", "quizKeptCleared"] as const;

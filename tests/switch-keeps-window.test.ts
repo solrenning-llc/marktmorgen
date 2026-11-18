@@ -577,6 +577,12 @@ async function main(): Promise<void> {
     // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
     // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // #2801 (thumbnail copies) merged again with its base #2803 (16 November 2026): the thumbnail's Blob lines with main's
+    // model and #2803's upload costs together; computed, not chosen, each still above zero (MR).
+    // Merge of main into #2801 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #2837 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main e023347098 into #2837 (18 November 2026, Claude 5 cloud ibqho): main's model and this PR's Blob lines
+    // together, monthly 44.31, 309.78, 694.25 -> 44.31, 309.77, 694.24; as the model computes them, still above zero (MR); no cost lowered.
     is("11: Store, Studio and Scale keep 44.31, 309.77 and 694.24 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.31", "309.77", "694.24"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
@@ -610,6 +616,8 @@ async function main(): Promise<void> {
     // 36.28, 256.78, 574.21 -> 36.28, 256.77, 574.19; figures as the model computes them, still above zero (MR); no cost lowered.
     // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
     // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main e023347098 into #2837 (18 November 2026, Claude 5 cloud ibqho): main's model and this PR's Blob lines
+    // together, yearly 36.25, 254.66, 570.98 -> 36.25, 254.65, 570.96; as the model computes them, still above zero (MR); no cost lowered.
     is("11: and 36.25, 254.65 and 570.96 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.25", "254.65", "570.96"]);
   } finally {
     Date.now = realNow;

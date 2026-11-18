@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   is("the login's grant is not given back while the store's own connection uses it", [granted.get(USER_1), revokedFor], [true, []]);
   is("and the store's existing connection still reads Meta", await readMetaSpend(a.statsId!, a.currency), "read");
   const after = await disconnectMeta(a.statsId!);
-  is("disconnecting it afterwards still gives the grant back, once", [after && after.metaAccess, granted.get(USER_1), revokedFor], ["removed", false, [USER_1]]);
+  is("disconnecting it afterward still gives the grant back, once", [after && after.metaAccess, granted.get(USER_1), revokedFor], ["removed", false, [USER_1]]);
 
   part("What the creator is told");
   const keptLine = accountChangeWords({ kind: "metaads-disconnected", kept: true }).line;

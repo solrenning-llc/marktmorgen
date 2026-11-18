@@ -24,13 +24,14 @@ import { canConfirm, confirmPurchase, resendPurchase } from "@/lib/purchase-emai
 import { importedFor } from "@/lib/imported-purchases";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { paidPeriod } from "./billing-period-fixture";
 import { paidIntentReply } from "./paid-intent-standin";
+import { paidPeriod } from "./billing-period-fixture";
 
 const emails: { to: string[]; subject: string; text: string }[] = [];
 /** Checkouts as the creator's Stripe account would answer for them, by id. */
 const onStripe = new Map<string, unknown>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
   const paid = paidIntentReply(input, init?.method ?? "GET");
   if (paid) return paid;
   const url = new URL(String(input));

@@ -50,6 +50,7 @@ const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () 
 const emails: { to: string[] }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   // A gift reads its payment before handing anything over (lib/gifts.ts, #4408; tests/paid-intent-standin.ts).
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup, #4494): paid, not given back.
   const paid = paidIntentReply(input, init?.method ?? "GET");
   if (paid) return paid;
   if (new URL(String(input)).hostname === "api.resend.com") {

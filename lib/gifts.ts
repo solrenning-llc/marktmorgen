@@ -617,7 +617,9 @@ export async function revokeRefundedGifts(
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`);
+      const latest = now() + 300;
+      return readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
     } catch (error) {
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading refunds for gifts: a page in another shape", error);

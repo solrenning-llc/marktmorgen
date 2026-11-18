@@ -346,7 +346,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "What about refunds on the Marktmorgen subscription itself?",
         a: [
-          `Your first payment to us is refunded in full if you ask within ${REFUND_DAYS} days of it, for any reason or none. A yearly plan is refunded at any time for the months you have not started, with the months you used charged at the monthly price and Stripe's card fee on that payment kept, since Stripe does not give it back. You can cancel at any time and keep access until the end of the period you already paid for; a renewal is not refunded, except where the law requires it. The refund policy page has the exact wording.`,
+          `${PLANS_ON_SALE ? "" : "Paid plans are not on sale yet, so no plan payment has been taken. "}Within ${REFUND_DAYS} days of your first payment, it and every plan payment since for the same store are refunded in full when you ask, for any reason or none. The guarantee is given once per person, and a refund is never more than you paid. A yearly plan is refunded at any time for the months you have not started, with the months you used charged at the monthly price and Stripe's card fee on that payment kept, since Stripe does not give it back. After those ${REFUND_DAYS} days, a monthly renewal, a charge for switching plans and any other later charge are not refunded, except where applicable consumer law requires it. A refund ends that store's plan on the day it is made. In your studio, under "What you pay us", choose "Refund my payment": a review page shows the exact amount and what happens to your store before anything changes. If you can't use it, email support@marktmorgen.com. You can cancel at any time and keep access until the end of the period you already paid for. The refund policy page has the exact wording.`,
         ],
       },
       {
@@ -565,7 +565,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes, on any paid product sold once that hands over nothing else, at one price or at several for sizes or versions (S, M, L; signed or not). Under the product, choose \u201cShip it: a physical product, sent by you\u201d, then set the shipping cost per order (0 for free shipping), where it ships (the United States, the United States and Canada, the EU, Europe, everywhere Stripe ships, or only the countries you list) and, if you like, when it ships.",
           "Its page says what shipping costs and where it goes before anybody pays. Stripe's own page asks the buyer for an address in one of those countries and adds the shipping as its own line; with sales tax on, the product is taxed as goods and the shipping as shipping. The address is on the page after paying, in the buyer's confirmation email, on the sale in your studio and in your Stripe dashboard.",
-          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift or part of a bundle, have a payment plan or a price the buyer chooses. At one price, limited or not, it can go in a cart with other products you ship: the buyer gives one address, in a country everything in the cart ships to, and pays each product's shipping added together.",
+          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift or part of a bundle, or have a payment plan. It can have a price the buyer chooses, at or above your lowest price, with the shipping added on its own line. At one price, limited or not, it can go in a cart with other products you ship: the buyer gives one address, in a country everything in the cart ships to, and pays each product's shipping added together.",
         ],
       },
       {
@@ -902,6 +902,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "That is the case it is designed for. Your store installs to the home screen on both iPhone and Android as an app of its own, with its name, its icon and its color, straight from the browser, with no app store in between. It opens on your store, not on ours.",
           "Your studio installs the same way, and from it you can turn on notifications of every sale, booking, community report, affiliate application, live event about to start and comment under a lesson, on Android and on a computer, and on iPhone and iPad with iOS or iPadOS 16.4 or later once it is on the home screen. It is not an app from the App Store or Google Play; Stan has a native iPhone app, and we do not.",
+        ],
+      },
+      {
+        q: "How do I choose which alert emails I get?",
+        a: [
+          "In your studio, open \u201cAlert emails\u201d. Under \u201cAlerts you choose\u201d, each email about your store's numbers has its own box: \u201cVisits fell\u201d, \u201cFewer sales from the same visits\u201d, \u201cRefunds piling up\u201d, \u201cMonthly goal off pace\u201d, \u201cMonthly goal reached\u201d and \u201cSales stopped\u201d. Each one is on until you turn it off. Uncheck the ones you do not want, then press \u201cSave choices\u201d. Turning one off stops its email only: your phone and your team chat keep their own settings.",
+          "Some emails are \u201cAlways sent\u201d, and the page says why for each: changes to your account, payment problems, your plan and your store, and notices about your content. Only the store's owner can open this page, because these emails go to the owner.",
+          "The stop link at the foot of the weekly email stops all of these alerts too, along with the weekly, monthly and busy-day emails. If it was used, the page says so, with a button to start them again. The alerts begin once your store takes payments through Stripe, on a paid plan or a free trial.",
         ],
       },
       {

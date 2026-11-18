@@ -25,6 +25,7 @@ const real = redis.pipeline.bind(redis);
 // A gift reads its payment before handing anything over (lib/gifts.ts, #4408): a plain paid one here, as every
 // fixture of paid payments answers it (tests/paid-intent-standin.ts; merge of main into #4408).
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup, #4494): paid, not given back.
   paidIntentReply(input, init?.method ?? "GET") ??
   (new URL(String(input)).hostname === "api.resend.com"
     ? new Response(JSON.stringify({ id: "email_1" }), { status: 200 })

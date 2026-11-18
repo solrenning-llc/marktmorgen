@@ -77,16 +77,19 @@ export async function makeDraftPreview(store: Owner, productId: string, now = Ma
 
 /**
  * Whether the draft has a link open now, and until when (never its code, which is not kept): the pointer names a
- * record that is there, for this draft, and not ended. Null when none is; a reply that cannot be read throws, never
- * "no link" (Claude 1's LOW on #3440: the studio says so after a reload, with "Stop this link").
+ * record that is there, for this draft, and not ended, and the product carries no taken-down mark. Null when none is;
+ * a reply that cannot be read throws, never "no link" (Claude 1's LOW on #3440: the studio says so after a reload,
+ * with "Stop this link"). The mark is read with the record, as hasDraftPreview and readDraftPreview do, so a pointer
+ * left behind a takedown never reads as an open link that the preview door refuses (Codex X6 on #3440 @e8385a2cdf).
  */
 export async function liveDraftPreview(store: Owner, productId: string, now = Math.floor(Date.now() / 1000)): Promise<{ expiresAt: number } | null> {
   const statsId = statsOf(store);
   const hash = stringOrNull((await exactly([["GET", pointerKey(statsId, productId)]]))[0], "pointer");
   if (hash === null) return null;
   if (!HASH.test(hash)) throw new Error("A preview link pointer could not be read");
-  const raw = stringOrNull((await exactly([["GET", lookupKey(hash)]]))[0], "record");
-  if (raw === null) return null;
+  const [rawValue, downValue] = await exactly([["GET", lookupKey(hash)], ["GET", downKey(statsId, productId)]]);
+  const raw = stringOrNull(rawValue, "record");
+  if (raw === null || stringOrNull(downValue, "taken-down mark") !== null) return null;
   let record: unknown;
   try {
     record = JSON.parse(raw);

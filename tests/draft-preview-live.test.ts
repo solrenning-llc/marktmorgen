@@ -71,6 +71,13 @@ async function main(): Promise<void> {
   const signedOut = await previewStatusRoute(new NextRequest(`https://marktmorgen.com/api/store/draft-preview?id=${draft.product.id}`, { method: "GET" }));
   is("GET signed out is refused", signedOut.status, 401);
 
+  // Codex X6 on #3440 @e8385a2cdf: a pointer left behind a takedown (lib/takedown.ts) must not read as an open link,
+  // since the preview door refuses it (hasDraftPreview and readDraftPreview read the same mark).
+  await makeDraftPreview(store, draft.product.id);
+  await real([["SET", `nl:dpv:down:${store.statsId}:${draft.product.id}`, "mark", "EX", 3600]]);
+  is("a link left behind a takedown mark: status answers none", (await read(draft.product.id)).body.live, null);
+  is("and the POST status too", (await send({ action: "status", id: draft.product.id })).body.live, null);
+
   const component = readFileSync("components/draft-preview-link.tsx", "utf8");
   is("the editor asks for the status when it opens, with a GET and no write", /draft-preview\?id=/.test(component) && !/action: "status"/.test(component) && /useEffect/.test(component), true);
   is("it says a link is open, until when, and offers to stop it", /A preview link is open until/.test(component) && /Stop this link/.test(component), true);

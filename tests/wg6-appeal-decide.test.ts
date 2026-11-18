@@ -147,7 +147,7 @@ async function main() {
     // The send's write of the record: the swap over the exact bytes (#3533's appeal-swap, its key third) or the fenced write
     // (appeal-write, the record fourth).
     const sendWrite = commands[0]?.[0] === "EVAL" && ((String(commands[0][1]).startsWith("-- marktmorgen:appeal-swap:v1") && String(commands[0][3]).startsWith(`nl:report:${e.report.id}:a:`))
-      || (String(commands[0][1]).startsWith("-- marktmorgen:appeal-write:v1") && String(commands[0][4]).startsWith(`nl:report:${e.report.id}:a:`)));
+      || (String(commands[0][1]).startsWith("-- marktmorgen:appeal-write:") && String(commands[0][4]).startsWith(`nl:report:${e.report.id}:a:`)));
     if (!decidedMidSend && sendWrite) {
       redis.pipeline = realPipeline;
       decidedMidSend = await answer({ token: e.token, decision: e.decision.key, to: "under_review" });

@@ -147,22 +147,40 @@ async function held<T>(sid: string, decision: Decision, work: (hold: Held) => Pr
 }
 
 /**
- * Writes a request's record only while the hold is still this writer's and the record is there, in one script, with
- * the record's expiry. -1 when the record is gone: an unknown, never written over (rule 24). The first line names the
- * script for the local stand-in (lib/redis-memory.ts).
+ * Writes a request's record only while the hold is still this writer's and the record still holds the exact bytes this
+ * writer read, in one script, with the record's expiry: 1 written; 0 the hold is not this writer's; -1 the record is
+ * gone (an unknown, never written over, rule 24); otherwise the record's current bytes, for the writer to compose its
+ * change over them. The inbox email marks told by swapAppeal over the exact bytes too, so the two writers keep each
+ * other's fields (Codex X7 on #3612). The first line names the script for the local stand-in (lib/redis-memory.ts).
  */
-export const APPEAL_WRITE = `-- marktmorgen:appeal-write:v1
+export const APPEAL_WRITE = `-- marktmorgen:appeal-write:v2
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-if redis.call("EXISTS", KEYS[2]) == 0 then return -1 end
-redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+local current = redis.call("GET", KEYS[2])
+if not current then return -1 end
+if current ~= ARGV[2] then return current end
+redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[4])
 return 1`;
 
-/** "written", or "lost" when the hold ran out and may be another writer's (nothing written); an unknown reply throws. */
-async function writeHeld(hold: Held, rk: string, kept: KeptAppeal): Promise<"written" | "lost"> {
-  const replies = repliesFor(await redisPipeline([["EVAL", APPEAL_WRITE, 2, hold.key, rk, hold.token, JSON.stringify(kept), KEEP_SECONDS]]), 1);
-  if (replies?.[0] === 1) return "written";
-  if (replies?.[0] === 0) return "lost";
-  throw new UnknownReplyError("a request to look again's write");
+/**
+ * Writes `change` of the record over its current bytes, while the hold is this writer's: `change` gets the record as it
+ * is and returns it with only this writer's fields changed, or null when the record no longer is the one this writer
+ * acts on. A record changed meanwhile (the inbox email marking told) is read again from the script's answer and the
+ * change composed over it, a few times at the most. "lost" when the hold ran out, the change no longer applies or the
+ * record kept moving (nothing written); an unknown reply throws.
+ */
+async function writeHeld(hold: Held, rk: string, row: AppealRow, change: (current: KeptAppeal) => KeptAppeal | null): Promise<{ written: true; row: AppealRow } | { written: false }> {
+  let from = row;
+  for (let i = 0; i <= MAX_TELL_TRIES; i++) {
+    const next = change(from.kept);
+    if (!next) return { written: false };
+    const raw = JSON.stringify(next);
+    const reply = repliesFor(await redisPipeline([["EVAL", APPEAL_WRITE, 2, hold.key, rk, hold.token, from.raw, raw, KEEP_SECONDS]]), 1)?.[0];
+    if (reply === 1) return { written: true, row: { kept: next, raw } };
+    if (reply === 0) return { written: false };
+    if (typeof reply !== "string") throw new UnknownReplyError("a request to look again's write");
+    from = { kept: readKept(reply), raw: reply };
+  }
+  return { written: false };
 }
 
 /** One request read again, exactly, with the bytes it was read from (for swapAppeal), or null when there is none. */
@@ -170,10 +188,6 @@ async function readOneRow(sid: string, decision: StoreDecision): Promise<AppealR
   return (await readAppealRows({ sid }, [decision])).get(decision.key) ?? null;
 }
 
-/** One request read again, exactly, or null when there is none. */
-async function readOne(sid: string, decision: StoreDecision): Promise<KeptAppeal | null> {
-  return (await readOneRow(sid, decision))?.kept ?? null;
-}
 
 /**
  * The requests this store sent, by decision key: one exact read of every decision's record, in one round trip. A
@@ -392,13 +406,17 @@ export async function decideAppeal(report: { id: string }, store: Store, decisio
   if (typeof toRaw !== "string" || !(APPEAL_STATES as readonly string[]).includes(toRaw)) return { ok: false, problem: "order", words: DECIDE_PROBLEMS.order };
   const to = toRaw as AppealState;
   const result = await held(store.sid, decision, async (hold): Promise<DecideResult> => {
-    const kept = await readOne(store.sid, decision);
-    if (!kept) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
+    const row = await readOneRow(store.sid, decision);
+    if (!row) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
+    const { kept } = row;
     const moved = moveAppeal(kept.appeal, to, { role: "operator" }, now, typeof reason === "string" ? reason : undefined);
     if (!moved.ok) return { ok: false, problem: moved.problem, words: DECIDE_PROBLEMS[moved.problem] };
-    const next: KeptAppeal = { ...kept, appeal: moved.appeal, creator: { state: moved.appeal.state, tries: 0, told: false } };
-    if ((await writeHeld(hold, recordKey(store.sid, decision), next)) === "lost") return { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy };
-    return tellCreator(store, decision, next, origin, hold);
+    // Only the decision's fields: the request's moves and the creator's new email owed. The inbox's told and tries, as
+    // the record holds them now, stay (Codex X7 on #3612); a request moved by someone else meanwhile is not written.
+    const written = await writeHeld(hold, recordKey(store.sid, decision), row, (current) =>
+      sameDecision(current.appeal, kept.appeal) ? { ...current, appeal: moved.appeal, creator: { state: moved.appeal.state, tries: 0, told: false } } : null);
+    if (!written.written) return { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy };
+    return tellCreator(store, decision, written.row, origin, hold);
   });
   return result === "busy" ? { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy } : result;
 }
@@ -408,22 +426,29 @@ export async function tellCreatorAgain(report: { id: string }, store: Store, dec
   const decision = decisionsOf(store).find((d) => d.key === decisionKeyRaw && d.report === report.id);
   if (!decision || !store.sid) return null;
   const result = await held(store.sid, decision, async (hold): Promise<DecideResult> => {
-    const kept = await readOne(store.sid, decision);
-    if (!kept) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
+    const row = await readOneRow(store.sid, decision);
+    if (!row) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
+    const { kept } = row;
     if (!kept.creator || kept.creator.told) return { ok: true, kept, emailed: Boolean(kept.creator?.told) };
-    return tellCreator(store, decision, kept, origin, hold);
+    return tellCreator(store, decision, row, origin, hold);
   });
   return result === "busy" ? { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy } : result;
 }
 
-async function tellCreator(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string, hold: Held): Promise<DecideResult> {
+async function tellCreator(store: Store, decision: StoreDecision, row: AppealRow, origin: string, hold: Held): Promise<DecideResult> {
+  const { kept } = row;
   const told = kept.creator as CreatorTold;
   if (told.tries >= MAX_TELL_TRIES) return { ok: true, kept, emailed: false };
+  // Each write changes only the creator's email fields of the state it is for, over the record as it is now: the inbox
+  // email's told, marked meanwhile, is kept (Codex X7 on #3612).
+  const ofThisState = (current: KeptAppeal) => current.creator?.state === told.state && sameDecision(current.appeal, kept.appeal);
   // The try is counted before the email, so a lost count never lets one more go. A hold lost already: nothing is sent,
   // and "Email the creator again" stays offered.
-  const counted: KeptAppeal = { ...kept, creator: { ...told, tries: told.tries + 1 } };
   const rk = recordKey(store.sid, decision);
-  if ((await writeHeld(hold, rk, counted)) === "lost") return { ok: true, kept, emailed: false };
+  const countedWrite = await writeHeld(hold, rk, row, (current) =>
+    ofThisState(current) && current.creator!.tries === told.tries ? { ...current, creator: { ...current.creator!, tries: told.tries + 1 } } : null);
+  if (!countedWrite.written) return { ok: true, kept, emailed: false };
+  const counted = countedWrite.row.kept;
   const { appeal } = counted;
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
@@ -442,9 +467,14 @@ async function tellCreator(store: Store, decision: StoreDecision, kept: KeptAppe
     idempotencyKey: `appeal-${appeal.number}-${appeal.state}-${told.tries + 1}`,
   }).catch(() => false);
   if (!sent) return { ok: true, kept: counted, emailed: false };
-  const done: KeptAppeal = { ...counted, creator: { ...(counted.creator as CreatorTold), told: true } };
   // The creator has it. A mark that did not land leaves "Email the creator again" offered: at most MAX_TELL_TRIES. A hold
   // that ran out during a slow email writes nothing: a later decision's record is never written back to this state.
-  const marked = await writeHeld(hold, rk, done).catch(() => "lost" as const);
-  return { ok: true, kept: marked === "written" ? done : counted, emailed: true };
+  const marked = await writeHeld(hold, rk, countedWrite.row, (current) =>
+    ofThisState(current) ? { ...current, creator: { ...current.creator!, told: true } } : null).catch(() => ({ written: false as const }));
+  return { ok: true, kept: marked.written ? marked.row.kept : counted, emailed: true };
+}
+
+/** The same request at the same point of its moves: what a decision or its email reads it as. */
+function sameDecision(a: Appeal, b: Appeal): boolean {
+  return sameAppeal(a, b) && a.state === b.state && a.moves.length === b.moves.length;
 }

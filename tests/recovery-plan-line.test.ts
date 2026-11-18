@@ -9,7 +9,7 @@
  *     the price): no plan line at all, never a plan it does not offer;
  *   - the sentence in every buyer language carries the plan as given.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setLanguage, setProductExtras, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setLanguage, setProductBundle, setProductExtras, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { remindAbandoned } from "@/lib/checkout-recovery";
 import { readListing } from "@/lib/catalog";
 import { activePlan } from "@/lib/product-extras";
@@ -94,6 +94,17 @@ async function main(): Promise<void> {
   is("a plan paused since: sent, with no plan line", [await remindAbandoned(await load(), left(paused, "cy@example.com")), emails.at(-1)!.text.includes("pay in parts")], ["sent", false]);
 
   part("Only when the checkout itself would offer the plan");
+  // A bundle the buyer picks items from is bought on PickBundleForm, which offers no payment plan, so Stripe charges
+  // it whole: its reminder never offers one (Claude 3, 6872125774; Claude 7, 6877354813; Codex N4).
+  const pickBundle = await addProduct(OWNER, "Choose Two Guides", "", "18", null);
+  if (!pickBundle.ok) throw new Error("no pick bundle");
+  const bundleId = pickBundle.product.id;
+  const options = await Promise.all(["Red Guide", "Blue Guide", "Green Guide"].map((title) => add(title, "9")));
+  const bundled = await setProductBundle(OWNER, bundleId, options, 2);
+  const bundlePlan = await setProductExtras(OWNER, bundleId, { plan: { payments: 2, interval: "month", amountCents: 900 } });
+  is("the pick bundle keeps a stored active plan", [bundled.ok, bundlePlan.ok, activePlan((await readListing(await load(), bundleId))!) !== null], [true, true, true]);
+  const picked = await remindAbandoned(await load(), left(bundleId, "pick@example.com"));
+  is("a pick bundle's reminder: sent, with no plan line", [picked, emails.at(-1)?.to, emails.at(-1)?.text.includes("pay in parts")], ["sent", "pick@example.com", false]);
   // A pre-order's checkout takes no plan (lib/store-checkout.ts): its reminder never offers one (review of f8a3e47).
   const preordered = left(course, "eve@example.com") as unknown as { metadata: Record<string, string> };
   preordered.metadata.preorder = "yes";

@@ -769,6 +769,28 @@ export class MemoryRedis {
           if (this.run(["HGET", hash, field]) !== value) return 0;
           return this.run(["HDEL", hash, field, mark]);
         }
+        // lib/traffic.ts FLY_SHARE_HOLD: a hold added to a connection's share of copies only under a token not yet there.
+        if (key.startsWith("-- marktmorgen:fly-share-hold:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, hash, field, token, units, keep] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HSETNX", hash, token, units]) === 0) return -1;
+          this.scriptCalls += 2;
+          const count = this.run(["HINCRBY", hash, field, units]);
+          this.run(["EXPIRE", hash, keep]);
+          return count;
+        }
+        // lib/traffic.ts FLY_SHARE_SETTLE: a hold settled by its token, 1 in place, 0 absent (then fenced with "~"), -1 else.
+        if (key.startsWith("-- marktmorgen:fly-share-settle:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, token, units, keep] = args;
+          this.scriptCalls += 1;
+          const held = this.run(["HGET", hash, token]);
+          if (held === units) return 1;
+          if (held !== null && held !== undefined) return -1;
+          this.scriptCalls += 2;
+          this.run(["HSET", hash, token, "~"]);
+          this.run(["EXPIRE", hash, keep]);
+          return 0;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;
@@ -1602,6 +1624,20 @@ export class MemoryRedis {
           const taken = this.storeData([room, limit, "0", month, "a", "aff:codes", bytes]);
           if (Array.isArray(taken) && taken[0] === 1) this.run(["HSET", codes, promo, affiliate]);
           return taken;
+        }
+        // lib/page-read.ts ADMIT_READING: the window's count within the token's ceiling and its nonce's mark, together.
+        if (key.startsWith("-- marktmorgen:read-admit:v3\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, count, cap, markSeconds, countSeconds] = args;
+          if (this.run(["EXISTS", mark]) === 1) return [-1, Number(this.run(["GET", count]) ?? 0)];
+          const n = Number(this.run(["INCR", count]));
+          if (n === 1) this.run(["EXPIRE", count, countSeconds]);
+          if (n > Number(cap)) {
+            this.run(["DECR", count]);
+            this.run(["SET", mark, "1", "EX", markSeconds]);
+            return [0, n - 1];
+          }
+          this.run(["SET", mark, "1", "EX", markSeconds]);
+          return [1, n];
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {

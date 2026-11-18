@@ -222,6 +222,12 @@ async function main(): Promise<void> {
     await redis.pipeline([["SET", `nl:sub:rec:${FOLDER}:${kept.id}`, "{broken"]]);
     const said = (await submissionsCopyOf(FOLDER, who)) as Record<string, unknown>[];
     is("a record that does not read is said, never left out", typeof said.find((r) => r.lesson === lesson(5))?.unread, "string");
+    // The course is named by the product the buyer bought, as the other course records of the copy are (Claude 5 and
+    // Claude 3 on #3570, LOW); a course no longer in the store keeps its own id.
+    const named = (await submissionsCopyOf(FOLDER, who, (id) => (id === COURSE ? "prod_course" : null))) as Record<string, unknown>[];
+    is("the course is named by its product, in every kind of record", [...new Set(named.map((r) => r.course))], ["prod_course"]);
+    const gone = (await submissionsCopyOf(FOLDER, who, () => null)) as Record<string, unknown>[];
+    is("a course with no product left keeps its own id", [...new Set(gone.map((r) => r.course))], [COURSE]);
   }
 
   part("The daily sweep at the end of the keeping time");

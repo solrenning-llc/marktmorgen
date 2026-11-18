@@ -34,6 +34,7 @@ export default async function StudioAppealsPage({ searchParams }: Params) {
   const decisions = decisionsOf(store);
   // Read exactly, or not at all: an unknown read shows the notice below, never a form for a request already sent.
   const kept: Map<string, KeptAppeal> | null = await readAppeals(store, decisions).catch(() => null);
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date();
   const none = { exportData: false, refundBuyers: false, closeStore: false };
   return (

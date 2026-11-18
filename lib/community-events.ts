@@ -461,6 +461,30 @@ function eventBytes(event: CommunityEvent): number {
 }
 
 /**
+ * Lets the oldest events that are over leave the calendar, `need` of them, and answers how many left (rules 24 and 30;
+ * Claude 5 on #3845, 6908545844). Each entry is read exactly: one whose event answered exactly nil leaves the index
+ * with its keys (an orphan a half-run pipeline left behind); one that is not an event id leaves the index only; one
+ * in an unknown shape stays and is not counted. A prune that could not make the room never lets a new event in, so
+ * the index never passes MAX_KEPT_EVENTS and no member's erasure is held by it.
+ */
+async function pruneOldest(id: string, need: number, now: number, room: DataStore): Promise<number> {
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, need]]), 1)?.[0]);
+  if (!listed) return 0;
+  let left = 0;
+  const strays = listed.filter((e) => !ITEM_ID.test(e));
+  if (strays.length) left += countOf(repliesFor(await redisPipeline([["ZREM", indexKey(id), ...strays]]), 1)?.[0]) ?? 0;
+  const ids = listed.filter((e) => ITEM_ID.test(e));
+  if (!ids.length) return left;
+  const replies = repliesFor(await redisPipeline(ids.map((e) => ["GET", eventKey(id, e)])), ids.length);
+  if (!replies) return left;
+  for (let i = 0; i < ids.length; i++) {
+    const event = replies[i] === null ? ids[i] : parseEvent(replies[i])?.id === ids[i] ? ids[i] : null;
+    if (event && (await forgetEventId(id, event, room))) left++;
+  }
+  return left;
+}
+
+/**
  * Puts a new event on the calendar, with its room, and plans its reminders.
  * Refused past MAX_UPCOMING_EVENTS coming up; past MAX_KEPT_EVENTS kept, the
  * oldest that is over is let go to make room.
@@ -468,12 +492,11 @@ function eventBytes(event: CommunityEvent): number {
 export async function createEvent(store: Store, input: EventInput, now = Date.now()): Promise<CreateResult> {
   const id = store.community?.id as string;
   if ((await upcomingCount(id, now)) >= MAX_UPCOMING_EVENTS) return { ok: false, reason: "full" };
-  const [kept] = await redisPipeline([["ZCARD", indexKey(id)]]);
-  if (Number(kept) >= MAX_KEPT_EVENTS) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, Number(kept) - MAX_KEPT_EVENTS + 1]]);
-    const oldest = (Array.isArray(raw) ? (raw as string[]) : []).filter((e) => ITEM_ID.test(e));
-    if (!oldest.length) return { ok: false, reason: "full" };
-    for (const gone of await readEvents(id, oldest)) await forgetEvent(id, gone, store);
+  // Read exactly (rule 24; Claude 5 on #3845): an unreadable count is unknown, so nothing is made, never an event past the cap.
+  const kept = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (kept === null) throw new UnknownReplyError("the events a community keeps");
+  if (kept >= MAX_KEPT_EVENTS) {
+    if ((await pruneOldest(id, kept - MAX_KEPT_EVENTS + 1, now, store)) < kept - MAX_KEPT_EVENTS + 1) return { ok: false, reason: "full" };
   }
   const event: CommunityEvent = {
     id: newItemId(),
@@ -610,12 +633,18 @@ export function readReplay(raw: unknown): Video | null {
 }
 
 async function forgetEvent(id: string, event: CommunityEvent, room: DataStore): Promise<void> {
-  await redisPipeline([
-    ["DEL", eventKey(id, event.id), rsvpKey(id, event.id), countKey(id, event.id)],
-    ["ZREM", indexKey(id), event.id],
-  ]);
-  await unindexEvent(id, event.id).catch(() => {});
-  await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: 0, set: true }]);
+  await forgetEventId(id, event.id, room);
+}
+
+/** An event's keys and its place in the calendar let go; true only when the ZREM answered exactly that it left. */
+async function forgetEventId(id: string, event: string, room: DataStore): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([
+    ["DEL", eventKey(id, event), rsvpKey(id, event), countKey(id, event)],
+    ["ZREM", indexKey(id), event],
+  ]), 2);
+  await unindexEvent(id, event).catch(() => {});
+  await giveData(room, [{ slot: EVENT_SLOT(event), bytes: 0, set: true }]);
+  return countOf(replies?.[1]) === 1;
 }
 
 /** Takes an event away for good: only one that is cancelled or over, so nobody coming is left without word. */
@@ -717,8 +746,13 @@ export type RsvpResult = "added" | "already" | "full" | "closed";
 export const RELEASE_RSVP = `-- marktmorgen:event-rsvp-release:v1
 if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
 return 0`;
-async function releaseOwnRsvp(list: string, member: string, mark: string): Promise<void> {
-  await redisPipeline([["EVAL", RELEASE_RSVP, 1, list, member, mark]]);
+/**
+ * Deletes this request's own place, never another request's for the same member. True only when it deleted it now: the
+ * room is given back only then, since a deletion in between (a cancel) gave it back already. An unknown reply keeps
+ * the room taken, never given back twice.
+ */
+async function releaseOwnRsvp(list: string, member: string, mark: string): Promise<boolean> {
+  return repliesFor(await redisPipeline([["EVAL", RELEASE_RSVP, 1, list, member, mark]]), 1)?.[0] === 1;
 }
 /** When a place was taken, from its value: plain seconds (before the attempt mark) or "seconds:attempt". */
 export function rsvpSeconds(value: unknown): number {
@@ -749,15 +783,15 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
     return "already";
   }
   if (added !== 1 || length === null) {
-    // Whether the place was written, or how many now hold one, is unknown: it is given back, never kept over the cap,
-    // and only if it is this request's own (another request's place for the same member is kept).
-    await releaseOwnRsvp(rsvpKey(id, event.id), member, mark);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    // Whether the place was written, or how many now hold one, is unknown: it is taken back, never kept over the cap,
+    // and only if it is this request's own (another request's place for the same member is kept). Its room is given
+    // back only when this deleted it.
+    if (await releaseOwnRsvp(rsvpKey(id, event.id), member, mark)) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     throw new UnknownReplyError("a place taken at an event");
   }
   if (event.cap > 0 && length > event.cap) {
-    await releaseOwnRsvp(rsvpKey(id, event.id), member, mark);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    // Given back only when this took the place away: a deletion of the member in between gave it back already.
+    if (await releaseOwnRsvp(rsvpKey(id, event.id), member, mark)) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
   }
   return "added";
@@ -963,17 +997,17 @@ export function announcementText(store: Pick<Store, "handle" | "language">, even
  * were coming to, and forgets each event's answer about whether they may
  * come in (lib/community-erasure.ts).
  */
-export async function forgetRsvpsPerson(id: string, who: string, email: string): Promise<number> {
+export async function forgetRsvpsPerson(id: string, who: string, email: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   // Each reply in its own exact shape (CX-123 rule 24): an unknown event list
   // is not "no events", and an unknown HDEL or DEL is not "nothing removed",
   // so the member's deletion is never reported done on it.
   const what = "a member's RSVPs forgotten";
-  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
+  // At most one more than the cap is read (a bounded read; Claude 5 on #3845). Past MAX_KEPT_EVENTS (two events made at
+  // once, each counting before its ZADD; Claude 5 on #2957), a cut would leave out the newest events with the member's
+  // answers still kept; eventCount pays for MAX_KEPT_EVENTS at most, so the deletion is never reported done on it.
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "LIMIT", 0, MAX_KEPT_EVENTS + 1]]), 1)?.[0]);
   if (!listed) throw new UnknownReplyError(what);
-  // Past MAX_KEPT_EVENTS (two events made at once, each counting before its ZADD), a cut would leave out the newest
-  // events with the member's answers still kept (Claude 5 on #2957); eventCount pays for MAX_KEPT_EVENTS at most, so
-  // the deletion is never reported done on it.
   if (listed.length > MAX_KEPT_EVENTS) throw new UnknownReplyError(what);
   const events = listed;
   if (!events.length) return 0;
@@ -981,6 +1015,9 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string):
   if (!replies) throw new UnknownReplyError(what);
   const counts = replies.map(countOf);
   if (counts.some((n) => n === null)) throw new UnknownReplyError(what);
+  // Each place's room comes back only where this deletion removed it (an exact 1), as cancelRsvp gives it.
+  const gone = events.filter((_, i) => counts[i] === 1);
+  if (room && gone.length) await giveData(room, gone.map((e) => ({ slot: EVENT_SLOT(e), bytes: RSVP_BYTES })));
   return (counts.slice(0, events.length) as number[]).reduce((sum, n) => sum + n, 0);
 }
 

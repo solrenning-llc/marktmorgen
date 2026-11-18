@@ -28,6 +28,7 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { readDraft, type PaymentRequest } from "@/lib/payment-request-rules";
 import { createRequest, markPaid, readRequest } from "@/lib/payment-request-store";
 import * as requests from "@/lib/payment-requests";
+import { forgetRefundCheck } from "@/lib/payment-request-refund-cache";
 import { addEndpoint, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { PaymentRequestsStudio } from "@/components/payment-requests-studio";
 import { advance, store as redis } from "./redis-stub";
@@ -91,7 +92,6 @@ type Shown = PaymentRequest & { refundsChecked?: boolean; refundsRetry?: boolean
 type Check = { request: Shown; why: string } | null;
 const api = requests as unknown as {
   checkRequestRefunds?: (store: Store, id: string, now?: number) => Promise<Check>;
-  forgetRefundCheck?: (sid: string, payment: string) => Promise<void>;
   REFUND_CHECKS_PER_MINUTE?: number;
   REFUND_CHECK_SECONDS?: number;
 };
@@ -145,7 +145,9 @@ async function main(): Promise<void> {
   is("opened again within the minute: Stripe is not asked, the same answer", [c.singleReads, c.request?.refunded, c.request?.refundsChecked], [0, 10_000, true]);
 
   part("A refund the five-minute Stripe events job reads costs it no command: what was kept goes by itself within REFUND_CHECK_SECONDS");
-  is("there is a way to forget one payment's kept check (the tests below use it)", typeof api.forgetRefundCheck, "function");
+  is("there is a way to forget one payment's kept check (the tests below use it)", typeof forgetRefundCheck, "function");
+  // Claude 5's LEVE on #3291: only these tests forget a kept check, so lib/payment-requests.ts does not hand it out.
+  is("lib/payment-requests.ts does not export forgetRefundCheck", "forgetRefundCheck" in requests, false);
   is("the events reader never forgets it: no Redis command per refunded charge it reads", readFileSync("lib/webhooks.ts", "utf8").includes("forgetRefundCheck"), false);
   is("an endpoint that listens only for disputes is kept", (await addEndpoint(store, "https://hooks.example.net/in", ["dispute.opened"])).ok, true);
   events = [{ id: "evt_RefDemand1", type: "charge.refunded", created: Math.floor(now / 1000), data: { object: { id: "ch_RefDemand1", payment_intent: INTENT, amount_refunded: PAID, amount: PAID, refunded: true, currency: "usd", metadata: {} } } }];
@@ -174,7 +176,7 @@ async function main(): Promise<void> {
     single = given;
     singleReads = 0;
     const got = api.checkRequestRefunds ? await api.checkRequestRefunds(store, id2, now) : null;
-    if (api.forgetRefundCheck) await api.forgetRefundCheck(store.sid, INTENT);
+    await forgetRefundCheck(store.sid, INTENT);
     return { request: got?.request, why: got?.why, singleReads, kept: (await readRequest(id2))! };
   };
   let d = await check2([{ status: 500, body: { error: { message: "Stripe is having trouble" } } }]);
@@ -214,7 +216,7 @@ async function main(): Promise<void> {
     const got = api.checkRequestRefunds ? await api.checkRequestRefunds(store, made3.request.id, now) : null;
     asked += singleReads;
     if (got?.request.refundsChecked !== true) break;
-    if (api.forgetRefundCheck) await api.forgetRefundCheck(store.sid, INTENT);
+    await forgetRefundCheck(store.sid, INTENT);
   }
   is("each check within the cap asks Stripe once", asked, cap);
   single = [list([], false)];

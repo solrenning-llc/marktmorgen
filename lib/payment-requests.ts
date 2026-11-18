@@ -40,7 +40,7 @@ import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
 import { type CheckedRequest, type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
 import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
-import { forgetRefundCheck, keepRefundCheck, keptRefundCheck, REFUND_CHECK_SECONDS } from "@/lib/payment-request-refund-cache";
+import { keepRefundCheck, keptRefundCheck, REFUND_CHECK_SECONDS } from "@/lib/payment-request-refund-cache";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { essentialLimitState } from "@/lib/request-guard";
@@ -553,7 +553,7 @@ export const REFUND_CHECKS_PER_MINUTE = 10;
  */
 export const REFUND_CHECK_UNITS = 3;
 
-export { forgetRefundCheck, REFUND_CHECK_SECONDS };
+export { REFUND_CHECK_SECONDS };
 
 /**
  * Why one request's check left it not checked: "" when it is checked;

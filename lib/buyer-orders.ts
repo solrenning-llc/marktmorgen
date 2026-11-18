@@ -24,7 +24,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
-import { packageState, readBought } from "@/lib/call-packages";
+import { packageReadCommands, packageState, readBought } from "@/lib/call-packages";
 import { giftFrom } from "@/lib/gifts";
 import { readPreorder, soonOne } from "@/lib/preorders";
 import { readPreorderJob } from "@/lib/preorder-rules";
@@ -701,7 +701,8 @@ async function purchaseFromSession(
     const product = bought ? await find(meta.product) : null;
     if (!bought || !product) return null;
     if ((await refundedFor(account, session, meter)) !== false) return null;
-    await meter?.take(bought.holds.length);
+    // One EXISTS a hold, the record of paid sessions and a seen session written down (packageReadCommands).
+    await meter?.take(packageReadCommands(bought));
     const state = await packageState(bought);
     return { customer: null, purchase: {
       reference: id,

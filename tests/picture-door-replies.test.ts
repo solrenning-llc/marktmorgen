@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   is("ZSCORE a number and ZREM 1, as Redis answers: taken", await take(first, null), "taken");
   const second = picture("second");
   await notePictureDoor(second);
-  is("ZSCORE as a numeric string, as the REST API may answer: taken", await take(second, { command: "ZSCORE", reply: String(Date.now()) }), "taken");
+  is("ZMSCORE with a numeric string, as the REST API may answer: taken", await take(second, { command: "ZMSCORE", reply: [String(Date.now())] }), "taken");
   const missing = picture("missing");
   is("a name never noted (ZSCORE null, ZREM 0): not taken, no throw", await take(missing, null), "not taken");
 
@@ -66,11 +66,12 @@ async function main(): Promise<void> {
     is(`ZREM answers ${label}: throws`, await take(path, { command: "ZREM", reply }), "throws");
   }
 
-  part("Any other ZSCORE answer is unknown: it throws");
-  for (const [label, reply] of [["an object", { score: 1 }], ["a list", [1]], ["a word", "soon"], ["true", true]] as const) {
+  part("Any other ZMSCORE answer is unknown: it throws");
+  // One ZMSCORE of every name since Codex X6 on #3347 (each command is billed): each score in it read as ZSCORE's was.
+  for (const [label, reply] of [["an object", [{ score: 1 }]], ["a list", [[1]]], ["a word", ["soon"]], ["true", [true]], ["a bare score", 1], ["a short list", []]] as const) {
     const path = picture(`zscore-${label.replace(/\W/g, "")}`);
     await notePictureDoor(path);
-    is(`ZSCORE answers ${label}: throws`, await take(path, { command: "ZSCORE", reply }), "throws");
+    is(`ZMSCORE answers ${label}: throws`, await take(path, { command: "ZMSCORE", reply }), "throws");
   }
 
   part("A page claim refuses an owner read in an unknown shape");

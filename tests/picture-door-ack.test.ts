@@ -45,10 +45,10 @@ async function main(): Promise<void> {
   is("a name already taken does not open it", await withReplies([[1, 1, 1, 1, 1], [1, 1]], () => notePictureDoor(PATH, NOW)), false);
 
   part("Taking a picture needs an exact removal acknowledgement");
-  // The score read, then the taken mark and the removals from the list of unclaimed pictures (which decides) and from the store's list.
-  is("a numeric-looking removal string is unknown", await take([[String(NOW)], ["OK", "1", 1]]), "unknown");
-  is("a mark not acknowledged is unknown", await take([[String(NOW)], [null, 1, 1]]), "unknown");
-  is("the canonical score, mark and numeric removal acknowledge the picture", await take([[String(NOW)], ["OK", 1, 1]]), [PATH]);
+  // The scores read (one ZMSCORE, Codex X6 on #3347), then the taken mark and the removals from the list of unclaimed pictures (which decides) and from the store's list.
+  is("a numeric-looking removal string is unknown", await take([[[String(NOW)]], ["OK", "1", 1]]), "unknown");
+  is("a mark not acknowledged is unknown", await take([[[String(NOW)]], [null, 1, 1]]), "unknown");
+  is("the canonical score, mark and numeric removal acknowledge the picture", await take([[[String(NOW)]], ["OK", 1, 1]]), [PATH]);
   part("A page's pictures not read exactly are ours to say, never \"add it again\" (Claude 4 on #2156)");
   let claimed: boolean | "unknown";
   try {

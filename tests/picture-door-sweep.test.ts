@@ -238,17 +238,25 @@ async function main(): Promise<void> {
   is("and the door opens again", await answer(reopened), [200, "ok"]);
   is("the refusal's sentence no longer says the pictures are from the last day", /last day/.test(STUDIO_MESSAGES.pictures_waiting ?? ""), false);
 
-  part("A picture behind a backlog keeps its store note until the sweep reaches it (Codex G, Codex X6 on #3347)");
-  // The sweep reads PICTURE_SWEEP_PER_RUN a day, oldest first, so a picture may wait past its grace for days. Its
-  // store note is the proof that it was the door's own and never taken, and it must outlive that wait.
-  redis.run(["DEL", UNCLAIMED, doors]);
-  const behind = await uploaded();
-  is("the store's list is written with no expiry", redis.run(["TTL", doors]), -1);
-  advance(GRACE + 5 * DAY);
-  is("its store note is still there after a backlog of days past its grace", onStore(behind), true);
-  is("so the sweep that finally reaches it deletes it", await run(Date.now() + GRACE + 5 * DAY), [behind]);
-  is("its file is gone", files.has(behind), false);
-  is("and both notes are gone", [onStore(behind), onList(behind)], [false, false]);
+  part("A door at the cap drops the notes left behind in three commands, not one a name (Claude 7, Codex X6 on #3347)");
+  {
+    redis.run(["DEL", UNCLAIMED, doors]);
+    const sent: string[] = [];
+    bend = (commands, replies) => {
+      for (const command of commands) if (String(command[1] ?? "").startsWith("nl:pictures:")) sent.push(String(command[0]));
+      return replies;
+    };
+    const old = Date.now() - 2 * DAY;
+    for (let i = 0; i < door.PICTURE_DOOR_MAX; i += 1) redis.run(["ZADD", doors, old + i, name()]);
+    const atCap = await uploaded();
+    is("the door still opens", onStore(atCap), true);
+    is("its note and the notes left behind: five and LEFT_BEHIND_COMMANDS commands", sent, ["ZADD", "ZADD", "PERSIST", "EXISTS", "ZCARD", "ZRANGEBYSCORE", "ZMSCORE", "ZREM"]);
+    is("LEFT_BEHIND_COMMANDS is three", door.LEFT_BEHIND_COMMANDS, 3);
+    sent.length = 0;
+    is("its picture put on a product", await attach(atCap), [200, "ok"]);
+    is("the attach reads every name with one ZMSCORE", sent, ["ZMSCORE", "SET", "ZREM", "ZREM"]);
+    bend = null;
+  }
 
   part("The course job runs the sweep, and the registry says what the door keeps");
   const cron = readFileSync(join(process.cwd(), "app/api/cron/courses/route.ts"), "utf8");
@@ -260,6 +268,17 @@ async function main(): Promise<void> {
   is("it names the sweep and the cap that bound what is kept", /sweepPictureDoors/.test(said) && /PICTURE_DOOR_MAX/.test(said), true);
   is("and no line prices it yet: not certified, never zero", !COST_LINES.some((line) => line.id === "picture-doors") && /never zero/.test(said), true);
 
+  part("A picture behind a backlog keeps its store note until the sweep reaches it (Codex G, Codex X6 on #3347)");
+  // The sweep reads PICTURE_SWEEP_PER_RUN a day, oldest first, so a picture may wait past its grace for days. Its
+  // store note is the proof that it was the door's own and never taken, and it must outlive that wait.
+  redis.run(["DEL", UNCLAIMED, doors]);
+  const behind = await uploaded();
+  is("the store's list is written with no expiry", redis.run(["TTL", doors]), -1);
+  advance(GRACE + 5 * DAY);
+  is("its store note is still there after a backlog of days past its grace", onStore(behind), true);
+  is("so the sweep that finally reaches it deletes it", await run(Date.now() + GRACE + 5 * DAY), [behind]);
+  is("its file is gone", files.has(behind), false);
+  is("and both notes are gone", [onStore(behind), onList(behind)], [false, false]);
   done();
 }
 

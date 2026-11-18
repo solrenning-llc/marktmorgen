@@ -109,7 +109,9 @@ const UNCLAIMED_KEY = "nl:pictures:unclaimed";
 /** How many unclaimed pictures go to one pipeline of ZREMs and one delete, so a lost reply keeps at most these. */
 const SWEEP_BATCH = 25;
 /** The most store notes past their day one door at the cap looks at, to drop those left behind. */
-const LEFT_BEHIND_BATCH = 100;
+export const LEFT_BEHIND_BATCH = 100;
+/** The commands one door at the cap sends to drop notes left behind: a ZRANGEBYSCORE, a ZMSCORE and a ZREM. */
+export const LEFT_BEHIND_COMMANDS = 3;
 /** A picture's mark that a record took it: a later note for the name opens no door. */
 const takenKey = (path: string) => `nl:pictures:taken:${path}`;
 
@@ -172,7 +174,10 @@ async function dropLeftBehind(key: string, path: string, now: number): Promise<n
   if (!old || !old.every((name): name is string => typeof name === "string")) return null;
   const names = old.filter((name) => name !== path);
   if (names.length === 0) return 0;
-  const scores = await redisPipeline(names.map((name) => ["ZSCORE", UNCLAIMED_KEY, name])).then((replies) => repliesFor(replies, names.length), () => null);
+  // One ZMSCORE and one ZREM of every name, not one command a name (Claude 7, Codex X6 on #3347): a door at the cap
+  // sends at most LEFT_BEHIND_COMMANDS here, as the drafted picture-doors cost line counts (NOT_A_COST.PICTURE_DOORS_PER_HOUR).
+  const read = await redisPipeline([["ZMSCORE", UNCLAIMED_KEY, ...names]]).then((replies) => repliesFor(replies, 1)?.[0], () => null);
+  const scores = Array.isArray(read) ? repliesFor(read, names.length) : null;
   if (!scores) return null;
   const gone: string[] = [];
   for (let i = 0; i < names.length; i += 1) {
@@ -180,15 +185,8 @@ async function dropLeftBehind(key: string, path: string, now: number): Promise<n
     else if (scoreOf(scores[i]) === null) return null;
   }
   if (gone.length === 0) return 0;
-  const removed = await redisPipeline(gone.map((name) => ["ZREM", key, name])).then((replies) => repliesFor(replies, gone.length), () => null);
-  if (!removed) return null;
-  let freed = 0;
-  for (const reply of removed) {
-    const one = countOf(reply);
-    if (one !== 0 && one !== 1) return null;
-    freed += one;
-  }
-  return freed;
+  const removed = await redisPipeline([["ZREM", key, ...gone]]).then((replies) => countOf(repliesFor(replies, 1)?.[0]), () => null);
+  return removed !== null && removed >= 0 && removed <= gone.length ? removed : null;
 }
 
 /**
@@ -256,15 +254,19 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
   const unique = [...new Set(paths.filter((path) => typeof path === "string" && doorsKey(path) !== null))];
   const taken = new Map<string, number>();
   if (unique.length === 0 || !isRedisConfigured()) return taken;
-  const scores = await redisPipeline(unique.map((path) => ["ZSCORE", UNCLAIMED_KEY, path]));
-  if (!Array.isArray(scores) || scores.length !== unique.length) throw new Error("could not confirm the pictures taken from the door");
+  // One ZMSCORE of every name, not one ZSCORE a name (Codex X6 on #3347: each command is billed; the drafted
+  // picture-doors cost line counts one a take).
+  const read = await redisPipeline([["ZMSCORE", UNCLAIMED_KEY, ...unique]]);
+  const listed = Array.isArray(read) && read.length === 1 ? read[0] : null;
+  if (!Array.isArray(listed) || listed.length !== unique.length) throw new UnknownReplyError("taking a picture from the door: ZMSCORE");
+  const scores: unknown[] = listed;
   // Each score only in its exact shape (CX-123, rule 24): null or a score (a number, or the numeric string the REST API
   // sends). Anything else is unknown and throws, never "taken".
   const fresh: [string, number][] = [];
   unique.forEach((path, i) => {
     const score = scores[i];
     if (score !== null && !(typeof score === "number" || (typeof score === "string" && /^\d{1,16}(\.\d+)?$/.test(score)))) {
-      throw new UnknownReplyError("taking a picture from the door: ZSCORE");
+      throw new UnknownReplyError("taking a picture from the door: ZMSCORE");
     }
     const at = score === null ? NaN : Number(score);
     if (Number.isFinite(at) && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000) fresh.push([path, at]);

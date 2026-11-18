@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     // The sign-up as a lead to the creator's ad platforms, with the visitor's yes (lib/ad-events.ts).
     // Without the address: it is not confirmed yet, so it may be someone else's, who never said yes.
     const lead = result === "sent" && sendsFromServer(store) && allowedBy(request, store) ? newLeadId() : "";
-    if (lead) after(() => sendServerLead(store, request, { id: lead, email: "", product: product.id }).catch((error) => console.error("sending a lead failed", error)));
+    if (lead) after(() => sendServerLead(store, request, { id: lead, email: "", typed: email, product: product.id }).catch((error) => console.error("sending a lead failed", error)));
     return away(result, lead);
   } catch (error) {
     console.error("joining a waitlist failed", error);

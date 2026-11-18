@@ -8,7 +8,7 @@
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { INVITE_EVERY_DAYS, settleInvites } from "@/lib/creator-invite-credit";
-import { COST_LINES, INVITE_JOB_RUNS_PER_MONTH } from "./plan-cost-registry";
+import { INVITE_JOB_MONTH_USD, INVITE_JOB_RUNS_PER_MONTH } from "./plan-cost-registry";
 
 const DAY_MS = 86_400_000;
 const EVEN = Date.UTC(2026, 9, 16, 12); // an even day since the epoch, as every invite test uses
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   part("Its cost line is priced at the runs a month can hold");
   is("every second day", INVITE_EVERY_DAYS, 2);
   is("at most 16 runs in a 31-day month", INVITE_JOB_RUNS_PER_MONTH, Math.ceil(31 / INVITE_EVERY_DAYS));
-  is("and the line is priced at them", Boolean(COST_LINES.find((l) => l.id === "invite-credit-reads")), true);
+  is("and the company's fixed cost of the job is priced at them", Number.isFinite(INVITE_JOB_MONTH_USD) && INVITE_JOB_MONTH_USD > 0, true);
   done();
 }
 void main();

@@ -18,8 +18,7 @@ import { claimHandle, setSubscription } from "@/lib/store";
 import { inviteCode, recordInvite, creditKey } from "@/lib/creator-invites";
 import * as job from "@/lib/creator-invite-credit";
 import { INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
-import { TIERS } from "@/lib/plan";
-import { COMMAND, COST_LINES, INVITE_JOB_RUNS_PER_MONTH } from "./plan-cost-registry";
+import { COMMAND, COST_LINES, INVITE_CREDIT_JOB, INVITE_JOB_RUNS_PER_MONTH } from "./plan-cost-registry";
 import { VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR } from "@/lib/spend-cost-table";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -90,16 +89,16 @@ async function main(): Promise<void> {
 
   part("The job has a whole-run command ceiling, and its line prices it");
   is("a whole number of commands a run", typeof ceiling === "number" && Number.isSafeInteger(ceiling) && ceiling > 0, true);
-  const line = COST_LINES.find((l) => l.id === "invite-credit-reads");
+  // A company fixed cost since the owner's decision of 18 November 2026 (INVITE_CREDIT_JOB), never a plan's line.
+  const line = INVITE_CREDIT_JOB;
+  is("not a line of each plan", COST_LINES.some((l) => l.id === "invite-credit-reads"), false);
   const memorySecond = ((VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR / 1e6) * VERCEL_FUNCTION_GB) / 3600;
   // Every second day since the owner's decision of 17 November 2026: INVITE_JOB_RUNS_PER_MONTH (16) runs.
   const memoryOnly = INVITE_JOB_RUNS_PER_MONTH * 60 * memorySecond;
   const commands = typeof ceiling === "number" ? INVITE_JOB_RUNS_PER_MONTH * ceiling * COMMAND : Number.POSITIVE_INFINITY;
-  for (const tier of TIERS) {
-    const usd = line ? line.monthlyUsd(tier) : 0;
-    is(`${tier}: ${INVITE_JOB_RUNS_PER_MONTH} runs at the most commands each, at COMMAND, above the memory alone`, usd >= memoryOnly + commands && usd > memoryOnly, true);
-  }
-  is("the line names the ceiling", (line?.sources ?? []).some((s) => s.file === "lib/creator-invite-credit.ts" && s.names.includes("INVITE_RUN_COMMANDS")), true);
+  const usd = line.monthlyUsd();
+  is(`${INVITE_JOB_RUNS_PER_MONTH} runs at the most commands each, at COMMAND, above the memory alone`, usd >= memoryOnly + commands && usd > memoryOnly, true);
+  is("the line names the ceiling", line.sources.some((s) => s.file === "lib/creator-invite-credit.ts" && s.names.includes("INVITE_RUN_COMMANDS")), true);
 
   part("A run over many invited stores sends at most the ceiling, and reads neither list whole");
   redis.clear();

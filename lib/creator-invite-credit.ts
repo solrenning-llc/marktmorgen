@@ -546,7 +546,7 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
 /**
  * The most Redis commands one run of the job sends, in all (Claude 7's and Claude 5's MEDIUM on #4514; rule MR/FX275:
  * a cost is bounded before it is spent, never unknown): held in code by lib/redis-ceiling.ts, whatever module sends
- * them, and priced by tests/plan-cost-registry.ts invite-credit-reads at 31 runs a month. Of it, INVITE_WALK_COMMANDS
+ * them, and priced as a company fixed cost by tests/plan-cost-registry.ts INVITE_CREDIT_JOB (INVITE_JOB_MONTH_USD). Of it, INVITE_WALK_COMMANDS
  * go to the invited stores and INVITE_OWED_COMMANDS to the credits owed; the rest is the run's own reads and its place.
  * A run that reaches a ceiling stops there, is not complete, and keeps its place: the next run starts at the store it
  * did not finish. A store whose own reading passes the whole walk's ceiling alone fails, and the walk goes past it, so

@@ -8,16 +8,19 @@
  * line does, naming the reads and the bound it is priced by (the cron's maxDuration, once a day), and that its figure
  * is that bound at the registry's own function-memory rate, for every plan.
  */
-import { COMMAND, COST_LINES, DB_BYTE, INVITE_JOB_LIST_BYTES, INVITE_JOB_RUNS_PER_MONTH, STRIPE_WAIT_SECONDS } from "./plan-cost-registry";
+import { readFileSync } from "node:fs";
+import { COMMAND, COST_LINES, DB_BYTE, INVITE_CREDIT_JOB, INVITE_JOB_LIST_BYTES, INVITE_JOB_MONTH_USD, INVITE_JOB_RUNS_PER_MONTH, NOT_A_COST, STRIPE_WAIT_SECONDS } from "./plan-cost-registry";
 import { INVITE_RUN_COMMANDS } from "@/lib/creator-invite-credit";
 import { VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR } from "@/lib/spend-cost-table";
-import { TIERS } from "@/lib/plan";
 import { done, is, part } from "./check";
 
-part("The invite-credit job has its own cost line");
-const line = COST_LINES.find((l) => l.id === "invite-credit-reads");
-is("there is a line for it", Boolean(line), true);
-const names = (file: string) => (line?.sources ?? []).filter((s) => s.file === file).flatMap((s) => s.names);
+part("The invite-credit job is priced whole as a company fixed cost (the owner's decision of 18 November 2026 on #4514)");
+const line = INVITE_CREDIT_JOB;
+is("not a line of each plan: one job for every store together", COST_LINES.some((l) => l.id === "invite-credit-reads"), false);
+is("named in NOT_A_COST as a company fixed cost, with its figure", /company fixed cost/.test(NOT_A_COST.INVITE_CREDIT_JOB ?? "") && /INVITE_JOB_MONTH_USD/.test(NOT_A_COST.INVITE_CREDIT_JOB ?? ""), true);
+// What a plan's line would be checked for (tests/plan-cost-registry.test.ts): every name it cites is in its file.
+is("every name it cites is in its file", line.sources.every((s) => s.names.every((n) => readFileSync(s.file, "utf8").includes(n))), true);
+const names = (file: string) => line.sources.filter((s) => s.file === file).flatMap((s) => s.names);
 is(
   "it names every Stripe read of the job",
   ["paidInvoices", "takenBackOn", "disputedOn", "paidNow", "stillOwed", "creditedAt", "INVOICE_PAGES", "HISTORY_PAGES"].every((n) => names("lib/creator-invite-credit.ts").includes(n)),
@@ -31,9 +34,6 @@ const memorySecondUsd = (VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR / 1e6) * VERCEL_FUN
 // its two list windows' bytes are priced with its memory (tests/invite-credit-command-ceiling.test.ts holds the code).
 // Every second day since the owner's decision of 17 November 2026: at most 16 runs a month (invite-every-second-day).
 const ceiling = INVITE_JOB_RUNS_PER_MONTH * (60 * memorySecondUsd + INVITE_RUN_COMMANDS * COMMAND + INVITE_JOB_LIST_BYTES * DB_BYTE);
-for (const tier of TIERS) {
-  const usd = line ? line.monthlyUsd(tier) : 0;
-  is(`${tier}: 16 runs of at most 60 s at 2 GB, INVITE_RUN_COMMANDS commands and their list bytes`, INVITE_JOB_RUNS_PER_MONTH === 16 && Math.abs(usd - ceiling) < 1e-9 && usd > 16 * 60 * memorySecondUsd, true);
-}
+is("16 runs of at most 60 s at 2 GB, INVITE_RUN_COMMANDS commands and their list bytes", INVITE_JOB_RUNS_PER_MONTH === 16 && Math.abs(INVITE_JOB_MONTH_USD - ceiling) < 1e-9 && INVITE_JOB_MONTH_USD > 16 * 60 * memorySecondUsd, true);
 is("each Stripe call is counted as a wait the registry already uses", STRIPE_WAIT_SECONDS > 0, true);
 done();

@@ -94,3 +94,19 @@ test("a review with nothing in between is written and finishes the lesson, as be
   assert.equal((await passedQuizzes(COURSE, WHO)).has(LESSON), true, "the lesson is done");
   assert.deepEqual(await approve(), { ok: false, reason: "state" }, "work already answered is not answered twice");
 });
+
+test("an approval after the earlier hand-in check protects the approved work from replacement", async () => {
+  redis.clear();
+  await handInText("v1", "one", 100);
+  assert.equal((await submissionOf(COURSE, LESSON, WHO))?.state, "waiting", "the earlier route check permits work while it is waiting");
+  assert.equal((await approve()).ok, true);
+  const outcome = await handInText("v2", "two", 400).then(
+    () => "written",
+    (error: unknown) => error instanceof Error ? error.name : "unexpected rejection",
+  );
+  const kept = await submissionOf(COURSE, LESSON, WHO);
+  assert.deepEqual(
+    [outcome, kept?.text, kept?.file?.path, kept?.state, (await waitingWork(COURSE)).total, (await passedQuizzes(COURSE, WHO)).has(LESSON)],
+    ["HandInClosedError", "v1", "one.pdf", "approved", 0, true],
+  );
+});

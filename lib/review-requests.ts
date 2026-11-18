@@ -227,12 +227,21 @@ export function afterSent(
   const mark = `sent:${Math.floor(sentAt)}`;
   return [
     ...items.map((item) => ["SET", sentKey(item.reference), item.stage === "again" ? "again" : mark, "EX", SENT_MARK_SECONDS]),
+    // A reminder leaves the list only now that it went (it stayed on it while claimed, Codex L and U on #4495).
+    ...items.filter((item) => item.stage === "again").map((item) => ["ZREM", ASK_DUE_KEY, item.member]),
     ...(again ? firsts.map((item) => ["ZADD", ASK_DUE_KEY, "XX", askDueAt("again", mark, item.paidAt, ask), item.member]) : []),
     ...(!again && firsts.length ? [["ZREM", ASK_DUE_KEY, ...firsts.map((item) => item.member)]] : []),
   ];
 }
 
-type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim?: string };
+type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim?: string; againClaim?: { key: string; value: string } };
+
+/**
+ * A reminder's own claim while it is being sent (Codex L and U on #4495): beside the order's mark, in its family, kept
+ * no longer than a sender retry. The reminder stays on the list until its batch went (afterSent takes it off), so an
+ * answer lost while it is claimed never drops it: an unconfirmed claim is let go, and one that stays runs out.
+ */
+const againClaimKey = (reference: string) => `${sentKey(reference)}:again`;
 
 /**
  * Sends the review requests that are due, until the deadline or fifty
@@ -267,7 +276,7 @@ export async function sendReviewRequests(
     // list. A throw before the email is ready (a Redis read, the review link, the stop link) undoes it below, so the
     // order is asked again by the next run, never dropped by its own stuck mark (webhooks/cron audit, Claude 1,
     // 12/11/2026).
-    let held: { reference: string; claim?: string; again?: true } | null = null;
+    let held: { reference: string; claim?: string; againClaim?: { key: string; value: string } } | null = null;
     try {
     const entry = readAskMember(member);
     if (!entry) {
@@ -372,9 +381,18 @@ export async function sendReviewRequests(
       }
       held = { reference: entry.reference, claim };
     } else {
-      const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
-      if (!taken || countOf(taken[0]) !== 1) continue;
-      held = { reference: entry.reference, again: true };
+      // Claimed by a mark of its own, not by taking it off the list: a removal applied with its answer lost dropped the
+      // reminder unsent (Codex L on #4495). Taken by another run: that run sends it. Not known: let go if ours, and
+      // the reminder, still on the list, is asked again by the next run.
+      const key = againClaimKey(entry.reference);
+      const value = `reminding:${claimValue()}`;
+      const claimed = await claimMark(key, RETRY_SECONDS.sender, value);
+      if (claimed === "taken") continue;
+      if (claimed === "unknown") {
+        await releaseMark(key, value);
+        continue;
+      }
+      held = { reference: entry.reference, againClaim: { key, value } };
     }
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
@@ -398,13 +416,14 @@ export async function sendReviewRequests(
       member,
       stage,
       claim,
+      againClaim: held?.againClaim,
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
     });
     groups.set(entry.handle, group);
     } catch (error) {
       console.error("preparing a review request failed; it is asked again by the next run", error);
       if (held?.claim) await releaseMark(sentKey(held.reference), held.claim);
-      if (held?.again) await redisPipeline([["ZADD", ASK_DUE_KEY, nowSeconds + RETRY_SECONDS.sender, member]]).catch(() => undefined);
+      if (held?.againClaim) await releaseMark(held.againClaim.key, held.againClaim.value);
       if (held) counts.waiting += 1;
     }
   }
@@ -416,13 +435,18 @@ export async function sendReviewRequests(
       const agains = ready.filter((item) => item.stage === "again");
       // Only this run's own first marks are let go (releaseMark), never one another run holds now.
       for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
-      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
+      // A reminder is still on the list: only its time moves (XX never adds back one another run took off), then its claim goes.
+      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, "XX", at, item.member]));
+      for (const item of agains) if (item.againClaim) await releaseMark(item.againClaim.key, item.againClaim.value);
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
     // A throw before the batch's outcome is known (the reservation, the sender) undoes the group's claims, as a
     // batch not sent does, so the next run asks again; one after the batch went keeps them (it was sent).
     let decided = false;
+    // The day whose emails were reserved for this batch, until its outcome is known: a throw in between gives them back
+    // (Codex N1 on #4495), as an outcome that was not "sent" does.
+    let reservedDay: string | null = null;
     try {
     const day = mailDay();
     const reserved = await reserve(store, ready.length, false, day);
@@ -431,6 +455,7 @@ export async function sendReviewRequests(
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
+    reservedDay = day;
     const outcome = await sendBatch(
       ready.map((item) => item.message),
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
@@ -451,6 +476,7 @@ export async function sendReviewRequests(
     await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
     } catch (error) {
       console.error("sending a store's review requests failed", error);
+      if (!decided && reservedDay) await release(store, ready.length, reservedDay).catch(() => undefined);
       if (!decided) await unclaim(nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
     }
   }

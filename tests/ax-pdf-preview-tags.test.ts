@@ -123,6 +123,19 @@ async function main(): Promise<void> {
   is("the table's summary, which may describe the page left out, is not in the preview", [spanAll.includes(SUMMARY), spanAll.includes(hexOf(SUMMARY))], [false, false]);
   const spanDoc = await PDFDocument.load(spanningPreview);
   is("the part on the kept pages is still tagged", spanDoc.catalog.has(PDFName.of("StructTreeRoot")), true);
+
+  part("A /Pg that is there but is not a page reference is an unknown page, never the parent's (Codex X3 on #3785)");
+  // A malformed /Pg (a direct dictionary standing for the page left out) was read as no /Pg at all, so the node took
+  // its parent's kept page, stayed whole and carried its Alt text, which describes the page the preview leaves out.
+  for (const where of ["element", "MCR"] as const) {
+    const ALT = `Alt text of page three, through the ${where}`;
+    const odd = await withDirectPg(source, ALT, where);
+    const oddPreview = await firstPages(odd, 2);
+    const oddAll = everything(oddPreview);
+    is(`${where}: its Alt text, which may describe the page left out, is not in the preview`, [oddAll.includes(ALT), oddAll.includes(hexOf(ALT))], [false, false]);
+    const oddDoc = await PDFDocument.load(oddPreview);
+    is(`${where}: the kept pages are still tagged`, oddDoc.catalog.has(PDFName.of("StructTreeRoot")), true);
+  }
   done();
 }
 
@@ -172,6 +185,31 @@ async function withSpanningTable(bytes: Uint8Array, summary: string): Promise<Ui
   const ref = doc.context.register(table);
   if (kids instanceof PDFArray) kids.push(ref);
   else holder.set(PDFName.of("K"), doc.context.obj(kids === undefined ? [ref] : [kids, ref]));
+  return doc.save();
+}
+
+/**
+ * The source with one more element on the first page, holding an Alt text, whose page is named by a direct dictionary
+ * (a /Pg that is no page reference): on the element itself under a parent on the first page, or on its MCR.
+ */
+async function withDirectPg(bytes: Uint8Array, alt: string, where: "element" | "MCR"): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes);
+  const root = doc.catalog.lookup(PDFName.of("StructTreeRoot")) as PDFDict;
+  const pages = doc.getPages();
+  const top = root.lookup(PDFName.of("K"));
+  const holderRef = (top instanceof PDFArray ? top.get(0) : root.get(PDFName.of("K"))) as PDFRef;
+  const holder = doc.context.lookup(holderRef) as PDFDict;
+  const direct = () => doc.context.obj({ Type: "Page", MediaBox: [0, 0, 300, 300] });
+  const sectRef = doc.context.nextRef();
+  const figureRef = doc.context.nextRef();
+  const figure = where === "element"
+    ? doc.context.obj({ Type: "StructElem", S: "Figure", P: sectRef, Pg: direct(), Alt: PDFString.of(alt), K: 0 })
+    : doc.context.obj({ Type: "StructElem", S: "Figure", P: sectRef, Pg: pages[0].ref, Alt: PDFString.of(alt), K: [doc.context.obj({ Type: "MCR", Pg: direct(), MCID: 0 })] });
+  doc.context.assign(figureRef, figure);
+  doc.context.assign(sectRef, doc.context.obj({ Type: "StructElem", S: "Sect", P: holderRef, Pg: pages[0].ref, K: [figureRef] }));
+  const kids = holder.lookup(PDFName.of("K"));
+  if (kids instanceof PDFArray) kids.push(sectRef);
+  else holder.set(PDFName.of("K"), doc.context.obj(kids === undefined ? [sectRef] : [kids, sectRef]));
   return doc.save();
 }
 

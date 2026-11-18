@@ -119,9 +119,10 @@ const timeout = () => new Error("Synthetic: Redis timed out");
  *  - "record-gone": the order's record ends just before the step that puts it in pending (its life renewed there);
  *  - "life-text" / "life-two" / "life-null": that renewal is applied and answers in a shape not known (rule 24);
  *  - "slow-settle": the step that puts the order in pending reaches Redis two seconds after it was sent, and the step
- *    that writes the payment down never reaches it (Claude 5's probe on #3411).
+ *    that writes the payment down never reaches it (Claude 5's probe on #3411);
+ *  - "standing-text": once every try is spent, the read of where the order stands answers in a shape not known.
  */
-type Fault = "none" | "settle" | "watch-unsent" | "watch-lost" | "watch-text" | "watch-wrapped" | "record-gone" | "life-text" | "life-two" | "life-null" | "slow-settle";
+type Fault = "none" | "settle" | "watch-unsent" | "watch-lost" | "watch-text" | "watch-wrapped" | "record-gone" | "life-text" | "life-two" | "life-null" | "slow-settle" | "standing-text";
 const pendingWrite = (commands: Commands) => commands.some((command) => command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:"));
 /** Where the step that puts an order in pending renews the order's record, if it does. */
 const lifeAt = (commands: Commands) => commands.findIndex((command) => /^EXPIRE(AT)?$/.test(String(command[0])) && String(command[1]).startsWith("nl:ppsell:o:"));
@@ -157,6 +158,11 @@ async function returnFor(store: Store, order: string, fault: Fault): Promise<{ s
       const at = lifeAt(commands);
       replies[at] = fault === "life-text" ? String(replies[at]) : fault === "life-two" ? 2 : null;
       return replies;
+    }
+    if (fault === "standing-text" && commands[0]?.[0] === "ZSCORE" && String(commands[0][1]).startsWith("nl:ppsell:pending:")) {
+      struck = true;
+      const replies = await pipeline(commands);
+      return ["not a score", replies[1]];
     }
     if (fault.startsWith("watch-") && pendingWrite(commands)) {
       struck = true;
@@ -273,6 +279,8 @@ async function main(): Promise<void> {
     const shown = await returnFor(store, order, fault);
     is("PayPal is not asked to take anything", captures.get(order) ?? 0, 0);
     is("and the buyer is never shown the thanks page as paid", shown.location.includes("/thanks?paypal="), false);
+    // A reply that does not read is the store's notice, never a server error (Claude 1's LOW 1 on #3411).
+    if (fault === "watch-text" || fault === "watch-wrapped") is("an answer in a shape not known shows the store's notice, not a server error", [shown.status, shown.location.includes("status=paypal-error")], [303, true]);
     is("nothing written down, handed over or receipted", await state(order, buyer), {
       paid: false, owned: 0, receipts: 0, sales: 0, pending: fault !== "watch-unsent", owed: false, captured: 0,
     });
@@ -466,6 +474,7 @@ async function main(): Promise<void> {
     const shown = await returnFor(store, order, fault);
     is("PayPal is not asked to take anything", captures.get(order) ?? 0, 0);
     is("and the buyer is never shown the thanks page as paid", shown.location.includes("/thanks?paypal="), false);
+    is("an answer in a shape not known shows the store's notice, not a server error (Claude 1's LOW 1 on #3411)", [shown.status, shown.location.includes("status=paypal-error")], [303, true]);
     is("nothing written down, handed over or receipted", [Boolean(await readPaid(order)), await owned(buyer), receipts.get(buyer) ?? 0, await sales(order)], [false, 0, 0, 0]);
     const again = await returnFor(store, order, "none");
     is("the buyer opening the return again with Redis well: taken once and sent to the thanks page", [captures.get(order), again.location.includes("/thanks?paypal=")], [1, true]);
@@ -614,6 +623,9 @@ async function main(): Promise<void> {
   is("and is not sent to the thanks page, which would say PayPal is still taking it", fourth.location.includes("/thanks?paypal="), false);
   is("it is sent to the store's notice, which tells the buyer to write to the store if PayPal shows money taken", fourth.location.includes("status=paypal-error"), true);
   is("nothing written: not put back in pending, not watched", [await pending(refused), watchSent.length], [false, 0]);
+  // Claude 1's LOW 1 on #3411: where the order stands answers in a shape not known; the buyer sees the store's notice.
+  const unread = await returnFor(store, refused, "standing-text");
+  is("a return whose standing does not read shows the store's notice, not a server error, and asks PayPal nothing", [unread.status, unread.location.includes("status=paypal-error"), captures.get(refused)], [303, true, 3]);
 
   part("Control: past the bound with a capture really under watch, the return still lands on the thanks page");
   captureWith = "lost";

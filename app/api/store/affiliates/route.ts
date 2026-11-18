@@ -4,7 +4,7 @@ import { readMoney } from "@/lib/money";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_COMMISSION, MIN_COMMISSION, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
-import { parsePartnerShare } from "@/lib/partner-share";
+import { parsePartnerShare, sharesTooMany } from "@/lib/partner-share";
 import { readTermEnd } from "@/lib/partner-terms-rules";
 import { LockBusyError, holdLock } from "@/lib/redis-lock";
 import { readListings } from "@/lib/catalog";
@@ -321,6 +321,8 @@ export async function POST(request: NextRequest) {
       // An end date, when the creator chose one (630 [HN6](39)); empty is until revoked.
       const end = readTermEnd(body.ends, Math.floor(Date.now() / 1000));
       if (!end.ok) return fail("share_ends");
+      // Over the cap is refused whole, never saved as its first products (lib/partner-share.ts MAX_SHARED_PRODUCTS).
+      if (sharesTooMany(body.products)) return fail("share_many");
       const share = parsePartnerShare({ percent: body.percent, products: body.products, until: end.until ?? undefined });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
       // Checked again, under the partner lock, when the invitation is accepted.
@@ -374,6 +376,8 @@ export async function POST(request: NextRequest) {
       // The end of the share in force may be saved again as it is, even on its own last day (review of #1924).
       const end = readTermEnd(body.ends, now, affiliate.share?.until ?? null);
       if (!end.ok) return fail("share_ends");
+      // Over the cap is refused whole, never saved as its first products (lib/partner-share.ts MAX_SHARED_PRODUCTS).
+      if (sharesTooMany(body.products)) return fail("share_many");
       const share = parsePartnerShare({ percent: body.percent, products: body.products, until: end.until ?? undefined });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
       const done = await saved(share);

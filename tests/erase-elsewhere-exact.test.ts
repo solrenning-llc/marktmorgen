@@ -416,6 +416,34 @@ async function main(): Promise<void> {
     is("the fourth walk reaches the end and erases the store", [fourth, redis.run(["HEXISTS", key, "claim1"]), line(OWNER, at), claimProgress()], [1, 0, "out", []]);
   }
 
+  part("LOW (Claude 5 on #3660 at 89d44aba5a): a host read to their end on an earlier walk is read again before the store is prepared");
+  {
+    // OWNER's store has a teammate host; OWNER's own claims take three walks (121 pages), the teammate's one page.
+    fresh();
+    const TEAM = "teammate-z@example.com";
+    await claimHandle(OWNER, "claimsz", "Claims Z", "");
+    const store = (await ensureStoreId(OWNER))!;
+    if (!(await putMember(store, TEAM, "admin"))) throw new Error("setup: the teammate is not on the team");
+    const ownerClaims = claimsKey(hostId(OWNER));
+    const teamClaims = claimsKey(hostId(TEAM));
+    const start = Date.now() + 86_400_000;
+    redis.run(["HSET", ownerClaims, "claim1", `${start}|${start + 1_800_000}|0|${store.sid}`]);
+    redis.run(["HSET", teamClaims, "claimA", `${start}|${start + 1_800_000}|0|${store.sid}`]);
+    await closeForErasure(OWNER);
+    const at = Date.now();
+    await markDue(OWNER, at - 1000);
+    const asked: string[] = [];
+    pages(ownerClaims, asked);
+    await walkAt(walkTime(at, 0));
+    is("first walk: the teammate's claims read to their end, their claim gone", redis.run(["HEXISTS", teamClaims, "claimA"]), 0);
+    // A paid booking on the teammate's calendar for this store, written between two walks.
+    redis.run(["HSET", teamClaims, "claimB", `${start + 3_600_000}|${start + 5_400_000}|0|${store.sid}`]);
+    await walkAt(walkTime(at, 1));
+    const last = await walkAt(walkTime(at, 2));
+    replaced = [];
+    is("the walk that prepares the store reads that host again: the late claim is gone too", [last, redis.run(["HEXISTS", teamClaims, "claimB"]), claimProgress()], [1, 0, []]);
+  }
+
   part("LOW: a store in line whose record does not read waits a walk; only nil is gone");
   for (const [what, reply] of [["a string that is not a store", "not a store {"], ["a number", 42], ["a record of another key", null]] as const) {
     fresh();

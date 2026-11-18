@@ -57,6 +57,18 @@ export type StudioMember = {
   answers: { q: string; a: string }[];
 };
 
+/** The community's figures; a count that could not be read (rule 24) is null, shown as not loaded, never as 0. */
+export type StudioTotals = { members: number | null; listed: number; posts: number; reach: number | null };
+
+/** One figure of the community, or "Not loaded" in its place when it could not be read. */
+function Figure({ value }: { value: number | null }) {
+  return value === null ? (
+    <p className="text-sm font-semibold text-ink">Not loaded</p>
+  ) : (
+    <p className="text-xl font-semibold tabular-nums">{value}</p>
+  );
+}
+
 type ProductChoice = { id: string; title: string; free: boolean; kind: string };
 
 const MESSAGES: Record<string, string> = {
@@ -128,8 +140,9 @@ export function CommunityStudio({
   config: CommunityConfig | null;
   products: ProductChoice[];
   queue: QueueRow[] | null;
-  members: StudioMember[];
-  totals: { members: number; listed: number; posts: number; reach: number };
+  /** Null when the member list could not be read (rule 24): said so, never shown as nobody. */
+  members: StudioMember[] | null;
+  totals: StudioTotals;
   canEmail: boolean;
   /**
    * Whether this person may set the community up (lib/team-roles.ts,
@@ -216,6 +229,7 @@ export function CommunityStudio({
             <Welcome config={config} busy={busy} run={run} problem={problem} />
             <Messages config={config} busy={busy} run={run} problem={problem} />
             <Room config={config} busy={busy} run={run} problem={problem} />
+            <AboutPage handle={handle} config={config} busy={busy} run={run} problem={problem} />
             <Spaces config={config} products={products} busy={busy} run={run} problem={problem} lockedPreview={lockedPreview} />
             <Levels config={config} rewards={rewards} courses={courses} busy={busy} run={run} problem={problem} />
           </>
@@ -252,7 +266,7 @@ function Basics({
   busy: string | null;
   run: Runner;
   problem: Problem;
-  totals: { members: number; listed: number; posts: number; reach: number };
+  totals: StudioTotals;
   canEmail: boolean;
 }) {
   const [name, setName] = useState(config.name);
@@ -272,18 +286,21 @@ function Basics({
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.members}</p>
+          <Figure value={totals.members} />
           <p className="text-xs text-ink-soft">have come in</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.posts}</p>
+          <Figure value={totals.posts} />
           <p className="text-xs text-ink-soft">posts</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.reach}</p>
+          <Figure value={totals.reach} />
           <p className="text-xs text-ink-soft">want the community&apos;s emails</p>
         </div>
       </div>
+      {totals.members === null || totals.reach === null ? (
+        <p role="status" className="mt-3 text-sm text-ink">Some of these figures could not be loaded. Reload this page to check them.</p>
+      ) : null}
       {!canEmail ? (
         <p className="mt-3 text-sm text-ink-soft">
           Announcements show in the community on every plan. Emailing them is part of Pro, from your Email settings, and
@@ -415,6 +432,65 @@ function Messages({
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
           {problem("dm")}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/**
+ * The public About page (233 [SK1], lib/community-about.ts): off until the
+ * creator turns it on, and its counts a second choice. Off is off: the page
+ * answers not found.
+ */
+function AboutPage({
+  handle,
+  config,
+  busy,
+  run,
+  problem,
+}: {
+  handle: string;
+  config: CommunityConfig;
+  busy: string | null;
+  run: Runner;
+  problem: Problem;
+}) {
+  const [on, setOn] = useState(config.page.on);
+  const [counts, setCounts] = useState(config.page.counts);
+  const changed = on !== config.page.on || (on && counts !== config.page.counts);
+  return (
+    <section aria-labelledby="cm-about-page-title" className="card p-6 sm:p-8">
+      <h2 id="cm-about-page-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Public About page</h2>
+      <p className="mt-1 text-sm text-ink-soft">
+        A page anyone can open, and search engines can find, before joining: your description, the products that open
+        the community and are on sale now, with their prices. No post, lesson, event or member is ever on it.
+      </p>
+      <form
+        className="mt-5 space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (changed) run("about-page", { action: "about-page", on, counts: on && counts }, on ? "About page saved." : "About page switched off.");
+        }}
+      >
+        <label className="flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-paper">
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={on} onChange={(e) => setOn(e.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Show a public About page</span>
+            <span className="block text-ink-soft">Off, and the page does not exist.</span>
+          </span>
+        </label>
+        <label className={`flex min-h-[44px] items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 ${on ? "cursor-pointer hover:bg-paper" : "opacity-50"}`}>
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" disabled={!on} checked={on && counts} onChange={(e) => setCounts(e.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Show how many people joined and how many posts the last 30 days had</span>
+            <span className="block text-ink-soft">The real numbers, small ones too, counted at most six hours before. Never anybody&apos;s name.</span>
+          </span>
+        </label>
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
+          {config.page.on ? <a href={`/@${handle}/community/about`} className="btn btn-ghost">Open the About page</a> : null}
+          {problem("about-page")}
         </div>
       </form>
     </section>
@@ -1156,14 +1232,25 @@ function Members({
   run,
   problem,
 }: {
-  members: StudioMember[];
-  total: number;
+  members: StudioMember[] | null;
+  total: number | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
 }) {
   const [filter, setFilter] = useState("");
   const q = filter.trim().toLowerCase();
+  if (members === null || total === null) {
+    return (
+      <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="cm-members-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Members</h2>
+          <span className="tag">Not loaded</span>
+        </div>
+        <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">Members could not be loaded. Reload this page to see them.</p>
+      </section>
+    );
+  }
   const shown = q ? members.filter((m) => m.email.includes(q) || m.name.toLowerCase().includes(q)) : members;
   return (
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">

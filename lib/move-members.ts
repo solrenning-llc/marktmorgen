@@ -19,6 +19,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
+import { RECOVER_TRACE_BYTES } from "@/lib/checkout-recovery";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -26,6 +27,7 @@ import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { storeBase } from "@/lib/purchase-email";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
@@ -74,10 +76,34 @@ function parseInvite(raw: unknown): Invite | null {
   }
 }
 
+/**
+ * One invitation, read exactly (CX-123 rule 24): nothing there, or text that
+ * is not an invitation, is none; any other reply throws UnknownReplyError, so
+ * it is never taken as "no invitation" nor as "not kept yet".
+ */
 export async function readInvite(statsId: string, field: string): Promise<Invite | null> {
   if (!FIELD_PATTERN.test(field) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", invitesKey(statsId), field]]);
+  const replies = repliesFor(await redisPipeline([["HGET", invitesKey(statsId), field]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a moved member's invitation");
   return parseInvite(raw);
+}
+
+/**
+ * The postal address a moved member's emails carry: the one the creator's
+ * emails carry (lib/mail.ts, "Postal address at the bottom of each email").
+ * "" when there is none, and then none of them is sent.
+ */
+export function movePostal(store: Store): string {
+  return (store.mail?.address ?? "").trim();
+}
+
+/**
+ * What a moved member's email ends with: the way to stop them (the page of
+ * `stop`), and who sends them, at which postal address.
+ */
+export function moveFoot(store: Store, stop: string): string[] {
+  return ["", moveWords(store.language).stopLine(store.name, stop), `${store.mail?.fromName || store.name} · ${movePostal(store)}`];
 }
 
 /**
@@ -122,8 +148,10 @@ export async function inviteMembers(
     const value = JSON.stringify({ e: normaliseEmail(row.email), p: row.productId, o: row.option, r: row.renews, job, at, t: token, kept: 0 } satisfies Invite);
     // Its record for as long as the store is, its link until it expires
     // (lib/store-data.ts); the record is counted once more when it is kept,
-    // which writes it again at the most a little longer.
-    return { row, field, token, value, bytes: dataBytes([field, value, '"kept":0000000000'], 1), link: dataBytes([linkKey(token), JSON.stringify({ s: statsId, f: field })], 1) };
+    // which writes it again at the most a little longer. And the mark its
+    // emails' stop link may leave, kept for good (lib/checkout-recovery.ts,
+    // RECOVER_TRACE_BYTES), taken here before anything is written.
+    return { row, field, token, value, bytes: dataBytes([field, value, '"kept":0000000000'], 1) + RECOVER_TRACE_BYTES, link: dataBytes([linkKey(token), JSON.stringify({ s: statsId, f: field })], 1) };
   });
   // Taken before anything is written: an import past the store's room stops
   // with DataRoomError and says so (lib/imports.ts).
@@ -271,16 +299,49 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   return { to: invite.e, subject: m.reminderSubject(product.title).slice(0, 200), text };
 }
 
-/** Whether this address has a live membership to this product on the creator's account now. */
+/** Every status Stripe names a subscription with; another is a row that cannot be read. */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
+const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+/** Pages of a hundred memberships read for one customer at most; one with more is unknown, never "not kept". */
+const KEPT_PAGES = 5;
+
+/** A membership row read whole: a status Stripe names and its metadata as a map of strings (as lib/winback-send.ts cameBack). */
+function legibleSub(row: Record<string, unknown>): boolean {
+  const { status, metadata } = row;
+  if (typeof status !== "string" || !SUB_STATUSES.has(status)) return false;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  return Object.values(metadata).every((value) => typeof value === "string");
+}
+
+/**
+ * Whether this address has a live membership to this product on the creator's account now. Read whole (CX-123 rule
+ * 24; review of #4121, MEDIUM): the customers under the address, and every page of each one's memberships, each list
+ * in its exact shape and each row legible. A list in another shape, one read in part (has_more past what is read), or
+ * a row that cannot be read throws StripeListUnreadable (an unknown answer, never "not kept"), so openMove opens
+ * nothing and a reminder is put back in line.
+ */
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
-  const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  for (const customer of (Array.isArray(customers.data) ? customers.data : []) as { id?: unknown }[]) {
-    if (typeof customer.id !== "string") continue;
-    const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    const list = (Array.isArray(subs.data) ? subs.data : []) as { status?: unknown; metadata?: Record<string, string> | null }[];
-    if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+  const customers: string[] = [];
+  for (const address of new Set([email, normaliseEmail(email)])) {
+    const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+    if (page.hasMore || page.unreadable > 0) throw new StripeListUnreadable("a moved member's customers, read in part");
+    for (const row of page.rows) if (!customers.includes(row.id)) customers.push(row.id);
+  }
+  for (const customer of customers) {
+    let after = "";
+    for (let pages = 0; ; pages += 1) {
+      if (pages >= KEPT_PAGES) throw new StripeListUnreadable("a moved member's memberships, more than are read");
+      const query = new URLSearchParams({ customer, status: "all", limit: "100", ...(after ? { starting_after: after } : {}) });
+      const page = readStripePage(await onAccount("GET", account, `/subscriptions?${query}`), legibleSub, SUB_PATTERN);
+      if (page.unreadable > 0) throw new StripeListUnreadable("a moved member's membership that cannot be read");
+      if (page.rows.some((s) => LIVE.has(String(s.status)) && (s.metadata as Record<string, string>).product === productId)) return true;
+      if (!page.hasMore) break;
+      if (!page.lastId) throw new StripeListUnreadable("a moved member's memberships, with no place to read on from");
+      after = page.lastId;
+    }
   }
   return false;
 }
@@ -321,23 +382,30 @@ export async function remindLater(sid: string, field: string, now = Date.now()):
   await redisPipeline([["ZADD", DUE_KEY, "XX", Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
 }
 
-/** Who a member's link is for, on this store and membership, while it works. */
+/**
+ * Who a member's link is for, on this store and membership, while it works.
+ * Read exactly (CX-123 rule 24): the link and its invitation each nothing or
+ * text; any other reply throws UnknownReplyError, never "no such link".
+ */
 export async function readMove(store: Store, productId: string, token: string): Promise<(Invite & { field: string }) | null> {
   if (!TOKEN_PATTERN.test(token) || !store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a moved member's link");
+  if (raw === null) return null;
+  let link: { s?: unknown; f?: unknown };
   try {
-    const link = JSON.parse(raw) as { s?: unknown; f?: unknown };
-    if (link.s !== store.statsId || typeof link.f !== "string") return null;
-    const invite = await readInvite(store.statsId, link.f);
-    if (!invite || invite.p !== productId || invite.t !== token) return null;
-    return { ...invite, field: link.f };
+    link = JSON.parse(raw) as { s?: unknown; f?: unknown };
   } catch {
     return null;
   }
+  if (!link || link.s !== store.statsId || typeof link.f !== "string") return null;
+  const invite = await readInvite(store.statsId, link.f);
+  if (!invite || invite.p !== productId || invite.t !== token) return null;
+  return { ...invite, field: link.f };
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "kept" };
 
 /** The checkout a member's link opens: this membership, this address, first charged on the renewal date. */
 export async function openMove(
@@ -349,8 +417,17 @@ export async function openMove(
   /** The box to start access at once, checked on the button's page (lib/digital-consent.ts). */
   consent: DigitalConsent | null = null,
 ): Promise<MoveOpen> {
-  const invite = await readMove(store, productId, token);
+  // An unknown read opens nothing, and the member is asked to try again.
+  let invite: Awaited<ReturnType<typeof readMove>>;
+  try {
+    invite = await readMove(store, productId, token);
+  } catch (error) {
+    console.error("reading a moved member's link failed", store.handle, error);
+    return { ok: false, reason: "refused" };
+  }
   if (!invite) return { ok: false, reason: "expired" };
+  // Kept already (read exactly above): said so, and no second checkout is opened.
+  if (invite.kept) return { ok: false, reason: "kept" };
   const product: Product | null = await readProduct(store, productId);
   if (!product?.recurring) return { ok: false, reason: "unavailable" };
   // The option they had. One the creator has since taken away, even the last,
@@ -359,6 +436,18 @@ export async function openMove(
   if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
+  // Kept already, through this link or found live on the creator's account: a second checkout would be a second
+  // membership of the same thing, charged every period beside the first. A reply that cannot be read opens nothing.
+  // (Kept through this link is answered above, before the product is read.)
+  try {
+    if (await keptAlready(store, invite.e, productId)) {
+      await noteKept(store, invite.e, productId, now);
+      return { ok: false, reason: "kept" };
+    }
+  } catch (error) {
+    console.error("reading a moved member's live membership failed", store.handle, error);
+    return { ok: false, reason: "refused" };
+  }
   const option = product.options.length ? invite.o : undefined;
   try {
     const held = await withStockHold(store, product, (holding) =>

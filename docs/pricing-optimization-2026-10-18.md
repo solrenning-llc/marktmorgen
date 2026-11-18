@@ -203,7 +203,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Studio | video | 3 | $649 | 1.01× | 1.02× |
 | Studio | storage | 4 GB | $639 | 1.02× | 1.03× |
 | Studio | orders | 45 | $639 | 1.02× | 1.03× |
-| Studio | store-email | 30 | $649 | 1.01× | 1.01× |
+| Studio | store-email | 30 | $649 | 1.01× | 1.02× |
 | Studio | transactional-email | 40 | $649 | 1.01× | 1.02× |
 | Studio | list-email | 700 | $519 | 1.13× | 1.27× |
 | Studio | visits | 1,000 | $599 | 1.05× | 1.10× |

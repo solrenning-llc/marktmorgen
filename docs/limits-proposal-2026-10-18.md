@@ -25,7 +25,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
 | Net with the cuts | not reachable | not reachable | **60.00%** | **60.00%** | **60.00%** | **60.00%** |
 | Every printed line at 10% / at zero | 56.34% / 56.53% | 55.82% / 56.04% | 61.18% / 61.45% | 60.87% / 61.17% | 61.62% / 61.88% | 61.31% / 61.61% |
-| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 54.95% of today | 39.55% of today | 72.67% of today | 55.02% of today |
+| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 54.93% of today | 39.54% of today | 72.65% of today | 55.00% of today |
 
 Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 56.53%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 56.04%: its hidden lines and receiving alone take more than the floor leaves).
 

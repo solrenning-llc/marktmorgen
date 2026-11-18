@@ -341,7 +341,8 @@ async function paidAtStripe(store: Store, email: string, exact = false): Promise
           try {
             live = liveExpanded(session.subscription);
           } catch (error) {
-            if (!(error instanceof UnknownReplyError)) throw error;
+            // An exact read never returns a partial ledger: a membership not read throws (Codex X4 on #3889, Claude 7).
+            if (exact || !(error instanceof UnknownReplyError)) throw error;
             unread = true;
             continue;
           }

@@ -6,7 +6,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
-import { paidCourses, recordEnrollment } from "@/lib/learn";
+import { paidCourses, paidCoursesExact, recordEnrollment } from "@/lib/learn";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_review_3889_course_door";
@@ -57,9 +58,13 @@ test("a membership that cannot be read neither reopens a refunded course nor shu
   assert.equal(open.includes(clubB), true, "the live membership's course stays open");
   assert.equal(open.includes(clubA), false, "the membership that cannot be read opens nothing");
   assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the answer with a membership not read is not kept");
+  await assert.rejects(paidCoursesExact(store, "zed@example.com"), UnknownReplyError, "an exact read must never return a partial ledger");
+  assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the rejected exact read leaves no cache");
   // The next good read decides, and is kept.
   sessions["zed@example.com"][2] = member("cs_test_zed000000003", clubA, "active");
   const again = [...(await paidCourses(store, "zed@example.com")).keys()];
   assert.deepEqual([again.includes(once), again.includes(clubB), again.includes(clubA)], [false, true, true], "a good read opens the membership");
   assert.equal(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")).length, 1, "a whole answer is kept");
+  const exact = await paidCoursesExact(store, "zed@example.com");
+  assert.deepEqual([exact.has(once), exact.has(clubB), exact.has(clubA)], [false, true, true], "a complete exact read keeps the valid purchases");
 });

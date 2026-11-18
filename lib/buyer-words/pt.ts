@@ -150,6 +150,10 @@ export const pt: BuyerWords = {
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
   chooseOne: "Escolha uma",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "País a partir do qual compra",
+  chooseCountry: "Escolha o seu país",
+  optionFromLink: (label) => `Abriu esta página para ${label}, por isso essa opção já está escolhida abaixo. Pode escolher outra.`,
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -189,12 +193,15 @@ export const pt: BuyerWords = {
   whoAnswers: (store) =>
     `${store} é o vendedor e responde pelo que compra, pelos reembolsos e por qualquer direito de livre resolução que tenha. A Marktmorgen aloja as páginas da loja e não é parte na venda.`,
   noPaymentsTitle: "Esta loja ainda não pode receber pagamentos.",
-  noPaymentsBody: (store) => `Os preços acima são reais, mas nada aqui pode cobrar um cartão. Para comprar, escreva diretamente a ${store}.`,
-  noPaymentsBodyOne: (store) => `O preço acima é real, mas nada aqui pode cobrar um cartão. Para comprar, escreva diretamente a ${store}.`,
+  noPaymentsBody: "Os preços acima são reais, mas nada aqui pode cobrar um cartão.",
+  noPaymentsBodyOne: "O preço acima é real, mas nada aqui pode cobrar um cartão.",
+  noPaymentsWrite: (store) => `Escrever a ${store}`,
 
   notices: {
     soldout: { title: "Acabou de esgotar", body: "O último foi vendido momentos antes de carregar em comprar. Nada foi cobrado." },
     busy: { title: "Outra pessoa está a comprá-lo neste momento", body: "Nada foi cobrado. Carregue novamente em comprar daqui a pouco." },
+    abroad: { title: "Ainda não é possível comprar na UE nem no Reino Unido", body: "Ainda não conseguimos cobrar o IVA que a União Europeia e o Reino Unido exigem para este produto, por isso nada foi cobrado. Se estiver fora destes países, escolha o seu país e tente de novo." },
+    country: { title: "Escolha o país a partir do qual compra", body: "Nada foi cobrado. Escolha o seu país junto ao botão de compra e carregue novamente em comprar." },
     slow: { title: "Demasiadas tentativas em poucos minutos", body: "Nada foi cobrado. Aguarde alguns minutos e carregue novamente em comprar." },
     error: { title: "Não foi possível abrir a página de pagamento", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
     nocharges: { title: "Esta loja não pode receber pagamentos com cartão neste momento", body: "Nada foi cobrado. Voltar a tentar não resulta enquanto a loja não resolver a situação." },
@@ -287,6 +294,8 @@ export const pt: BuyerWords = {
   openFullSize: "Abrir esta imagem em tamanho real",
   countdownUnits: { days: "dias", hours: "horas", min: "min", sec: "seg" },
   until: (when) => `Até ${when}`,
+  countdownPause: "Pausar a contagem decrescente",
+  countdownResume: "Retomar a contagem decrescente",
 
   restingTitle: "Esta página está em pausa por agora",
   restingBody: (store) =>

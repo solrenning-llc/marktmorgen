@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import {
   addStoreLink,
   editStoreLink,
   moveStoreLink,
   removeStoreLink,
+  setLinkArchived,
   type LinkResult,
 } from "@/lib/store";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
@@ -13,8 +14,9 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
-const ACTIONS = new Set(["add", "edit", "remove", "move"]);
+const ACTIONS = new Set(["add", "edit", "remove", "move", "archive", "unarchive"]);
 
 /** How firmly to answer when a change is refused. */
 const STATUS: Record<string, number> = {
@@ -26,7 +28,9 @@ const STATUS: Record<string, number> = {
  * Adds, changes, reorders or removes one of the links on the creator's page.
  * An add or an edit may also carry `spotlight`, `from` and `until` (when it
  * shows) and `play` (a video played on the page), read by linkExtras in
- * lib/store-link.ts; an edit sent without them clears them.
+ * lib/store-link.ts; an edit sent without them clears them. `archive` keeps a
+ * link back from the page without removing it, and `unarchive` shows it
+ * again within its own times (423 [LT1]).
  *
  * Deliberately a separate route from products. A link takes no money, reaches
  * no Stripe account and delivers nothing, so it shares none of that code and
@@ -57,7 +61,9 @@ export async function POST(request: NextRequest) {
       // A heading over links: a title, no address, perhaps a window to show in.
       // A link turned into one lets its picture go for good: a session let in without its second
       // step waits (lib/two-step.ts).
-      if (action === "edit" && (await lockedFor(request, "page", "replace")) && guarded.store.links.some((link) => link.id === id && link.image)) return refusedJson("locked");
+      const lock = action === "edit" ? await lockRead(lockedFor(request, "page", "replace")) : false;
+      if (lock instanceof Response) return lock;
+      if (lock && guarded.store.links.some((link) => link.id === id && link.image)) return refusedJson("locked");
       const { from, until } = linkExtras(body, false);
       const extras = { header: true, ...(from ? { from } : {}), ...(until ? { until } : {}) };
       result = action === "add" ? await addStoreLink(ref, title, "", extras) : await editStoreLink(ref, id, title, "", extras);
@@ -77,6 +83,8 @@ export async function POST(request: NextRequest) {
           : await editStoreLink(ref, id, title, read.url, linkExtras(body, playsOnPage(read.url)));
     } else if (action === "remove") {
       result = await removeStoreLink(ref, id);
+    } else if (action === "archive" || action === "unarchive") {
+      result = await setLinkArchived(ref, id, action === "archive");
     } else {
       const direction = body.direction === "up" ? "up" : "down";
       result = await moveStoreLink(ref, id, direction);
@@ -90,9 +98,7 @@ export async function POST(request: NextRequest) {
     }
     // A link taken off, or turned into a heading, lets its picture go, after the write.
     if (result.removed) {
-      await del(result.removed.path).catch((error: unknown) => {
-        console.error("could not delete a removed link's picture", error);
-      });
+      await deleteOrSweep(result.removed.path, "a removed link's picture");
     }
     return Response.json({ ok: true, links: result.store.links });
   } catch (error) {

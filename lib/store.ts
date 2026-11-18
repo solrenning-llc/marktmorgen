@@ -173,6 +173,7 @@ import { type AssistantPlan, type AssistantSetting, NO_ASSISTANT, parseAssistant
 import { type NextOfferSetting, NO_NEXT_OFFER, parseNextOffer } from "@/lib/next-offer-rules";
 import { type AssistReminderSetting, NO_ASSIST_REMINDER, parseAssistReminder } from "@/lib/assistant-reminder-rules";
 import { DEFAULT_FAIR, type FairPricing, parseFair } from "@/lib/fair-price";
+import { type MemberPrices, NO_MEMBER_PRICES, parseMemberPrices } from "@/lib/member-price-rules";
 import { DEFAULT_LANGUAGE, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { type AdsServerPlatform, parseAdsServer } from "@/lib/ad-consent";
 import { ATTRIBUTION_DAYS, type AttributionDays, DEFAULT_ATTRIBUTION_DAYS, parseAttributionDays } from "@/lib/attribution-rules";
@@ -773,6 +774,12 @@ export type Store = {
    * on every store until its creator switches it on.
    */
   fair: FairPricing;
+  /**
+   * Member and past-buyer prices (lib/member-price-rules.ts, 620 [SZ4]): the
+   * creator's rules that a holder of one product pays less for others. Off
+   * on every store until its creator switches it on.
+   */
+  memberPrices: MemberPrices;
   /** Every product in a cart cheaper once it holds a few (lib/cart-rules.ts). Off on every store until switched on. */
   cartDeal: CartDeal;
   /**
@@ -825,6 +832,12 @@ export type Store = {
    * directly. Null when PayPal is not connected.
    */
   paypalSeller: PayPalSeller | null;
+  /**
+   * When PayPal was last disconnected (milliseconds since the epoch; 0 never), written in the same locked write that
+   * clears the seller. A connect started at or before it is never finished by its way back, even when its mark could
+   * not be ended (Codex X5 on #4345; lib/paypal-sales.ts, ONBOARDING_SECONDS).
+   */
+  paypalStoppedAt: number;
   /**
    * The PayPal account the store sold through until the creator disconnected it, and when (`at`, in milliseconds),
    * kept so the sweep can still ask PayPal about the orders it took: a pending payment that completes is handed over,
@@ -1149,6 +1162,8 @@ function parseStore(raw: unknown): Store | null {
       nextOffer: parseNextOffer(value.nextOffer),
       assistReminder: parseAssistReminder(value.assistReminder),
       fair: { ...parseFair(value.fair), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
+      // Stores written before member prices existed have none.
+      memberPrices: parseMemberPrices(value.memberPrices),
       cartDeal: parseCartDeal(value.cartDeal),
       // Stores written before a store could pick its language speak English.
       language: parseLanguage(value.language),
@@ -1161,6 +1176,8 @@ function parseStore(raw: unknown): Store | null {
       pastBuyers: value.pastBuyers === true,
       // Stores written before PayPal selling existed sell through Stripe only.
       paypalSeller: parsePayPalSeller(value.paypalSeller),
+      // Stores written before this existed were never disconnected after it.
+      paypalStoppedAt: Number.isSafeInteger(value.paypalStoppedAt) && (value.paypalStoppedAt as number) > 0 ? (value.paypalStoppedAt as number) : 0,
       paypalPast: parsePayPalSeller(value.paypalPast),
     };
   } catch {
@@ -1591,6 +1608,7 @@ async function freshStore(fields: {
     nextOffer: { ...NO_NEXT_OFFER },
     assistReminder: { ...NO_ASSIST_REMINDER },
     fair: { ...DEFAULT_FAIR },
+    memberPrices: { ...NO_MEMBER_PRICES, rules: [] },
     cartDeal: { ...NO_DEAL },
     language: DEFAULT_LANGUAGE,
     emailSync: null,
@@ -1599,6 +1617,7 @@ async function freshStore(fields: {
     recentSales: false,
     pastBuyers: false,
     paypalSeller: null,
+    paypalStoppedAt: 0,
   };
 }
 
@@ -4895,7 +4914,32 @@ export async function setPastBuyers(email: string): Promise<Store | null> {
 export async function setPayPalSeller(email: string, merchant: string | null): Promise<Store | null> {
   const seller = merchant ? parsePayPalSeller({ merchant, at: Date.now() }) : null;
   if (merchant && !seller) return null;
-  return patchStore(email, () => ({ paypalSeller: seller }));
+  // A disconnect is written with its moment, in the same locked write: an older connect never finishes after it.
+  return patchStore(email, () => (seller ? { paypalSeller: seller } : { paypalSeller: null, paypalStoppedAt: Date.now() }));
+}
+
+/**
+ * Connects a PayPal seller on the way back from PayPal's onboarding only while `still()` says that connect is still
+ * the store's current one, asked under the store's write lock: a disconnect (which ends the connect before clearing the
+ * seller) or a newer connect made while PayPal was being asked is never undone. "stale" when it no longer is; null when
+ * the store is missing, the merchant id is not one, or `still()` cannot tell (rule 24).
+ */
+export async function connectPayPalSellerIf(
+  email: string,
+  merchant: string,
+  still: () => Promise<boolean | "unknown">,
+  startedAt: number,
+): Promise<Store | "stale" | null> {
+  const seller = parsePayPalSeller({ merchant, at: Date.now() });
+  if (!seller || !Number.isSafeInteger(startedAt) || startedAt <= 0) return null;
+  return withStore<Store | "stale" | null>(email, async (store, save) => {
+    // A disconnect at or after this connect began wins, whatever its end of the connect's mark came back as.
+    if (store.paypalStoppedAt >= startedAt) return "stale";
+    const current = await still();
+    if (current === "unknown") return null;
+    if (!current) return "stale";
+    return save({ ...store, paypalSeller: seller });
+  });
 }
 
 /**
@@ -4904,8 +4948,11 @@ export async function setPayPalSeller(email: string, merchant: string | null): P
  * back when refunded, cancelled with a notice when never confirmed (lib/paypal-sales.ts, watchPayPal).
  */
 export async function disconnectPayPalSeller(email: string): Promise<Store | null> {
+  // Written with its moment, in the same locked write (as setPayPalSeller's disconnect): a connect started at or before
+  // it is never finished by its way back (connectPayPalSellerIf, paypalStoppedAt).
   return patchStore(email, (store) => ({
     paypalSeller: null,
+    paypalStoppedAt: Date.now(),
     paypalPast: store.paypalSeller && store.paypalSeller.merchant ? { merchant: store.paypalSeller.merchant, at: Date.now() } : (store.paypalPast ?? null),
   }));
 }
@@ -5081,6 +5128,11 @@ export async function setCartDeal(email: string, raw: unknown): Promise<Store | 
 
 export async function setFair(email: string, raw: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ fair: parseFair(raw) }));
+}
+
+/** Sets member and past-buyer prices (lib/member-price-rules.ts, 620 [SZ4]): read from anything as the rules allow. */
+export async function setMemberPrices(email: string, raw: unknown): Promise<Store | null> {
+  return patchStore(email, () => ({ memberPrices: parseMemberPrices(raw) }));
 }
 
 /** Sets the language the store speaks to its buyers in (lib/store-language.ts). */

@@ -373,12 +373,14 @@ export async function roomSlots(store: DataStore, slots: string[]): Promise<numb
   const key = dataKey(store);
   if (!key || !isRedisConfigured()) return null;
   try {
-    const [reply] = await redisPipeline([["HMGET", key, ...slots]]);
-    if (!Array.isArray(reply) || reply.length !== slots.length) return null;
+    // Read exactly, slot by slot (rule 24; Codex P's MEDIUM 1 on #4846, the same read here): a slot the room's script
+    // wrote is a decimal whole number above zero, or nothing. Anything else, or a hole, is an unreadable room.
+    const reply = replyList(repliesFor(await redisPipeline([["HMGET", key, ...slots]]), 1)?.[0]);
+    if (!reply || reply.length !== slots.length) return null;
     const out: number[] = [];
     for (const value of reply) {
       if (value === null) out.push(0);
-      else if (typeof value === "string" && /^\d+$/.test(value)) out.push(Number(value));
+      else if (typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value))) out.push(Number(value));
       else return null;
     }
     return out;

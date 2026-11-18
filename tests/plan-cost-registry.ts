@@ -1234,6 +1234,26 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 76, takeBackCommands: 22 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 /**
+ * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
+ * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts. First the
+ * try is counted, in a step of its own: the INCR and EXPIREAT of the order's count of tries (countCommandsPerTry;
+ * Claude 7's cost MEDIUM on #3411). Only a try that count admits then sends the ZADD that puts the order in pending
+ * and the EXPIREAT that renews its record until thirty days from its opening (watchCommandsPerCaptureAsked; Codex X2's
+ * MEDIUM 2 and Claude 5's MEDIUM on #3411: they used to go in the count's step, so returns that all read the count
+ * before any of them counted each wrote all four). PayPal is asked at most capturesAskedPerOrderAtMost times an order
+ * (CAPTURE_TRIES_PER_ORDER, lib/paypal-sales.ts), so the admitted tries send at most capturesAskedPerOrderAtMost x
+ * commandsPerCaptureAsked commands an order, none past those thirty days; together they are inside a tenth of that
+ * order's own work (line orders, ORDER_COMPUTE), besides settle's script. A refused return writes neither pending nor
+ * the record and sends at most commandsPerRefusedReturnAtMost commands: the count's two when it read a count under the
+ * bound and found it spent by returns at the same moment, or, when it read the count already spent, a ZSCORE of
+ * pending and a GET of the paid record in one round trip, to tell a capture under watch from tries that were all
+ * refused (Codex X2's MEDIUM 1, Claude 5's LEVE). That is a cost per return, not per order, like the reads every
+ * return already sends (the paid record's GET, then the order's record and its count in one round trip), under the
+ * route's own limit per connection and store ("paypal-return", line orders). What the record and the count keep for
+ * those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:, nl:ppsell:try:).
+ */
+export const PAYPAL_CAPTURE_WATCH = { countCommandsPerTry: 2, watchCommandsPerCaptureAsked: 2, commandsPerCaptureAsked: 4, capturesAskedPerOrderAtMost: 3, commandsPerRefusedReturnAtMost: 2 } as const;
+/**
  * The daily plans job (lib/plans.ts, settlePlans, from app/api/cron/plans/route.ts), per run, at the most:
  * - readCommandsPerRun: one pipeline reads both lines (SRANDMEMBER of the new plans, ZRANGEBYSCORE ... LIMIT of
  *   the plans tried and due), each bounded by plansPerRun;
@@ -1493,6 +1513,45 @@ export const HELD_EXPOSURE = {
   stripeEndpointTariffUsd: null,
   completeMonthlyCostUsd: null,
   reviewedGlobalCaseCeiling: null,
+} as const;
+/**
+ * DONO-3 company work for a closing store at or past its day (fourth pre-review, LEVE 3), outside paid-unit
+ * COST_LINES like HELD_EXPOSURE, at most per store per daily run of the closing job:
+ *   - kept past the published time: GET of its record, SET of its reason when it changes (overdueWhy), and the
+ *     monthly count's EVAL (HELD_ONCE);
+ *   - its creator account refusing us: SET of its record (refusedFrom, refusedLast), HSET+EXPIRE of the day's
+ *     account note, and four HLEN of the two days' notes; an account that answers: HSET+EXPIRE and, after a
+ *     refusal, one SET;
+ *   - after STRIPE_SILENT_DAYS of refusals: one more platform GET of the store's own subscription, once a run, with
+ *     the activation readSubscription does for a funded plan (the same as observeStoreSubscriptions');
+ *   - its creator account giving no answer (Claude 3's H1 on #3463), the same shape: SET of its record (silentFrom,
+ *     silentLast), HSET+EXPIRE of the day's account note and, past the deadline with a streak, four HLEN of the two
+ *     days' notes and the same one platform GET of the store's own subscription (shared with a refusal's, once a run);
+ *   - a lapse before its members' renewals were stopped: one notice per member with a known subscription, out of the
+ *     closing's own email credit (lib/closing-credit.ts), and one SET of its record, once; a member owed a refund is
+ *     told both in its refund letter, one letter an address, and a member already told of the closing gets one
+ *     follow-up only, the one its notice paid for: any letter past it takes one credit first, all or nothing, or the
+ *     store is held (Claude 1 cloud's review of #3463, tests/closing-told-follow-ups.test.ts); the refund letter
+ *     reads the paid periods once more (HGETALL) for who was already sent a follow-up;
+ *   - a lapse: SET of its record and the monthly count's EVAL, once.
+ * The notes are hashed identities (about 80 bytes a field) for ACCOUNT_NOTE_SECONDS. Stripe's endpoint tariff and the
+ * number of stores in this state are unknown, never zero: no monthly total is certified here.
+ */
+export const CLOSING_DEADLINE_WORK = {
+  overdueCommandsPerRun: 3,
+  refusalCommandsPerRun: 1 + 2 + 4,
+  silenceCommandsPerRun: 1 + 2 + 4,
+  renewalNoticeCommandsOnce: 1,
+  lapseLetterReadsOnce: 1,
+  answerCommandsPerRun: 2 + 1,
+  platformGetsPerRefusedRun: 1,
+  fundedActivationsPerRefusedRun: 1,
+  lapseCommandsOnce: 2,
+  accountNoteBytesPerField: 80,
+  accountNoteSeconds: 3 * 86400,
+  stripeEndpointTariffUsd: null,
+  storesInThisState: null,
+  completeMonthlyCostUsd: null,
 } as const;
 /** A full held store, not its smaller ended-store allowance, for31days. All
  * still-retained outside-room keys are charged at peak for the whole month. */

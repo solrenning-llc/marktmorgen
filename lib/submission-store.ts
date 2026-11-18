@@ -928,11 +928,9 @@ export async function forgetSubmissionsPerson(
     if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission deleted");
     if (replies[0] === 1) gone += 1;
   }
-  // Every entry's door is deleted again after the index and places (Claude 6 on #3570): a refused close or abort that
-  // put a door back while this erasure ran (both its checks still passing) is undone here, and one after the index is
-  // gone finds no entry and puts nothing back.
+  // Delete the doors again after the live places (Claude 6 on #3570). A refused close or abort that put a door back
+  // before those places were removed is undone here. Once the live place is gone, the put-back check refuses it.
   const keys = [
-    whoKey(folder, who),
     ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); }),
     ...entries.map((entry) => doorKey(folder, entry.id)),
   ];
@@ -943,8 +941,10 @@ export async function forgetSubmissionsPerson(
     return slot ? [`${slot}|${courseId}|${lessonId}|${who}`] : [];
   });
   const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...(turns.length > 0 ? [["ZREM", slotsKey(folder), ...turns]] : [])];
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
+  if (commands.length > 0) {
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
+  }
   // And their room slots (buyerSlotFor), emptied in one step so the store's room keeps nothing of them; a step not
   // known to be done leaves the erasure unfinished, to be pressed again.
   const slots = [...lessons].flatMap((at) => {
@@ -956,6 +956,9 @@ export async function forgetSubmissionsPerson(
     const emptied = await takeData(data, slots);
     if (!emptied.ok) throw new UnknownReplyError("a buyer's submission room slots emptied");
   }
+  // The buyer's index is the retry's only record of these lessons. Remove it after the other steps are confirmed.
+  const removed = countOf(repliesFor(await redisPipeline([["DEL", whoKey(folder, who)]]), 1)?.[0]);
+  if (removed === null || removed > 1) throw new UnknownReplyError("a buyer's submission index deleted");
   return gone;
 }
 

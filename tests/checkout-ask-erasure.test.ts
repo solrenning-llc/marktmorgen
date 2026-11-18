@@ -81,8 +81,10 @@ test("a person's erasure reads only their store's asks, however many other store
   const now = Math.floor(Date.now() / 1000);
   const mine = askMember({ statsId, handle: "askindex", productId: "prod01", email: PERSON, askedAt: now, from: "page", after: ASK_WHENS.days });
   const STORE_QUEUE = askIndexKey(statsId, PERSON);
-  // Their ask, put back by the job after a failed send: the queue's own path (again), so it is written as the code writes it.
+  // Their ask, put back by the job after a failed send: the queue's own path (again), so it is written as the code writes it,
+  // from an ask in the queue and in their index, as every ask is made (keep).
   redis.run(["ZADD", QUEUE, now - 10, mine]);
+  redis.run(["ZADD", STORE_QUEUE, now - 10, mine]);
   const broken = async () => {
     throw new Error("synthetic: the store could not be read");
   };

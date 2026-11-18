@@ -130,6 +130,16 @@ export class MemoryRedis {
       }
       case "EVAL": {
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        // lib/checkout-ask.ts ASK_AGAIN: a retried ask put back only while the entry it was taken with waits in its index.
+        if (key.startsWith("-- marktmorgen:ask-again:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, queue, index, was, at, member, ttl] = args;
+          if (this.run(["ZSCORE", index, was]) === null) return -1;
+          const added = this.run(["ZADD", queue, at, member]);
+          this.run(["ZREM", index, was]);
+          this.run(["ZADD", index, at, member]);
+          this.run(["EXPIRE", index, ttl]);
+          return added;
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);

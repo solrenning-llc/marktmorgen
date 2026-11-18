@@ -217,21 +217,38 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
 }
 
 /**
+ * Puts a retried ask back, in one step, only while the entry it was taken with still waits in its person's index
+ * (KEYS[2], ARGV[1]): sendAsked leaves that entry there while the ask is in flight, and a person's erasure takes it out
+ * (forgetAskPerson), so an ask whose person was erased meanwhile is never written back (Codex L on #4290). Swaps the
+ * old entry for the new one in the index; answers ZADD's reply on the queue, or -1. Billed 1 + 5; lib/redis-memory.ts
+ * runs it the same way.
+ */
+const ASK_AGAIN = `-- marktmorgen:ask-again:v1
+if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return -1 end
+local added = redis.call("ZADD", KEYS[1], ARGV[2], ARGV[3])
+redis.call("ZREM", KEYS[2], ARGV[1])
+redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return added`;
+
+/**
  * Puts an ask whose send failed back in the queue, for a later try
  * (lib/reminder-retry.ts): a few times at the most, and never when the try
  * would land past its six hours — a reminder that arrives hours late is worse
  * than none, and the buyer can ask again. Its name (askKey) does not change,
  * so a try that does go is the one email. Whether it went back.
  */
-async function again(ask: Ask, now: number): Promise<boolean> {
+async function again(ask: Ask, was: string, now: number): Promise<boolean> {
   const tries = ask.tries ?? 0;
   const at = now + reminderRetryAfter(tries);
   if (tries >= REMINDER_RETRIES || at - (ask.askedAt + ask.after) > STALE_SECONDS) return false;
   try {
     const member = askMember({ ...ask, tries: tries + 1 });
-    const [added] = await redisPipeline([["ZADD", QUEUE, at, member], ["ZADD", askIndexKey(ask.statsId, ask.email), at, member], ["EXPIRE", askIndexKey(ask.statsId, ask.email), STORE_QUEUE_SECONDS]]);
-    // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
+    const [added] = await redisPipeline([["EVAL", ASK_AGAIN, 2, QUEUE, askIndexKey(ask.statsId, ask.email), was, at, member, STORE_QUEUE_SECONDS]]);
+    // 1 put back; 0 one just like it already waits; -1 its person was erased while it was in flight (its entry in their
+    // index is gone), so it stays out. Anything else is unknown: not counted as put back.
     if (added === 1 || added === 0) return true;
+    if (added === -1) return false;
     console.error("putting an asked-for reminder back answered in no known shape", ask.handle);
   } catch (error) {
     console.error("putting an asked-for reminder back failed", ask.handle, error);
@@ -260,10 +277,15 @@ export async function sendAsked(
   for (const member of members) {
     if (Date.now() >= deadline) break;
     const ask = parseAsk(member);
-    // Out of the store's index with the queue, so neither keeps an ask the job has taken.
-    const [taken] = await redisPipeline([["ZREM", QUEUE, member], ...(ask ? [["ZREM", askIndexKey(ask.statsId, ask.email), member]] : [])]);
+    const [taken] = await redisPipeline([["ZREM", QUEUE, member]]);
     if (Number(taken) !== 1) continue;
+    // Its entry in the person's index stays while it is in flight, so a person's erasure meanwhile still finds it and
+    // takes it out, and a retry is then refused (again; Codex L on #4290). It leaves the index once the ask is done.
+    const done = async () => {
+      if (ask) await redisPipeline([["ZREM", askIndexKey(ask.statsId, ask.email), member]]);
+    };
     if (!ask || now - (ask.askedAt + ask.after) > STALE_SECONDS) {
+      await done();
       counts.skipped += 1;
       continue;
     }
@@ -280,10 +302,16 @@ export async function sendAsked(
       console.error("sending an asked-for reminder failed", ask.handle, error);
       outcome = "retry";
     }
-    if (outcome === "sent") counts.sent += 1;
+    if (outcome === "sent") {
+      await done();
+      counts.sent += 1;
+    }
     // "failed" is a send the email service was asked for and did not take: never again (lib/reminder-retry.ts).
-    else if (outcome === "retry" && (await again(ask, now))) counts.retried += 1;
-    else counts.skipped += 1;
+    else if (outcome === "retry" && (await again(ask, member, now))) counts.retried += 1;
+    else {
+      await done();
+      counts.skipped += 1;
+    }
   }
   return counts;
 }

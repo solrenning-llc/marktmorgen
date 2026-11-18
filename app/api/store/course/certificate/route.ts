@@ -7,7 +7,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, storeKey } from "@/lib/learn";
-import { passedForGate } from "@/lib/quiz";
+import { passedQuizzes } from "@/lib/quiz";
 import { hasFinished, issueCertificate } from "@/lib/certificate";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
   const base = `${origin}/@${store.handle}/course/${product.id}`;
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: path, "Cache-Control": "no-store" } });
 
-  const access = await courseAccess(store, product, await cookies());
   const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, await cookies(), course);
   if (access.state !== "open" || access.learner.owner || !course?.certificate) return away(base);
   // A certificate asked for is one of the store's buyer actions (lib/buyer-actions.ts).
   if (!(await takeBuyerAction(store))) return restingAway(origin, store);
@@ -51,7 +51,8 @@ export async function POST(request: NextRequest) {
   let done: Set<string>;
   let passed: Set<string>;
   try {
-    [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedForGate(course.id, who)]);
+    // The passes read exactly too: passedForGate would turn an unreadable reply into "nothing passed".
+    [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedQuizzes(course.id, who)]);
   } catch (error) {
     // Progress that could not be read is unknown, never "unfinished": said as it is, in the store's language (rule 24).
     if (error instanceof UnknownReplyError) return new Response(coursesWords(store.language).certProgressUnknown, { status: 503, headers: { "Cache-Control": "no-store" } });

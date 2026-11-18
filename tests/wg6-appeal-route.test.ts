@@ -350,8 +350,8 @@ async function main() {
   let lostCount = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await realPipeline(commands);
-    // Since #3612 the try is counted by the fenced write (APPEAL_WRITE, an EVAL), no longer by a SET XX.
-    if (!lostCount && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:appeal-write:")) {
+    // The inbox try is counted by the swap over the exact bytes read (#3533's appeal-swap, kept inside #3612's hold).
+    if (!lostCount && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:appeal-swap:v1")) {
       lostCount = true;
       throw new Error("reply lost");
     }

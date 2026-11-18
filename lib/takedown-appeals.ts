@@ -165,14 +165,14 @@ async function writeHeld(hold: Held, rk: string, kept: KeptAppeal): Promise<"wri
   throw new UnknownReplyError("a request to look again's write");
 }
 
+/** One request read again, exactly, with the bytes it was read from (for swapAppeal), or null when there is none. */
+async function readOneRow(sid: string, decision: StoreDecision): Promise<AppealRow | null> {
+  return (await readAppealRows({ sid }, [decision])).get(decision.key) ?? null;
+}
+
 /** One request read again, exactly, or null when there is none. */
 async function readOne(sid: string, decision: StoreDecision): Promise<KeptAppeal | null> {
-  const replies = repliesFor(await redisPipeline([["GET", recordKey(sid, decision)]]), 1);
-  if (!replies) throw new UnknownReplyError("a request to look again");
-  if (replies[0] === null) return null;
-  if (typeof replies[0] !== "string") throw new UnknownReplyError("a request to look again");
-  const kept = readKept(replies[0]);
-  return appealVisibleTo(kept.appeal, sid) && kept.appeal.decision === decision.key ? kept : null;
+  return (await readOneRow(sid, decision))?.kept ?? null;
 }
 
 /**
@@ -181,7 +181,14 @@ async function readOne(sid: string, decision: StoreDecision): Promise<KeptAppeal
  * anyway). Throws on any unknown reply.
  */
 export async function readAppeals(store: Pick<Store, "strikes" | "sid">, decisions = decisionsOf(store)): Promise<Map<string, KeptAppeal>> {
-  const found = new Map<string, KeptAppeal>();
+  const rows = await readAppealRows(store, decisions);
+  return new Map([...rows].map(([key, row]) => [key, row.kept]));
+}
+
+type AppealRow = { kept: KeptAppeal; raw: string };
+
+async function readAppealRows(store: Pick<Store, "sid">, decisions: StoreDecision[]): Promise<Map<string, AppealRow>> {
+  const found = new Map<string, AppealRow>();
   if (!decisions.length) return found;
   const replies = repliesFor(await redisPipeline(decisions.map((d) => ["GET", recordKey(store.sid, d)])), decisions.length);
   if (!replies) throw new UnknownReplyError("requests to look again");
@@ -190,7 +197,7 @@ export async function readAppeals(store: Pick<Store, "strikes" | "sid">, decisio
     if (raw === null) return;
     if (typeof raw !== "string") throw new UnknownReplyError("a request to look again");
     const kept = readKept(raw);
-    if (appealVisibleTo(kept.appeal, store.sid) && kept.appeal.decision === d.key) found.set(d.key, kept);
+    if (appealVisibleTo(kept.appeal, store.sid) && kept.appeal.decision === d.key) found.set(d.key, { kept, raw });
   });
   return found;
 }
@@ -247,27 +254,57 @@ export async function sendAgain(store: Store, decisionKeyRaw: unknown, origin: s
   return tellInbox(store, decision, origin);
 }
 
-/** Tells the inbox, holding the request and reading it again first; held by someone else, it is left to Send it again. */
+const SWAP_APPEAL = [
+  "-- marktmorgen:appeal-swap:v1",
+  'local current = redis.call("GET", KEYS[1])',
+  "if current ~= ARGV[1] then return current or false end",
+  'redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])',
+  "return 1",
+].join("\n");
+
+/** Swap the exact record read, or return the current bytes so the caller can keep a newer handoff. */
+async function swapAppeal(key: string, from: string, to: string): Promise<1 | string | null> {
+  const reply = repliesFor(await redisPipeline([["EVAL", SWAP_APPEAL, 1, key, from, to, KEEP_SECONDS]]), 1)?.[0];
+  if (reply === 1 || typeof reply === "string" || reply === null) return reply;
+  throw new UnknownReplyError("a request to look again's try");
+}
+
+function sameAppeal(a: Appeal, b: Appeal): boolean {
+  return a.number === b.number && a.store === b.store && a.decision === b.decision;
+}
+
+/**
+ * Tells the inbox, holding the request and reading it again first; held by someone else, it is left to Send it again.
+ * The hold (#3612) keeps two tries from running at once; the try itself is counted and marked over the exact bytes
+ * read (swapAppeal, #3533), so an email slower than the hold still marks the newest attempt told (the loop in tell).
+ */
 async function tellInbox(store: Store, decision: StoreDecision, origin: string): Promise<FileResult> {
-  const result = await held(store.sid, decision, async (hold) => {
-    const kept = await readOne(store.sid, decision);
-    if (!kept) throw new UnknownReplyError("a request to look again");
-    if (kept.told) return { ok: true as const, kept };
-    return tell(store, decision, kept, origin, hold);
+  const result = await held(store.sid, decision, async () => {
+    const row = await readOneRow(store.sid, decision);
+    if (!row) throw new UnknownReplyError("a request to look again");
+    if (row.kept.told) return { ok: true as const, kept: row.kept };
+    return tell(store, decision, row, origin);
   });
   return result === "busy" ? { ok: false, problem: "unsent", words: UNSENT_WORDS } : result;
 }
 
-async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string, hold: Held): Promise<FileResult> {
+async function tell(store: Store, decision: StoreDecision, row: AppealRow, origin: string): Promise<FileResult> {
+  const { kept, raw } = row;
   const { appeal } = kept;
   if (kept.tries >= MAX_TELL_TRIES) return { ok: false, problem: "unsent", words: TRIES_SPENT_WORDS };
-  const rk = recordKey(store.sid, decision);
+  const key = recordKey(store.sid, decision);
   // The notice's own link works for 60 days; the request may come, or be answered, later (Claude 4 on #3612). The
   // inbox gets a link to the same notice for KEEP_SECONDS from this email (none when the notice is no longer kept).
   const link = await noticeLinkFor(decision.report, KEEP_SECONDS);
-  // The try is counted before the email, so a lost count never lets a fourth one go. A hold lost already: nothing sent.
+  // The try is counted before the email, so a lost count never lets a fourth one go.
   const counted: KeptAppeal = { ...kept, tries: kept.tries + 1 };
-  if ((await writeHeld(hold, rk, counted)) === "lost") return { ok: false, problem: "unsent", words: UNSENT_WORDS };
+  const countedRaw = JSON.stringify(counted);
+  const mark = await swapAppeal(key, raw, countedRaw);
+  if (mark !== 1) {
+    const current = typeof mark === "string" ? readKept(mark) : null;
+    if (current?.told && sameAppeal(current.appeal, appeal)) return { ok: true, kept: current };
+    throw new UnknownReplyError("a request to look again's try");
+  }
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
@@ -295,12 +332,25 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
     idempotencyKey: `appeal-${appeal.number}-${counted.tries}`,
   }).catch(() => false);
   if (!sent) return { ok: false, problem: "unsent", words: counted.tries >= MAX_TELL_TRIES ? TRIES_SPENT_WORDS : UNSENT_WORDS };
-  const told: KeptAppeal = { ...counted, told: true };
-  // The inbox has it. A mark that did not land, or a hold that ran out during a slow email (then another writer's
-  // record is never written over), leaves Send it again offered, and a press of it is a new try with a new key, so the
-  // inbox may get this request once more: never more than MAX_TELL_TRIES in all, and never a buyer.
-  const marked = await writeHeld(hold, rk, told).catch(() => "lost" as const);
-  return { ok: true, kept: marked === "written" ? told : counted };
+  // A confirmed send can mark a newer attempt as told, keeping its count and moves. Only the few allowed tries
+  // can advance the record concurrently, and a lost reply must not turn a confirmed send into a known refusal.
+  // Each mark is a swap over the exact bytes read: a person's decision written meanwhile (#3612) is kept whole, and
+  // only its told flag is set.
+  let current = counted;
+  let currentRaw = countedRaw;
+  for (let i = 0; i < MAX_TELL_TRIES; i++) {
+    const told: KeptAppeal = { ...current, told: true };
+    const reply = await swapAppeal(key, currentRaw, JSON.stringify(told)).catch(() => null);
+    if (reply === 1) return { ok: true, kept: told };
+    if (reply === null) break;
+    let latest: KeptAppeal;
+    try { latest = readKept(reply); } catch { break; }
+    if (!sameAppeal(latest.appeal, appeal)) break;
+    if (latest.told) return { ok: true, kept: latest };
+    current = latest;
+    currentRaw = reply;
+  }
+  return { ok: true, kept: current };
 }
 
 /** A request about one decision of this notice, for the page a person at Marktmorgen opens from the notice's email. */

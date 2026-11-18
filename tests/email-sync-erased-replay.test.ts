@@ -31,6 +31,8 @@ function reset(): void {
   redis.run(["SET", cfgKey, JSON.stringify({ handle: "erased", provider: "kit", key: "sealed-stand-in", last4: "0000", target: { id: "t1", name: "Synthetic list" }, free: true, buyers: "all", products: [], tags: {}, since: ORDER_AT - 86_400_000, connectedAt: ORDER_AT - 86_400_000 })]);
   redis.run(suppressCommand(LIST, WHO, ERASED_SECONDS));
 }
+const isPublication = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:esync-enqueue:v1");
+const writesJob = (c: (string | number)[]) => (c[0] === "SET" && String(c[1]).startsWith("nl:esync:j:")) || isPublication(c);
 const queueSize = () => Number(redis.run(["ZCARD", QUEUE_KEY]));
 const logSize = () => Number(redis.run(["LLEN", logKey]));
 const holdsAddress = () => (redis.run(["LRANGE", logKey, 0, -1]) as string[]).some((id) => String(redis.run(["GET", `nl:esync:j:${id}`]) ?? "").includes(WHO));
@@ -78,8 +80,8 @@ test("a deletion print that does not read is unknown: nothing written, never tak
 /**
  * Codex C2 (5876565212) and Codex G (5876832230): the deletion can land between the first read of its print and the
  * job's write, and the job would then go to the platform. The erasure writes the print before it deletes any job
- * (lib/person-erasure.ts), so queuePerson reads the print again once its job is written, before it is sent: a
- * deletion that came in between takes that job out, and nothing goes.
+ * (lib/person-erasure.ts), so queuePerson reads the print again inside the step publishing the job.
+ * A deletion that came in between prevents the job from being written.
  */
 test("a deletion landing between the check and the job's write hands nothing over", async () => {
   reset();
@@ -87,7 +89,7 @@ test("a deletion landing between the check and the job's write hands nothing ove
   const real = redis.pipeline.bind(redis);
   let landed = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!landed && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:esync:j:"))) {
+    if (!landed && commands.some(writesJob)) {
       landed = true;
       // The erasure, at this moment: its print first, then its jobs (none yet).
       await real([suppressCommand(LIST, KEPT, Math.floor(Date.now() / 1000))]);
@@ -106,6 +108,30 @@ test("a deletion landing between the check and the job's write hands nothing ove
   assert.equal((redis.run(["LRANGE", logKey, 0, -1]) as string[]).some((id) => String(redis.run(["GET", `nl:esync:j:${id}`]) ?? "").includes(KEPT)), false, "and no job holds the address");
 });
 
+test("a background worker cannot claim a job for consent erased before publication", async () => {
+  reset();
+  const email = "background.deleted@example.test";
+  const pipeline = redis.pipeline.bind(redis);
+  let raced = false;
+  let visibleToWorker: number | undefined;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (raced || !commands.some(writesJob)) return pipeline(commands);
+    raced = true;
+    await pipeline([suppressCommand(LIST, email, ERASED_SECONDS)]);
+    const written = await pipeline(commands);
+    visibleToWorker = (redis.run(["ZRANGEBYSCORE", QUEUE_KEY, "-inf", Date.now()]) as string[]).length;
+    return written;
+  }) as typeof redis.pipeline;
+  try {
+    assert.equal(await queuePerson(store, person(email, ORDER_AT)), "off");
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  assert.equal(raced, true);
+  assert.equal(visibleToWorker, 0, "the cron saw no eligible job for erased consent");
+  assert.equal(queueSize(), 0);
+});
+
 test("the deletion's reads are counted (Claude 4 and Codex N1): HAND_OVER_ERASED_READS, named in the cost registry", async () => {
   reset();
   const { HAND_OVER_ERASED_READS } = await import("@/lib/email-sync");
@@ -113,7 +139,7 @@ test("the deletion's reads are counted (Claude 4 and Codex N1): HAND_OVER_ERASED
   const real = redis.pipeline.bind(redis);
   let reads = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    reads += commands.filter((c) => c[0] === "HGET" && c[1] === suppressedKey(LIST)).length;
+    reads += commands.filter((c) => (c[0] === "HGET" && c[1] === suppressedKey(LIST)) || (isPublication(c) && c[6] === suppressedKey(LIST))).length;
     return real(commands);
   }) as typeof redis.pipeline;
   try {

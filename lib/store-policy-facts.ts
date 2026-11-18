@@ -9,8 +9,10 @@
  *
  *   - Seller: the creator is the seller, the sale is a contract between them
  *     and the buyer, Marktmorgen is not the merchant of record, and payments
- *     go into the creator's own Stripe account by direct charges (app/terms,
- *     section 3); PayPal only when the store has it connected.
+ *     go into the creator's own accounts: Stripe by direct charges (app/terms,
+ *     section 3) only when the store sells through it (canSell), PayPal only
+ *     when it sells through PayPal (sellsThroughPayPal); with neither, no
+ *     account is named (Codex N1's MEDIUM on #1824).
  *   - Canceling within 14 days: for digital content and for memberships, the
  *     two rules the checkout asks by (lib/digital-consent.ts), with the same
  *     meaning as the Terms, never saying more than they do.
@@ -29,6 +31,8 @@
  * any word, so a later unit keeps each version with its date.
  */
 import { createHash } from "node:crypto";
+import { POLICY_WORDS, type PaidInto } from "@/lib/buyer-words/policies";
+import { parseLanguage } from "@/lib/store-language";
 
 export type PolicyFactsInput = {
   storeName: string;
@@ -36,73 +40,65 @@ export type PolicyFactsInput = {
   sellsDigital: boolean;
   /** Memberships (subscriptions). */
   sellsMemberships: boolean;
-  /** Whether the store has its PayPal connected for checkout. */
+  /**
+   * Whether the store takes money into its own Stripe account right now (canSell, as its store and product pages
+   * decide it). Never assumed: a store can take payments by PayPal alone (Codex N1's MEDIUM on #1824).
+   */
+  stripe: boolean;
+  /** Whether the store takes money into its own PayPal account right now (sellsThroughPayPal). */
   paypal: boolean;
   /** The ad pixels switched on, by their platform names ("Meta", "Google"…). */
   pixels: readonly string[];
   /** The postal address on the store's emails, or "" when none is set. */
   postalAddress: string;
+  /**
+   * Whether the store's membership emails carry the link to cancel without asking anyone (canManage, as
+   * lib/purchase-email.ts decides it). Only true says so; otherwise the buyer cancels by reply and nothing promises
+   * otherwise (Claude 1's LOW on #1824).
+   */
+  membersSelfCancel?: boolean;
 };
 
 export type PolicySection = { id: "seller" | "cancel" | "memberships" | "measurement" | "contact"; title: string; sentences: string[] };
 
-export const NOT_ADVICE =
-  "This page describes how this store works and is updated by itself when its settings change. It is not legal advice, and it does not say that the store meets any particular law.";
+/** The English sentence that says it is not legal advice; every language has its own (lib/buyer-words/policies.ts). */
+export const NOT_ADVICE = POLICY_WORDS.en.notAdvice;
 
-const list = (items: readonly string[]) =>
-  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+const list = (items: readonly string[], and: string) =>
+  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${and} ${items[items.length - 1]}`;
 
-/** The sections, in order, with only what applies to this store. */
-export function policyFacts(input: PolicyFactsInput): PolicySection[] {
-  const name = input.storeName.trim() || "This store";
+/** Where the money goes, only into the accounts the store takes it with; with neither, no sentence names one. */
+function paymentSentence(payments: (name: string, via: PaidInto) => string, name: string, input: Pick<PolicyFactsInput, "stripe" | "paypal">): string[] {
+  const via: PaidInto | null = input.stripe === true ? (input.paypal === true ? "both" : "stripe") : input.paypal === true ? "paypal" : null;
+  return via ? [payments(name, via)] : [];
+}
+
+/** The sections, in order, with only what applies to this store, in the store's language (English by default). */
+export function policyFacts(input: PolicyFactsInput, language: unknown = "en"): PolicySection[] {
+  const w = POLICY_WORDS[parseLanguage(language)];
+  // Without the store's name nothing can be said truthfully about who sells: nothing is generated.
+  const name = input.storeName.trim();
+  if (!name) return [];
   const sections: PolicySection[] = [
-    {
-      id: "seller",
-      title: "Who sells",
-      sentences: [
-        `${name} is the seller. Each sale is a contract between ${name} and the buyer.`,
-        "Marktmorgen provides the store and its checkout. It is not a party to the sale and is not the merchant of record.",
-        `Payments go into ${name}'s own Stripe account${input.paypal ? ", or its own PayPal account when you pay with PayPal" : ""}.`,
-      ],
-    },
+    { id: "seller", title: w.titles.seller, sentences: [w.sellerIs(name), w.notParty, ...paymentSentence(w.payments, name, input)] },
   ];
   const cancel: string[] = [];
-  if (input.sellsDigital || input.sellsMemberships) {
-    cancel.push("In the European Union, the United Kingdom and some other places, a consumer who buys online usually has 14 days to cancel.");
-  }
-  if (input.sellsDigital) {
-    cancel.push("For digital content, such as a file, a link, a course or a private podcast, that right ends once access starts only if you agreed at checkout that it may start within the 14 days, said you understood you would lose the right, and received a confirmation of both.");
-  }
-  if (input.sellsMemberships) {
-    cancel.push("A membership is at least partly a service: at checkout you ask for it to start now, you keep the right to cancel within the 14 days, and if you do, you may be asked to pay for what you already received.");
-  }
-  if (cancel.length) sections.push({ id: "cancel", title: "Canceling within 14 days", sentences: cancel });
-  if (input.sellsMemberships) {
-    sections.push({
-      id: "memberships",
-      title: "Memberships",
-      sentences: [
-        "You can cancel a membership yourself at any time, from the link in any email about it, without contacting anyone.",
-        "Canceling ends the membership at the end of the period you already paid for.",
-      ],
-    });
-  }
+  if (input.sellsDigital || input.sellsMemberships) cancel.push(w.cancelIntro);
+  if (input.sellsDigital) cancel.push(w.cancelDigital);
+  if (input.sellsMemberships) cancel.push(w.cancelMembership);
+  if (cancel.length) sections.push({ id: "cancel", title: w.titles.cancel, sentences: cancel });
+  if (input.sellsMemberships) sections.push({ id: "memberships", title: w.titles.memberships, sentences: input.membersSelfCancel === true ? [w.membersCancel, w.membersEnd] : [w.membersEnd] });
   const pixels = [...new Set(input.pixels.map((p) => p.trim()).filter(Boolean))];
-  if (pixels.length) {
-    sections.push({
-      id: "measurement",
-      title: "Ad measurement",
-      sentences: [
-        `${name} measures its ads with ${list(pixels)}.`,
-        "Where the law asks visitors first, nothing is measured until you say yes, and you can say no.",
-        "If your browser sends Global Privacy Control, nothing is measured.",
-      ],
-    });
-  }
+  if (pixels.length) sections.push({ id: "measurement", title: w.titles.measurement, sentences: [w.measures(name, list(pixels, w.and)), w.askFirst, w.gpc] });
   // Only what is set: with no postal address there is no sentence, rather than one about a contact page the store may not have.
   const address = input.postalAddress.replace(/\s+/g, " ").trim();
-  if (address) sections.push({ id: "contact", title: "Contact", sentences: [`${name}'s postal address: ${address}.`] });
+  if (address) sections.push({ id: "contact", title: w.titles.contact, sentences: [w.postal(name, address)] });
   return sections;
+}
+
+/** The sentence under the policies that says what they are not, in the store's language. */
+export function notAdvice(language: unknown = "en"): string {
+  return POLICY_WORDS[parseLanguage(language)].notAdvice;
 }
 
 /** A fingerprint of every word, so each version can be kept with its date. */

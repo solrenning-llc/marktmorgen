@@ -93,18 +93,22 @@ export type ErasureSize = {
  * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4471) the private podcast feeds of
  * removed products: the count of the store's noted products (SCARD), their set read with whether the walk of feeds
  * granted before the note is done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most
- * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (since 12 November 2026) the four on a person's index of kept
- * API answers (lib/api-idempotency.ts: its count, then the erasure's mark, its expiry and the read), whatever it lists:
- * 558 before them.
+ * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (Claude 3 on #3473) the read of the memberships whose
+ * invitations wait to be deleted (lib/move-members.ts withPendingInvites), one SMEMBERS: 558 before it; and (since 12
+ * November 2026) the four on a person's index of kept API answers (lib/api-idempotency.ts: its count, then the
+ * erasure's mark, its expiry and the read), whatever it lists: 559 before them.
  */
-export const ERASE_FIXED_COMMANDS = 562;
+export const ERASE_FIXED_COMMANDS = 563;
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
- * again, and those commands; and (since 12 November 2026) the four on the index of kept API answers, under 1,000 bytes
- * with their replies, which also cover the erasure's mark kept for a day (a byte moved is priced above a byte kept a
- * day, lib/spend-cost-table.ts): 310,000 before them.
+ * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
+ * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
+ * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000;
+ * and (since 12 November 2026) the four on the index of kept API answers, under 1,000 bytes with their replies, which
+ * also cover the erasure's mark kept for a day (a byte moved is priced above a byte kept a day,
+ * lib/spend-cost-table.ts): 325,000 before them.
  */
-export const ERASE_FIXED_BYTES = 311_000;
+export const ERASE_FIXED_BYTES = 326_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],

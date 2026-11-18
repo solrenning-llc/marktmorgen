@@ -1072,11 +1072,23 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   // down a payment PayPal completes; one every try was refused for, or the sweep let go of, has nothing under watch,
   // so the buyer is shown the store's notice rather than told PayPal is still taking it (Codex X2's MEDIUM 1, Claude
   // 5's LEVE on #3411); one paid since it was read is shown as paid.
-  if (tries >= CAPTURE_TRIES_PER_ORDER) return standing(order, opened);
+  // A reply that does not read here, or in watchFirst below, takes nothing and writes nothing: the buyer is told it did
+  // not go through (the store's notice), never shown a server error (Claude 1's LOW 1 on #3411; CX-123 rule 24).
+  const unread = (error: unknown, what: string): CaptureResult => {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    console.error(`a PayPal order's ${what} could not be read`, order, error);
+    return { ok: false, reason: "unknown" };
+  };
+  if (tries >= CAPTURE_TRIES_PER_ORDER) return standing(order, opened).catch((error) => unread(error, "standing"));
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
   // and a record ended since it was read, or less than a day from thirty past its opening, is no order to take a payment
   // for).
-  const watched = await watchFirst(order, opened);
+  let watched: Awaited<ReturnType<typeof watchFirst>>;
+  try {
+    watched = await watchFirst(order, opened);
+  } catch (error) {
+    return unread(error, "watch");
+  }
   if (watched === "gone") return { ok: false, reason: "unknown" };
   // Two returns at once can both read a count under the bound; the count this step took decides (the INCR), so PayPal
   // is never asked more than CAPTURE_TRIES_PER_ORDER times an order, as above, and a refused one wrote nothing past its

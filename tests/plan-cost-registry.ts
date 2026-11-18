@@ -914,8 +914,10 @@ export const COMMUNITY_DEVICES_READ = {
  *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
  *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);
  * - notSentCommandsAtMost: once, at the last try, the "Not sent" lines (lib/webhooks.ts notSentLines): the SET NX of
- *   the event's mark, one SET of a line a live endpoint (MAX_ENDPOINTS at most), the log's LRANGE when a line was
- *   already there, one LPUSH a line and the LTRIM, besides the configuration read emitEvent makes too.
+ *   the event's mark and, when its answer is lost, the GET that reads it back (lib/claim-mark.ts; Codex L and Codex U
+ *   on #3499), one SET of a line a live endpoint (MAX_ENDPOINTS at most), the log's LRANGE when a line was already
+ *   there, one LPUSH a line and the LTRIM, and the EVAL that lets go of the mark when the lines could not be written,
+ *   besides the configuration read emitEvent makes too.
  * A telling that works writes none of them. The work is the five-minute job's sweep, bounded by the tries a refunded
  * order: a company fixed cost like NOT_A_COST.HAND_OVER_BATCH, not a plan's allowance; like the job's other per-store
  * work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
@@ -924,7 +926,7 @@ export const PAYPAL_REFUND_TELL_RETRY = {
   triesAtMost: REFUND_TELL_TRIES_AT_MOST,
   ownCommandsPerFailedTry: 3,
   lookCommandsPerFailedTry: 3,
-  notSentCommandsAtMost: 1 + 2 * MAX_ENDPOINTS + 2,
+  notSentCommandsAtMost: 2 + 2 * MAX_ENDPOINTS + 2 + 1,
 } as const;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {

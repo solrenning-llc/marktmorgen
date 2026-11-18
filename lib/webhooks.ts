@@ -1088,9 +1088,17 @@ export async function notSentLines(store: Store, type: WebhookEvent, seed: strin
   const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? [], true);
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
-  const claimed = repliesFor(await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]), 1);
-  if (!claimed || (claimed[0] !== "OK" && claimed[0] !== null)) throw new UnknownReplyError("an event's sent mark");
-  if (claimed[0] === null) return 0;
+  // Taken as emitEvent takes it (lib/claim-mark.ts; Codex L and Codex U on #3499, MEDIUM): a SET NX whose answer is
+  // lost is read back, so a mark that landed with our own value is ours and the lines are written; "unknown" lets go
+  // of the mark if it still holds our value and throws, so the next look says it again. Never a mark left behind with
+  // no line.
+  const value = claimValue();
+  const fresh = await claimMark(eventKey(eventId), EVENT_SECONDS, value);
+  if (fresh === "taken") return 0;
+  if (fresh === "unknown") {
+    await releaseMark(eventKey(eventId), value);
+    throw new UnknownReplyError("an event's sent mark");
+  }
   const lines = listening.map((endpoint) => noticeLine(
     `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
     statsId, endpoint.id, eventId, type, words, now,
@@ -1100,9 +1108,9 @@ export async function notSentLines(store: Store, type: WebhookEvent, seed: strin
     if (!written || !written.every((reply) => reply === "OK" || reply === null)) throw new UnknownReplyError("a webhook log line not sent");
     await pushMissing(statsId, lines.filter((_, at) => written[at] === null).map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
   } catch (error) {
-    // As emitEvent: without its lines the event would leave no trace; the mark goes, so the next look says it again.
-    await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
-      console.error("WEBHOOK EVENT LOST: its not-sent lines could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
+    // As emitEvent: without its lines the event would leave no trace; the mark goes (only while it is still ours), so
+    // the next look says it again.
+    await releaseMark(eventKey(eventId), value);
     throw error;
   }
   return lines.length;

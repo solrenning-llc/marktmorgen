@@ -32,7 +32,8 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type Book, BOOK_STRIPE_PAGES, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type BookSizes, bookWork } from "@/lib/api-read-rules";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -434,6 +435,22 @@ export async function paypalChecks(store: Store): Promise<{ checking: number; ma
   return out;
 }
 
+/**
+ * Integration units one press of "Pay with PayPal" takes before it reads anything (app/api/store/affiliates/paypal,
+ * withinServiceWhy; Claude 7 on #4488): a press is one call held for up to its route's 60 s, its own commands (the
+ * lock's tries, who is on their way twice, the lock held again and let go by EVAL, the batch written and settled) and
+ * the whole book read with no titles, whose commands grow with the program's PayPal refunds and moves. So it takes
+ * PAYPAL_PRESS_BASE_UNITS, and one more for each PAYPAL_PRESS_UNIT_COMMANDS of the book read at its size, counted
+ * first (lib/affiliates.ts, bookSizes) as bookWork counts it. tests/paypal-press-cost.test.ts holds the units above
+ * the press's cost at every size (tests/plan-cost-registry.ts, paypalPressCost) and its commands under the count.
+ */
+export const PAYPAL_PRESS_BASE_UNITS = 5;
+export const PAYPAL_PRESS_UNIT_COMMANDS = 40;
+export function paypalPressUnits(sizes: BookSizes): number {
+  const book = bookWork({ ...sizes, products: 0 }, BOOK_STRIPE_PAGES).commands;
+  return PAYPAL_PRESS_BASE_UNITS + Math.ceil(book / PAYPAL_PRESS_UNIT_COMMANDS);
+}
+
 /** The open batch's field for a batch sent whose answer is not known yet: "?" and our own sender_batch_id. */
 export const UNKNOWN_BATCH_PREFIX = "?";
 
@@ -448,7 +465,9 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   if (!link) return { ok: false, reason: "not-connected" };
   try {
     return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (lock): Promise<PayResult> => {
-      const book = await readBook(store);
+      // A batch names no product (batchBody, payoutNote), so nothing is read for the names, as the payout file does: up
+      // to BOOK_INVOICES listings fewer read on every press (PAYPAL_PRESS_BOOK_COMMANDS, Claude 7 on #4488).
+      const book = await readBook(store, undefined, { titles: false });
       // What is owed is not known while refunds could not be read from Stripe.
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
       if (!payableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
@@ -470,6 +489,8 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
+      // The lock was held again a full term just above (#4618), with nothing awaited since: it is still this press's
+      // own, so it is not held a second time (one EVAL more that buys nothing; Claude 7 on #4488).
       let held: unknown = null;
       try {
         held = await redisPipeline([

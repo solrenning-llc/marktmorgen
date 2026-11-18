@@ -86,9 +86,12 @@ async function triedAgain(label: string, knownIntent: boolean, next: World, used
 async function main() {
   process.env.STRIPE_SECRET_KEY = "sk_test_closing_own_reply_synthetic";
   const ownInvoice = { id: INVOICE, object: "invoice", payment_intent: INTENT };
+  // Since #4428 (Codex P and X5) the invoice's whole list of payments is always read: the payment the invoice names, or
+  // the one kept when the member was held, is never taken alone as its only one.
+  const ownListed = { object: "list", has_more: false, data: [{ id: "inpay_closeown0", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: INTENT } }] };
 
   part("Control: every reply is the object asked for, so this member's own payment is refunded");
-  const control = await run("control", false, { invoice: ownInvoice, listed: null, intent: ownIntent });
+  const control = await run("control", false, { invoice: ownInvoice, listed: ownListed, intent: ownIntent });
   is("one refund, on this member's payment", posts, [INTENT]);
   is("settled done", [control.settled, control.result?.done.length], ["done", 1]);
 
@@ -123,13 +126,13 @@ async function main() {
   );
 
   part("The payment read answers with another payment, whose charge is disputed");
-  await triedAgain("otherintent", true, { invoice: ownInvoice, listed: null, intent: () => ({ id: OTHER_INTENT, object: "payment_intent", latest_charge: charge({ payment_intent: OTHER_INTENT, disputed: true }) }) }, 1);
+  await triedAgain("otherintent", true, { invoice: ownInvoice, listed: ownListed, intent: () => ({ id: OTHER_INTENT, object: "payment_intent", latest_charge: charge({ payment_intent: OTHER_INTENT, disputed: true }) }) }, 3);
 
   part("The payment read answers with no id, and a disputed charge");
-  await triedAgain("intentnoid", true, { invoice: ownInvoice, listed: null, intent: () => ({ object: "payment_intent", latest_charge: charge({ disputed: true }) }) }, 1);
+  await triedAgain("intentnoid", true, { invoice: ownInvoice, listed: ownListed, intent: () => ({ object: "payment_intent", latest_charge: charge({ disputed: true }) }) }, 3);
 
   part("The payment read is this payment, but its expanded charge belongs to another payment and is disputed");
-  await triedAgain("othercharge", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: OTHER_INTENT, disputed: true }) }) }, 1);
+  await triedAgain("othercharge", true, { invoice: ownInvoice, listed: ownListed, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: OTHER_INTENT, disputed: true }) }) }, 3);
 
   // Claude 6 on #3097 (the same MEDIUM as Codex G's on #3120): a paid payment whose intent does not read, or a list that
   // is not whole, is not "this invoice was paid by nothing"; settling "none" there would close the member for good.
@@ -161,20 +164,20 @@ async function main() {
   // amount_refunded that is not a whole number read as 0 would give back again what was already given back by hand.
   for (const [label, value, key] of [["null", null, "rnull"], ["a string", "500", "rtext"], ["an object", { amount: 500 }, "robj"], ["negative", -1, "rneg"], ["a fraction", 1.5, "rfrac"]] as const) {
     part(`This payment's own charge says what was given back as ${label}`);
-    await triedAgain(key, true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: value }) }) }, 1);
+    await triedAgain(key, true, { invoice: ownInvoice, listed: ownListed, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: value }) }) }, 3);
   }
   // Codex G's focal on #3097 (5815090132, proof g3097-refunded-overcharge): more given back than the charge took is
   // not a reading of this charge; settling "none" on it would leave the member's unused time never given back.
   part("This payment's own charge says more was given back than it took");
-  await triedAgain("rover", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: 1001 }) }) }, 1);
+  await triedAgain("rover", true, { invoice: ownInvoice, listed: ownListed, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: 1001 }) }) }, 3);
   part("This payment's own charge says what it took in no readable way");
-  await triedAgain("ramt", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount: "1000" }) }) }, 1);
+  await triedAgain("ramt", true, { invoice: ownInvoice, listed: ownListed, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount: "1000" }) }) }, 3);
 
   part("This payment's charge is not expanded (only its id)");
-  await triedAgain("chargeid", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: "ch_closeown1" }) }, 1);
+  await triedAgain("chargeid", true, { invoice: ownInvoice, listed: ownListed, intent: (id) => ({ id, object: "payment_intent", latest_charge: "ch_closeown1" }) }, 3);
 
   part("Control: this payment's own disputed charge still settles the member disputed, with nothing POSTed");
-  const disputed = await run("owndisputed", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, disputed: true }) }) });
+  const disputed = await run("owndisputed", true, { invoice: ownInvoice, listed: ownListed, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, disputed: true }) }) });
   is("nothing POSTed", posts, []);
   is("settled disputed", [disputed.settled, disputed.result?.disputed], ["disputed", 1]);
   done();

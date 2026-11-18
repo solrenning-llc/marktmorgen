@@ -615,6 +615,15 @@ async function readRecords(ctx: Ctx): Promise<void> {
       const text = await readText(ctx.run, ctx.env.FILES_BUCKET, name);
       if (text === null) throw new BackupFilesStateError(`${name} is named by the journal and missing`);
       const archive = parseArchive(text, name);
+      // The archive and journal may both have been saved while the day's worker state was not.
+      const named = /^deletions\/(\d{4}-\d{2}-\d{2})\/(0|[1-9][0-9]*)\.json$/.exec(name);
+      if (named) {
+        const day = Date.parse(named[1]) / DAY_MS;
+        const index = Number(named[2]);
+        if (Number.isSafeInteger(day) && index < BACKUP_FILES_INDEX_PAGES && recordFileName(day, index) === name) {
+          noteRecordFile(ctx, day, index);
+        }
+      }
       receive(ctx, archive.records, archive.receivedAt, waiting);
     }
     ctx.journal = journal;

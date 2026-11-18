@@ -47,6 +47,18 @@ async function main(): Promise<void> {
   is("a reply with a hole where a slot should be is an unreadable pool", await data.besideHeld(store, ["none-such", id]), null);
   redis.pipeline = plain;
 
+  // The sweep's read of the room's slots (lib/store-data.ts, roomSlots; #4847) takes them in the same exact form.
+  const roomSlots = (data as Record<string, unknown>).roomSlots as ((s: typeof store, slots: string[]) => Promise<number[] | null>) | undefined;
+  if (roomSlots) {
+    const slot = `p:${id}`;
+    const [kept] = await redisPipeline([["HGET", room, slot]]);
+    for (const value of ["01", "1e3", "-1", " 4", "1.5"]) {
+      await redisPipeline([["HSET", room, slot, value]]);
+      is(`a room slot kept as ${JSON.stringify(value)} is an unreadable room (#4847)`, await roomSlots(store, [slot]), null);
+    }
+    await redisPipeline(kept === null ? [["HDEL", room, slot]] : [["HSET", room, slot, String(kept)]]);
+  }
+
   // Every room script on this store answers as `mode` says; the pool's own key is left alone.
   let mode: "unknown" | "full" | null = null;
   const real = redis.pipeline.bind(redis);

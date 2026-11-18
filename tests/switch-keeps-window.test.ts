@@ -25,8 +25,7 @@ import { addMonthsMs, allowanceWindow, anchorAfter, windowAt, windowId, type All
 import { takeAllowance } from "@/lib/store-allowance";
 import { ALLOWANCE_KINDS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { MOST_CORRECT_READING } from "@/lib/receiving-costs";
-import { netOf, worstCost } from "./plan-cost-model";
+import { worstMonthKept } from "./worst-month-kept";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -539,166 +538,18 @@ async function main(): Promise<void> {
     is("10g: a stop written inside the grace keeps the anchor", anchorAfter(lastPaidG, inGraceG, Date.UTC(2027, 3, 29, 11))?.subscriptionId, SUB);
 
     part("11. The worst month this keeps: one window per paid month, every limit used (the figures in the PR body)");
-    // The repository's own model: a month's receipts after every fee and reserve (netOf, lib/receiving-costs.ts), less
-    // every cost line at its limit (worstCost, tests/plan-cost-registry.ts), then the LC rule's taxes on that profit:
-    // IRPF 15% and IOF 0.38% (MOST_CORRECT_READING), the IOF taken on the profit sent home before the IRPF.
-    const taxShare = (MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000;
-    const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
-    // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
-    // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
-    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
-    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
-    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
-    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
-    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
-    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
-    // #3411's PayPal pending record (its capture watch, PAYPAL_CAPTURE_WATCH, and the record kept thirty days, nl:ppsell:o:)
-    // is counted at its limit. Recomputed from the model at the merge of main c757064cc0 (15 November 2026, with #4542):
-    // Studio keeps a cent less and Scale two, monthly; still above zero (MR). Cost is not lowered.
-    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
-    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
-    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
-    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
-    // #3476 (r46, MOVED_EMAIL_EXTRA_COMMANDS on the imports line), recomputed from the model at the merge of main of
-    // 15 November 2026 (with #4542): Studio keeps 313.74 and Scale 703.14 on a monthly plan; Store as main has it.
-    // Merge of main into #3476 (15 November 2026): both together; figures as the model computes them.
-    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
-    // Merge of main into #3476 (16 November 2026, second pass): main's model and this PR's imports line together;
-    // Merge of main 7aa1ce65a3 (16 November 2026) into #3411: #3411's pending record and main's outbox together;
-    // Scale's monthly worst month keeps 703.16 where main shows 703.18 (Store and Studio as main); still above zero (MR).
-    // Cost is not lowered.
-    // Merge of main into #3411 (16 November 2026, second pass): main's model and #3411's pending record together;
-    // figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
-    // Merge of main into #2803 (16 November 2026): main's outbox and this PR's Blob costs together; computed, still above zero (MR).
-    // Merge of main into #2803 (16 November 2026, Claude 5 fix H): main's latest model and this PR's Blob costs together; computed, not chosen, each still above zero (MR).
-    // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
-    // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
-    // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
-    // figures as the model computes them; still above zero (MR), cost not lowered.
-    // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
-    // figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3476 (16 November 2026, third pass): main's model (with #4291's vault release line) and this PR's
-    // imports line together; the model computes the same figures, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3476 (16 November 2026, Claude 6 cloud, main 33ac85d41b): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3411 (16 November 2026, Claude 6 cloud, main 1ef10910dc, after #2803): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #4246 (17 November 2026, Claude 3 cloud T): main's costs (#2803's picture uploads) and this PR's
-    // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3411 (17 November 2026, Claude 6 cloud, main 01ab5f10e2): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3591 (16 November 2026): main's costs with this PR's (path leads counted only once confirmed), as the model computes them;
-    // still above zero (MR). No cost lowered.
-    // Merge of main 05d01ad7ac into #3591 (16 November 2026, Claude 3 cloud R): main's model and this PR together cost
-    // Studio and Scale one cent more in the monthly worst month: 313.79 and 703.15; still above zero (MR), cost not lowered.
-    // Merge of main into #3591 (16 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
-    // 44.34, 311.91, 697.49 -> 44.34, 311.90, 697.47; figures as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
-    // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3476 (16 November 2026, Claude 6 cloud, main 1ef10910dc, after #2803): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #4246 (17 November 2026, Claude 3 cloud T): main's costs (#2803's picture uploads) and this PR's
-    // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3476 (17 November 2026, Claude 6 cloud, main 01ab5f10e2): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Claude 7's cost MEDIUM 1 on #3476 (17 November 2026, Claude 6 local): each moved email now also prices its
-    // invitation's reminder held for a missing postal address (MOVE_HELD_PASSES at MOVE_HELD_PASS_COMMANDS each),
-    // a cost added, not lowered: Studio 309.75 -> 309.54 and Scale 694.30 -> 694.00; Store unchanged. Still above zero (MR).
-    // Merge of main e023347098 into #3476 (18 November 2026, Claude 6 local): main's costs and the held passes together;
-    // figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3411 (18 November 2026, Claude 6 cloud, main e023347098): main's model and this PR's lines
-    // Merge of main into #2571 (17 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
-    // 44.33, 309.84, 694.42 -> 44.31, 309.78, 694.20; figures as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
-    // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // C1-20261117 (2,000 products on every plan): the beside pool, 40 MB a paying store keeps beside its room, costs a
-    // cent more on Studio and Scale; the figures are the model's (AC (n)).
-    // The beside pool's inner commands on product saves (BESIDE_SAVE_COMMANDS, Claude 4 on #4847), priced on every studio
-    // request: a cost added, not lowered (Claude 6 local, 18 November 2026): 44.28, 309.72 and 694.08.
-    // Merge of main e023347098 into #4846 (18 November 2026, Claude 6 local): main's costs and the beside pool together;
-    // figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main e023347098 into #2571 (18 November 2026, Claude 3 local): main's costs (#3591, #4246) and this PR's
-    // time-on-page readings together, monthly 44.33, 309.83, 694.40 -> 44.31, 309.77, 694.18; figures as the model computes
-    // them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #4846 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
-    // Merge of main into #3501 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3411 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
-    // Merge of main into #3501 (18 November 2026, Claude 6 cloud, main f3b01adfe7): main's model and this PR's lines
-    // Merge of main into #3476 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3411 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
-    // Merge of main into #4846 (18 November 2026, Claude 6 cloud, main f3b01adfe7): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #3476 (18 November 2026, Claude 6 cloud, main 307e08fae7): main's model and this PR's lines
-    // Merge of main into #3476 (18 November 2026, Claude 6 cloud, main f3b01adfe7): main's model and this PR's lines
-    // Merge of main into #4846 (18 November 2026, Claude 6 cloud, main dadc1cafe9): main's model and this PR's lines
-    // together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main f3b01adfe7 (#3411) into #4831 (18 November 2026, Claude 5 cloud ibqho): main's model and this PR's lines
-    // together, monthly 44.31, 309.77, 694.18 -> 44.31, 309.77, 694.16; as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main dadc1cafe9 into #4831 (18 November 2026, Claude 5 ibqho, after #3476): main's model and this PR's
-    // costs together: 44.31, 309.47 and 693.74, the same as main; still above zero (MR). Cost is not lowered.
-    // Merge of main e5c3badd09 into #4846 (18 November 2026, Claude 1 cloud c1-varredor-b, after #4831): main's costs and this
-    // PR's together, figures as the model computes them; still above zero (MR). No figure typed by hand, no cost lowered.
-    // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
-    // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
-    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    // #3476's imports line in a month of a yearly plan, recomputed at the same merge: Studio 258.62, Scale 579.87;
-    // Store as main has it. Still above zero (MR). Cost is not lowered.
-    // #3411's PayPal pending record at the merge of main c757064cc0: Scale's yearly month 579.97 where main shows 579.98;
-    // Store and Studio unchanged.
-    // Merge of main 24fcd87caf (15 November 2026, with #4022) into #3411: both together cost Studio's yearly month one
-    // cent more, 258.69 where 258.70 was; still above zero (MR). Cost is not lowered.
-    // Main at 7aa1ce65a3 (16 November 2026, with #4319's outbox) shows 37.04, 258.68 and 579.90; merged into #3411 with
-    // its pending record, Studio keeps 258.67 and Scale 579.88 (Store as main); still above zero (MR). Cost is not lowered.
-    // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
-    // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
-    // #4246 (claude7/decided-flow-ses-wait) counts the waits for room at Amazon SES in WORST_COMMANDS_PER_RUN
-    // (SES_WAITS_PER_RUN × (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY), lib/flow-limits.ts): a dearer
-    // workflows line, so each plan keeps less, every figure still above zero (MR). Figures as the model computes them.
-    // #4246 again (15 November 2026, reviews by clouds F and G): the mail job's look for parked SES steps
-    // (SES_WAKE_JOBS_PER_DAY × SES_WAKE_JOB_COMMANDS) priced whole on every plan that can run workflows, and
-    // SES_WAIT_COMMANDS_PER_TRY 60 → 64: Studio 312.40 → 311.87 and Scale 700.96 → 700.37; Store, with no runs a day,
-    // unchanged; every figure above zero (MR).
-    // And each counted wait priced at the dearer of an ordinary try and an SES try past its parks
-    // (SES_COUNTED_WAIT_COMMANDS_PER_TRY, review by cloud AA): Studio 311.87 → 311.76, Scale 700.37 → 700.20; Store unchanged.
-    // With main's erasure probe (#4542) and #4015 merged in: Store 45.10, Studio 311.76, Scale 700.19, every figure above
-    // zero (MR); cost is not lowered.
-    // Merge of main into #4246 (15 November 2026): this PR's costs and main's together cost Studio's monthly worst month
-    // one cent more (the sum crosses a rounding step): 311.75 where 311.76 was; still above zero (MR). Cost is not lowered.
-    // Merge of main into #4246 again (16 November 2026): with main's webhook outbox (#4319); figures as the model computes them.
-    // Merge of main into #4246 (17 November 2026, Claude 1 cloud c1-conflitos-5): with main's vault release line (#4291)
-    // and the rest of main's model; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
-    // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.
-    // The same on the yearly month: Studio 256.74 and Scale 577.10 where 257.27 and 577.69 were; Store unchanged.
-    // The same on the yearly month: Studio 256.74 → 256.64, Scale 577.10 → 576.93; Store unchanged.
-    // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
-    // Merge of main into #2803 (16 November 2026, Claude 5 cloud iacVn3r): main's costs and this PR's upload costs
-    // together keep one cent less on Store's yearly month, 36.28 where 36.29 was; still above zero (MR). Cost is not lowered.
-    // Merge of main into #2571 (17 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
-    // 36.28, 254.71, 571.15 -> 36.26, 254.65, 570.92; figures as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main into #3591 (16 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
-    // 36.28, 256.78, 574.21 -> 36.28, 256.77, 574.19; figures as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
-    // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // The same on the yearly month: 36.22, 254.59 and 570.81.
-    // The same merge on the yearly month: 36.22, 254.59 and 570.79.
-    // Merge of main e023347098 into #2571 (18 November 2026, Claude 3 local): main's costs (#3591, #4246) and this PR's
-    // time-on-page readings together, yearly 36.27, 254.70, 571.13 -> 36.25, 254.65, 570.91; figures as the model computes
-    // them, still above zero (MR). Cost is not lowered.
-    // The same held reminder passes on the yearly month: Studio 254.63 -> 254.41 and Scale 571.03 -> 570.73; Store unchanged.
-    // The same merge on the yearly month: 36.27, 254.41 and 570.71.
-    // Merge of main 307e08fae7 (#2571) into #4831 (18 November 2026, Claude 5 cloud ibqho): main's model and this PR's lines
-    // together, yearly 36.25, 254.65, 570.91 -> 36.25, 254.64, 570.90; as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main f3b01adfe7 (#3411) into #4831 (18 November 2026, Claude 5 cloud ibqho): main's model and this PR's lines
-    // together, yearly 36.25, 254.64, 570.90 -> 36.25, 254.64, 570.89; as the model computes them, still above zero (MR); no cost lowered.
-    // Merge of main dadc1cafe9 into #4831 (18 November 2026, Claude 5 ibqho): 36.25, 254.34 and 570.46, the same as main;
-    // figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // The repository's own model, one formula (tests/worst-month-kept.ts): a month's receipts after every fee and
+    // reserve, less every cost line at its limit, then the LC rule's taxes on that profit.
+    // MR (owner, 27 October 2026): no plan may lose money in its worst month, on a monthly plan or in a month of a
+    // yearly one. That is what is checked here, above zero, and no figure is written: every cost change used to edit
+    // the figures and the notes beside them, and two such pull requests always conflicted on these lines (AGENTS.md
+    // AC (n); 33 of the 80 conflicts measured on 18 November 2026). The six exact figures are in
+    // docs/margin-alignment-2026-10-18.md, from the same formula, held by that document's staleness test (Claude 4's
+    // LOW on #4854). A refunded Store first year under US$66 is held by tests/email-logo-region.test.ts.
+    const month = worstMonthKept("month");
+    const year = worstMonthKept("year");
+    is(`11: Store, Studio and Scale keep more than zero in their worst month on a monthly plan (now ${month.join(", ")})`, month.every((v) => Number(v) > 0), true);
+    is(`11: and in a month of a yearly plan, a twelfth of the year paid (now ${year.join(", ")})`, year.every((v) => Number(v) > 0), true);
   } finally {
     Date.now = realNow;
   }

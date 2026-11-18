@@ -718,6 +718,8 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
       wrapped = true;
     }
   }
-  await save(cursor, 0);
+  // `skip` is zero once a page is done; it still holds the frontier's offset when the held store's sweep took the run
+  // before the walk began (Codex L on #3215).
+  await save(cursor, skip);
   return counts;
 }

@@ -352,6 +352,22 @@ async function main(): Promise<void> {
     is("and nobody twice", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`)], [1, 1]);
   }
 
+  part("The store walk: a held store that takes the whole run keeps the frontier's offset (Codex L on #3215)");
+  reset();
+  {
+    const [first, second, third] = await threeStores();
+    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));
+    // The last run held the first store and stopped at the third (offset 2 of the first page); this run's sweep of the
+    // held store takes all the time, so the walk never starts: the next run must still go on from the third.
+    await redis.pipeline([["SET", "nl:dun:cursor", "0|0|1|0|2"]]);
+    slow.add(first.account);
+    await run();
+    is("the frontier's offset is kept, the held store counted once more", (await redis.pipeline([["GET", "nl:dun:cursor"]]))[0], "0|0|2|0|2");
+    slow.clear();
+    await run();
+    is("the next run: the held store, then the third, never the second again first", [told(`${first.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1]);
+  }
+
   done();
 }
 

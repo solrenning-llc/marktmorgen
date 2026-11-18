@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.39% / 60.14% | 12.13% | 437 | $69 / $690 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.39% / 60.14% | 12.13% | 438 | $69 / $690 |
 | Studio | **$859 / $8,590** | every #553 figure, none cut | 61.14% / 60.82% | 12.43% | 17 | $449 / $4,490 |
 | Scale | **$1,799 / $17,990** | every #553 figure, none cut | 61.24% / 60.91% | 12.47% | 8 | $999 / $9,990 |
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 437 |
+| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 438 |
 | Studio | $859 | 21.2% | 21.1% / 1.5% / 10.7% / 21.2% | 17 |
 | Scale | $1,799 | 23.6% | 23.6% / 1.6% / 11.9% / 23.5% | 8 |
 
@@ -178,7 +178,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: none finite | $79: none finite | $99: none finite | $129: none finite |
-| Studio | $449: none finite | $559: none finite | $669: 1143 | $889: 15 |
+| Studio | $449: none finite | $559: none finite | $669: 1166 | $889: 15 |
 | Scale | $999: none finite | $1,239: none finite | $1,489: 25 | $1,989: 6 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
@@ -260,7 +260,7 @@ Raised to the band's best finite figure, the lowest price that keeps 60%: list-e
 | products | 2,000 products | 50 | Kajabi Growth | Kajabi Pro | **no** |
 | fee | 0% of a sale | 0% | Kajabi Growth, Kajabi Pro, ClickFunnels Optimize, ClickFunnels Dominate | — | yes |
 
-Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $26,609; storage $2,129; all of them together **$27,159 a month** (today $999). Where a competitor in the band prints "unlimited" (list-email, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
+Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $26,609; storage $2,129; all of them together **$27,169 a month** (today $999). Where a competitor in the band prints "unlimited" (list-email, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
 
 So "superior on every attribute to the best competitor in its band" is **infeasible** for every plan (an unlimited figure in every band), and on the finite metered figures alone it costs the prices above, far above both the band and the scenarios' best prices. Where Marktmorgen is ahead without it: 0% of a sale (tied with the best in each band), 2,000 products, 100,000 contacts (above every finite figure in the Store and Studio bands).
 

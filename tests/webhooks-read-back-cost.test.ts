@@ -19,7 +19,7 @@ import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/li
 import { addEndpoint, emitEvent, setSendHooksForTests } from "@/lib/webhooks";
 import { paidPeriod } from "./billing-period-fixture";
 import * as registry from "./plan-cost-registry";
-import { NOT_A_COST, TAKE_COMMANDS, UNIT_COST, request } from "./plan-cost-registry";
+import { NOT_A_COST, TAKE_COMMANDS, UNIT_COST, WEBHOOK_ERASED_READ_COMMANDS, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   is("the GET reads a line at most as large as a line may be kept", readBack?.bytes, DELIVERY_WRITE_MAX_BYTES);
   const commands = typeof readBack?.commands === "number" ? readBack.commands : NaN;
   const bytes = typeof readBack?.bytes === "number" ? readBack.bytes : NaN;
-  is("UNIT_COST.webhook is a try with the read back of its delivery's line", UNIT_COST.webhook, request("wait", 20 + TAKE_COMMANDS + commands, 40_000 + bytes));
+  is("UNIT_COST.webhook is a try with the read back of its delivery's line, beside the deletion print's read (#3491)", UNIT_COST.webhook, request("wait", 20 + TAKE_COMMANDS + WEBHOOK_ERASED_READ_COMMANDS + commands, 40_000 + bytes));
   is("the notice lines' read back is said beside their daily caps", [NOT_A_COST.GIVEN_UP_LINES_PER_DAY?.includes("read back"), NOT_A_COST.SKIPPED_LINES_PER_DAY?.includes("DECR")], [true, true]);
 
   part(`An emit to ${MAX_ENDPOINTS} endpoints whose SET answered in a shape it cannot read, at the largest message a line keeps`);

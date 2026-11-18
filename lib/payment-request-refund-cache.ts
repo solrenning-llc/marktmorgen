@@ -8,12 +8,9 @@
  *
  * Only a reading Stripe gave whole, with no refund still under way, is kept.
  * The bound on how old a kept reading can be is REFUND_CHECK_SECONDS: it goes
- * by itself then. A refunded charge seen by the five-minute Stripe events job
- * also forgets it (lib/webhooks.ts, charge.refunded), but that job reads only
- * the stores with an endpoint that wants Stripe events, and usually after the
- * minute has run out, so it helps only sometimes.
- * Its own small file, so the events reader can forget it without loading
- * what payment requests need.
+ * by itself then. The five-minute Stripe events job does not forget it on a
+ * refunded charge: it usually reads after the minute has run out, and a
+ * forget per event read would be one more Redis command, unpriced.
  */
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";

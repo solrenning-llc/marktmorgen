@@ -30,7 +30,7 @@ import { createRequest, markPaid, readRequest } from "@/lib/payment-request-stor
 import * as requests from "@/lib/payment-requests";
 import { addEndpoint, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { PaymentRequestsStudio } from "@/components/payment-requests-studio";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -144,9 +144,9 @@ async function main(): Promise<void> {
   c = await check([{ status: 500, body: {} }]);
   is("opened again within the minute: Stripe is not asked, the same answer", [c.singleReads, c.request?.refunded, c.request?.refundsChecked], [0, 10_000, true]);
 
-  part("A refund the store's Stripe events show forgets what was kept");
-  is("there is a way to forget one payment's kept check", typeof api.forgetRefundCheck, "function");
-  is("the events reader forgets it on a refunded charge, whether or not an endpoint listens for refunds", /event\.type === "charge\.refunded"\) \{[\s\S]{0,900}forgetRefundCheck\([\s\S]{0,900}heard\.has\("refund\.issued"\)/.test(readFileSync("lib/webhooks.ts", "utf8")), true);
+  part("A refund the five-minute Stripe events job reads costs it no command: what was kept goes by itself within REFUND_CHECK_SECONDS");
+  is("there is a way to forget one payment's kept check (the tests below use it)", typeof api.forgetRefundCheck, "function");
+  is("the events reader never forgets it: no Redis command per refunded charge it reads", readFileSync("lib/webhooks.ts", "utf8").includes("forgetRefundCheck"), false);
   is("an endpoint that listens only for disputes is kept", (await addEndpoint(store, "https://hooks.example.net/in", ["dispute.opened"])).ok, true);
   events = [{ id: "evt_RefDemand1", type: "charge.refunded", created: Math.floor(now / 1000), data: { object: { id: "ch_RefDemand1", payment_intent: INTENT, amount_refunded: PAID, amount: PAID, refunded: true, currency: "usd", metadata: {} } } }];
   const quiet = console.error;
@@ -157,7 +157,10 @@ async function main(): Promise<void> {
     console.error = quiet;
   }
   c = await check([list([ours("re_ours_301", 10_000), ours("re_ours_rest", 38_000)], false)]);
-  is("after the refund event, Stripe is asked again, and the rest of the refund is read: refunded in full", [c.singleReads, c.request?.state, c.request?.refunded, c.request?.refundsChecked], [1, "refunded", PAID, true]);
+  is("after the refund event, within the minute: still the kept reading, Stripe not asked", [c.singleReads, c.request?.refunded], [0, 10_000]);
+  advance((api.REFUND_CHECK_SECONDS ?? 0) * 1000 + 1000);
+  c = await check([list([ours("re_ours_301", 10_000), ours("re_ours_rest", 38_000)], false)]);
+  is("once the minute is over, Stripe is asked again, and the rest of the refund is read: refunded in full", [c.singleReads, c.request?.state, c.request?.refunded, c.request?.refundsChecked], [1, "refunded", PAID, true]);
 
   part("A read that cannot be trusted is \"not checked\", never 0");
   redis.clear();

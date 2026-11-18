@@ -574,8 +574,7 @@ export type RefundCheckWhy = "" | "limit" | "unavailable" | "used" | "stripe" | 
  * only after the store's check for the minute (REFUND_CHECKS_PER_MINUTE) and
  * REFUND_CHECK_UNITS studio requests are taken; a whole reading is kept
  * REFUND_CHECK_SECONDS per payment (lib/payment-request-refund-cache.ts), so
- * opening it again asks Stripe nothing, and a refund the store's Stripe
- * events show forgets it (lib/webhooks.ts). Every other answer is not
+ * opening it again within that minute asks Stripe nothing. Every other answer is not
  * checked, never 0 refunded (rule 24): a failed read, a list with more,
  * a reply or a row in another shape, a refund under way, the cap or the
  * studio's figure reached. What was read is written, only ever upward.

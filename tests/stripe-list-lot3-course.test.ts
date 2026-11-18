@@ -38,12 +38,16 @@ import { emptyCourse, editCourse, saveCourse } from "@/lib/course";
 import { courseAccess, dropEnrollment, recordEnrollment, mintPass, passCookieName, forgetPaid } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 import { paidPeriod } from "./billing-period-fixture";
 
 let pages: unknown[] = [];
 const mails: { to: string[]; text: string }[] = [];
 const reads: { after: string | null; version: string | null }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     mails.push(JSON.parse(String(init?.body)) as { to: string[]; text: string });
@@ -59,6 +63,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return new Response(JSON.stringify(pages[Math.min(index, pages.length - 1)]));
   }
   if (path === "/checkout/sessions" && method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  // The store's disputes closed (charge.dispute.closed, lib/refunds.ts lostDisputesSince): none, read to the end.
+  if (path === "/events" && method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
 
@@ -103,7 +109,9 @@ async function main(): Promise<void> {
   const anchor = async () => (await redis.pipeline([["GET", anchorKey]]))[0];
   const run = () => revokeRefundedGroups(store, Date.now() + 30_000, async () => {});
   const now = Math.floor(Date.now() / 1000);
-  const refund = (id: string, pi: string, created = now) => ({ id, object: "refund", created, status: "succeeded", payment_intent: pi, charge: { refunded: true } });
+  // Rule 23: the refund and its charge now carry their amounts, as Stripe lists them: since the owner's decision 18 (9 November
+  // 2026) a succeeded refund takes the places back only when its amount covers the charge, or the charge's refunds add up.
+  const refund = (id: string, pi: string, created = now) => ({ id, object: "refund", created, status: "succeeded", amount: 4900, payment_intent: pi, charge: { refunded: true, amount: 4900 } });
   const other = (n: number) => refund(`re_LotThreeOther${String(n).padStart(3, "0")}`, `pi_LotThreeElse${String(n).padStart(3, "0")}`, now - n);
 
 

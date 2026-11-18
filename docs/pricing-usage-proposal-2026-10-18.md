@@ -19,8 +19,8 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $139.80 | $1,435.98 | $69 / $690 |
-| Studio | $277.95 | $3,065.78 | $449 / $4,490 |
+| Store | $139.90 | $1,435.98 | $69 / $690 |
+| Studio | $278.40 | $3,065.85 | $449 / $4,490 |
 | Scale | $495.70 | $5,635.75 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
@@ -44,7 +44,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 **(recommended)** | 10.6% | 60.22% | 60.04% | $89.74 | 0.42 |
-| $169 / $1,690 | 64.7% | 60.24% | 60.04% | $101.82 | 0.37 |
+| $169 / $1,690 | 64.7% | 60.24% | 60.04% | $101.81 | 0.37 |
 | $199 / $1,990 | 100.0% | 60.51% | 60.31% | $120.43 | 0.31 |
 
 ### Studio
@@ -92,7 +92,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Store emails a month: included · #553 · before #553 | **7** · 75 · 75 | **110** · 300 · 300 | **430** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.22% | 60.40% | 60.45% |
 | Net at full included use, yearly (sizing reading) | 60.04% | 60.01% | 60.01% |
-| Net at full use, monthly, under the most-tax reading (the gate) | 12.07% | 12.14% | 12.16% |
+| Net at full use, monthly, under the most-tax reading (the gate) | 12.06% | 12.14% | 12.16% |
 | Net a customer, a month, at full included use | $89.74 | $271.21 | $603.96 |
 | The same at #553's price | $37.63 | $263.99 | $592.27 |
 

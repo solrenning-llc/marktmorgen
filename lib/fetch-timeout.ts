@@ -85,6 +85,10 @@ export function lockWait(most: number, keep = 2_000): number {
 }
 
 /** The error a request gives up with: the one `fetch` throws when the network fails. */
+/** The reason a request cut short by our own run's time is given up with, never the provider's silence. */
+export const RUN_TIME_RAN_OUT = "The run's own time ran out";
+export const NO_TIME_TO_ASK = "there was no time left to ask";
+
 export function givenUp(cause: unknown): TypeError {
   return new TypeError("fetch failed", { cause });
 }
@@ -99,7 +103,7 @@ export function givenUp(cause: unknown): TypeError {
  */
 export async function timed<T>(ms: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const room = Math.min(ms, timeLeft());
-  if (room < 50) throw givenUp(new Error("there was no time left to ask"));
+  if (room < 50) throw givenUp(new Error(NO_TIME_TO_ASK));
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   // The caller is answered when the time is up whether or not the library
@@ -107,7 +111,9 @@ export async function timed<T>(ms: number, work: (signal: AbortSignal) => Promis
   // may not stop at once): the request is aborted, and its promise raced.
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      const reason = new DOMException("The request took too long", "TimeoutError");
+      // Our own run's time (a cutoff nearer than `ms`) is told apart from the provider taking too long
+      // (lib/stripe-silence.ts): only the second is the provider's silence.
+      const reason = room < ms ? new DOMException(RUN_TIME_RAN_OUT, "TimeoutError") : new DOMException("The request took too long", "TimeoutError");
       controller.abort(reason);
       reject(givenUp(reason));
     }, room);

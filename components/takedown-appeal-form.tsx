@@ -109,11 +109,22 @@ export function TakedownAppealForm({ decision, what }: { decision: string; what:
   );
 }
 
-/** Tells our team again about a kept request it was never told of. */
+/**
+ * Tells our team again about a kept request it was never told of. The focus is never dropped (2.4.3, cloud P's
+ * MEDIUM on #3533): while sending, the button keeps it (aria-disabled, presses ignored, never `disabled`); on a failure
+ * it stays there to try again; on success the button goes and the outcome takes it.
+ */
 export function TakedownAppealSendAgain({ decision, number }: { decision: string; number: string }) {
   const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   const [words, setWords] = useState("");
+  const busy = useRef(false);
+  const outcome = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (state === "sent") outcome.current?.focus();
+  }, [state]);
   async function again() {
+    if (busy.current) return;
+    busy.current = true;
     setState("sending");
     try {
       const response = await fetch("/api/store/appeal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "again", decision }) });
@@ -129,17 +140,19 @@ export function TakedownAppealSendAgain({ decision, number }: { decision: string
     } catch {
       setWords("We could not reach Marktmorgen just now. Try again in a moment.");
       setState("failed");
+    } finally {
+      busy.current = false;
     }
   }
   return (
     <div className="mt-3">
-      <p className="max-w-[80ch]">We could not pass this request on to our team yet.</p>
+      {state === "sent" ? null : <p className="max-w-[80ch]">We could not pass this request on to our team yet.</p>}
       {state === "sent" ? null : (
-        <button type="button" className="btn btn-primary mt-2 inline-flex min-h-11 items-center" onClick={again} disabled={state === "sending"}>
+        <button type="button" className="btn btn-primary mt-2 inline-flex min-h-11 items-center" onClick={again} aria-disabled={state === "sending" ? true : undefined}>
           {state === "sending" ? "Sending…" : "Send it again"}
         </button>
       )}
-      <p role="status" className="mt-2">{words}</p>
+      <p ref={outcome} tabIndex={-1} role="status" className="mt-2">{words}</p>
     </div>
   );
 }

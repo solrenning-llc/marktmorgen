@@ -38,6 +38,7 @@
 import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
+import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
@@ -252,6 +253,13 @@ export type Product = {
    */
   shipping?: Shipping | null;
   /**
+   * The legal information the creator filled on a product they ship
+   * (lib/physical-legal-record.ts, 618 [SZ2]): EU product safety, a
+   * Proposition 65 text and the net quantity of each price. Absent or null is
+   * nothing filled. Kept on the full record only, never on the listing.
+   */
+  legal?: PhysicalLegal | null;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -264,7 +272,7 @@ export type Product = {
  * its own page, a download and most of the site need. Anything that takes a
  * Listing also takes a full Product.
  */
-export type Listing = Omit<Product, "fields" | "funnel">;
+export type Listing = Omit<Product, "fields" | "funnel" | "legal">;
 
 /**
  * One product as the store record lists it: its id, what kind of thing it is
@@ -283,6 +291,11 @@ export type Catalog = {
   head: Listing[];
   /** A record from before this layout: its products, read in full. Null otherwise. */
   inline: Product[] | null;
+  /**
+   * The products of the head or inline whose stored schedule (`recurring`) is there but could not be read: read as
+   * no schedule everywhere else (parseRecurring), unknown to readListingsAll (Codex's review of #1824). Only when any.
+   */
+  unreadSchedules?: string[];
 };
 
 /** What a product is, in bits a store record can carry for thousands of them. */
@@ -374,6 +387,8 @@ export function parseProduct(entry: unknown): Product | null {
   // An unreadable physical record must not become a digital product or free shipping.
   // Leave the stored creator record intact and refuse to offer this product.
   if (value.shipping !== undefined && value.shipping !== null && !shipping) return null;
+  // Unreadable legal fields read as not filled, so every EU/EEA gap stays open; the product itself still reads.
+  const legal = readPhysicalLegal(value.legal);
   return {
     id: value.id,
     title: value.title.slice(0, MAX_TITLE_LENGTH),
@@ -414,6 +429,7 @@ export function parseProduct(entry: unknown): Product | null {
     yearly: parseYearly(value.yearly),
     note: value.note === true,
     shipping,
+    ...(legal ? { legal } : {}),
     hidden: value.hidden === true,
   };
 }
@@ -470,6 +486,12 @@ function parseListing(entry: unknown): Listing | null {
   return product ? listingOf(product) : null;
 }
 
+/** Whether a stored entry's schedule is there (not absent, not null) and was read as none. */
+function scheduleUnread(entry: unknown, read: Pick<Product, "recurring">): boolean {
+  const recurring = entry && typeof entry === "object" ? (entry as { recurring?: unknown }).recurring : undefined;
+  return recurring !== undefined && recurring !== null && !read.recurring;
+}
+
 /** The kind bits of a product. */
 export function kindOf(product: Listing & { funnel?: Product["funnel"] }): number {
   let bits = product.priceCents > 0 ? KIND.paid : KIND.free;
@@ -519,22 +541,29 @@ export function parseCatalog(raw: unknown, legacy: unknown): Catalog {
   if (value && typeof value.id === "string" && CATALOG_ID_PATTERN.test(value.id)) {
     const items = parseItems(value.items);
     const known = new Set(items.map((item) => item.id));
-    const head = Array.isArray(value.head)
-      ? value.head.map(parseListing).filter((listing): listing is Listing => listing !== null && known.has(listing.id))
-      : [];
-    return { id: value.id, items, head, inline: null };
+    const head: Listing[] = [];
+    const unread: string[] = [];
+    for (const entry of Array.isArray(value.head) ? value.head : []) {
+      const listing = parseListing(entry);
+      if (listing === null || !known.has(listing.id)) continue;
+      head.push(listing);
+      if (scheduleUnread(entry, listing)) unread.push(listing.id);
+    }
+    return { id: value.id, items, head, inline: null, ...(unread.length ? { unreadSchedules: unread } : {}) };
   }
   const inline: Product[] = [];
+  const unread: string[] = [];
   const seen = new Set<string>();
   for (const entry of Array.isArray(legacy) ? legacy : []) {
     const product = parseProduct(entry);
     if (!product || seen.has(product.id)) continue;
     seen.add(product.id);
     inline.push(product);
+    if (scheduleUnread(entry, product)) unread.push(product.id);
     if (inline.length >= MAX_PRODUCTS) break;
   }
   const items = inline.map(itemOf);
-  return { id: null, items, head: headFrom(items, new Map(inline.map((p) => [p.id, listingOf(p)]))), inline };
+  return { id: null, items, head: headFrom(items, new Map(inline.map((p) => [p.id, listingOf(p)]))), inline, ...(unread.length ? { unreadSchedules: unread } : {}) };
 }
 
 /** How a catalog is written into the store record. */
@@ -691,11 +720,13 @@ function parseJson(raw: unknown): unknown {
 function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
   if (ids === undefined) return productIds(store);
   const known = new Set(productIds(store));
-  const out: string[] = [];
+  // Each id once, in the order asked: a Set, so asking for every product stays linear (772 [SA4] unit 4 measured the
+  // list scan this replaced at 17 s for 100,000 products, tests/catalog-whole-read-load.test.ts).
+  const out = new Set<string>();
   for (const id of ids) {
-    if (typeof id === "string" && known.has(id) && !out.includes(id)) out.push(id);
+    if (typeof id === "string" && known.has(id)) out.add(id);
   }
-  return out;
+  return [...out];
 }
 
 /**
@@ -730,6 +761,64 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
     });
   }
   return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
+}
+
+/**
+ * Every listing asked for, in the order asked, or UnknownReplyError: for a
+ * reader whose answer would be wrong with one left out (a store's policy
+ * page, lib/store-policy-input.ts). An id the store does not have, a record
+ * missing from Redis, a reply that is not one exact answer per GET
+ * (repliesFor), a record that is not that product's listing, or one whose
+ * `recurring` is there but not a schedule makes the whole read unknown, never
+ * a shorter list or a membership read as none (Codex G's review of #1824), wherever it is read from: Redis, the
+ * head or a record from before product records (unreadSchedules), and a head listing with no schedule whose item
+ * says it is a membership (Codex's review of #1824 @ 48fc8e11e6). Stricter than readListingsExact below,
+ * which leaves out a record Redis confirms is not there.
+ */
+export async function readListingsAll(store: Store, ids: readonly string[]): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  if (asked.length !== ids.length) throw new UnknownReplyError("a listing read for products the store does not have");
+  const catalog = store.catalog;
+  const unread = new Set(catalog.unreadSchedules ?? []);
+  if (asked.some((id) => unread.has(id))) throw new UnknownReplyError("a listing read with a membership schedule unreadable in the store record");
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => {
+      const product = byId.get(id);
+      if (!product) throw new UnknownReplyError("a listing read with a product missing from the store record");
+      return listingOf(product);
+    });
+  }
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  // The head and its item are written together: a head listing with no schedule whose item says a membership is
+  // a contradiction, never "not a membership".
+  const kinds = new Map(catalog.items.map((item) => [item.id, item.kind]));
+  for (const id of asked) {
+    const listing = found.get(id);
+    if (listing && !listing.recurring && ((kinds.get(id) ?? 0) & KIND.recurring) !== 0) throw new UnknownReplyError("a listing read whose head says no schedule while its item says a membership");
+  }
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a listing read with no catalog storage");
+    const chunks: string[][] = [];
+    for (let i = 0; i < missing.length; i += 400) chunks.push(missing.slice(i, i + 400));
+    const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((id) => ["GET", listingKey(catalog.id!, id)]))));
+    chunks.forEach((chunk, c) => {
+      const replies = repliesFor(answers[c], chunk.length);
+      if (!replies) throw new UnknownReplyError("a listing read");
+      chunk.forEach((id, i) => {
+        const raw = parseJson(replies[i]);
+        const listing = parseListing(raw);
+        if (!listing || listing.id !== id) throw new UnknownReplyError("a listing read with a record missing or unreadable");
+        // parseProduct reads a schedule it cannot read as none; here that would say "not a membership".
+        // Only an absent or null `recurring` is none (Codex G's review of #1824).
+        const recurring = (raw as { recurring?: unknown }).recurring;
+        if (recurring !== undefined && recurring !== null && !listing.recurring) throw new UnknownReplyError("a listing read with a membership schedule unreadable");
+        found.set(id, listing);
+      });
+    });
+  }
+  return asked.map((id) => found.get(id)!);
 }
 
 /**
@@ -799,6 +888,32 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
     if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * Which of these products ask questions at checkout (lib/checkout-fields.ts), read without the products in full:
+ * the questions live in the heavy rest of a product's record, which a listing does not carry, so a cart that reads
+ * listings alone took a product with questions for one it could pay for, and the cart checkout then refused the
+ * whole order (#4350). One GET per product a store does not hold inline. A product with no heavy rest asks nothing
+ * (productWrites deletes it); a reply or record that does not read throws UnknownReplyError (CX-123 rule 24), never
+ * "asks nothing".
+ */
+export async function readAsking(store: Store, ids: Iterable<string>): Promise<Set<string>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) return new Set(catalog.inline.filter((p) => asked.includes(p.id) && p.fields.length > 0).map((p) => p.id));
+  if (asked.length === 0) return new Set();
+  if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a product's checkout questions");
+  const raws = await getMany(asked.map((id) => extrasKey(catalog.id!, id)));
+  const asking = new Set<string>();
+  asked.forEach((id, i) => {
+    if (raws[i] === null) return;
+    // Read exactly as readProducts reads it (exactExtras): a record in another shape is unknown, never "asks nothing".
+    const extras = typeof raws[i] === "string" ? exactExtras(parseJson(raws[i])) : null;
+    if (!extras) throw new UnknownReplyError("a product's checkout questions");
+    if (parseFields(extras.fields).length > 0) asking.add(id);
+  });
+  return asking;
 }
 
 /**
@@ -982,22 +1097,40 @@ export const STORE_SEARCH_LIMIT = STORE_PAGE_SIZE * 2;
 /** The longest search the store page takes. */
 export const MAX_STORE_SEARCH = 80;
 
-/** Words as a search compares them: no accents, no case, letters and digits only. */
+/** Letters NFD does not take apart, as a buyer types them on a plain keyboard. */
+const PLAIN_LETTERS: Record<string, string> = { "\u00df": "ss", "\u0142": "l", "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0131": "i" };
+
+/**
+ * Words as a search compares them: no accents, no case, letters and digits only. An apostrophe is part of its
+ * word ("Beginner’s" is "beginners", as typed without it), and the letters NFD keeps whole are spelled plainly.
+ */
 export function searchWords(text: string): string[] {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/['\u2018\u2019\u02bc`]/g, "")
+    .replace(/[\u00df\u0142\u00f8\u00e6\u0153\u0111\u00f0\u00fe\u0131]/g, (letter) => PLAIN_LETTERS[letter])
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
 }
 
-/** Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one). */
+/** The text with its hyphens taken out, so "E-book" reads as "ebook" too. */
+const unhyphened = (text: string) => text.replace(/[-\u2010\u2011]/g, "");
+/** The text with its apostrophes as spaces, so the word after an elision ("L'Atelier", "dell'arte") is found by itself too. */
+const unelided = (text: string) => text.replace(/['\u2018\u2019\u02bc`]/g, " ");
+
+/**
+ * Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one).
+ * A hyphenated word is found typed whole or in its parts, either side: "ebook" finds "E-book", "e-book" finds "Ebook".
+ * A word after an apostrophe is found by itself as well as glued: "atelier" and "latelier" both find "L'Atelier".
+ */
 export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query: string): boolean {
-  const asked = searchWords(query);
-  if (asked.length === 0) return false;
-  const has = searchWords(`${listing.title} ${listing.summary}`);
-  return asked.every((word) => has.some((one) => one.startsWith(word)));
+  const text = `${listing.title} ${listing.summary}`;
+  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text)), ...searchWords(unelided(text))])];
+  return [searchWords(query), searchWords(unhyphened(query))].some(
+    (asked) => asked.length > 0 && asked.every((word) => has.some((one) => one.startsWith(word))),
+  );
 }
 
 /**
@@ -1278,9 +1411,13 @@ export async function studioShelf(
   // command (readTitles). Only the fifty products actually shown are read.
   // This used to read every product in the store to find fifty.
   const titles = await readTitles(store);
+  // Folded as the store page's search folds words (searchWords: no accents, no case), so "creme brulee" finds
+  // "Crème brûlée class" here as it does for a buyer; a part of a word still finds it.
   const needle = query.toLowerCase();
+  const folded = searchWords(needle).join(" ");
   const ordered = productIds(store).filter((id) => titles.has(id));
-  const matches = needle ? ordered.filter((id) => (titles.get(id) ?? "").toLowerCase().includes(needle)) : ordered;
+  const has = (title: string) => (folded ? searchWords(title).join(" ").includes(folded) : title.toLowerCase().includes(needle));
+  const matches = needle ? ordered.filter((id) => has(titles.get(id) ?? "")) : ordered;
   const pages = Math.max(1, Math.ceil(matches.length / STUDIO_PAGE_SIZE));
   const page = Math.min(Math.max(1, asked), pages);
   const from = (page - 1) * STUDIO_PAGE_SIZE;
@@ -1324,12 +1461,23 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+/**
+ * The heavy rest of a product, kept beside its listing: its checkout
+ * questions, its funnel and, on a product the creator ships, its legal
+ * information (lib/physical-legal-record.ts). "" when it has none of them.
+ */
+function extrasOf(product: Product): string {
+  const legal = product.legal ?? null;
+  if (product.fields.length === 0 && product.funnel === null && legal === null) return "";
+  return JSON.stringify({ fields: product.fields, funnel: product.funnel, ...(legal ? { legal } : {}) });
+}
+
 /** The writes that put one product in its records. Refuses one past the ceiling. */
 export function productWrites(catalog: string, product: Product): Command[] {
   if (!SAFE_ID.test(product.id)) throw new Error("product id");
   const listing = JSON.stringify(listingOf(product));
-  const heavy = product.fields.length > 0 || product.funnel !== null;
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
   return [
     ["SET", listingKey(catalog, product.id), listing],
@@ -1344,9 +1492,9 @@ export function productWrites(catalog: string, product: Product): Command[] {
  * its own key or field.
  */
 export function productBytes(product: Product): number {
-  const heavy = product.fields.length > 0 || product.funnel !== null;
   const listing = JSON.stringify(listingOf(product));
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
 }
 
@@ -1374,9 +1522,13 @@ export function movedMark(catalog: string, count: number): Command {
 /** How many products the index listed when this catalog was last written, or null when it was never moved. */
 export async function movedCount(catalog: string): Promise<number | null> {
   if (!CATALOG_ID_PATTERN.test(catalog) || !isRedisConfigured()) return null;
-  const [found] = await redisPipeline([["GET", movedKey(catalog)]]);
-  if (typeof found !== "string") return null;
-  return /^\d{1,6}$/.test(found) ? Number(found) : 0;
+  // Read exactly (rule 24): only GET's exact null is "never moved" and only digits are a count. Anything else throws, so
+  // moveToRecords writes nothing, never null or 0 that skipped its guard and wrote a lost index over the products.
+  const read = repliesFor(await redisPipeline([["GET", movedKey(catalog)]]), 1);
+  const found = read?.[0];
+  if (read && found === null) return null;
+  if (!read || typeof found !== "string" || !/^\d{1,6}$/.test(found)) throw new UnknownReplyError("how many products a moved catalog listed");
+  return Number(found);
 }
 
 /** Sends writes in pipelines of a few hundred. */

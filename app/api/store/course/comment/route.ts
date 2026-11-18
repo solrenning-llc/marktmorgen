@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
 
   const course = await readCourse(product.course.id);
   const found = course ? findLesson(course, lessonId) : null;
-  const access = await courseAccess(store, product, request.cookies);
+  const access = await courseAccess(store, product, request.cookies, course);
   if (!course || !found || access.state !== "open" || !isOpen(course, found.unit, access.start)) {
     return new Response(null, { status: 303, headers: { Location: base } });
   }
@@ -61,7 +62,9 @@ export async function POST(request: NextRequest) {
   }
   if (!(await commentsOn(course.id))) return back("off");
   // The creator deleting a comment, from a session let in without its second step, waits (lib/two-step.ts).
-  if (owner && action === "delete" && (await lockedFor(request, "products", "cm-delete"))) return back("locked");
+  const lock = owner && action === "delete" ? await lockRead(lockedFor(request, "products", "cm-delete"), { back: `${base}/${lessonId}#comments`, to: "the lesson" }) : false;
+  if (lock instanceof Response) return lock;
+  if (lock) return back("locked");
 
   // Each act here is one of the store's buyer actions, or the creator's
   // studio requests (lib/buyer-actions.ts); a student deleting their own

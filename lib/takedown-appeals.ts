@@ -111,7 +111,7 @@ function readKept(raw: string): KeptAppeal {
   const v: unknown = JSON.parse(raw);
   const r = v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
   const a = r?.appeal && typeof r.appeal === "object" ? (r.appeal as Record<string, unknown>) : null;
-  if (!r || !a || typeof r.told !== "boolean" || typeof r.tries !== "number" || !Number.isSafeInteger(r.tries) || r.tries < 0 || typeof a.number !== "string" || !APPEAL_NUMBER.test(a.number) || typeof a.store !== "string" ||
+  if (!r || !a || typeof r.told !== "boolean" || typeof r.tries !== "number" || !Number.isSafeInteger(r.tries) || r.tries < (r.told ? 1 : 0) || r.tries > MAX_TELL_TRIES || typeof a.number !== "string" || !APPEAL_NUMBER.test(a.number) || typeof a.store !== "string" ||
       typeof a.decision !== "string" || typeof a.explanation !== "string" || typeof a.at !== "string" || !Array.isArray(a.moves) ||
       !["received", "under_review", "upheld", "reversed"].includes(String(a.state)) || !movesLeadTo(a.state, a.moves)) {
     throw new UnknownReplyError("a request to look again");

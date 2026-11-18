@@ -108,25 +108,33 @@ type Params = {
  * the same prices, options, plan, box for the product offered alongside,
  * limited quantity and checkout. A page that sold the same thing on
  * different terms would be a page nobody could trust.
+ *
+ * As the store page does, a store with no plan a visit can be charged to rests once it has had its month's visits
+ * (lib/traffic.ts). The page is counted as one of the store's public requests here, before anything of the product
+ * is read (traffic audit, 9 November 2026): past the window, neither the title nor the page reads the listing, the
+ * description or the sales page. The page and its title share this one count within a request (React cache).
  */
-const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
+const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string; resting: false } | { store: Store; asked: string; resting: true } | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const asked = normaliseHandle(decoded);
   const store = await storeForPage(asked);
   if (!store) return null;
+  if (await isResting(store)) return { store, asked, resting: true };
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
   // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked } : null;
+  return product && !product.hidden ? { store, product, asked, resting: false } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+/** The product's description and its sales page, each read once a request, by the title and by the page (React cache). */
+const aboutOf = cache((statsId: Store["statsId"], productId: string): Promise<string> => readAbout(statsId, productId));
+const pageOf = cache(async (statsId: Store["statsId"], productId: string, has: boolean): Promise<SalesPage | "unread"> => {
   // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
   // read is not known is "unread": said so, out of search, never shown as the product with no page
   // (C4-20261106-2610-C6-153, unit B).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
-}
+  return has ? readPage(statsId, productId).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
+});
 
 /**
  * The page as this visitor is shown it, while it runs a test of a second
@@ -152,8 +160,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const found = await load(handle, id);
   if (!found) return { title: "Not found — Marktmorgen" };
+  // Resting: the title says so, and names nothing of the product, which was not read.
+  if (found.resting) return { title: `${speech(found.store).w.restingTitle} — ${found.store.name}`, robots: { index: false, follow: true } };
   const { store, product } = found;
-  const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  const [about, page] = await Promise.all([product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""), pageOf(store.statsId, product.id, product.page)]);
   if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
@@ -260,6 +270,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     if (store) redirect(`/@${store.handle}`);
     notFound();
   }
+  if (found.resting) return <StoreResting store={found.store} />;
   const { product, asked } = found;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = await forVisitor(found.store);
@@ -273,9 +284,6 @@ export default async function ProductPage({ params, searchParams }: Params) {
   }
   if (asked !== store.handle && !reachedOn) permanentRedirect(productPath(store, product));
 
-  // As the store page does: a store with no plan a visit can be charged to
-  // rests once it has had its month's visits (lib/traffic.ts).
-  if (await isResting(store)) return <StoreResting store={store} />;
   // Switched off after notices about its content (lib/takedown.ts).
   if (store.suspended) return <StoreResting store={store} suspended />;
 
@@ -289,10 +297,13 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const giftProblem = typeof query.gift === "string" ? query.gift : "";
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   const groupProblem = typeof query.group === "string" ? query.group : "";
   // Sent back because the box to start access at once was not checked (lib/digital-consent.ts): said beside it.
   const consentAgain = query.consent === "needed";
+  // Sent back by the checkout (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate): refused from the EU or the UK, or
+  // the billing country was left out. Only those two words; anything else shows nothing.
+  const countryStatus = query.status === "abroad" || query.status === "country" ? query.status : null;
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
@@ -317,11 +328,11 @@ export default async function ProductPage({ params, searchParams }: Params) {
       </p>
     ) : null;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, asksAtCheckout] = await Promise.all([
-    product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
+    product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""),
     // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
     stockLeft(store, product).catch(() => undefined),
     outOfKeys(store, product).catch(() => null),
-    pageOf(store, product),
+    pageOf(store.statsId, product.id, product.page),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
     product.bumps.length ? readListings(store, bumpTargets(product)) : Promise.resolve([]),
@@ -483,7 +494,19 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {unread && selling && !soon ? (
         <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
       ) : (
-        <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} />
+        <>
+          {/* Drawn with the buy box only: its link and the field's aria-describedby point at the country field inside it. */}
+          {countryStatus ? (
+            <div className="st-note mb-4" role="alert" id="country-notice">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices[countryStatus].title}</p>
+              <p className="mt-1 text-sm">{w.notices[countryStatus].body}</p>
+              <p className="mt-2 text-sm">
+                <a href={`#bc-${product.id}`} className="underline">{w.chooseCountry}</a>
+              </p>
+            </div>
+          ) : null}
+          <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
+        </>
       )}
       {/* A course whose exact read failed offers no way to buy here, the cart included (Codex L on #3445): the BuyBox is closed on the same reading. */}
       {!courseUnread && cartOn && !soon && !unread && !asksAtCheckout && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}

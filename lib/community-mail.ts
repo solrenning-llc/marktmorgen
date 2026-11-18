@@ -29,7 +29,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendListBatch } from "@/lib/email";
-import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import { leadsKey } from "@/lib/contact-rules";
 import type { Store } from "@/lib/store";
@@ -41,10 +41,11 @@ import {
   readConfig,
   readMember,
   readMembersExact,
+  readPost,
   setMail,
   setMemberToken,
 } from "@/lib/community";
-import { askingAgainWontTell, holdsTicket } from "@/lib/community-access";
+import { askingAgainWontTell, holdsTicket, maySeeSpace } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
@@ -76,6 +77,12 @@ export type AnnouncementJob = {
   skipped?: number;
   /** The current batch's members not answered for, by member key, with the tries in a row so far (sortBatch). */
   tries?: Record<string, number>;
+  /**
+   * The space the post was written in. A member who cannot see that space (one kept for the buyers of a product
+   * they do not hold) is passed over, never emailed its words. Absent on a send queued before it was kept: the post
+   * is read for it.
+   */
+  space?: string;
 };
 
 function parse(raw: unknown): AnnouncementJob | null {
@@ -152,6 +159,7 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
     community: communityId,
     handle: store.handle,
     post: post.id,
+    space: post.sp,
     subject,
     body,
     total: members.length,
@@ -434,7 +442,13 @@ export async function advanceAnnouncement(
         const asking = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
         // Never an address the store's list took off for a hard bounce, a spam complaint or a refusal (keptOnList).
         const candidates = store.listId ? await keptOnList(store.listId, asking) : asking;
-        return sortBatch(store, community, candidates, (m) => holdsTicket(store, config, m.e, { strict: true }), job.tries);
+        // The post's space, as it is now: a space taken away leaves its posts in the whole community's feed.
+        const spaceId = job.space ?? (await readPost(community, job.post))?.sp;
+        const space = spaceId ? config.spaces.find((s) => s.id === spaceId) : undefined;
+        const letIn = async (m: Member) =>
+          (await holdsTicket(store, config, m.e, { strict: true })) &&
+          (!space?.only.length || (await maySeeSpace(store, config, space, { owner: false, email: m.e }, { strict: true })));
+        return sortBatch(store, community, candidates, letIn, job.tries);
       })().catch((error: unknown) => {
         console.error("an announcement could not read who is in a batch", error);
         return null;
@@ -446,7 +460,8 @@ export async function advanceAnnouncement(
       }
       const { recipients, tokens, skipped } = read;
       if (recipients.length) {
-        const reserved = await reserve(store, recipients.length);
+        const day = mailDay();
+        const reserved = await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -476,12 +491,12 @@ export async function advanceAnnouncement(
         const outcome = await sendListBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
         if (outcome === "waiting") {
           // Known not handed to any provider: it waits for the sender in the queue, never counted as a failure.
-          await release(store, recipients.length);
+          await release(store, recipients.length, day);
           job = { ...job, status: "waiting", note: SENDER_WAIT_NOTE };
           break;
         }
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          await release(store, recipients.length, day);
           const failures = job.failures + 1;
           // Only a refusal ends it: a provider that is down keeps the email waiting, never abandoned (outage drill).
           job = outcome === "refused"

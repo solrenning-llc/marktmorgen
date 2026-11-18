@@ -81,7 +81,7 @@ import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseReco
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
-import { forgetPodcastPerson } from "@/lib/podcast-access";
+import { forgetPodcastPerson, podcastProductCount } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
 import { forgetRecoveryPerson } from "@/lib/checkout-recovery";
@@ -94,6 +94,7 @@ import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
+import { forgetBenefitPerson } from "@/lib/tier-benefits";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
@@ -196,6 +197,7 @@ export const ERASERS: Eraser[] = [
   // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
   { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
+  { module: "lib/tier-benefits.ts", run: (s) => forgetBenefitPerson(s.store, s.person) },
   {
     module: "lib/reviews.ts",
     only: "person",
@@ -281,13 +283,14 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    podcastProductCount(scope.statsId),
   ]);
   return {
     products: scope.productIds.length,
@@ -301,6 +304,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificates,
     droppedCourses: scope.droppedCourses ?? 0,
     droppedRecords: scope.droppedRecords ?? 0,
+    podcastProducts,
   };
 }
 

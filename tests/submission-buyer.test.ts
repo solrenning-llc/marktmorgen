@@ -53,7 +53,7 @@ import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { LessonSubmission } from "@/components/lesson-submission";
 import { type DataStore, dataKey } from "@/lib/store-data";
 import { advance, store as redis } from "./redis-stub";
-import { mount, texts } from "./client-hooks";
+import { find, mount, texts } from "./client-hooks";
 import { COURSE, FOLDER, LESSON, resetWorld, state } from "./submission-upload-world";
 import { done, is, part } from "./check";
 
@@ -511,6 +511,56 @@ async function main(): Promise<void> {
     let plainAsked = 0;
     const plainDone = await withdrawSubmission({ ...lesson2, id: plain.id }, NOW + 3_000, vault({ deleteVault: async () => ((plainAsked += 1), true) }).steps);
     is("an ordinary withdrawal is kept and its file deleted", [plainDone.ok, (plainDone as { deleted?: boolean }).deleted, plainAsked], [true, true, 1]);
+  }
+
+
+  part("A busy action keeps the keyboard focus: its buttons say they are busy, never vanish from the tab order (Codex X6 on #3574, LOW)");
+  {
+    const now = Math.floor(Date.now() / 1000);
+    const rows = [
+      { id: "u".repeat(32), state: "uploading", file: { name: "half.mp4", bytes: 5 * MiB, type: "video/mp4" }, at: now - 60, pathname: "submissions/half.mp4" },
+      { id: "w".repeat(32), state: "submitted", file: { name: "wait.mp4", bytes: 5 * MiB, type: "video/mp4" }, note: "", at: now - 60, keepUntil: now + 86_400, reply: null },
+    ];
+    // The list answers at once; the actions never answer while the test looks, so each stays busy.
+    globalThis.fetch = (async (_url: unknown, init?: { body?: unknown }) => {
+      const action = (JSON.parse(String(init?.body ?? "{}")) as { action?: string }).action;
+      if (action === "mine") return new Response(JSON.stringify({ ok: true, submissions: rows }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    const box = await mount(LessonSubmission as (props: Record<string, unknown>) => unknown, { setup: SETUP, where: route, storeName: "Ana's Gym", language: "en" });
+    const buttons = () => find(box.tree(), (n) => n.type === "button");
+    const named = (text: string) => buttons().find((b) => texts(b).join("").includes(text));
+    const busy = (b: ReturnType<typeof named>) => [b?.props.disabled === true, b?.props["aria-disabled"] === true || b?.props["aria-disabled"] === "true"];
+    (named("Cancel sending half.mp4")?.props.onClick as () => void)();
+    await box.settle();
+    is("cancel sending: while it works, the button stays focusable and says it is busy", busy(named("Working")), [false, true]);
+    (named("Withdraw wait.mp4")?.props.onClick as () => void)();
+    await box.settle();
+    (named("Yes, withdraw it")?.props.onClick as () => void)();
+    await box.settle();
+    const keep = named("Keep it");
+    is("withdraw: while it works, \"Keep it\" stays focusable and says it is busy", busy(keep), [false, true]);
+    const before = buttons().length;
+    (keep?.props.onClick as () => void)();
+    await box.settle();
+    is("and pressing it while busy changes nothing", buttons().length, before);
+    box.unmount();
+  }
+
+  part("A withdrawn file is never said kept until a day (Codex X6 on #3574, LOW)");
+  {
+    const now = Math.floor(Date.now() / 1000);
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: true, submissions: [{ id: "x".repeat(32), state: "withdrawn", file: { name: "gone.mp4", bytes: 5 * MiB, type: "video/mp4" }, note: "", at: now - 60, keepUntil: now + 86_400, reply: null }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    const box = await mount(LessonSubmission as (props: Record<string, unknown>) => unknown, { setup: SETUP, where: route, storeName: "Ana's Gym", language: "en" });
+    const said = texts(box.tree()).join(" ");
+    box.unmount();
+    is("its row is listed as withdrawn (control)", said.includes("gone.mp4") && said.includes("Withdrawn."), true);
+    is("never \"Kept until\": its file is deleted or due to be", said.includes("Kept until"), false);
+    is("nor a keeping time", said.includes("Keeping time ended"), false);
   }
 
   done();

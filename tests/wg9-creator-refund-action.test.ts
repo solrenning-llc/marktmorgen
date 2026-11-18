@@ -343,6 +343,29 @@ async function main(): Promise<void> {
   await post({ charge: CHARGE, token: TL, amount: "1.00" });
   is("the same form again writes it now", (await logLines(store)).length, toldBefore + 1);
 
+  part("Codex U on #3678 (MEDIUM, money): the charge read must be the charge asked for, before any refund is listed or sent");
+  // A well-formed answer for another charge, with this store's metadata (a swapped response, a cache or gateway fault):
+  // its ownership, state and ceiling must never authorize a refund on the charge the form named.
+  reset();
+  {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.pathname.endsWith(`/charges/${CHARGE}`) && (init?.method ?? "GET") === "GET") {
+        stripe.calls.push({ method: "GET", path: `/charges/${CHARGE}`, key: null, body: "" });
+        return Response.json({ ...chargeBody(), id: "ch_wg9_different" });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    try {
+      const mismatched = await post({ charge: CHARGE, token: "7".repeat(32), amount: "1.00" });
+      is("a charge answer with another id fails closed", [mismatched.status, mismatched.body.error], [503, "unreadable"]);
+      is("and nothing is listed or sent after it", stripe.calls.filter((c) => c.path.startsWith("/refunds")).length, 0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
   part("Claude 5 on #3678, MEDIUM cost: no studio request left for the waits, nothing is asked of Stripe");
   reset();
   await forceAllowance(store, "studio", 100_000_000);

@@ -1204,6 +1204,7 @@ function OptionsBlock({
       )}
 
       <ul className="mt-3 space-y-2">
+        {/* oxlint-disable-next-line react/refs -- the ref is read only inside ref callbacks and event handlers, not during render; oxlint's port flags the enclosing callback */}
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
             {editingId === option.id ? (() => {
@@ -1457,6 +1458,7 @@ function OptionsBlock({
       {adding
         ? form(
             "Add this price",
+            // oxlint-disable-next-line react/refs -- run() reads its in-flight ref only when the form is submitted, not during render; oxlint's port flags the callback
             () =>
               run(
                 { action: "add", id: product.id, label, price, details, best, ...(shipped ? { sku } : {}) },
@@ -1891,6 +1893,7 @@ export function ProductEditor({
   ownHosts = [],
   tiers = [],
   taxOnTop,
+  canSend = true,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1946,6 +1949,8 @@ export function ProductEditor({
   tiers?: readonly string[];
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
+  /** Whether this role may send to the list (lib/team-roles.ts "send"): putting a waitlisted product on sale emails its waitlist. */
+  canSend?: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -2608,6 +2613,7 @@ export function ProductEditor({
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}
+                    canLaunch={canSend}
                   />
                 ) : null}
                 {product.call || product.course || product.shipping ? null : <BundleToggle product={product} />}

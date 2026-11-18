@@ -58,7 +58,7 @@ async function pay(mode: Mode) {
     };
   }
   try {
-    const form = withConsent(new URLSearchParams({ handle: fixture.store.handle, id: fixture.product }));
+    const form = withConsent(new URLSearchParams({ handle: fixture.store.handle, id: fixture.product, billing_country: "US" }));
     const response = await payCart(new NextRequest("https://marktmorgen.test/api/store/cart", {
       method: "POST",
       headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },

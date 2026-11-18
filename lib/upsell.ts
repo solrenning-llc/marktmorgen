@@ -186,7 +186,8 @@ async function creditAgain(store: Store, session: string, slot: string): Promise
   if (!record) throw new Error("a paid offer's record did not read");
   // Never paid, or paid before a payment id was known: nothing to credit from.
   if (record.state !== "paid" || !record.pi || !store.stripeAccountId) return;
-  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
+  // With its settled charge, so a partner's dated end is compared with when it was paid (noteCharge, Codex G on #1924).
+  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}?expand[]=latest_charge.balance_transaction`);
   const meta = pi.metadata as Record<string, string> | null;
   if (meta?.parent !== session || (meta?.step ?? "") !== slot) return;
   await noteCharge(store, pi);

@@ -105,6 +105,8 @@ part("Names quoted in the answers written for HC1 are on the screens");
     "how-do-i-choose-a-growth-goal-and-see-what-to-do-next": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/growth/page.tsx", "lib/growth-plan.ts", "components/template-library.tsx"],
     "how-do-i-approve-changes-my-ai-assistant-prepared": ["app/studio/agent/page.tsx", "components/agent-proposals.tsx", "app/developers/page.tsx"],
     "how-do-i-keep-my-busy-times-out-of-the-team-calls-i-host": ["app/studio/page.tsx", "components/studio-tools.tsx", "components/team-event-editor.tsx", "app/studio/calendar/page.tsx", "components/host-calendar.tsx"],
+    // The owner's alert emails (601 [KB22] U6, #3013): its screen had no help (Claude 4's review of #3013, MEDIUM).
+    "how-do-i-choose-which-alert-emails-i-get": ["app/studio/page.tsx", "app/studio/notifications/page.tsx", "components/notify-prefs-panel.tsx", "lib/notify-prefs-rules.ts"],
   };
   const plain = (text: string) => text.replace(/&apos;|\u2019/g, "'");
   for (const [id, files] of Object.entries(SCREENS)) {

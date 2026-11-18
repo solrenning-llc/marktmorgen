@@ -40,7 +40,7 @@ import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, type MailDay, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -371,8 +371,8 @@ async function stopLink(store: Store, email: string): Promise<string> {
 }
 
 /** Gives back what reserve() took for a batch that did not go out; a give-back that is not confirmed is unknown and throws. */
-async function giveBack(store: Store, n: number): Promise<void> {
-  if (!(await release(store, n))) throw new UnknownReplyError("the give-back of an update's reserved emails");
+async function giveBack(store: Store, n: number, day: MailDay): Promise<void> {
+  if (!(await release(store, n, day))) throw new UnknownReplyError("the give-back of an update's reserved emails");
 }
 
 /**
@@ -445,7 +445,8 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         const batchKey = `upd:${id}:${job.done}:${emails.length}`;
         // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
         const kept = await batchCountKept(batchKey, recipients);
-        const reserved = kept ? "ok" : await reserve(store, recipients.length);
+        const day = mailDay();
+        const reserved = kept ? "ok" : await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -467,7 +468,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           // A stop link that could not be written sends nothing (rule 24): what reserve() took from the store's month
           // and the company's day is given back now, exactly, or the run fails, never taking it again on every run.
           // A count kept by an earlier unknown answer was not taken by this run, so it stays (lib/batch-count.ts).
-          if (!kept) await giveBack(store, recipients.length);
+          if (!kept) await giveBack(store, recipients.length, day);
           job = { ...job, status: "waiting", note: "The stop links could not be saved just now. Nothing more was sent. We will try again." };
           break;
         }
@@ -497,7 +498,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           // retry is counted again (#4073 MEDIUM 1).
           if (outcome === "uncertain" || outcome === "unconfirmed") {
             if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, recipients);
-          } else if (!kept) await giveBack(store, recipients.length);
+          } else if (!kept) await giveBack(store, recipients.length, day);
           const failures = job.failures + 1;
           job =
             // Only a refusal ends it: a provider that is down or slow keeps the update waiting in the queue, never

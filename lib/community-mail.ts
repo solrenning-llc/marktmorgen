@@ -30,7 +30,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
-import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import { leadsKey } from "@/lib/contact-rules";
 import type { Store } from "@/lib/store";
@@ -465,7 +465,8 @@ export async function advanceAnnouncement(
         const to = recipients.map((m) => m.e);
         // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
         const kept = await batchCountKept(batchKey, to);
-        const reserved = kept ? "ok" : await reserve(store, recipients.length);
+        const day = mailDay();
+        const reserved = kept ? "ok" : await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -502,7 +503,7 @@ export async function advanceAnnouncement(
           // retry is counted again (#4073 MEDIUM 1).
           if (outcome === "uncertain" || outcome === "unconfirmed") {
             if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, to);
-          } else if (!kept) await release(store, recipients.length);
+          } else if (!kept) await release(store, recipients.length, day);
           const failures = job.failures + 1;
           // Only a refusal ends it: a provider that is down keeps the email waiting, never abandoned (outage drill).
           job = outcome === "refused"

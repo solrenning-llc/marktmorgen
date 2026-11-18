@@ -39,7 +39,7 @@ import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
+import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -411,7 +411,8 @@ export async function sendReviewRequests(
     const to = ready.map((item) => item.message.to);
     // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
     const kept = await batchCountKept(batchKey, to);
-    const reserved = kept ? "ok" : await reserve(store, ready.length);
+    const day = mailDay();
+    const reserved = kept ? "ok" : await reserve(store, ready.length, false, day);
     if (reserved !== "ok") {
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
@@ -426,7 +427,7 @@ export async function sendReviewRequests(
       // retry is counted again (#4073 MEDIUM 1).
       if (outcome === "uncertain" || outcome === "unconfirmed") {
         if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, to);
-      } else if (!kept) await release(store, ready.length);
+      } else if (!kept) await release(store, ready.length, day);
       if (outcome === "refused") {
         await unclaim(null);
         for (const item of ready) await drop(item.member);

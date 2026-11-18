@@ -45,6 +45,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
  if(!found.ok) redirect(found.reason==="signed_out"?"/signin":"/studio");
  const access=found.view;const store=access.store;
  if(access.role!=="owner")redirect(studioPath(store,"team=forbidden"));
+ // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
  const now=new Date().getTime();
  const checkout=pathCheckoutNotice({plansOpen:PLANS_ON_SALE,suspended:Boolean(store.suspended),checkoutReady:canSell(store),testMode:sellsInTestMode(store)});
  const reading=await readPath(store).then(record=>({record,failed:false})).catch(()=>({record:null,failed:true}));

@@ -25,6 +25,12 @@
  * deletion: deletion records come on their own page (kind "deletions"), from
  * the records the site keeps, never from what a listing misses.
  *
+ * A stores page (kind "stores") names each store to copy with R, the room of
+ * its plan in bytes (docs/backup-costs-2026-11-08.md, 5b: plan storage, the
+ * students' room and the community pictures), from which the Worker takes
+ * its per-store ceilings (5R held, 4R copied in 32 days). The route does not
+ * answer it yet (503 "stores_unavailable"), so the Worker copies nothing.
+ *
  * Rule 24: anything else (an extra or missing field, a wrong type, an entry
  * of another source or folder) throws BackupFilesContractError. Unknown is
  * never an empty or complete page.
@@ -55,6 +61,15 @@ export const BACKUP_FILES_HELD_OBJECTS = BACKUP_FILES_PAGES_PER_STORE * BACKUP_F
  * is claimed copied); never more than one complete listing holds.
  */
 export const BACKUP_FILES_OBJECTS_PER_MONTH = 10_000;
+/**
+ * Calls a source may be refused 429 "day_ceiling" in one UTC day: the Worker stops asking that source for the rest of
+ * the day at its first such refusal. A refusal still runs the day's count (INCR, EXPIRE NX) and is a call, so the
+ * route's worst month prices this one call a source a day at a whole page's ceiling (backupFilesRouteWorstMonth;
+ * Codex N1's LOW 1 on #3313). The route cannot hold its caller to it: the Worker (workers/backup-files, #3340, not
+ * merged) must hold it with its own test before the owner's review is filled, and nothing calls the route while
+ * BACKUP_FILES_ROUTE_REVIEW is null.
+ */
+export const BACKUP_FILES_DAY_CEILING_REFUSALS = 1;
 /** How long a signed read URL lasts: 15 minutes (R2 allows 1 s to 7 days, Blob at most 7 days). */
 export const BACKUP_FILES_URL_SECONDS = 900;
 
@@ -79,6 +94,24 @@ export type BackupDeletionPage = {
   version: 1;
   kind: "deletions";
   records: BackupDeletionRecord[];
+  cursor: string | null;
+  complete: boolean;
+  reason: "done" | "more" | "cutoff";
+};
+
+/**
+ * The largest room R a store's plan gives, in bytes: Scale's 80 GiB of storage (PAID_STORAGE_BYTES), 2 GiB of
+ * students' room (TASK_ROOM_BYTES) and 3,000 community pictures of 1 MB (COMMUNITY_PICTURES × PICTURE_BYTES), the R
+ * the per-plan lines of docs/backup-costs-2026-11-08.md (5b) are priced at. A stores page that gives more is refused:
+ * R is the only per-store byte bound the Worker has (5R kept, 4R read), so a larger one would raise its ceilings with
+ * no alarm (Claude 5's LOW 4 on #3340). tests/backup-files-worker.test.ts holds it to those constants.
+ */
+export const BACKUP_FILES_ROOM_MOST = 91_046_829_568;
+export type BackupStoreRoom = { store: string; roomBytes: number };
+export type BackupStoresPage = {
+  version: 1;
+  kind: "stores";
+  stores: BackupStoreRoom[];
   cursor: string | null;
   complete: boolean;
   reason: "done" | "more" | "cutoff";
@@ -238,4 +271,30 @@ export function parseDeletionPage(raw: unknown): BackupDeletionPage {
   });
   const end = pageEnd(value, ["done", "more", "cutoff"]);
   return { version: 1, kind: "deletions", records, cursor: end.cursor, complete: end.complete, reason: end.reason as BackupDeletionPage["reason"] };
+}
+
+const STORES_FIELDS = ["version", "kind", "stores", "cursor", "complete", "reason"] as const;
+const STORE_ROOM_FIELDS = ["store", "roomBytes"] as const;
+
+/** A page of the stores to copy, each with the room R of its plan in bytes, exactly; throws BackupFilesContractError on anything else. */
+export function parseStoresPage(raw: unknown): BackupStoresPage {
+  const parsed = textOf(raw);
+  const value = exactObject(parsed, STORES_FIELDS, "stores page");
+  if (value.version !== BACKUP_FILES_CONTRACT_VERSION) fail("version is not 1");
+  if (value.kind !== "stores") fail("kind is not stores");
+  if (!Array.isArray(value.stores)) fail("stores is not a list");
+  const list = value.stores as unknown[];
+  if (list.length > BACKUP_FILES_PAGE_ENTRIES) fail("more than 1,000 stores");
+  sizeCheck(parsed);
+  const seen = new Set<string>();
+  const stores: BackupStoreRoom[] = list.map((item, i) => {
+    const room = exactObject(item, STORE_ROOM_FIELDS, `stores[${i}]`);
+    if (typeof room.store !== "string" || !STORE_PATTERN.test(room.store)) fail(`stores[${i}].store is not a folder`);
+    if (seen.has(room.store as string)) fail(`stores[${i}].store is listed twice`);
+    seen.add(room.store as string);
+    if (typeof room.roomBytes !== "number" || !Number.isSafeInteger(room.roomBytes) || room.roomBytes <= 0 || room.roomBytes > BACKUP_FILES_ROOM_MOST) fail(`stores[${i}].roomBytes is not a positive count of bytes at most the dearest plan's room`);
+    return { store: room.store as string, roomBytes: room.roomBytes as number };
+  });
+  const end = pageEnd(value, ["done", "more", "cutoff"]);
+  return { version: 1, kind: "stores", stores, cursor: end.cursor, complete: end.complete, reason: end.reason as BackupStoresPage["reason"] };
 }

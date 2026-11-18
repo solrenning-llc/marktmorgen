@@ -470,6 +470,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/problem/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/problem",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/orders/sessions/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/orders/sessions",
@@ -1565,6 +1576,7 @@
     "components/old-addresses.tsx",
     "components/older-purchases.tsx",
     "components/option-link-copy.tsx",
+    "components/order-problem-form.tsx",
     "components/orders-bundle.tsx",
     "components/orders-shared.tsx",
     "components/outreach-studio.tsx",
@@ -1624,6 +1636,7 @@
     "components/pricing-cycle.tsx",
     "components/pricing-value.tsx",
     "components/print-button.tsx",
+    "components/problem-notice.tsx",
     "components/product-about-view.tsx",
     "components/product-editor.tsx",
     "components/product-image-editor.tsx",
@@ -1848,6 +1861,7 @@
     "app/api/store/affiliates/join/route.ts",
     "app/api/store/affiliates/kit/route.ts",
     "app/api/store/affiliates/open/route.ts",
+    "app/api/store/affiliates/partner-answer/route.ts",
     "app/api/store/affiliates/payout-batch/route.ts",
     "app/api/store/affiliates/paypal/route.ts",
     "app/api/store/affiliates/payto/route.ts",
@@ -2212,6 +2226,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 152
+    "pageTemplates": 153
   }
 }

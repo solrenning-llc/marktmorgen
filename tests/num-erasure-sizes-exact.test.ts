@@ -152,11 +152,12 @@ test("a member's RSVPs and points: healthy and confirmed absence", async () => {
   assert.equal(await forgetPointsPerson(community, member), 1, "what ZREM said it removed");
 });
 
-test("a member's community deletion: the trace DEL answered 'OK' is not done with 0", async () => {
+// Since #2576 the trace is counted and deleted in one step (lib/redis-take.ts SET_TAKE_COUNT, keyed on the trace).
+test("a member's community deletion: the trace's deletion answered 'OK' is not done with 0", async () => {
   redis.clear();
   const trace = `nl:cm:${community}:tr:${member}`;
   await assert.rejects(() =>
-    withPipeline(async (commands, original) => (commands.length === 1 && commands[0][0] === "DEL" && commands[0][1] === trace ? ["OK"] : original(commands)), () =>
+    withPipeline(async (commands, original) => (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === trace ? ["OK"] : original(commands)), () =>
       forgetCommunityPerson(community, member, email, []),
     ),
   );

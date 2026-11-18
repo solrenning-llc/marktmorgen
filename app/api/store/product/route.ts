@@ -50,6 +50,8 @@ import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
+import { InvitesPendingFullError, InvitesUnpaidError, dropProductInvites, notePendingInvites } from "@/lib/move-members";
+import { studioRefusal } from "@/lib/person-tasks";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
@@ -362,6 +364,50 @@ export async function POST(request: NextRequest) {
         if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
         if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
       }
+      // The invitations an import gave members to keep it here (lib/move-members.ts), with their links and reminders:
+      // kept under its id, a person's erasure would never reach them once it is gone. Main's refusal while a membership
+      // or payment plan still runs comes first (above), so a removal it refuses deletes no invitation. Each page is paid
+      // for in studio requests first; not finished (a reply not known, the studio's requests used up): nothing is
+      // removed, and the same removal asked again goes on where this stopped.
+      const refusal: { reason?: string; message?: string } = {};
+      const pay = async (units: number): Promise<boolean> => {
+        const counted = await countStudio(guarded.store, null, units);
+        if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
+        return counted.ok;
+      };
+      // Deleted only once the product is (below): a removal that does not go through keeps every invitation and its
+      // emailed link (Claude 7, MEDIUM on #3473). Asked again for a product already removed, what an earlier removal
+      // left is deleted now.
+      if (!before && id && PRODUCT_ID.test(id)) {
+        try {
+          await dropProductInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          console.error("could not delete the invitations to a removed membership", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // A product still here is noted first among the memberships whose invitations wait to be deleted (Claude 3, MEDIUM
+      // on #3473), in the studio request that also pays for their deletion's first page below: that one deletion runs
+      // after the product is gone, when the studio can no longer ask for it again, so if it does not finish, a person's
+      // erasure and the copy of their data still reach every invitation through the note. Not noted (refused, a reply
+      // not known, the note full): nothing is removed.
+      if (before) {
+        try {
+          await notePendingInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          if (error instanceof InvitesPendingFullError) return Response.json({ ok: false, error: "member_invites" }, { status: 409 });
+          console.error("could not note a membership's invitations before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
@@ -394,6 +440,14 @@ export async function POST(request: NextRequest) {
       }
       if (removed.ok) {
         const going = removed.product;
+        // Its invitations, now that it is gone (above): not finished (a reply not known, the studio's requests used up),
+        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left. Until then the
+        // note made before the removal keeps them within a person's erasure and data copy. Its first page is paid for by
+        // the request that made the note.
+        await dropProductInvites(removed.store, id, pay, !!before).catch((error: unknown) => {
+          console.error("could not delete the invitations to a removed membership", error);
+          cleanupPending = true;
+        });
         const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.

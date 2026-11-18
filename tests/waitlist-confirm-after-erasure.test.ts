@@ -14,7 +14,7 @@ import { readListing } from "@/lib/catalog";
 import { agreedKey, leadsKey, upsertContact } from "@/lib/contacts";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { erasePerson } from "@/lib/person-erasure";
-import { confirmSpot, joinWaitlist, setSoon } from "@/lib/waitlist";
+import { ERASURE_SECONDS, confirmSpot, joinWaitlist, setSoon } from "@/lib/waitlist";
 import { ROOM } from "./data-room";
 
 const OWNER = "wait-race-owner@example.com";
@@ -121,7 +121,9 @@ async function main(): Promise<void> {
   }
 
   part("a fresh yes, by a link made after the erasure, still lifts the print");
-  advance(2_000);
+  // Past the second of the print, and past ERASURE_SECONDS (#2576): a sign-up that close to a deletion of the person
+  // is asked to try again later, so a place written while the deletion may still run is never left with the address.
+  advance((ERASURE_SECONDS + 2) * 1000);
   token = await join();
   is("the new link confirms the spot", (await confirmSpot(token, store)).ok, true);
   is("the address is back on the list, as it asked again", typeof redis.run(["HGET", leads, PERSON]), "string");

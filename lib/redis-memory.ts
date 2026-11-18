@@ -289,6 +289,11 @@ export class MemoryRedis {
           }
           return [n, e];
         }
+        // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
+        if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, mark] = args;
+          return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;
@@ -972,6 +977,16 @@ export class MemoryRedis {
           this.run(["HSET", month, "count", count, "peak", Math.max(count, peak), "day", day, "complete", complete]);
           this.run(["EXPIRE", month, seconds]); return 1;
         }
+        // lib/held-stores.ts HELD_ONCE (DONO-3): a store counted once in a month, its mark and its count together.
+        if (key.startsWith("-- marktmorgen:held-once:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, month, mark, field, seconds] = args;
+          const type = this.run(["TYPE", month]);
+          if (type !== "none" && type !== "hash") return -1;
+          const raw = this.run(["HGET", month, field]);
+          if (raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          if (this.run(["HSETNX", month, mark, "1"]) === 1) this.run(["HINCRBY", month, field, 1]);
+          this.run(["EXPIRE", month, seconds]); return 1;
+        }
         // CX-67: one funded held-store reconfirmation per UTC day, site ceiling.
         if (key.startsWith("-- marktmorgen:held-recheck:v1\n") && args[0] === "1" && args.length === 5) {
           const [, ledger, ref, rawLimit, seconds] = args;
@@ -1495,18 +1510,37 @@ export class MemoryRedis {
           });
         }
         // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
-        // deleted people (-1, nothing written).
-        if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {
-          const [, erased, invites, ...rest] = args;
-          const n = rest.length / 3;
+        // deleted people (-1, nothing written) and its membership is not marked removed (-2, nothing written); a new one's
+        // link SET with it, and the reminders in one ZADD.
+        if (key.startsWith("-- marktmorgen:invite-unless-erased:v2\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const n = argv.length / 7;
+          if (!Number.isInteger(n) || n < 1 || keys.length !== 3 + 2 * n) throw new Error("ERR invite-unless-erased: wrong number of keys or arguments");
+          const [erased, invites, due] = keys;
           if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
-          this.scriptCalls += 1;
-          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => rest[3 * i])]) as unknown[];
-          return Array.from({ length: n }, (_, i) => {
+          this.scriptCalls += 2;
+          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => argv[7 * i])]) as unknown[];
+          const gone = this.run(["MGET", ...Array.from({ length: n }, (_, i) => keys[4 + 2 * i])]) as unknown[];
+          const queued: (string | number)[] = [];
+          const out = Array.from({ length: n }, (_, i) => {
             if (found[i] !== null) return -1;
+            if (gone[i] !== null) return -2;
             this.scriptCalls += 1;
-            return this.run(["HSETNX", invites, rest[3 * i + 1], rest[3 * i + 2]]);
+            const made = this.run(["HSETNX", invites, argv[7 * i + 1], argv[7 * i + 2]]);
+            if (made === 1) {
+              this.scriptCalls += 1;
+              this.run(["SET", keys[3 + 2 * i], argv[7 * i + 3], "EX", argv[7 * i + 4]]);
+              if (argv[7 * i + 5] !== "") queued.push(argv[7 * i + 5], argv[7 * i + 6]);
+            }
+            return made;
           });
+          if (queued.length) {
+            this.scriptCalls += 1;
+            this.run(["ZADD", due, ...queued]);
+          }
+          return out;
         }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
@@ -2593,7 +2627,11 @@ export class MemoryRedis {
         // passes for the wrong reason.
         const at = flags.indexOf("EX");
         const seconds = at >= 0 ? Number(flags[at + 1]) : NaN;
+        // EXAT: the unix second the key ends at (lib/paypal-sales.ts, an order kept until thirty days from opening).
+        const exat = flags.indexOf("EXAT");
+        const endsAt = exat >= 0 ? Number(flags[exat + 1]) : NaN;
         if (Number.isFinite(seconds)) this.until.set(key, this.now() + seconds * 1000);
+        else if (Number.isFinite(endsAt)) this.until.set(key, endsAt * 1000);
         else this.until.delete(key);
         return "OK";
       }

@@ -81,13 +81,14 @@ import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
+import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
-import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
+import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
@@ -106,10 +107,8 @@ export type ImportSource = "csv" | "clickfunnels";
 
 /** The most rows one import may bring, by kind. */
 export const IMPORT_LIMITS: Record<ImportKind, number> = { contacts: 50_000, products: 500, purchases: 20_000, members: MAX_MOVED_MEMBERS };
-/** Rows one upload request may carry. */
-export const BATCH_ROWS = 1_000;
-/** The most an upload request may weigh. */
-export const BATCH_BYTES = 1_000_000;
+/** Rows one upload request may carry, and the most it may weigh (lib/import-batches.ts, shared with the page). */
+export { BATCH_BYTES, BATCH_ROWS };
 /** Rows kept for the report of what was not brought in; the count goes on past it. */
 export const MAX_REPORT_ROWS = 5_000;
 
@@ -263,7 +262,9 @@ const RECEIVING_MS = 2 * 60 * 60 * 1000;
 const HELD_UPLOAD_CLOSES_MS = RECEIVING_MS - 10 * 60 * 1000;
 /**
  * What a write of an import only over the one it was read as (JOB_WRITE_IF) costs beside the plain SET it replaces:
- * the EVAL and the GET it compares with, which Upstash bills one by one beside the writes.
+ * the EVAL and the GET it compares with, which Upstash bills one by one beside the writes. The writes it carries (an
+ * upload's RPUSH and EXPIRE of its batch, the finish's SADD to the active set) are the same commands, billed the same,
+ * as when they were sent beside it (focal review on #3384, L-B): only the round trip is saved.
  */
 export const JOB_WRITE_IF_EXTRA_COMMANDS = 2;
 /** The tries an end of an import makes when another writer changed it meanwhile, with a read between them (cancelJob). */
@@ -417,29 +418,38 @@ function saveJob(job: ImportJob): Command {
 }
 
 /**
- * Writes an import only while it is still stored as the text it was read as (ARGV[1]), and with it, for an upload,
- * its batch of rows (KEYS[2]): one step on the Redis side.
+ * Writes an import only while it is still stored as the text it was read as (ARGV[1]), and with it what ARGV[4]
+ * names, one step on the Redis side: "rows", an upload's batch (ARGV[5]) onto its rows (KEYS[2]) for ARGV[6] seconds;
+ * "active", the import's id (ARGV[5]) onto the active set (KEYS[2]), so a queued import is on it, and one not written
+ * is not (focal review on #3384, L-B); "", nothing more. That write goes before the import's: a script stopped by an
+ * error keeps what it wrote before it, so one refused by its key (a wrong type) leaves the import as it was read.
  */
-const JOB_WRITE_IF = `-- marktmorgen:import-job-write-if:v1
+const JOB_WRITE_IF = `-- marktmorgen:import-job-write-if:v2
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
-redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-if #KEYS == 2 then
-  redis.call('RPUSH', KEYS[2], ARGV[4])
-  redis.call('EXPIRE', KEYS[2], ARGV[5])
+if ARGV[4] == 'rows' then
+  redis.call('RPUSH', KEYS[2], ARGV[5])
+  redis.call('EXPIRE', KEYS[2], ARGV[6])
+elseif ARGV[4] == 'active' then
+  redis.call('SADD', KEYS[2], ARGV[5])
 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
 return 1`;
 
 /**
- * Writes `job` only over the import as it was read (`raw`), with an upload's `batch` (second review on #3384, HIGH):
+ * Writes `job` only over the import as it was read (`raw`), with an upload's batch (`with.rows`) or, for a finish that
+ * queues it, its place on the active set (`with.active`), in the same step (second review on #3384, HIGH; L-B):
  * the writers that do not take the import's lock (a batch, the finish, a new start giving up an old upload) never
  * write back an import another writer has since canceled or given up, so what it held is never held again after it
  * was given back. True when written; false when the import changed since, and nothing was written; any other reply
  * throws UnknownReplyError (CX-123 rule 24), and the caller gives nothing back on it.
  */
-async function writeJobIf(raw: string, job: ImportJob, batch?: string[][]): Promise<boolean> {
-  const command: Command = batch
-    ? ["EVAL", JOB_WRITE_IF, 2, jobKey(job.id), rowsKey(job.id), raw, JSON.stringify(job), KEEP_SECONDS, JSON.stringify(batch), RAW_DAYS * 86_400]
-    : ["EVAL", JOB_WRITE_IF, 1, jobKey(job.id), raw, JSON.stringify(job), KEEP_SECONDS];
+async function writeJobIf(raw: string, job: ImportJob, extra?: { rows: string[][] } | { active: true }): Promise<boolean> {
+  const text = JSON.stringify(job);
+  const command: Command = !extra
+    ? ["EVAL", JOB_WRITE_IF, 1, jobKey(job.id), raw, text, KEEP_SECONDS, ""]
+    : "rows" in extra
+      ? ["EVAL", JOB_WRITE_IF, 2, jobKey(job.id), rowsKey(job.id), raw, text, KEEP_SECONDS, "rows", JSON.stringify(extra.rows), RAW_DAYS * 86_400]
+      : ["EVAL", JOB_WRITE_IF, 2, jobKey(job.id), ACTIVE_KEY, raw, text, KEEP_SECONDS, "active", job.id];
   const reply = repliesFor(await redisPipeline([command]), 1)?.[0];
   if (reply === 1) return true;
   if (reply === 0) return false;
@@ -616,7 +626,7 @@ export async function startImport(
     }
     // Given up only over the upload as it was read here: when the five-minute job gave it up first, this finds it
     // ended and gives nothing back a second time (cancelJob); one still changing keeps the store busy.
-    if (other && other.job.state === "receiving" && !finished((await cancelJob(other.job, other.raw)).state)) return { ok: false, reason: "busy" };
+    if (other && other.job.state === "receiving" && !finished((await cancelJob(other.job, other.raw, true)).state)) return { ok: false, reason: "busy" };
     // Freed only while it is still that holder's, in one step on the Redis side, and then claimed with NX again: of
     // two starts that both read the same finished holder, one claims the slot and the other is told the store is
     // busy (independent review on #2881, L2). Before, each took it with a plain SET and both ran.
@@ -730,7 +740,7 @@ export async function addRows(store: Store, id: string, rows: string[][]): Promi
   job.total += rows.length;
   // The batch and the count only over the import as it was read: one canceled or given up since stays so, with no
   // rows kept for it.
-  if (!(await writeJobIf(raw, job, rows))) return { ok: false, reason: "state" };
+  if (!(await writeJobIf(raw, job, { rows }))) return { ok: false, reason: "state" };
   return { ok: true, job };
 }
 
@@ -744,10 +754,10 @@ export async function finishUpload(store: Store, id: string): Promise<{ ok: true
   if (job.state === "done") job.finishedAt = Date.now();
   const back = job.state === "done" ? heldLeft(job) : undefined;
   // Only over the import as it was read: one canceled or given up since is never queued again with what it held.
-  // What an empty one held is given back once that write is confirmed.
-  if (!(await writeJobIf(raw, job))) return { ok: false, reason: "state" };
-  if (job.state === "queued") await redisPipeline([["SADD", ACTIVE_KEY, id]]);
-  else {
+  // A queued one goes on the active set in the same step, so the five-minute job always finds it (L-B). What an empty
+  // one held is given back once that write is confirmed.
+  if (!(await writeJobIf(raw, job, job.state === "queued" ? { active: true } : undefined))) return { ok: false, reason: "state" };
+  if (job.state === "done") {
     await giveBackHeld(job.sid, back, store);
     await releaseBusy(job);
   }
@@ -761,11 +771,14 @@ export async function finishUpload(store: Store, id: string): Promise<{ ok: true
  * it held once that write is confirmed. Of two that end the same import (a cancel, the five-minute job giving up an
  * upload, a new start giving up an old one), one writes it and gives back, and the other finds it ended and gives
  * nothing back (second review on #3384, HIGH). Read again and tried once more when another writer changed it meanwhile
- * (a batch arriving); answers the import as it then stands, not ended when it was still changing.
+ * (a batch arriving); answers the import as it then stands, not ended when it was still changing. A give-up of an old
+ * upload (`onlyReceiving`: a new start, which does not hold the import's lock, or the five-minute job) ends it only
+ * while it is still receiving: one finished and queued meanwhile is the creator's, and is left alone with what it
+ * holds (focal review on #3384, L-A). The creator's cancel, under the lock, ends it in any state not finished.
  */
-async function cancelJob(job: ImportJob, raw: string): Promise<ImportJob> {
+async function cancelJob(job: ImportJob, raw: string, onlyReceiving = false): Promise<ImportJob> {
   for (let tries = 1; ; tries += 1) {
-    if (finished(job.state)) return job;
+    if (finished(job.state) || (onlyReceiving && job.state !== "receiving")) return job;
     const ended: ImportJob = { ...job, state: "canceled", finishedAt: Date.now() };
     const back = heldLeft(ended);
     if (await writeJobIf(raw, ended)) {
@@ -1076,6 +1089,12 @@ function classifyProducts(store: Store, rows: string[][]): { valid: ProductRow[]
         continue;
       }
       priceCents = amount;
+    }
+    // readBatch keeps a description to its cap plus one: one longer than the cap arrived cut, often inside a tag,
+    // and is refused as it is, never brought in short (docs/cross-product-handoff.md).
+    if (rawDescription.length > MAX_ABOUT_LENGTH * 2) {
+      problems.push({ line, column: "description", problem: `Longer than ${(MAX_ABOUT_LENGTH * 2).toLocaleString("en-US")} characters with its formatting, so it cannot be brought in whole. Shorten it, or remove its formatting`, value: rawDescription.slice(0, 80) });
+      continue;
     }
     const description = cleanAbout(plainText(rawDescription).slice(0, MAX_ABOUT_LENGTH * 2));
     if (plainText(rawDescription).trim().length > MAX_ABOUT_LENGTH) {
@@ -1658,7 +1677,8 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     return "more";
   }
   // The company's day first: over it, the same buyers wait for tomorrow.
-  if (!(await reserveDay(messages.length))) {
+  const day = mailDay();
+  if (!(await reserveDay(messages.length, day))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     await unsent(portion);
     return "retry";
@@ -1678,12 +1698,12 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     if (saved !== "OK") {
       held.n += room;
       await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
-      await releaseDay(messages.length);
+      await releaseDay(messages.length, day);
       await unsent(portion);
       throw new UnknownReplyError("an import's hold saved before its send");
     }
   }
-  if (sending.length < messages.length) await releaseDay(messages.length - sending.length);
+  if (sending.length < messages.length) await releaseDay(messages.length - sending.length, day);
   if (sending.length === 0) {
     job.counts.unmailed += messages.length;
     await unsent(portion);
@@ -1694,7 +1714,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
-    await releaseDay(sending.length);
+    await releaseDay(sending.length, day);
     await unsent(portion);
     return "retry";
   }
@@ -1844,7 +1864,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
   const job = read?.job ?? null;
   try {
     if (!read || !job) return null;
-    if (job.state === "receiving" && Date.now() - job.at > RECEIVING_MS) return await cancelJob(job, read.raw);
+    if (job.state === "receiving" && Date.now() - job.at > RECEIVING_MS) return await cancelJob(job, read.raw, true);
     if (job.state !== "queued" && job.state !== "running" && job.state !== "mailing") return job;
     const store = await storeForId(job.sid);
     if (!store) {
@@ -2073,12 +2093,13 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
-      if (!(await reserveDay(1))) {
+      const day = mailDay();
+      if (!(await reserveDay(1, day))) {
         await putBack(now);
         continue;
       }
       if ((await reserveMoved(store, 1)) < 1) {
-        await releaseDay(1);
+        await releaseDay(1, day);
         // The month's emails are spent: tried once more when they open again, while that is still before the renewal
         // date (after it, reminderEmail has nothing to send). Due REMIND_DAYS_BEFORE days before it, and every window
         // longer than that, a second refusal finds the next opening past the renewal date, so it is put back at most
@@ -2106,7 +2127,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         counts.sent += 1;
       } else if (sent === "retry") {
         await releaseMoved(store, 1);
-        await releaseDay(1);
+        await releaseDay(1, day);
         await putBack(now);
       }
     } catch (error) {

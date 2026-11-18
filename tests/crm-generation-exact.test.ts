@@ -80,7 +80,10 @@ async function main(): Promise<void> {
   part("Several people's generations, read exactly");
   const many = (reply: unknown[]) => withGenerationReplies(() => reply, () => readGenerations(statsId, [person, other]));
   is("each slot as it is", [await many([null, "5"]), await many(["x", null])], [[0, 5], [-1, 0]]);
-  is("a short envelope leaves the missing ones unknown, never 0", [await many([]), await many([null])], [[-1, -1], [0, -1]]);
+  // One reply per person, exactly (Codex X6 on #2287): an envelope of another length, short or long, is not the reply to
+  // these reads, so every slot of it is unknown, never 0 and never read by position.
+  is("a short envelope leaves every one unknown, never 0", [await many([]), await many([null])], [[-1, -1], [-1, -1]]);
+  is("an overlong envelope leaves every one unknown, never read by position", [await many([null, "5", "99"]), await many(["5", null, null])], [[-1, -1], [-1, -1]]);
 
   part("The page is told to reload when its mark cannot save");
   is("a stale page: reload, not check your access", crmRefusalMessage("stale"), "This page was opened too long ago to save from. Copy your entry, then reload the page and try again.");

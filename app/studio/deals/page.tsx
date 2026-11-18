@@ -56,6 +56,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
   // do (add a pipeline of their own, change the fields) and says "You have no pipelines to see in this store.".
   const available = inventory.available && loadedFields !== null && team !== null && (shown.pipelines.length > 0 || restricted);
   const assignees = [store.email, ...(team?.members ?? []).filter(m => can(m.role, "orders")).map(m => m.email)];
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const today = new Date().toISOString().slice(0, 10);
 
   return (

@@ -175,10 +175,14 @@ try {
   // and re-encoded it (components/shrink-image.ts). Counting the held sends before that request arrived read 0 on a slow
   // runner (Studio AAA job 130247027939 on #3551). Wait for the first send's own request, so the count below can only
   // say whether pressing the busy Add button started another one.
-  const firstSend = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/store/image/upload");
+  // With the picture door (lib/upload-refusal.ts askDoor) the first send is held in the page by the harness's fetch, not
+  // by the network route below, so it never raises a page "request" event: count both places until the first one shows.
+  const sendsSoFar = async () => uploads.length + await page.evaluate(() => window.harness.held.filter((each) => new URL(each.url, location.href).pathname === "/api/store/image/upload").length);
   await page.locator('input[type="file"]').setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: png });
   await sending().waitFor();
-  await firstSend;
+  for (const started = Date.now(); (await sendsSoFar()) < 1; await page.waitForTimeout(100)) {
+    if (Date.now() - started > 30_000) throw new Error("the first send never started (neither held in the page nor routed) within 30 s");
+  }
   await page.getByRole("button", { name: "Remove picture 1" }).focus();
   await page.keyboard.press("Enter");
   await settled();

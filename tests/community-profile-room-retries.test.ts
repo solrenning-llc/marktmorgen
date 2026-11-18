@@ -22,6 +22,7 @@ import { done, is, part } from "./check";
 
 type Command = (string | number)[];
 const CAS = 'local cur = redis.call("HGET"';
+// Found inside the script, not at its start: main (since #2576) opens the script with its version line ("-- marktmorgen:member-cas:v1").
 const pipeline = redis.pipeline.bind(redis);
 
 /** A write by somebody else, landed on the record between a try's read and its set; null leaves it alone. */
@@ -33,7 +34,7 @@ let roomCalls = 0;
 
 redis.pipeline = (async (commands: Command[]) => {
   for (const command of commands) if (command[0] === "EVAL" && command[1] === TAKE_DATA) roomCalls += 1;
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(CAS)) {
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes(CAS)) {
     const [, , , members, dir, field, expected, next, listed, at] = commands[0];
     if (interfere && interferences > 0) {
       interferences -= 1;

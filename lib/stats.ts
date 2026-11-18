@@ -29,7 +29,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
-import { type DiscountElsewhere, type DiscountRow, discountElsewhere, discountImpact } from "@/lib/discount-impact";
+import { type DiscountCodeRow, type DiscountElsewhere, type DiscountRow, discountCodes, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
@@ -278,6 +278,20 @@ export async function recordHit(
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
   await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }]);
+}
+
+/** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
+export const CONFIRMED_LEAD_FIELD = "lc";
+/**
+ * One confirmed lead on the store's all-time record, for lib/path-lead.ts,
+ * which sends it once an address's mark is newly taken. A HINCRBY of its own,
+ * outside the record's capped count (cappedCount), as "u" is: a record already
+ * at LIFE_WRITE_MAX would put a new field under "~" and Path would never see
+ * it (review 6748073377 of #3431, L4). One field more at the most, and its
+ * answer is exactly the new count, which the caller reads.
+ */
+export function confirmedLeadCommand(statsId: string): (string | number)[] {
+  return ["HINCRBY", lifeKey(statsId), CONFIRMED_LEAD_FIELD, 1];
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -756,7 +770,7 @@ export async function campaignViews(
 }
 
 /** Fields the all-time record keeps for itself rather than as counts. */
-const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap"]);
+const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap", CONFIRMED_LEAD_FIELD]);
 /** Beyond this many fields, the smallest sources and tags are let go. */
 const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
@@ -1010,7 +1024,7 @@ export type SalesStats = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (lib/discount-impact.ts); null with no discounted sale. */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[] };
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[]; codes: DiscountCodeRow[] };
   /** When buyers bought over the 90 days: checkouts by hour of the week in UTC, Sunday 0:00 first (hoursOfWeek). */
   hours?: { sales: number[]; cents: number[] };
 };
@@ -1679,8 +1693,10 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
 /**
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
- * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none; an answer in any other
+ * where visits came from (r:<source>), the visitors (u) and the confirmed
+ * leads (lc: addresses that used their confirmation link, lib/path-lead.ts),
+ * which Marktmorgen Path reads; the addresses only asked for (fs:<channel>)
+ * are there too, for the store's numbers, never as Path's leads. Empty when there is none; an answer in any other
  * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {
@@ -1936,11 +1952,14 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     !(out.refundsIn?.d90 ?? []).some((r) => r.source === UNRECORDED);
   out.levers = measureSalesLevers(read,store.currency,readPartial,now);
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
+  const refundedIntents = new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean));
   out.discounts = {
-    rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
+    rows: discountImpact(read, refundedIntents, store.currency, now, STATS_DAYS),
     refundsRead: refundRows !== null,
     // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
     elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
+    // The same checkouts by the code they used (760 [STN7], unit 2), from the same sales: nothing more is read.
+    codes: discountCodes(read, refundedIntents, store.currency, now, STATS_DAYS),
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),
@@ -2294,7 +2313,7 @@ export type StatsData = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (SalesStats.discounts). */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[] } | null;
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[]; codes?: DiscountCodeRow[] } | null;
   /** Checkouts by hour of the week in UTC over the 90 days (SalesStats.hours); the browser turns them to its own time. */
   hours?: { sales: number[]; cents: number[] } | null;
   /**

@@ -330,6 +330,13 @@ function firstName(name: string | null | undefined): string | null {
  * is. A store with no list has deleted nobody. A print that does not read as whole seconds is unknown and throws
  * (CX-123 rule 24), never "not deleted".
  */
+/**
+ * The reads of a person's deletion print a hand-over makes (queuePerson): one before anything is marked, and one once
+ * its job is written, before it is sent (Codex C2 and G on #3908). Named in tests/plan-cost-registry.ts (orders and
+ * public-requests), held by tests/email-sync-erased-replay.test.ts.
+ */
+export const HAND_OVER_ERASED_READS = 2;
+
 async function consentBeforeErasure(listId: string | null | undefined, email: string, at: number): Promise<boolean> {
   if (!listId) return false;
   const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
@@ -406,6 +413,22 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   // An overflow that does not read is left in the log, where the copy and the erasure still find it; the next push reads it again.
   if (overflow?.length) await dropOverflow(statsId, overflow);
   if (!agreed) return "skipped";
+  // Read again now that the job is written, before it is sent (Codex C2 and G on #3908): the erasure writes the print
+  // before it deletes any job (lib/person-erasure.ts), so a deletion that landed after the first read is seen here, and
+  // this job, the only one it could have missed, is taken out. A read that does not answer takes the job out too and
+  // lets this run's mark go, so the next try reads the print again: an unknown never hands the address over.
+  let erasedSince: boolean;
+  try {
+    erasedSince = await consentBeforeErasure(store.listId, email, person.at);
+  } catch (error) {
+    await redisPipeline([["DEL", jobKey(job.id)], ["ZREM", QUEUE_KEY, `${statsId}|${job.id}`], ["LREM", logKey(statsId), 0, job.id]]);
+    await releaseMark(seen, mine);
+    throw error;
+  }
+  if (erasedSince) {
+    await redisPipeline([["DEL", jobKey(job.id)], ["ZREM", QUEUE_KEY, `${statsId}|${job.id}`], ["LREM", logKey(statsId), 0, job.id]]);
+    return "off";
+  }
   await soon(async () => {
     if (await claim(statsId, job.id)) await runClaimed(statsId, job.id, JOB_MS);
   });

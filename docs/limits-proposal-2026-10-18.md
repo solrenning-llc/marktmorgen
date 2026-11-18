@@ -14,7 +14,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 54.68% | 53.98% | 58.81% | 58.21% | 59.29% | 58.68% |
+| Net today | 54.68% | 53.97% | 58.81% | 58.21% | 59.29% | 58.68% |
 | AI drafts / answers a month | none today | none today | 40 / 250 → **4 / 25** | 40 / 250 → **4 / 25** | 80 / 400 → **8 / 40** | 80 / 400 → **8 / 40** |
 | Video hours watched a month | 4 | 4 | 32 → **3** | 32 → **3** | 64 → **6** | 64 → **6** |
 | Storage | 5 GiB | 5 GiB | 40 GiB → **4 GiB** | 40 GiB → **4 GiB** | 80 GiB → **19 GiB** | 80 GiB → **8 GiB** |

@@ -353,13 +353,13 @@
     "store-email": 7,
     "transactional-email": 15,
     "list-email": 0,
-    "visits": 89
+    "visits": 90
    },
    "coefYear": {
     "ai": 0,
     "video": 69,
     "storage": 152,
-    "orders": 504,
+    "orders": 505,
     "store-email": 81,
     "transactional-email": 169,
     "list-email": 0,
@@ -6537,7 +6537,7 @@
    },
    "coefYear": {
     "ai": 7643,
-    "video": 1106,
+    "video": 1107,
     "storage": 2435,
     "orders": 3786,
     "store-email": 872,

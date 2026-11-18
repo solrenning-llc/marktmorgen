@@ -4624,7 +4624,11 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
   };
 
   // An offer on an order whose link was pending follows that order once it is credited (owner's decision 6).
-  if (!AFFILIATE_ID_PATTERN.test(meta.via ?? "") && meta.kind === "upsell" && typeof meta.parent === "string") return notePendingOffer(store, pi, meta.parent);
+  // A partner's step that failed above is rethrown here too (settle), so the job credits the offer again (Claude 4 on #3485).
+  if (!AFFILIATE_ID_PATTERN.test(meta.via ?? "") && meta.kind === "upsell" && typeof meta.parent === "string") {
+    await notePendingOffer(store, pi, meta.parent);
+    return settle();
+  }
   const aff = meta.via ?? "";
   if (!AFFILIATE_ID_PATTERN.test(aff)) return settle();
   // Read before anything is written: a share that does not read throws, and no 0% sale is set down (linkShare).

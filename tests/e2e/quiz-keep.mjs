@@ -84,19 +84,28 @@ try {
     await tab.getByRole("button", { name: "Check my answers" }).waitFor();
   };
   const picked = () => tab.evaluate(() => [...document.querySelectorAll('input[name^="q_"]')].map((i) => i.checked));
-  const kept = () => tab.evaluate((k) => localStorage.getItem(k), ADA);
+  // By default a draft lives in this tab's session storage only; the device's storage holds one only when the student
+  // chose "Keep my answers on this device for 7 days" (review of #4324, the plan of 6995178754).
+  const kept = () => tab.evaluate((k) => sessionStorage.getItem(k), ADA);
+  const onDevice = () => tab.evaluate((k) => localStorage.getItem(k), ADA);
+  const DEVICE = "Keep my answers on this device for 7 days";
   // QuizKeep puts a draft back, or forgets it, in an effect after the form is drawn: wait for it before reading
   // (review of #4324, LOW 4), never read what the page held a moment before.
   const putBack = (count) => tab.waitForFunction((n) => document.querySelectorAll('input[name^="q_"]:checked').length === n, count);
-  const forgotten = () => tab.waitForFunction((k) => localStorage.getItem(k) === null, ADA);
+  const forgotten = () => tab.waitForFunction((k) => sessionStorage.getItem(k) === null && localStorage.getItem(k) === null, ADA);
   const status = () => tab.getByRole("status").textContent();
 
   await open(ada);
   is("nothing kept and nothing said at first, though the status line is already there, empty", [await kept(), await status()], [null, ""]);
   await tab.getByLabel("B").check();
   await tab.getByLabel("D").check();
-  is("each choice is kept in this browser as it is made, under this student's code", JSON.parse(await kept()).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] });
+  is("each choice is kept in this tab as it is made, under this student's code", JSON.parse(await kept()).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] });
+  is("and not on the device: keeping it there is off by default", [await onDevice(), await tab.getByLabel(DEVICE).isChecked()], [null, false]);
   is("nothing was sent", sent.length, 0);
+  await tab.getByLabel(DEVICE).check();
+  is("choosing to keep it on the device moves the draft there", [JSON.parse((await onDevice()) ?? "null")?.answers, await kept()], [{ q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] }, null]);
+  await tab.getByLabel(DEVICE).uncheck();
+  is("and turning it off takes it off the device again, back to this tab only", [await onDevice(), JSON.parse((await kept()) ?? "null")?.answers], [null, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] }]);
 
   await open(ada);
   await putBack(2);
@@ -163,6 +172,7 @@ try {
 
   await context.addInitScript(() => {
     Object.defineProperty(window, "localStorage", { get() { throw new Error("denied"); } });
+    Object.defineProperty(window, "sessionStorage", { get() { throw new Error("denied"); } });
   });
   await open(ada);
   await tab.getByLabel("B").check();

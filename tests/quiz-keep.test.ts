@@ -209,12 +209,25 @@ part("The key in the browser says nothing about the course (review of #4324, MED
   is("the privacy policy no longer says the key names the store, the course and the lesson", /followed by the store, the course, the lesson/.test(policy), false);
 }
 
+part("Kept for this tab only, unless the student chooses the device (review of #4324, the plan of 6995178754)");
+{
+  // Privacy by default for students who may be children (ICO Children's Code, standard 7), and only session data in the
+  // ePrivacy user-input exemption (WP29 Opinion 04/2012, 3.1): the draft lives in the tab's session storage, which
+  // already covers a reload, going back, a dropped connection and a refused send; the device only on an explicit choice.
+  is("the choice is offered in plain words, off until chosen", COURSES_WORDS.en.quizKeepDevice, "Keep my answers on this device for 7 days");
+  const keeperCode = readFileSync("components/quiz-keep.tsx", "utf8");
+  is("the keeping uses the tab's session storage by default", /window\.sessionStorage/.test(keeperCode) && /useState\(false\)[\s\S]{0,80}onDevice|onDevice[\s\S]{0,80}useState\(false\)/.test(keeperCode), true);
+  const privacyText = readFileSync("app/privacy/page.tsx", "utf8");
+  is("the privacy policy says so", /id="quiz-drafts"[\s\S]{0,2600}closing the tab removes them[\s\S]{0,800}Keep my answers on this device for 7 days[\s\S]{0,200}off by default/.test(privacyText), true);
+  is("and the register", PERSON_DATA.some((r) => r.file === "lib/quiz-keep-rules.ts" && /this tab/.test(r.what) && /off by default/.test(r.what)), true);
+}
+
 part("Said in every language, and in the privacy policy");
 {
-  const keys = ["quizKeptBack", "quizKeptClear", "quizKeptCleared"] as const;
+  const keys = ["quizKeptBack", "quizKeptClear", "quizKeptCleared", "quizKeepDevice", "quizKeepDeviceHint"] as const;
   for (const [lang, w] of Object.entries(COURSES_WORDS)) {
-    is(`${lang}: three phrases`, keys.every((k) => typeof w[k] === "string" && w[k].length > 3), true);
-    if (lang !== "en") is(`${lang}: not left in English`, keys.filter((k) => w[k] === COURSES_WORDS.en[k]), []);
+    is(`${lang}: every phrase`, keys.every((k) => typeof (w as Record<string, unknown>)[k] === "string" && ((w as Record<string, string>)[k]).length > 3), true);
+    if (lang !== "en") is(`${lang}: not left in English`, keys.filter((k) => (w as Record<string, unknown>)[k] === (COURSES_WORDS.en as Record<string, unknown>)[k]), []);
   }
   const privacy = readFileSync("app/privacy/page.tsx", "utf8");
   // Review of #4324 (MEDIUM 2): a shared or school computer may hold a child's choices, so a draft is kept 7 days at

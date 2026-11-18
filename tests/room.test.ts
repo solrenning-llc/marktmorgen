@@ -196,7 +196,9 @@ async function main(): Promise<void> {
   is("for somebody who is in, and never for the creator", /viewer\.state === "in" && !viewer\.owner\) \{[\s\S]{0,300}await countDay\(store\)/.test(door), true);
   const course = readFileSync(join(process.cwd(), "app/[handle]/course/[product]/page.tsx"), "utf8");
   const lesson = readFileSync(join(process.cwd(), "app/[handle]/course/[product]/[lesson]/page.tsx"), "utf8");
-  is("a course and each of its lessons count a student's day, never the creator's", [/!access\.learner\.owner\) \{[\s\S]{0,500}await countDay\(store\)/.test(course), /if \(student\) await countDay\(store\)/.test(lesson)], [true, true]);
+  // The window grew from 500 to 700 characters when #3344 passed the course and product to touchStudent (512 apart);
+  // countDay is still inside the block that leaves the creator out.
+  is("a course and each of its lessons count a student's day, never the creator's", [/!access\.learner\.owner\) \{[\s\S]{0,700}await countDay\(store\)/.test(course), /if \(student\) await countDay\(store\)/.test(lesson)], [true, true]);
   const day = readFileSync(join(process.cwd(), "lib/day-visit.ts"), "utf8");
   is("counted after the page is sent, by the address it came from, like any visit", [/after\(\(\) => recordVisit\(store, ip\)\)/.test(day), /x-forwarded-for/.test(day)], [true, true]);
   const routes = ["route.ts", "new/route.ts"].map((name) => readFileSync(join(process.cwd(), "app/api/store/community/chat", name), "utf8"));

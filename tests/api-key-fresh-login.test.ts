@@ -13,6 +13,7 @@
  * Synthetic stores and sessions only; nothing leaves the process.
  */
 import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
 import { POST as keysRoute } from "@/app/api/store/api-keys/route";
 import { FRESH_LOGIN_SECONDS, SESSION_COOKIE, endAllSessions, openSession } from "@/lib/auth";
 import { resolveKey } from "@/lib/api-keys";
@@ -67,6 +68,14 @@ async function main(): Promise<void> {
   is("refused with reauth", [late.status, late.body.ok, late.body.error, "key" in late.body], [403, false, "reauth", false]);
   const lateRead = await make(store, old, "Taken cookie, read only");
   is("a key that only reads too", [lateRead.status, lateRead.body.error], [403, "reauth"]);
+
+  part("The API-key path explains its own fresh-login step");
+  const editor = readFileSync("components/api-key-editor.tsx", "utf8");
+  const signIn = readFileSync("app/signin/page.tsx", "utf8");
+  is("the editor uses the API-key reauthentication status", editor.includes('href="/signin?status=reauth-key"'), true);
+  is("the status is a returning login with API-key words", [signIn.includes('"reauth-key"'), signIn.includes('title: "Log in again to make an API key"')], [true, true]);
+  const keyNotice = signIn.match(/"reauth-key": \{([\s\S]*?)\n  \},/)?.[1] ?? "";
+  is("the notice does not promise a passkey flow", /add a passkey|spot to add it/i.test(keyNotice), false);
 
   part("Logging in again makes it");
   const again = await openSession(OWNER);

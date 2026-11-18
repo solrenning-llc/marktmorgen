@@ -561,7 +561,14 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
 const claimsLeftKey = (ref: string) => `nl:closed:claims:${createHash("sha256").update(`closing-claims:${ref}`).digest("hex").slice(0, 40)}`;
 /** A host whose claims were read to their end, in claimsLeftKey. */
 const CLAIMS_END = "end";
+/**
+ * A host read to their end once more on the walk that finishes (clearClaims): "r:<cursor>" while that re-read is under
+ * way, CLAIMS_REREAD once it reached the end. A host is re-read at most once a closing (Claude 4's LEVE on #3660: two
+ * big hosts each re-reading the other made the store never prepared).
+ */
+const CLAIMS_REREAD = "end2";
 const CURSOR = /^\d{1,20}$/;
+const REREAD_CURSOR = /^r:\d{1,20}$/;
 
 /** A closing store whose hosts' claims are more than one walk reads: it waits a walk, and goes on from where it stopped. */
 class ClaimsLeftError extends Error {
@@ -584,7 +591,7 @@ async function claimsLeft(key: string, ended: string): Promise<Record<string, st
   const { ended: was, hosts } = value as { ended?: unknown; hosts?: unknown };
   if (was !== ended || !hosts || typeof hosts !== "object" || Array.isArray(hosts)) return {};
   const out: Record<string, string> = {};
-  for (const [host, at] of Object.entries(hosts)) if (typeof at === "string" && (at === CLAIMS_END || CURSOR.test(at))) out[host] = at;
+  for (const [host, at] of Object.entries(hosts)) if (typeof at === "string" && (at === CLAIMS_END || at === CLAIMS_REREAD || CURSOR.test(at) || REREAD_CURSOR.test(at))) out[host] = at;
   return out;
 }
 
@@ -616,8 +623,11 @@ async function clearClaims(store: Store, hosts: string[], own: Set<string>, keep
   let moved = false;
   let stopped: unknown = null;
   let kept = false;
-  /** Reads `host`'s claims from `from`, CLAIM_PAGES pages at the most, deleting this store's: where it stopped. */
-  const walkHost = async (host: string, from: string): Promise<string> => {
+  /**
+   * Reads `host`'s claims from `from`, CLAIM_PAGES pages at the most, deleting this store's: where it stopped. A re-read
+   * (`again`) keeps its place as "r:<cursor>" and its end as CLAIMS_REREAD, so it is never started over.
+   */
+  const walkHost = async (host: string, from: string, again = false): Promise<string> => {
     let cursor = from;
     for (let round = 0; round < CLAIM_PAGES && cursor !== CLAIMS_END; round += 1) {
       let page: ReturnType<typeof scanPage> = null;
@@ -647,20 +657,24 @@ async function clearClaims(store: Store, hosts: string[], own: Set<string>, keep
         }
       }
       cursor = next === "0" ? CLAIMS_END : next;
-      left[host] = cursor;
+      left[host] = again ? (cursor === CLAIMS_END ? CLAIMS_REREAD : `r:${cursor}`) : cursor;
       moved = true;
     }
     return cursor;
   };
   let unfinished = false;
   for (const host of hosts) {
-    const cursor = await walkHost(host, left[host] ?? "0");
+    const at = left[host] ?? "0";
+    // Re-read already done: nothing more. A re-read under way goes on from where it stopped, as a re-read.
+    if (at === CLAIMS_REREAD) continue;
+    const again = REREAD_CURSOR.test(at);
+    const cursor = await walkHost(host, again ? at.slice(2) : at, again);
     if (stopped) break;
     if (cursor !== CLAIMS_END) unfinished = true;
   }
   if (!stopped && !unfinished && endedBefore.length > 0) {
     for (const host of endedBefore) {
-      const cursor = await walkHost(host, "0");
+      const cursor = await walkHost(host, "0", true);
       if (stopped) break;
       if (cursor !== CLAIMS_END) unfinished = true;
     }

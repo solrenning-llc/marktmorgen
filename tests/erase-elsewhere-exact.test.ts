@@ -463,7 +463,10 @@ async function main(): Promise<void> {
     // answers n + 1, the last page the claim. Each reaching its end makes the other, already at its end, read again.
     const paged = (key: string, last: number) => (command: Command) => {
       const cursor = Number(command[2]);
-      return cursor >= last ? ["0", ["claim1", redis.run(["HGET", key, "claim1"])]] : [String(cursor + 1), []];
+      if (cursor < last) return [String(cursor + 1), []];
+      // The last page holds the claim only while it is there, as HSCAN answers.
+      const value = redis.run(["HGET", key, "claim1"]);
+      return ["0", value === null ? [] : ["claim1", value]];
     };
     replaced = [{ word: "HSCAN", key: ownerClaims, reply: paged(ownerClaims, 120) }, { word: "HSCAN", key: teamClaims, reply: paged(teamClaims, 170) }];
     let prepared = 0;

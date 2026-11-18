@@ -444,6 +444,39 @@ async function main(): Promise<void> {
     is("the walk that prepares the store reads that host again: the late claim is gone too", [last, redis.run(["HEXISTS", teamClaims, "claimB"]), claimProgress()], [1, 0, []]);
   }
 
+  part("LEVE (Claude 4 on #3660 at 4ea74ecfc1): two hosts with more claims than a walk reads are re-read once each, never in turn for good");
+  {
+    fresh();
+    const TEAM = "teammate-w@example.com";
+    await claimHandle(OWNER, "claimsw", "Claims W", "");
+    const store = (await ensureStoreId(OWNER))!;
+    if (!(await putMember(store, TEAM, "admin"))) throw new Error("setup: the teammate is not on the team");
+    const ownerClaims = claimsKey(hostId(OWNER));
+    const teamClaims = claimsKey(hostId(TEAM));
+    const start = Date.now() + 86_400_000;
+    redis.run(["HSET", ownerClaims, "claim1", `${start}|${start + 1_800_000}|0|${store.sid}`]);
+    redis.run(["HSET", teamClaims, "claim1", `${start}|${start + 1_800_000}|0|${store.sid}`]);
+    await closeForErasure(OWNER);
+    const at = Date.now();
+    await markDue(OWNER, at - 1000);
+    // Both hosts' claims as more pages than CLAIM_PAGES a walk, ending in different walks (121 and 171 pages): cursor n
+    // answers n + 1, the last page the claim. Each reaching its end makes the other, already at its end, read again.
+    const paged = (key: string, last: number) => (command: Command) => {
+      const cursor = Number(command[2]);
+      return cursor >= last ? ["0", ["claim1", redis.run(["HGET", key, "claim1"])]] : [String(cursor + 1), []];
+    };
+    replaced = [{ word: "HSCAN", key: ownerClaims, reply: paged(ownerClaims, 120) }, { word: "HSCAN", key: teamClaims, reply: paged(teamClaims, 170) }];
+    let prepared = 0;
+    let walks = 0;
+    while (prepared === 0 && walks < 20) {
+      prepared = await walkAt(walkTime(at, walks));
+      walks += 1;
+    }
+    replaced = [];
+    is("the store is prepared in a bounded number of walks (each host read through at most twice)", [prepared, walks <= 12], [1, true]);
+    is("and both hosts' claims for it are gone", [redis.run(["HEXISTS", ownerClaims, "claim1"]), redis.run(["HEXISTS", teamClaims, "claim1"])], [0, 0]);
+  }
+
   part("LOW: a store in line whose record does not read waits a walk; only nil is gone");
   for (const [what, reply] of [["a string that is not a store", "not a store {"], ["a number", 42], ["a record of another key", null]] as const) {
     fresh();

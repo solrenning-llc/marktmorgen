@@ -11,15 +11,15 @@ Queue item 457 [EL1] asks for the worst-case cost of keeping contacts on each pl
 
 ## How many fit
 
-The smallest contact (a yes from a form, nothing else) takes **944 bytes**. The largest (every title, label, name and mark at its longest) takes **4,144 bytes**. The table assumes the room holds nothing else: no products, pages, orders or courses. So these are the most a plan could ever keep.
+The smallest contact (a yes from a form, nothing else) takes **912 bytes**. The largest (every title, label, name and mark at its longest) takes **4,016 bytes**. The table assumes the room holds nothing else: no products, pages, orders or courses. So these are the most a plan could ever keep.
 
 | Plan | Data room | Smallest contacts that fit | Largest contacts that fit | MAX_LEADS | Real ceiling |
 | --- | --- | --- | --- | --- | --- |
-| Store | 18,000,000 bytes | 19,067 | 4,343 | 100,000 | **19,067** |
-| Studio | 135,000,000 bytes | 143,008 | 32,577 | 100,000 | **100,000** |
-| Scale | 250,000,000 bytes | 264,830 | 60,328 | 100,000 | **100,000** |
+| Store | 18,000,000 bytes | 19,736 | 4,482 | 100,000 | **19,736** |
+| Studio | 135,000,000 bytes | 148,026 | 33,615 | 100,000 | **100,000** |
+| Scale | 250,000,000 bytes | 274,122 | 62,250 | 100,000 | **100,000** |
 
-**On Store, the published 100,000 cannot be reached.** The room fills first, at most at 19,067 (Store), and sooner when the store keeps anything else. The home page says "A list of up to 100,000 people" (`components/home-parts.tsx`, `listSizeWords`). The studio speaks of 100,000 as the most one store holds (`app/studio/page.tsx`). Neither says it depends on the plan. That is a published number that does not hold on that plan (VR, item 2). The fix is for the owner to choose ("Depende do dono"):
+**On Store, the published 100,000 cannot be reached.** The room fills first, at most at 19,736 (Store), and sooner when the store keeps anything else. The home page says "A list of up to 100,000 people" (`components/home-parts.tsx`, `listSizeWords`). The studio speaks of 100,000 as the most one store holds (`app/studio/page.tsx`). Neither says it depends on the plan. That is a published number that does not hold on that plan (VR, item 2). The fix is for the owner to choose ("Depende do dono"):
 - show each plan's real number, which lowers the visible figure on that plan, against the owner's rule not to cut a visible limit;
 - give that plan a larger room, which has a cost and needs the margin rule (MR) first;
 - or say on the page that the figure depends on the plan and the room.

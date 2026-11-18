@@ -51,6 +51,7 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
@@ -59,6 +60,7 @@ import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
+import { cleanReviewText } from "@/lib/review-ai-summary-rules";
 import type { Store } from "@/lib/store";
 
 export type VoiceSource = "cancel" | "question" | "review" | "search";
@@ -167,16 +169,28 @@ redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
 
-/** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
+const VOICE_FAILURE_MESSAGES: Record<VoiceSource | "save", string> = {
+  cancel: "reading cancellation feedback for the customer summary failed",
+  question: "reading customer questions for the customer summary failed",
+  review: "reading customer reviews for the customer summary failed",
+  search: "reading customer searches for the customer summary failed",
+  save: "keeping the customer summary failed",
+};
+
+/** Logs only a fixed operation label: provider errors may contain customer text or request data. */
+export function logVoiceFailure(kind: VoiceSource | "save", _error: unknown): void {
+  console.error(VOICE_FAILURE_MESSAGES[kind]);
+}
+
+/**
+ * A text as it may be sent: one line, short, with addresses, handles, phone
+ * numbers and links taken out. Pure. The same rule as the reviews' summary
+ * (cleanReviewText), so a web address without "http" or "www"
+ * ("janesmith.dev") is a link too, as the privacy policy says (663 [HF1]);
+ * cut at whole characters, never inside an emoji.
+ */
 export function cleanVoice(value: string, max = MAX_TEXT): string {
-  return value
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[email]")
-    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, max);
+  return Array.from(cleanReviewText(value)).slice(0, max).join("");
 }
 
 /**
@@ -190,7 +204,7 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   const items: Omit<VoiceItem, "id">[] = [];
   const unread: VoiceSource[] = [];
   const failed = (source: VoiceSource) => (error: unknown) => {
-    console.error(`reading the ${source} texts for what customers are saying failed`, error);
+    logVoiceFailure(source, error);
     unread.push(source);
     return null;
   };
@@ -220,7 +234,7 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   const out: VoiceItem[] = [];
   for (const item of items) {
     const text = cleanVoice(item.text);
-    if (text.replace(/\[(email|link|number)\]/g, "").trim().length < 2) continue;
+    if (text.replace(/\[(email|handle|link|number)\]/g, "").trim().length < 2) continue;
     out.push({ ...item, text, id: out.length + 1 });
     if (out.length >= MAX_TEXTS) break;
   }
@@ -311,11 +325,42 @@ function parseSummary(raw: unknown): VoiceSummary | null {
  */
 export async function forgetVoicePerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [, gone] = await redisPipeline([
-    ["DEL", lockKey(statsId)],
-    ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
-  ]);
-  return Number(gone) || 0;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["DEL", lockKey(statsId)],
+      ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
+    ]),
+    2,
+  );
+  // Both DELs' own counts only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const locked = countOf(replies?.[0]);
+  const gone = countOf(replies?.[1]);
+  if (locked === null || gone === null) throw new UnknownReplyError("the customer voice summaries deleted");
+  return gone;
+}
+
+/**
+ * A review its buyer deleted (app/api/store/review/route.ts; Claude 7's reviews hunt, 14 November 2026): every summary
+ * kept for the store that quotes its words goes, with the lock of a reading under way, so that reading is not kept
+ * (VOICE_KEEP). A summary that does not read (another reply than text or nothing) goes too, never kept on a guess. One
+ * GET of each kept month, then at most one DEL. Returns how many summaries went.
+ */
+export async function forgetReviewWords(statsId: string | null, text: string, now = Date.now()): Promise<number> {
+  const words = text.trim();
+  if (!statsId || !words || !isRedisConfigured()) return 0;
+  const quoted = new Set([words, cleanVoice(words)]);
+  const keys = keptMonths(now).map((month) => voiceKey(statsId, month));
+  const replies = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  const gone = keys.filter((key, i) => {
+    const raw = replies ? replies[i] : undefined;
+    if (raw === null) return false;
+    const summary = parseSummary(raw);
+    if (!summary) return true;
+    return [...summary.themes, ...(summary.reviewThemes ?? [])].some((theme) => theme.examples.some((example) => example.source === "review" && quoted.has(example.text)));
+  });
+  if (!gone.length) return 0;
+  await redisPipeline([["DEL", lockKey(statsId)], ["DEL", ...gone]]);
+  return gone.length;
 }
 
 /** This month's summary, or last month's while this month has none yet. */
@@ -380,7 +425,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
     // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
     const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
-      console.error("keeping the summary of what customers say failed", error);
+      logVoiceFailure("save", error);
       return null;
     });
     if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };

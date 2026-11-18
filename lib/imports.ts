@@ -2226,7 +2226,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         stop = await moveStopLink(store, letter.to);
       } catch (error) {
         await releaseMoved(store, 1);
-        await releaseDay(1);
+        await releaseDay(1, day);
         throw error;
       }
       const text = [letter.text, ...moveFoot(store, stop.page)].join("\n");

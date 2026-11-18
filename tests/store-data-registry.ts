@@ -396,7 +396,13 @@ export const FAMILIES: Record<string, Family> = {
     ],
   },
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
-  "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
+  "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token, and the sessions it spent for good", parts: [
+    item(KEY, "One per package, kept with it.", "call"),
+    // C6 R40, Claude 4 and Claude 6 on #3487 (9-10 November 2026): <token key>:used, the package's paid sessions, one id of 16 characters per
+    // confirmed hold (packageSessionUsed and spent in lib/call-packages.ts): its total (MAX_PACKAGE_SESSIONS, 20), with room kept for as many
+    // again (a late confirmation of a hold that had already let its slot go), kept exactly as long as the package.
+    item(768, "Its paid sessions: one id of 16 characters each, at most 20 with as many again in room, kept as long as the package.", "call"),
+  ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept until 200 days after the call it moved to, two years at most", "call", 730, KB),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
@@ -473,6 +479,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),
+  "nl:cm:@lib/community-about.ts": short("A community's About page counts, kept six hours", "request", 1, 512, REQ("community-about")),
   "nl:cm:@lib/community-approval.ts": {
     what: "Posts and comments waiting for the creator's approval, the notes left to their authors, and each member's approved count (543 [CM2])",
     room: ["lib/community-approval.ts"],
@@ -615,6 +622,7 @@ export const FAMILIES: Record<string, Family> = {
       per("own", 401, MARK, "A link in one of the store's own emails noted."),
       per("access", 401, MARK, "A link in an access email noted."),
       per("monthly", 401, MARK, "A link in a monthly email noted."),
+      per("order", 401, MARK, "A membership's ad cookies noted, once per membership sold with the buyer's yes (lib/ad-events.ts).", KIND("membership")),
       // A confirmed Path lead's mark (lib/path-lead.ts) is noted beside the link that carried it (13 [D10], review M1 of #3431).
       per("access", 401, MARK, "A Path lead's mark noted: a sign-up link used.", MAIL("join")),
       per("order", 401, MARK, "A Path lead's mark noted: a free copy's link used.", KIND("free")),
@@ -637,6 +645,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),
   "nl:fair:c:@lib/fair-coupon.ts": { what: "A fair-price coupon made on the creator's Stripe", parts: [capped(96 * KEY, "One per percent offered.")] },
+  "nl:member:c:@lib/fair-coupon.ts": { what: "A member-price coupon made on the creator's Stripe (620 [SZ4])", parts: [capped(96 * KEY, "One per percent offered: at most the 18 of MEMBER_PERCENT_CHOICES.")] },
   "nl:mail:flows:@lib/flow-list.ts": { what: "The store's workflows", room: ["lib/flows.ts"] },
   "nl:wf:day:@lib/flow-runs.ts": short("Runs started and refused a day", "day", 3, 128),
   "nl:wf:held:@lib/flow-runs.ts": { what: "Held runs", room: ["lib/flows.ts"] },
@@ -871,6 +880,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
+  "nl:stamp:noroom:@lib/pdf-stamp.ts": { what: "A store found without room for a new stamped copy or preview", parts: [capped(KEY + MARK, "One mark a store, kept NO_ROOM_NOTE_SECONDS (an hour).", src("lib/stamp-cost-rules.ts", "NO_ROOM_NOTE_SECONDS"))] },
   "nl:stamp:drop@lib/pdf-stamp.ts": company("Folders of stamped copies to delete again", "One set, members gone when done."),
   "nl:phone:cfg:@lib/phone-alerts.ts": { what: "Phones that hear of sales", parts: [capped(MAX_DEVICES * 6 * 2 * KB, "MAX_STORE_DEVICES devices.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },
   "nl:phone:seen:@lib/phone-alerts.ts": { what: "An event already sent to phones", parts: [per("order", 40, MARK, "A sale."), per("buyer", 40, MARK, "A buyer's action.")] },

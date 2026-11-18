@@ -47,7 +47,8 @@ const joined = (product: string) => ({
   payment_status: "paid",
   metadata: { store: HANDLE, product },
   payment_intent: null,
-  subscription: { id: "sub_C1Member0001", object: "subscription", status: "active", metadata: { store: HANDLE, product }, items: { object: "list", data: [] }, pause_collection: null },
+  // Stripe always sends at least one item, and the checkout writes the product on its price (Codex X6's re-check of #2999).
+  subscription: { id: "sub_C1Member0001", object: "subscription", status: "active", metadata: { store: HANDLE, product }, items: { object: "list", data: [{ id: "si_C1Member0001", price: { id: "price_C1Member0001", metadata: { product } } }] }, pause_collection: null },
 });
 const jar = (cookies: Record<string, string>) => ({ get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined) });
 
@@ -127,6 +128,9 @@ async function main(): Promise<void> {
     ["its payment not expanded (an id)", "pi_C5Guide0001"],
     ["its charge not expanded (an id)", { ...kept, latest_charge: "ch_C5Guide0001" }],
     ["its charge's refund in another shape", { ...kept, latest_charge: { ...kept.latest_charge, refunded: "no" } }],
+    // Codex X6's re-check of #2999: an amount refunded is a whole number of cents from zero up; anything else is no amount.
+    ["its charge's amount refunded negative", { ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: -1 } }],
+    ["its charge's amount refunded a fraction", { ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: 1.5 } }],
   ] as const) {
     rows = [joined(club.product.id), bought(pi)];
     is(`club member, the guide's row with ${label}: unknown (the 30% may rest on it), not 20%`, await memberPriceFor(store, product, proved), { state: "unknown" });
@@ -150,6 +154,10 @@ async function main(): Promise<void> {
     ["no pause field", { ...sub, pause_collection: undefined }],
     ["its pause in another shape", { ...sub, pause_collection: "paused" }],
     ["its pause's end in another shape", { ...sub, pause_collection: { behavior: "void", resumes_at: "soon" } }],
+    // Codex X6's re-check of #2999 (LOW): with no item, or no product on the price nor on the subscription, the product it
+    // is on now is not proved, and falling back to the product bought would keep a member moved off it on it.
+    ["its items an empty list", { ...sub, items: { object: "list", data: [] } }],
+    ["no product on its price nor on itself", { ...sub, metadata: { store: HANDLE }, items: { object: "list", data: [{ id: "si_C1Member0001", price: { id: "price_C1Member0001", metadata: {} } }] } }],
   ] as const) {
     rows = [{ ...joined(club.product.id), subscription: JSON.parse(JSON.stringify(partial)) }];
     is(`the club's subscription with ${label}: unknown, not 20%`, await memberPriceFor(store, product, proved), { state: "unknown" });

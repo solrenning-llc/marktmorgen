@@ -10,7 +10,7 @@
  * A row is taken as this import's own only from its record (the grant's or the invitation's job), never from the
  * answer alone: a buyer or member another import brought is still "already", and is not emailed.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { addRows, finishUpload, runImport, startImport } from "@/lib/imports";
 import { importedFor } from "@/lib/imported-purchases";
 import { linkKey, readInvite, inviteField } from "@/lib/move-members";
@@ -70,6 +70,9 @@ async function openStore(owner: string, handle: string, account: string, id: str
   await ensureListId(owner);
   await setStripeAccount(owner, account, true);
   await setSubscription(owner, { customerId: `cus_${id}`, subscriptionId: `sub_${id}`, active: true, period: paidPeriod() });
+  // A members import needs the postal address its emails carry since main's move-members work (lib/move-members.ts,
+  // movePostal). A synthetic one, as tests/members-import-emails-month.test.ts gives.
+  await setMailSettings(owner, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   const guide = await addProduct(owner, "The Guide", "", "12", null);
   const club = await addProduct(owner, "The Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });
   if (!guide.ok || !club.ok) throw new Error("no product");

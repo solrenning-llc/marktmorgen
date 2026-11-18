@@ -199,6 +199,51 @@ async function main(): Promise<void> {
     is(`${kind}: read again, added and emailed exactly once`, [after?.state, after?.counts.added, after?.counts.already, sentTo(address, before)], ["done", 1, 0, 1]);
   }
 
+  for (const mode of ["missing claim reply", "unreadable row", "sparse invitation reply"] as const) {
+    part(`An import retry waits for exact reads: ${mode}`);
+    const address = `exact-retry-${mode.split(" ")[0]}@example.test`;
+    const before = emails.length;
+    store = await fresh();
+    const id = mode === "sparse invitation reply"
+      ? await members(store, OWNER, address, renews)
+      : await purchases(store, OWNER, address);
+    const seen = `nl:import:${id}:seen`;
+    let queued = false;
+    let injected = false;
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (!queued && commands.some(queues(id))) {
+        queued = true;
+        throw new Error("synthetic failure before queueing the mail");
+      }
+      const replies = await original(commands);
+      if (!queued || injected) return replies;
+      const slot = commands.findIndex(([command, key]) =>
+        (mode === "missing claim reply" && command === "HSETNX" && key === seen)
+        || (mode === "unreadable row" && command === "HMGET" && key === seen)
+        || (mode === "sparse invitation reply" && command === "HMGET" && String(key).startsWith("nl:mv:")));
+      if (slot === -1) return replies;
+      injected = true;
+      if (mode === "missing claim reply") delete replies[slot];
+      else replies[slot] = mode === "unreadable row" ? ["not-a-row-number"] : Array(1);
+      return replies;
+    };
+    let held;
+    try {
+      await runImport(id, Date.now() + 30_000);
+      held = await runImport(id, Date.now() + 30_000);
+    } finally {
+      restore();
+    }
+    is("the reply reached the retry", injected, true);
+    is("unknown evidence makes no progress and queues no email",
+      [held?.state, held?.done, held?.counts.added, held?.counts.already, sentTo(address, before)],
+      ["running", 0, 0, 0, 0]);
+    const finished = await run(id);
+    is("an exact retry counts and emails the row once",
+      [finished?.state, finished?.counts.added, finished?.counts.already, sentTo(address, before)],
+      ["done", 1, 0, 1]);
+  }
+
   part("Control: a member another import invited is still already, and not emailed again");
   {
     const before = emails.length;

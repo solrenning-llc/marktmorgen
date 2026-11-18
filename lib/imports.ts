@@ -1826,9 +1826,9 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   if (sent === "retry" || sent === "uncertain" || sent === "unconfirmed") {
     // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back,
     // and marked so that the same batch tried again is not counted again. A count kept by an earlier unknown answer
-    // stays whatever this one says. Amazon's unknown answer ("unconfirmed") is kept but never marked: Amazon may
-    // write to them again, so the retry is counted again (#4073 MEDIUM 1).
-    if (sent === "uncertain" && !kept) await keepBatchCount(batchKey, sending.map((m) => m.to));
+    // stays whatever this one says. Amazon's unknown answer ("unconfirmed") is marked too: the same batch tried again
+    // never writes to whoever Amazon may have taken (lib/email.ts, notMaybeTaken; Codex X6 on #4073).
+    if ((sent === "uncertain" || sent === "unconfirmed") && !kept) await keepBatchCount(batchKey, sending.map((m) => m.to));
     if (sent === "retry") await giveBack();
     else {
       await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
@@ -2275,9 +2275,9 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         counts.sent += 1;
       } else if (sent === "retry" || sent === "uncertain" || sent === "unconfirmed") {
         // An answer not known (lib/email.ts, sendBatchOutcome) may have sent it: its count is kept, never given back,
-        // and marked so that the same reminder tried again is not counted again; Amazon's ("unconfirmed") is not
-        // marked, as Amazon may write to them again (#4073 MEDIUM 1).
-        if (sent === "uncertain" && !kept) await keepBatchCount(remindKey, [letter.to]);
+        // and marked so that the same reminder tried again is not counted again, Amazon's ("unconfirmed") as well: the
+        // retry never writes to whoever Amazon may have taken (notMaybeTaken; Codex X6 on #4073).
+        if ((sent === "uncertain" || sent === "unconfirmed") && !kept) await keepBatchCount(remindKey, [letter.to]);
         if (sent === "retry" && !kept) {
           await releaseMoved(store, 1);
           await releaseDay(1, day);

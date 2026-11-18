@@ -725,9 +725,9 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       if (outcome === "sent") await batchCountSettled(batchKey, to);
       if (outcome === "retry" || outcome === "uncertain" || outcome === "unconfirmed") {
         // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
-        // back. Resend's ("uncertain") is marked so that the same batch tried again is not counted again; Amazon's
-        // ("unconfirmed") is not, as Amazon may write to them again.
-        if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, to);
+        // back, and marked so that the same batch tried again is not counted again: Resend drops a key it took, and
+        // the same batch tried again never writes to whoever Amazon may have taken (notMaybeTaken; Codex X6 on #4073).
+        if ((outcome === "uncertain" || outcome === "unconfirmed") && !kept) await keepBatchCount(batchKey, to);
         if (outcome === "retry" && !kept) await releaseDay(chunk.length, day);
         break;
       }

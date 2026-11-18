@@ -609,9 +609,10 @@ export async function sendBatch(
  * Resend under the same key, which Resend drops if it took the first, so the
  * caller keeps its count, never given back, and may send the retry under it
  * (lib/batch-count.ts). "unconfirmed": Amazon may have taken some of it (an
- * SES acknowledgement lost); Amazon has no such key, and the retry posts
- * those emails to it again, so the caller keeps its count, never given back,
- * and counts the retry again (#4073 MEDIUM 1). "retry" means nothing was
+ * SES acknowledgement lost); the same batch tried again never posts to
+ * whoever Amazon may have taken (dispatchBatch, notMaybeTaken, two days), so
+ * the caller keeps its count, never given back, and may send the retry under
+ * it as well: the kept mark ends first (Codex X6 on #4073). "retry" means nothing was
  * handed to a provider and the same batch may be tried again, its count
  * given back.
  */

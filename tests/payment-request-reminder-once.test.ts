@@ -19,7 +19,16 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { installSesMailFixture } from "./ses-mail-fixture";
 
-const fixture = installSesMailFixture({ fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 }) });
+let holdReminder: (() => Promise<void>) | undefined;
+const fixture = installSesMailFixture({
+  onSes: (message) => {
+    if (message.to.includes("overlap@example.com") && holdReminder) {
+      return holdReminder().then(() => Response.json({ MessageId: "ses_fixture_overlap" }));
+    }
+    return undefined;
+  },
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 }),
+});
 fixture.configure();
 const handed = (to: string) => fixture.sesAttempts.filter((m) => m.to.includes(to)).length;
 /** The SES once-only mark of a key lasts a day; the in-memory Redis keeps real time, so its expiry is played here. */
@@ -108,6 +117,26 @@ async function main(): Promise<void> {
   aDayPasses(`nimbus-payreq:${other}:1`);
   await sendDueReminders(Date.now() + 10_000, firstDay + DAY + 1);
   is("and sent the day after", [toRefused(), (await readRequest(other))!.sent.length], [3, 2]);
+
+  part("Two workers completing the same reminder advance its number once");
+  const overlap = await request(store, "overlap@example.com", now);
+  const before = (await readRequest(overlap))!;
+  let entered!: () => void;
+  let release!: () => void;
+  const atSender = new Promise<void>((resolve) => { entered = resolve; });
+  const reply = new Promise<void>((resolve) => { release = resolve; });
+  holdReminder = () => { entered(); return reply; };
+  const first = sendRequestEmail(store, before, firstDay);
+  await atSender;
+  try {
+    await sendRequestEmail(store, before, firstDay + 1);
+  } finally {
+    release();
+    holdReminder = undefined;
+  }
+  await first;
+  const completed = (await readRequest(overlap))!;
+  is("one delivery attempt and one durable reminder", [handed("overlap@example.com"), completed.sent, completed.sendingAt], [2, [now, firstDay], undefined]);
   done();
 }
 

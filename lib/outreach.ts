@@ -568,7 +568,9 @@ export async function stopFromLink(token: string, everyone: boolean, now = Math.
   const writes: (string | number)[][] = [
     ["SADD", key(link.s, "stop"), link.d],
     ...(everyone ? [["SADD", STOP_ALL, link.d]] : []),
-    ...(pitch && pitch.status !== "stopped" ? [["HSET", key(link.s, "pitches"), link.id, JSON.stringify({ ...pitch, status: "stopped", sentAt: pitch.sentAt || now } satisfies Pitch)]] : []),
+    // An answer the creator marked (replied, deal) stays: the business is closed by the stop set all the same, and
+    // "What your pitches did" keeps counting it (Claude 1 cloud on #4123). Only a pitch with no answer becomes "stopped".
+    ...(pitch && (pitch.status === "draft" || pitch.status === "sent") ? [["HSET", key(link.s, "pitches"), link.id, JSON.stringify({ ...pitch, status: "stopped", sentAt: pitch.sentAt || now } satisfies Pitch)]] : []),
   ];
   const receipt = repliesFor(await redisPipeline(writes), writes.length);
   if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("a business's stop");

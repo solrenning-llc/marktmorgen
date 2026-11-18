@@ -55,7 +55,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor, stringList } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, plainObject, readStripePage } from "@/lib/stripe-list";
-import { currentMeta } from "@/lib/tier-rules";
+import { currentMeta, productOfSub } from "@/lib/tier-rules";
 import { type Listing, type Store, saleHandles } from "@/lib/store";
 import { currencyRule } from "@/lib/money";
 
@@ -103,8 +103,12 @@ export function subscriptionDecidable(sub: unknown): boolean {
   if (!textMap(sub.metadata)) return false;
   const items = sub.items;
   if (!plainObject(items) || !Array.isArray(items.data)) return false;
+  // At least one item, and a product proved on its price or on the subscription (Codex X6's re-check of #2999, LOW):
+  // with none, productOfSub would fall back to the product bought, and a member moved off it would still hold it.
+  // Stripe always sends an item, and the checkout writes the product on its prices.
   const first: unknown = items.data[0];
-  if (items.data.length && (!plainObject(first) || !plainObject(first.price) || !textMap(first.price.metadata))) return false;
+  if (!items.data.length || !plainObject(first) || !plainObject(first.price) || !textMap(first.price.metadata)) return false;
+  if (!productOfSub(sub, "")) return false;
   if (!Object.prototype.hasOwnProperty.call(sub, "pause_collection")) return false;
   const pause = sub.pause_collection;
   if (pause === null) return true;
@@ -131,7 +135,10 @@ export function sessionDecidable(row: Record<string, unknown>): boolean {
   if (payment.status !== "succeeded") return true;
   const charge = payment.latest_charge;
   return plainObject(charge) && typeof charge.paid === "boolean" && typeof charge.refunded === "boolean"
-    && typeof charge.disputed === "boolean" && typeof charge.amount_refunded === "number";
+    && typeof charge.disputed === "boolean"
+    // A whole number of cents from zero up, as Stripe gives it: a negative, a fraction or a number that is not finite
+    // is no amount, so the row is undecidable, never read as refunded with a smaller rule standing as proved (as on #3026).
+    && Number.isSafeInteger(charge.amount_refunded) && (charge.amount_refunded as number) >= 0;
 }
 
 /**

@@ -87,3 +87,35 @@ export function checkedAfter(input: ChoiceInput, draft: QuizDraft): boolean {
   if (!picked || !CHOICE.test(input.value)) return input.checked;
   return picked.includes(Number(input.value));
 }
+
+/** The part of the browser's storage the forgetting needs, so a test can hand in a synthetic one. */
+export type DraftStorage = { getItem(key: string): string | null; removeItem(key: string): void };
+
+/**
+ * While the quiz cannot be answered, removes the draft kept under `key` that a
+ * recorded try made useless (Codex L's review of #4324): once the student has
+ * passed or used the last try (`final`), every draft for the lesson goes;
+ * while they wait between tries, a draft made before a try recorded since
+ * (another count), unreadable or too old goes, and one at the same count,
+ * never recorded, stays to come back after the wait. Storage that cannot be
+ * read or written (a private window) is left alone, without an error.
+ */
+export function forgetClosedDraft(storage: DraftStorage, key: string, tries: number, final: boolean, now: number): void {
+  try {
+    const raw = storage.getItem(key);
+    if (raw === null) return;
+    if (!final) {
+      let kept: unknown;
+      try {
+        kept = JSON.parse(raw);
+      } catch {
+        kept = null;
+      }
+      const { at, tries: keptTries } = (kept && typeof kept === "object" ? kept : {}) as Partial<QuizDraft>;
+      if (keptTries === tries && typeof at === "number" && Number.isFinite(at) && at <= now && now - at <= KEEP_MS) return;
+    }
+    storage.removeItem(key);
+  } catch {
+    // Storage closed: nothing to forget.
+  }
+}

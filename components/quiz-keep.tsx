@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useHydrated } from "@/components/use-hydrated";
-import { type ChoiceInput, checkedAfter, draftOf, draftToRestore, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
+import { type ChoiceInput, checkedAfter, draftOf, draftToRestore, forgetClosedDraft, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
 
 /**
  * Keeps a quiz's answers in the student's own browser while they answer
@@ -118,4 +118,24 @@ export function QuizKeep({
       ) : null}
     </span>
   );
+}
+
+/**
+ * Drawn instead of QuizKeep while the quiz cannot be answered (passed, out of
+ * tries, or waiting between tries), for the same signed-in student: removes
+ * the draft a recorded try made useless, by forgetClosedDraft, the moment the
+ * lesson opens (Codex L's review of #4324). Draws nothing visible.
+ */
+export function QuizForget({ handle, product, lesson, who, tries, final }: { handle: string; product: string; lesson: string; who: string; tries: number; final: boolean }) {
+  const key = quizKeepKey(handle, product, lesson, who);
+  useEffect(() => {
+    let storage: Storage | null = null;
+    try {
+      storage = window.localStorage;
+    } catch {
+      storage = null;
+    }
+    if (storage) forgetClosedDraft(storage, key, tries, final, Date.now());
+  }, [key, tries, final]);
+  return <span hidden data-quiz-forget />;
 }

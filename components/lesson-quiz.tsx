@@ -2,7 +2,7 @@ import type { Attempt, Quiz } from "@/lib/quiz";
 import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
-import { QuizKeep } from "@/components/quiz-keep";
+import { QuizForget, QuizKeep } from "@/components/quiz-keep";
 
 /**
  * A lesson's quiz, as a student meets it: the questions to answer, and after
@@ -144,6 +144,10 @@ export function LessonQuiz({
             tries={used}
             words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }}
           />
+        ) : null}
+        {/* While it cannot be answered, a draft a recorded try made useless is removed, even on the result-only view (review of #4324). */}
+        {mode === "student" && !canAnswer && keeper && hidden.handle && hidden.product && hidden.lesson ? (
+          <QuizForget handle={hidden.handle} product={hidden.product} lesson={hidden.lesson} who={keeper} tries={used} final={passed || left === 0} />
         ) : null}
         <ol className="space-y-6">
           {quiz.questions.map((question, qi) => {

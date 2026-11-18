@@ -128,6 +128,15 @@ try{
    const extras=buyForm.locator('input[name="bump"]');
    if(await extras.evaluateAll(nodes=>nodes.some(n=>n.checked)))throw Error("An extra was selected for the buyer");
    if(mode==="baseline"){await page.keyboard.press("Tab");if(!await page.evaluate(()=>document.activeElement!==document.body))throw Error("Native keyboard focus missing");}
+   // The billing country (components/billing-country-field.tsx, EU VAT art. 9a gate): a required, labelled native select,
+   // with no country chosen for the buyer. A buyer outside the EU and the UK (the United States here) chooses it and can buy;
+   // the refusal of EU and UK places is held in tests/eu-vat-consumer-gate.test.ts and tests/eu-vat-checkout-routes.test.ts.
+   const country=buyForm.locator('select[name="billing_country"]');
+   if(await country.count()!==1)throw Error("Billing country field missing");
+   const field=await country.evaluate(n=>({value:n.value,required:n.required,labelled:Boolean(n.labels&&n.labels.length&&n.labels[0].innerText.trim()),us:[...n.options].some(o=>o.value==="US")}));
+   if(field.value!==""||!field.required||!field.labelled||!field.us)throw Error("Billing country is not an empty, required, labelled select offering the United States "+JSON.stringify(field));
+   await country.focus();await country.selectOption("US");
+   if(await country.inputValue()!=="US")throw Error("The billing country could not be chosen");
    // The box to start during the cancellation period (lib/digital-consent.ts): a real, labelled, required checkbox, never checked for the buyer.
    const consent=buyForm.locator('input[name="dc"]');
    if(await consent.count()!==1)throw Error("Immediate-access consent box missing");

@@ -27,6 +27,7 @@ export function QuizKeep({
   who,
   shown,
   tries,
+  version,
   words,
 }: {
   handle: string;
@@ -35,6 +36,8 @@ export function QuizKeep({
   who: string;
   shown: string;
   tries: number;
+  /** The server's code for the quiz's words and choices (lib/quiz-keep-key.ts quizVersion). */
+  version: string;
   words: { quizKeptBack: string; quizKeptClear: string; quizKeptCleared: string };
 }) {
   const mark = useRef<HTMLSpanElement>(null);
@@ -54,7 +57,7 @@ export function QuizKeep({
     } catch {
       raw = null;
     }
-    const draft = draftToRestore(raw, shown, tries, Date.now());
+    const draft = draftToRestore(raw, shown, tries, Date.now(), version);
     let pending: ReturnType<typeof setTimeout> | undefined;
     if (draft) {
       for (const input of choices()) input.checked = checkedAfter({ name: input.name, value: input.value, checked: input.checked }, draft);
@@ -70,7 +73,7 @@ export function QuizKeep({
       }
     }
     const save = () => {
-      const now = draftOf(snapshot(), shown, tries, Date.now());
+      const now = draftOf(snapshot(), shown, tries, Date.now(), version);
       try {
         if (hasAnswers(now)) window.localStorage.setItem(key, JSON.stringify(now));
         else window.localStorage.removeItem(key);
@@ -83,7 +86,7 @@ export function QuizKeep({
       if (pending) clearTimeout(pending);
       form.removeEventListener("change", save);
     };
-  }, [key, shown, tries, words.quizKeptBack]);
+  }, [key, shown, tries, version, words.quizKeptBack]);
 
   return (
     <span ref={mark} className="block" data-quiz-keep>

@@ -34,7 +34,7 @@ const KEEP_MS = QUIZ_KEEP_DAYS * 86_400_000;
 export const quizKeepKey = (handle: string, product: string, lesson: string, who: string) => `${QUIZ_KEEP_PREFIX}${handle}:${product}:${lesson}:${who}`;
 
 /** One question's choices as the student left them: every question of the try, even one left unanswered; `tries` is how many tries were recorded then. */
-export type QuizDraft = { at: number; shown: string; tries: number; answers: Record<string, number[]> };
+export type QuizDraft = { at: number; shown: string; tries: number; version: string; answers: Record<string, number[]> };
 
 /** One choice input of the form, as the browser has it. */
 export type ChoiceInput = { name: string; value: string; checked: boolean };
@@ -42,15 +42,19 @@ export type ChoiceInput = { name: string; value: string; checked: boolean };
 const QUESTION = /^q_[A-Za-z0-9_-]{1,64}$/;
 const CHOICE = /^\d{1,3}$/;
 
-/** The draft of a form's choices, at `now`; only q_ inputs with a choice number count. */
-export function draftOf(inputs: readonly ChoiceInput[], shown: string, tries: number, now: number): QuizDraft {
+/**
+ * The draft of a form's choices, at `now`; only q_ inputs with a choice number count. `version` is the server's code
+ * for the quiz's words and choices (lib/quiz-keep-key.ts quizVersion; review of #4324), kept so a quiz changed since
+ * never gets it back.
+ */
+export function draftOf(inputs: readonly ChoiceInput[], shown: string, tries: number, now: number, version = ""): QuizDraft {
   const answers: Record<string, number[]> = {};
   for (const input of inputs) {
     if (!QUESTION.test(input.name) || !CHOICE.test(input.value)) continue;
     answers[input.name] ??= [];
     if (input.checked) answers[input.name].push(Number(input.value));
   }
-  return { at: now, shown, tries, answers };
+  return { at: now, shown, tries, version, answers };
 }
 
 /** Whether a draft holds any answer at all; an empty one is not worth keeping. */
@@ -60,10 +64,11 @@ export const hasAnswers = (draft: QuizDraft) => Object.values(draft.answers).som
  * The draft kept under a key, when it can be put back on this try: readable,
  * not older than QUIZ_KEEP_DAYS, for exactly these questions, made before
  * the same number of recorded tries (a try recorded since means it was sent
- * and counted), with at least one answer. Anything else is null, and the
+ * and counted), for the same version of the quiz's words and choices, with
+ * at least one answer. Anything else is null, and the
  * caller forgets it.
  */
-export function draftToRestore(raw: string | null, shown: string, tries: number, now: number): QuizDraft | null {
+export function draftToRestore(raw: string | null, shown: string, tries: number, now: number, version = ""): QuizDraft | null {
   if (!raw) return null;
   let kept: unknown;
   try {
@@ -72,16 +77,16 @@ export function draftToRestore(raw: string | null, shown: string, tries: number,
     return null;
   }
   if (!kept || typeof kept !== "object") return null;
-  const { at, shown: keptShown, tries: keptTries, answers } = kept as Partial<QuizDraft>;
+  const { at, shown: keptShown, tries: keptTries, version: keptVersion, answers } = kept as Partial<QuizDraft>;
   if (typeof at !== "number" || !Number.isFinite(at) || at > now || now - at > KEEP_MS) return null;
-  if (keptShown !== shown || keptTries !== tries || !answers || typeof answers !== "object") return null;
+  if (keptShown !== shown || keptTries !== tries || keptVersion !== version || !answers || typeof answers !== "object") return null;
   const clean: Record<string, number[]> = {};
   for (const [name, picked] of Object.entries(answers)) {
     if (!QUESTION.test(name) || !Array.isArray(picked)) return null;
     if (!picked.every((n) => Number.isInteger(n) && n >= 0 && n < 1000)) return null;
     clean[name] = [...new Set(picked)];
   }
-  const draft = { at, shown, tries, answers: clean };
+  const draft = { at, shown, tries, version, answers: clean };
   return hasAnswers(draft) ? draft : null;
 }
 

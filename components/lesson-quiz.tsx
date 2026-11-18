@@ -3,6 +3,7 @@ import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { QuizForget, QuizKeep } from "@/components/quiz-keep";
+import { quizVersion } from "@/lib/quiz-keep-key";
 
 /**
  * A lesson's quiz, as a student meets it: the questions to answer, and after
@@ -142,6 +143,7 @@ export function LessonQuiz({
             who={keeper}
             shown={quiz.questions.map((q) => q.id).join(",")}
             tries={used}
+            version={quizVersion(quiz.questions)}
             words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }}
           />
         ) : null}

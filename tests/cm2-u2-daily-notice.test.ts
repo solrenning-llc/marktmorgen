@@ -277,6 +277,37 @@ async function main(): Promise<void> {
   is("once nothing it held can wait, it is let go", await storesWithHeld(tGone), []);
   is("and it has left the line", await redis.run(["ZSCORE", "nl:cm:ap:turns", turn[0].sid]), null);
 
+  part("A store let go while it holds again is found on the next run, even when the second look and the put-back both fail");
+  // Codex X6's LOW on #3033: the removal applies, the second look is unknown and the put-back never reaches Redis;
+  // the store is still on the list, so the next run must find it in line again.
+  redis.clear();
+  const t5 = t0 + 120 * DAY;
+  await holdPost(turn[0].id, post(ada, "Waiting"), { ...ROOM, sid: turn[0].sid }, t5);
+  const t5Late = t5 + (HELD_DAYS + 2) * DAY;
+  redis.pipeline = async (commands) => {
+    if (!commands.some((c) => c[0] === "ZREM" && c.includes(turn[0].sid))) return realPipe(commands);
+    redis.pipeline = realPipe;
+    const back = await holdPost(turn[0].id, post(bob, "Back"), { ...ROOM, sid: turn[0].sid }, t5Late);
+    if (!back.ok) throw new Error("not held");
+    const replies = await realPipe(commands);
+    redis.pipeline = async (next) => {
+      if (next.some((c) => c[0] === "ZADD" && c[1] === "nl:cm:ap:turns")) throw new Error("synthetic: the put-back never reached Redis");
+      return realPipe(next);
+    };
+    return [replies[0], {}] as never;
+  };
+  let lostThrew = false;
+  try {
+    await storesWithHeld(t5Late);
+  } catch {
+    lostThrew = true;
+  } finally {
+    redis.pipeline = realPipe;
+  }
+  is("the run that could not put the store back throws", lostThrew, true);
+  is("the next run finds the store again, from the list", await storesWithHeld(t5Late + 60), [turn[0].sid]);
+  is("and its creator is told", await shortRun(t5Late + 120), "creator0@example.test");
+
   part("Wired into the daily job, and its email registered");
   const cron = read("app/api/cron/courses/route.ts");
   is("the courses job runs the notice", /noticeHeldStores\(/.test(cron), true);

@@ -653,7 +653,8 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = stock;
   }
-  is("an unknown answer is taken for neither: PayPal is not asked, nothing is written, the buyer is not told where it stands", [captures.get(strange) ?? 0, await pending(strange), strangeShown.status], [0, false, 500]);
+  // The store's notice (paypal-error), never a server error (Claude 1's LOW 1 on #3411); it says nothing of where the order stands.
+  is("an unknown answer is taken for neither: PayPal is not asked, nothing is written, the buyer is not told where it stands", [captures.get(strange) ?? 0, await pending(strange), strangeShown.status, strangeShown.location.includes("status=paypal-error")], [0, false, 303, true]);
 
   done();
 }

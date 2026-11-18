@@ -30,6 +30,15 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 
 Caption rows select their worst modeled net share under the binding reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.
 
+## What each plan keeps in its worst month, under the LC reading
+
+A month's receipts after every fee and reserve (netOf), less every cost line at its limit (worstCost), then IRPF 15% and IOF 0.38% on that profit (MOST_CORRECT_READING, the LC rule of 1 November 2026). tests/switch-keeps-window.test.ts section 11 holds each one above zero (rule MR); this table holds the exact figures, through this document's staleness test (tests/worst-month-kept.ts, one formula for both).
+
+| Interval | Store | Studio | Scale |
+| --- | --- | --- | --- |
+| Monthly plan | US$44.29 | US$309.41 | US$693.56 |
+| A month of a yearly plan | US$36.23 | US$254.29 | US$570.29 |
+
 ## LLC fixed costs — owner decision22 October2026
 
 Allocation:100% Marktmorgen;0% Hazelsong. Owner22/10/2026 05:10 Fortaleza: "esqueça Hazelsong". Historical shared allocations are superseded.

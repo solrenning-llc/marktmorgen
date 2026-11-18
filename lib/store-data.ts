@@ -344,7 +344,12 @@ export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<s
   try {
     const [reply] = await redisPipeline([["HMGET", key, ...ids.map((id) => `b:${id}`)]]);
     if (!Array.isArray(reply) || reply.length !== ids.length) return null;
-    return new Set(ids.filter((_, i) => Number(reply[i] ?? 0) > 0));
+    // Read exactly (Codex P on #4846, MEDIUM): HMGET answers a share the pool's script wrote as a decimal whole number
+    // of bytes (it writes only above zero) and nothing for a slot without one. Any other value is not a share the pool
+    // wrote: the pool is unreadable, never "not held" (a share taken twice) nor "held" (a product counted nowhere).
+    const shares = reply.map((value) => (value === null ? 0 : typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null));
+    if (shares.some((share) => share === null)) return null;
+    return new Set(ids.filter((_, i) => (shares[i] ?? 0) > 0));
   } catch {
     return null;
   }
@@ -407,6 +412,16 @@ export async function markBesideSwept(store: DataStore): Promise<void> {
 export async function giveBeside(store: DataStore, ids: string[], now = Date.now()): Promise<void> {
   if (ids.length === 0) return;
   await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), true, now / 1000, true).catch(() => undefined);
+}
+
+/**
+ * Counts, before it is written, what a write that is never refused will
+ * grow by, like noteData, but says whether the count landed: a write that
+ * must never be stored uncounted is made only on `ok` (lib/contacts.ts,
+ * Codex X6 on #2576). Never refuses for room; never throws.
+ */
+export function countData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<DataTaken> {
+  return run(store, changes, true, now / 1000);
 }
 
 /** One slot shrunk by `bytes`. Never refuses and never throws. */

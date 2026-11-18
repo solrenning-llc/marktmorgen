@@ -1808,7 +1808,10 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
   if (room.length) {
     const taken = await takeData(before, room);
     if (!taken.ok) {
-      await giveBeside(before, moved);
+      // Only "full" says the room's script wrote nothing. An unreadable answer may come after it ran (a timeout, a
+      // reply not read), the product then counted in the room without the share it carries outside the pool, so the
+      // share stays held: the pool looks fuller than it is, never emptier (Codex P on #4846, MEDIUM).
+      if (taken.reason === "full") await giveBeside(before, moved);
       throw taken.reason === "full" ? new StoreFullError() : new StoreBusyError();
     }
   }

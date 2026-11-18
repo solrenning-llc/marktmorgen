@@ -53,12 +53,10 @@ export async function POST(request: NextRequest) {
   }
 
   // A product kept for a child-safety report (lib/child-safety.ts) keeps its price options: none added, changed or
-  // removed with its file while the hold lasts (the id names the product or the option); a hold that cannot be read
-  // refuses too. Reordering stays open: it changes nothing of them.
-  if (action !== "move") {
-    const held = await heldRefusal(guarded.store, id);
-    if (held) return held;
-  }
+  // removed with its file, nor reordered, while the hold lasts (the id names the product or the option): their order
+  // is part of what is kept. A hold that cannot be read refuses too.
+  const held = await heldRefusal(guarded.store, id);
+  if (held) return held;
 
   try {
     let result: OptionResult;
@@ -82,12 +80,14 @@ export async function POST(request: NextRequest) {
       result = await editOption(ref, id, label, price, { details, best, sku });
     } else if (action === "remove") {
       result = await removeOption(ref, id);
-    } else {
+    } else if (action === "move") {
       const direction = readOptionDirection(body);
       if (direction === null) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
       result = await moveOption(ref, id, direction);
+    } else {
+      return Response.json({ ok: false, error: "invalid" }, { status: 400 });
     }
 
     if (!result.ok) {

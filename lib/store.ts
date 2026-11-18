@@ -2594,14 +2594,31 @@ async function closingUnderway(store: Store): Promise<boolean> {
  * (GET nil and PTTL -2), the time stored with its milliseconds left (null for a mark with no end), or UnknownReplyError
  * for any other answer, so a mark that does not read is never "no break taken" and the move does not go through.
  */
-async function breakYearAt(ref: string): Promise<{ value: string; leftMs: number | null } | null> {
+async function breakYearAt(ref: string): Promise<{ value: string; leftMs: number | null; readAt: number } | null> {
+  // The clock before the read, so the time the mark had left is counted from no later than Redis measured it
+  // (breakYearLeft): the move's later reads and writes come off it, and its end is never pushed back.
+  const readAt = Date.now();
   const replies = repliesFor(await redisPipeline([["GET", breakYearKey(ref)], ["PTTL", breakYearKey(ref)]]), 2);
   const value = replies?.[0];
   const ttl = replies?.[1];
   const ms = typeof ttl === "number" && Number.isSafeInteger(ttl) ? ttl : typeof ttl === "string" && /^-?\d{1,15}$/.test(ttl) ? Number(ttl) : NaN;
   if (value === null && ms === -2) return null;
-  if (typeof value === "string" && /^\d{1,12}$/.test(value) && (ms > 0 || ms === -1)) return { value, leftMs: ms === -1 ? null : ms };
+  if (typeof value === "string" && /^\d{1,12}$/.test(value) && (ms > 0 || ms === -1)) return { value, leftMs: ms === -1 ? null : ms, readAt };
   throw new UnknownReplyError("a store's once-a-year break mark (GET, PTTL)");
+}
+
+/**
+ * The milliseconds a mark read by breakYearAt has left now: what Redis answered less the time since the read was sent,
+ * so the mark keeps its own end at the new address (Codex X6's LOW on #3752: a relative PX written after the move's
+ * other reads pushed the end back by that time). 0 when it ran out meanwhile; null for a mark with no end.
+ */
+const breakYearLeft = (mark: { leftMs: number | null; readAt: number }): number | null =>
+  mark.leftMs === null ? null : Math.max(0, mark.leftMs - Math.max(0, Date.now() - mark.readAt));
+
+/** The writes that carry a mark from `fromRef` to `to`: set there with the time it has left, then taken off `fromRef`. */
+function breakYearMove(mark: { value: string; leftMs: number | null; readAt: number }, fromRef: string, to: string): (string | number)[][] {
+  const left = breakYearLeft(mark);
+  return [...(left === 0 ? [] : [["SET", breakYearKey(to), mark.value, ...(left === null ? [] : ["PX", left])]]), ["DEL", breakYearKey(fromRef)]];
 }
 
 /**
@@ -2674,7 +2691,9 @@ export async function moveAccount(
     // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // Its once-a-year break mark goes with it (breakYearAt): left behind, the store had a fresh year at the new address.
-    const breakYear = await breakYearAt(from);
+    // Read at the store's own ref, its address as the record keeps it, where pausePlan wrote it, not at the lowercased
+    // `from`: a legacy home store whose address has capitals keeps its mark there (Codex X6's LOW on #3752).
+    const breakYear = await breakYearAt(storeRef(store));
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([
       ["GET", await ownerKey(to)],
@@ -2726,7 +2745,7 @@ export async function moveAccount(
         ...(store.sid ? [["SET", storeIdKey(store.sid), to]] : []),
         ...(moved.length ? [["SADD", await accountKey(to), ...moved.map((one) => one.before.sid)]] : []),
         // The mark keeps its own end: written at the new address with the time it had left, then taken off the old one.
-        ...(breakYear ? [["SET", breakYearKey(to), breakYear.value, ...(breakYear.leftMs === null ? [] : ["PX", breakYear.leftMs])], ["DEL", breakYearKey(from)]] : []),
+        ...(breakYear ? breakYearMove(breakYear, storeRef(store), to) : []),
         ["DEL", await accountKey(from)],
         ["DEL", await ownerKey(from)],
       ]);

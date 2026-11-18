@@ -466,6 +466,8 @@ async function forget(ref: string, andTheYear: boolean): Promise<void> {
 export async function undoPause(store: Store, nowSeconds = Math.floor(Date.now() / 1000)): Promise<"kept" | "stopped" | "none"> {
   // Under the store's own lock too (Codex X5's MEDIUM on #3752), on the store read afresh: nothing at a ref the store
   // left is touched.
+  // Without Redis, unknown, as before the lock (Codex X6's LOW on #3752): withStoreLock's "moved" is not "no break".
+  if (!isRedisConfigured()) throw new Error("the break could not be confirmed");
   const out = await withStoreLock(store, (fresh) => undoPauseHeld(fresh, nowSeconds));
   return out === "moved" ? "none" : out;
 }

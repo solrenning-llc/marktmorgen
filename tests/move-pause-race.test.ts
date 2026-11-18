@@ -8,7 +8,7 @@
  * Real code with the stand-in Redis; Stripe simulated; the break is asked for right after the move reads the mark.
  */
 import { pausePlan } from "@/lib/plan-pause";
-import { claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, moveAccount, ownerKey, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -68,6 +68,46 @@ async function main(): Promise<void> {
   is(`(the break was asked for in the window: ${asked})`, asked !== "not asked", true);
   is("no break is left at the old address of a store that moved", orphaned, false);
   is("a store that moved with no break at its new address has no stop scheduled at the provider", moved.ok && atNew[0] !== 1 ? subs[SUB].cancel_at_period_end : false, false);
+
+  part("A legacy home store whose address has capitals: its mark moves with it (Codex X6's LOW on #3752)");
+  const LEGACY = "owner-legacy@movepause.example";
+  const LEGACY_SHOWN = "Owner-Legacy@MovePause.example";
+  const LEGACY_NEW = "owner-legacy-new@movepause.example";
+  await claimHandle(LEGACY, "movepauselegacy", "Move Pause Legacy", "");
+  const ownerOf = await ownerKey(LEGACY);
+  const record = JSON.parse(String((await pipeline([["GET", ownerOf]]))[0])) as Record<string, unknown>;
+  await pipeline([["SET", ownerOf, JSON.stringify({ ...record, email: LEGACY_SHOWN })]]);
+  const legacyRef = storeRef((await storeForEmail(LEGACY))!);
+  is("(the record keeps the address with its capitals, so its ref has them)", legacyRef, LEGACY_SHOWN);
+  await pipeline([["SET", `nl:pause:last:${legacyRef}`, String(NOW - 30 * DAY), "EX", 335 * DAY]]);
+  const legacyMoved = await moveAccount(LEGACY, LEGACY_NEW);
+  const legacyAfter = (await pipeline([["EXISTS", `nl:pause:last:${legacyRef}`], ["GET", `nl:pause:last:${LEGACY_NEW}`]])) as unknown[];
+  is("the move went through", legacyMoved.ok, true);
+  is("the mark is at the new address", legacyAfter[1], String(NOW - 30 * DAY));
+  is("and none is left at the old ref", legacyAfter[0], 0);
+
+  part("The mark keeps its own end across a slow move (Codex X6's LOW on #3752)");
+  const SLOW = "owner-slow@movepause.example";
+  const SLOW_NEW = "owner-slow-new@movepause.example";
+  await claimHandle(SLOW, "movepauseslow", "Move Pause Slow", "");
+  await pipeline([["SET", `nl:pause:last:${SLOW}`, String(NOW - 30 * DAY), "EX", 335 * DAY]]);
+  const WAIT_MS = 1_200;
+  let readLeft: number | null = null;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const answer = await pipeline(commands);
+    if (readLeft === null && commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === `nl:pause:last:${SLOW}` && commands[1][0] === "PTTL") {
+      readLeft = Number((answer as unknown[])[1]);
+      await new Promise((resolve) => setTimeout(resolve, WAIT_MS));
+    }
+    return answer;
+  }) as typeof redis.pipeline;
+  const slowMoved = await moveAccount(SLOW, SLOW_NEW);
+  redis.pipeline = pipeline;
+  const leftNow = Number((await pipeline([["PTTL", `nl:pause:last:${SLOW_NEW}`]]))[0]);
+  is("the move went through", slowMoved.ok, true);
+  is(`(the mark was read with ${readLeft} ms left, then the move took ${WAIT_MS} ms)`, readLeft !== null && readLeft > 0, true);
+  is("the mark at the new address ends no later than it did at the old one", readLeft !== null && leftNow <= readLeft - WAIT_MS, true);
+  is("and it is still there, with almost all its time", leftNow > 335 * DAY * 1000 - 60_000, true);
   done();
 }
 void main();

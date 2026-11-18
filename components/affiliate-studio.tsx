@@ -66,6 +66,7 @@ const MESSAGES: Record<string, string> = {
   share_term_held:
     "This partner was not removed: their share runs to a set end date, and you agreed it would not end before then without their yes. To end it sooner, open their partner share and press End the partnership; it ends once they accept. Or wait until the end date, then remove them.",
   unsure: "We could not confirm whether this was saved. Reload the page: it shows their share as it stands now.",
+  share_many: SHARE_PROBLEMS.many,
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
   offer_committed: `That store has promised other partners too much of these products since it made this offer: partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. Nothing was saved and the offer is kept. Ask the store to lower a share, then accept again.`,

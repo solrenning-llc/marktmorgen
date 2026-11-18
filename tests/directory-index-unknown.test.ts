@@ -355,7 +355,9 @@ async function main(): Promise<void> {
   seen = await counted(async () => {
     parallel = await Promise.all([readDirectory(), readDirectory()].map((read) => read.then((rows) => rows.map((row) => row.handle).sort().join(","), (error) => (error instanceof UnknownReplyError ? "UnknownReplyError" : `other: ${String(error)}`))));
   });
-  is("two reads at once on no kept page: one builds and answers, the other builds nothing", [seen.SSCAN, [...parallel].sort()], [1, ["UnknownReplyError", "breadhouse,yogaroom"]]);
+  // Codex X6, LOW on #2921: the read that finds the mark held waits for the other build's page instead of showing
+  // "unavailable" (and noindex) to a visitor who came during a healthy rebuild; it still builds nothing.
+  is("two reads at once on no kept page: one builds, and both answer the rows", [seen.SSCAN, [...parallel].sort()], [1, ["breadhouse,yogaroom", "breadhouse,yogaroom"]]);
   is("the finished build kept the page and dropped the mark", [typeof (await kept()), await mark()], ["string", [null, -2]]);
   is("the next read is the kept page alone: one GET", await counted(async () => void (await readDirectory())), { GET: 1 });
   const baker = await storeForEmail("baker@example.com");
@@ -366,6 +368,12 @@ async function main(): Promise<void> {
   await original([["SET", DIRECTORY_BUILD, "building", "EX", 60]]);
   seen = await counted(async () => void (outcomes = await visits(1)));
   is("a build mark held (another build running): reads build nothing", [seen.SSCAN ?? 0, outcomes], [0, ["UnknownReplyError", "UnknownReplyError"]]);
+  is("and each held read looks for the other build's page a bounded number of times", seen.GET ?? 0, 2 * (1 + 2 * 5));
+  is(
+    "the committed proof of #2921 says it is committed (Codex X6, LOW)",
+    /never committed/.test(readFileSync(join(process.cwd(), "tests/c3-2921-rebuild.proof.ts"), "utf8")),
+    false,
+  );
   advance(60_001);
   is("a build cut short holds the page at most 60 seconds", (await readDirectory()).length, 2);
   for (const [label, reply] of [["QUEUED", "QUEUED"], ["a number", 1], ["missing", undefined]] as const) {

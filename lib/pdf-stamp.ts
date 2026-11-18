@@ -33,8 +33,10 @@
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
-import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, degrees, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { loadFonts } from "@/lib/certificate-pdf";
+import { deleteFile, headFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -86,10 +88,19 @@ function writable(text: string): string {
  * Puts the line along the bottom of every page, however the page is turned: a
  * page stored sideways and shown upright gets the line along what the reader
  * sees as its foot, reading left to right. Pure: bytes in, bytes out.
+ *
+ * The line is drawn as an artifact (`/Artifact BMC … EMC`), like a running
+ * footer or a watermark: a creator's tagged PDF keeps every piece of its
+ * content in its structure tree or marked as decoration (PDF/UA, ISO 14289-1
+ * 7.1), so a screen reader goes on reading the book and not the mark. In an
+ * untagged file the marker changes nothing a reader sees.
  */
 export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  // The project's own Noto Sans, embedded as a subset (PDF/UA, ISO 14289-1 7.21.4.1: every font used to draw is in
+  // the file, an artifact's included), as the receipt and the certificate are (review of #3761, Claude 3 nuvem P).
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont((await loadFonts()).sans, { subset: true });
   const text = writable(line);
   const margin = 14;
   for (const page of doc.getPages()) {
@@ -107,6 +118,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
           : angle === 270
             ? { x: box.x + lift, y: box.y + box.height - inset, rotate: 270 }
             : { x: box.x + inset, y: box.y + lift, rotate: 0 };
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContent, [PDFName.of("Artifact")]));
     page.drawText(text, {
       x: at.x,
       y: at.y,
@@ -116,6 +128,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
       color: rgb(0.38, 0.38, 0.42),
       opacity: 0.85,
     });
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
   }
   return doc.save();
 }
@@ -165,6 +178,16 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 }
 
 /**
+ * Keeps a copy's record only while the store's data room has space for it (lib/store-data.ts): without it the buyer
+ * still gets the copy, and the next download asks the file store for it again (one HEAD) before stamping another.
+ */
+async function keepRecord(store: DataStore, key: string, copy: ProductFile): Promise<void> {
+  if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
+    await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
+  }
+}
+
+/**
  * The buyer's stamped copy of a PDF or an EPUB, made on the first download of a sale and
  * reused after. Null means hand over the original: stamping does not apply,
  * or it could not be done, and the reason is kept for the creator to see.
@@ -197,6 +220,19 @@ export async function stampedCopy(
       // failed read is noted as one too.
       if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return null;
     }
+    // The copy's path is made from the sale and the file alone, so with no record (the data room had no space for it,
+    // or it expired) a copy made before may still be there: it is asked about first, one HEAD, and handed over as it
+    // is, instead of reading the whole original again, stamping it and writing it over the same path (#4237, item 3).
+    // Only a copy that is not there, or one that cannot be asked about, is made again.
+    const contentType = epub ? "application/epub+zip" : "application/pdf";
+    const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
+    const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
+    const found = await headFile(pathname).catch(() => null);
+    if (found && found.size > 0 && found.contentType === contentType) {
+      const kept: ProductFile = { pathname, name: file.name, bytes: found.size, contentType, addedAt: new Date().toISOString() };
+      await keepRecord(store, key, kept);
+      return kept;
+    }
     const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) {
       await noteProblem(file.pathname, "too_big");
@@ -221,12 +257,9 @@ export async function stampedCopy(
         return null;
       }
     }
-    const contentType = epub ? "application/epub+zip" : "application/pdf";
     // In the store that charges nothing to send, a path is plain characters
     // only (lib/vault-rules.ts); the name the buyer saves it under is kept
-    // beside the path, as it is for the original.
-    const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
-    const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
+    // beside the path, as it is for the original (`last` and `pathname` above).
     await writeFileWhole(pathname, stamped, contentType);
     const copy: ProductFile = {
       pathname,
@@ -235,12 +268,7 @@ export async function stampedCopy(
       contentType,
       addedAt: new Date().toISOString(),
     };
-    // Its record is kept only while the store's data room has space for it
-    // (lib/store-data.ts): without it the buyer still gets this copy, and the
-    // next download stamps another.
-    if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
-      await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
-    }
+    await keepRecord(store, key, copy);
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.

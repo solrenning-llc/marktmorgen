@@ -15,8 +15,10 @@ import { onAccount, StripeError } from "@/lib/stripe-account";
 import { withLock } from "@/lib/redis-lock";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import { grantOf, subsOf, type SubRow } from "@/lib/membership-manage";
+import { grantOf, ownedSub, type SubRow } from "@/lib/membership-manage";
 import { forgetStatus } from "@/lib/membership-access";
+import { forgetPaid } from "@/lib/learn";
+import { forgetTicket } from "@/lib/community-access";
 import { productOfSub } from "@/lib/tier-rules";
 import { readListings } from "@/lib/catalog";
 import { sendEmail } from "@/lib/email";
@@ -233,8 +235,9 @@ async function memberSub(store: Store, token: string, subscription: string): Pro
   if (!SUB_PATTERN.test(subscription)) return null;
   const grant = await grantOf(store, token);
   if (!grant) return "expired";
-  const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
-  return sub ? { sub: sub as SubRow & PauseSub, account: grant.a, customer: grant.c } : null;
+  // Among every customer the link manages, with the one who holds it (R43 F1 on #2985).
+  const owned = await ownedSub(store, grant, subscription);
+  return owned ? { sub: owned.sub as SubRow & PauseSub, account: owned.grant.a, customer: owned.grant.c } : null;
 }
 
 /** The date a member reads, in the store's language. */
@@ -292,7 +295,7 @@ export async function pauseMembership(store: Store, token: string, subscription:
  */
 export async function resumeMembership(store: Store, token: string, subscription: string, now = Math.floor(Date.now() / 1000)): Promise<ResumeResult> {
   // Read and changed under the membership's lock: a second press reads it after the first's change, no longer paused.
-  const done = await underLock(subscription, "resuming a membership", async (): Promise<Extract<ResumeResult, { ok: false }> | { ok: true; account: string }> => {
+  const done = await underLock(subscription, "resuming a membership", async (): Promise<Extract<ResumeResult, { ok: false }> | { ok: true; account: string; customer: string }> => {
     let found: Awaited<ReturnType<typeof memberSub>>;
     try {
       found = await memberSub(store, token, subscription);
@@ -354,11 +357,21 @@ export async function resumeMembership(store: Store, token: string, subscription
       console.error("resuming a membership failed", error);
       return { ok: false, reason: "error" };
     }
-    return { ok: true, account: found.account };
+    return { ok: true, account: found.account, customer: found.customer };
   });
   if (!done.ok) return done;
   await forgetStatus(done.account, subscription).catch(() => null);
+  // The course and community doors keep what they read (ten and five minutes): a member back in after a pause is
+  // let in at once, as the page tells them, not minutes later. A failure here changes nothing of the resume.
+  await forgetDoors(store, done.account, done.customer).catch((error) => console.error("asking the doors again after a resume failed", error));
   return { ok: true };
+}
+
+/** Lets the course and community doors ask Stripe again for this member, as a tier switch does (lib/tier-switch.ts). */
+async function forgetDoors(store: Store, account: string, customer: string): Promise<void> {
+  const person = (await onAccount("GET", account, `/customers/${encodeURIComponent(customer)}`)) as { email?: unknown };
+  if (typeof person.email !== "string" || !person.email.includes("@")) return;
+  await Promise.all([forgetPaid(store, person.email), forgetTicket(store, person.email)]);
 }
 
 /** The member's note of their pause, from the store, in its language, with the dates. */

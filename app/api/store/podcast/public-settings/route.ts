@@ -58,7 +58,17 @@ function answer(store: Store, product: Listing, settings: PublicShowSettings | n
  * priced at, UNIT_COST.studio), on top of the guard's own; what the request did not move, measured from the bytes
  * Redis answered and the answer sent, is given back at its end. A request stopped part way gives nothing back.
  */
-export const PUBLIC_SETTINGS_WORST_BYTES = { read: 2 * PUBLIC_SHOW_MAX_BYTES, off: PUBLIC_SHOW_MAX_BYTES, change: 3 * PUBLIC_SHOW_MAX_BYTES + PODCAST_RECORD_MOST } as const;
+/**
+ * What an answer adds to the record it sends, at the most: its fixed keys and the feed address, at the longest handle
+ * (24 characters, lib/store-handle-pattern.ts) and product id (40); about 170 bytes, kept with room (Claude 5's LOW 3
+ * on #3544: the answer could pass PUBLIC_SHOW_MAX_BYTES by these few dozen bytes).
+ */
+const ANSWER_EXTRA_BYTES = 512;
+export const PUBLIC_SETTINGS_WORST_BYTES = {
+  read: 2 * PUBLIC_SHOW_MAX_BYTES + ANSWER_EXTRA_BYTES,
+  off: PUBLIC_SHOW_MAX_BYTES + ANSWER_EXTRA_BYTES,
+  change: 3 * PUBLIC_SHOW_MAX_BYTES + PODCAST_RECORD_MOST + ANSWER_EXTRA_BYTES,
+} as const;
 /** Studio requests `bytes` costs beyond the request's own (lib/sent-bytes.ts, IncludedBytes). */
 const unitsFor = (bytes: number) => new IncludedBytes().take(bytes, PAGE_INCLUDED_BYTES).units;
 
@@ -69,14 +79,20 @@ function refused(write: { reason: "full" | "too_big"; message?: string }): Respo
 
 /**
  * Runs `work` with the studio requests for `worstBytes` taken first, refused before anything is read when they are not
- * there; then gives back what was not moved. A `work` that throws keeps all it took (its measure is not trusted).
+ * there; then gives back what was not moved. A busy lock gives back all of it (nothing was read); any other throw keeps
+ * all it took (its measure is not trusted).
  */
 async function paid(store: Store, worstBytes: number, work: (moved: Moved) => Promise<Response>): Promise<Response> {
   const most = unitsFor(worstBytes);
   const held = await holdStudio(store, most);
   if (!held.ok) return refusedJson("used", held.message);
   const moved: Moved = { bytes: 0 };
-  const response = await work(moved);
+  // A busy lock throws before the work runs, so nothing was read: what was held is given back (Claude 6's LOW on
+  // #3544). Anything else thrown keeps all it took, as its measure is not trusted.
+  const response = await work(moved).catch(async (error: unknown) => {
+    if (error instanceof LockBusyError) await held.give(most);
+    throw error;
+  });
   await held.give(most - unitsFor(moved.bytes));
   return response;
 }
@@ -151,7 +167,9 @@ export async function POST(request: NextRequest) {
         if (show) await dropPublicShow(now, podcastId);
         return answer(now, still, null, moved);
       }
-      if (still.hidden) return fail("private", 409);
+      // A hidden product gets no feed and no new public episode, but one can still be taken out (Claude 5's LOW 2 on
+      // #3544): its public feed already answers 404 while the product is hidden.
+      if (still.hidden && (action === "on" || makePublic)) return fail("private", 409);
       const { podcast, bytes: podcastBytes } = await readPodcastSized(podcastId);
       moved.bytes += podcastBytes;
       const episodes = new Set((podcast?.episodes ?? []).map((e) => e.id));

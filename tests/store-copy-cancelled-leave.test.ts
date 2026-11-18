@@ -1,6 +1,6 @@
 /**
  * The WebKit leave guard of tests/e2e/store-copy.mjs (#4844) drops a same-origin RSC fetch failure only when the page
- * really leaves (Codex V's MEDIUM on #4844, C1-20261117-2340-todos-1 item 2). beforeunload can be cancelled: a fetch
+ * really leaves (Codex V's MEDIUM on #4844, C1-20261117-2340-todos-1 item 2). beforeunload can be canceled: a fetch
  * that failed in the grace second of a leave the page refused must still reach "no page threw" once the document
  * stays; pagehide confirms the leave, pageshow restores reporting, and any other failure throws at once.
  *
@@ -57,7 +57,7 @@ test("the browser initializer is found in tests/e2e/store-copy.mjs", () => {
   assert.ok(first >= 0 && last > first, "the browser initializer was located");
 });
 
-test("a cancelled leave still reports a fetch failure that arrived in its grace second", async () => {
+test("a canceled leave still reports a fetch failure that arrived in its grace second", async () => {
   const page = environment();
   page.fire("beforeunload");
   const result = observe(page.window.fetch("/studio?_rsc=synthetic"));

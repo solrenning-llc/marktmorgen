@@ -255,7 +255,7 @@ try {
       // cut-off as a rejected fetch ("... due to access control checks") that Next does not catch, so it reached
       // "no page threw" although nothing in the page failed (CV (e), 17 November 2026, #4843 and others). Only such a
       // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
-      // beforeunload can be cancelled (the page's own unload protection, which Playwright's dialog handling answers
+      // beforeunload can be canceled (the page's own unload protection, which Playwright's dialog handling answers
       // by staying): a failure in its grace second waits for the decision. pagehide is the real unload, and drops it;
       // if the document stays, the failure is thrown once the second ends (Codex V's MEDIUM on #4844). pageshow (a
       // page restored from the back/forward cache) reports failures again.

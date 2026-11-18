@@ -169,6 +169,20 @@ export default function TermsPage() {
           is told when you do not publish it, and it is not published if you do
           not answer within {HELD_DAYS} days.
         </p>
+        <p id="plan-past-end" className="scroll-mt-24">
+          <strong className="text-black">Payment plans end when agreed.</strong>{" "}
+          When a buyer pays on a payment plan, we tell your Stripe account when
+          the plan ends, after its last payment. If Stripe still takes a
+          payment after that date (for example, because your account refused
+          our access for a while), we end the subscription and refund that
+          payment in full, automatically, from your own Stripe account&rsquo;s
+          balance, and email the buyer once to say so. If your balance does not
+          cover it, or Stripe refuses the refund, we try again every day; if
+          it is still owed 3 days later, we email you once with what to
+          refund. We can do this only while your Stripe account still lets us
+          act on it; if it does not, you must refund it yourself. Marktmorgen
+          never pays these refunds and never takes any part of them.
+        </p>
         <p id="course-access-end" className="scroll-mt-24">
           <strong className="text-black">A course&apos;s end date.</strong>{" "}
           You may set a day when access to a course ends. The course&apos;s

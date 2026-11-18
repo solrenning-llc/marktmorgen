@@ -52,6 +52,7 @@ let refunds: Record<string, unknown>[] = [];
 /** The refunds of another connected account, by account (the one above is ACCOUNT's). */
 const byAccount: Record<string, Record<string, unknown>[]> = {};
 const refundCalls: URLSearchParams[] = [];
+let enforceRefundWindow = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -60,7 +61,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (path === "/refunds") {
     refundCalls.push(url.searchParams);
-    const rows = byAccount[new Headers(init?.headers).get("Stripe-Account") ?? ""] ?? refunds;
+    const source = byAccount[new Headers(init?.headers).get("Stripe-Account") ?? ""] ?? refunds;
+    const since = Number(url.searchParams.get("created[gte]") ?? "0");
+    const rows = enforceRefundWindow ? source.filter(row => Number(row.created) >= since) : source;
     const limit = Number(url.searchParams.get("limit") ?? "10");
     const after = url.searchParams.get("starting_after");
     const at = after ? rows.findIndex((row) => row.id === after) : -1;
@@ -265,6 +268,22 @@ async function check(job: Job, base: number): Promise<void> {
     redis.pipeline = original;
   }
   is(`${job.name}: and asks nothing of Stripe`, refundCalls.length, 0);
+
+  part(`${job.name}: an out-of-window timestamp never advances the anchor`);
+  const item = await job.make(81);
+  const anchorBeforeFuture = NOW - 900;
+  await redis.pipeline([["SET", job.anchor, String(anchorBeforeFuture)], ["DEL", job.pass]]);
+  enforceRefundWindow = true;
+  try {
+    refunds = list(`${job.name}future`, 1, NOW + 86_400, -1, "pi_unused");
+    await job.run();
+    is(`${job.name}: the future row leaves the previous anchor`, await read(job.anchor), String(anchorBeforeFuture));
+    refunds = list(`${job.name}afterFuture`, 1, NOW - 5, 0, item.pi);
+    is(`${job.name}: the next in-window refund is taken back`, await job.run(), 1);
+    is(`${job.name}: access goes after the valid refund`, await item.holds(), false);
+  } finally {
+    enforceRefundWindow = false;
+  }
 }
 
 async function main(): Promise<void> {
@@ -343,7 +362,7 @@ async function main(): Promise<void> {
       if (given !== "given") throw new Error(`pre-order ${n} not given: ${given}`);
       return { pi, who: email, holds: () => holds(email) };
     },
-  }, NOW - 5_000);
+  }, NOW - 10_000);
 
   done();
 }

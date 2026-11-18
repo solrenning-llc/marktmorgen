@@ -21,13 +21,13 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Orders a month | 200 | 200 | 450 → **45** | 450 → **45** | 1,500 | 1,500 → **150** |
 | Store emails a month | 75 | 75 | 300 → **30** | 300 → **30** | 800 | 800 → **80** |
 | Access emails a month | 150 | 150 | 400 → **40** | 400 → **40** | 1,000 | 1,000 → **100** |
-| List emails a month | none today | none today | 7,000 → **6,300** | 7,000 → **3,200** | 10,000 | 10,000 → **7,400** |
+| List emails a month | none today | none today | 7,000 → **6,300** | 7,000 → **3,100** | 10,000 | 10,000 → **7,400** |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
-| Net with the cuts | not reachable | not reachable | **60.00%** | **60.00%** | **60.00%** | **60.00%** |
-| Every printed line at 10% / at zero | 56.42% / 56.62% | 55.91% / 56.13% | 61.19% / 61.46% | 60.89% / 61.18% | 61.62% / 61.88% | 61.32% / 61.61% |
-| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 55.37% of today | 40.01% of today | 72.86% of today | 55.23% of today |
+| Net with the cuts | not reachable | not reachable | **60.00%** | **60.01%** | **60.00%** | **60.00%** |
+| Every printed line at 10% / at zero | 56.42% / 56.60% | 55.91% / 56.13% | 61.19% / 61.46% | 60.89% / 61.18% | 61.62% / 61.88% | 61.32% / 61.61% |
+| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 55.36% of today | 39.99% of today | 72.85% of today | 55.21% of today |
 
-Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 56.62%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 56.13%: its hidden lines and receiving alone take more than the floor leaves).
+Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 56.60%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 56.13%: its hidden lines and receiving alone take more than the floor leaves).
 
 ## How each line compares
 

@@ -65,6 +65,7 @@
  *   nl:hooks:wait:<statsId>     the event its reading waits on, and for how many runs
  *   nl:hooks:anchor:<statsId>:back  a read with no anchor still walking back: the oldest event read so far
  */
+import { StripeUnreadableReply } from "@/lib/stripe-http-error";
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
@@ -1864,6 +1865,9 @@ function waitsOn(error: unknown): Waits {
   // or an answer that is not JSON at all (an error page in front of Stripe), which onAccount cannot read.
   if (error instanceof TypeError && error.message === "fetch failed") return "passing";
   if (error instanceof SyntaxError) return "passing";
+  // The same error page, now read with its status (lib/stripe-http-error.ts): a page in front of Stripe (a proxy, a
+  // CDN, a firewall) is passing whatever its status, as the SyntaxError was; it is never Stripe's own refusal.
+  if (error instanceof StripeUnreadableReply) return "passing";
   return "ours";
 }
 

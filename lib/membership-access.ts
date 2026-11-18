@@ -111,8 +111,9 @@ export function isLiveSub(sub: unknown): boolean {
  * never "ended" (lib/learn.ts, lib/community-access.ts, lib/buyer-orders.ts).
  */
 export function liveExpanded(sub: unknown): boolean {
-  if (!sub || typeof sub !== "object" || Array.isArray(sub)) throw new UnknownReplyError("a checkout's membership");
-  return isLiveSub(sub);
+  const state = Array.isArray(sub) ? null : memberState(sub);
+  if (state === null) throw new UnknownReplyError("a checkout's membership");
+  return isLive(state);
 }
 
 /**

@@ -48,18 +48,28 @@ test("a membership that cannot be read neither reopens a refunded course nor shu
     // Refunded in full, and written down on the thanks page before the refund.
     paid("cs_test_zed000000001", once, { payment_intent: { id: "pi_zed01", latest_charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } } }),
     member("cs_test_zed000000002", clubB, "active"),
-    // Not expanded (still its id): a paid subscription checkout's membership that cannot be read (liveExpanded). A status
-    // Stripe does not have reads as ended, as main documents (tests/money-e2e-buyer-subscriptions.test.ts).
-    { ...member("cs_test_zed000000003", clubA, "active"), subscription: "sub_zed000000003" },
   ];
   await recordEnrollment(store, "zed@example.com", once, NOW - 86_400);
-  const open = [...(await paidCourses(store, "zed@example.com")).keys()];
-  assert.equal(open.includes(once), false, "the course refunded in full stays shut");
-  assert.equal(open.includes(clubB), true, "the live membership's course stays open");
-  assert.equal(open.includes(clubA), false, "the membership that cannot be read opens nothing");
-  assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the answer with a membership not read is not kept");
-  await assert.rejects(paidCoursesExact(store, "zed@example.com"), UnknownReplyError, "an exact read must never return a partial ledger");
-  assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the rejected exact read leaves no cache");
+  // An unexpanded or incomplete subscription leaves the membership state unknown.
+  const incompleteSubscriptions = [
+    "sub_zed000000003",
+    {},
+    { id: "sub_zed000000003", object: "subscription" },
+    { id: "sub_zed000000003", object: "subscription", status: 42 },
+  ];
+  for (const subscription of incompleteSubscriptions) {
+    sessions["zed@example.com"][2] = {
+      ...member("cs_test_zed000000003", clubA, "active"),
+      subscription,
+    };
+    await assert.rejects(paidCoursesExact(store, "zed@example.com"), UnknownReplyError, "an exact read must never return a partial ledger");
+    assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the rejected exact read leaves no cache");
+    const open = [...(await paidCourses(store, "zed@example.com")).keys()];
+    assert.equal(open.includes(once), false, "the course refunded in full stays shut");
+    assert.equal(open.includes(clubB), true, "the live membership's course stays open");
+    assert.equal(open.includes(clubA), false, "the membership that cannot be read opens nothing");
+    assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the answer with a membership not read is not kept");
+  }
   // The next good read decides, and is kept.
   sessions["zed@example.com"][2] = member("cs_test_zed000000003", clubA, "active");
   const again = [...(await paidCourses(store, "zed@example.com")).keys()];

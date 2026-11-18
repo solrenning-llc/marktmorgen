@@ -419,6 +419,14 @@ export class HandInChangedError extends Error {
   }
 }
 
+/** The creator approved the work before this hand-in reached its final read. */
+export class HandInClosedError extends Error {
+  constructor() {
+    super("this work has already been approved");
+    this.name = "HandInClosedError";
+  }
+}
+
 /**
  * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
  * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
@@ -460,6 +468,8 @@ export async function handIn(input: {
   const at = input.now ?? Math.floor(Date.now() / 1000);
   const read = await readSubmission(courseId, lessonId, who);
   const before = read.found;
+  // Use the same snapshot as the conditional write: the route's earlier read may predate an approval.
+  if (task.review && before?.state === "approved") throw new HandInClosedError();
   const state: TaskState = task.review ? "waiting" : "approved";
   const kept: Submission = {
     text: input.text.replace(/\r\n?/g, "\n").trim().slice(0, MAX_ANSWER_TEXT),

@@ -7,6 +7,8 @@
  *   nl:grp:<id>:n            string  how many places were taken, as counted before 5 November 2026 (no longer written)
  *   nl:grp:<id>:t:<hash>     string  one open of an address's link at a time, for 30 seconds at most
  *   nl:grp:<id>:mail         string  emails this link sent today, so it cannot be used to fill inboxes
+ *   nl:grp:<id>:stuck        string  its refund stuck on its way was said in the log today (a day at most)
+ *   nl:grp:<id>:held         string  its charge was read with a part on its way: asked again after an hour
  *   nl:grp:take:<token>      string  the link in a place's email: which purchase, which address
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
  *   nl:grp:<store>:any       string  present once the store has sold one
@@ -50,11 +52,12 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
-import { onAccount } from "@/lib/stripe-account";
-import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
+import { StripeError, onAccount } from "@/lib/stripe-account";
+import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
-import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
+import { STRIPE_ACCOUNT_PATTERN, type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { givenOption } from "@/lib/gift-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -93,6 +96,8 @@ export type Group = {
   h?: number;
 };
 
+/** The shape of a charge's id, read before a purchase for several hands out places (PAYMENT_ID is below). */
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{3,252}$/;
 const groupKey = (id: string) => `nl:grp:${id}`;
 const membersKey = (id: string) => `nl:grp:${id}:m`;
 /** The count kept before 5 November 2026: no longer written, still deleted with the purchase. */
@@ -114,6 +119,27 @@ const SEEN_KEEP_SECONDS = 30 * 86_400;
 const REFUND_PAGES = 10;
 /** Where a pass over the refunds stands, kept between runs (revokeRefundedGroups). */
 const passKey = (sid: string) => `nl:grp:${sid}:refunds:pass`;
+/**
+ * The Stripe account the anchor is of, written with it (REFUNDS_END). An anchor kept before anchors named their account
+ * has none, and is read as the store's account today, as it was read then.
+ */
+const ownerKey = (sid: string) => `nl:grp:${sid}:refunds:acct`;
+/**
+ * Where each account the store left is read from again should the store come back to it (A, then B, then A): a
+ * sorted set, the account as member and, as score, its anchor when the store left it, or the start of a pass on it
+ * that never ended. At most REFUND_ACCOUNTS_KEPT; past that the newest marks are let go, and an account with no mark
+ * is read from the oldest mark kept (never later than any mark let go) or a week back, whichever is older, so no
+ * refund is lost and what is kept stays bounded.
+ */
+const leftKey = (sid: string) => `nl:grp:${sid}:refunds:left`;
+const REFUND_ACCOUNTS_KEPT = 16;
+/** A pass ended: the anchor and the account it is of written together, that account's mark let go, the pass too. */
+const REFUNDS_END = `-- marktmorgen:group-refunds-end:v1
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('ZREM', KEYS[3], ARGV[2])
+redis.call('DEL', KEYS[4])
+return 1`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const PASS_SECONDS = 7 * 86_400;
 /**
@@ -130,6 +156,90 @@ const RETRY_CAP = 100;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 const now = () => Math.floor(Date.now() / 1000);
+
+/**
+ * The refunds of one charge read in one run (one GET /refunds?charge= each, only for a refund that succeeded on a
+ * charge read refunded in full without covering the charge by itself): past it, the refund holds the anchor and is
+ * read in the next run. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
+ */
+export const CHARGE_REFUND_LOOKUPS = 10;
+/**
+ * How long a group purchase whose charge was read with a part still on its way waits before that charge is asked
+ * again (heldKey; second money review of #3410, Claude 3): its parts hold the anchor meanwhile, and the run's lookups go
+ * to the other charges, so ten charges waiting on a part never starve an older one refunded in full. A charge is asked
+ * once a run at most, whatever its parts (chargeSettled in revokeRefundedGroups). Up to CHARGE_REFUND_LOOKUPS x 12
+ * charges waiting at once are each asked again within the hour; the places of one whose last part went through go at
+ * most this long later.
+ */
+const CHARGE_HELD_RECHECK_SECONDS = 3_600;
+const heldKey = (id: string) => `nl:grp:${id}:held`;
+/**
+ * A refund still on its way this long is said in the log, and still takes nothing back (the owner's decision 18, 9
+ * November 2026: a refund pending for many days raises an alert, never a revocation). Stripe finishes almost every
+ * refund within days; one still pending after a week needs a look (the creator's balance short, a payment method
+ * that answers slowly). Said in the log at most once a payment a day (stuckKey), and only for a payment that paid for a
+ * group purchase: no email.
+ */
+const REFUND_STUCK_SECONDS = 7 * 86_400;
+/** The mark that a purchase's refund stuck on its way was said in the log today: one SET NX EX a run while it is stuck. */
+const stuckKey = (id: string) => `nl:grp:${id}:stuck`;
+const STUCK_SAID_SECONDS = 86_400;
+
+// The reading of a refund in parts below is a copy of the one on #2868 (lib/licence-keys.ts, claude5/fix-licence-refund,
+// wholeOnItsOwn and chargeRefundsSettled), not yet on main: once both are, one shared function in lib/refunds.ts
+// should take the place of both copies.
+/** The most refunds of one charge read in one GET /refunds?charge= (one page; more than that is unknown). */
+const CHARGE_REFUNDS_PAGE = 100;
+const CHARGE_PATTERN = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+/** Statuses a refund still on its way has: it may yet fail, and Stripe already counts it in amount_refunded. */
+const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
+const REFUND_STATUS_KNOWN = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * Whether a succeeded refund whose charge reads refunded in full gave the whole charge back by itself: its own amount
+ * covers the charge's. Only then is no other refund of the charge needed to say the money went back for good.
+ */
+function wholeOnItsOwn(refund: Record<string, unknown>): boolean {
+  const charge = refund.charge;
+  if (!plainObject(charge)) return false;
+  const amount = ownField(charge, "amount");
+  return centsKnown(refund.amount) && centsKnown(amount) && amount > 0 && refund.amount >= amount;
+}
+
+/**
+ * A full refund made of several refunds of one charge, read from all of that charge's refunds (one GET /refunds?charge=,
+ * Stripe's own list): "held" while any is still on its way (it may still fail, and Stripe counts it in the charge's
+ * amount_refunded already), "through" when the ones that succeeded add up to the whole charge. Anything else (no
+ * charge id, a row or a list in another shape, more than one page, or succeeded refunds that do not add up although
+ * the charge reads refunded in full) throws StripeListUnreadable: never "nothing pending" (CX-123 rule 24).
+ */
+async function chargeRefundsSettled(account: string, refund: Record<string, unknown>): Promise<"held" | "through"> {
+  const charge = refund.charge;
+  const id = plainObject(charge) ? ownField(charge, "id") : undefined;
+  const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
+  if (typeof id !== "string" || !CHARGE_PATTERN.test(id) || !centsKnown(amount) || amount <= 0) {
+    throw new StripeListUnreadable("a refund's charge without its id or amount");
+  }
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    const named = ownField(row, "charge");
+    const chargeId = typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : undefined;
+    return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
+  };
+  const listed = readStripePage(
+    // Pinned to the version the list is read in, as the store's refund pages are (readPage below).
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`, undefined, STRIPE_LIST_VERSION),
+    legible,
+  );
+  if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
+  // The refund being read is one of them, as it now stands: if Stripe's list does not have it, the list proves nothing.
+  if (!listed.rows.some((row) => row.id === refund.id)) throw new StripeListUnreadable("a charge's refunds without the one read");
+  if (listed.rows.some((row) => REFUND_ON_ITS_WAY.has(ownField(row, "status") as string))) return "held";
+  const through = listed.rows.reduce((sum, row) => sum + (ownField(row, "status") === "succeeded" ? (ownField(row, "amount") as number) : 0), 0);
+  if (through >= amount) return "through";
+  throw new StripeListUnreadable("a charge read refunded in full whose succeeded refunds do not add up");
+}
 
 /** How a place is named where purchases given to an address are kept. */
 export const groupJob = (id: string) => `group:${id}`;
@@ -152,8 +262,27 @@ export async function readGroup(id: string): Promise<Group | null> {
   }
 }
 
-async function saveGroup(group: Group, seconds: number): Promise<void> {
-  await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]);
+/**
+ * A purchase's record for settling it, read exactly (sweep A3; CX-123 rules 24 and 30): no record is null, and an
+ * answer that is not one reply of text or nothing is unknown and throws, never "no purchase", so a paid checkout is
+ * never said as having nothing to settle because Redis answered in another shape.
+ */
+async function readGroupExactly(id: string): Promise<Group | null> {
+  if (!GROUP_ID.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", groupKey(id)]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a purchase for several's record");
+  if (typeof replies[0] !== "string") return null;
+  try {
+    const g = JSON.parse(replies[0]) as Group;
+    return g && g.id === id && Number.isInteger(g.people) ? g : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Writes a purchase down; true only when Redis answered the write in its exact shape ("OK"). */
+async function saveGroup(group: Group, seconds: number): Promise<boolean> {
+  return repliesFor(await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]), 1)?.[0] === "OK";
 }
 
 /** A paid purchase of this store's that still hands out places; null for anything else. */
@@ -187,7 +316,10 @@ export async function startGroup(store: Store, product: Listing, people: unknown
   if (count === null) return { ok: false, reason: "people" };
   if (!payable(chosen.option ? chosen.option.priceCents : product.priceCents, count)) return { ok: false, reason: "amount" };
   const group: Group = { id: newGroupId(), s: store.statsId, p: product.id, ...(chosen.option ? { o: chosen.option.id } : {}), people: count, at: now() };
-  await saveGroup(group, GROUP_PENDING_SECONDS);
+  // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
+  // shape may not have landed, and a purchase paid for with no record never hands out a place. Refused instead, as
+  // "unavailable" (the page says nothing was charged), and no checkout is made.
+  if (!(await saveGroup(group, GROUP_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
   return { ok: true, group };
 }
 
@@ -229,32 +361,120 @@ export async function settleGroup(input: {
 }): Promise<SettleOutcome> {
   const { store, session, product } = input;
   const id = session.metadata?.group ?? "";
-  const group = await readGroup(id);
+  const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
-  if (group.paid) return "already";
-  const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // Given back before it was first confirmed (#4494, kept as revoked with no paid time): nothing to settle or send.
+  if (!group.paid && group.revoked) return "already";
+  // Paid already. The receipt with the link that hands out the places comes after the write that marks it paid, so
+  // a run whose reply to that write came back in another shape threw before sending it (#2872 review M1): a later run
+  // with no "sent" mark (the caller checked) still sends it, once (its own idempotency key), while that is recent.
+  // Taken back by a refund, or paid longer ago than a run is retried, there is nothing to send.
+  if (group.paid && (group.revoked || now() - group.paid >= RECEIPT_WITHIN_SECONDS)) return "already";
+  const settling = `${groupKey(id)}:settling`;
+  // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
+  // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
+  const mark = claimValue();
+  const claimed = await claimMark(settling, 300, mark);
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
+  if (claimed === "taken") {
+    // Another run is settling it: thrown, even once it is paid (Claude 2 K and Claude 6 on #2872). confirmGroup
+    // (lib/purchase-email.ts) keeps its "sent" mark on "already", and the run holding the mark may have written the
+    // purchase paid and died before its receipt: "already" here would certify a receipt never sent, and the places'
+    // link would never reach the payer. Thrown, no "sent" mark is kept; the run holding the mark keeps its own once it
+    // has sent, and if it died, the next run takes the mark once it runs out and sends from the paid record (M1's path).
+    throw new Error("another run is settling this purchase for several right now");
+  }
+  // The mark is kept, not let go, once the purchase is paid: it runs out by itself, after the caller has kept its
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and throws instead of sending and confirming a second
+  // time (#2872 review M1), and never certifies a receipt this run may not have sent (Claude 6 on #2872).
+  if (group.paid) {
+    await sendPaidReceipt(input, group);
+    return "settled";
+  }
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   // Stripe gives the payment as its id, or whole when the caller asked for it.
   const intent = session.payment_intent as { id?: unknown } | string | null | undefined;
   const pi = typeof intent === "string" ? intent : typeof intent?.id === "string" ? intent.id : "";
+  // A checkout stays "paid" at Stripe after its money is given back, and the sweep reads refunds before it settles the
+  // day's checkouts: a purchase refunded before this point has had its refund read, and passed, while nl:grp:pi: (set
+  // below) did not exist yet, so no later run takes its places back. So the payment is asked about here, before any
+  // place exists. Given back: kept as revoked, nothing settled or sent. An answer that does not read, or that is not
+  // this payment's own (rule 30), throws: nothing is written, and the next run asks again.
+  // A positive checkout, or one that names a PaymentIntent, needs a readable payment on the store's current account,
+  // and the answer must be that PaymentIntent, succeeded, with its expanded charge tied to it (Codex X4 and N1 on
+  // #4494; fix as Codex X5 proposed). Only a free checkout, with no PaymentIntent, is settled with no read.
+  try {
+    // Only a checkout that reads as free (a total of exactly zero) and names no PaymentIntent is settled unread; a total
+    // that does not read is not taken for zero, so its payment is read (its receipt still leaves the amount out).
+    const free = session.amount_total === 0 && !pi;
+    if (!free) {
+      const account = store.stripeAccountId;
+      if (!PAYMENT_ID.test(pi) || typeof account !== "string" || !account) throw new UnknownReplyError("a purchase for several's payment");
+      const payment = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
+      if (!payment || typeof payment !== "object" || Array.isArray(payment)) throw new UnknownReplyError("a purchase for several's payment");
+      const read = payment as { id?: unknown; object?: unknown; status?: unknown; latest_charge?: unknown };
+      const charge = read.latest_charge;
+      if (read.id !== pi || read.object !== "payment_intent" || read.status !== "succeeded" || !charge || typeof charge !== "object" || Array.isArray(charge)) {
+        throw new UnknownReplyError("a purchase for several's payment");
+      }
+      const chargeRead = charge as { id?: unknown; object?: unknown; payment_intent?: unknown; refunded?: unknown; disputed?: unknown };
+      const charged = chargeRead.payment_intent;
+      const chargedId = typeof charged === "string"
+        ? charged
+        : charged && typeof charged === "object" && !Array.isArray(charged) ? (charged as { id?: unknown }).id : "";
+      if (typeof chargeRead.id !== "string" || !CHARGE_ID.test(chargeRead.id) || chargeRead.object !== "charge" || chargedId !== pi ||
+          typeof chargeRead.refunded !== "boolean" || typeof chargeRead.disputed !== "boolean") {
+        throw new UnknownReplyError("a purchase for several's payment");
+      }
+      if (await givenBack(account, payment)) {
+        if (!(await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS))) {
+          throw new UnknownReplyError("a revoked purchase for several's record");
+        }
+        await releaseMark(settling, mark);
+        return "already";
+      }
+    }
+  } catch (error) {
+    await releaseMark(settling, mark).catch(() => undefined);
+    throw error;
+  }
   // A bundle hands over what it held when it was paid for, to every place.
   const items = bundleFromMeta(session.metadata ?? null, "bundle");
   // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
   const admittedHour = Number(session.metadata?.[ADMITTED_FIELD] ?? "");
   const paid: Group = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}) };
-  await saveGroup(paid, GROUP_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(group.s), "1"],
-    ["DEL", `${groupKey(id)}:settling`],
-  ]);
+  // What a refund looks up (the payment's purchase, and that this store sold one) is written first and the purchase
+  // marked paid last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of
+  // the settling mark and throws, so confirmGroup keeps no "sent" mark and the next run does it again, never
+  // "already" on a purchase whose payment a refund could not find.
+  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a paid purchase for several's payment record");
+  }
+  if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a paid purchase for several's record");
+  }
+  await sendPaidReceipt(input, paid);
+  return "settled";
+}
 
-  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
+/**
+ * How long after a purchase was paid a run still sends its receipt when the caller kept no "sent" mark: the window
+ * the checkout sweep confirms in (lib/purchase-email.ts CONFIRM_WITHIN_SECONDS, one day), inside the receipt's own
+ * idempotency, so a late run never sends it a second time.
+ */
+const RECEIPT_WITHIN_SECONDS = 24 * 60 * 60;
+
+/** The buyer's receipt for a paid purchase, with the link that hands out its places, under its own idempotency key. */
+async function sendPaidReceipt(input: Parameters<typeof settleGroup>[0], paid: Group): Promise<void> {
+  const { store } = input;
+  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${paid.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
   );
-  return "settled";
 }
 
 /** The buyer's receipt, with the link that hands out the places. False when it has nobody to go to or was not sent. */
@@ -549,7 +769,7 @@ export async function takePlace(input: {
   if (lock === null) throw new Error("this place's link is being opened already");
   if (lock !== "OK") throw new UnknownReplyError("a place's opening");
   try {
-    return await takeOpened(input, group, email, who);
+    return await takeOpened(input, group, email, who, mine);
   } finally {
     // Compared and deleted in one step (Codex C2's proof on #2654): an open that outlived its 30 seconds never
     // takes off the hold of the open that came after it.
@@ -560,6 +780,25 @@ export async function takePlace(input: {
 /** Deletes a place's opening hold only while it is still this open's own (its random token). */
 const PLACE_RELEASE = `-- marktmorgen:group-place-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
+/**
+ * Takes a place's mark off only while it is still exactly the text an open wrote (KEYS[1] the marks, ARGV[1] the
+ * address, ARGV[2] that text): 1 when it did, 0 when it was gone or is another's now (Codex C2 on #2872).
+ */
+const PLACE_DROP = `-- marktmorgen:group-place-drop:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+
+/**
+ * Claims a place's mark for an open (KEYS[1] the marks, ARGV[1] the address, ARGV[2] the text read, ARGV[3] the open's
+ * own): 1 when it was still the text read and is now the open's, 0 when it changed or is gone.
+ */
+const PLACE_CLAIM = `-- marktmorgen:group-place-claim:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  return 1
+end
 return 0`;
 
 /**
@@ -583,8 +822,12 @@ return 1`;
 /** How long one open of a link holds it, at most. */
 const OPENING_SECONDS = 30;
 
-/** A place's mark: who, when, the hour its order was admitted in, and whether all that follows the gift was done. */
-type Mark = Member & { h?: number; d?: 1 };
+/**
+ * A place's mark: who, when, the hour its order was admitted in, whether all that follows the gift was done, and the
+ * open that holds it (o, its random token; Codex C2 on #2872): a cleanup takes off only the mark its own open wrote.
+ */
+type Mark = Member & { h?: number; d?: 1; o?: string };
+const OPEN_TOKEN = /^[0-9a-f]{32}$/;
 
 /**
  * A place's mark as HGET answers it: null only for an explicit nil (no
@@ -605,16 +848,17 @@ function markOf(reply: unknown): Mark | null | undefined {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const fields = value as Record<string, unknown>;
-  if (Object.keys(fields).some((name) => !["e", "at", "h", "d"].includes(name))) return undefined;
-  const { e, at, h, d } = fields;
+  if (Object.keys(fields).some((name) => !["e", "at", "h", "d", "o"].includes(name))) return undefined;
+  const { e, at, h, d, o } = fields;
   if (typeof e !== "string" || !e || !Number.isSafeInteger(at) || (at as number) < 1) return undefined;
   if (h !== undefined && !Number.isSafeInteger(h)) return undefined;
   if (d !== undefined && d !== 1) return undefined;
-  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}) };
+  if (o !== undefined && !(typeof o === "string" && OPEN_TOKEN.test(o))) return undefined;
+  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}), ...(typeof o === "string" ? { o } : {}) };
 }
 
 /** The address's mark and what it was given, in their exact shape; throws when either is not. */
-async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; given: { job: string; at: number } | null }> {
+async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; raw: string | null; given: { job: string; at: number } | null }> {
   const read = repliesFor(
     await redisPipeline([
       ["HGET", membersKey(group.id), who],
@@ -625,13 +869,30 @@ async function readPlace(group: Group, email: string, who: string): Promise<{ ma
   const mark = read ? markOf(read[0]) : undefined;
   const given = read ? givenBy(read[1]) : undefined;
   if (mark === undefined || given === undefined) throw new UnknownReplyError("a place's address");
-  return { mark, given };
+  return { mark, raw: mark === null ? null : (read![0] as string), given };
 }
 
-async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string): Promise<Taken> {
+async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string, token: string): Promise<Taken> {
   const { store } = input;
   const members = membersKey(group.id);
-  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}) });
+  // Every mark this open writes carries its own token (o), so nothing but this open's own cleanup takes it off.
+  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}), o: token });
+  /** The mark as this open last wrote or claimed it: the only one its cleanup may take off. */
+  let own: string | null = null;
+  /**
+   * This address's mark taken off, so the place it was not given is free for another address and its link works
+   * again (Claude 6 on #2872, ported to the marks; CX-123 rules 24 and 30): Upstash runs each command on its own, so
+   * an HDEL whose call failed or whose answer is of another shape is sent once more alone. True only once Redis said
+   * the HDEL ran (0 or 1); false leaves the mark as it is, this address's own, picked up when its link is opened again.
+   */
+  // Compared and deleted in one step (PLACE_DROP; Codex C2's proposed HIGH on #2872): a cleanup that times out and
+  // lands later finds the mark another open has claimed or written since, and leaves it. Nothing written by this open
+  // (own null) is nothing to take off.
+  const dropOnce = () =>
+    own === null
+      ? Promise.resolve(true)
+      : redisPipeline([["EVAL", PLACE_DROP, 1, members, who, own]]).then((r) => bit(repliesFor(r, 1)?.[0]) !== null, () => false);
+  const letGo = async (): Promise<boolean> => (await dropOnce()) || (await dropOnce());
   /**
    * All that follows the gift, each part once: the doors that read gifts
    * opened for this store, a course dated from the day the place was taken,
@@ -656,7 +917,7 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   };
 
   // Read again now that this open holds the link.
-  const { mark, given } = await readPlace(group, email, who);
+  const { mark, raw, given } = await readPlace(group, email, who);
   if (given && given.job === groupJob(group.id)) {
     // Given by this purchase: "already" only once that is so. A gift whose
     // mark went missing has it written back, so it is counted among the
@@ -670,45 +931,61 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   }
   if (given) {
     // Given it some other way: no place is used for it, and a mark left by an
-    // open that stopped half way is taken off.
-    if (mark) await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    // open that stopped half way is taken off, only as it was read.
+    own = raw;
+    if (mark) await letGo();
     return { outcome: "has", email, group };
   }
 
   const at = now();
-  // The mark first, then how many marks there are: the places taken, this
-  // one among them. A mark already there is this address's own, from an open
-  // that stopped before handing anything over, and is picked up here.
+  // A mark already there is this address's own, from an open that stopped before handing anything over, and is
+  // picked up here: claimed for this open first (PLACE_CLAIM, compare-and-set from the text read), so a cleanup of the
+  // earlier open that lands late finds it changed and leaves it (Codex C2 on #2872). Changed since it was read, or an
+  // answer of another shape: nothing is handed out, and the link works again.
+  if (mark) {
+    const claimed = write(mark);
+    const swapped = await redisPipeline([["EVAL", PLACE_CLAIM, 1, members, who, raw as string, claimed]]).then((r) => repliesFor(r, 1)?.[0], () => undefined);
+    if (swapped !== 1) throw new UnknownReplyError("a place's mark, picked up");
+    own = claimed;
+  }
+  // The mark first, then how many marks there are: the places taken, this one among them.
+  const fresh = write({ e: email, at });
+  if (!mark) own = fresh;
   const wrote = await redisPipeline([
-    ...(mark ? [] : [["HSETNX", members, who, write({ e: email, at })] as (string | number)[]]),
+    ...(mark ? [] : [["HSETNX", members, who, fresh] as (string | number)[]]),
     ["HLEN", members],
   ]).then(
     (r) => repliesFor(r, mark ? 1 : 2),
     () => null,
   );
   const set = wrote && !mark ? bit(wrote[0]) : 1;
+  // Not written by this open (another open's mark landed first): it is not this open's to take off.
+  if (!mark && set === 0) own = null;
   const count = wrote ? countOf(wrote.at(-1)) : null;
   if (!wrote || set === null || count === null || count < 1) {
     // The answer never came or is of another shape: the mark may be written,
     // so nothing is given and no place is handed out. The mark is this
     // address's alone: taken off, or, if that is lost too, picked up when the
     // link is opened again. No other address's place moves.
-    await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    await letGo();
     throw new UnknownReplyError("a place's count");
   }
-  const giveBack = () => redisPipeline([["HDEL", members, who]]);
   if (count > group.people) {
     // More marks than places: this one comes off. When that leaves a place
     // free (two pressed for the last one in the same instant and both came
     // off), it is not said that every place is taken: the open is said as
-    // not done, and the link works again.
-    const after = await redisPipeline([["HDEL", members, who], ["HLEN", members]]).then(
-      (r) => {
-        const two = repliesFor(r, 2);
-        return two ? countOf(two[1]) : null;
-      },
+    // not done, and the link works again. The marks are counted after the
+    // HDEL is known to have run (its answer 0 or 1): when it was not, it is
+    // sent once more alone and counted again (#2872, ported), so a mark it
+    // was never given a place for is not left counted beside the others.
+    const dropped = await redisPipeline(own === null ? [["HLEN", members]] : [["EVAL", PLACE_DROP, 1, members, who, own], ["HLEN", members]]).then(
+      (r) => (own === null ? [0, ...(repliesFor(r, 1) ?? [])] : repliesFor(r, 2)),
       () => null,
     );
+    let after = dropped && bit(dropped[0]) !== null ? countOf(dropped[1]) : null;
+    if (after === null && (await letGo())) {
+      after = await redisPipeline([["HLEN", members]]).then((r) => countOf(repliesFor(r, 1)?.[0]), () => null);
+    }
     if (after === null) throw new UnknownReplyError("a place given back");
     if (after < group.people) throw new Error("a place was given back in the same instant");
     return { outcome: "full", email, group };
@@ -721,7 +998,9 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   if (!held) {
     const admitted = await admitOrders(store, 1);
     if (!admitted.ok) {
-      await giveBack();
+      // Resting all the same: the mark, when even the second HDEL does not run, is this address's own and is picked up
+      // when its link is opened again.
+      await letGo();
       return { outcome: "resting", email, group };
     }
     hour = admitted.hour;
@@ -729,7 +1008,24 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   const placed: Mark = { e: email, at: mark?.at ?? at, ...(hour !== null ? { h: hour } : {}) };
   await redisPipeline([["EXPIRE", members, GROUP_KEPT_SECONDS]]);
 
-  const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
+  // The grant answered in another shape or failed (#2872 review N1, ported): what is on the address is read below,
+  // exactly. Only when it is this purchase's own gift, which this open holds the link for, does it go on as taken;
+  // anything else keeps the mark and says "not done", since a grant whose call failed may still land (rule 24: never
+  // read as a free place).
+  let granted: boolean | null = null;
+  try {
+    [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
+  } catch (error) {
+    console.error("a place's grant answered in another shape; read back", error);
+  }
+  if (granted === null) {
+    const one = repliesFor(await redisPipeline([["HGET", importedKey(group.s, email), group.p]]), 1);
+    const landed = one ? givenBy(one[0]) : undefined;
+    // Not landed, not known, or another's: the room this open was admitted with stays held until its day ends, never
+    // given back twice, and the mark stays for the next open of the link, which reads the address again.
+    if (!landed || landed.job !== groupJob(group.id)) throw new UnknownReplyError("a place's gift");
+    granted = true;
+  }
   if (!granted) {
     // This open's order is not counted by this open: the room it was
     // admitted with goes back (another open gives back its own, and an open
@@ -748,29 +1044,64 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
       return { outcome: "already", email, group };
     }
     // It reached this address another way in the same instant.
-    await giveBack();
+    await letGo();
     return { outcome: "has", email, group };
   }
   // The hour goes on the mark once this open's gift is the one made, so an
   // open that stops before all that follows is done gives its room back when
   // the link is opened again; a mark without it leaves the room held until
   // its day ends, never given back twice.
-  if (hour !== null) await redisPipeline([["HSET", members, who, write(placed)]]);
+  if (hour !== null) {
+    await redisPipeline([["HSET", members, who, write(placed)]]);
+    own = write(placed);
+  }
   await finish(placed);
   return { outcome: "taken", email, group };
 }
 
 /** A write of one item (SADD of one member, HDEL of one field) answers 0 or 1; anything else is unknown. */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
-/** Where a pass over the refunds stands between runs: its start, the page it continues from, the newest refund read. */
-type RefundPass = { since: number; after: string; newest: number };
-function readPass(raw: unknown): RefundPass | null | undefined {
+/**
+ * Where a pass over the refunds stands between runs: its start, the page it continues from, the newest refund read,
+ * the Stripe account whose list it is reading (its cursor is a refund of that account and of no other), and, when a
+ * row it passed was not readable, the oldest time such a row holds (`hold`: the anchor goes no further when the pass
+ * ends, so the next pass reads that row again).
+ */
+type RefundPass = { since: number; after: string; newest: number; account: string; hold?: number };
+/** A pass's cursor: an id as Stripe gives one. */
+const CURSOR = /^[A-Za-z0-9_]{3,255}$/;
+/** A time kept as a mark: whole seconds, as Redis answers a score or a value; anything else is unknown (undefined). */
+function timeMark(raw: unknown): number | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw === "number") return Number.isSafeInteger(raw) && raw >= 0 ? raw : undefined;
+  return typeof raw === "string" && /^\d{1,12}$/.test(raw) ? Number(raw) : undefined;
+}
+/** The oldest mark of an account left, from ZRANGEBYSCORE ... LIMIT 0 1 WITHSCORES: null when there is none. */
+function lowestMark(raw: unknown): number | null | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  if (raw.length === 0) return null;
+  if (raw.length !== 2 || typeof raw[0] !== "string") return undefined;
+  return timeMark(raw[1]) ?? undefined;
+}
+/**
+ * A kept pass, only when it is in its exact shape and reads the store's account today. One kept on another account
+ * (the creator connected another one) or before passes named their account is not read from: its cursor would be
+ * answered 404 by this account. Then the pass starts again from the anchor, which never moved past it.
+ */
+function readPass(raw: unknown, account: string): RefundPass | null | undefined {
   if (raw === null) return null;
   if (typeof raw !== "string") return undefined;
   try {
     const pass = JSON.parse(raw) as Partial<RefundPass>;
-    if (Number.isSafeInteger(pass.since) && Number.isSafeInteger(pass.newest) && typeof pass.after === "string" && /^[A-Za-z0-9_]{3,255}$/.test(pass.after)) {
-      return { since: pass.since as number, after: pass.after, newest: pass.newest as number };
+    if (
+      Number.isSafeInteger(pass.since) &&
+      Number.isSafeInteger(pass.newest) &&
+      typeof pass.after === "string" &&
+      CURSOR.test(pass.after) &&
+      pass.account === account &&
+      (pass.hold === undefined || (Number.isSafeInteger(pass.hold) && (pass.hold as number) >= 0))
+    ) {
+      return { since: pass.since as number, after: pass.after, newest: pass.newest as number, account, ...(pass.hold !== undefined ? { hold: pass.hold } : {}) };
     }
   } catch {}
   return undefined;
@@ -782,6 +1113,14 @@ function readPass(raw: unknown): RefundPass | null | undefined {
  * it last looked, finds the purchase each paid for, and removes it from every
  * address that took a place. Returns how many places went.
  *
+ * A refund takes the places back only once it succeeded on a charge refunded in full by the refunds that succeeded
+ * (the owner's decision 18, 9 November 2026): one still on its way, or a part of a charge whose rest is on its way,
+ * holds the anchor at its time and takes nothing back yet; one that failed or was canceled takes nothing back; one
+ * on its way for more than REFUND_STUCK_SECONDS is said in the log, never taken back for that. A dispute Stripe closed
+ * as lost takes the places back as a full refund that succeeded does, whatever its amount; one won or still open takes
+ * nothing (lib/refunds.ts, lostDisputesOrRetry, read once a run as gifts and pre-orders read it). Only a payment that
+ * paid for a group purchase is looked at further: any other refund holds nothing and asks Stripe nothing more.
+ *
  * The refunds are read in Stripe's exact list shape, every row as refundRowKnown (lib/refunds.ts) reads it, page
  * after page (CX-123 rules 24 and 30; C4-20261106-0450-C5-16). One pass from the anchor to the end of the list may
  * take several runs: where it stands is kept (passKey) after every page read whole and handled, so the next run goes
@@ -791,6 +1130,22 @@ function readPass(raw: unknown): RefundPass | null | undefined {
  * run that stops halfway leaves it to the next (Codex G on #2781, M2); one whose work was left unknown (a reply in
  * another shape, a record that does not read) marks nothing and is kept on a short list tried first on every run, so
  * it never holds back the refunds after it (Claude 4 on #2781); with that list full, the pass stays on its page.
+ *
+ * The pass is kept with the account it reads: one kept on the store's previous Stripe account is never read from on
+ * the new one, and a kept cursor the account answers 404 `resource_missing` for is let go and the pass starts again
+ * from the top in the same run, so a refund is never left unread behind a cursor that cannot be followed (the sibling
+ * of M2 on #3301). A row that is not readable never holds back the pages after it (the sibling of M1 on #3301): the
+ * pass goes on from the page's last readable row or, on a page with none, from its last row's id when that id reads;
+ * when it ends, the anchor goes no further than the oldest such row's time (the start of the pass when that time does
+ * not read), so the next pass reads it again and the week a store with no anchor starts from never slides past it. A
+ * page with no row whose id reads gives nothing to go on from: the pass stays on it, says in the log that what is
+ * after it is unknown, and reads it again on the next run, at most the newest page and that one.
+ *
+ * The anchor is of one account (ownerKey). A store that connects another account starts that one from its own mark
+ * (leftKey): where it was left, or, for one never read, a week back or the oldest mark kept, whichever is older; the
+ * account left is marked at its anchor before anything else, and the anchor moves to the new account only once a pass
+ * over it ends (REFUNDS_END, in one step). So a store that goes back to an account it left reads that account from
+ * where it left it, never from the other account's anchor (A, then B, then A).
  */
 export async function revokeRefundedGroups(
   store: Store,
@@ -800,38 +1155,145 @@ export async function revokeRefundedGroups(
   if (!store.statsId || !store.stripeAccountId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
   const account = store.stripeAccountId;
-  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)]]), 3);
+  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)], ["GET", ownerKey(sid)]]), 4);
   if (!begun) return 0;
-  const [any, anchorRaw, passRaw] = begun;
+  const [any, anchorRaw, passRaw, ownerRaw] = begun;
   if (!any) return 0;
   // The anchor read exactly: in another shape, no pass starts (Claude 4 on #2781), never one from a week back.
   if (anchorRaw !== null && (typeof anchorRaw !== "string" || !/^\d{1,12}$/.test(anchorRaw))) return 0;
-  const kept = readPass(passRaw);
-  // A pass kept in an unknown shape is started again from the anchor, which never moved past it.
-  const since = kept ? kept.since : Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
-  let newest = kept ? kept.newest : Number(anchorRaw) || since;
+  // And the account it is of: in another shape, no pass starts either.
+  if (ownerRaw !== null && (typeof ownerRaw !== "string" || !STRIPE_ACCOUNT_PATTERN.test(ownerRaw))) return 0;
+  // Where this account is read from: its anchor, when the anchor is of this account (or kept before anchors named one).
+  let start: number;
+  if (anchorRaw !== null && (ownerRaw === null || ownerRaw === account)) start = Number(anchorRaw);
+  else {
+    // No anchor of this account: its own mark, if the store left it before, else a week back or the oldest mark kept.
+    const marks = repliesFor(await redisPipeline([["ZSCORE", leftKey(sid), account], ["ZRANGEBYSCORE", leftKey(sid), "-inf", "+inf", "LIMIT", 0, 1, "WITHSCORES"]]), 2);
+    const own = marks ? timeMark(marks[0]) : undefined;
+    const lowest = marks ? lowestMark(marks[1]) : undefined;
+    if (own === undefined || lowest === undefined) return 0;
+    start = own ?? Math.min(lowest ?? Number.MAX_SAFE_INTEGER, Math.max(0, now() - 7 * 86_400));
+    // Before anything is read: the account left is marked at its anchor, and this one at where it starts, so neither
+    // is lost if the store moves again before a pass here ends; then the newest marks past the bound are let go.
+    const marking: (string | number)[][] = [];
+    if (anchorRaw !== null && ownerRaw !== null) marking.push(["ZADD", leftKey(sid), "NX", anchorRaw, ownerRaw]);
+    marking.push(["ZADD", leftKey(sid), "NX", String(start), account], ["ZREMRANGEBYRANK", leftKey(sid), REFUND_ACCOUNTS_KEPT, -1]);
+    const marked = repliesFor(await redisPipeline(marking), marking.length);
+    if (!marked || !marked.slice(0, -1).every(oneWrite) || countOf(marked.at(-1)) === null) return 0;
+  }
+  const kept = readPass(passRaw, account);
+  // A pass kept in an unknown shape, or on another account, is started again from the anchor, which never moved past it.
+  const since = kept ? kept.since : Math.max(0, start - 300);
+  let newest = kept ? kept.newest : start;
   let after = kept ? kept.after : "";
+  let hold = kept?.hold;
   let revoked = 0;
 
-  /** One refund row read whole: false when something it needed was left unknown, and then it is not marked handled. */
-  const handle = async (refund: Record<string, unknown>): Promise<boolean> => {
+  let lookups = CHARGE_REFUND_LOOKUPS;
+  /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, each said in the log once a run. */
+  const stuck = new Set<string>();
+  /** Each charge's parts as read in this run: held (a part on its way, seen on a row or in the charge's refunds) or through. */
+  const chargeSettled = new Map<string, "held" | "through">();
+
+  /**
+   * One refund row, or one dispute closed as lost (as lostDisputesSince builds it), read whole: true when it was
+   * handled or takes nothing back; false when something it needed was left unknown, and then it is not marked handled;
+   * "hold" when it may still take its purchase back but has not yet, and it then holds the anchor at its time, so the
+   * next pass reads it again (audit of refunds, A1).
+   *
+   * The owner's decision 18 (9 November 2026): the places go only once the refund succeeded on a charge refunded in full,
+   * or the dispute was lost. A refund still on its way (pending, or waiting on an action) takes nothing back, since it
+   * may yet fail, and holds the anchor; failed or canceled, it takes nothing back and holds nothing. A refund in parts
+   * (as on #2868): a succeeded part on a charge read refunded in full (Stripe counts a refund still pending in
+   * amount_refunded) takes the places back only once the charge's succeeded refunds add up to the whole charge; while
+   * one of them is on its way, or when they cannot be read, it holds. A dispute lost takes the whole purchase back,
+   * whatever its amount (lib/refunds.ts, the owner's rule of 4 November 2026); one won or still open takes nothing.
+   * `decided` is a refund already read through, kept to be tried again.
+   *
+   * Whether the payment paid for a group purchase is read first (the pre-review of claude5/group-buy-cursor-account):
+   * a refund of any other sale never holds the anchor, is never said in the log, and never asks Stripe about its
+   * charge, so it cannot spend the lookups a group's own parts need.
+   */
+  const handle = async (refund: Record<string, unknown>, decided = false): Promise<boolean | "hold"> => {
     const id = refund.id as string;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    const charge = refund.charge as { refunded?: unknown } | null;
-    // A dispute closed as lost takes the purchase back as a full refund does, whatever its amount (lib/refunds.ts, the
-    // owner's rule of 4 November 2026; queue 388 [TB14]). One that names no payment says nothing of this store's
-    // purchases: it is marked read, so it never holds the place in the closing events back.
     const dispute = refund.object === "dispute";
-    if (dispute && typeof id === "string" && id && !pi) {
+    // Read, with the read set's expiry (main): both replies exact, or not marked.
+    const markRead = async (): Promise<boolean> => {
       const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
       return !!marked && oneWrite(marked[0]) && marked[1] === 1;
-    }
-    if (!pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) return true;
+    };
+    // A dispute closed as lost takes the purchase back as a full refund does, whatever its amount (lib/refunds.ts, the
+    // owner's rule of 4 November 2026; queue 388 [TB14]). One that names no payment says nothing of this store's
+    // purchases: it is marked read, so it never holds the place in the closing events back (main, #4774).
+    if (dispute && typeof id === "string" && id && !pi) return markRead();
+    if (dispute && !rowGivesBack(refund)) return true;
+    if (!pi) return true;
+    const onItsWay = !dispute && !decided && REFUND_ON_ITS_WAY.has(refund.status as string);
+    const charge = refund.charge as { refunded?: unknown } | null;
+    if (!dispute && !onItsWay && (refund.status !== "succeeded" || charge?.refunded !== true)) return true;
+    // Through already when lost to a dispute, kept read through, or when its own amount covers the charge; otherwise
+    // only once the charge's refunds are read below.
+    const through = dispute || decided || (!onItsWay && wholeOnItsOwn(refund));
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
-    if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return false;
+    // Left unknown before it was read through: held for the next pass, never kept on the retry list, which reads what
+    // it keeps as through.
+    if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return through ? false : "hold";
     if (handled === 1) return true;
+    // No group purchase paid by it: nothing to take back, so nothing held, said or asked of Stripe. One that gives its
+    // payment back is marked read, as before; one still on its way is read again with the list, at no cost.
+    if (groupId === null) return onItsWay ? true : markRead();
+    const chargeId = plainObject(refund.charge) ? ownField(refund.charge, "id") : undefined;
+    const chargeKey = typeof chargeId === "string" && CHARGE_PATTERN.test(chargeId) ? chargeId : "";
+    if (onItsWay) {
+      // Its charge has a part on its way: a succeeded part of it read later in this run holds without asking Stripe.
+      if (chargeKey) chargeSettled.set(chargeKey, "held");
+      if (typeof refund.created === "number" && refund.created <= now() - REFUND_STUCK_SECONDS && !stuck.has(id)) {
+        stuck.add(id);
+        // An alert for whoever reads the logs, never a revocation (the owner's decision 18): nothing goes until it
+        // succeeded. At most once a payment a day: the mark is written first, and only a mark already there is quiet.
+        const mark = typeof groupId === "string" && GROUP_ID.test(groupId) ? repliesFor(await redisPipeline([["SET", stuckKey(groupId), "1", "NX", "EX", STUCK_SAID_SECONDS]]), 1)?.[0] : undefined;
+        if (mark !== null) {
+          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept while it is on its way", { store: sid, account, refund: id, status: refund.status, created: refund.created });
+        }
+      }
+      return "hold";
+    }
+    // A succeeded part of the charge: through only once the charge's succeeded refunds add up to it. Read after the
+    // handled mark and the group purchase, so a refund already handled, or of another sale, asks Stripe nothing more.
+    // Each charge is asked once a run at most, and one found waiting on a part is asked again only after
+    // CHARGE_HELD_RECHECK_SECONDS (its mark, or a reply on the mark that does not read, holds without a lookup).
+    if (!through) {
+      const known = chargeKey ? chargeSettled.get(chargeKey) : undefined;
+      if (known === "held") return "hold";
+      if (known !== "through") {
+        // A purchase id in another shape has no mark: its charge is asked as before, never held for good.
+        const marked = typeof groupId === "string" && GROUP_ID.test(groupId) ? groupId : "";
+        // Past the run's lookups it holds whatever the mark says, so the mark is read only while a lookup is left
+        // (GROUP_REFUND_RUN in tests/plan-cost-registry.ts: one GET and one SET a lookup at the most).
+        if (lookups <= 0) return "hold";
+        const waiting = marked ? repliesFor(await redisPipeline([["GET", heldKey(marked)]]), 1) : [null];
+        if (!waiting || waiting[0] !== null) return "hold";
+        lookups -= 1;
+        let settled: "held" | "through";
+        try {
+          settled = await chargeRefundsSettled(account, refund);
+        } catch (error) {
+          if (!(error instanceof StripeListUnreadable) && !(error instanceof StripeError)) throw error;
+          console.error("reading the refunds of a refunded charge for group purchases failed; held for the next pass", error);
+          if (chargeKey) chargeSettled.set(chargeKey, "held");
+          return "hold";
+        }
+        if (chargeKey) chargeSettled.set(chargeKey, settled);
+        if (settled === "held") {
+          // A mark whose write is left unknown only means the charge is asked again on the next run.
+          if (marked) await redisPipeline([["SET", heldKey(marked), "1", "EX", CHARGE_HELD_RECHECK_SECONDS]]);
+          return "hold";
+        }
+      }
+    }
     if (typeof groupId === "string") {
       const raw = repliesFor(await redisPipeline([["GET", groupKey(groupId)]]), 1);
       if (!raw || (raw[0] !== null && typeof raw[0] !== "string")) return false;
@@ -910,18 +1372,49 @@ export async function revokeRefundedGroups(
       }
     }
     // Marked handled only now, once everything it takes back was written.
-    const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
-    return !!marked && oneWrite(marked[0]) && marked[1] === 1;
+    return markRead();
   };
 
-  /** One page of refunds: its rows read in their exact shape, or null when the page itself could not be read. */
-  const readPage = async (from: string): Promise<StripePage | null> => {
+  /**
+   * One page of refunds: its rows read in their exact shape, null when the page itself could not be read, or "gone"
+   * when the account does not know the refund it was asked to read on from (404 `resource_missing` on a cursor). With
+   * the page: its last row's id when that id reads, whatever the rest of the row (`tailId`), and the oldest time a row
+   * not readable holds (`holdAt`: its own time when that reads, the start of the pass when it does not).
+   */
+  const readPage = async (from: string): Promise<(StripePage & { tailId: string | null; holdAt: number | null }) | null | "gone"> => {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION);
+      const latest = now() + 300;
+      const timeInWindow = (created: unknown): created is number =>
+        typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= latest;
+      const page = readStripePage(raw, (row) => timeInWindow(ownField(row, "created")) && refundRowKnown(row));
+      // A page that read is a plain object whose own data is a list: its rows are looked at again, slot by slot.
+      const data = ownField(raw as Record<string, unknown>, "data") as unknown[];
+      const readable = new Set<unknown>(page.rows);
+      const slot = (i: number): unknown => {
+        const own = Object.getOwnPropertyDescriptor(data, String(i));
+        return own && Object.hasOwn(own, "value") ? own.value : undefined;
+      };
+      let holdAt: number | null = null;
+      for (let i = 0; i < data.length; i += 1) {
+        const row = slot(i);
+        if (readable.has(row)) continue;
+        const created = plainObject(row) ? ownField(row, "created") : undefined;
+        // A time Stripe could have given this list (inside its window, not ahead of now); otherwise the pass's start.
+        const at = timeInWindow(created) ? created : since + 300;
+        holdAt = holdAt === null ? at : Math.min(holdAt, at);
+      }
+      const last = data.length > 0 ? slot(data.length - 1) : undefined;
+      const lastId = plainObject(last) ? ownField(last, "id") : undefined;
+      return { ...page, tailId: typeof lastId === "string" && CURSOR.test(lastId) ? lastId : null, holdAt };
     } catch (error) {
+      if (from && error instanceof StripeError && error.status === 404 && error.code === "resource_missing") {
+        console.error("a kept pass over group refunds named a refund this account does not know; started again", error);
+        return "gone";
+      }
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading refunds for group purchases failed", error);
       return null;
@@ -947,8 +1440,9 @@ export async function revokeRefundedGroups(
     for (const [id, pi] of pairs) {
       if (Date.now() >= deadline) return revoked;
       if (typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) continue;
-      // Only a refund in full is ever kept here (handle reads nothing else), so it is read again as one.
-      if (await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } })) {
+      // Only a refund read through in full is ever kept here (handle hands nothing else to later), so it is read again
+      // as one, without asking Stripe again.
+      if ((await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } }, true)) === true) {
         await redisPipeline([["HDEL", retryKey(sid), id]]);
       }
     }
@@ -964,7 +1458,7 @@ export async function revokeRefundedGroups(
   let rowsUnsure = false;
   for (const row of lost.rows) {
     if (Date.now() >= deadline) return revoked;
-    if (!(await handle(row))) rowsUnsure = true;
+    if ((await handle(row)) !== true) rowsUnsure = true;
   }
   const lostDone = !rowsUnsure && (await confirmLostRead(lost, seenKey(sid))) && lost.complete;
 
@@ -974,7 +1468,7 @@ export async function revokeRefundedGroups(
     // here never moves the pass or the anchor; a later pass reads these again, and what was handled stays handled.
     pages -= 1;
     const top = await readPage("");
-    for (const refund of top?.rows ?? []) {
+    for (const refund of top && top !== "gone" ? top.rows : []) {
       if (Date.now() >= deadline) return revoked;
       await handle(refund);
     }
@@ -982,32 +1476,65 @@ export async function revokeRefundedGroups(
   for (let page = 0; page < pages; page += 1) {
     if (Date.now() >= deadline) return revoked;
     const read = await readPage(after);
+    if (read === "gone") {
+      // The cursor is not this account's: the pass is let go and started again from the top, never read from it again.
+      // The anchor did not move during the pass, so nothing it covers is skipped; what was handled stays handled.
+      await redisPipeline([["DEL", passKey(sid)]]);
+      after = "";
+      newest = start;
+      hold = undefined;
+      continue;
+    }
     if (!read) return revoked;
-    let whole = read.unreadable === 0;
+    let whole = true;
+    const held: number[] = [];
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
       // A refund on a readable row is taken back whatever the other rows. One whose work was left unknown is kept to
       // be tried again first on the next runs, and the pass goes on; when it cannot be kept for sure, the page stays.
-      if (!(await handle(refund)) && !(await later(refund))) whole = false;
+      const result = await handle(refund);
+      if (result === "hold") held.push(refund.created as number);
+      else if (!result && !(await later(refund))) whole = false;
     }
-    // A page with a row not readable, or a row neither handled nor kept for later, is read again next run.
+    // A row neither handled nor kept for later: the page is read again next run.
     if (!whole) return revoked;
+    // A row not readable holds the anchor at its time, so the next pass reads it again, and never holds back the pages
+    // after it (the sibling of M1 on #3301).
+    if (read.holdAt !== null) hold = hold === undefined ? read.holdAt : Math.min(hold, read.holdAt);
+    // A refund that has not taken its purchase back yet but may (on its way, a part of a charge not settled, or one
+    // whose charge's refunds did not read) holds the anchor the same way (audit of refunds, A1): the next pass reads it
+    // again, and its places go once it went through.
+    for (const at of held) hold = hold === undefined ? at : Math.min(hold, at);
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
       // The anchor moves only once the closing events were read to their end and every lost dispute read was handled
-      // (above): the closings are read from the anchor, so it waits while they are not all read. A read that went on
-      // from a place an earlier run kept did not read the closings made since that run, newer than its newest one,
-      // so the anchor goes no further than that one (lib/gifts.ts): the next run reads them from there.
+      // (above, main #4774): the closings are read from the anchor, so it waits while they are not all read. A read that
+      // went on from a place an earlier run kept did not read the closings made since that run, newer than its newest
+      // one, so the anchor goes no further than that one, and no further than the newest refund this pass read
+      // (lib/gifts.ts; first money review of #3410): the next run reads them from there.
       if (!lostDone) return revoked;
-      if (lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
-      const ended = repliesFor(await redisPipeline([["SET", anchorKey(sid), String(newest)], ["DEL", passKey(sid)]]), 2);
-      if (!ended) console.error("ending a pass over group refunds was left unknown");
+      const lostAt = lost.resumed ? Math.min(newest, Math.max(lost.newest, since)) : undefined;
+      // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further
+      // than its time, never back before where this pass started. A row not readable may rightly hold later than
+      // `newest` (read.holdAt), so only the lost disputes' bound is capped at it.
+      const heldAt = hold === undefined ? undefined : Math.max(since + 300, hold);
+      const at = heldAt === undefined && lostAt === undefined ? newest : Math.min(heldAt ?? Number.MAX_SAFE_INTEGER, lostAt ?? Number.MAX_SAFE_INTEGER);
+      const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
+      if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");
       return revoked;
     }
-    // More pages, and no readable last row to read them from: not read whole.
-    if (!read.lastId) return revoked;
-    after = read.lastId;
-    await redisPipeline([["SET", passKey(sid), JSON.stringify({ since, after, newest } satisfies RefundPass), "EX", PASS_SECONDS]]);
+    // More pages: read on from the last readable row (a row not readable after it is read again on the next page), or,
+    // on a page with no readable row, from its last row's id when that id reads.
+    const next = read.lastId ?? read.rows.at(-1)?.id ?? read.tailId;
+    if (!next) {
+      // Nothing to read on from: the refunds after this page are unknown until it reads. The pass stays on it and the
+      // anchor (or this account's mark) where it was, so nothing after it leaves the window; each run reads the newest
+      // page and this one again, inside its page bound.
+      console.error("a page of refunds for group purchases has no row whose id reads: the pass stays on it, and the refunds after it are unknown", { store: sid, account });
+      return revoked;
+    }
+    after = next;
+    await redisPipeline([["SET", passKey(sid), JSON.stringify({ since, after, newest, account, ...(hold !== undefined ? { hold } : {}) } satisfies RefundPass), "EX", PASS_SECONDS]]);
   }
   return revoked;
 }

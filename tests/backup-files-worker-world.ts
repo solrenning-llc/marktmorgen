@@ -144,6 +144,7 @@ export const world = {
   /** A listing answered otherwise: a status, or a JSON value to send as the page. */
   listingFault: new Map<string, { status?: number; body?: unknown; afterPages?: number; error?: string }>(),
   pageSize: 1000,
+  signedForMs: 900_000,
   /** Listings whose last page ends "unsignable": a key the route could not sign was left out (Claude 5's MEDIUM on #3313). */
   unsignableEnd: new Set<string>(),
   rangeIgnored: false,
@@ -168,6 +169,7 @@ export function resetWorld(): void {
   world.listings = new Map();
   world.listingFault = new Map();
   world.pageSize = 1000;
+  world.signedForMs = 900_000;
   world.unsignableEnd = new Set();
   world.rangeIgnored = false;
   world.noEtag = false;
@@ -231,7 +233,7 @@ function routeAnswer(url: URL): Response {
   const all = world.listings.get(listingKey(source, store)) ?? [];
   const slice = all.slice(at, at + world.pageSize);
   const more = at + world.pageSize < all.length;
-  const expiresAt = world.now + 900_000;
+  const expiresAt = world.now + world.signedForMs;
   return json({
     version: 1,
     kind: "files",

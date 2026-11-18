@@ -62,8 +62,10 @@
  *     the last entry signed, losing none;
  *   - at most BACKUP_FILES_PAGES_PER_STORE provider pages a listing: a store
  *     with more objects is answered "over_bound", never complete (item 8);
- *   - a key that cannot be signed as itself is left out alone and its listing
- *     ends "unsignable", never complete (Claude 5's MEDIUM on #3313);
+ *   - a key that cannot be signed as itself, or that breaks the contract's own
+ *     key rule (a C0 control, DEL, over 1,024 characters), is left out alone and
+ *     its listing ends "unsignable", never complete (Claude 5's and Claude 3's
+ *     MEDIUMs on #3313);
  *   - at most the review's maxPagesPerDay pages a UTC day for each source
  *     (and its own maxStoresPagesPerDay and maxDeletionsPagesPerDay for those pages),
  *     counted before the provider is asked (one INCR and one EXPIRE NX, lib/window-count.ts, read
@@ -86,6 +88,8 @@ import {
   type BackupFilesPage,
   type BackupFilesReason,
   type BackupFilesSource,
+  isContractKey,
+  isContractUrl,
   parseFilesPage,
   sourcePrefix,
 } from "@/lib/backup-files-contract";
@@ -308,7 +312,8 @@ async function listBlob(prefix: string, cursor: string | null): Promise<Listed> 
   const seen = new Set<string>();
   const objects = (blobs as unknown[]).map((item) => {
     const { pathname, size, etag } = (item ?? {}) as { pathname?: unknown; size?: unknown; etag?: unknown };
-    if (typeof pathname !== "string" || !pathname.startsWith(prefix) || pathname.length === prefix.length || pathname.length > 1024 || seen.has(pathname)) fail("an entry outside the folder, or twice");
+    // A name over 1,024 characters is still an entry of the folder: the page refuses it alone (isContractKey, below).
+    if (typeof pathname !== "string" || !pathname.startsWith(prefix) || pathname.length === prefix.length || seen.has(pathname)) fail("an entry outside the folder, or twice");
     seen.add(pathname as string);
     if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) fail("a size that is not a count");
     if (typeof etag !== "string" || !/^[\x21-\x7e]{1,256}$/.test(etag)) fail("an entry without its etag");
@@ -419,16 +424,31 @@ export async function backupFilesPage(
   // end is "unsignable", never complete, and the Worker alarms and applies no orphan end.
   let refused = state.refused === true;
   const carry = (next: CursorState): CursorState => (refused ? { ...next, refused: true } : next);
+  const refuse = () => {
+    if (!refused) console.error("backup files: a key could not be handed out as itself and is left out", input.source);
+    refused = true;
+  };
   for (const object of objects) {
     const resume = carry({ page: state.page, provider: state.provider, after: entries.length ? entries[entries.length - 1].key : state.after });
     if (now() >= options.stopAt) return answer(entries, "cutoff", resume);
+    // The contract's own key rule first (a C0 control, DEL, or more than 1,024 characters: Claude 3's MEDIUM on
+    // #3313): such a key would make parseFilesPage refuse the whole page, so it is left out alone, as below.
+    if (!isContractKey(object.key)) {
+      refuse();
+      continue;
+    }
     let signed: { url: string; expiresAt: number };
     try {
       signed = await source.sign(object.key);
     } catch (error) {
       if (!(error instanceof UnsignableKey)) throw error;
-      if (!refused) console.error("backup files: a key could not be signed as itself and is left out", input.source);
-      refused = true;
+      refuse();
+      continue;
+    }
+    // The contract's own address rule too (Claude 3's second MEDIUM on #3313): an address past it would make
+    // parseFilesPage refuse the whole page, so its key is left out alone, as above.
+    if (!isContractUrl(signed.url)) {
+      refuse();
       continue;
     }
     const entry: BackupFilesEntry = { source: input.source, key: object.key, etag: object.etag, size: object.size, url: signed.url, expiresAt: signed.expiresAt };

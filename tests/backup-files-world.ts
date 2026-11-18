@@ -11,6 +11,12 @@ export const blobWorld = {
   token: { delegationToken: "deleg-synthetic", clientSigningToken: "client-signing-secret-synthetic", validUntil: 0 } as unknown,
   tokenFails: false,
   listFails: false,
+  /**
+   * Shape the signed address as @vercel/blob 2.8.0 does (addPresignedParams: `new URL` and `searchParams.set`), which
+   * percent-encodes every non-ASCII character of the path (Claude 3's MEDIUM on #3313, 6910729243). Off by default:
+   * the other tests keep the raw pathname that makes "%" and "#" lead elsewhere.
+   */
+  sdkShape: false,
 };
 
 export function resetBlobWorld(): void {
@@ -21,6 +27,7 @@ export function resetBlobWorld(): void {
   blobWorld.token = { delegationToken: "deleg-synthetic", clientSigningToken: "client-signing-secret-synthetic", validUntil: 0 };
   blobWorld.tokenFails = false;
   blobWorld.listFails = false;
+  blobWorld.sdkShape = false;
 }
 
 export async function list(options: Record<string, unknown> = {}): Promise<unknown> {
@@ -41,6 +48,12 @@ export async function issueSignedToken(options: Record<string, unknown>): Promis
 export async function presignUrl(token: Record<string, unknown>, options: Record<string, unknown>): Promise<{ presignedUrl: string }> {
   blobWorld.presignCalls.push({ token, options });
   const signature = Buffer.from(`${String(token.clientSigningToken)}|${String(options.pathname)}|${String(options.operation)}`).toString("hex").slice(-32);
+  if (blobWorld.sdkShape) {
+    const url = new URL(`https://synthetic.private.blob.vercel-storage.com/${String(options.pathname)}`);
+    url.searchParams.set("vercel-blob-delegation", String(token.delegationToken));
+    url.searchParams.set("vercel-blob-signature", signature);
+    return { presignedUrl: url.toString() };
+  }
   return { presignedUrl: `https://synthetic.private.blob.vercel-storage.com/${String(options.pathname)}?vercel-blob-delegation=${String(token.delegationToken)}&vercel-blob-signature=${signature}` };
 }
 

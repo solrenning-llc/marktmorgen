@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   part("An unknown deletion answer is never read as \"nothing to delete\"");
   for (const [label, shape] of [
     ["no reply", () => undefined],
-    ["a word", () => "OK"],
+    ["a count", () => 1],
     ["a list", () => [1]],
     ["a fraction", () => 0.5],
     ["a negative number", () => -1],
@@ -36,7 +36,8 @@ async function main(): Promise<void> {
     seed();
     redis.pipeline = (async (commands: (string | number)[][]) => {
       const replies = await real(commands);
-      if (commands[0]?.[0] !== "HDEL") return replies;
+      // Each place is read and deleted in one step since #2576 (HASH_TAKE_FIELD): the place's text or nil.
+      if (!(commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:hash-take-field:"))) return replies;
       return shape ? [shape(), ...replies.slice(1)] : replies.slice(0, -1);
     }) as typeof redis.pipeline;
     const outcome = await forgetWaitlistPerson(SID, PRODUCTS, "dana@example.com").then(

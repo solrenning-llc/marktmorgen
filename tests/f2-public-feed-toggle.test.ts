@@ -24,7 +24,9 @@ import { allowanceUsed } from "@/lib/store-allowance";
 import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
 import { readFileSync } from "node:fs";
 import type { Podcast } from "@/lib/podcast-rules";
-import { forgetPublicFeeds } from "@/lib/podcast-public-show";
+import { PODCAST_RECORD_MOST, PUBLIC_SHOW_MAX_BYTES, forgetPublicFeeds } from "@/lib/podcast-public-show";
+import { PUBLIC_SETTINGS_WORST_BYTES } from "@/app/api/store/podcast/public-settings/route";
+import { SITE_URL } from "@/lib/site-url";
 import { dataKey } from "@/lib/store-data";
 import { eraseClosed, markDue } from "@/lib/closed-store-data";
 import { GET as feed } from "@/app/api/store/podcast/public/[handle]/[product]/route";
@@ -267,6 +269,44 @@ async function main(): Promise<void> {
     await savePodcast(podcast(POD));
   }
   is("the takedown says when it takes effect, as the feed's cache gives it", /within 5 minutes/.test(readFileSync("components/podcast-public-feed.tsx", "utf8")), true);
+
+  part("A busy podcast lock gives back the studio requests it held: nothing was read (Claude 6, LOW on #3544)");
+  {
+    const owner = (await storeForEmail(OWNER)) as Store;
+    // A refusal after the guard and before any hold: what the guard alone takes.
+    const g0 = await allowanceUsed(owner, "studio");
+    is("control: a refused action", (await post({ action: "nope", id: pid })).status, 400);
+    const guardOnly = (await allowanceUsed(owner, "studio")) - g0;
+    bend = (command) => (command[0] === "SET" && String(command[1]) === `nl:pod:${POD}:lock` ? "BUSY" : undefined);
+    const b0 = await allowanceUsed(owner, "studio");
+    const busy = await post({ action: "on", id: pid, category: "Education", explicit: false, understood: true });
+    const busyUsed = (await allowanceUsed(owner, "studio")) - b0;
+    bend = null;
+    is("the lock is busy: 409 busy", [busy.status, busy.body.error], [409, "busy"]);
+    is("and it costs only what the guard takes, never the change's held requests", busyUsed, guardOnly);
+  }
+
+  part("A hidden product's episode can still be taken out of its feed (Claude 5, LOW 2 on #3544)");
+  {
+    is("control: the feed is on", (await post({ action: "on", id: pid, category: "Education", explicit: false, understood: true })).status, 200);
+    is("control: an episode is public", (await post({ action: "episode", id: pid, episode: "ep0000000001", public: true, audio: AUDIO })).status, 200);
+    await setProductHidden(OWNER, pid, true);
+    const out = await post({ action: "episode", id: pid, episode: "ep0000000001", public: false });
+    is("hidden: taking the episode out is done", [out.status, (out.body.feed as { episodes?: Record<string, string> } | undefined)?.episodes], [200, {}]);
+    is("hidden: putting one in is still refused as private", (await post({ action: "episode", id: pid, episode: "ep0000000001", public: true, audio: AUDIO })).body.error, "private");
+    is("hidden: turning it on is still refused as private", (await post({ action: "on", id: pid, category: "Education", explicit: false, understood: true })).body.error, "private");
+    await setProductHidden(OWNER, pid, false);
+  }
+
+  part("A request's worst case covers its answer too (Claude 5, LOW 3 on #3544)");
+  {
+    // What an answer adds to the record it sends: its fixed keys and the feed address, at the longest handle (24
+    // characters, lib/store-handle-pattern.ts) and product id (40).
+    const extra = Buffer.byteLength(JSON.stringify({ ok: true, feed: { on: true, category: "", explicit: false, episodes: {}, address: `${SITE_URL}/api/store/podcast/public/${"h".repeat(24)}/${"p".repeat(40)}.xml` } }), "utf8");
+    is("read: the record read, and the answer at the record's most plus what it adds", PUBLIC_SETTINGS_WORST_BYTES.read >= 2 * PUBLIC_SHOW_MAX_BYTES + extra, true);
+    is("change: the record read and written, the podcast, and the answer", PUBLIC_SETTINGS_WORST_BYTES.change >= 3 * PUBLIC_SHOW_MAX_BYTES + PODCAST_RECORD_MOST + extra, true);
+    is("off: the record read, and an answer with no settings", PUBLIC_SETTINGS_WORST_BYTES.off >= PUBLIC_SHOW_MAX_BYTES + extra, true);
+  }
 
   part("The store's closing erases it, by the podcast's id; another store's stays");
   await claimHandle(OTHER, "shorecast", "Shore", "");

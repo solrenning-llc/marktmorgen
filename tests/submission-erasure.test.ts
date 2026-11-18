@@ -179,6 +179,31 @@ async function main(): Promise<void> {
     is("an entry that does not read is unknown, never left out", await threw(() => forgetSubmissionsPerson(FOLDER, "f".repeat(32), [], world().steps)), "unknown");
   }
 
+  part("A retry can still empty the buyer's room after an unconfirmed room update");
+  {
+    const { steps } = world();
+    const who = "2".repeat(32);
+    const lessonId = lesson(231);
+    await send(who, lessonId, steps);
+    const roomKey = dataKey(SHOP) ?? "";
+    const slot = buyerSlotFor(FOLDER, COURSE, lessonId, who) ?? "";
+    const whoKey = `nl:sub:who:${FOLDER}:${who}`;
+    const original = redis.pipeline.bind(redis);
+    is("control: the buyer's room slot exists before erasure", (await original([["HGET", roomKey, slot]]))[0] !== null, true);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((command) => command[0] === "EVAL" && command[3] === roomKey)) return [];
+      return original(commands);
+    }) as typeof redis.pipeline;
+    try {
+      is("the unreadable room write stops erasure", await threw(() => forgetSubmissionsPerson(FOLDER, who, [], steps, SHOP)), "unknown");
+    } finally {
+      redis.pipeline = original;
+    }
+    is("the index still names the buyer's lesson for the retry", (await original([["EXISTS", whoKey]]))[0], 1);
+    await forgetSubmissionsPerson(FOLDER, who, [], steps, SHOP);
+    is("retry empties the slot and finally removes the index", await original([["HGET", roomKey, slot], ["EXISTS", whoKey]]), [null, 0]);
+  }
+
   part("An erased buyer's file stays on the sweep's list until it is deleted (Claude 6 on #3570, MEDIUM)");
   {
     // The erasure hands the path to its caller, which deletes it at the end; if that delete never happens (it fails and
@@ -485,9 +510,8 @@ async function main(): Promise<void> {
     is("control: a buyer still there gets the door back after a refused close", typeof (await redis.pipeline([["GET", `nl:sub:door:${FOLDER}:${id}`]]))[0], "string");
   }
 
-  // Claude 6 on #3570 (MEDIUM): an erasure still running, between its per-entry door DEL and its final DEL of the
-  // buyer's index and places, lets a refused vault step put the door back with both checks passing; the door then
-  // outlives the erasure that said done. The erasure's final pipeline is held here until the put-back has run.
+  // Claude 6 on #3570 (MEDIUM): an erasure still running before the live places are removed lets a refused vault
+  // step put the door back with both checks passing. Pause the place cleanup until the put-back has run.
   part("A refused vault step during a running erasure leaves no door after it says done");
   for (const via of ["close", "abort"] as const) {
     const who = (via === "close" ? "5" : "6").repeat(32);
@@ -498,7 +522,7 @@ async function main(): Promise<void> {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     redis.pipeline = (async (list: (string | number)[][]) => {
-      if (list.some((c) => c[0] === "DEL" && c[1] === `nl:sub:who:${FOLDER}:${who}`)) {
+      if (list.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:sub:live:") && String(c[1]).endsWith(`:${who}`))) {
         reached();
         await gate;
       }

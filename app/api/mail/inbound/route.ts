@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } from "@/lib/inbound-mail";
-import { HEALTH_ID, LIST_TAG, STOP_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
+import { HEALTH_ID, LIST_TAG, MOVE_TAG, STOP_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -142,6 +142,7 @@ export async function POST(request: NextRequest) {
           store,
           list: tagOf(notice.data?.tags, LIST_TAG),
           stop: tagOf(notice.data?.tags, STOP_TAG),
+          move: tagOf(notice.data?.tags, MOVE_TAG),
         });
       }
       const event: MailReportEvent = notice.type === "email.delivered"

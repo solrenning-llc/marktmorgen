@@ -315,6 +315,7 @@ export async function sendCallReminders(
               currency: call.currency,
               lead: call.lead,
               pi: call.pi,
+              fromPackage: call.pkg,
               due: call.due,
               cancel: call.cancel,
               origin,

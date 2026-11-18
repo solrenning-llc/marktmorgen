@@ -44,10 +44,10 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
 import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
-import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
+import { emailKey, forgetLearnerPerson, learnerProbes, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
@@ -69,18 +69,19 @@ import { forgetCrmPerson } from "@/lib/crm";
 import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
-import { forgetFinishPerson } from "@/lib/course-finish";
-import { forgetQuizPerson } from "@/lib/quiz";
+import { finishMarkProbes, forgetFinishPerson } from "@/lib/course-finish";
+import { forgetQuizPerson, passedProbe } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
-import { forgetCertificatesPerson } from "@/lib/certificate";
+import { certificateProbe, forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
+import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseRecords } from "@/lib/removed-courses";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
-import { forgetPodcastPerson } from "@/lib/podcast-access";
+import { forgetPodcastPerson, podcastProductCount } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
 import { forgetRecoveryPerson } from "@/lib/checkout-recovery";
@@ -93,6 +94,7 @@ import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
+import { forgetBenefitPerson } from "@/lib/tier-benefits";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
@@ -132,14 +134,14 @@ export const ERASERS: Eraser[] = [
   { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
-  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
+  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person, s.store) },
   { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
   },
   { module: "lib/course-finish.ts", run: (s) => forgetFinishPerson(s.courses.map((c) => c.courseId), s.email) },
-  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner) },
+  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner, s.store) },
   {
     module: "lib/assignment.ts",
     run: async (s, files) => {
@@ -162,11 +164,11 @@ export const ERASERS: Eraser[] = [
     },
   },
   { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
-  { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds) : Promise.resolve(0)) },
-  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
+  { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
+  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email, s.store) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
-  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email) },
+  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email, s.store) },
   { module: "lib/podcast-access.ts", run: (s) => forgetPodcastPerson(s.store, s.productIds, s.email) },
   { module: "lib/welcome-offer-send.ts", run: (s) => forgetWelcomePerson(s.statsId, s.email) },
   { module: "lib/winback-send.ts", run: (s) => forgetWinbackPerson(s.statsId, s.productIds, s.email) },
@@ -195,6 +197,7 @@ export const ERASERS: Eraser[] = [
   // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
   { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
+  { module: "lib/tier-benefits.ts", run: (s) => forgetBenefitPerson(s.store, s.person) },
   {
     module: "lib/reviews.ts",
     only: "person",
@@ -215,7 +218,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
-  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
+  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email, s.store) },
 ];
 
 export type ErasureResult =
@@ -224,6 +227,24 @@ export type ErasureResult =
   | { ok: false; reason: "incomplete"; parts: ErasedPart[]; failed: string[] };
 
 /** Works out where one person may be found in one store. */
+/**
+ * The dropped courses (lib/removed-courses.ts) where this learner has a record, and how many were looked at: their
+ * student row, lessons done, quizzes passed or a certificate, asked of the modules that keep them. Every reply read
+ * exactly: anything but a 0 or a 1 throws, never "no record".
+ */
+async function droppedCoursesOf(statsId: string, learner: string, skip: ReadonlySet<string>): Promise<{ courses: RemovedCourse[]; probed: number }> {
+  // The list holds each dropped course's id and product only; a course's lessons and modules are read only where the
+  // person has something (#4542 review: reading every course's ids cost more than the erasure counted).
+  const dropped = (await droppedCourseIds(statsId)).filter((c) => !skip.has(c.courseId));
+  if (!dropped.length) return { courses: [], probed: 0 };
+  const probes = dropped.flatMap((c) => [...learnerProbes(c.courseId, learner), passedProbe(c.courseId, learner), certificateProbe(c.courseId, learner), ...finishMarkProbes(c.courseId, learner)]);
+  if (probes.length !== dropped.length * DROPPED_PROBES) throw new Error("a dropped course's probes are not DROPPED_PROBES");
+  const replies = repliesFor(await redisPipeline(probes), probes.length);
+  if (!replies || !replies.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's records in a store's dropped courses");
+  const hit = dropped.filter((_, i) => replies.slice(i * DROPPED_PROBES, (i + 1) * DROPPED_PROBES).some((r) => r === 1));
+  return { courses: await droppedCourseRecords(statsId, hit), probed: dropped.length };
+}
+
 export async function erasureScope(store: Store, email: string): Promise<ErasureScope | null> {
   const ref = storeRef(store);
   let current: Store | null = store;
@@ -235,6 +256,9 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
   // Read exactly (rule 24): an outline kept but unreadable throws, so the deletion answers "unavailable" and is
   // pressed again, never done with the person's records in that course still kept; only a confirmed absent one is left out.
   const courses = await readCoursesExact([...courseOf.keys()]);
+  // And the courses the store dropped where this person has a record (lib/removed-courses.ts): their records kept under
+  // one are still reached. Read exactly: a list or a probe that cannot be read throws, so the erasure is pressed again.
+  const dropped = await droppedCoursesOf(current.statsId, emailKey(email), new Set(courses.keys()));
   return {
     store: current,
     sid: current.sid,
@@ -248,22 +272,25 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
       courseId: course.id,
       lessonIds: course.modules.flatMap((m) => m.lessons.map((l) => l.id)),
       moduleIds: course.modules.map((m) => m.id),
-    })),
+    })).concat(dropped.courses),
     productIds: current.catalog.items.map((item) => item.id),
     communityId: current.community?.id ?? null,
+    droppedCourses: dropped.probed,
+    droppedRecords: dropped.courses.length,
   };
 }
 
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    podcastProductCount(scope.statsId),
   ]);
   return {
     products: scope.productIds.length,
@@ -275,6 +302,9 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     roomMessages,
     events,
     certificates,
+    droppedCourses: scope.droppedCourses ?? 0,
+    droppedRecords: scope.droppedRecords ?? 0,
+    podcastProducts,
   };
 }
 
@@ -346,8 +376,17 @@ export async function erasePerson(
   }
   const records = parts.reduce((sum, p) => sum + p.records, 0);
   // The team's own deletions go in its activity log; a person's own is told to the owner by email (lib/erasure-request.ts).
+  // What really happened, never more (#4333): a deletion with a part that could not finish says it is not complete, how
+  // many parts are left and how to finish, so the owner and the team reading it later know one is owed. In plain words
+  // on a screen the creator reads: a count, never the parts' source file names (Claude 3 and Claude 7 on #4336), so
+  // the line also stays whole within the log's 200 characters. Never the address.
   if (scope.sid && by.kind === "team") {
-    await logTeam(scope.sid, { who: by.who, role: by.role, what: `People: deleted a person and everything kept about them (${records} ${records === 1 ? "record" : "records"})` });
+    const counted = `${records} ${records === 1 ? "record" : "records"}`;
+    const left = `${failed.length} ${failed.length === 1 ? "part" : "parts"}`;
+    const what = failed.length
+      ? `People: deleting a person is not complete (${counted} deleted; ${left} could not be deleted yet). Delete the same person again to finish.`
+      : `People: deleted a person and everything kept about them (${counted})`;
+    await logTeam(scope.sid, { who: by.who, role: by.role, what });
   }
   if (failed.length) return { ok: false, reason: "incomplete", parts, failed };
   return { ok: true, parts, records, notes: [...notes] };

@@ -294,6 +294,25 @@ async function main(): Promise<void> {
     await original([["DEL", DIRECTORY_CACHE]]);
     await listed("baker@example.com", true);
     is("healthy control again: the kept build as written is the list", await attempt(), ["breadhouse", "cakeshop"]);
+
+    // #2921's wait for another visitor's build (otherBuildsPage) reads the kept page again while the mark reads
+    // "building": a page with a row out of shape that appears then is not shown either (merge of #2921 into #3062).
+    for (const [label, rows] of [["a row that is null", [null]], ["products that are null", [{ ...first, products: null }]]] as [string, unknown[]][]) {
+      await original([["DEL", DIRECTORY_CACHE], ["SET", DIRECTORY_BUILD, "building", "EX", 60]]);
+      let looks = 0;
+      const waited = await counted(() => attempt(), (c) => {
+        // The first read finds no page; the wait's first look finds the bent one, as if the other build wrote it.
+        if (c.length === 2 && c[0][0] === "GET" && c[0][1] === DIRECTORY_CACHE && c[1][0] === "GET" && c[1][1] === DIRECTORY_BUILD) {
+          looks += 1;
+          return [JSON.stringify(rows), "building"];
+        }
+        return undefined;
+      });
+      is(`while another build runs, a kept page with ${label} is not shown`, [waited.result === "UnknownReplyError" || Array.isArray(waited.result) && !waited.result.length ? "not shown" : waited.result, looks > 0], ["not shown", true]);
+    }
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILD]]);
+    await listed("baker@example.com", true);
+    is("healthy control after the wait: the kept build as written is the list", await attempt(), ["breadhouse", "cakeshop"]);
   }
 
   part("#2921's mark still comes first: a held or failed mark builds nothing and counts nothing");

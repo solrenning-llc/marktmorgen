@@ -1,5 +1,5 @@
 /**
- * Second independent money review of #2921 (CX-116), synthetic only, never committed.
+ * Second independent money review of #2921 (CX-116), synthetic only; committed with #2921 as that review's proof.
  *
  * P1: a failed build is no longer kept, and nothing else throttles a rebuild, so a persistent failure in one listed
  *     store makes every visitor's request run the whole build again (twice: generateMetadata and the page).

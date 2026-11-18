@@ -105,6 +105,9 @@ const BUILD_HOLD_SECONDS = 60;
  * than "unavailable" for the rest of the hour.
  */
 const FAILED_SECONDS = 600;
+/** Looks a read that finds the build mark held takes for the other build's page (otherBuildsPage), and the wait between them. */
+export const BUILD_WAIT_LOOKS = 5;
+const BUILD_WAIT_MS = 250;
 /**
  * How long a page with a row whose numbers could not be read is kept: as long
  * as a whole one (#2921), so it costs no more builds than a healthy page;
@@ -380,7 +383,8 @@ export function isDirectoryRow(raw: unknown): raw is DirectoryRow {
  * could not finish (no program read while a store read failed, a numbers read
  * that failed, the SSCAN page ceiling; #2921, CX-116 A1): before building, the build mark
  * (DIRECTORY_BUILD) is taken with SET NX. A read that finds no kept page and
- * cannot take the mark throws UnknownReplyError, so the page shows its own
+ * cannot take the mark waits up to a second for the page of a build still
+ * running (otherBuildsPage); without it, it throws UnknownReplyError, so the page shows its own
  * "The program list is unavailable just now" state; it never builds again and
  * never shows a list that was not read whole. A finished build keeps the page
  * and drops the mark; one that could not finish sets the mark to "failed" for
@@ -421,6 +425,10 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
   }
   const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, "building", "EX", BUILD_HOLD_SECONDS, "NX"]]);
   // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
+  if (claim === null) {
+    const other = await otherBuildsPage();
+    if (other) return other;
+  }
   if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
   const room = await reserveBuild().catch(() => "unknown" as const);
   if (room !== "build") return lastDirectory(room);
@@ -545,6 +553,27 @@ async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryPage> {
   // numbers only while its creator still lets them be shown (Claude 5's MEDIUM on #3062).
   const kept = (rows as DirectoryRow[]).flatMap((row, at) => (listed[at] ? [{ row, sid: (sids as string[])[at] }] : []));
   return (await numbersChecked({ rows: kept.map((k) => k.row), omitted }, kept.map((k) => k.sid))).page;
+}
+
+/**
+ * The page another visitor's healthy build is making (Codex X6, LOW on #2921): while the mark reads "building", the
+ * read looks for the kept page again, at most BUILD_WAIT_LOOKS times BUILD_WAIT_MS apart (one second in all), so a
+ * visitor who came during a rebuild sees the list instead of "unavailable". It never builds. Null when the mark
+ * is "failed" or gone, when the page is still not there, or on any reply off its shape; the caller then throws.
+ */
+async function otherBuildsPage(): Promise<DirectoryPage | null> {
+  for (let look = 0; look < BUILD_WAIT_LOOKS; look += 1) {
+    if (look > 0) await new Promise((resolve) => setTimeout(resolve, BUILD_WAIT_MS));
+    const replies = await redisPipeline([["GET", DIRECTORY_CACHE], ["GET", DIRECTORY_BUILD]]).catch(() => null);
+    if (!Array.isArray(replies) || replies.length !== 2) return null;
+    const [kept, mark] = replies;
+    const page = typeof kept === "string" ? keptPage(kept) : null;
+    // The same exact row check as the first read (Codex CX1 on #3062): a kept page with any row out of shape is never
+    // shown, so the wait ends and the visit is told the list could not be checked.
+    if (page) return page.rows.every(isDirectoryRow) ? page : null;
+    if (mark !== "building") return null;
+  }
+  return null;
 }
 
 /** A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its BUILD_HOLD_SECONDS. */

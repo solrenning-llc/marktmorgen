@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.45% / 60.21% | 12.16% | 290 | $69 / $690 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.45% / 60.21% | 12.16% | 292 | $69 / $690 |
 | Studio | **$839 / $8,390** | every #553 figure, none cut | 61.16% / 60.85% | 12.43% | 17 | $449 / $4,490 |
 | Scale | **$1,749 / $17,490** | every #553 figure, none cut | 61.29% / 60.96% | 12.48% | 8 | $999 / $9,990 |
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 290 |
+| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 292 |
 | Studio | $839 | 22.0% | 22.0% / 1.5% / 11.0% / 21.7% | 17 |
 | Scale | $1,749 | 24.7% | 24.7% / 1.6% / 12.6% / 24.7% | 8 |
 
@@ -178,7 +178,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: none finite | $79: none finite | $99: none finite | $129: none finite |
-| Studio | $449: none finite | $559: none finite | $669: 130 | $889: 14 |
+| Studio | $449: none finite | $559: none finite | $669: 131 | $889: 14 |
 | Scale | $999: none finite | $1,239: none finite | $1,489: 17 | $1,989: 5 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
@@ -209,7 +209,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Studio | visits | 1,000 | $599 | 1.04× | 1.08× |
 | Scale | ai | 8 | $1,159 | 1.06× | 1.12× |
 | Scale | video | 6 | $1,279 | 1.01× | 1.02× |
-| Scale | storage | 8 GB | $1,249 | 1.02× | 1.04× |
+| Scale | storage | 8 GB | $1,259 | 1.02× | 1.03× |
 | Scale | orders | 150 | $1,229 | 1.03× | 1.06× |
 | Scale | store-email | 80 | $1,279 | 1.01× | 1.02× |
 | Scale | transactional-email | 100 | $1,279 | 1.01× | 1.02× |

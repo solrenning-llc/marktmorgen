@@ -37,13 +37,20 @@ const check = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_IMAGE_BYTE
 const handInHead = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
 /** A student's door: its token and the browser's put, every try, and the head of its name, every try (main, 293456c92). */
 const studentDoor = door + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
-const perBuyerAction = Math.max(door, studentDoor, check, handInHead);
+/**
+ * A community door: the same, since main's #3414 (ef1eaea581) heads its name once, inside its buyer action, to refuse a
+ * name that is already a file (merge of base #2843 into #2852, 18 November 2026).
+ */
+const communityDoorBlob = door + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+const perBuyerAction = Math.max(door, studentDoor, communityDoorBlob, check, handInHead);
 const mailPut = BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
 
 part("What the code does at each door (read from the routes, so a new operation fails here)");
 const communityDoor = read("app/api/store/community/upload/route.ts");
 is("a community door signs one token, takes a buyer action (the creator's: a studio request) and a picture's place first", [count(communityDoor, "issueSignedToken({"), communityDoor.includes('takeBuyerAction(store, viewer.owner ? "owner" : "buyer")'), communityDoor.includes("takePicturePlace(pathname")], [1, true, true]);
-is("a community door asks the store nothing else (no head, no read, no list)", /\b(head|get|list|put)\(/.test(communityDoor.replace(/issueSignedToken\(/g, "")), false);
+// Changed on merging main (#3414, ef1eaea581): the community door heads its name once, inside its buyer action, to refuse
+// a name the file store already has; nothing else. That head is priced with every try (communityDoorBlob above).
+is("a community door heads its name once and asks the store nothing else (no read, no list)", [count(communityDoor, "await head(pathname)"), /\b(get|list|put)\(/.test(communityDoor.replace(/issueSignedToken\(/g, "").replace(/await head\(pathname\)/g, ""))], [1, false]);
 is("the door's file is at most MAX_IMAGE_BYTES (the token says so)", communityDoor.includes("maximumSizeInBytes: MAX_IMAGE_BYTES"), true);
 const communityPost = read("app/api/store/community/route.ts");
 is("a post checks one picture at most, after its own buyer action", [count(communityPost, "checkCommunityImage(path, id, blobImages)"), communityPost.includes('takeBuyerAction(store, owner ? "owner" : "buyer")')], [1, true]);
@@ -68,7 +75,7 @@ is("at least pictureCheckBlob less the clean-up head the community path does not
 is("so the dearest buyer action is the check, not a door, the student's with its head included", [check > door, check > studentDoor, registry.buyerBlobPerAction() >= check - 1e-12], [true, true, true]);
 
 part("The creator's community doors and checks are studio requests, inside studio-blob");
-is("a studio request is already priced above a community door", studioBlobPerRequest() >= door, true);
+is("a studio request is already priced above a community door, its head included", studioBlobPerRequest() >= communityDoorBlob, true);
 is("and above a community picture's check", studioBlobPerRequest() >= check, true);
 
 part("The buyers' doors, checks and hand-ins: line buyer-blob");

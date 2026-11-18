@@ -72,6 +72,20 @@ async function withLost<T>(gone: [string, string][], reply: unknown, work: () =>
   }
 }
 
+/** Every pipeline holding `[command, key]` runs for real (the write is applied), then throws `error` (its reply lost). */
+async function withAppliedThenLost<T>(command: string, key: string, error: Error, work: () => Promise<T>): Promise<T> {
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await original(commands);
+    if (commands.some((c) => c[0] === command && c[1] === key)) throw error;
+    return replies;
+  }) as typeof redis.pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 async function rejection(work: () => Promise<unknown>): Promise<string> {
   try {
     await work();
@@ -139,6 +153,7 @@ async function main(): Promise<void> {
   part("Healthy control: read exactly");
   const { pid: a, key: aKey } = await setUp("Course A");
   const { pid: b } = await setUp("Course B", false);
+  const { pid: e } = await setUp("Course E");
   is("the studio sees the buyer who waits, and nothing for a product nobody pre-ordered", await preorderViews(await store(), [a, b]), { [a]: { day: null, waiting: 1, given: 0, refunded: 0 } });
   is("the switch answers the view with its day and the buyer who waits", await switchDay(a).then((r) => r.json()), { ok: true, view: { day: DAY, waiting: 1, given: 0, refunded: 0 } });
   is("the copy of the buyer's data has their pre-order", (await preordersOf(await store(), [a, b], BUYER)).map((p) => [p.product, p.checkout, p.to]), [[a, CHECKOUT, BUYER]]);
@@ -147,7 +162,7 @@ async function main(): Promise<void> {
   for (const [label, reply] of SHAPES) {
     part(`Unknown (${label}): the HVALS of a product's pre-orders answers in another shape`);
     const shop = await store();
-    is(`(${label}) preorderViews says it does not know, never "no pre-orders"`, await withBent("HVALS", aKey, reply, () => rejection(() => preorderViews(shop, [a, b]))), "UnknownReplyError");
+    is(`(${label}) preorderViews says it does not know that product's pre-orders, never "no pre-orders"`, await withBent("HVALS", aKey, reply, () => preorderViews(shop, [a, e])), { [a]: "unread", [e]: { day: null, waiting: 1, given: 0, refunded: 0 } });
     const switched = await withBent("HVALS", aKey, reply, () => switchDay(a));
     is(`(${label}) the switch answers 503 "preorders_unread", never 0 waiting`, await answer(switched), [503, "preorders_unread"]);
   }
@@ -159,7 +174,8 @@ async function main(): Promise<void> {
   }
   {
     const shop = await store();
-    is("a kept day that is not a day, for a product asked about, is unknown", await withBent("HGETALL", dayKey, [a, "someday"], () => rejection(() => preorderViews(shop, [a]))), "UnknownReplyError");
+    // Codex X6's LOW on #3005: one malformed record made every product's panel say "could not be read".
+    is("a kept day that is not a day, for a product asked about, makes that product unknown, and only that one", await withBent("HGETALL", dayKey, [a, "someday"], () => preorderViews(shop, [a, e])), { [a]: "unread", [e]: { day: null, waiting: 1, given: 0, refunded: 0 } });
   }
 
   for (const [label, reply] of HASH_SHAPES) {
@@ -193,6 +209,24 @@ async function main(): Promise<void> {
     is(`(${label}) with its pre-orders unread too, still 502 "day_unconfirmed", never "Saved."`, await answer(both), [502, "day_unconfirmed"]);
     is(`(${label}) and the day was indeed not saved`, await dayOf(c), null);
   }
+  // Codex X4 (6984205751) and X6 (6989392736) on #3005, MEDIUM: a pipeline that applied the HSET or HDEL and then lost
+  // its reply (an answer that does not parse, a timeout after the request was sent) threw past PreorderDayUnconfirmed,
+  // and the switch said 503 "soon_unchecked", "Nothing was changed", while the day had changed.
+  for (const [label, lost] of [["an answer that does not read", new UnknownReplyError("a pipeline")], ["a timeout after sending", new Error("Redis request timed out")]] as [string, Error][]) {
+    part(`Applied, reply lost (${label}): the HSET of the expected day was written, its answer never came back`);
+    await redis.pipeline([["HDEL", dayKey, c]]);
+    const shop = await store();
+    is(`(${label}) setExpectedDay says the day is not confirmed, never "nothing changed"`, await withAppliedThenLost("HSET", dayKey, lost, () => failure(() => setExpectedDay(shop, c, DAY))), "PreorderDayUnconfirmed");
+    await redis.pipeline([["HDEL", dayKey, c]]);
+    const switched = await withAppliedThenLost("HSET", dayKey, lost, () => switchDay(c));
+    is(`(${label}) the switch answers 502 "day_unconfirmed", never "soon_unchecked"`, await answer(switched), [502, "day_unconfirmed"]);
+    is(`(${label}) and the day was in fact written`, await dayOf(c), DAY);
+    const stopped = await withAppliedThenLost("HDEL", dayKey, lost, () => stopDay(c));
+    is(`(${label}) stopping with its reply lost answers 502 "day_unconfirmed" too`, await answer(stopped), [502, "day_unconfirmed"]);
+    is(`(${label}) and the day was in fact taken off`, await dayOf(c), null);
+  }
+  await redis.pipeline([["HDEL", dayKey, c]]);
+
   part("Healthy control: the day is saved, moved and stopped with a confirmed write");
   is("taking pre-orders saves the day", [await answer(await switchDay(c)), await dayOf(c)], [[200, "ok"], DAY]);
   is("moving to the same day again (HSET answers 0) is still saved", await answer(await switchDay(c)), [200, "ok"]);
@@ -238,7 +272,7 @@ async function main(): Promise<void> {
     const page = readFileSync("app/studio/page.tsx", "utf8");
     is("the studio page never reads an unread view as none", /preorderViews\(.*\.catch\(\(\) => \(\{\}\)\)/.test(page), false);
     const editor = readFileSync("components/product-editor.tsx", "utf8");
-    is("the editor passes an unread view on to the panel", editor.includes("preordersUnread={preorders === null}"), true);
+    is("the editor passes an unread view on to the panel, the whole read or this product's", editor.includes('preordersUnread={preorders === null || preorders?.[product.id] === "unread"}'), true);
   }
 
   // Rule-30 sibling on the same panel (studio inventory, app/studio/page.tsx:1750): the waitlist's own read failing

@@ -61,6 +61,15 @@ export const BACKUP_FILES_HELD_OBJECTS = BACKUP_FILES_PAGES_PER_STORE * BACKUP_F
  * is claimed copied); never more than one complete listing holds.
  */
 export const BACKUP_FILES_OBJECTS_PER_MONTH = 10_000;
+/**
+ * Calls a source may be refused 429 "day_ceiling" in one UTC day: the Worker stops asking that source for the rest of
+ * the day at its first such refusal. A refusal still runs the day's count (INCR, EXPIRE NX) and is a call, so the
+ * route's worst month prices this one call a source a day at a whole page's ceiling (backupFilesRouteWorstMonth;
+ * Codex N1's LOW 1 on #3313). The route cannot hold its caller to it: the Worker (workers/backup-files, #3340, not
+ * merged) must hold it with its own test before the owner's review is filled, and nothing calls the route while
+ * BACKUP_FILES_ROUTE_REVIEW is null.
+ */
+export const BACKUP_FILES_DAY_CEILING_REFUSALS = 1;
 /** How long a signed read URL lasts: 15 minutes (R2 allows 1 s to 7 days, Blob at most 7 days). */
 export const BACKUP_FILES_URL_SECONDS = 900;
 

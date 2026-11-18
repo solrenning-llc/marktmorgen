@@ -312,12 +312,6 @@ export async function readBrokenMove(email: string): Promise<{ from: string; to:
 }
 
 /**
- * Moves of the sign-in address one store makes in a calendar month (UTC), counted by the store, never by the
- * address, so moving from address to address finds no fresh count (Codex G2 and Claude 5 on #2271). Taken at the
- * tap, before anything moves (takeMoveRoom).
- */
-export const MOVES_PER_STORE_PER_MONTH = 10;
-/**
  * Moves the company pays for in a calendar month (UTC) for stores with a running paid plan, all of them together.
  * Kept apart from the others' (MOVES_PER_MONTH_UNPAID), so stores made for free can never use up the moves of the
  * creators who pay, nor close the way out for someone losing their inbox (Claude 5's focal review of #2271).
@@ -333,26 +327,24 @@ export const MOVES_PER_MONTH = MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID;
 /** Kept past the end of any calendar month, so a count lapses only once its month is over. */
 const MOVE_ROOM_SECONDS = 32 * 86_400;
 
-/** What the month's counts say about one more move: room, the store's month is over, the company's is, or not known. */
-export type MoveRoom = "within" | "store" | "company" | "unknown";
+/** What the company's month says about one more move: room, the month is over for its kind of store, or not known. */
+export type MoveRoom = "within" | "company" | "unknown";
 
 /**
- * Takes one move of the month, before anything moves (the move route, before markMoving): first the store's own
- * count, then, only within it, the company's for its kind of store (a running paid plan, or not), so a store past
- * its count never spends the company's, and stores without a paid plan never spend the paying ones'. Each is one
- * INCR and one EXPIRE NX (lib/window-count.ts), read in their exact shape; a reply in any other shape, or Redis not
- * answering, is "unknown" and refuses the move (SG2 rule 24): a count is never guessed as room. A unit taken by a move that then
- * fails stays taken, on the safe side. `store` is the store's own id and whether its plan is paid, or null when the
- * address holds none, which takes only the others' company count: such a move finds nothing to carry.
+ * Takes one of the company's moves of the month, before anything moves (the move route, after main's per-store pace,
+ * lib/move-pace.ts takeMove, and before markMoving): the count for its kind of store (a running paid plan, or not), so
+ * stores without a paid plan never spend the paying ones'. Since the owner's decision of 18 November 2026 on #2271, the
+ * only per-store limit is takeMove's; this keeps the company's ceiling, the one the owner's US$17 a month for moves is
+ * priced on (lib/llc-fixed-costs.ts accountMoves). One INCR and one EXPIRE NX (lib/window-count.ts), read in their
+ * exact shape; a reply in any other shape, or Redis not answering, is "unknown" and refuses the move (SG2 rule 24): a
+ * count is never guessed as room. A unit taken by a move that then fails stays taken, on the safe side. `store` says
+ * whether any store of the account has a paid plan, or is null when the address holds none, which takes the others'
+ * count: such a move finds nothing to carry.
  */
-export async function takeMoveRoom(store: { id: string; paid: boolean } | null, now = Date.now()): Promise<MoveRoom> {
+export async function takeMoveRoom(store: { paid: boolean } | null, now = Date.now()): Promise<MoveRoom> {
   if (!isRedisConfigured()) return "unknown";
   const month = new Date(now).toISOString().slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) return "unknown";
-  if (store !== null) {
-    const own = await countMove(`nl:auth:move-room:${month}:${(await sha256Hex(`nimbus-move-room:${store.id}`)).slice(0, 32)}`, MOVES_PER_STORE_PER_MONTH);
-    if (own !== "within") return own === "over" ? "store" : "unknown";
-  }
   const paid = store?.paid === true;
   const all = await countMove(`nl:auth:move-room:${month}:${paid ? "paid" : "unpaid"}`, paid ? MOVES_PER_MONTH_PAID : MOVES_PER_MONTH_UNPAID);
   return all === "within" ? "within" : all === "over" ? "company" : "unknown";

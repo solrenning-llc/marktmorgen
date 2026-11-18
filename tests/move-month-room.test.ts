@@ -2,10 +2,11 @@
  * A move of the sign-in address takes a unit of a monthly room before anything moves, and the old record is never
  * deleted after its lock may have run out (#2271: Codex G2's MEDIUM, kept by Claude 1's decision; Claude 5's LOW 1).
  *
- * 1. Each store moves at most MOVES_PER_STORE_PER_MONTH times a calendar month (UTC), counted by the store, never by
- *    the address, so a store moving from address to address finds no fresh count; the company pays for at most
- *    MOVES_PER_MONTH moves a month, all stores together. Past either, the tap is refused before markMoving: nothing
- *    moves and the move's EVAL (NOTE_MOVE_COPY) is never sent. A count that does not read is a refusal too.
+ * 1. Each store moves at most MOVES_PER_30_DAYS times in 30 days (main's lib/move-pace.ts takeMove, the only per-store
+ *    limit since the owner's decision of 18 November 2026 on #2271), counted by the store, never by the address; the
+ *    company pays for at most MOVES_PER_MONTH moves a calendar month (UTC), all stores together. Past either, the tap
+ *    is refused before markMoving: nothing moves and the move's EVAL (NOTE_MOVE_COPY) is never sent. A count that does
+ *    not read is a refusal too.
  * 2. moveAccount notes the copy's print before it writes, and makes the old address's lock last again right before
  *    the last step that deletes the old record: a write that landed on the old address meanwhile is never lost.
  *
@@ -14,7 +15,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
 import { readFileSync } from "node:fs";
-import { MOVES_PER_MONTH, MOVES_PER_MONTH_PAID, MOVES_PER_MONTH_UNPAID, MOVES_PER_STORE_PER_MONTH, openSession } from "@/lib/auth";
+import { MOVES_PER_MONTH, MOVES_PER_MONTH_PAID, MOVES_PER_MONTH_UNPAID, openSession } from "@/lib/auth";
+import { MOVES_PER_30_DAYS } from "@/lib/move-pace";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { StoreBusyError, claimHandle, createStore, moveAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -35,7 +37,7 @@ const noteSent = () => sent.some((command) => command[0] === "EVAL" && String(co
 /**
  * What one tap of a store with no other stores sends, measured here: 81 commands since the broken-move stock of #2271
  * (markBrokenMove's EVAL and the exact read of the account's stores; 76 before). The registry prices a tap at
- * MOVE_TAP_COMMANDS_UNCONTENDED (tests/plan-cost-registry.ts, 232), which holds it.
+ * MOVE_TAP_COMMANDS_UNCONTENDED (tests/plan-cost-registry.ts, 240), which holds it.
  */
 const MOVE_TAP_COMMANDS = 84;
 const where = (location: string) => location.replace(/^.*[?&](status|address)=/, "");
@@ -57,14 +59,14 @@ async function main(): Promise<void> {
   redis.clear();
   console.error = () => {};
 
-  part("1. a store moves at most MOVES_PER_STORE_PER_MONTH times a month, whatever address it is at");
+  part("1. a store moves at most MOVES_PER_30_DAYS times in 30 days, whatever address it is at (main's pace)");
   const A = "room-a@example.com";
   const B = "room-b@example.com";
   await claimHandle(A, "room-store", "Room", "");
   const landed: string[] = [];
   const commands: number[] = [];
   let at = A;
-  for (let i = 0; i < MOVES_PER_STORE_PER_MONTH; i += 1) {
+  for (let i = 0; i < MOVES_PER_30_DAYS; i += 1) {
     const next = at === A ? B : A;
     landed.push(await move(at, next));
     commands.push(sent.length);
@@ -75,20 +77,9 @@ async function main(): Promise<void> {
   // stores, its two counts included, sends at most MOVE_TAP_COMMANDS commands in its pipelines a tap.
   is(`a tap sends at most ${MOVE_TAP_COMMANDS} pipelined commands`, Math.max(...commands) <= MOVE_TAP_COMMANDS, true);
   const other = at === A ? B : A;
-  is("the next one is refused as the month's count", await move(at, other), "move-month");
+  is("the next one is refused by the store's pace (main's takeMove)", await move(at, other), "move-limited");
   is("nothing moved: the store is where it was", [Boolean(await storeForEmail(at)), Boolean(await storeForEmail(other))], [true, false]);
   is("and the move's EVAL was never sent", noteSent(), false);
-
-  part("2. a new month gives the store its room again");
-  const clock = Date.now;
-  try {
-    const now = new Date(clock());
-    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 2);
-    Date.now = () => next;
-    is("moved in the next month", await move(at, other), "moved");
-  } finally {
-    Date.now = clock;
-  }
 
   part("3. the company's rooms for the month: paying stores apart from the others (Claude 5's focal review)");
   is("the two rooms make the company's month", MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID, MOVES_PER_MONTH);
@@ -96,12 +87,12 @@ async function main(): Promise<void> {
   // Stores made for free use up their room this month by moving back and forth, as anyone could: each store at its
   // own count, until the company's room for them is gone (the stores of parts 1 and 2 took some of it already).
   let free = 0;
-  for (let s = 0; free < MOVES_PER_MONTH && s < Math.ceil(MOVES_PER_MONTH / MOVES_PER_STORE_PER_MONTH) + 1; s += 1) {
+  for (let s = 0; free < MOVES_PER_MONTH && s < Math.ceil(MOVES_PER_MONTH / MOVES_PER_30_DAYS) + 1; s += 1) {
     const x = `room-free-${s}@example.com`;
     const y = `room-free-${s}-b@example.com`;
     await claimHandle(x, `room-free-${s}`, "Free", "");
     let here = x;
-    for (let i = 0; i < MOVES_PER_STORE_PER_MONTH; i += 1) {
+    for (let i = 0; i < MOVES_PER_30_DAYS; i += 1) {
       const there = here === x ? y : x;
       if ((await move(here, there)) !== "moved") break;
       here = there;
@@ -126,9 +117,8 @@ async function main(): Promise<void> {
 
   part("3b. the words say what the code counts (rule 27)");
   const words = readFileSync("app/signin/page.tsx", "utf8");
-  is("the month's words name the store's count", words.includes(`can change its sign-in address ${MOVES_PER_STORE_PER_MONTH} times a month`) && words.includes(`changed its sign-in address ${MOVES_PER_STORE_PER_MONTH} times this month`), true);
-  is("a move that did not finish says it may count", words.includes(`may still count toward the store's ${MOVES_PER_STORE_PER_MONTH} address changes this month`), true);
-  is("the month ends at midnight UTC, said with its name", (words.match(/from midnight UTC \(Coordinated Universal Time\) on the 1st/g) ?? []).length, 2);
+  is("no screen names a monthly count of the store's own any more (the owner's decision of 18 November 2026 on #2271)", /times this month|address changes this month/.test(words), false);
+  is("the company's month ends at midnight UTC, said with its name", (words.match(/from midnight UTC \(Coordinated Universal Time\) on the 1st/g) ?? []).length, 1);
 
   part("4. a count that does not read is a refusal, never room");
   const shapes: unknown[] = [null, "1", { 0: 1 }, -1, 1.5];

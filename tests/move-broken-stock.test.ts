@@ -129,9 +129,24 @@ async function main(): Promise<void> {
   cut = (commands) => (commands.some((c) => c[0] === "GET" && c[1] === owner) && !commands.some((c) => c[0] === "SET") ? [] : null);
   const answer = await move(S, "short-to@example.com");
   cut = null;
-  is("the tap is refused as a move that could not be done", answer, "move-error");
+  // Main's per-store pace (lib/move-pace.ts takeMove) reads the store first since the owner's decision of 18 November
+  // 2026 on #2271: the same cut reply refuses the tap there, as a read that did not finish, before the company's month.
+  is("the tap is refused as a read that did not finish", answer, "move-unread");
   is("no month's room was taken", sent.some((c) => c[0] === "INCR" && String(c[1]).startsWith("nl:auth:move-room:")), false);
   is("the store stayed where it was", Boolean(await storeForEmail(S)), true);
+
+  // The same LOW 3 past main's pace: only the pipeline that reads every store of the account (the owner's record and
+  // the account's set together, lib/store.ts accountStoresExact) is cut short, so takeMove reads its store and counts.
+  const T2 = "short-two-from@example.com";
+  await claimHandle(T2, "short-two-store", "Short two", "");
+  const ownerT = ownerKey(T2);
+  cut = (commands) => (commands.some((c) => c[0] === "GET" && c[1] === ownerT) && commands.some((c) => c[0] === "SMEMBERS") ? [] : null);
+  sent = [];
+  const answerT = await move(T2, "short-two-to@example.com");
+  cut = null;
+  is("past the pace, a cut read of the account's stores refuses the tap as a move that could not be done", answerT, "move-error");
+  is("no company month was taken for it", sent.some((c) => c[0] === "INCR" && String(c[1]).startsWith("nl:auth:move-room:")), false);
+  is("its store stayed where it was", Boolean(await storeForEmail(T2)), true);
   done();
 }
 

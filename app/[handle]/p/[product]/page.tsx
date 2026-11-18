@@ -289,10 +289,13 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const giftProblem = typeof query.gift === "string" ? query.gift : "";
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   const groupProblem = typeof query.group === "string" ? query.group : "";
   // Sent back because the box to start access at once was not checked (lib/digital-consent.ts): said beside it.
   const consentAgain = query.consent === "needed";
+  // Sent back by the checkout (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate): refused from the EU or the UK, or
+  // the billing country was left out. Only those two words; anything else shows nothing.
+  const countryStatus = query.status === "abroad" || query.status === "country" ? query.status : null;
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
@@ -483,7 +486,19 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {unread && selling && !soon ? (
         <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
       ) : (
-        <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} />
+        <>
+          {/* Drawn with the buy box only: its link and the field's aria-describedby point at the country field inside it. */}
+          {countryStatus ? (
+            <div className="st-note mb-4" role="alert" id="country-notice">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices[countryStatus].title}</p>
+              <p className="mt-1 text-sm">{w.notices[countryStatus].body}</p>
+              <p className="mt-2 text-sm">
+                <a href={`#bc-${product.id}`} className="underline">{w.chooseCountry}</a>
+              </p>
+            </div>
+          ) : null}
+          <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
+        </>
       )}
       {/* A course whose exact read failed offers no way to buy here, the cart included (Codex L on #3445): the BuyBox is closed on the same reading. */}
       {!courseUnread && cartOn && !soon && !unread && !asksAtCheckout && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}

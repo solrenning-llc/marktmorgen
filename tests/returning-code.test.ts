@@ -186,6 +186,8 @@ async function main(): Promise<void> {
     const readsBefore = reads;
     const f = new FormData();
     f.set("handle", "returnshop");
+    // The billing country the art. 9a gate asks of every paid checkout (lib/eu-vat-gate.ts consumerGate).
+    f.set("billing_country", "US");
     f.set("product", fields.product ?? productId);
     for (const [k, v] of Object.entries(fields)) if (k !== "product") f.set(k, v);
     // The field's own button asks for the link; the buy button never does.
@@ -215,6 +217,7 @@ async function main(): Promise<void> {
   part("Asking for the link is not buying: the box to start access at once is not needed for it");
   const bare = new FormData();
   bare.set("handle", "returnshop");
+  bare.set("billing_country", "US");
   bare.set("product", productId);
   bare.set("rcode", "THANKYOU");
   bare.set("remail", PAST);
@@ -240,6 +243,7 @@ async function main(): Promise<void> {
   part("Sent back for the consent box, the link is kept");
   const noBox = new FormData();
   noBox.set("handle", "returnshop");
+  noBox.set("billing_country", "US");
   noBox.set("product", productId);
   noBox.set("rtoken", token);
   const boxed = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: noBox, headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.52" } }));

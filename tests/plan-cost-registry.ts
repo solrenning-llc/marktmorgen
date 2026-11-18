@@ -939,6 +939,22 @@ export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
 /**
+ * lib/webhooks.ts erasedSincePaid (R38): before an event read from a payment provider names its buyer (Stripe's
+ * refund.issued, sale.completed, membership.started, an offer's sale.completed and membership.canceled; PayPal's
+ * refund.issued), one HGET of that address's print in the store's deletion hash (lib/suppression.ts), so a person
+ * deleted at or after the payment is sent with no address. Read inside emitEvent only for an event about to be kept
+ * for a live endpoint: new (its SET NX taken), heard, and inside the month's deliveries, so each read goes with at least
+ * one try (this unit), and an event no endpoint hears, one already sent and read again, or one the month cannot take
+ * makes none (reviews of #3491; held in tests/webhook-stripe-erased.test.ts and tests/paypal-refund-erased.test.ts);
+ * only a message too large to keep, which writes its line instead of a try, reads it with none. A read with no answer
+ * takes the event's mark back: a Stripe event is read again next run, as the watcher's other lookups are (one event
+ * waits a store a run, inside the five-minute job's own schedule, STRIPE_WAIT_RUNS in lib/webhooks.ts); PayPal's
+ * refund is owed: its order stays on the refund watch and is told again when it is looked at an hour later
+ * (REFUND_TELL_AGAIN_SECONDS in lib/paypal-sales.ts; review of #3491, MEDIUM), each look priced by PAYPAL_REFUND_WATCH
+ * and PAYPAL_REFUND_TOLD, so each try reads this print once more.
+ */
+export const WEBHOOK_ERASED_READ_COMMANDS = 1;
+/**
  * What one comment's push reads of the members' devices, at the most (lib/community-push.ts devicesOf): the twelve
  * people it can tell (the post's author, the comment it answers, MAX_MENTIONS named), each with MAX_MEMBER_DEVICES
  * devices, each sending at most DEVICE_SENT_BYTES (an endpoint over MAX_ENDPOINT_BYTES is refused when it is turned
@@ -980,10 +996,11 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A webhook settings change (lib/webhooks.ts, changeConfig) is inside a studio or API request above: a GET and the
   // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
   // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
-  // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
+  // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds,
+  // and the deletion print read before a Stripe-read event names its buyer (WEBHOOK_ERASED_READ_COMMANDS).
   // Since 14 November 2026 a try also reads the store's deletion marks for the addresses in its message, one HMGET
   // (namesErased), before the endpoint is called: 11 commands a try in tests/webhook-erased-person.test.ts, inside the 20.
-  webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
+  webhook: request("wait", 20 + TAKE_COMMANDS + WEBHOOK_ERASED_READ_COMMANDS, 40_000),
 };
 
 /**
@@ -1375,8 +1392,19 @@ export const PAYPAL_PENDING_SWEEP = {
  * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted
  * at the person's request is left out (review of #3449, LEVE 2). Held by tests/paypal-receipt-once.test.ts (part M).
  * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH and PAYPAL_REFUND_KEPT above.
+ * A telling that failed (a deletion print or the event's once-only mark that did not read; review of #3491, MEDIUM) is
+ * owed, never lost: what the payment gave is still taken back, and the order stays on the watch, looked at again
+ * tellAgainAfterSeconds later (REFUND_TELL_AGAIN_SECONDS, lib/paypal-sales.ts), the watch's hourly pace, so no more
+ * looks a day than PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost and none past its daysWatchedAtMost. Each such look
+ * makes, besides PAYPAL_REFUND_WATCH's commands of a look, the refund mark's ZADD and EXPIRE again
+ * (markCommandsPerOwedLook), the paid purchase's HGET again (recordReadsPerOwedLook), at most one write of what is
+ * already taken back (writesPerOwedLookAtMost: an SREM or an HSET a second time, harmless twice) and the telling again
+ * (ownNoteReadsPerRefund and emitEvent's own reads, the webhook unit's WEBHOOK_ERASED_READ_COMMANDS among them; its
+ * event id is the capture's, so it is sent once). A scheduled job's work, bounded by its schedule and the batch, a
+ * company fixed cost (NOT_A_COST.REFUND_WATCH_BATCH), not a plan's allowance; its dollar figure is not yet a line of
+ * lib/llc-fixed-costs.ts, so it is not certified, never zero. Held by tests/paypal-refund-erased.test.ts.
  */
-export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
+export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1, tellAgainAfterSeconds: 3_600, markCommandsPerOwedLook: 2, recordReadsPerOwedLook: 1, writesPerOwedLookAtMost: 1 } as const;
 /**
  * The copy a reading of the buyers leaves, stored for its whole life (lib/segments.ts, LEDGER_SECONDS: an hour since
  * the owner's C3-80 (b); Codex R1 on #3226): BUYER_LEDGER_BYTES at Upstash's GB-month rate for that hour. Only a

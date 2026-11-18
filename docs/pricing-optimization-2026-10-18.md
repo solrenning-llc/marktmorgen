@@ -10,9 +10,9 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$159 / $1,590** | every #553 figure, none cut | 60.74% / 60.61% | 12.26% | 123 | $69 / $690 |
+| Store | **$159 / $1,590** | every #553 figure, none cut | 60.73% / 60.61% | 12.26% | 123 | $69 / $690 |
 | Studio | **$819 / $8,190** | every #553 figure, none cut | 61.23% / 60.95% | 12.46% | 16 | $449 / $4,490 |
-| Scale | **$1,739 / $17,390** | every #553 figure, none cut | 61.28% / 60.96% | 12.48% | 8 | $999 / $9,990 |
+| Scale | **$1,739 / $17,390** | every #553 figure, none cut | 61.28% / 60.95% | 12.48% | 8 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).
 
@@ -152,9 +152,9 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
-| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.33% / 61.23%; 62.19% / 62.01%; 62.29% / 62.10%) | yes |
+| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.32% / 61.23%; 62.19% / 62.01%; 62.29% / 62.10%) | yes |
 | ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.92% / 61.90%; 62.99% / 62.91%; 63.07% / 62.98%) | yes |
-| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.33% / 61.23%; 62.19% / 62.01%; 62.29% / 62.10%) | yes |
+| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.32% / 61.23%; 62.19% / 62.01%; 62.29% / 62.10%) | yes |
 | ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.92% / 61.90%; 62.99% / 62.91%; 63.07% / 62.98%) | yes |
 | ε = -1.5 | A | $139 | $619 | $1,289 | yes (60.30% / 60.17%; 60.44% / 60.06%; 60.44% / 60.00%) | yes |
 | ε = -1.5 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $289 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $579 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.46% / 60.42%; 60.44% / 60.09%; 60.49% / 60.04%) | yes |
@@ -208,7 +208,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Studio | list-email | 700 | $479 | 1.14× | 1.29× |
 | Studio | visits | 1,000 | $559 | 1.05× | 1.11× |
 | Scale | ai | 8 | $1,159 | 1.05× | 1.11× |
-| Scale | video | 6 | $1,269 | 1.01× | 1.02× |
+| Scale | video | 6 | $1,279 | 1.00× | 1.01× |
 | Scale | storage | 8 GB | $1,249 | 1.02× | 1.03× |
 | Scale | orders | 150 | $1,229 | 1.02× | 1.05× |
 | Scale | store-email | 80 | $1,279 | 1.00× | 1.01× |
@@ -232,7 +232,7 @@ For each plan, each attribute Marktmorgen and its band's competitors both state,
 | products | 2,000 products | 50 | Podia Mover | Stan Creator | **no** |
 | fee | 0% of a sale | 0% | Stan Creator, Beacons Creator Plus, Systeme.io Startup, Systeme.io Webinar | — | yes |
 
-Store carries no list email at #553 and lib/plan.ts gates broadcasts to Studio (`canUse`), so its list-email line also needs that gate opened. Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $145; storage $1,139; video $145; all of them together **$1,159 a month** (today $69). Where a competitor in the band prints "unlimited" (list-email, storage, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
+Store carries no list email at #553 and lib/plan.ts gates broadcasts to Studio (`canUse`), so its list-email line also needs that gate opened. Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $149; storage $1,139; video $145; all of them together **$1,159 a month** (today $69). Where a competitor in the band prints "unlimited" (list-email, storage, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
 
 **Studio**
 

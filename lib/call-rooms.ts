@@ -40,8 +40,8 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
-import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { type CallSetup, cleanRoom, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
 
@@ -84,6 +84,38 @@ export const ROOM_KEYS_PER_BOOKING = 4;
 export function roomReads(bookings: number): number {
   if (Number.isNaN(bookings) || bookings === Number.POSITIVE_INFINITY) return Number.POSITIVE_INFINITY;
   return bookings > 0 ? Math.ceil((bookings * ROOM_KEYS_PER_BOOKING) / ROOM_KEYS_PER_MGET) : 0;
+}
+
+const unreadableRooms = () => new Error("The booking rooms could not be read.");
+
+/** Only explicit nulls prove that no room or meeting was stored. */
+function roomReplies(reply: unknown, count: number): (string | null)[] {
+  if (!Array.isArray(reply) || reply.length !== count) throw unreadableRooms();
+  const values: (string | null)[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+    if (!slot || !("value" in slot) || (slot.value !== null && typeof slot.value !== "string")) throw unreadableRooms();
+    values.push(slot.value);
+  }
+  return values;
+}
+
+function storedMeetingLink(raw: string | null, scope: string): string | null {
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const record = parseRecord(raw);
+    if (!record || record.scope !== scope || typeof value.gone !== "boolean" ||
+      typeof value.link !== "string" || value.link !== record.link) throw unreadableRooms();
+    const link = givenLink(record);
+    if (link) {
+      const room = cleanRoom(link);
+      if (room === null || room === "bad" || new URL(link).toString() !== link) throw unreadableRooms();
+    }
+    return link;
+  } catch {
+    throw unreadableRooms();
+  }
 }
 
 /** One booked seat, as much of it as picks its room. */
@@ -141,15 +173,16 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
   const replies = repliesFor(await redisPipeline(lots.map((lot) => ["MGET", ...lot])), lots.length);
   if (!replies) throw new UnknownReplyError("the bookings' rooms");
   const read: (string | null)[] = [];
-  lots.forEach((lot, l) => {
-    const values = listSlots(replies[l]);
-    if (!values || values.length !== lot.length || !values.every((v) => v === null || typeof v === "string")) throw new UnknownReplyError("the bookings' rooms");
-    read.push(...(values as (string | null)[]));
-  });
-  const found: (string | null)[] = asks.map((_, i) => {
+  // Each MGET's values read exactly (roomReplies): an array of exactly its keys' count, every slot its own, each text
+  // or an explicit null; only explicit nulls prove that no room or meeting was stored.
+  lots.forEach((lot, l) => read.push(...roomReplies(replies[l], lot.length)));
+  const found: (string | null)[] = asks.map((ask, i) => {
     const own = read[i * ROOM_KEYS_PER_BOOKING];
     const shared = read[i * ROOM_KEYS_PER_BOOKING + 1];
-    const meeting = givenLink(parseRecord(read[i * ROOM_KEYS_PER_BOOKING + 2])) ?? givenLink(parseRecord(read[i * ROOM_KEYS_PER_BOOKING + 3]));
+    if ((own !== null && !isVideoRoom(own)) || (shared !== null && !isVideoRoom(shared))) throw unreadableRooms();
+    const ownMeeting = storedMeetingLink(read[i * ROOM_KEYS_PER_BOOKING + 2], callScope(callsId, { ...ask, group: false }));
+    const groupMeeting = storedMeetingLink(read[i * ROOM_KEYS_PER_BOOKING + 3], callScope(callsId, { ...ask, group: true }));
+    const meeting = ownMeeting ?? groupMeeting;
     if (meeting) return meeting;
     if (isVideoRoom(own)) return own;
     if (isVideoRoom(shared)) return shared;
@@ -169,16 +202,18 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
   });
   if (making.size) {
     const keys = [...making.keys()];
-    const made = await redisPipeline(
+    const made = roomReplies(await redisPipeline(
       keys.flatMap((key) => [
         ["SET", key, newVideoRoom(), "NX", "EX", making.get(key)!.ttl],
         // Whoever won the race, this is the room.
         ["GET", key],
       ]),
-    );
+    ), keys.length * 2);
     keys.forEach((key, k) => {
+      const acknowledgement = made[k * 2];
       const room = made[k * 2 + 1];
-      for (const i of making.get(key)!.at) found[i] = isVideoRoom(room as string) ? (room as string) : null;
+      if ((acknowledgement !== null && acknowledgement !== "OK") || !isVideoRoom(room)) throw unreadableRooms();
+      for (const i of making.get(key)!.at) found[i] = room;
     });
   }
   return asks.map((a, i) => found[i] ?? roomFor(a.setup, a.start));

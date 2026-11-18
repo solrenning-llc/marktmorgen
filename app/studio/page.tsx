@@ -148,6 +148,10 @@ import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
 import { TodayPanel } from "@/components/today-panel";
+import { NextActionsPanel } from "@/components/next-actions-panel";
+import { nextActions } from "@/lib/next-actions-rules";
+import { nextFactsOf } from "@/lib/next-actions-read";
+import { DRAFTABLE, NEXT_DRAFT_JOBS } from "@/lib/next-action-draft-rules";
 import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
@@ -642,6 +646,48 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
+/** A notice that asks for something to be done: said as a status, under its own heading, with a link to each place. */
+type ActionNotice = { title: string; body: string; actions: { href: string; label: string }[] };
+
+/**
+ * Where a move lands when something did not come along (app/api/auth/move): "moved", then "-sessions-open",
+ * "-no-recovery", "-no-teams" and "-keys-open" (an API key made from a place taken off may still work), each only
+ * when it applies; "moved" and "moved-sessions-open" alone are
+ * ADDRESS_NOTICES below.
+ * Both sign-in addresses are emailed too, but this is the notice that cannot be lost, so it says what to do and links
+ * straight to where it is done (WCAG 2.4.9, 3.3.5: each link says its purpose by its own words).
+ */
+function movedNotice(key: string): ActionNotice | undefined {
+  const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?(-keys-open)?$/.exec(key);
+  if (!flags || !(flags[2] || flags[3] || flags[4])) return undefined;
+  const [sessionsOpen, recovery, teams, keys] = [Boolean(flags[1]), Boolean(flags[2]), Boolean(flags[3]), Boolean(flags[4])];
+  const actions: ActionNotice["actions"] = [];
+  if (recovery) actions.push({ href: "#account-recovery", label: "Check your recovery address" });
+  if (sessionsOpen) actions.push({ href: "#log-out-everywhere", label: "Go to “Log out of all devices”" });
+  const needs = [sessionsOpen, recovery, teams, keys].filter(Boolean).length;
+  return {
+    title:
+      needs >= 2
+        ? `Your account moved, but ${["two", "three", "four"][needs - 2]} things need you`
+        : recovery
+          ? "Your account moved: check its recovery address"
+          : teams
+            ? "Your account moved: ask to join your teams again"
+            : "Your account moved: some API keys may still work",
+    body: [
+      "This address logs you in from now on.",
+      sessionsOpen ? "We could not close every session that was open before the move, so log out of all devices." : "Every session the old one had open is closed.",
+      // Not "may have none": a carry whose answer was lost may still have written it, and the section below shows it.
+      ...(recovery ? ["We could not confirm that your recovery address came along. Check it, and add one again if none is shown."] : []),
+      // Nothing to press here: only each store's owner can invite this address (lib/team.ts dropMemberships).
+      ...(teams ? ["We could not carry your places on other stores' teams. Ask each store's owner to invite this address again."] : []),
+      // The move is not complete on that team (lib/team.ts dropMemberships): only its owner can revoke them, and was emailed.
+      ...(keys ? ["Some API keys made with your old address on another store's team may still work. Ask that store's owner to revoke the ones you no longer use."] : []),
+    ].join(" "),
+    actions,
+  };
+}
+
 const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
   sent: {
     title: "Check the new address",
@@ -851,6 +897,9 @@ export default async function StudioPage({
     read.catch(() => undefined);
     return read;
   };
+  // "Do this next" (484 [IT1] complement WG, unit 2): the store's kept memberships reading, one GET sent with the
+  // page's first reads, never Stripe (lib/next-actions-read.ts); only for a role that sees the numbers. Never throws.
+  const nextFactsRead = store && may("stats") ? early(nextFactsOf(store)) : null;
   // Google Calendar and Zoom (lib/meet-connect.ts): which accounts calls can
   // make meetings on, for the call editor, and what was made for each booked
   // time, for the list below. Nothing is read when the deployment has neither.
@@ -917,7 +966,10 @@ export default async function StudioPage({
   const pin = store?.sid ? `?store=${store.sid}` : "";
   // The writing help, and what is left of it this month: read once for the whole studio page.
   const ai = store && aiAvailableFor(store) ? aiOnValue(true, firstReads.aiLeft ? await firstReads.aiLeft : null) : aiOnValue(false, null);
+  // A notice that asks for something to be done is drawn on its own (movedNotice); it stands in for any other.
+  const actionNotice = movedNotice(typeof params.address === "string" ? params.address : "");
   const notice =
+    actionNotice ??
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
@@ -1243,6 +1295,20 @@ export default async function StudioPage({
     ...(todayCounts.bookingsToday !== undefined ? { calls: "#calls-title" } : {}),
   };
   const todayScreen = current ? todayView(todayCounts, may) : null;
+  // Each action leads to the screen that deals with it, only where this page has it for this person.
+  const nextScreen =
+    current && nextFactsRead
+      ? nextActions(await nextFactsRead, {
+          may,
+          where: {
+            ...(sellsMemberships(current) ? { failed_payments: studioPath(current, "", "memberships") } : {}),
+            // The come-back email's editor, further down this page (shown with the settings, to a store with memberships).
+            ...(may("settings") && sellsMemberships(current) ? { winback: "#winback-title" } : {}),
+          },
+          currency: current.currency,
+          now: todayNow(),
+        })
+      : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
   const shelf = firstReads.shelf ? await firstReads.shelf : null;
@@ -1420,7 +1486,24 @@ export default async function StudioPage({
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
-        {notice ? (
+        {actionNotice ? (
+          // Asks for something to be done: announced, named by its own heading, a link to each place (movedNotice).
+          <div className="notice notice-warn mt-6" role="status" aria-labelledby="action-notice-title">
+            <h2 id="action-notice-title" className="font-bold text-ink">{actionNotice.title}</h2>
+            <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">{actionNotice.body}</p>
+            {actionNotice.actions.length ? (
+              <ul className="mt-2 flex flex-wrap gap-x-6">
+                {actionNotice.actions.map((action) => (
+                  <li key={action.href}>
+                    <a href={action.href} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
+                      {action.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : notice ? (
           <div className="notice notice-warn mt-6">
             <p className="font-bold text-ink">{notice.title}</p>
             <p className="mt-1 text-sm text-ink-soft">{notice.body}</p>
@@ -1476,6 +1559,8 @@ export default async function StudioPage({
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
+            {/* A draft written with AI only when asked (unit 3): for a role that writes drafts, on a store with the writing help. */}
+            {nextScreen ? <NextActionsPanel view={nextScreen} draftable={ai.on && may("draft") ? DRAFTABLE : []} jobs={NEXT_DRAFT_JOBS} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.known === false ? null : ai.left} /> : null}
@@ -1556,6 +1641,10 @@ export default async function StudioPage({
                   : []),
                 // Everyone on the store, for their own devices (lib/phone-alerts.ts).
                 { href: studioPath(store, "", "phone"), title: "Phone notifications", text: "A buzz for sales, bookings, community reports, affiliate applications and live events, on your own devices.", icon: "phone" as const },
+                // The owner's own alert emails, so the owner's only (lib/notify-prefs-rules.ts, queue item 601 [KB22] U6).
+                ...(role === "owner"
+                  ? [{ href: studioPath(store, "", "notifications"), title: "Alert emails", text: "Choose which emails about your store's numbers you get. Account, payment and legal emails always come.", icon: "mail" as const }]
+                  : []),
                 // Everyone on the store, for their own calendar as a team host (lib/host-calendar.ts).
                 ...(callProducts.length > 0
                   ? [{ href: studioPath(store, "", "calendar"), title: "Your calendar", text: "Your own busy times, kept out of the team calls you host.", icon: "calendar" as const }]
@@ -3774,7 +3863,7 @@ export default async function StudioPage({
               Log out
             </button>
           </form>
-          <form action="/api/auth/signout-all" method="post">
+          <form id="log-out-everywhere" action="/api/auth/signout-all" method="post" className="scroll-mt-32">
             <button
               type="submit"
               className="btn btn-ghost"

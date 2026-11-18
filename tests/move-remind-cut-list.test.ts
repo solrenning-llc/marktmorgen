@@ -5,7 +5,7 @@
  * every time, for ever, with one Stripe read each time and never an email. It may be tried again only while a reminder
  * could still go, that is before the renewal date; after it, the entry is dropped.
  */
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { redisPipeline, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -55,6 +55,8 @@ async function main(): Promise<void> {
   const club = await addProduct(OWNER, "The Inner Circle", "", "29", { interval: "month", trialDays: 7, payments: 0 });
   if (!club.ok) throw new Error("no product");
   await setProductLink(OWNER, club.product.id, "https://example.com/club");
+  // A moved member's emails carry the creator's postal address; with none, no member import starts (main, review of #3476).
+  await setMailSettings(OWNER, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   const store = (await storeForEmail(OWNER))!;
   const in20 = noon(new Date((nowS + 20 * DAY) * 1000));
   const started = await startImport(store, OWNER, "members", { expected: 1, file: "patrons.csv", stopped: true });

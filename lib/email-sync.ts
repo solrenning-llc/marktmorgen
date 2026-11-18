@@ -331,8 +331,8 @@ function firstName(name: string | null | undefined): string | null {
  * (CX-123 rule 24), never "not deleted".
  */
 /**
- * The reads of a person's deletion print a hand-over makes (queuePerson): one before anything is marked, and one once
- * its job is written, before it is sent (Codex C2 and G on #3908). Named in tests/plan-cost-registry.ts (orders and
+ * The reads of a person's deletion print a hand-over makes (queuePerson): one before anything is marked, and one when
+ * its job is published atomically (Codex C2 and G on #3908). Named in tests/plan-cost-registry.ts (orders and
  * public-requests), held by tests/email-sync-erased-replay.test.ts.
  */
 export const HAND_OVER_ERASED_READS = 2;
@@ -346,6 +346,22 @@ async function consentBeforeErasure(listId: string | null | undefined, email: st
   if (typeof text !== "string" || !/^\d{1,12}$/.test(text)) throw new UnknownReplyError("whether a person handed to an email platform was deleted");
   return !(Number.isFinite(at) && at >= (Number(text) + 1) * 1000);
 }
+
+/** Checks the erasure print in the same Redis step that publishes a sendable job. */
+const ENQUEUE_PERSON = `-- marktmorgen:esync-enqueue:v1
+if KEYS[4] then
+  local deleted = redis.call("HGET", KEYS[4], ARGV[1])
+  if deleted then
+    if #deleted > 12 or not string.match(deleted, "^%d+$") then return "unknown" end
+    local consent = tonumber(ARGV[2])
+    if not consent or consent <= tonumber(deleted) then return "erased" end
+  end
+end
+redis.call("SET", KEYS[1], ARGV[3], "EX", ARGV[4])
+redis.call("LPUSH", KEYS[2], ARGV[5])
+local overflow = redis.call("LRANGE", KEYS[2], ARGV[6], -1)
+redis.call("ZADD", KEYS[3], ARGV[7], ARGV[8])
+return overflow`;
 
 /**
  * Hands one person to the creator's platform, when the creator's settings
@@ -402,33 +418,35 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
     lastAt: agreed ? 0 : now,
     createdAt: now,
   };
-  const written: (string | number)[][] = [
-    ["SET", jobKey(job.id), JSON.stringify(job), "EX", JOB_SECONDS],
-    ...(agreed ? [["ZADD", QUEUE_KEY, now, `${statsId}|${job.id}`]] : []),
-    ["LPUSH", logKey(statsId), job.id],
-    // What this push moved past the studio's LOG_SIZE, read rather than trimmed blind (dropOverflow).
-    ["LRANGE", logKey(statsId), LOG_SIZE, -1],
-  ];
-  const overflow = stringList(repliesFor(await redisPipeline(written), written.length)?.[written.length - 1]);
-  // An overflow that does not read is left in the log, where the copy and the erasure still find it; the next push reads it again.
+  let overflow: string[] | null;
+  if (agreed) {
+    const keys = [jobKey(job.id), logKey(statsId), QUEUE_KEY];
+    if (store.listId) keys.push(suppressedKey(store.listId));
+    const print = store.listId ? suppressionPrint(store.listId, email) : "";
+    const second = Number.isFinite(person.at) ? Math.floor(person.at / 1000) : "";
+    const published = repliesFor(await redisPipeline([[
+      "EVAL", ENQUEUE_PERSON, keys.length, ...keys,
+      print, second, JSON.stringify(job), JOB_SECONDS, job.id, LOG_SIZE, now, `${statsId}|${job.id}`,
+    ]]), 1)?.[0];
+    if (published === "erased") return "off";
+    if (published === "unknown") {
+      // This exact result is returned before any job is written, so only our mark is safe to let go.
+      await releaseMark(seen, mine);
+      throw new UnknownReplyError("whether a person handed to an email platform was deleted");
+    }
+    overflow = stringList(published);
+    if (!overflow) throw new UnknownReplyError("a job handed to an email platform, published");
+  } else {
+    const written: (string | number)[][] = [
+      ["SET", jobKey(job.id), JSON.stringify(job), "EX", JOB_SECONDS],
+      ["LPUSH", logKey(statsId), job.id],
+      ["LRANGE", logKey(statsId), LOG_SIZE, -1],
+    ];
+    overflow = stringList(repliesFor(await redisPipeline(written), written.length)?.[written.length - 1]);
+  }
+  // An overflow that does not read is left in the log, where the copy and the erasure still find it.
   if (overflow?.length) await dropOverflow(statsId, overflow);
   if (!agreed) return "skipped";
-  // Read again now that the job is written, before it is sent (Codex C2 and G on #3908): the erasure writes the print
-  // before it deletes any job (lib/person-erasure.ts), so a deletion that landed after the first read is seen here, and
-  // this job, the only one it could have missed, is taken out. A read that does not answer takes the job out too and
-  // lets this run's mark go, so the next try reads the print again: an unknown never hands the address over.
-  let erasedSince: boolean;
-  try {
-    erasedSince = await consentBeforeErasure(store.listId, email, person.at);
-  } catch (error) {
-    await redisPipeline([["DEL", jobKey(job.id)], ["ZREM", QUEUE_KEY, `${statsId}|${job.id}`], ["LREM", logKey(statsId), 0, job.id]]);
-    await releaseMark(seen, mine);
-    throw error;
-  }
-  if (erasedSince) {
-    await redisPipeline([["DEL", jobKey(job.id)], ["ZREM", QUEUE_KEY, `${statsId}|${job.id}`], ["LREM", logKey(statsId), 0, job.id]]);
-    return "off";
-  }
   await soon(async () => {
     if (await claim(statsId, job.id)) await runClaimed(statsId, job.id, JOB_MS);
   });

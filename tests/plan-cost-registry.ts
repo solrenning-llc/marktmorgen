@@ -1104,7 +1104,7 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED", "paidOrdersLimitFor", "freeCopiesLimitFor", "ORDER_CENTS_PER_THOUSAND_OVER"] },
       { file: "lib/order-admission.ts", names: ["ADMIT_ORDERS", "admitOrders"] },
-      // A person handed to the creator's email platform is read against the store's deletions twice, one HGET before it is marked and one once its job is written, before it goes (#3908): HAND_OVER_ERASED_READS commands, held in tests/email-sync-erased-replay.test.ts.
+      // A person handed to the creator's email platform is read against the store's deletions twice, one HGET before it is marked and one inside the atomic job publication (#3908): HAND_OVER_ERASED_READS commands, held in tests/email-sync-erased-replay.test.ts.
       { file: "lib/email-sync.ts", names: ["HAND_OVER_ERASED_READS"] },
       { file: "lib/order-rules.ts", names: ["CALL_ORDER_UNITS", "TRIAL_ORDERS"] },
       { file: "lib/calls.ts", names: ["admitOrders(store, CALL_ORDER_UNITS)", "countOrder"] },
@@ -1350,7 +1350,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
-      // A person handed to the creator's email platform is read against the store's deletions twice, one HGET before it is marked and one once its job is written, before it goes (#3908): HAND_OVER_ERASED_READS commands, held in tests/email-sync-erased-replay.test.ts.
+      // A person handed to the creator's email platform is read against the store's deletions twice, one HGET before it is marked and one inside the atomic job publication (#3908): HAND_OVER_ERASED_READS commands, held in tests/email-sync-erased-replay.test.ts.
       { file: "lib/email-sync.ts", names: ["HAND_OVER_ERASED_READS"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },

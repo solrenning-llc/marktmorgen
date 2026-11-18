@@ -30,7 +30,9 @@ import { done, is, part } from "./check";
 type Commands = (string | number)[][];
 const handle = "race-shop";
 const real = redis.pipeline.bind(redis);
-const OWNER = { sid: ROOM.sid, statsId: "race_stats", handle };
+// The order's store with its room's fields (noteProduct and orderRoom take a DataStore since #2576: a contact counted
+// in the contacts' slot stays counted there when an order writes it).
+const OWNER = { ...ROOM, statsId: "race_stats", handle };
 
 async function setup(list: string, email: string, clicks = false): Promise<string> {
   await upsertContact(list, email, { agreed: true, explicit: true, source: "free", clicks }, ROOM);

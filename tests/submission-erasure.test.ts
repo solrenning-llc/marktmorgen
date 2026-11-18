@@ -176,6 +176,26 @@ async function main(): Promise<void> {
     is("an entry that does not read is unknown, never left out", await threw(() => forgetSubmissionsPerson(FOLDER, "f".repeat(32), [], world().steps)), "unknown");
   }
 
+  part("An erased buyer's file stays on the sweep's list until it is deleted (Claude 6 on #3570, MEDIUM)");
+  {
+    // The erasure hands the path to its caller, which deletes it at the end; if that delete never happens (it fails and
+    // its fallback fails too, or the function stops first), the sweep's entry is the file's only durable reminder.
+    const who = "c".repeat(32);
+    const { steps } = world();
+    const sent = await send(who, lesson(40), steps);
+    const files: string[] = [];
+    is("control: the file is on the sweep's list before", (await due()).includes(sent.path), true);
+    await forgetSubmissionsPerson(FOLDER, who, files, steps, SHOP);
+    is("control: the erasure names the file to its caller", files.includes(sent.path), true);
+    // The caller's delete never happens here.
+    is("the file stays on the sweep's list after the erasure", (await due()).includes(sent.path), true);
+    is("pressed again, nothing is left to find", await forgetSubmissionsPerson(FOLDER, who, [], steps), 0);
+    const sweeper = world();
+    await sweepSubmissions(NOW + 400 * DAY, sweeper.steps);
+    is("so the daily sweep deletes the erased buyer's file", sweeper.calls.includes(`delete ${sent.path}`), true);
+    is("and then it is off the list", (await due()).includes(sent.path), false);
+  }
+
   part("The copy of their data");
   {
     const { steps } = world();

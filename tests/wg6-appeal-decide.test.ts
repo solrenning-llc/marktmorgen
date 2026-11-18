@@ -244,6 +244,42 @@ async function main() {
   is("the email never points at 'this page', nor promises to say when it is back, since nothing here puts it back or says so", [/this page/i.test(reversedText), /will say when it is back/.test(reversedText)], [false, false]);
   is("it says putting it back is a separate step, and how to reach a person", [/separate step/.test(reversedText), /reply to/i.test(reversedText)], [true, true]);
 
+  part("A slow inbox email and a decision's email to the creator: each keeps what the other wrote (Codex X7 on #3612)");
+  {
+    // 1. the inbox email is slow and its hold runs out; 2. a decision takes the hold, writes its state and is slow to
+    // email the creator; 3. the inbox email ends and its swap marks told: true over the decision's record; 4. the
+    // creator's email ends while the decision still holds: its write must keep told: true, not put the old record back.
+    const g = await takenDown("decideshopx");
+    mailDown = true;
+    await fileAppeal(g.store, g.decision.key, { explanation: "Please look again, slowly." }, new Date(), ORIGIN);
+    mailDown = false;
+    let creatorStarted!: () => void;
+    const creatorBegun = new Promise<void>((resolve) => { creatorStarted = resolve; });
+    let inboxFinished!: () => void;
+    const inboxDone = new Promise<void>((resolve) => { inboxFinished = resolve; });
+    let decisionAnswer: Promise<Awaited<ReturnType<typeof answer>>> | null = null;
+    duringSend = async () => {
+      // Inside the inbox email: its hold runs out, and a person decides meanwhile.
+      for (const k of redis.keys().filter((k) => k.startsWith(`nl:report:${g.report.id}:al:`))) redis.run(["DEL", k]);
+      duringSend = async () => {
+        // Inside the email to the creator: it ends only after the inbox email has.
+        creatorStarted();
+        await inboxDone;
+      };
+      decisionAnswer = answer({ token: g.token, decision: g.decision.key, to: "under_review" });
+      await creatorBegun;
+    };
+    const inbox = await sendAgain(g.store, g.decision.key, ORIGIN);
+    const afterInbox = (await readAppeals(g.store)).get(g.decision.key);
+    inboxFinished();
+    const decided = await (decisionAnswer as unknown as Promise<Awaited<ReturnType<typeof answer>>>);
+    duringSend = null;
+    const final = (await readAppeals(g.store)).get(g.decision.key);
+    is("the inbox email went and marked the request told, over the decision's state", [inbox?.ok, afterInbox?.told, afterInbox?.appeal.state], [true, true, "under_review"]);
+    is("the decision was written and its email went", [decided.status, decided.data.emailed], [200, true]);
+    is("the record keeps all three: the decision, the creator told and the inbox told", [final?.appeal.state, final?.creator?.told, final?.told], ["under_review", true, true]);
+  }
+
   done();
 }
 

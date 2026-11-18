@@ -1445,19 +1445,23 @@ export async function watchPayPal(
     // that failed, is unknown, never "marked": the order stays watched and is looked at again in an hour (rule 24).
     if (status === "PARTIALLY_REFUNDED") {
       const field = paypalPaymentId(paid.capture);
-      const there = repliesFor(await redisPipeline([["HEXISTS", partlyRefundedKey(statsId), field]]), 1)?.[0];
-      let kept: unknown = there === 1 ? 1 : undefined;
-      if (there === 0) {
-        try {
+      // The read is inside the same unknown as the write (Codex P on #4131): a HEXISTS that throws leaves this order
+      // for its next look and lets the pass go on to the others, never stops it.
+      let kept: unknown;
+      try {
+        const there = repliesFor(await redisPipeline([["HEXISTS", partlyRefundedKey(statsId), field]]), 1)?.[0];
+        if (there === 1) kept = 1;
+        if (there === 0) {
           const written = await orderWrite(store, [["HSETNX", partlyRefundedKey(statsId), field, String(now)]]);
           kept = written.length === 1 ? written[0] : undefined;
-        } catch (error) {
-          console.error("a PayPal refund in part could not be kept for the affiliate book", error);
         }
+      } catch (error) {
+        console.error("a PayPal refund in part could not be read or kept for the affiliate book", error);
       }
       if (!(kept === 0 || kept === 1)) {
         console.error("a PayPal refund in part could not be marked; looked at again in an hour", order);
-        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        // A reschedule not confirmed leaves the order due, where the next pass finds it again.
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
         continue;
       }
     }

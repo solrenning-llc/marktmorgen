@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $136.95 | $1,432.85 | $69 / $690 |
-| Studio | $275.58 | $3,068.40 | $449 / $4,490 |
-| Scale | $493.60 | $5,642.50 | $999 / $9,990 |
+| Store | $136.95 | $1,432.95 | $69 / $690 |
+| Studio | $275.58 | $3,069.10 | $449 / $4,490 |
+| Scale | $493.60 | $5,643.20 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$149 / $1,490** | **$449 / $4,490** | **$999 / $9,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **390** · 3,400 · 3,000 | **3,700** · 10,000 · 10,000 | **21,000** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **380** · 3,400 · 3,000 | **3,700** · 10,000 · 10,000 | **21,000** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **22** · 200 · 200 | **170** · 450 · 450 | **820** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **2,600** · 7,000 · 5,000 | **5,400** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **15 + 94** · 40 + 250 · 40 + 250 | **43 + 210** · 80 + 400 · 80 + 400 |
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.04% | 60.02% | 60.00% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.09% | 12.15% | 12.16% |
 | Net a customer, a month, at full included use | $89.83 | $271.31 | $604.04 |
-| The same at #553's price | $37.73 | $264.08 | $592.34 |
+| The same at #553's price | $37.73 | $264.08 | $592.33 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

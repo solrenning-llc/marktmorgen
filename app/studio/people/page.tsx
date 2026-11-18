@@ -214,6 +214,7 @@ function TasksAgendaWaiting() {
  * the creator's may be and the browser shows its own (components/tasks-agenda.tsx).
  */
 async function TasksAgenda({ store, included }: { store: Store; included: IncludedBytes }) {
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const today = new Date().toISOString().slice(0, 10);
   const data = await agendaData(store, today, included);
   const title = <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>;
@@ -516,6 +517,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         <h2 id="tasks-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks</h2>
         <p className="mt-1 text-sm text-ink-soft">What you still owe this person, beside any deal. For you and your team only.</p>
         {profile.person && tasks ? (
+          // oxlint-disable-next-line react/purity -- server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
           <PersonTasks key={profile.person} person={profile.person} initial={tasks} owner={store.email.toLowerCase()} assignees={assignees} today={new Date().toISOString().slice(0, 10)} />
         ) : profile.person ? (
           <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s tasks could not be read just now. Open this page again in a moment.</p>

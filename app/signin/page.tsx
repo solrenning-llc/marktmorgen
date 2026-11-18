@@ -14,6 +14,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { formatMoney } from "@/lib/money";
 import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
+import { ForgetInboxDrafts } from "@/components/forget-inbox-drafts";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
 const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
@@ -84,6 +85,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   "move-unread": {
     title: "We could not finish the move just now",
     body: "Your account was not moved, and it stays at its old address. Log in, then try the move again in a minute.",
+  },
+  // Past the account's finished moves in 30 days (lib/move-pace.ts MOVES_PER_30_DAYS; app/api/auth/move).
+  "move-limited": {
+    title: "This account has moved too often for now",
+    body: "Nothing was changed, and your account stays at its old address. An account's sign-in address can change 10 times in 30 days. Try again later, or reply to any email from us if you need it moved sooner.",
   },
   "move-error": {
     title: "The move did not finish",
@@ -298,6 +304,8 @@ export default async function SignInPage({
           ) : null}
 
           {confirmation ? <ToastOnLoad message={confirmation} param="status" /> : null}
+          {/* Every log-out and every ended session lands here: the unsent inbox answers kept on this device go (lib/inbox-drafts.ts). */}
+          <ForgetInboxDrafts />
           {notice ? (
             <div className={`notice ${notice.tone === "success" ? "notice-success" : "notice-warn"} mt-6`} role="status">
               <p className="font-semibold">{notice.title}</p>

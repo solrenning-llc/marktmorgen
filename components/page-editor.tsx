@@ -1,14 +1,16 @@
 "use client";
 
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
+import { templateLeftMessage } from "@/lib/template-text-rules";
 import { TestCountsNotice } from "@/components/test-counts-notice";
 import { pasteExceedsLimit } from "@/lib/paste-limit";
 
 import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
+import { PageTime } from "@/components/page-time";
 
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -167,7 +169,7 @@ export const MESSAGES: Record<string, string> = {
   booking: `A page holds one booking block, with one of your calls chosen and a heading of up to ${MAX_HEADING} characters. Nothing was saved.`,
   same_version: "Version B shows just what version A does, or one of them has no blocks. Change something in version B, or end the test.",
   too_big: "The page is too long to save. Shorten some of the text.",
-  placeholder: "This page still has parts marked ⟦like this⟧ for you to write. Replace each one with your own words, or keep the page hidden, before saving. Nothing was saved.",
+  placeholder: "This page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Replace each one with your own words, or keep the page hidden, before saving. Nothing was saved.",
   next: "After a sign-up, only another product that costs money can be shown.",
   unknown: "That product is no longer in your store. Reload the page.",
   store_full: "Your store is full. Remove something before adding more.",
@@ -352,6 +354,12 @@ export function PageEditor({
   const [reach, setReach] = useState<{ shares: Record<string, number>; visitors: number } | null>(null);
   // What stopped measured visitors, how far the video was watched, and whether the page asks (components/page-answers.tsx).
   const [answers, setAnswers] = useState<{ whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; asking: boolean } | null>(null);
+  // How long measured visitors stayed (639 [GL7](25)), in ranges.
+  const [stay, setStay] = useState<{ words: string; count: number; share: number }[] | null>(null);
+  // Set when this month's readings went past their ceiling, so the time and depth are partial (lib/page-read.ts).
+  const [partial, setPartial] = useState<{ counted: number; opens: number; resumed?: boolean } | "unknown" | null>(null);
+  // Set when the time record could not be read: said, never shown as no stays (lib/page-depth.ts).
+  const [stayUnread, setStayUnread] = useState(false);
   // The key the page's blocks and earlier versions are kept under.
   const pageKey = site ? `site-${site.id}` : product.id;
   useEffect(() => {
@@ -359,7 +367,11 @@ export function PageEditor({
     let live = true;
     fetch(`/api/store/depth?id=${encodeURIComponent(product.id)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((data: { ok?: boolean; shares?: Record<string, number>; visitors?: number; whyNot?: Partial<Record<WhyNot, number>>; videos?: Record<string, VideoReach>; asking?: boolean }) => {
+      .then((data: { ok?: boolean; shares?: Record<string, number>; visitors?: number; whyNot?: Partial<Record<WhyNot, number>>; videos?: Record<string, VideoReach>; asking?: boolean; time?: { words: string; count: number; share: number }[]; timeUnread?: boolean; partial?: { counted: number; opens: number; resumed?: boolean } | "unknown" | null }) => {
+        if (live && data.ok && Array.isArray(data.time)) setStay(data.time);
+        if (live && data.ok && data.timeUnread === true) setStayUnread(true);
+        if (live && data.ok && data.partial === "unknown") setPartial("unknown");
+        else if (live && data.ok && data.partial && data.partial !== "unknown" && Number.isSafeInteger(data.partial.counted) && Number.isFinite(data.partial.opens)) setPartial(data.partial);
         if (live && data.ok && data.shares) setReach({ shares: data.shares, visitors: data.visitors ?? 0 });
         if (live && data.ok) setAnswers({ whyNot: data.whyNot ?? {}, videos: data.videos ?? {}, asking: data.asking === true });
       })
@@ -566,6 +578,20 @@ export function PageEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  // The focus through the clear question (WCAG 2.4.3): opening it puts the focus on Keep it, the choice that changes
+  // nothing; Keep it puts it back on Clear the page. After Yes, clear it, focusAfterClear sends it on instead.
+  const clearKeep = useRef<HTMLButtonElement>(null);
+  const clearOpen = useRef<HTMLButtonElement>(null);
+  const clearBack = useRef(false);
+  // The question's own id, unique per editor, so a second editor on one screen never names its group by this one's.
+  const clearQuestionId = useId();
+  useEffect(() => {
+    if (confirmClear) clearKeep.current?.focus();
+    else if (clearBack.current) {
+      clearBack.current = false;
+      clearOpen.current?.focus();
+    }
+  }, [confirmClear]);
   // Which template the empty page would start from, and the block being dragged.
   const templates = site ? [] : PAGE_TEMPLATES.filter((t) => t.free === product.free);
   const [dragged, setDragged] = useState<number | null>(null);
@@ -1122,6 +1148,17 @@ export function PageEditor({
         // The page as it was a moment ago is now the newest earlier version.
         if (versions !== null) void loadVersions();
         return;
+      }
+      if (data.error === "placeholder") {
+        // A part a template left to write (754 [STN1], unit 1): said with where it is, and that block opened.
+        const left = data as { field?: unknown; block?: unknown; kind?: unknown; part?: unknown };
+        const field = left.field === "block" || left.field === "search" || left.field === "test" ? left.field : null;
+        const block = typeof left.block === "string" && all.some((b) => b.id === left.block) ? all.find((b) => b.id === left.block)! : null;
+        if (field && typeof left.part === "string" && left.part && (field !== "block" || block)) {
+          setError(templateLeftMessage({ field, part: left.part }, block ? kindLabel(block.kind) : null, site ? "site" : "product"));
+          if (block) show(block.id);
+          return;
+        }
       }
       setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
@@ -2323,6 +2360,8 @@ export function PageEditor({
             />
           ) : null}
 
+          {stay || stayUnread ? <PageTime ranges={stay ?? []} least={MIN_DEPTH_VISITORS} partial={partial} unread={stayUnread} /> : null}
+
           {answers && !product.free ? (
             <PageAnswers
               whyNot={answers.whyNot}
@@ -2597,7 +2636,7 @@ export function PageEditor({
                           productId={product.id}
                           block={block}
                           page={pageToSend}
-                          onChange={(next) => setDrafts((all) => all.map((d, i) => (i === index ? { ...d, block: next } : d)))}
+                          onChange={(next) => setDrafts((all) => all.map((d) => (d.block.id === block.id ? { ...d, block: next } : d)))}
                         />
                       )}
                     </div>
@@ -2858,17 +2897,27 @@ export function PageEditor({
         ) : null}
         {initial.blocks.length > 0 && !dirty && !site ? (
           confirmClear ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              Back to the plain page?
+            <span role="group" aria-labelledby={clearQuestionId} className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+              <span id={clearQuestionId}>
+                Back to the plain page?
+              </span>
               <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>
                 Yes, clear it
               </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
+              <button
+                ref={clearKeep}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  clearBack.current = true;
+                  setConfirmClear(false);
+                }}
+              >
                 Keep it
               </button>
             </span>
           ) : (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
+            <button ref={clearOpen} type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
               Clear the page
             </button>
           )
@@ -2950,6 +2999,7 @@ function RowEditor({
   // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
   // begun in an earlier drawing of the row keeps its place (lib/row-edit-rules.ts, shiftHeld).
   const mine = useRef([0, 0, 0]);
+  // oxlint-disable-next-line react/refs -- initial state copied once from a constant ref value; pre-existing and not flagged by the former ESLint React Compiler rule
   const [mineShown, setMineShown] = useState(mine.current);
   // Whether this drawing is still on screen, so what happens after it closed is said by the page editor instead.
   const drawn = useRef(true);

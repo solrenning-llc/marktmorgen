@@ -5,8 +5,9 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ENDING_KEY, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, GIVE_UP_DAYS, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
+import { setCancelAtPeriodEnd } from "@/lib/billing";
 import { store as redis } from "./redis-stub";
 import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
 
@@ -163,5 +164,359 @@ await t.test(`present debt evidence with a ${malformed} is retained`, async () =
   assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0);
   assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
 });
+await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_DAYS, with the creator told (Claude 4's LOW on #2692)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number };
+  note.p = malformed === "null entry" ? [null] : [note.p[0], null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  const callsBefore = world.calls.length;
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+
+  assert.equal(await shop.note(), null, "past GIVE_UP_DAYS the unknown note is let go, never kept forever");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0, "the plan is never ended on unknown debt evidence");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("POST /refunds")).length, 0, "no refund is made on it");
+  assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+  assert.equal(world.emails.length, 1, "the creator is told once");
+  assert.equal(world.emails[0].subject.endsWith("we could not confirm your refund"), true);
+  assert.equal(world.emails[0].text.includes("We could not confirm how much of the refund"), true, "the letter says what is not known, not that part went through");
+  assert.equal(world.emails[0].text.includes("set to stop at the end of the period you paid for"), true, "and says what Stripe shows of the plan: the stop this refund set is still there");
+  assert.equal(world.emails[0].text.includes("support@marktmorgen.com"), true);
+
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
+  assert.equal(world.emails.length, 0, "a second run sends nothing more");
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
+});
 }
+
+// Rule 24 (Codex CX1's MEDIUM on #3585): a status Stripe has no name for, a stop flag that is missing or not a boolean,
+// and a cancel_at that is neither null nor a number are not read as "renews"; the letter says to check the studio.
+const UNREADABLE_SHAPES = ["an unknown status", "no stop flag", "a string stop flag", "a string cancel_at", "no cancel_at"] as const;
+// Claude 1's LOW 1 on #3585: a paused or unpaid plan does not renew as usual, so the letter says to check the studio.
+const NOT_RENEWING = ["paused", "unpaid"] as const;
+for (const plan of ["the creator's own stop", "kept by the creator", "unreadable", "gone at Stripe", ...UNREADABLE_SHAPES, ...NOT_RENEWING] as const) {
+await t.test(`the give-up letter says what Stripe shows of the plan, not the note's flag: ${plan} (Claude 4's LOW on #3585)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY, stopSet: plan === "the creator's own stop" });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number; s: string };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  const row = world.subs.get(note.s)!;
+  if (plan === "kept by the creator") row.cancel_at_period_end = false;
+  if (plan === "unreadable") row.status = 42;
+  if (plan === "gone at Stripe") world.subs.delete(note.s);
+  const shape = row as Record<string, unknown>;
+  if (plan === "an unknown status") shape.status = "a_status_stripe_never_named";
+  if (plan === "no stop flag") delete shape.cancel_at_period_end;
+  if (plan === "a string stop flag") shape.cancel_at_period_end = "true";
+  if (plan === "a string cancel_at") shape.cancel_at = "2000000000";
+  if (plan === "no cancel_at") delete shape.cancel_at;
+  if (plan === "paused" || plan === "unpaid") shape.status = plan;
+  const callsBefore = world.calls.length;
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
+  assert.equal(await shop.note(), null);
+  assert.equal(world.calls.slice(callsBefore).filter((call) => !call.startsWith("GET ")).filter((call) => call.includes("/subscriptions/") || call.startsWith("POST /refunds")).length, 0, "the letter only reads the plan; nothing is changed or refunded");
+  assert.equal(world.emails.length, 1);
+  const text = world.emails[0].text;
+  const said = {
+    stops: text.includes("set to stop at the end of the period you paid for"),
+    renews: text.includes("renews as usual"),
+    ended: text.includes("Your plan has ended"),
+    check: text.includes("check your plan in your studio"),
+  };
+  const expected = plan === "the creator's own stop" ? "stops" : plan === "kept by the creator" ? "renews" : plan === "gone at Stripe" ? "ended" : "check";
+  assert.deepEqual(Object.entries(said).filter(([, on]) => on).map(([k]) => k), [expected], `the letter says only "${expected}" (note m was ${note.m})`);
+});
+}
+
+// Revisor 2's LOW on #3585: the damaged note is dropped only after the creator's letter was sent, and never on a store
+// reply that is not an exact answer; the log says "told" only after the send.
+for (const cause of ["an anomalous store reply", "a letter that was not sent"] as const) {
+await t.test(`a damaged note is kept, no letter lost, when the let-go cannot be finished: ${cause} (Revisor 2's LOW on #3585)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[] };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  world.emails = [];
+  world.emailsDown = cause === "a letter that was not sent";
+  const logs: string[] = [];
+  const logged = console.error;
+  console.error = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+  if (cause === "an anomalous store reply") {
+    redis.pipeline = async (commands) => commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:store:id:") ? [] : original(commands);
+  }
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+    assert.notEqual(await shop.note(), null, "the note stays until the letter is known to be sent");
+    assert.equal(logs.some((line) => line.includes("the creator told")), false, "nothing says the creator was told before a send");
+    redis.pipeline = original;
+    world.emailsDown = false;
+    // A refused send may have been taken by the provider, so the same key is not posted again at once (lib/email.ts):
+    // that retry is the provider guard's call. Only the store-reply case can be read again straight away.
+    if (cause === "an anomalous store reply") {
+      await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
+      assert.equal(world.emails.length, 1, "the next run sends the letter once");
+      assert.equal(await shop.note(), null, "and only then is the note dropped");
+    }
+  } finally {
+    console.error = logged;
+    world.emailsDown = false;
+    redis.pipeline = original;
+    delete process.env.RESEND_API_KEY;
+  }
+});
+}
+
+// Claude 4 (cloud D) on #3740: a store that is gone (its id answers nil) is not unknown. Its damaged note goes, with no
+// letter (there is nobody to tell), so it never holds a place among the first MAX_NOTES notes for good.
+await t.test("a damaged note of a store that is gone is dropped, with no letter (cloud D on #3740)", async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[] };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  world.emails = [];
+  redis.pipeline = async (commands) => commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:store:id:") ? [null] : original(commands);
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+    redis.pipeline = original;
+    assert.equal(await shop.note(), null, "the note of a store that is gone is dropped");
+    assert.equal(world.emails.length, 0, "and no letter goes to a store that is gone");
+  } finally {
+    redis.pipeline = original;
+    delete process.env.RESEND_API_KEY;
+  }
+});
+
+// Comment 6807195181 on #3585: once our stop is taken back, a note left behind by a removal whose answer was lost must
+// not let a later run take back a stop the creator has set themselves since. The note says m: 0 before it is dropped.
+const dropLost = (commands: Command[]) => isNote(commands, "HDEL");
+for (const path of ["the daily job", "the creator's request"] as const) {
+await t.test(`a retry never takes back a stop the creator set after ours was taken back: ${path}`, async () => {
+  await reset();
+  const shop = path === "the daily job" ? await paidShop() : await paidShop({ at: NOW - 40 * DAY });
+  if (path === "the daily job") {
+    world.refundsDown = true;
+    await refundAndEndPlan(await shop.store(), NOW);
+    world.refundsDown = false;
+    assert.equal(JSON.parse(String(await shop.note())).m, 1, "our stop is noted for the daily job");
+  }
+  // The removal is not done and its answer is lost: the note stays behind.
+  redis.pipeline = async (commands) => dropLost(commands) ? [] : original(commands);
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    if (path === "the daily job") await finishPlanRefunds(Date.now() + 10_000, NOW + 601);
+    else {
+      const store = await shop.store();
+      await assert.rejects(() => refundAndEndPlan(store, NOW), "a lost removal answer is not taken for a removal");
+    }
+  } finally {
+    console.error = logged;
+    redis.pipeline = original;
+  }
+  assert.equal(shop.sub().cancel_at_period_end, false, "our stop was taken back");
+  assert.notEqual(await shop.note(), null, "the removal was lost, so the note is still there");
+  // The creator now sets the stop themselves; the next daily run must leave it.
+  shop.sub().cancel_at_period_end = true;
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600); } finally { console.error = quiet; }
+  assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back by a retry");
+});
+}
+// Codex G on #3740: the note's m: 0 write after our stop was taken back fails without landing, so the note still says
+// m: 1. The creator then sets the stop themselves; the next run must still leave it. What decides is Stripe's own record
+// of whose stop it is, not a note that may be stale.
+for (const path of ["the daily job", "the creator's request"] as const) {
+await t.test(`a stale m: 1 note never takes back a stop the creator set after ours was taken back: ${path}`, async () => {
+  await reset();
+  const shop = path === "the daily job" ? await paidShop() : await paidShop({ at: NOW - 40 * DAY });
+  if (path === "the daily job") {
+    world.refundsDown = true;
+    await refundAndEndPlan(await shop.store(), NOW);
+    world.refundsDown = false;
+  }
+  // Every note write saying m: 0 fails before it lands, and the note's removal fails too.
+  const notLanded = (commands: Command[]) => (isNote(commands, "HSET") && String(commands[0][3]).includes('"m":0')) || isNote(commands, "HDEL");
+  redis.pipeline = async (commands) => {
+    if (notLanded(commands)) throw new Error("Redis request failed with status 503");
+    return original(commands);
+  };
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    if (path === "the daily job") await finishPlanRefunds(Date.now() + 10_000, NOW + 601).catch(() => {});
+    else await refundAndEndPlan(await shop.store(), NOW).catch(() => {});
+  } finally {
+    console.error = logged;
+    redis.pipeline = original;
+  }
+  assert.equal(shop.sub().cancel_at_period_end, false, "our stop was taken back");
+  assert.equal(JSON.parse(String(await shop.note())).m, 1, "the note still says m: 1: its m: 0 never landed");
+  shop.sub().cancel_at_period_end = true;
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600); } finally { console.error = quiet; }
+  assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back on a stale note");
+});
+}
+// Codex Y on #3740 (MEDIUM): none was made and the plan has already ended (our stop ran out), but the note's removal is
+// lost. The note must still let the next run read the plan again, so a canceled plan is never told it renews as usual.
+for (const plan of ["ended at Stripe", "still live"] as const) {
+await t.test(`a lost note removal after "none was made" keeps what the plan is for the next run: ${plan} (Codex Y on #3740)`, async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  assert.equal(JSON.parse(String(await shop.note())).m, 1, "our stop is noted for the daily job");
+  if (plan === "ended at Stripe") shop.sub().status = "canceled";
+  world.emails = [];
+  redis.pipeline = async (commands) => dropLost(commands) ? [] : original(commands);
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + 601);
+    redis.pipeline = original;
+    assert.notEqual(await shop.note(), null, "the removal was lost, so the note is still there");
+    await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600);
+  } finally {
+    console.error = logged;
+    redis.pipeline = original;
+    delete process.env.RESEND_API_KEY;
+  }
+  assert.equal(await shop.note(), null, "the next run drops the note");
+  const texts = world.emails.map((email) => email.text);
+  assert.equal(texts.length, 1, "one letter, once the note is gone");
+  if (plan === "ended at Stripe") {
+    assert.equal(texts.some((text) => text.includes("renews as usual")), false, "a canceled plan is never told it renews as usual");
+    assert.equal(texts[0].includes("Your plan ended at the end of the period you paid for"), true, "the letter says the plan has ended");
+  } else {
+    assert.equal(texts[0].includes("renews as usual"), true, "a plan that goes on is told so");
+    assert.equal(shop.sub().cancel_at_period_end, false, "our stop was taken back");
+  }
+});
+}
+// The same on the creator's request: the plan ends between our stop and its take-back, and the note's removal is
+// lost. The note keeps m: 1, so the daily job reads the plan again instead of taking it for one that goes on.
+await t.test("a lost note removal after the plan ended on the creator's request keeps the note at m: 1 (Codex Y on #3740)", async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 40 * DAY });
+  const store = await shop.store();
+  world.afterSubscriptionGet = async () => {
+    shop.sub().status = "canceled";
+    world.afterSubscriptionGet = null;
+  };
+  redis.pipeline = async (commands) => dropLost(commands) ? [] : original(commands);
+  try {
+    await assert.rejects(() => refundAndEndPlan(store, NOW), "a lost removal answer is not taken for a removal");
+  } finally {
+    redis.pipeline = original;
+    world.afterSubscriptionGet = null;
+  }
+  assert.equal(JSON.parse(String(await shop.note())).m, 1, "the plan ended, so the note never says our stop was taken back");
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600); } finally { console.error = quiet; delete process.env.RESEND_API_KEY; }
+  assert.equal(world.emails.some((email) => email.text.includes("renews as usual")), false, "a canceled plan is never told it renews as usual");
+});
+// Claude 1 on #3740: while our stop stands (a refund that may still turn up), the creator takes it back and cancels
+// themselves from the studio (lib/billing.ts setCancelAtPeriodEnd). That cancellation is theirs: no run takes it back.
+await t.test("the creator's own resume and cancel, made while our stop stood, is never taken back", async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  const id = String(shop.sub().id);
+  await setCancelAtPeriodEnd(id, false);
+  await setCancelAtPeriodEnd(id, true);
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 601); } finally { console.error = quiet; }
+  assert.equal(shop.sub().cancel_at_period_end, true, "the creator's own cancellation stands");
+});
+
+// Codex U on #3740: the creator cancels between our read of the subscription and our take-back. Either the creator's
+// change waits and is refused (said to try again), or it lands and is never taken back: never told "done" and undone.
+await t.test("a creator's cancel between our read and our take-back is never told done and then undone", async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  const id = String(shop.sub().id);
+  // The creator first takes our stop back, so the next GET reads no stop; then cancels in the gap.
+  let creator = "refused" as "done" | "refused";
+  world.afterSubscriptionGet = async () => {
+    try {
+      await setCancelAtPeriodEnd(id, true);
+      creator = "done";
+    } catch {
+      creator = "refused";
+    }
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 601); } finally { console.error = quiet; world.afterSubscriptionGet = null; }
+  if (creator === "done") assert.equal(shop.sub().cancel_at_period_end, true, "a cancel the creator was told is done stands");
+  else assert.equal(shop.sub().cancel_at_period_end, false, "refused: our stop is taken back, and the creator was told to try again");
+});
+// Claude 7 on #3740: a take-back whose read outlived the stop's lock posts nothing: another writer may hold it now.
+await t.test("a take-back whose lock lapsed during its read sends nothing", async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  const id = String(shop.sub().id);
+  world.afterSubscriptionGet = async () => {
+    await redisPipeline([["DEL", `nl:lock:plan-stop:${id}`]]);
+  };
+  const callsBefore = world.calls.length;
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 601); } finally { console.error = quiet; world.afterSubscriptionGet = null; }
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith(`POST /subscriptions/${id}`)).length, 0, "no update is posted without the lock");
+  assert.equal(shop.sub().cancel_at_period_end, true, "our stop stays for the next run");
+});
 });

@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.37% / 60.11% | 12.12% | 548 | $69 / $690 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.37% / 60.11% | 12.12% | 551 | $69 / $690 |
 | Studio | **$859 / $8,590** | every #553 figure, none cut | 61.16% / 60.85% | 12.43% | 17 | $449 / $4,490 |
 | Scale | **$1,789 / $17,890** | every #553 figure, none cut | 61.25% / 60.91% | 12.47% | 8 | $999 / $9,990 |
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 548 |
+| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 551 |
 | Studio | $859 | 21.2% | 21.1% / 1.5% / 10.7% / 21.2% | 17 |
 | Scale | $1,789 | 23.9% | 23.9% / 1.6% / 12.0% / 23.6% | 8 |
 
@@ -178,7 +178,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: none finite | $79: none finite | $99: none finite | $129: none finite |
-| Studio | $449: none finite | $559: none finite | $669: 334 | $889: 15 |
+| Studio | $449: none finite | $559: none finite | $669: 339 | $889: 15 |
 | Scale | $999: none finite | $1,239: none finite | $1,489: 23 | $1,989: 6 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.

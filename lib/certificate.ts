@@ -591,6 +591,8 @@ export async function certificateCount(courseIds: string[]): Promise<number> {
  * so neither is counted; an expired one was still earned and is. A reply that is not a count throws UnknownReply
  * (CX-123 rule 24), so a page says nothing rather than a number it did not read.
  */
+/** What earnedCount sends: one HLEN (a course's sales page, tests/sq3-course-facts.test.ts). */
+export const FINISHED_FACT_COMMANDS = 1;
 export async function earnedCount(courseId: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const what = "the certificates earned in a course";

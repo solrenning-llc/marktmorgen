@@ -317,7 +317,6 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  let certificateOn = false;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, asksAtCheckout] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
     // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
@@ -337,8 +336,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // box says buying is not available just now), never a buy box without the date. The video total stays lenient.
     // Whether finishing gives a certificate now is kept too: "N students earned the certificate" is said only then (93 [D2-VERIFIED-SOCIAL]).
     product.course ? readCourseForSale(product.course.id).then(async ({ course, unread }) => {
-      certificateOn = course?.certificate === true;
       return {
+          certificateOn: course?.certificate === true,
           facts: course ? await readCourseFacts(course).catch(() => null) : null,
           accessEndLine: course && !product.recurring ? accessEndFact(course, store.language) : null,
           // What the buy form sends back (24 [E7]): the end this page says, or "none"; never for a membership.
@@ -368,6 +367,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // recordOpenEnrollment), so a course sold here through PayPal alone never shows a date (Claude 5's M1 on #3445).
   const accessEndLine = canSellProduct(store, product) ? courseFacts?.accessEndLine ?? null : null;
   const courseUnread = courseFacts?.unread === true;
+  const certificateOn = courseFacts?.certificateOn === true;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);

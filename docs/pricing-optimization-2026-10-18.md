@@ -171,7 +171,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | --- | --- | --- | --- | --- |
 | Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 434 |
 | Studio | $859 | 21.2% | 21.1% / 1.5% / 10.7% / 21.2% | 17 |
-| Scale | $1,799 | 23.6% | 23.6% / 1.6% / 11.9% / 23.5% | 8 |
+| Scale | $1,799 | 23.6% | 23.6% / 1.6% / 12.0% / 23.5% | 8 |
 
 **The minimum paying base at each price.** Company fixed costs are not reviewed for Marktmorgen (lib/customer-base-rules.ts needs them; the review is null), so the base is given per $100 a month of fixed cost, from that file's own rule (the worst of the monthly and the yearly unit): multiply by the real monthly figure once it is reviewed.
 

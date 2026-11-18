@@ -7,7 +7,7 @@ import { build } from "esbuild";
 
 const root = resolve("."), require = createRequire(root + "/package.json");
 /** A lesson's quiz for one student (`who`, the server's code) with `tries` already recorded and the questions `shown`. */
-const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tries = 0 } = {}) => build({
+const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tries = 0, version = "v1" } = {}) => build({
   stdin: { contents: `
     import React from 'react';import {createRoot} from 'react-dom/client';
     import {QuizKeep} from '@/components/quiz-keep';
@@ -18,7 +18,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
       <form action="https://quiz.test/sent" method="post">
         <input type="hidden" name="handle" value="shop" />
         <input type="hidden" name="shown" value={shown} />
-        <QuizKeep handle="shop" product="prod" lesson="lessonaaaaa1" who=${JSON.stringify(who)} shown={shown} tries={${tries}} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }} />
+        <QuizKeep handle="shop" product="prod" lesson="lessonaaaaa1" who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }} />
         <fieldset><legend>One?</legend>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" /> A</label>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="1" /> B</label>
@@ -37,6 +37,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
 const ada = await fixture();
 const adaOtherQuestions = await fixture({ shown: "aaaaaaaaaaa1,aaaaaaaaaaa9" });
 const adaAfterRecordedTry = await fixture({ tries: 1 });
+const adaQuizChanged = await fixture({ version: "v2" });
 const bo = await fixture({ who: "b".repeat(32) });
 
 const engine = process.env.E2E_BROWSER ?? "chromium";
@@ -112,6 +113,11 @@ try {
   is("Clear my answers empties the choices and forgets them", [await picked(), await kept()], [[false, false, false, false], null]);
   is("says so, and the focus goes to the quiz's first choice, not nowhere", [await status(), await tab.evaluate(() => document.activeElement?.getAttribute("name"))], ["Your answers are cleared.", "q_aaaaaaaaaaa1"]);
 
+  await tab.getByLabel("A").check();
+  await open(adaQuizChanged);
+  is("a quiz the creator changed since never gets the old choices, and they are forgotten (review of #4324)", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);
+
+  await open(ada);
   await tab.getByLabel("A").check();
   await open(adaOtherQuestions);
   is("a try with other questions never gets them, and they are forgotten", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);

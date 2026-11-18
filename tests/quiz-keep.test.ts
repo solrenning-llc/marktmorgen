@@ -18,6 +18,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as keepRules from "@/lib/quiz-keep-rules";
 import { QUIZ_KEEP_DAYS, checkedAfter, draftOf, draftToRestore, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
+import * as keepKey from "@/lib/quiz-keep-key";
 import { deviceQuizKey } from "@/lib/quiz-keep-key";
 import { devicePlaceKey } from "@/lib/lesson-position";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -40,7 +41,7 @@ const inputs = [
 part("What is kept");
 {
   const draft = draftOf(inputs, shown, 0, NOW);
-  is("every question of the try, answered or not; never a hidden field or a value that is not a choice", draft, { at: NOW, shown, tries: 0, answers: { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] } });
+  is("every question of the try, answered or not; never a hidden field or a value that is not a choice", draft, { at: NOW, shown, tries: 0, version: "", answers: { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] } });
   is("worth keeping only with an answer", [hasAnswers(draft), hasAnswers(draftOf(inputs.map((i) => ({ ...i, checked: false })), shown, 0, NOW))], [true, false]);
   is("kept per store, course, lesson and student", quizKeepKey("shop", "prod", "lesson", "abc"), "mm:quiz:shop:prod:lesson:abc");
 }
@@ -81,6 +82,33 @@ part("One student's draft is never another's (review of #4324)");
   is("no server key: no code, so nothing is kept", deviceQuizKey("course1", "ada@example.com"), null);
   if (stripeBefore !== undefined) process.env.STRIPE_SECRET_KEY = stripeBefore;
   if (dataBefore !== undefined) process.env.NIMBUS_DATA_KEY = dataBefore;
+}
+
+part("A quiz the creator changed never gets an old draft (review of #4324, LOW 3)");
+{
+  // The draft keeps a choice by its place (value={ci}); a reordered choice would get another one's mark. The server's
+  // code for the quiz's words and choices (quizVersion) is kept with it, and a draft for another code is never put back.
+  const v1 = JSON.stringify(keepRules.draftOf(inputs, shown, 0, NOW - 60_000, "v1"));
+  type Restore = (raw: string | null, shown: string, tries: number, now: number, version: string) => keepRules.QuizDraft | null;
+  const restore = keepRules.draftToRestore as unknown as Restore;
+  is("the same quiz: put back", restore(v1, shown, 0, NOW, "v1")?.answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] });
+  is("the quiz changed since: never", restore(v1, shown, 0, NOW, "v2"), null);
+  is("a draft kept before the code: never", restore(JSON.stringify({ ...JSON.parse(v1), version: undefined }), shown, 0, NOW, "v1"), null);
+  const version = (keepKey as unknown as Record<string, unknown>).quizVersion as ((questions: Quiz["questions"]) => string) | undefined;
+  const q = (id: string, text: string, choices: string[], correct = [0]) => ({ id, text, kind: "single" as const, choices, correct, explanation: "" });
+  const base = [q("aaaaaaaaaaa1", "One?", ["A", "B"]), q("aaaaaaaaaaa2", "Two?", ["C", "D"])];
+  is("the server makes the code", typeof version, "function");
+  if (version) {
+    is("the same words and choices: the same code", version(base), version(base.map((x) => ({ ...x }))));
+    is("choices reordered: another code", version(base) === version([q("aaaaaaaaaaa1", "One?", ["B", "A"]), base[1]]), false);
+    is("a question's words changed: another code", version(base) === version([q("aaaaaaaaaaa1", "One, really?", ["A", "B"]), base[1]]), false);
+    is("the questions in another order (a shuffled try): the same code, since each answer is kept by its question", version(base), version([base[1], base[0]]));
+    is("which choice is right is never in it", version(base), version([q("aaaaaaaaaaa1", "One?", ["A", "B"], [1]), base[1]]));
+  }
+  const quizView = readFileSync("components/lesson-quiz.tsx", "utf8");
+  const keeper = readFileSync("components/quiz-keep.tsx", "utf8");
+  is("the lesson hands the code to the keeping", /version=\{quizVersion\(quiz\.questions\)\}/.test(quizView), true);
+  is("which keeps it and checks it", /draftOf\(snapshot\(\), shown, tries, Date\.now\(\), version\)/.test(keeper) && /draftToRestore\(raw, shown, tries, Date\.now\(\), version\)/.test(keeper), true);
 }
 
 part("Putting it back");

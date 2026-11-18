@@ -613,6 +613,7 @@ export const FAMILIES: Record<string, Family> = {
       per("own", 401, MARK, "A link in one of the store's own emails noted."),
       per("access", 401, MARK, "A link in an access email noted."),
       per("monthly", 401, MARK, "A link in a monthly email noted."),
+      per("order", 401, MARK, "A membership's ad cookies noted, once per membership sold with the buyer's yes (lib/ad-events.ts).", KIND("membership")),
       // A confirmed Path lead's mark (lib/path-lead.ts) is noted beside the link that carried it (13 [D10], review M1 of #3431).
       per("access", 401, MARK, "A Path lead's mark noted: a sign-up link used.", MAIL("join")),
       per("order", 401, MARK, "A Path lead's mark noted: a free copy's link used.", KIND("free")),

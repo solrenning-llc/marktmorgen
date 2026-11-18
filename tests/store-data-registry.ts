@@ -853,9 +853,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pp:settle:after@lib/paypal-payouts.ts": company("Where the daily PayPal settling stopped", "One store id for the whole company, kept seven days."),
   "nl:pp:stores@lib/paypal-payouts.ts": company("Stores with a batch open", "One set for every store."),
   "nl:pp:unk:month:@lib/paypal-payouts.ts": company("Monthly counts of PayPal payout batches whose answer was not known", "Three counts a month (unknown, settled, manual), no store or person; at most 14 monthly keys alive for 400 days."),
-  "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days at most.", KIND("paypal")), per("request", 3, 768, "One opened and never paid, three days.", REQ("paypal checkout"))] },
+  "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days from opening; a capture's answer that comes back after them (not reachable while each PayPal call stops at TIMEOUT_MS and PayPal is asked with a day left) keeps it six hours from that answer.", KIND("paypal")), per("request", 30, 768, "One opened and never paid: three days, kept while pending, 30 from opening at most (lib/paypal-sales.ts, watchFirst and watchLater; Claude 3's first money review of #3404). PayPal is asked only with a day left; a capture's answer that comes back after the thirty days keeps it six hours from that answer, for the sweep (Claude 5's second money review of #3411).", REQ("paypal checkout"))] },
   "nl:ppsell:own:@lib/paypal-sales.ts": short("The paid orders behind one address's product", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
+  "nl:ppsell:try:@lib/paypal-sales.ts": short("How many times a PayPal order's capture was asked for (at most CAPTURE_TRIES_PER_ORDER), until thirty days from its opening", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
   // A PayPal order hands over one product (lib/paypal-sales.ts, sellsWithPayPal): never a call, a recurring one or
@@ -919,6 +920,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pod:ok:@lib/podcast-access.ts": short("A listener's access, answered", "request", 1, KEY, REQ("page")),
   "nl:pod:t:@lib/podcast-access.ts": { what: "A listener's feed token", parts: [item(KEY, "One a buyer.", "membership")] },
   "nl:pod:@lib/podcast.ts": { what: "A podcast's episodes", parts: [capped((tier) => 0 * MAX_PRODUCTS + (tier ? 0 : 0), "Kept on the product's record (lib/store.ts, setPodcastEpisodes): counted with products.")], room: ["lib/store.ts"] },
+  // 33 [F2] part 2 (9 November 2026): the public feed's settings, only read; the studio unit that writes them counts them in the room.
+  "nl:pod:@lib/podcast-public-show.ts": { what: "A podcast's public feed settings, read for its public feed", parts: [capped(0, "Read only: nothing writes it yet, so no store keeps one; a record is read at most PUBLIC_SHOW_MAX_BYTES.", src("lib/podcast-public-show.ts", "PUBLIC_SHOW_MAX_BYTES = 768_000", "nl:pod:${id}:public"))] },
   // Read-only alias of the existing retained family below; no storage or TTL write.
   "nl:pre:@lib/dispute-preorder-review.ts": { what: "One retained pre-order row read with its existing PTTL; storage and 400-day retention priced by nl:pre:@lib/preorders.ts, with no duplicate bytes", line: "database-storage" },
   "nl:pre:@lib/preorders.ts": { what: "Pre-orders: who paid, the refunds read", parts: [per("order", 430, KB, "A pre-order and its payment, 400 days after its last change.", KIND("preorder")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled (thirty days from the last one marked) and where an unfinished pass over them stands (lib/preorders.ts passKey, a JSON of under 300 bytes, a week).")] },

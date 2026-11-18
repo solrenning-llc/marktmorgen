@@ -121,6 +121,7 @@ function FooterAnchor({ link, className }: { link: FooterLink; className: string
  * them away from it; `home` on the home page, with one short column (HOME_COLUMN).
  */
 export function SiteFooter({ variant = "full", morning = false }: { variant?: "full" | "slim" | "home"; morning?: boolean }) {
+  // oxlint-disable-next-line react/purity -- server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const year = new Date().getFullYear();
 
   if (variant === "slim") {

@@ -1930,6 +1930,7 @@ export default async function StudioPage({
                       pairChoices={await pairChoices}
                       tiers={store.tiers}
                       taxOnTop={store.tax.enabled && !store.tax.included}
+                      canSend={may("send")}
                     />
                   );
                 })()}

@@ -15,7 +15,7 @@
  * one made before every store had one. A deleted address on several rows is left out on each, never written into
  * the report or kept among the rows the import saw.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { addRows, finishUpload, previewImport, readJob, reportCsv, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { importedFor } from "@/lib/imported-purchases";
 import { erasePerson } from "@/lib/person-erasure";
@@ -120,6 +120,8 @@ function withoutList(sid: string) {
 async function openStore(owner: string, handle: string, account: string, id: string, withList = true) {
   await claimHandle(owner, handle, "Harbor Kitchen", "");
   await ensureStatsId(owner);
+  // A members import needs the postal address its emails carry (lib/move-members.ts, movePostal).
+  await setMailSettings(owner, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   if (withList) await ensureListId(owner);
   else withoutList((await storeForEmail(owner))!.sid);
   await setStripeAccount(owner, account, true);

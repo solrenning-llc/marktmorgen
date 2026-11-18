@@ -47,7 +47,8 @@ const joined = (product: string) => ({
   payment_status: "paid",
   metadata: { store: HANDLE, product },
   payment_intent: null,
-  subscription: { id: "sub_C1Member0001", object: "subscription", status: "active", metadata: { store: HANDLE, product }, items: { data: [] } },
+  // Stripe always sends at least one item, and the checkout writes the product on its price (Codex X6's re-check of #2999).
+  subscription: { id: "sub_C1Member0001", object: "subscription", status: "active", metadata: { store: HANDLE, product }, items: { object: "list", data: [{ id: "si_C1Member0001", price: { id: "price_C1Member0001", metadata: { product } } }] }, pause_collection: null },
 });
 const jar = (cookies: Record<string, string>) => ({ get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined) });
 
@@ -127,10 +128,9 @@ async function main(): Promise<void> {
     ["its payment not expanded (an id)", "pi_C5Guide0001"],
     ["its charge not expanded (an id)", { ...kept, latest_charge: "ch_C5Guide0001" }],
     ["its charge's refund in another shape", { ...kept, latest_charge: { ...kept.latest_charge, refunded: "no" } }],
-    // Codex X6's re-check of #3026 (MEDIUM): an amount refunded that is a number but no amount Stripe gives (negative,
-    // a fraction) made the row decidable, then paidAndKept dropped it, and the smaller 20% stood as proved.
-    ["an amount refunded below zero", { ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: -1 } }],
-    ["an amount refunded that is a fraction", { ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: 0.5 } }],
+    // Codex X6's re-check of #2999: an amount refunded is a whole number of cents from zero up; anything else is no amount.
+    ["its charge's amount refunded negative", { ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: -1 } }],
+    ["its charge's amount refunded a fraction", { ...kept, latest_charge: { ...kept.latest_charge, amount_refunded: 1.5 } }],
   ] as const) {
     rows = [joined(club.product.id), bought(pi)];
     is(`club member, the guide's row with ${label}: unknown (the 30% may rest on it), not 20%`, await memberPriceFor(store, product, proved), { state: "unknown" });
@@ -142,6 +142,31 @@ async function main(): Promise<void> {
   is("control: zero and a whole amount refunded are decidable", [decidable(0), decidable(1200)], [true, true]);
   rows = [{ ...joined(club.product.id), subscription: "sub_C1Member0001" }];
   is("the club's row with its subscription not expanded: unknown, not none", await memberPriceFor(store, product, proved), { state: "unknown" });
+  // Codex U on #2999 (U-20261117-0045): a subscription in part. Its tier (items, metadata) and its pause decide whether
+  // the club is held; one that does not carry them in Stripe's shape proves nothing, never the product bought.
+  const sub = joined(club.product.id).subscription;
+  const priced = { ...sub, items: { object: "list", data: [{ id: "si_C1Member0001", price: { id: "price_C1Member0001", metadata: { product: club.product.id } } }] } };
+  rows = [{ ...joined(club.product.id), subscription: priced }];
+  is("control: a whole subscription, its price's product and no pause, proves the 20%", await memberPriceFor(store, product, proved), { state: "member", percent: 20, email: MEMBER });
+  for (const [label, partial] of [
+    ["only its status", { status: "active" }],
+    ["no items", { ...sub, items: undefined }],
+    ["its items not a list", { ...sub, items: { object: "list", data: "si_C1Member0001" } }],
+    ["its item's price not expanded", { ...priced, items: { object: "list", data: [{ id: "si_C1Member0001", price: "price_C1Member0001" }] } }],
+    ["its item's price without metadata", { ...priced, items: { object: "list", data: [{ id: "si_C1Member0001", price: { id: "price_C1Member0001" } }] } }],
+    ["no metadata", { ...sub, metadata: undefined }],
+    ["metadata not text", { ...sub, metadata: { store: HANDLE, product: 7 } }],
+    ["no pause field", { ...sub, pause_collection: undefined }],
+    ["its pause in another shape", { ...sub, pause_collection: "paused" }],
+    ["its pause's end in another shape", { ...sub, pause_collection: { behavior: "void", resumes_at: "soon" } }],
+    // Codex X6's re-check of #2999 (LOW): with no item, or no product on the price nor on the subscription, the product it
+    // is on now is not proved, and falling back to the product bought would keep a member moved off it on it.
+    ["its items an empty list", { ...sub, items: { object: "list", data: [] } }],
+    ["no product on its price nor on itself", { ...sub, metadata: { store: HANDLE }, items: { object: "list", data: [{ id: "si_C1Member0001", price: { id: "price_C1Member0001", metadata: {} } }] } }],
+  ] as const) {
+    rows = [{ ...joined(club.product.id), subscription: JSON.parse(JSON.stringify(partial)) }];
+    is(`the club's subscription with ${label}: unknown, not 20%`, await memberPriceFor(store, product, proved), { state: "unknown" });
+  }
   rows = [];
 
   part("L2: a proved session behind a pass for some courses only");

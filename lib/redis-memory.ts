@@ -316,8 +316,10 @@ export class MemoryRedis {
           return [parks, Number(now)];
         }
         // lib/flow-runs.ts RELEASE_IF_OPEN: the creator's choice on a held run, only over its exact open.
-        if (key.startsWith("-- marktmorgen:flow-release-hold:v1\n") && args[0] === "4" && args.length === 14) {
-          const [, runK, logK, heldK, indexK, open, resolved, kept, status, step, now, member, person, keep] = args;
+        if (key.startsWith("-- marktmorgen:flow-release-hold:v2\n") && ((args[0] === "4" && args.length === 14) || (args[0] === "5" && args.length === 17))) {
+          const keyCount = Number(args[0]);
+          const [, runK, logK, heldK, indexK] = args;
+          const [open, resolved, kept, status, step, now, member, person, keep, due, nextMember] = args.slice(keyCount + 1);
           if (this.run(["HGET", runK, "open"]) !== open) return 0;
           this.run(["HDEL", runK, "open"]);
           this.run(["RPUSH", logK, resolved]);
@@ -327,6 +329,7 @@ export class MemoryRedis {
           this.run(["ZADD", indexK, now, person]);
           this.run(["EXPIRE", runK, keep]);
           this.run(["EXPIRE", logK, keep]);
+          if (keyCount === 5) this.run(["ZADD", args[5], due, nextMember]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:flow-retry:v1\n") && args[0] === "1" && args.length === 3) {

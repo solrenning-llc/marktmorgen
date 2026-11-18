@@ -1397,13 +1397,12 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
         ? target < 0 ? "You chose to try it again, but the step is no longer in the workflow, so the run ended." : "Tried again at your request. If the first attempt went through, this may happen twice."
         : target < 0 ? "Marked as done by you; it was the last step." : `Marked as done by you; going on to step ${target + 1}.`;
   const now = Math.floor(Date.now() / 1000);
-  if (!(await releaseHold(store.listId, flowId, person, run.open, note, status, target, now))) return "not_held";
-  if (target >= 0) {
-    const due = choice === "retry" ? now : now + flow.steps[target].delayHours * 3600;
-    const reply = await redisPipeline([["ZADD", QUEUE, due, `${store.listId}|${store.handle}|${flowId}|${target}|${run.email}`]]).catch(() => null);
-    if (!Array.isArray(reply) || reply.length !== 1) throw new FlowWriteUnconfirmed();
-  }
-  return "ok";
+  const next = target < 0 ? undefined : {
+    key: QUEUE,
+    due: choice === "retry" ? now : now + flow.steps[target].delayHours * 3600,
+    member: `${store.listId}|${store.handle}|${flowId}|${target}|${run.email}`,
+  };
+  return await releaseHold(store.listId, flowId, person, run.open, note, status, target, now, next) ? "ok" : "not_held";
 }
 
 /**

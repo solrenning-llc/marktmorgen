@@ -729,24 +729,35 @@ export async function listHeld(listId: string | null, limit = 50): Promise<{ flo
  * no `open` and nothing is written, so its record, history and index never
  * come back (Claude 3 local's MEDIUM on #4234: three round trips did).
  */
-export async function releaseHold(listId: string, flowId: string, person: string, open: string, note: string, status: RunStatus, step: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<boolean> {
+export async function releaseHold(
+  listId: string, flowId: string, person: string, open: string, note: string, status: RunStatus, step: number,
+  nowSeconds = Math.floor(Date.now() / 1000), next?: { key: string; due: number; member: string },
+): Promise<boolean> {
   const resolved = event({ at: nowSeconds, step: Number(open.split(":")[0]) || 0, stepId: open.split(":")[1] ?? "", kind: "run", state: "resolved", note });
+  const keys = [runKey(flowId, person), logKey(flowId, person), heldKey(listId), indexKey(flowId)];
+  if (next) keys.push(next.key);
   const reply = await redisPipeline([[
-    "EVAL", RELEASE_IF_OPEN, 4, runKey(flowId, person), logKey(flowId, person), heldKey(listId), indexKey(flowId),
+    "EVAL", RELEASE_IF_OPEN, keys.length, ...keys,
     open, resolved, KEPT_AFTER_CHOICE, status, step, nowSeconds, `${flowId}|${person}`, person, RUN_KEEP_SECONDS,
+    ...(next ? [next.due, next.member] : []),
   ]]).catch(() => null);
+  if (next && (!replied(reply, 1) || (reply[0] !== 0 && reply[0] !== 1))) {
+    throw new FlowRunUnavailable("The workflow continuation could not be confirmed");
+  }
   return replied(reply, 1) && reply[0] === 1;
 }
 
 /**
  * The creator's choice on a held run, in one step (KEYS: the run's record, its history, the held list, the
- * workflow's index; ARGV: the exact `open`, the "resolved" event, the events kept, status, step, now, the held
- * member, the person, how long it is kept): 1 when it was this hold and is now released; 0 when the record holds
+ * workflow's index, optionally the queue; ARGV: the exact `open`, the "resolved" event, the events kept, status,
+ * step, now, the held member, the person, how long it is kept, optionally the next due time and queue member).
+ * Scheduling the next step here keeps the release and its queue entry together during erasure (Codex X5 on #4234).
+ * Returns 1 when it was this hold and is now released; 0 when the record holds
  * no such `open` (taken by another caller, or the run erased), with nothing written. The history keeps room for
  * whatever follows (KEPT_AFTER_CHOICE), and the record and history are kept RUN_KEEP_SECONDS more, as every write
  * does. Modelled by lib/redis-memory.ts.
  */
-export const RELEASE_IF_OPEN = `-- marktmorgen:flow-release-hold:v1
+export const RELEASE_IF_OPEN = `-- marktmorgen:flow-release-hold:v2
 if redis.call("HGET", KEYS[1], "open") ~= ARGV[1] then return 0 end
 redis.call("HDEL", KEYS[1], "open")
 redis.call("RPUSH", KEYS[2], ARGV[2])
@@ -756,6 +767,7 @@ redis.call("ZREM", KEYS[3], ARGV[7])
 redis.call("ZADD", KEYS[4], ARGV[6], ARGV[8])
 redis.call("EXPIRE", KEYS[1], ARGV[9])
 redis.call("EXPIRE", KEYS[2], ARGV[9])
+if KEYS[5] then redis.call("ZADD", KEYS[5], ARGV[10], ARGV[11]) end
 return 1`;
 
 /** The commands that erase one person's run of one workflow: its record, its history and both indexes. */

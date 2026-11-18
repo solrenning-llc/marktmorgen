@@ -36,7 +36,7 @@ test("the UK consumer needs two agreeing items; the Isle of Man is not settled; 
 
 test("unreviewed nothing is collected; reviewed, an electronic service is collected on top, half up", () => {
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, now }), { kind: "refuse", reason: "review" });
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now }), {
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication: false }), {
     kind: "collect", vat: { priceCents: 1000, vatCents: 200, totalCents: 1200, basisPoints: 2000 }, place: { kind: "uk", evidence: gb },
   });
   assert.deepEqual(ukVatOnTop(1), { priceCents: 1, vatCents: 0, totalCents: 1, basisPoints: 2000 });
@@ -53,6 +53,21 @@ test("goods, a live service, an unknown product, an unknown place and an expired
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now: new Date("2027-01-01T00:00:00Z") }), { kind: "refuse", reason: "rate-expired" });
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: { ip: "US", billing: "US" }, now }), { kind: "outside", country: "US" });
   assert.deepEqual(ukCheckout({ supply: "free", priceCents: 0, items: gb, now }), { kind: "free" });
+});
+
+test("an electronic service is charged UK VAT only when it is classified as not an e-publication (Claude 5 on #4574 @2dc6127da7, MEDIO 1)", () => {
+  // E-publications are zero-rated in the UK (VAT Act 1994 Sch. 8 Group 3, as extended by SI 2020/459). The TX policy
+  // forbids picking the reading with more tax, so an unclassified product, or an e-publication, is refused, never charged 20%.
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now }), { kind: "refuse", reason: "publication" });
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication: true }), { kind: "refuse", reason: "publication" });
+  assert.equal(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication: false }).kind, "collect");
+  // Only `false` classifies: anything else is unknown.
+  for (const publication of [null, 0, "false", "no"] as unknown as boolean[]) {
+    assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication }), { kind: "refuse", reason: "publication" });
+  }
+  // The review gate and the other refusals come first and are unchanged.
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, now }), { kind: "refuse", reason: "review" });
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now: new Date("2027-01-01T00:00:00Z"), publication: false }), { kind: "refuse", reason: "rate-expired" });
 });
 
 const vat = ukVatOnTop(1000)!;
@@ -184,4 +199,17 @@ test("in another currency, the pence left always match what is left converted, s
   }
   const q4 = ukReturn([record], { start: "2026-10-01", end: "2026-12-31", filedOn: "2027-01-03" })!;
   assert.deepEqual([q4.box1Pence, q4.box6Pence], [toPence(vatLeft, "1.3137"), toPence(exLeft, "1.3137")]);
+});
+
+test("the invoice currency is a store currency with hundredths, read as Stripe writes it (Claude 5 on #4574 @2dc6127da7, LEVE 2)", () => {
+  const period = { perPound: "1.3", basis: "hmrc-period", day: "2026-11-01", source: "https://www.trade-tariff.service.gov.uk/exchange_rates" } as const;
+  // Stripe writes currencies in lower case: read as the same currency, not refused after the charge.
+  const lower = ukInvoice({ ...invoiceInput, currency: "usd", sterling: period });
+  assert.ok(lower, "a lower-case currency reads");
+  assert.equal(lower!.currency, "USD");
+  assert.equal(ukInvoice({ ...invoiceInput, currency: "gbp" })!.vatSterlingPence, 200, "lower-case sterling is sterling");
+  // ISO 4217 three-decimal currencies, a made-up code and a zero-decimal currency are never taken as hundredths.
+  for (const currency of ["IQD", "LYD", "ABC", "JPY", "KWD", "iqd"]) {
+    assert.equal(ukInvoice({ ...invoiceInput, currency, sterling: period }), null, currency);
+  }
 });

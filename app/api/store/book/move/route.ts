@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readOrder } from "@/lib/store-checkout";
-import { isCallProduct, moveBooking } from "@/lib/calls";
+import { isCallProduct, moveBooking, packageOf } from "@/lib/calls";
 import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 import { bookedHere, payBookTimes } from "@/lib/book-page-admission";
@@ -88,6 +88,8 @@ export async function POST(request: NextRequest) {
     booked: { start: order.call.start, end: order.call.end, email: order.email, buyerTz: order.call.buyerTz },
     start,
     origin: linkOrigin(request, store),
+    // A session from a package: a move made before its confirmation writes it down there too (lib/call-packages.ts).
+    fromPackage: packageOf(order.record.metadata),
   });
   return back(result.ok ? "moved" : result.reason);
 }

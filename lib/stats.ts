@@ -44,7 +44,7 @@ import { plainAmount } from "@/lib/money";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
-import { reachRows } from "@/lib/page-read";
+import { type ReadingsPartial, reachRows, readingsPartial } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
 import { type TaxSummary, taxSummary } from "@/lib/tax-summary";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
@@ -271,13 +271,37 @@ export async function recordHit(
 
 /**
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
- * item seen and the one clicked, on the day's record, which the day's first
- * view has already given its expiry. One command, and only for the visitors
- * the page chose to measure.
+ * item seen and the one clicked, on the day's record. A reading may come
+ * on a day with no view yet (its token is good for two hours, so a page shown
+ * at 23:30 UTC may be read at 00:30), so it gives the day's record its expiry
+ * itself (Claude 5 on #2571). Two commands, and only for the visitors the
+ * page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }]);
+  const counts = countsKey(statsId, dayKey(now));
+  try {
+    // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
+    // keep their room.
+    await cappedCount(counts, REACH_FIELDS_MAX, [{ field, by: 1 }]);
+  } finally {
+    // Sent whatever the count answered: an answer lost after the write leaves the record as it would be.
+    await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+  }
+}
+
+/** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
+export const CONFIRMED_LEAD_FIELD = "lc";
+/**
+ * One confirmed lead on the store's all-time record, for lib/path-lead.ts,
+ * which sends it once an address's mark is newly taken. A HINCRBY of its own,
+ * outside the record's capped count (cappedCount), as "u" is: a record already
+ * at LIFE_WRITE_MAX would put a new field under "~" and Path would never see
+ * it (review 6748073377 of #3431, L4). One field more at the most, and its
+ * answer is exactly the new count, which the caller reads.
+ */
+export function confirmedLeadCommand(statsId: string): (string | number)[] {
+  return ["HINCRBY", lifeKey(statsId), CONFIRMED_LEAD_FIELD, 1];
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -553,6 +577,8 @@ export type Stats = {
   previousTrafficAvailable?: Record<"d7" | "d30" | "d90", boolean>;
   /** Everything since `since`, or null when it could not be read. */
   life: (WindowStats & { since: string }) | null;
+  /** Whether this window's page readings went past their ceiling, so time on page and reading depth are partial (lib/page-read.ts). */
+  readsPartial?: ReadingsPartial | "unknown" | null;
 };
 
 const ranked = (map: Map<string, number>): Ranked =>
@@ -716,11 +742,14 @@ export async function readStats(store: Store, now = Date.now()): Promise<Stats |
     d30: { visitors: Number(results[base + 4]) || 0, ...sum(days.slice(-60, -30)) },
     d90: { visitors: Number(results[base + 5]) || 0, ...olderTotals },
   };
-  const life = await readLife(store, now).catch((error) => {
-    console.error("reading all-time counts failed", error);
-    return null;
-  });
-  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life };
+  const [life, readsPartial] = await Promise.all([
+    readLife(store, now).catch((error) => {
+      console.error("reading all-time counts failed", error);
+      return null;
+    }),
+    readingsPartial(store, now),
+  ]);
+  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life, readsPartial };
 }
 
 /**
@@ -756,7 +785,7 @@ export async function campaignViews(
 }
 
 /** Fields the all-time record keeps for itself rather than as counts. */
-const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap"]);
+const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap", CONFIRMED_LEAD_FIELD]);
 /** Beyond this many fields, the smallest sources and tags are let go. */
 const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
@@ -1683,8 +1712,10 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
 /**
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
- * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none; an answer in any other
+ * where visits came from (r:<source>), the visitors (u) and the confirmed
+ * leads (lc: addresses that used their confirmation link, lib/path-lead.ts),
+ * which Marktmorgen Path reads; the addresses only asked for (fs:<channel>)
+ * are there too, for the store's numbers, never as Path's leads. Empty when there is none; an answer in any other
  * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {
@@ -2256,6 +2287,8 @@ export type StatsData = {
    * clicked it, in the order of the page. Measured on one visitor in eight.
    */
   reach: Record<"d7" | "d30" | "d90", { visitors: number; rows: ReachItem[] }>;
+  /** Set when this month's page readings reached their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
+  readsPartial?: ReadingsPartial | "unknown" | null;
   /**
    * The stretch of days just before each window, to set the window beside:
    * the 7 days before the last 7, and so on. Sales and money are null where
@@ -2582,6 +2615,7 @@ export function studioStats(
       d30: reachItems(store, w.d30.reach ?? {}, titles),
       d90: reachItems(store, w.d90.reach ?? {}, titles),
     },
+    readsPartial: stats.readsPartial ?? null,
   };
 }
 

@@ -410,6 +410,7 @@ export async function startPitch(
     status: "draft",
     createdAt: now,
     sentAt: 0,
+    stoppedAt: 0,
   };
   const pushedOut = pitches.length - replaced.length >= MAX_PITCHES && spare.some((p) => !replaced.includes(p)) ? spare.find((p) => !replaced.includes(p))! : null;
   const commands: (string | number)[][] = [
@@ -559,20 +560,42 @@ export async function readStopLink(token: string): Promise<{ domain: string; sto
 export async function stopFromLink(token: string, everyone: boolean, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const link = await readLink(token);
   if (!link) return false;
-  // Read and written exactly (CX-123 rule 24; J and Codex Q on #2870): the pitch is nil or a string, and the write
+  // Read and written exactly (CX-123 rule 24; J and Codex Q on #2870): the pitch is nil or a string, and each write
   // answers one count for each command. Anything else throws, so the stop is never said done on a write whose answer
   // is not known (the route then answers done=0, and pressing again only adds what may already be there).
-  const raw = repliesFor(await redisPipeline([["HGET", key(link.s, "pitches"), link.id]]), 1)?.[0];
-  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("the pitch a stop link names");
-  const pitch = parsePitch(raw);
-  const writes: (string | number)[][] = [
-    ["SADD", key(link.s, "stop"), link.d],
-    ...(everyone ? [["SADD", STOP_ALL, link.d]] : []),
-    // An answer the creator marked (replied, deal) stays: the business is closed by the stop set all the same, and
-    // "What your pitches did" keeps counting it (Claude 1 cloud on #4123). Only a pitch with no answer becomes "stopped".
-    ...(pitch && (pitch.status === "draft" || pitch.status === "sent") ? [["HSET", key(link.s, "pitches"), link.id, JSON.stringify({ ...pitch, status: "stopped", sentAt: pitch.sentAt || now } satisfies Pitch)]] : []),
-  ];
-  const receipt = repliesFor(await redisPipeline(writes), writes.length);
-  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("a business's stop");
+  let raw = await keptPitch(link.s, link.id);
+  // The stop sets are what close the business, so they go first and on their own.
+  const sets: (string | number)[][] = [["SADD", key(link.s, "stop"), link.d], ...(everyone ? [["SADD", STOP_ALL, link.d]] : [])];
+  wrote(await redisPipeline(sets), sets.length, "a business's stop");
+  // Then the pitch, only over the exact record read (Codex V on #4123): a mark the creator wrote meanwhile is read
+  // again and kept, with the stop beside it. After PITCH_STOP_TRIES changes in a row the business stays closed by
+  // the sets all the same.
+  for (let tries = 0; tries < PITCH_STOP_TRIES && typeof raw === "string"; tries += 1) {
+    const next = stoppedPitch(parsePitch(raw), now);
+    if (!next) break;
+    const [swapped] = wrote(await redisPipeline([["EVAL", PITCH_IF_READ, 1, key(link.s, "pitches"), link.id, raw, JSON.stringify(next)]]), 1, "a business's stop");
+    if (swapped === 1) break;
+    raw = await keptPitch(link.s, link.id);
+  }
   return true;
+}
+
+/** How many times a stop link reads its pitch again when it changed in between; a company cost (the outreach-stop guard). */
+export const PITCH_STOP_TRIES = 3;
+
+/** Writes a pitch only while it still holds the exact record read (stopFromLink). Billed 1 + 2; lib/redis-memory.ts runs it. */
+const PITCH_IF_READ = `-- marktmorgen:outreach-pitch-if-read:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
+/**
+ * What a business's stop makes of its pitch, or null when nothing changes. A pitch with no answer becomes "stopped";
+ * an answer the creator marked (replied, deal) stays, with when the stop came beside it, so "What your pitches did"
+ * counts both (Claude 1 cloud and Codex X7 on #4123).
+ */
+function stoppedPitch(pitch: Pitch | null, now: number): Pitch | null {
+  if (!pitch || pitch.status === "stopped") return null;
+  if (pitch.status === "draft" || pitch.status === "sent") return { ...pitch, status: "stopped", sentAt: pitch.sentAt || now, stoppedAt: pitch.stoppedAt || now };
+  return pitch.stoppedAt ? null : { ...pitch, stoppedAt: now };
 }

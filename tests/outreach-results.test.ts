@@ -65,7 +65,7 @@ async function main(): Promise<void> {
 
   part("In the real studio, the numbers follow the list");
   {
-    const pitch = (id: string, goal: OutreachGoal, status: PitchStatus): Pitch => ({ id, goal, status, domain: `${id}.example`, company: id, to: `hello@${id}.example`, role: true, country: "US", page: `https://${id}.example/contact`, line: "", foundAt: 1, subject: "Hi", body: "Hello", footer: "", stop: "", createdAt: 1, sentAt: status === "draft" ? 0 : 2 });
+    const pitch = (id: string, goal: OutreachGoal, status: PitchStatus): Pitch => ({ id, goal, status, domain: `${id}.example`, company: id, to: `hello@${id}.example`, role: true, country: "US", page: `https://${id}.example/contact`, line: "", foundAt: 1, subject: "Hi", body: "Hello", footer: "", stop: "", createdAt: 1, sentAt: status === "draft" ? 0 : 2, stoppedAt: 0 });
     const pitches = Array.from({ length: 5 }, (_, i) => pitch(`s${i}`, "sponsor", "sent"));
     const shown = await mount(OutreachStudio, { sender: { name: "Ana", address: "1 Main St" }, pitches, left: 0, on: false, off: null, storeUrl: "https://marktmorgen.com/@ana" });
     const card = () => find(shown.tree(), (n) => n.type === OutreachResultsCard)[0];

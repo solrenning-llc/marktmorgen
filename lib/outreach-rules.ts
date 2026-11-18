@@ -537,6 +537,11 @@ export type Pitch = {
   status: PitchStatus;
   createdAt: number;
   sentAt: number;
+  /**
+   * When the business pressed the stop link, 0 if never. Kept beside the status, so a pitch the creator marked
+   * replied or deal keeps that mark and is still counted as asked to stop (Codex X7 on #4123).
+   */
+  stoppedAt: number;
 };
 
 export function parsePitch(raw: unknown): Pitch | null {
@@ -564,6 +569,7 @@ export function parsePitch(raw: unknown): Pitch | null {
       status: PITCH_STATUSES.includes(v.status as PitchStatus) ? (v.status as PitchStatus) : "draft",
       createdAt: num(v.createdAt),
       sentAt: num(v.sentAt),
+      stoppedAt: num(v.stoppedAt),
     };
   } catch {
     return null;

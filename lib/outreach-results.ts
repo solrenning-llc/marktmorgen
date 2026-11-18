@@ -7,7 +7,8 @@
  *   - Only this store's own pitches, as the creator marked them: "sent" when
  *     they said they sent it; "replied" and "deal" are answers; "stopped" is
  *     a business that asked not to be written to again, said apart, never
- *     counted as an answer. Drafts are not sent.
+ *     counted as an answer; a replied or deal pitch whose business pressed
+ *     stop after counts as both (its stoppedAt). Drafts are not sent.
  *   - Below MIN_SENT sent pitches there is not enough to learn from, and the
  *     page says so instead of a share or a tip; the same for each goal.
  *   - The next step only states what the creator's own numbers show: drafts
@@ -33,8 +34,14 @@ const SENT: ReadonlySet<PitchStatus> = new Set(["sent", "replied", "deal", "stop
 /** What each goal is called in a sentence: "sponsor pitches". */
 const GOAL_WORDS: Record<OutreachGoal, string> = { sponsor: "sponsor", partner: "partner", business: "business" };
 
+/**
+ * A business that asked not to be written to again: a pitch stopped, or one the creator marked replied or deal whose
+ * business pressed stop after, which keeps its answer and is counted here too (Codex X7 on #4123).
+ */
+const askedToStop = (p: { status: PitchStatus; stoppedAt?: number }) => p.status === "stopped" || (p.stoppedAt ?? 0) > 0;
+
 /** The creator's results from their own pitches; `none` when they have not written any. */
-export function outreachResults(pitches: readonly { goal: OutreachGoal; status: PitchStatus }[]): OutreachResults {
+export function outreachResults(pitches: readonly { goal: OutreachGoal; status: PitchStatus; stoppedAt?: number }[]): OutreachResults {
   if (!pitches.length) return { kind: "none" };
   const drafts = pitches.filter((p) => p.status === "draft").length;
   const sentPitches = pitches.filter((p) => SENT.has(p.status));
@@ -51,7 +58,7 @@ export function outreachResults(pitches: readonly { goal: OutreachGoal; status: 
   const rows: GoalRow[] = OUTREACH_GOALS.map(({ id, label }) => {
     const mine = sentPitches.filter((p) => p.goal === id);
     const answered = mine.filter((p) => p.status === "replied" || p.status === "deal").length;
-    return { goal: id, label, sent: mine.length, answered, deals: mine.filter((p) => p.status === "deal").length, stopped: mine.filter((p) => p.status === "stopped").length, enough: mine.length >= MIN_SENT };
+    return { goal: id, label, sent: mine.length, answered, deals: mine.filter((p) => p.status === "deal").length, stopped: mine.filter(askedToStop).length, enough: mine.length >= MIN_SENT };
   }).filter((row) => row.sent > 0);
 
   // A goal is said to get answers more often only against another goal with enough sent, and only when strictly more often.

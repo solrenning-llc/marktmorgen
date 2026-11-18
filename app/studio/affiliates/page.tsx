@@ -13,7 +13,7 @@ import { AffiliateStudio } from "@/components/affiliate-studio";
 import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts } from "@/components/paypal-payouts";
-import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { onTheirWay, paypalChecks, paypalLeftOut, paypalLeftOutText, paypalPayableLines, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
@@ -53,7 +53,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
     // The creator's own codes, so one of them can be given to an affiliate
     // (lib/affiliate-codes.ts). Only worth asking Stripe when they have made any.
     store.hasDiscounts && store.stripeAccountId
-      ? listCodes(store.stripeAccountId).catch(() => ({ state: "error" as const }))
+      ? listCodes(store.stripeAccountId, { active: true }).catch(() => ({ state: "error" as const }))
       : Promise.resolve({ state: "unavailable" as const }),
     // Payments whose answer from PayPal is not known (lib/paypal-payouts.ts): counted, never guessed.
     paypalChecks(store).catch(() => null),
@@ -196,6 +196,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}
+          // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
           today={new Date().toISOString().slice(0, 10)}
           currency={store.currency}
           elsewhere={book?.elsewhere ?? 0}
@@ -207,8 +208,9 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
             book && away !== null && checks !== null ? (
               <PayPalPayouts
                 initial={paypal}
-                people={payableLines(book, away).length}
-                cents={batchTotal(payableLines(book, away))}
+                people={paypalPayableLines(book, away).length}
+                cents={batchTotal(paypalPayableLines(book, away))}
+                leftOutNote={paypalLeftOut(book, away) > 0 ? paypalLeftOutText(paypalLeftOut(book, away)) : ""}
                 currency={store.currency}
                 onTheirWay={away.size}
                 checking={checks.checking}

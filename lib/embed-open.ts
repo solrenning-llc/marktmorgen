@@ -52,7 +52,16 @@ function fromThisSite(referer: string | null, host: string | null): boolean {
 }
 
 /** Reads the open and says what the page may show; the page counts the visit itself (components/store-beacon.tsx). Never throws. */
-export async function readScriptOpen(store: Store, mode: ScriptMode, query: Record<string, unknown>): Promise<ScriptOpen> {
+export async function readScriptOpen(
+  store: Store,
+  mode: ScriptMode,
+  query: Record<string, unknown>,
+  /**
+   * True when the caller has already taken this render's public request and found the store not resting
+   * (app/embed/[handle]/[product], #4634): the open is then not counted a second time (Claude 7 on #4645).
+   */
+  counted = false,
+): Promise<ScriptOpen> {
   const asked = await headers();
   const ip = clientAddress({ headers: asked });
   const referer = asked.get("referer");
@@ -73,6 +82,6 @@ export async function readScriptOpen(store: Store, mode: ScriptMode, query: Reco
   // A frame on a site the creator did not list shows the plain link and asks nothing more.
   if (mode === "overlay" && !site) return { ...base, live: false, reason: "site" };
   if (!(await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600))) return { ...base, live: false, reason: "limited" };
-  if (await isResting(store).catch(() => true)) return { ...base, live: false, reason: "resting" };
+  if (!counted && (await isResting(store).catch(() => true))) return { ...base, live: false, reason: "resting" };
   return { ...base, live: true, reason: "" };
 }

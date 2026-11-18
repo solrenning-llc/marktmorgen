@@ -23,7 +23,8 @@ jobs:
   documentation-scope:
     name: Documentation scope (accessibility-studio-matrix)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10 min: on 16/11/2026 a full-history checkout alone passed 5 min on main and froze the queue (#4826).
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.scope.outputs.full }}
       deferred: ${{ steps.scope.outputs.deferred }}
@@ -86,6 +87,8 @@ jobs:
         run: node tests/e2e/deals-board-focus.mjs
       - name: Page editor arrows keep focus at an edge, moves and removals said, no icon button animated in forced colors (synthetic, no server)
         run: node tests/e2e/page-editor-actions.mjs
+      - name: Lesson focus mode hides what is around the lesson, keeps the keyboard on its button and is said (synthetic, no server)
+        run: node tests/e2e/lesson-focus.mjs
       - run: node scripts/ci-build.mjs
       - name: Authenticated studio and page editor at five widths with AAA and access modes
         run: node tests/e2e/accessibility-studio-matrix.mjs

@@ -96,6 +96,7 @@
   --mint-soft: #e5f6ef;
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
+  --amber-text: #6b3d00; /* warning copy on amber-soft: 8.32:1 (amber itself is 5.97:1) */
   --amber-soft: #fdf3e1;
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
@@ -246,11 +247,24 @@ body {
   color: var(--violet-ink);
 }
 
-:where(a, button, [role="button"], input, select, textarea, summary):focus-visible,
+/* [tabindex="0"]: a box made focusable so the keyboard can scroll it (a wide table, a long text) gets the same ring
+   as a control, not only the browser's own (2.4.7, 2.4.13; tests/focus-ring-regions.test.ts). */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex="0"]):focus-visible,
 :where(input[type="radio"]):focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
   border-radius: 6px;
+}
+
+/* A file field kept visually hidden (sr-only) behind a label drawn as a button takes the Tab key, but its own ring is
+ * clipped to one pixel: the ring goes on the label that is seen, whether it wraps the field, comes just before it or
+ * just after it (WCAG 2.4.7, 2.4.13; tests/file-input-focus-ring.test.ts). In forced colors the outline keeps a system
+ * color of its own. */
+label:has(> input[type="file"].sr-only:focus-visible),
+label:has(+ input[type="file"].sr-only:focus-visible),
+input[type="file"].sr-only:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
 }
 
 /*
@@ -1212,7 +1226,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -1330,7 +1344,10 @@ a.chip {
    bar rather than by colour alone. */
 
 .toc-link {
-  display: block;
+  /* A 44 px tall target for each entry of a page index (2.5.5 AAA, tests/legal-pages-accessibility.test.ts). */
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
   border-left: 2px solid var(--line);
   padding: 0.3rem 0 0.3rem 0.85rem;
   color: var(--ink-mute);
@@ -1732,6 +1749,11 @@ a.chip {
   font-size: 1.25rem;
   letter-spacing: -0.02em;
 }
+/* No block of an article's or the mission's prose is wider than 80 characters, at any width or with text spacing
+   (1.4.8 AAA, tests/mission-article-line-length.test.ts). */
+.prose-nb :where(p, li, blockquote) {
+  max-width: 46ch;
+}
 .prose-nb a {
   color: var(--violet-deep);
   font-weight: 600;
@@ -1969,6 +1991,11 @@ a.chip {
      break on its own. On a 320px screen one of them is enough to push the
      whole page sideways, so they break wherever they must. */
   overflow-wrap: anywhere;
+}
+/* No block of a legal page's text is wider than 80 characters, at any width or with text spacing (1.4.8 AAA,
+   tests/legal-pages-accessibility.test.ts). */
+.legal-body :where(p, li, dd, blockquote) {
+  max-width: 46ch;
 }
 .legal-body a {
   color: var(--violet-deep);
@@ -2369,6 +2396,16 @@ a.chip {
   border-color: var(--st-accent-text);
   box-shadow: 0 0 0 3px var(--st-accent-soft);
 }
+/* No block of the digital consent box is wider than 80 characters, wherever it is drawn (1.4.8 AAA,
+   tests/consent-box-line-length.test.ts): its paragraphs and the sentence the buyer checks (the label's span); its
+   error box and its screen-reader-only line keep their width. In @layer components at no weight, like the store
+   front's caps below: where the box sits in .st-measure or [data-store-layout] their narrower 34ch still applies,
+   and Tailwind's utilities still win. */
+@layer components {
+  :where([data-digital-consent]) :where(p:not(.st-note, .sr-only), label > span) {
+    max-width: 46ch;
+  }
+}
 /* Keyboard focus stays distinct even when a creator picks a very pale or
    dark accent. Each opaque band is large enough to be seen on its own. */
 .st-field:focus-visible {
@@ -2564,6 +2601,14 @@ select.st-field:not([multiple]),
   align-items: center;
   min-height: 2.75rem;
 }
+/* The same on every other page under a store (tip, waitlist, letters, blog, manage, renew, pay, ...): a way back drawn
+   directly inside a <div> or <nav> stands alone, so it is a 44 px target too (2.5.5 AAA,
+   tests/store-back-links-target.test.ts). A link in a sentence sits in a <p> or <span> and keeps its line. */
+.st-page :is(div, nav) > a.st-footer-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
 /* A summary drawn as such a link (the presale's "Or join the waitlist") opens from a 44 px row by its padding, so it
    stays a list item with its triangle. The first padding is for a browser without the lh unit. */
 [data-store-layout] summary.st-footer-link {
@@ -2571,6 +2616,24 @@ select.st-field:not([multiple]),
   padding-block: 0.625rem;
   padding-block: calc((2.75rem - 1lh) / 2);
 }
+/* begin studio target floor (AX274 audit, cloud P)
+ * In the studio, every disclosure summary and every label that wraps a checkbox or a radio is a target at least
+ * 44 px tall (WCAG 2.2 2.5.5 Target Size (Enhanced), AAA; AX274 Part A item 4). About 50 summaries and 167 checkboxes
+ * across its components measured 13 to 20 px; a label is the checkbox's target too, since a click on it ticks the box.
+ * app/studio/layout.tsx marks the studio's pages with data-studio (display: contents, so no box of its own). In a layer
+ * and behind :where, so a size or a padding a control sets for itself with a utility still wins (tests/studio-target-floor.test.ts).
+ * align-content centers a one-line summary's words, its open/closed marker with them, in the taller row.
+ */
+@layer components {
+  [data-studio] :where(summary) {
+    min-height: 2.75rem;
+    align-content: center;
+  }
+  [data-studio] :where(label:has(> input[type="checkbox"], > input[type="radio"])) {
+    min-height: 2.75rem;
+  }
+}
+/* end studio target floor */
 /* A line of the store front's sentences, and of its questions, stays at or under 80 characters at any width (WCAG
    1.4.8): the cards (li) keep the grid's columns, their words are capped. Counted in Chromium, 56ch let a real sentence
    reach 81 a line and words of narrow letters (i, l, t, f, j, r) 126; at 34ch they measured 51 and 75.
@@ -2697,6 +2760,9 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 .st-title-link {
   color: inherit;
   text-decoration: none;
+  /* A creator's title or name with one long word (a German compound, a run-together name) wraps inside its
+     card instead of running past it and being cut off on a phone (WCAG 1.4.10). */
+  overflow-wrap: anywhere;
   background-image: linear-gradient(currentColor, currentColor);
   background-size: 0% 2px;
   background-position: 0 100%;
@@ -2705,6 +2771,13 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 }
 .st-title-link:hover {
   background-size: 100% 2px;
+}
+/* The embedded card's title: its click area covers the block of the title and the store's name, at least 44 px tall
+   (2.5.5 AAA, tests/embed-title-target.test.ts); the two-line clamp and the focus ring on the words stay. */
+.em-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 .st-title-link:focus-visible,
 .st-cover-link:focus-visible,
@@ -5000,6 +5073,15 @@ fieldset:disabled .cm-poll-row {
   .st-has-sticky {
     padding-bottom: 6.5rem;
   }
+  /*
+   * WCAG 2.2 2.4.11/2.4.12: the browser keeps what has keyboard focus above the
+   * bar instead of under it (tests/sticky-buy-focus.test.ts). Held while the bar
+   * is away too: focus can scroll the buy box off screen, and the bar then comes
+   * back over what was just focused.
+   */
+  html:has(.st-sticky-buy) {
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
 }
 .st-sticky-price {
   min-width: 0;
@@ -5129,6 +5211,19 @@ fieldset:disabled .cm-poll-row {
   gap: 0.5rem;
   max-width: calc(100vw - 1.5rem);
 }
+/*
+ * WCAG 2.4.12 (Focus Not Obscured, Enhanced): on a phone the cart's button
+ * sits over the top of the page, where nothing scrolls a link out from under
+ * it (the store's line of news, the store's name on a product's page). Once
+ * the button is there, the page starts below it: 0.75rem from the top, 44px
+ * tall, and 0.5rem of room. Lower down, html's scroll-padding-top (5.5rem)
+ * already keeps what has the focus clear of it.
+ */
+@media (max-width: 639.98px) {
+  body:has(#cart .st-cart-open) .st-page {
+    padding-top: calc(44px + 1.25rem + env(safe-area-inset-top));
+  }
+}
 .st-cart-open {
   min-height: 44px;
   gap: 0.5rem;
@@ -5251,3 +5346,38 @@ html:has([data-product-editor]) {
   }
 }
 /* end 654 [WG14] */
+
+/* 274 [AX1] dark mode, stage 1: dormant dark tokens (lib/dark-tokens.ts). */
+/* Nothing sets data-color-scheme yet, so no page changes. tests/dark-tokens.test.ts holds every pair to AAA. */
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --paper: #10151d;
+  --sand: #161c26;
+  --sand-deep: #1e2531;
+  --line: #2a3240;
+  --line-strong: #3b4453;
+  --line-off: #7d8797;
+  --ink: #f4f2ed;
+  --ink-soft: #dad7d0;
+  --ink-mute: #c9c5bc;
+  --lilac: #1d1f3a;
+  --lilac-deep: #262a4d;
+  --action-bg: #b9b7f5;
+  --action-on: #10151d;
+  --action-border: #b9b7f5;
+  --link: #c3c1f7;
+  --focus-ring: #c3c1f7;
+  --accent-large: #9a97e0;
+  --mint-soft: #0f2a22;
+  --mint-text: #8fe8c6;
+  --mint: #4fd1a3;
+  --danger-soft: #331614;
+  --danger-text: #ffb4ab;
+  --danger: #ff7b6e;
+  --amber-soft: #2e2210;
+  --amber: #ffcf8a;
+  --amber-text: #ffcf8a;
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+/* end dark tokens */

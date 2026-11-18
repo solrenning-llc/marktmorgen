@@ -38,6 +38,7 @@ import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
+import { LessonFocus } from "@/components/lesson-focus";
 import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
 import { AccessUncheckedNote } from "@/components/access-unchecked-note";
@@ -92,12 +93,12 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const product = await readListing(store, productId);
   if (!product?.course) redirect(`/@${store.handle}`);
   const jar = await cookies();
-  const access = await courseAccess(store, product, jar);
+  const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, jar, course);
   // A draft is not: only its students and the store's owner and team, signed
   // in, see anything of it, a free preview included (MM-SA-30). Anyone else
   // goes where an id that does not exist goes, before its lessons are read.
   if (product.hidden && access.state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
-  const course = await readCourse(product.course.id);
   const base = `/@${store.handle}/course/${product.id}`;
   const found = course ? findLesson(course, lessonId) : null;
   if (!course || !found) redirect(base);
@@ -133,7 +134,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
     // A store with no plan that can be charged plays video for the hours
     // it has, and is paused past them (lib/plan-standing.ts).
-    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store) : Promise.resolve(null),
+    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store, { free: access.state !== "open" }) : Promise.resolve(null),
     lesson.quiz ? readQuizFor(course.id, lesson.id) : Promise.resolve(null),
     lesson.quiz && student ? attemptOf(course.id, lesson.id, who) : Promise.resolve<Attempt | null>(null),
     // An assignment, and what this student handed in for it (lib/assignment.ts).
@@ -196,12 +197,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
         {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
-        <p className="text-sm">
+        {/* 295 [SQ6]: "Focus mode" hides everything here marked group-data-[focus=on]/focus:hidden. */}
+        <LessonFocus words={{ focusOn: w.focusOn, focusOff: w.focusOff, focusOnSaid: w.focusOnSaid, focusOffSaid: w.focusOffSaid }}>
+        <p className="text-sm group-data-[focus=on]/focus:hidden">
           <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
           <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
         </p>
 
-        <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] group-data-[focus=on]/focus:mt-0 group-data-[focus=on]/focus:lg:grid-cols-1">
           <article className="st-card min-w-0 p-5 sm:p-8">
             <h1 className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{lesson.title}</h1>
             {!open ? (
@@ -308,6 +311,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <p className="st-note mt-6" role="status">
                   <strong>{w.pausedStrong}</strong>{` ${w.pausedRest(store.name)}`}
                 </p>
+              ) : video?.kind === "free_paused" ? (
+                <p className="st-note mt-6" role="status">
+                  <strong>{w.pausedStrong}</strong>{` ${w.freePausedRest}`}
+                </p>
               ) : video?.kind === "failed" ? (
                 <p className="st-note mt-6">{w.videoFailed(store.name)}</p>
               ) : (
@@ -381,11 +388,13 @@ export default async function LessonPage({ params, searchParams }: Params) {
             ) : null}
 
             {note ? (
+              <div className="group-data-[focus=on]/focus:hidden">
               <LessonNotes
                 initial={note.state === "kept" ? { state: "kept", text: note.text } : note}
                 where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
                 language={store.language}
               />
+              </div>
             ) : null}
 
             <div className="mt-8 flex flex-wrap items-center gap-3 border-t pt-6" style={{ borderColor: "var(--st-line)" }}>
@@ -417,15 +426,16 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 </form>
               ) : null}
               {next && (isDone || done === null || !student || !open || lesson.task) ? (
-                <Link href={`${base}/${next.lesson.id}`} className="btn st-btn">{w.nextLesson}</Link>
+                // .btn sets its own display, so the hiding is on a wrapper.
+                <span className="group-data-[focus=on]/focus:hidden"><Link href={`${base}/${next.lesson.id}`} className="btn st-btn">{w.nextLesson}</Link></span>
               ) : null}
               {previous ? (
-                <Link href={`${base}/${previous.lesson.id}`} className="st-footer-link text-sm font-semibold">{w.previousLesson}</Link>
+                <Link href={`${base}/${previous.lesson.id}`} className="st-footer-link text-sm font-semibold group-data-[focus=on]/focus:hidden">{w.previousLesson}</Link>
               ) : null}
             </div>
           </article>
 
-          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">
+          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2 group-data-[focus=on]/focus:hidden">
             <p className="st-label">{w.inThisCourse}</p>
             <div className="mt-3">
               <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
@@ -442,7 +452,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
           </aside>
 
           {reader && talking ? (
-            <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+            <div className="min-w-0 lg:col-start-1 lg:row-start-2 group-data-[focus=on]/focus:hidden">
               <LessonComments
                 threads={threads}
                 reader={reader}
@@ -457,6 +467,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             </div>
           ) : null}
         </div>
+        </LessonFocus>
       </main>
     </div>
   );

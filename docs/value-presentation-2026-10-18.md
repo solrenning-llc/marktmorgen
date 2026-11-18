@@ -85,11 +85,11 @@ Generated from the actual CI renderer for MR; amounts are registered-model calcu
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.73 | $32.01 | $5.45 | 10.03% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $89.39 | $315.08 | $53.18 | 9.78% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $28.39 | $228.13 | $41.05 | 11.61% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $324.87 | $2,253.70 | $402.88 | 11.39% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $56.65 | $513.27 | $92.93 | 11.81% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $649.54 | $5,072.22 | $912.56 | 11.60% | $1.00 | positive | no |
+| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $89.43 | $315.05 | $53.17 | 9.78% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $28.40 | $228.12 | $41.05 | 11.61% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $324.97 | $2,253.62 | $402.86 | 11.39% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $56.67 | $513.26 | $92.92 | 11.81% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $649.80 | $5,072.01 | $912.51 | 11.60% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |

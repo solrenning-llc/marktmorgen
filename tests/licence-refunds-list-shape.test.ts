@@ -121,6 +121,18 @@ async function main(): Promise<void> {
   await run();
   is("a later healthy run revokes it", await checkKey(store, app, key), "revoked");
 
+  part("A refund dated ahead of the clock cannot advance the next scan");
+  const later = await keyOf(sale(5));
+  sold(5);
+  const anchorKey = `nl:keys:${store.statsId}:refunds:since`;
+  const beforeFuture = NOW - 30;
+  refunds = [refund("re_TestShape0004", intent(4), NOW + 86_400)];
+  await run();
+  is("a future date on an already processed refund leaves the anchor", redis.run(["GET", anchorKey]), String(beforeFuture));
+  refunds = [refund("re_TestShape0005", intent(5), NOW - 5)];
+  await run();
+  is("the next valid refund revokes its key", await checkKey(store, app, later), "revoked");
+
   done();
 }
 

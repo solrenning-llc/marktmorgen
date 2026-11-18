@@ -10,8 +10,8 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.46% / 60.23% | 12.16% | 270 | $69 / $690 |
-| Studio | **$839 / $8,390** | every #553 figure, none cut | 61.18% / 60.87% | 12.44% | 17 | $449 / $4,490 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.46% / 60.23% | 12.16% | 271 | $69 / $690 |
+| Studio | **$839 / $8,390** | every #553 figure, none cut | 61.17% / 60.87% | 12.44% | 17 | $449 / $4,490 |
 | Scale | **$1,739 / $17,390** | every #553 figure, none cut | 61.30% / 60.97% | 12.49% | 8 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).
@@ -142,7 +142,7 @@ R² 0.635 (adjusted 0.552), main; 0.678 (adjusted 0.620), robustness. Each step 
 
 **Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to twice today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).
 
-**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 3¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
+**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 2¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
 
 **Objective.** Demand at each price is q = (price ÷ the band's median price)^ε, one scenario for each ε in −0.5, −1, −1.5 and −2; the objective is the sum over plans of q times the monthly payment's net at full use: **a profit index in dollars per customer the band's median price would bring**, comparable within a scenario only. No scenario is a measurement: no sale has ever been open.
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 5.0% | 2.8% / 0.3% / 2.4% / 5.0% | 270 |
+| Store | $189 | 5.0% | 2.8% / 0.3% / 2.4% / 5.0% | 271 |
 | Studio | $839 | 22.0% | 22.0% / 1.5% / 11.0% / 21.7% | 17 |
 | Scale | $1,739 | 24.9% | 24.9% / 1.6% / 12.7% / 24.9% | 8 |
 
@@ -178,7 +178,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: none finite | $79: none finite | $99: none finite | $129: none finite |
-| Studio | $449: none finite | $559: none finite | $669: 111 | $889: 14 |
+| Studio | $449: none finite | $559: none finite | $669: 112 | $889: 14 |
 | Scale | $999: none finite | $1,239: none finite | $1,489: 16 | $1,989: 5 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
@@ -213,7 +213,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Scale | orders | 150 | $1,219 | 1.03× | 1.06× |
 | Scale | store-email | 80 | $1,269 | 1.01× | 1.02× |
 | Scale | transactional-email | 100 | $1,269 | 1.01× | 1.02× |
-| Scale | list-email | 1,000 | $1,089 | 1.09× | 1.18× |
+| Scale | list-email | 1,000 | $1,099 | 1.08× | 1.17× |
 | Scale | visits | 4,000 | $1,059 | 1.10× | 1.22× |
 
 ## 4. At least the best competitor in the band, on every attribute (alternative B)
@@ -260,7 +260,7 @@ Raised to the band's best finite figure, the lowest price that keeps 60%: list-e
 | products | 2,000 products | 50 | Kajabi Growth | Kajabi Pro | **no** |
 | fee | 0% of a sale | 0% | Kajabi Growth, Kajabi Pro, ClickFunnels Optimize, ClickFunnels Dominate | — | yes |
 
-Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $26,539; storage $2,059; all of them together **$27,089 a month** (today $999). Where a competitor in the band prints "unlimited" (list-email, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
+Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $26,539; storage $2,069; all of them together **$27,089 a month** (today $999). Where a competitor in the band prints "unlimited" (list-email, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
 
 So "superior on every attribute to the best competitor in its band" is **infeasible** for every plan (an unlimited figure in every band), and on the finite metered figures alone it costs the prices above, far above both the band and the scenarios' best prices. Where Marktmorgen is ahead without it: 0% of a sale (tied with the best in each band), 2,000 products, 100,000 contacts (above every finite figure in the Store and Studio bands).
 

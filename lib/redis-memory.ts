@@ -172,6 +172,11 @@ export class MemoryRedis {
     return made;
   }
 
+  /** An empty hash, set, sorted set or list: Redis keeps none, so it is not there. */
+  private static empty(held: unknown): boolean {
+    return (held instanceof Map || held instanceof Set) ? held.size === 0 : Array.isArray(held) && held.length === 0;
+  }
+
   /**
    * EXPIRE, PEXPIRE and EXPIREAT as Redis 7 answers them (redis.io/docs/latest/commands/expire): NX sets an expiry only
    * on a key that has none, XX only on one that has one, GT only when the new one is later (no expiry counts as never,
@@ -266,6 +271,11 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
+        if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, mark] = args;
+          return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;
@@ -585,13 +595,13 @@ export class MemoryRedis {
           if (withIndex) { this.run(["SADD", args[6], member]); this.run(["EXPIREAT", args[6], day]); this.scriptCalls += 2; }
           return 1;
         }
-        // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link and the entry still exist.
-        if (key.startsWith("-- marktmorgen:waitlist-confirm:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, link, list, email, entry] = args;
+        // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link exists and the entry still holds what was read.
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, link, list, email, entry, read] = args;
           this.scriptCalls += 1;
           if (this.run(["EXISTS", link]) === 0) return 0;
           this.scriptCalls += 1;
-          if (this.run(["HEXISTS", list, email]) === 0) return 0;
+          if (this.run(["HGET", list, email]) !== read) return 0;
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
           return 1;
@@ -751,6 +761,28 @@ export class MemoryRedis {
           const [, hash, field, value, mark] = args;
           if (this.run(["HGET", hash, field]) !== value) return 0;
           return this.run(["HDEL", hash, field, mark]);
+        }
+        // lib/traffic.ts FLY_SHARE_HOLD: a hold added to a connection's share of copies only under a token not yet there.
+        if (key.startsWith("-- marktmorgen:fly-share-hold:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, hash, field, token, units, keep] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HSETNX", hash, token, units]) === 0) return -1;
+          this.scriptCalls += 2;
+          const count = this.run(["HINCRBY", hash, field, units]);
+          this.run(["EXPIRE", hash, keep]);
+          return count;
+        }
+        // lib/traffic.ts FLY_SHARE_SETTLE: a hold settled by its token, 1 in place, 0 absent (then fenced with "~"), -1 else.
+        if (key.startsWith("-- marktmorgen:fly-share-settle:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, token, units, keep] = args;
+          this.scriptCalls += 1;
+          const held = this.run(["HGET", hash, token]);
+          if (held === units) return 1;
+          if (held !== null && held !== undefined) return -1;
+          this.scriptCalls += 2;
+          this.run(["HSET", hash, token, "~"]);
+          this.run(["EXPIRE", hash, keep]);
+          return 0;
         }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
@@ -925,6 +957,16 @@ export class MemoryRedis {
           if (!Number.isSafeInteger(peak)) return -1;
           const count = this.run(["ZCARD", index]) as number;
           this.run(["HSET", month, "count", count, "peak", Math.max(count, peak), "day", day, "complete", complete]);
+          this.run(["EXPIRE", month, seconds]); return 1;
+        }
+        // lib/held-stores.ts HELD_ONCE (DONO-3): a store counted once in a month, its mark and its count together.
+        if (key.startsWith("-- marktmorgen:held-once:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, month, mark, field, seconds] = args;
+          const type = this.run(["TYPE", month]);
+          if (type !== "none" && type !== "hash") return -1;
+          const raw = this.run(["HGET", month, field]);
+          if (raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          if (this.run(["HSETNX", month, mark, "1"]) === 1) this.run(["HINCRBY", month, field, 1]);
           this.run(["EXPIRE", month, seconds]); return 1;
         }
         // CX-67: one funded held-store reconfirmation per UTC day, site ceiling.
@@ -1322,6 +1364,14 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/suppression.ts ERASED_WITHIN: a deleted person's print read against Redis's clock (this stand-in's).
+        if (key.startsWith("-- marktmorgen:erased-within:v1\n") && args[0] === "1" && args.length === 4) {
+          this.scriptCalls += 2;
+          const at = this.run(["HGET", args[1], args[2]]);
+          if (at === null || at === undefined) return 0;
+          if (!/^\d+$/.test(String(at))) return -1;
+          return Number(at) >= Math.floor(this.now() / 1000) - Number(args[3]) ? 1 : 0;
+        }
         // lib/path-lead.ts PATH_LEAD_COUNT: nothing for an address deleted from the store (-2); otherwise the erasure
         // note, then the mark, and the count only with the mark; -1 when the record or the notes are of another type.
         if (key.startsWith("-- marktmorgen:path-lead-count:v2\n") && args[0] === "4" && args.length === 11) {
@@ -1578,6 +1628,20 @@ export class MemoryRedis {
           if (Array.isArray(taken) && taken[0] === 1) this.run(["HSET", codes, promo, affiliate]);
           return taken;
         }
+        // lib/page-read.ts ADMIT_READING: the window's count within the token's ceiling and its nonce's mark, together.
+        if (key.startsWith("-- marktmorgen:read-admit:v3\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, count, cap, markSeconds, countSeconds] = args;
+          if (this.run(["EXISTS", mark]) === 1) return [-1, Number(this.run(["GET", count]) ?? 0)];
+          const n = Number(this.run(["INCR", count]));
+          if (n === 1) this.run(["EXPIRE", count, countSeconds]);
+          if (n > Number(cap)) {
+            this.run(["DECR", count]);
+            this.run(["SET", mark, "1", "EX", markSeconds]);
+            return [0, n - 1];
+          }
+          this.run(["SET", mark, "1", "EX", markSeconds]);
+          return [1, n];
+        }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
@@ -1767,6 +1831,19 @@ export class MemoryRedis {
             changed.push(field);
           }
           return changed;
+        }
+        // lib/contacts.ts CONTACT_FORGET: the row and its counts in one step, only over the row read.
+        if (key.startsWith("-- marktmorgen:contact-forget:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, leads, agreed, unsub, email, raw, wasAgreed, wasUnsub] = args;
+          if (this.run(["HGET", leads, email]) !== raw) return 0;
+          this.run(["HDEL", leads, email]);
+          const down = (counter: string) => {
+            const n = Number(this.run(["GET", counter]) ?? "0") || 0;
+            if (n > 0) this.run(["DECR", counter]);
+          };
+          if (wasAgreed === "1") down(agreed);
+          if (wasUnsub === "1") down(unsub);
+          return 1;
         }
         // lib/quiz.ts QUIZ_TRY: one try checked against the state the caller read, counted, charged to the store and written at once.
         if (key.startsWith("-- marktmorgen:quiz-try:v1\n") && (args[0] === "3" || args[0] === "4") && args.length === 1 + Number(args[0]) + 8) {
@@ -2513,7 +2590,11 @@ export class MemoryRedis {
         // passes for the wrong reason.
         const at = flags.indexOf("EX");
         const seconds = at >= 0 ? Number(flags[at + 1]) : NaN;
+        // EXAT: the unix second the key ends at (lib/paypal-sales.ts, an order kept until thirty days from opening).
+        const exat = flags.indexOf("EXAT");
+        const endsAt = exat >= 0 ? Number(flags[exat + 1]) : NaN;
         if (Number.isFinite(seconds)) this.until.set(key, this.now() + seconds * 1000);
+        else if (Number.isFinite(endsAt)) this.until.set(key, endsAt * 1000);
         else this.until.delete(key);
         return "OK";
       }
@@ -2591,15 +2672,14 @@ export class MemoryRedis {
         let gone = 0;
         // Its expiry goes with it, as in Redis: a key made again under the same name starts with none (C7 TTL hunt).
         for (const one of [key, ...args]) {
-          const held = this.data.get(one);
-          const empty = (Array.isArray(held) && held.length === 0) || ((held instanceof Set || held instanceof Map) && held.size === 0);
-          if (this.data.delete(one) && !empty) gone += 1;
+          const there = this.data.has(one) && !MemoryRedis.empty(this.data.get(one));
+          if (this.data.delete(one) && there) gone += 1;
           this.until.delete(one);
         }
         return gone;
       }
       case "EXISTS":
-        return this.data.has(key) ? 1 : 0;
+        return this.data.has(key) && !MemoryRedis.empty(this.data.get(key)) ? 1 : 0;
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.
@@ -2630,7 +2710,7 @@ export class MemoryRedis {
       case "TYPE": {
         // As Redis names them, for a test that walks every key (tests/erasure-world.ts).
         const held = this.data.get(key);
-        if (held === undefined) return "none";
+        if (held === undefined || MemoryRedis.empty(held)) return "none";
         if (typeof held === "string") return "string";
         if (held instanceof Map) return "hash";
         if (held instanceof Set) return "set";
@@ -2759,7 +2839,7 @@ export class MemoryRedis {
         const pattern = at >= 0 ? args[at + 1] : "*";
         const matcher = new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
         for (const k of [...this.data.keys()]) this.live(k);
-        const found = [...this.data.keys()].filter((k) => matcher.test(k));
+        const found = [...this.data.keys()].filter((k) => matcher.test(k) && !MemoryRedis.empty(this.data.get(k)));
         return ["0", found];
       }
       case "HSCAN": {

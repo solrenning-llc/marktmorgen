@@ -153,7 +153,10 @@ async function main(): Promise<void> {
     is("their open upload is given up at the vault", calls, [`abort ${open.path}`]);
     is("every file of theirs goes to the erasure to be deleted", [...files].sort(), [first.path, second.path, open.path].sort());
     is("their records are gone", [await readSubmission(FOLDER, first.id), await readSubmission(FOLDER, second.id)], [null, null]);
-    is("their files are off the sweep's list", (await due()).filter((p) => p !== bobs.path), []);
+    // Left due at once on the sweep's list (Claude 6 on #3570): the next daily sweep deletes them if the erasure's own
+    // delete does not happen.
+    const dueScores = await redis.pipeline([first.path, second.path, open.path].map((p) => ["ZSCORE", "nl:sub:due", `${FOLDER}|${p}`]));
+    is("their files stay on the sweep's list, due at once", dueScores.every((score) => score !== null && Number(score) <= NOW), true);
     is("their places are let go", await liveCount(FOLDER, COURSE, lesson(1), ANA, NOW), 0);
     is("their room slots are emptied, so the store's room keeps nothing of them", await Promise.all([1, 2, 3].map((n) => slotOf(ANA, lesson(n)))), [null, null, null]);
     is("another buyer's slot stays", (await slotOf(BOB, lesson(1))) !== null, true);
@@ -174,6 +177,26 @@ async function main(): Promise<void> {
     void open;
     await redis.pipeline([["ZADD", `nl:sub:who:${FOLDER}:${"f".repeat(32)}`, NOW + DAY, "not|an entry"]]);
     is("an entry that does not read is unknown, never left out", await threw(() => forgetSubmissionsPerson(FOLDER, "f".repeat(32), [], world().steps)), "unknown");
+  }
+
+  part("An erased buyer's file stays on the sweep's list until it is deleted (Claude 6 on #3570, MEDIUM)");
+  {
+    // The erasure hands the path to its caller, which deletes it at the end; if that delete never happens (it fails and
+    // its fallback fails too, or the function stops first), the sweep's entry is the file's only durable reminder.
+    const who = "c".repeat(32);
+    const { steps } = world();
+    const sent = await send(who, lesson(40), steps);
+    const files: string[] = [];
+    is("control: the file is on the sweep's list before", (await due()).includes(sent.path), true);
+    await forgetSubmissionsPerson(FOLDER, who, files, steps, SHOP);
+    is("control: the erasure names the file to its caller", files.includes(sent.path), true);
+    // The caller's delete never happens here.
+    is("the file stays on the sweep's list after the erasure", (await due()).includes(sent.path), true);
+    is("pressed again, nothing is left to find", await forgetSubmissionsPerson(FOLDER, who, [], steps), 0);
+    const sweeper = world();
+    await sweepSubmissions(NOW + 400 * DAY, sweeper.steps);
+    is("so the daily sweep deletes the erased buyer's file", sweeper.calls.includes(`delete ${sent.path}`), true);
+    is("and then it is off the list", (await due()).includes(sent.path), false);
   }
 
   part("The copy of their data");
@@ -199,6 +222,12 @@ async function main(): Promise<void> {
     await redis.pipeline([["SET", `nl:sub:rec:${FOLDER}:${kept.id}`, "{broken"]]);
     const said = (await submissionsCopyOf(FOLDER, who)) as Record<string, unknown>[];
     is("a record that does not read is said, never left out", typeof said.find((r) => r.lesson === lesson(5))?.unread, "string");
+    // The course is named by the product the buyer bought, as the other course records of the copy are (Claude 5 and
+    // Claude 3 on #3570, LOW); a course no longer in the store keeps its own id.
+    const named = (await submissionsCopyOf(FOLDER, who, (id) => (id === COURSE ? "prod_course" : null))) as Record<string, unknown>[];
+    is("the course is named by its product, in every kind of record", [...new Set(named.map((r) => r.course))], ["prod_course"]);
+    const gone = (await submissionsCopyOf(FOLDER, who, () => null)) as Record<string, unknown>[];
+    is("a course with no product left keeps its own id", [...new Set(gone.map((r) => r.course))], [COURSE]);
   }
 
   part("The daily sweep at the end of the keeping time");
@@ -323,7 +352,8 @@ async function main(): Promise<void> {
     is("after an erasure said done, no record of the erased buyer remains", await readSubmission(FOLDER, id), null);
     // An empty index counts as none (Redis drops a sorted set with no member; the stand-in may keep the key).
     const left = await redis.pipeline([["ZCARD", `nl:sub:who:${FOLDER}:${who}`], ["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]);
-    is("nor their index, nor a sweep entry written again by the close", [left[0], left[1]], [0, null]);
+    // The erasure leaves the file due at once on the sweep's list (Claude 6 on #3570); the close does not push it later.
+    is("nor their index; the file's sweep entry stays due at once", [left[0], left[1] !== null && Number(left[1]) <= NOW], [0, true]);
     is("and the completed file is deleted", racing.calls.includes(`delete ${path}`), true);
 
     // Control: with no erasure, a close still keeps its record.

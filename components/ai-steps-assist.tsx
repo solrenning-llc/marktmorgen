@@ -183,6 +183,9 @@ export function AiStepsAssist<T>({
   const runRef = useRef("");
   // The steps the run was sent with, fixed when it starts: what is drawn while it runs and after it ends.
   const runSteps = useRef<AiStep[]>(steps);
+  // The same steps for drawing: a ref is never read during render (oxlint react(refs)), so the run's steps are also
+  // kept in state, set with the ref when a run starts.
+  const [drawnSteps, setDrawnSteps] = useState<AiStep[]>(steps);
   // Whether a run is going on now, read after an await, when `busy` is a stale copy.
   const busyRef = useRef(false);
   const stopRequested = useRef(false);
@@ -209,7 +212,7 @@ export function AiStepsAssist<T>({
 
   const showSteps = busy || Object.keys(states).length > 0;
   // A run's own steps while it runs and once it ended; the page's current ones only before any run.
-  const shown = showSteps ? runSteps.current : steps;
+  const shown = showSteps ? drawnSteps : steps;
   const canStop = busy && shown.length > 1 && shown.some((s) => (states[s.id] ?? "waiting") === "waiting") && Object.keys(states).length > 0;
   // Once the job has started, Stop stays drawn until it ends, unavailable when nothing is left to stop.
   const stopShown = busy && shown.length > 1 && Object.keys(states).length > 0;
@@ -326,6 +329,7 @@ export function AiStepsAssist<T>({
     runRef.current = id;
     // Fixed with the payload below: the steps drawn are the ones the server is asked to run.
     runSteps.current = steps;
+    setDrawnSteps(steps);
     startedAt.current = Date.now();
     setElapsed(0);
     setStates({});

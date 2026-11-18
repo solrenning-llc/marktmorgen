@@ -107,8 +107,11 @@ export function sessionDecidable(row: Record<string, unknown>): boolean {
   if (!plainObject(payment) || typeof payment.status !== "string") return false;
   if (payment.status !== "succeeded") return true;
   const charge = payment.latest_charge;
+  // An amount refunded is a whole number of cents from zero up, as Stripe gives it; a negative, a fraction or a number
+  // that is not finite (JSON.parse reads 1e400 as Infinity) is no amount, so the row is undecidable, never dropped as
+  // refunded with a smaller rule standing as proved (Codex X6's re-check of #3026, MEDIUM).
   return plainObject(charge) && typeof charge.paid === "boolean" && typeof charge.refunded === "boolean"
-    && typeof charge.disputed === "boolean" && typeof charge.amount_refunded === "number";
+    && typeof charge.disputed === "boolean" && Number.isSafeInteger(charge.amount_refunded) && (charge.amount_refunded as number) >= 0;
 }
 
 /**

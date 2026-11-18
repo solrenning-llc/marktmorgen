@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { readListing } from "@/lib/catalog";
-import { PreorderDayUnconfirmed, preorderViews, setExpectedDay, soonOne } from "@/lib/preorders";
+import { PREORDERS_UNREAD, PreorderDayUnconfirmed, preorderViews, setExpectedDay, soonOne } from "@/lib/preorders";
 import { preorderProblem, readExpectedDay } from "@/lib/preorder-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
@@ -48,8 +48,10 @@ export async function POST(request: NextRequest) {
       await setExpectedDay(store, product.id, day);
       saved = true;
     }
-    const views = await preorderViews(store, [product.id]);
-    return Response.json({ ok: true, view: views[product.id] ?? { day: null, waiting: 0, given: 0, refunded: 0 } });
+    const view = (await preorderViews(store, [product.id]))[product.id];
+    // Its own pre-orders unread: saved, but the counts are not invented (the catch below, "preorders_unread").
+    if (view === PREORDERS_UNREAD) throw new UnknownReplyError("a product's pre-orders");
+    return Response.json({ ok: true, view: view ?? { day: null, waiting: 0, given: 0, refunded: 0 } });
   } catch (error) {
     if (error instanceof PreorderDayUnconfirmed) {
       console.error("a pre-order change could not be confirmed saved", error);

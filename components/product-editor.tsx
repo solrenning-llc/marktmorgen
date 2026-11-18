@@ -1934,7 +1934,7 @@ export function ProductEditor({
   /** Per product with a waitlist, where it stands (lib/waitlist.ts); null when they could not be read. */
   waitlists?: Record<string, WaitlistView> | null;
   /** Each product's pre-orders, when it takes or took any (lib/preorders.ts); null when they could not be read. */
-  preorders?: Record<string, PreorderView> | null;
+  preorders?: Record<string, PreorderView | "unread"> | null;
   /** The store's postal address for email, offered for a launch email's foot. */
   mailAddress?: string;
   /** The store's color, letters, name and language, for the cover maker (components/cover-maker.tsx). */
@@ -2621,8 +2621,8 @@ export function ProductEditor({
                     initial={waitlists?.[product.id] ?? null}
                     waitlistUnread={waitlists === null}
                     suggestedAddress={mailAddress}
-                    preorders={preorders?.[product.id] ?? null}
-                    preordersUnread={preorders === null}
+                    preorders={((view) => (view === "unread" ? null : view ?? null))(preorders?.[product.id])}
+                    preordersUnread={preorders === null || preorders?.[product.id] === "unread"}
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}

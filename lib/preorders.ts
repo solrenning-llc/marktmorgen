@@ -221,10 +221,13 @@ export function preorderDay(store: Store, product: Listing, soon: boolean, day: 
 
 // ------------------------------------------------------------------ the studio
 
-/** The expected day's HSET or HDEL answered in another shape: it may or may not have been written, never said saved. */
+/**
+ * The expected day's HSET or HDEL answered in another shape, or not at all once sent: it may or may not have been
+ * written, never said saved and never said unchanged.
+ */
 export class PreorderDayUnconfirmed extends Error {
-  constructor() {
-    super("the expected day of a pre-order could not be confirmed saved");
+  constructor(cause?: unknown) {
+    super("the expected day of a pre-order could not be confirmed saved", cause === undefined ? undefined : { cause });
     this.name = "PreorderDayUnconfirmed";
   }
 }
@@ -236,11 +239,23 @@ export class PreorderDayUnconfirmed extends Error {
  */
 export async function setExpectedDay(store: Store, productId: string, day: string | null): Promise<void> {
   if (!store.statsId) return;
-  const replies = await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  // Not set up: nothing is sent, so nothing was written; the route's own error, never "unconfirmed".
+  if (!isRedisConfigured()) throw new Error("Redis is not configured");
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  } catch (error) {
+    // Sent, then its answer lost (one that does not read, a timeout, a dropped connection): the write may have been
+    // applied, so it is unconfirmed, never "nothing was changed" (Codex X4 6984205751 and X6 6989392736 on #3005).
+    throw new PreorderDayUnconfirmed(error);
+  }
   if (!oneWrite(repliesFor(replies, 1)?.[0])) throw new PreorderDayUnconfirmed();
 }
 
 export type PreorderView = { day: string | null; waiting: number; given: number; refunded: number };
+
+/** One product's pre-orders could not be read exactly: said so for that product alone (Codex X6's LOW on #3005). */
+export const PREORDERS_UNREAD = "unread" as const;
 
 /**
  * What the studio shows of each product's pre-orders, read exactly (CX-123 rule 24): the expected days a list of
@@ -248,15 +263,28 @@ export type PreorderView = { day: string | null; waiting: number; given: number;
  * else throws UnknownReplyError, never "no pre-orders": the studio says they could not be read, the pre-order
  * switch answers 503 "preorders_unread".
  */
-export async function preorderViews(store: Store, productIds: string[]): Promise<Record<string, PreorderView>> {
-  const out: Record<string, PreorderView> = {};
+export async function preorderViews(store: Store, productIds: string[]): Promise<Record<string, PreorderView | typeof PREORDERS_UNREAD>> {
+  const out: Record<string, PreorderView | typeof PREORDERS_UNREAD> = {};
   if (!store.statsId || !isRedisConfigured() || !productIds.length) return out;
   const sid = store.statsId;
   const rows = repliesFor(await redisPipeline([["HGETALL", dayKey(sid)], ...productIds.map((p) => ["HVALS", entriesKey(sid, p)])]), productIds.length + 1);
   if (!rows) throw new UnknownReplyError("the studio's pre-orders");
-  const days = exactDays(rows[0], new Set(productIds));
+  const { days, unread } = exactDays(rows[0], new Set(productIds));
   productIds.forEach((p, i) => {
-    const entries = exactPreorders([rows[i + 1]]);
+    // One product's record that does not read leaves that product's panel unread, never every product's (Codex X6's
+    // LOW on #3005); a reply that is not a list at all still throws, for every product.
+    if (unread.has(p)) {
+      out[p] = PREORDERS_UNREAD;
+      return;
+    }
+    let entries: Preorder[];
+    try {
+      entries = exactPreorders([rows[i + 1]]);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      out[p] = PREORDERS_UNREAD;
+      return;
+    }
     const day = days.get(p) ?? null;
     if (!day && entries.length === 0) return;
     out[p] = { day, ...preorderCounts(entries) };
@@ -264,18 +292,22 @@ export async function preorderViews(store: Store, productIds: string[]): Promise
   return out;
 }
 
-/** The expected days, read exactly: texts in pairs, and each day of a product asked about a day. Otherwise throws. */
-function exactDays(reply: unknown, asked: Set<string>): Map<string, string> {
+/**
+ * The expected days, read exactly: texts in pairs, or it throws. A product asked about whose kept day is not a day is
+ * unread, that product alone.
+ */
+function exactDays(reply: unknown, asked: Set<string>): { days: Map<string, string>; unread: Set<string> } {
   const fields = stringList(reply);
   if (!fields || fields.length % 2 !== 0) throw new UnknownReplyError("the expected days of pre-orders");
-  const out = new Map<string, string>();
+  const days = new Map<string, string>();
+  const unread = new Set<string>();
   for (let i = 0; i < fields.length; i += 2) {
     if (!asked.has(fields[i])) continue;
     const day = keptDay(fields[i + 1]);
-    if (!day) throw new UnknownReplyError("the expected days of pre-orders");
-    out.set(fields[i], day);
+    if (day) days.set(fields[i], day);
+    else unread.add(fields[i]);
   }
-  return out;
+  return { days, unread };
 }
 
 /**

@@ -132,8 +132,10 @@ function carryTree(source: PDFDocument, out: PDFDocument, kept: PDFPage[]): void
     const role = element.lookup(PDFName.of("S"));
     if (!(role instanceof PDFName)) return null;
     const ref = out.context.nextRef();
+    // A /Pg that is there but is no page reference (a direct dictionary, a number) names a page the preview cannot
+    // place, perhaps one it leaves out: the page is unknown (null), never the parent's (Codex X3 on #3785).
     const pgRef = element.get(PDFName.of("Pg"));
-    const page = pgRef instanceof PDFRef ? (pageOf.get(pgRef) ?? null) : inheritedPage;
+    const page = pgRef === undefined ? inheritedPage : pgRef instanceof PDFRef ? (pageOf.get(pgRef) ?? null) : null;
     const raw = element.lookup(PDFName.of("K"));
     const kids: PDFObject[] = raw === undefined ? [] : raw instanceof PDFArray ? raw.asArray() : [raw];
     const outKids: PDFObject[] = [];
@@ -148,7 +150,7 @@ function carryTree(source: PDFDocument, out: PDFDocument, kept: PDFPage[]): void
         }
       } else if (value instanceof PDFDict && value.lookup(PDFName.of("Type"))?.toString() === "/MCR") {
         const mcrPg = value.get(PDFName.of("Pg"));
-        const at = mcrPg instanceof PDFRef ? (pageOf.get(mcrPg) ?? null) : page;
+        const at = mcrPg === undefined ? page : mcrPg instanceof PDFRef ? (pageOf.get(mcrPg) ?? null) : null;
         const mcid = value.lookup(PDFName.of("MCID"));
         if (at === null || at === undefined || !(mcid instanceof PDFNumber) || value.has(PDFName.of("Stm"))) whole = false;
         else {

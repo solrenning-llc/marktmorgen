@@ -22,6 +22,7 @@ import {
   type Paid,
 } from "@/lib/paypal-sales";
 import { plainAmount } from "@/lib/money";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { addressHash } from "@/lib/imported-purchases";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -275,12 +276,18 @@ for (const [label, reply] of mgetReplies) {
     await withReply((c) => c[0] === "MGET", reply, () => assert.rejects(() => readPayPalSales(sid, 0, 100)));
   });
 }
-test("a sale whose record does not read makes the list partial, never complete without it; one whose record ended is gone", async () => {
+test("a sale whose record does not read is unknown, never complete without it; one whose record ended is gone", async () => {
   const [b] = await twoSales();
-  const broken = await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), "{"]], () => readPayPalSales(sid, 0, 100));
-  assert.deepEqual(broken, { sales: [b], partial: true });
-  // GET/MGET null is Redis's own word that the record ended (kept 400 days, as the list is): a known absence.
-  const gone = await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), null]], () => readPayPalSales(sid, 0, 100));
+  // Since #4001 (Codex L and Codex V there) a record that does not read is thrown as unknown, as a reply off its shape
+  // is: never a sale left out of a reading said whole. The Path's reader takes the throw as a PayPal gap.
+  await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), "{"]], () => assert.rejects(() => readPayPalSales(sid, 0, 100), UnknownReplyError));
+  // GET/MGET null is Redis's own word that the record ended, which it does PAID_KEPT_SECONDS after the sale: a sale paid
+  // inside that window whose record answers null is one this reading could not count, so the reading is partial.
+  const recent = await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), null]], () => readPayPalSales(sid, 0, 100));
+  assert.deepEqual(recent, { sales: [b], partial: true });
+  // Past the window its record ended by design and the member only waits for the next trim: a known absence.
+  const later = Math.floor(Date.now() / 1000) + 400 * 86_400; // PAID_KEPT_SECONDS in lib/paypal-sales.ts
+  const gone = await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), null]], () => readPayPalSales(sid, 0, 100, later));
   assert.deepEqual(gone, { sales: [b], partial: false });
 });
 test("controls: the sales read exactly, none is none, and more than the limit is partial", async () => {

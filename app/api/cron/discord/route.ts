@@ -4,7 +4,10 @@ import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isDiscordConfigured } from "@/lib/discord";
 import { sweepDiscord } from "@/lib/discord-access";
+import { withCutoff } from "@/lib/fetch-timeout";
 
+/** Sixty seconds, as the other scheduled jobs; the lock (120 s) outlives it, so a killed run never overlaps the next. */
+export const maxDuration = 60;
 /** How long one run may go on checking; the rest wait for the next. */
 const BUDGET_MS = 45_000;
 
@@ -14,6 +17,11 @@ const BUDGET_MS = 45_000;
  * and takes back what is no longer theirs. One run at a time.
  */
 export async function GET(request: NextRequest) {
+  // Every request it makes (Discord, Stripe) is given up by 57 s, inside maxDuration (lib/fetch-timeout.ts).
+  return withCutoff(Date.now() + 57_000, () => run(request));
+}
+
+async function run(request: NextRequest): Promise<Response> {
   if (!(await cronAllowed(request))) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }

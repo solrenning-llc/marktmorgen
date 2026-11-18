@@ -50,6 +50,7 @@ function monthName(month: string): string {
  * customers' own words.
  */
 export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
+  // oxlint-disable-next-line react/purity -- pre-existing read of today's date, not flagged by the former ESLint React Compiler rule; changing render behavior is outside the lint swap
   const thisMonth = new Date().toISOString().slice(0, 7);
   const [summary, setSummary] = useState<VoiceSummary | null>(initial);
   const [busy, setBusy] = useState(false);

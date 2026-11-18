@@ -34,6 +34,27 @@ export type OrderProblemWords = {
   errorOrder: string;
   errorLimited: string;
   errorUnavailable: string;
+  /** The page's title, and the link to it under the list of purchases (unit 3). */
+  title: string;
+  /** Over the list of orders, when none is chosen yet. */
+  chooseLead: string;
+  /** When the link finds no orders. */
+  none: string;
+  productLabel: string;
+  orderLabel: string;
+  backToList: string;
+  /** This order already has an open report. */
+  alreadyOpen: string;
+  /** The store is busy: nothing was sent. */
+  busyNow: string;
+  /** A report of this order is on its way already (its mark is pending): never "nothing was sent" (review of #3838). */
+  pendingNow: string;
+  /** The store has no room to take it. */
+  storeFull: string;
+  /** The filing threw on its way and whether it reached the inbox could not be read (review of #3838): never "nothing was sent". */
+  notConfirmed: string;
+  /** Checkouts the opening left for the orders page's older batches: not listed on this page (review of #3838). */
+  olderNotListed: string;
 };
 
 /** The sentences each language must have (the reasons and the sent line are checked on their own). */
@@ -51,6 +72,18 @@ export const ORDER_PROBLEM_KEYS = [
   "errorOrder",
   "errorLimited",
   "errorUnavailable",
+  "title",
+  "chooseLead",
+  "none",
+  "productLabel",
+  "orderLabel",
+  "backToList",
+  "alreadyOpen",
+  "busyNow",
+  "pendingNow",
+  "storeFull",
+  "notConfirmed",
+  "olderNotListed",
 ] as const satisfies readonly (keyof OrderProblemWords)[];
 
 const D = ORDER_PROBLEM_REPLY_DAYS;
@@ -72,6 +105,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "We could not find this order. Open your purchases again from the link in your email.",
     errorLimited: "Too many reports for now. Try again tomorrow.",
     errorUnavailable: "This could not be sent just now. Nothing was sent. Try again in a minute.",
+    title: "Report a problem with an order",
+    chooseLead: "Which order is it about?",
+    none: "We found no orders for this link.",
+    productLabel: "Product",
+    orderLabel: "Order",
+    backToList: "Back to your purchases",
+    alreadyOpen: `This order already has an open report. The creator has ${D} days to answer it.`,
+    busyNow: "This is busy right now. Nothing was sent. Try again in a minute.",
+    pendingNow: "A report of this order is already on its way. Check this page again in a few minutes.",
+    storeFull: "The store cannot take messages right now. Nothing was sent. Try again later or use the store's contact page.",
+    notConfirmed: "We could not confirm that your report reached the creator. It may have. Wait 10 minutes before you send it again.",
+    olderNotListed: "Only your newest purchases are listed here, so an older one cannot be chosen on this page yet.",
   },
   es: {
     button: "Informar de un problema con este pedido",
@@ -89,6 +134,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "No encontramos este pedido. Vuelve a abrir tus compras desde el enlace de tu correo.",
     errorLimited: "Demasiados avisos por ahora. Inténtalo de nuevo mañana.",
     errorUnavailable: "No se pudo enviar ahora. No se envió nada. Inténtalo de nuevo en un minuto.",
+    title: "Informar de un problema con un pedido",
+    chooseLead: "¿De qué pedido se trata?",
+    none: "No encontramos pedidos para este enlace.",
+    productLabel: "Producto",
+    orderLabel: "Pedido",
+    backToList: "Volver a tus compras",
+    alreadyOpen: `Este pedido ya tiene un aviso abierto. El creador tiene ${D} días para responderlo.`,
+    busyNow: "Ahora mismo está ocupado. No se envió nada. Inténtalo de nuevo en un minuto.",
+    pendingNow: "Ya hay un aviso de este pedido en camino. Vuelve a mirar esta página en unos minutos.",
+    storeFull: "La tienda no puede recibir mensajes ahora. No se envió nada. Inténtalo más tarde o usa la página de contacto de la tienda.",
+    notConfirmed: "No pudimos confirmar que tu aviso llegó al creador. Puede que sí. Espera 10 minutos antes de enviarlo de nuevo.",
+    olderNotListed: "Aquí solo aparecen tus compras más recientes, así que una más antigua todavía no se puede elegir en esta página.",
   },
   fr: {
     button: "Signaler un problème avec cette commande",
@@ -106,6 +163,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "Nous n'avons pas trouvé cette commande. Rouvrez vos achats depuis le lien de votre e-mail.",
     errorLimited: "Trop de signalements pour le moment. Réessayez demain.",
     errorUnavailable: "L'envoi n'a pas pu se faire pour l'instant. Rien n'a été envoyé. Réessayez dans une minute.",
+    title: "Signaler un problème avec une commande",
+    chooseLead: "De quelle commande s'agit-il ?",
+    none: "Nous n'avons trouvé aucune commande pour ce lien.",
+    productLabel: "Produit",
+    orderLabel: "Commande",
+    backToList: "Retour à vos achats",
+    alreadyOpen: `Cette commande a déjà un signalement ouvert. Le créateur a ${D} jours pour y répondre.`,
+    busyNow: "C'est occupé pour le moment. Rien n'a été envoyé. Réessayez dans une minute.",
+    pendingNow: "Un signalement de cette commande est déjà en cours d'envoi. Revenez sur cette page dans quelques minutes.",
+    storeFull: "La boutique ne peut pas recevoir de messages pour le moment. Rien n'a été envoyé. Réessayez plus tard ou utilisez la page de contact de la boutique.",
+    notConfirmed: "Nous n'avons pas pu confirmer que votre signalement est arrivé au créateur. Il est peut-être arrivé. Attendez 10 minutes avant de l'envoyer à nouveau.",
+    olderNotListed: "Seuls vos achats les plus récents sont listés ici : un achat plus ancien ne peut pas encore être choisi sur cette page.",
   },
   de: {
     button: "Ein Problem mit dieser Bestellung melden",
@@ -123,6 +192,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "Wir haben diese Bestellung nicht gefunden. Öffnen Sie Ihre Käufe erneut über den Link in Ihrer E-Mail.",
     errorLimited: "Gerade zu viele Meldungen. Versuchen Sie es morgen noch einmal.",
     errorUnavailable: "Das konnte gerade nicht gesendet werden. Es wurde nichts gesendet. Versuchen Sie es in einer Minute noch einmal.",
+    title: "Ein Problem mit einer Bestellung melden",
+    chooseLead: "Um welche Bestellung geht es?",
+    none: "Wir haben für diesen Link keine Bestellungen gefunden.",
+    productLabel: "Produkt",
+    orderLabel: "Bestellung",
+    backToList: "Zurück zu Ihren Käufen",
+    alreadyOpen: `Für diese Bestellung gibt es schon eine offene Meldung. Der Creator hat ${D} Tage Zeit, darauf zu antworten.`,
+    busyNow: "Gerade ist es belegt. Es wurde nichts gesendet. Versuchen Sie es in einer Minute noch einmal.",
+    pendingNow: "Eine Meldung zu dieser Bestellung ist bereits unterwegs. Sehen Sie in ein paar Minuten noch einmal auf dieser Seite nach.",
+    storeFull: "Der Shop kann gerade keine Nachrichten annehmen. Es wurde nichts gesendet. Versuchen Sie es später noch einmal oder nutzen Sie die Kontaktseite des Shops.",
+    notConfirmed: "Wir konnten nicht bestätigen, dass Ihre Meldung beim Ersteller angekommen ist. Vielleicht ist sie angekommen. Warten Sie 10 Minuten, bevor Sie sie erneut senden.",
+    olderNotListed: "Hier stehen nur Ihre neuesten Käufe, daher kann ein älterer Kauf auf dieser Seite noch nicht gewählt werden.",
   },
   it: {
     button: "Segnala un problema con questo ordine",
@@ -140,6 +221,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "Non abbiamo trovato questo ordine. Riapri i tuoi acquisti dal link nella tua email.",
     errorLimited: "Troppe segnalazioni per ora. Riprova domani.",
     errorUnavailable: "Non è stato possibile inviarlo adesso. Non è stato inviato nulla. Riprova tra un minuto.",
+    title: "Segnala un problema con un ordine",
+    chooseLead: "Di quale ordine si tratta?",
+    none: "Non abbiamo trovato ordini per questo link.",
+    productLabel: "Prodotto",
+    orderLabel: "Ordine",
+    backToList: "Torna ai tuoi acquisti",
+    alreadyOpen: `Questo ordine ha già una segnalazione aperta. Il creatore ha ${D} giorni per rispondere.`,
+    busyNow: "Al momento è occupato. Non è stato inviato nulla. Riprova tra un minuto.",
+    pendingNow: "Una segnalazione di questo ordine è già in arrivo. Ricontrolla questa pagina tra qualche minuto.",
+    storeFull: "Il negozio non può ricevere messaggi in questo momento. Non è stato inviato nulla. Riprova più tardi o usa la pagina dei contatti del negozio.",
+    notConfirmed: "Non abbiamo potuto confermare che la tua segnalazione sia arrivata al creatore. Potrebbe essere arrivata. Aspetta 10 minuti prima di inviarla di nuovo.",
+    olderNotListed: "Qui sono elencati solo i tuoi acquisti più recenti, quindi uno più vecchio non si può ancora scegliere in questa pagina.",
   },
   nl: {
     button: "Een probleem met deze bestelling melden",
@@ -157,6 +250,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "We konden deze bestelling niet vinden. Open je aankopen opnieuw via de link in je e-mail.",
     errorLimited: "Te veel meldingen op dit moment. Probeer het morgen opnieuw.",
     errorUnavailable: "Dit kon nu niet worden verstuurd. Er is niets verstuurd. Probeer het over een minuut opnieuw.",
+    title: "Een probleem met een bestelling melden",
+    chooseLead: "Over welke bestelling gaat het?",
+    none: "We hebben geen bestellingen gevonden voor deze link.",
+    productLabel: "Product",
+    orderLabel: "Bestelling",
+    backToList: "Terug naar je aankopen",
+    alreadyOpen: `Voor deze bestelling is al een melding open. De maker heeft ${D} dagen om die te beantwoorden.`,
+    busyNow: "Het is nu even druk. Er is niets verstuurd. Probeer het over een minuut opnieuw.",
+    pendingNow: "Er is al een melding over deze bestelling onderweg. Kijk over een paar minuten opnieuw op deze pagina.",
+    storeFull: "De winkel kan nu geen berichten ontvangen. Er is niets verstuurd. Probeer het later opnieuw of gebruik de contactpagina van de winkel.",
+    notConfirmed: "We konden niet bevestigen dat je melding bij de maker is aangekomen. Misschien wel. Wacht 10 minuten voordat je hem opnieuw stuurt.",
+    olderNotListed: "Hier staan alleen je nieuwste aankopen, dus een oudere kun je op deze pagina nog niet kiezen.",
   },
   pt: {
     button: "Informar um problema com este pedido",
@@ -174,6 +279,18 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     errorOrder: "Não encontramos este pedido. Abra suas compras de novo pelo link do seu e-mail.",
     errorLimited: "Muitos avisos por enquanto. Tente de novo amanhã.",
     errorUnavailable: "Não foi possível enviar agora. Nada foi enviado. Tente de novo em um minuto.",
+    title: "Informar um problema com um pedido",
+    chooseLead: "De qual pedido se trata?",
+    none: "Não encontramos pedidos para este link.",
+    productLabel: "Produto",
+    orderLabel: "Pedido",
+    backToList: "Voltar às suas compras",
+    alreadyOpen: `Este pedido já tem um aviso aberto. O criador tem ${D} dias para responder.`,
+    busyNow: "Está ocupado agora. Nada foi enviado. Tente de novo em um minuto.",
+    pendingNow: "Já há um aviso deste pedido a caminho. Volte a esta página em alguns minutos.",
+    storeFull: "A loja não pode receber mensagens agora. Nada foi enviado. Tente mais tarde ou use a página de contato da loja.",
+    notConfirmed: "Não conseguimos confirmar que seu aviso chegou ao criador. Pode ter chegado. Espere 10 minutos antes de enviá-lo de novo.",
+    olderNotListed: "Aqui aparecem só as suas compras mais recentes, então uma mais antiga ainda não pode ser escolhida nesta página.",
   },
 };
 

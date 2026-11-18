@@ -47,7 +47,10 @@ export const MAX_JOIN_COMMENT = 280;
 export type JoinSurveySetting = { on: boolean; version: number; hopes: JoinHope[]; own: OwnHope[] };
 export const NO_JOIN_SURVEY: JoinSurveySetting = { on: false, version: 1, hopes: [...JOIN_HOPES], own: [] };
 
-const words = (text: unknown, max: number) => (typeof text === "string" ? text.replace(/\s+/g, " ").trim().slice(0, max) : "");
+// Cut to `max` UTF-16 units, then never left ending on half of a character outside the basic plane (an emoji): a lone
+// high surrogate would turn into U+FFFD when written as UTF-8 (Claude 6 on #3652, LOW).
+const words = (text: unknown, max: number) =>
+  typeof text === "string" ? text.replace(/\s+/g, " ").trim().slice(0, max).replace(/[\ud800-\udbff]$/, "") : "";
 
 function readHopes(raw: unknown): JoinHope[] {
   const picked = Array.isArray(raw) ? raw.filter(isJoinHope) : [...JOIN_HOPES];
@@ -118,7 +121,8 @@ const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
  * an address written out to dodge a filter ("jane at gmail dot com"), and a web address with no http or www
  * ("janesmith.dev/shop", "wa.me/<number>"), whole with its path; ".js" stays, a library's name, never an address.
  */
-const SPELLED_EMAIL = /\b[\p{L}\p{N}._-]+\s+(?:at|\(at\)|\[at\])\s+[\p{L}\p{N}-]+\s+(?:dot|\(dot\)|\[dot\])\s+[a-z]{2,}\b/giu;
+// A bare "at"/"dot" needs spaces around it; a bracketed one may be glued, as in jane(at)gmail(dot)com (Claude 6 on #3652, LOW).
+const SPELLED_EMAIL = /\b[\p{L}\p{N}._-]+(?:\s+at\s+|\s*(?:\(at\)|\[at\])\s*)[\p{L}\p{N}-]+(?:\s+dot\s+|\s*(?:\(dot\)|\[dot\])\s*)[a-z]{2,}\b/giu;
 const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}(?:\/\S*)?\b/gi;
 /** Invisible format characters (zero-width and the like), which could split an address so no pattern sees it. */
 const FORMAT = /\p{Cf}/gu;
@@ -158,6 +162,9 @@ export function cleanJoinAnswer(
   if (raw.v !== setting.version) return { ok: false, problem: "version" };
   const choice = joinChoices(setting).find((c) => c.id === raw.choice);
   if (!choice) return { ok: false, problem: "choice" };
-  const comment = typeof raw.comment === "string" ? words(commentHead(raw.comment).replace(FORMAT, "").replace(LINK, " ").replace(EMAIL, " ").replace(SPELLED_EMAIL, " ").replace(BARE_LINK, " ").replace(PHONE, " ").replace(HANDLE, "$1"), MAX_JOIN_COMMENT) : "";
+  // NFKC first, so an address, web address or handle typed in fullwidth or other compatibility characters (a CJK input
+  // method in fullwidth mode) reads as the plain one the patterns know; bounded again after, since NFKC can lengthen
+  // a text (Claude 6 on #3652, MEDIUM privacy).
+  const comment = typeof raw.comment === "string" ? words(commentHead(commentHead(raw.comment).normalize("NFKC")).replace(FORMAT, "").replace(LINK, " ").replace(EMAIL, " ").replace(SPELLED_EMAIL, " ").replace(BARE_LINK, " ").replace(PHONE, " ").replace(HANDLE, "$1"), MAX_JOIN_COMMENT) : "";
   return { ok: true, answer: { v: setting.version, choice: choice.id, label: choice.label, comment } };
 }

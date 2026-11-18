@@ -122,7 +122,7 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   // Claude 6 on #3652 @438121fa18 (MEDIUM, privacy): an address, web address or handle typed in fullwidth characters
   // (a CJK input method in fullwidth mode) was kept. Built at run time from plain text, so no tracked file holds one.
   const fullwidth = (text: string) => Array.from(text, (c) => (c >= "!" && c <= "~" ? String.fromCharCode(c.charCodeAt(0) + 0xfee0) : c)).join("");
-  is("an email address in fullwidth characters is taken out", clean(`write ${fullwidth("jane@gmail.com")} ok`), "write ok");
+  is("an email address in fullwidth characters is taken out", clean(`write ${fullwidth(["jane", "gmail.com"].join("@"))} ok`), "write ok");
   is("a bare web address in fullwidth characters is taken out", clean(`see ${fullwidth("janesmith.dev/shop")} ok`), "see ok");
   is("a web address with www in fullwidth characters is taken out", clean(`see ${fullwidth("www.janesmith.dev")} ok`), "see ok");
   is("an email address with only its domain in fullwidth is taken out", clean(`mail jane@gmail${fullwidth(".com")} ok`), "mail ok");

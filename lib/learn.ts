@@ -43,7 +43,7 @@ import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
-import { isLiveSub } from "@/lib/membership-access";
+import { liveExpanded } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
 import { folderFromPathname, freeDeliveryPause, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
@@ -263,6 +263,11 @@ type Ledger = {
    */
   refunded: Set<string>;
   /**
+   * A membership on one of these purchases could not be read (rule 24): it opened nothing, and the answer is
+   * not kept, so the next good read decides (Claude 7 on #3889).
+   */
+  unread?: boolean;
+  /**
    * For each course in `paid`, the end its purchases were stamped with at checkout (24 [E7]): the most generous of
    * them, so null as soon as one purchase carries no end, else the latest stamp. Read by courseAccess.
    */
@@ -279,6 +284,7 @@ async function paidAtStripe(store: Store, email: string, exact = false): Promise
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
+  let unread = false;
   const ends = new Map<string, number | null>();
   const again = new Set<string>();
   const account = store.stripeAccountId;
@@ -330,9 +336,19 @@ async function paidAtStripe(store: Store, email: string, exact = false): Promise
         // Read from the checkout itself, never from what the product is now: a membership the creator later turned
         // into a one-off sale was still sold as a membership, and reopens nothing to a member who left.
         if (product.id === meta.product && session.mode === "subscription" && meta.kind !== "plan") {
-          const sub = session.subscription as { status?: unknown } | null;
-          // The same rule as every other door a membership opens (lib/membership-access.ts).
-          if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+          // The same rule as every other door a membership opens (lib/membership-access.ts). One that cannot be read
+          // is not ended (rule 24) and opens nothing; it does not change what the address's other purchases open,
+          // as in paidForAny (lib/community-access.ts), and the answer is not kept (Claude 7 on #3889).
+          let live: boolean;
+          try {
+            live = liveExpanded(session.subscription);
+          } catch (error) {
+            // An exact read never returns a partial ledger: a membership not read throws (Codex X4 on #3889, Claude 7).
+            if (exact || !(error instanceof UnknownReplyError)) throw error;
+            unread = true;
+            continue;
+          }
+          if (!live) {
             ended.add(product.id);
             continue;
           }
@@ -360,7 +376,7 @@ async function paidAtStripe(store: Store, email: string, exact = false): Promise
     ended.delete(id);
     if (refunded.delete(id)) again.add(id);
   }
-  return { paid: found, ended, refunded, again, ends };
+  return { paid: found, ended, refunded, again, ends, unread };
 }
 
 /** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
@@ -476,10 +492,12 @@ async function courseLedger(store: Store, email: string, read: "lenient" | "stri
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email, exact);
-      // Only the stamped ends are kept (24 [E7]): a course without one in `e` has none, which keeps the answer as short
-      // as it was for the stores whose courses have no end date.
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], a: [...asked.again], e: Object.fromEntries([...asked.ends].filter(([, end]) => end !== null)) });
-      await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
+      if (!asked.unread) {
+        // Only the stamped ends are kept (24 [E7]): a course without one in `e` has none, which keeps the answer as short
+        // as it was for the stores whose courses have no end date.
+        const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], a: [...asked.again], e: Object.fromEntries([...asked.ends].filter(([, end]) => end !== null)) });
+        await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
+      }
     } catch (error) {
       // Unknown, not none, where the caller can wait (CX-123 rule 24): a purchase refunded in full stays shut.
       if (strict || exact) throw error;

@@ -6,4 +6,5 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Opening readiness, locks 2 and 3 (Claude 1 cloud A, coordinator 14/11/2026) | claude1/opening-readiness | `docs/opening-readiness/stripe-platform.md`, `docs/opening-readiness/deemed-supplier.md` | 14/11/2026 21h30 |
 | Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

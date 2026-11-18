@@ -50,6 +50,26 @@ async function main(): Promise<void> {
   const own = `${SESSION_COOKIE}=${await openSession("owner-x@example.com")}`;
   const answer = await POST(new NextRequest("https://marktmorgen.com/api/auth/recovery-address", { method: "POST", headers: { "content-type": "application/json", cookie: own }, body: JSON.stringify({ action: "start", address: "backup-x@example.com" }) }));
   is("an owner choosing an address nobody flooded still gets the code", [answer.status, mails.filter((m) => m.to === "backup-x@example.com").length], [200, 1]);
+
+  // Codex N1 on #3897 (N1-20261118-0512): the per-inbox ceiling is what keeps this form from filling a stranger's inbox,
+  // so a count that cannot be read sends nothing, even while the code's write and the email service still answer.
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).startsWith("nl:rl:recovery-address-to:")) {
+      throw new Error("synthetic recipient counter unavailable");
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const beforeUnknown = mails.length;
+  let unknown: Response;
+  try {
+    const cookie = `${SESSION_COOKIE}=${await openSession("counter-unknown@example.com")}`;
+    unknown = await POST(new NextRequest("https://marktmorgen.com/api/auth/recovery-address", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ action: "start", address: "unknown-recipient@example.net" }) }));
+  } finally {
+    redis.pipeline = real;
+  }
+  const unknownBody = (await unknown!.json()) as { error?: string };
+  is("an unknown per-inbox count sends no code", [unknown!.status, unknownBody.error, mails.length - beforeUnknown], [503, "unsent", 0]);
   done();
 }
 

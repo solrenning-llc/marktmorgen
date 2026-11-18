@@ -16,11 +16,13 @@ import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrig
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
-import { rememberPlan } from "@/lib/plans";
+import { rememberPlan } from "@/lib/plan-remember";
 import { currentMeta } from "@/lib/tier-rules";
-import { saleOff } from "@/lib/store-sale";
+import { saleOff, saleable } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
-import { fairCoupon } from "@/lib/fair-coupon";
+import { fairCoupon, memberCoupon, memberCustomer } from "@/lib/fair-coupon";
+import { isMemberPercent, memberKeepsFloor } from "@/lib/member-price-rules";
+import { currencyRule } from "@/lib/money";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
@@ -145,6 +147,20 @@ export function fromPriceCents(product: Listing): number {
 }
 
 /** A code only for people who bought here before that Stripe would not take on this checkout (lib/returning-code.ts). */
+/**
+ * The checkout boxes the buyer ticked turned the order into one the EU VAT gate refuses (lib/eu-vat-gate.ts
+ * consumerGate): thrown before Stripe is asked anything, so nothing is held or charged, and the buyer is sent back to
+ * the page as for the product itself.
+ */
+export class BoxesRefused extends Error {
+  readonly reason: "refused" | "billing";
+  constructor(reason: "refused" | "billing") {
+    super("A checkout box makes this order one the EU VAT gate refuses");
+    this.name = "BoxesRefused";
+    this.reason = reason;
+  }
+}
+
 export class ReturningCodeRefused extends Error {
   /** "code": Stripe would not take its coupon (used up, ended, deleted); "other": the code cannot go on this checkout. */
   readonly reason: "code" | "other";
@@ -180,6 +196,11 @@ export async function createCheckout(
     held?: boolean;
     /** For a bundle its buyer builds: the products they ticked (lib/bundle-rules.ts, chosenItems). */
     picked?: string[];
+    /**
+     * The EU VAT gate for the whole order (lib/eu-vat-gate.ts consumerGate), asked again with the boxes the buyer
+     * ticked, as they are read here: a box the order's place refuses throws BoxesRefused before Stripe is asked.
+     */
+    gateBoxes?: (boxes: { product: Listing; members?: ReadonlyMap<string, Listing> }[]) => { ok: true } | { ok: false; reason: "refused" | "billing" };
     /**
      * The fingerprint of the secret the buyer's browser keeps, when an upsell
      * follows: the card is then kept for payments made while they are there.
@@ -239,6 +260,13 @@ export async function createCheckout(
      * the route from the request; "" when it is not known.
      */
     country?: string;
+    /**
+     * A member price (lib/member-price.ts, 620 [SZ4]): the percentage the page
+     * showed and the address it was proved for, proved again by the route
+     * (memberClaim) before they are passed here. Taken off like a fair price,
+     * when it takes off the most, with that address fixed on Stripe's page.
+     */
+    member?: { percent: number; email: string };
     /** No free trial: somebody coming back has had theirs. */
     noTrial?: boolean;
     /**
@@ -443,7 +471,7 @@ export async function createCheckout(
   const checked = new Set((extras.bumps ?? []).slice(0, MAX_BUMPS + 1));
   const shown = checked.size && !membership && !pwyw && product.bumps.length ? activeBumps(await readListings(store, bumpTargets(product)), product) : [];
   if (checked.has("yes") && shown[0]) checked.add(shown[0].target.id);
-  const added: { key: BumpKey; bump: Bump; target: Listing }[] = [];
+  const added: { key: BumpKey; bump: Bump; target: Listing; bundled: Listing[] | null }[] = [];
   for (const offer of shown) {
     if (!checked.has(offer.target.id)) continue;
     // A bundle ticked at checkout: its list is written down the same way.
@@ -468,7 +496,14 @@ export async function createCheckout(
     // creator left out of the programme never earns the front product's rate.
     body.set(`metadata[${key}_cents]`, String(offer.bump.priceCents));
     if (!recurring) body.set(`payment_intent_data[metadata][${key}]`, offer.target.id);
-    added.push({ key, bump: offer.bump, target: offer.target });
+    added.push({ key, bump: offer.bump, target: offer.target, bundled });
+  }
+  // The order read whole by the EU VAT gate, boxes included, before anything is sent (Claude 7 on #4572).
+  if (added.length && extras.gateBoxes) {
+    // A bundle box is read by the members already read above, so the gate costs no read of its own.
+    const boxes = added.map(({ target, bundled }) => ({ product: target, members: bundled ? new Map(bundled.map((listing) => [listing.id, listing] as const)) : undefined }));
+    const gate = extras.gateBoxes(boxes);
+    if (!gate.ok) throw new BoxesRefused(gate.reason);
   }
   if (added.length) body.set("metadata[title]", [name, ...added.map((a) => a.target.title)].join(" + ").slice(0, 480));
 
@@ -519,6 +554,19 @@ export async function createCheckout(
   // the page used to show the price, and taken off the same way as a sale,
   // when it takes off more than the sale does. Never both.
   const fairOffNow = !extras.coupon && !plan && !membership ? fairOff(store.fair, product, extras.country ?? "") : 0;
+  // A member price (lib/member-price.ts), already proved by the route: on
+  // what a sale covers, the same way, when it takes off more than a sale or
+  // a fair price does. Never two. Only on the member's own purchase of that
+  // product alone: a coupon comes off every line, so not with a box ticked
+  // (a product no rule may cover), nor a gift, places for others or a
+  // pre-order, which hand nothing to the member (lib/bundle-rules.ts).
+  const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;
+  // Never below the currency's smallest charge, as a sale and a fair price (DISC-S-1): memberClaim already
+  // refuses such a claim; this holds the floor for any other caller too.
+  const memberOffNow =
+    !extras.coupon && !plan && !membership && memberAlone && saleable(product) && extras.member && isMemberPercent(extras.member.percent) && memberKeepsFloor(product, extras.member.percent, currencyRule(store.currency).minCharge)
+      ? extras.member.percent
+      : 0;
   // A membership's introductory price (lib/intro-price.ts), unless a
   // come-back offer replaces it: one discount at a time, as everywhere here.
   const intro = membership && !extras.coupon ? activeIntro(product, store.tiers) : null;
@@ -543,6 +591,15 @@ export async function createCheckout(
     body.set("metadata[intro_cents]", String(intro.cents));
     body.set("metadata[regular_cents]", String(product.priceCents));
     body.set("subscription_data[metadata][intro]", String(intro.count));
+  } else if (memberOffNow > saleOffNow && memberOffNow > fairOffNow) {
+    // The member's own purchase: the checkout belongs to a customer of the creator's made with the proved
+    // address, which Stripe's page shows and the buyer cannot change. customer_email would be only a prefill,
+    // typed over for somebody else (Codex X4 on #2999). No address proved, no member price: refused.
+    if (!extras.member?.email) throw new Error("The payment page could not be opened");
+    body.set("customer", await memberCustomer(store.stripeAccountId, extras.member.email));
+    body.set("discounts[0][coupon]", await memberCoupon(store.stripeAccountId, memberOffNow));
+    body.set("metadata[member]", String(memberOffNow));
+    mayComeOff.push({ kind: "percent", percent: memberOffNow });
   } else if (fairOffNow > saleOffNow) {
     body.set("discounts[0][coupon]", await fairCoupon(store.stripeAccountId, fairOffNow));
     body.set("metadata[fair]", `${extras.country}:${fairOffNow}`);
@@ -581,7 +638,8 @@ export async function createCheckout(
   // applies, or the buyer names the price): never opened without the code
   // the buyer asked for, and never two discounts.
   if (extras.returning && body.get("discounts[0][coupon]") !== extras.returning.coupon) throw new ReturningCodeRefused("other");
-  if (extras.email) body.set("customer_email", extras.email);
+  // Never over a member's own customer (above): Stripe takes one or the other, and the member's address is the one proved.
+  if (extras.email && !body.has("customer")) body.set("customer_email", extras.email);
 
   if (extras.gift) {
     body.set("metadata[gift]", extras.gift);
@@ -772,6 +830,17 @@ export async function createCheckout(
     else body.set(`subscription_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
   }
 
+  // A member's own customer (above): Stripe makes no other for the checkout (an offer after paying or a tax
+  // number box asked for one) and takes no prefill beside it; what the buyer types on its page (their name, a
+  // billing or a delivery address, which a tax number box and the tax on top need) is saved to that customer.
+  if (body.has("customer")) {
+    body.delete("customer_creation");
+    body.delete("customer_email");
+    body.set("customer_update[address]", "auto");
+    body.set("customer_update[name]", "auto");
+    if (shipping) body.set("customer_update[shipping]", "auto");
+  }
+
   // Until the durable lifecycle is activated, the existing single-file sale
   // keeps its legacy checkout, independently of optional newsletter consent.
   // An activated durable producer still needs original-file access proof;
@@ -782,7 +851,8 @@ export async function createCheckout(
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
     !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
-    !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
+    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.
+    !body.has("discounts[0][promotion_code]") && !(body.has("discounts[0][coupon]") && !body.has("metadata[member]")));
   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
     throw new Error("The payment page could not be opened");
   }
@@ -919,7 +989,7 @@ export async function createCheckout(
   // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
   // rememberPlan throws unless the write is confirmed, and on an id the job could not follow (Codex X4 on #4493), so a
   // checkout whose end is not on that list is never handed out; the open session then expires unpaid.
-  if (plan || (membership && membership.payments > 0)) await rememberPlan(store.stripeAccountId ?? "", session.id);
+  if (plan || (membership && membership.payments > 0)) await rememberPlan(store.stripeAccountId ?? "", session.id, { sid: store.sid, product: product.id });
   // When Stripe closes it, in Unix seconds: its own expires_at, else the one this checkout was opened with (a held unit,
   // the reminders' hour), else null (Stripe's default day). A caller that keeps the address keeps it no longer
   // (lib/winback-send.ts; Claude 7's review of #3482, MEDIUM).

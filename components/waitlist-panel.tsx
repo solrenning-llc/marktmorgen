@@ -71,6 +71,7 @@ export function WaitlistPanel({
   preorderBlocked = null,
   hasContent = true,
   price,
+  canLaunch = true,
 }: {
   productId: string;
   initial: WaitlistView | null;
@@ -87,6 +88,8 @@ export function WaitlistPanel({
   hasContent?: boolean;
   /** Its price, in the store's currency, as the waitlist's email carries it. */
   price: string;
+  /** Whether this role may put it on sale: that emails the waitlist, so it needs "send" (lib/team-roles.ts). */
+  canLaunch?: boolean;
 }) {
   const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null, switchedOff: false });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
@@ -266,7 +269,7 @@ export function WaitlistPanel({
               ? `It goes on sale at once, and ${view.confirmed === 1 ? "the confirmed address gets" : `each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses gets`} one email with its link and price. Then the waitlist's addresses are deleted; whoever also asked to hear from you is on your list already.`
               : "Nobody has confirmed yet, so no email goes out: it just goes on sale."}
           </p>
-          {view.confirmed ? (
+          {canLaunch && view.confirmed ? (
             <>
               <label className="block">
                 <span className="field-label">A note in the email (optional)</span>
@@ -295,7 +298,7 @@ export function WaitlistPanel({
               </label>
             </>
           ) : null}
-          {confirming && view.confirmed ? (
+          {canLaunch && confirming && view.confirmed ? (
             <div id={`waitlist-${productId}-review`} className="rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
               <h3 id={`waitlist-${productId}-review-title`} tabIndex={-1} className="font-semibold">Check before it goes out</h3>
               {/* A summary list, one answer a row (GOV.UK "Check answers"). */}
@@ -325,6 +328,7 @@ export function WaitlistPanel({
               </dl>
             </div>
           ) : null}
+          {canLaunch ? (
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -349,6 +353,12 @@ export function WaitlistPanel({
                 ? "Put it on sale and tell the waitlist"
                 : "Put it on sale"}
           </button>
+          ) : (
+            // An Editor has no sending to the list (lib/team-roles.ts): the server refuses the launch, so it is not offered.
+            <p className="text-sm text-ink-soft">
+              Putting it on sale emails its waitlist, so it is done by someone on your team who can send to your list: the owner or an Admin.
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -357,10 +367,18 @@ export function WaitlistPanel({
           {launch.stopped
             ? `The waitlist email stopped because your store stayed switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} went out. Whoever did not get it is still on the waitlist. To email them, mark it coming soon again, then put it on sale.`
             : launch.finished
-              ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
+              ? launch.total === 0
+                ? "Launched. Nobody on the waitlist had confirmed, so no email went out."
+                : `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
               : view.switchedOff
                 ? `Paused while your store is switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails sent so far. The rest go out by themselves once your store is back on. If it is still switched off on ${dayWords(new Date((launch.started + LAUNCH_HOLD_SECONDS) * 1000).toISOString().slice(0, 10))}, the email stops, and whoever did not get it stays on the waitlist.`
-                : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+                : launch.total === 0
+                  ? // Nobody to email: only the waitlist's deletion is left, done by the next run.
+                    "On sale. Nobody on the waitlist had confirmed, and the waitlist is being deleted."
+                  : launch.cursor >= launch.total
+                    ? // Every email went: only the waitlist's deletion is left, done by the next run.
+                      `On sale. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out, and the waitlist is being deleted.`
+                    : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
         </p>
       ) : null}
 

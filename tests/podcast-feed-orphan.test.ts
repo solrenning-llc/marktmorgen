@@ -11,6 +11,7 @@
  * Synthetic only: an in-memory Redis, no provider.
  */
 import assert from "node:assert/strict";
+import { createHash, randomBytes } from "node:crypto";
 import test from "node:test";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { feedToken, readFeedToken, tokenKey } from "@/lib/podcast-access";
@@ -41,7 +42,11 @@ const isGrantWrite = (commands: Commands) =>
 const isGrantRead = (commands: Commands) =>
   commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:pod:t:");
 
-/** Fails the grant's write once, as Claude 6's proof does, and leaves the index written before it. */
+/**
+ * An index without its grant. Since #4471 (Codex V) a new feed's index and grant are written in one script, so a failed
+ * write leaves neither: checked first here. An index without its grant can still be one written before that change, by
+ * the two writes it took then; it is seeded as that write left it, and withGrant must still repair it.
+ */
 async function orphaned(id: string, store: () => Promise<Awaited<ReturnType<typeof storeForEmail>>>, email: string) {
   let fail = true;
   redis.pipeline = (async (commands: Commands) => {
@@ -52,8 +57,12 @@ async function orphaned(id: string, store: () => Promise<Awaited<ReturnType<type
     const first = await feedToken((await store())!, id, email).catch(() => null);
     assert.equal(first, null, "no link is given while its grant was not written");
   } finally { redis.pipeline = original; }
-  assert.equal(indexes(), 1, "the index landed before the grant's write failed");
+  assert.equal(indexes(), 0, "the failed write left no index: it is one script with the grant");
   assert.equal(grants(), 0, "the grant is not there");
+  const sid = (await store())!.statsId!;
+  const address = createHash("sha256").update(`nimbus-podcast:${email}`).digest("hex").slice(0, 32);
+  await original([["SET", `nl:pod:by:${sid}:${id}:${address}`, randomBytes(24).toString("hex")]]);
+  assert.equal(indexes(), 1, "an index from before the change, without its grant");
 }
 
 test("Claude 6's proof: after the grant's write failed once, the next call hands out a token that opens the feed", async () => {

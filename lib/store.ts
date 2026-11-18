@@ -177,6 +177,7 @@ import { DEFAULT_LANGUAGE, type LanguageCode, parseLanguage } from "@/lib/store-
 import { type AdsServerPlatform, parseAdsServer } from "@/lib/ad-consent";
 import { ATTRIBUTION_DAYS, type AttributionDays, DEFAULT_ATTRIBUTION_DAYS, parseAttributionDays } from "@/lib/attribution-rules";
 import { parseEmbedSites, readEmbedSites } from "@/lib/embed-sites";
+import { type OptionalEvent, isAlwaysOn, keptOff, parseOff } from "@/lib/notify-prefs-rules";
 
 // What the rest of the site has always imported from here.
 export { MAX_PRODUCTS, MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, StoreFullError };
@@ -604,6 +605,14 @@ export type Store = {
   attributionDays: AttributionDays;
   /** Whether each sale, and each alert (lib/store-alerts.ts), is posted to the store's Slack or Discord channel (lib/chat-summary.ts). Off until turned on. */
   chatSales: boolean;
+  /**
+   * The optional alert emails its owner switched off (lib/notify-prefs-rules.ts, queue item 601 [KB22] U6): none
+   * until changed, so every alert is emailed as before. Kept here so each alert job follows the last saved choice
+   * with the store it already holds, never a second reading. Account, payment, plan and legal emails never read it.
+   * null: the kept value is present but not a list (keptOff), so optional alert emails are held, and each alert job
+   * says so in the log, until the owner saves again.
+   */
+  alertEmailsOff: OptionalEvent[] | null;
   /**
    * The creator's own websites that may open the store's checkout card and
    * sign-up form over their pages with the checkout script, and be told what
@@ -1091,6 +1100,7 @@ function parseStore(raw: unknown): Store | null {
       adsServer: parseAdsServer(value.adsServer),
       attributionDays: parseAttributionDays(value.attributionDays),
       chatSales: value.chatSales === true,
+      alertEmailsOff: keptOff(value.alertEmailsOff),
       embedSites: parseEmbedSites(value.embedSites),
       winback: parseWinBack(value.winback),
       welcomeOffer: parseWelcomeOffer(value.welcomeOffer),
@@ -1543,6 +1553,7 @@ async function freshStore(fields: {
     adsServer: [],
     attributionDays: DEFAULT_ATTRIBUTION_DAYS,
     chatSales: false,
+    alertEmailsOff: [],
     embedSites: [],
     winback: { ...NO_WINBACK },
     welcomeOffer: { ...NO_WELCOME_OFFER },
@@ -3097,6 +3108,19 @@ export async function setLeaving(email: string, raw: unknown): Promise<{ ok: tru
 /** Whether each sale and each alert is posted to the store's chat (lib/chat-summary.ts). */
 export async function setChatSales(email: string, on: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ chatSales: on === true }));
+}
+
+/**
+ * The optional alert emails switched off (lib/notify-prefs-rules.ts): the whole list, replacing the one before; `[]`
+ * turns every one back on. An always-on notice is refused as such, and anything that is not a list of distinct
+ * optional events as invalid; nothing is written either way.
+ */
+export async function setAlertEmailsOff(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "invalid" | "always_on" | "none" }> {
+  if (Array.isArray(raw) && raw.some(isAlwaysOn)) return { ok: false, reason: "always_on" };
+  const off = parseOff(raw);
+  if (!off) return { ok: false, reason: "invalid" };
+  const next = await patchStore(email, () => ({ alertEmailsOff: off }));
+  return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 
 /** The sites that may open the store's checkout with the checkout script (lib/embed-sites.ts): the whole list, as typed. */

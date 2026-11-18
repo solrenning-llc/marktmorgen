@@ -43,9 +43,9 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $149 / $1,490 | 9.7% | 60.29% | 60.04% | $89.84 | 0.42 |
-| $169 / $1,690 **(recommended)** | 61.8% | 60.31% | 60.05% | $101.93 | 0.37 |
-| $199 / $1,990 | 100.0% | 60.56% | 60.31% | $120.52 | 0.31 |
+| $149 / $1,490 | 9.7% | 60.28% | 60.04% | $89.83 | 0.42 |
+| $169 / $1,690 **(recommended)** | 61.8% | 60.30% | 60.05% | $101.92 | 0.37 |
+| $199 / $1,990 | 100.0% | 60.55% | 60.31% | $120.51 | 0.31 |
 
 ### Studio
 
@@ -90,11 +90,11 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
 | Access emails a month: included · #553 · before #553 | **92** · 150 · 150 | **150** · 400 · 400 | **530** · 1,000 · 1,000 |
 | Store emails a month: included · #553 · before #553 | **46** · 75 · 75 | **110** · 300 · 300 | **430** · 800 · 800 |
-| Net at full included use, monthly (sizing reading) | 60.31% | 60.42% | 60.46% |
+| Net at full included use, monthly (sizing reading) | 60.30% | 60.42% | 60.46% |
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.01% | 60.00% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.10% | 12.15% | 12.16% |
-| Net a customer, a month, at full included use | $101.93 | $271.30 | $604.04 |
-| The same at #553's price | $37.72 | $264.05 | $592.23 |
+| Net a customer, a month, at full included use | $101.92 | $271.30 | $604.04 |
+| The same at #553's price | $37.71 | $264.05 | $592.22 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 
@@ -121,7 +121,7 @@ Each plan at its recommended price with every included figure used, plus one of 
 
 | Plan | Monthly: revenue, net | Yearly: revenue, net |
 | --- | --- | --- |
-| Store | $315.00, 60.41% | $3,442.00, 60.29% |
+| Store | $315.00, 60.40% | $3,442.00, 60.29% |
 | Studio | $707.00, 60.43% | $7,586.00, 60.19% |
 | Scale | $1,257.00, 60.46% | $13,086.00, 60.11% |
 

@@ -10,9 +10,11 @@
  *
  * Synthetic store; MemoryRedis; the real route and recordHit.
  */
-import { readToken, STORE_SCOPE } from "@/lib/page-read";
+import { forgetReadingsSeen, noteReadStore, readSampled, readSlot, readToken, STORE_SCOPE } from "@/lib/page-read";
+import { allowanceWindow } from "@/lib/allowance-window";
 import { DAY_FIELDS_MAX, recordHit } from "@/lib/stats";
-import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 import { POST as readRoute } from "@/app/api/store/read/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -42,10 +44,25 @@ async function main(): Promise<void> {
 
   part("Control: a real visitor's reach beacon is still counted");
   redis.clear();
+  forgetReadingsSeen();
   await claimHandle(OWNER, "reachroom", "Reach Room", "");
   await ensureStatsId(OWNER);
+  // Since 639 [GL7](25) (#2571) a token is made only as a page makes it: for a store whose window of readings is
+  // open (a paid plan), at its block's reading slot, for a visitor the draw took (lib/page-read.ts readToken).
+  await setSubscription(OWNER, { customerId: "cus_reachroom01", subscriptionId: "sub_reachroom01", active: true, tier: "creator", cycle: "month", period: paidPeriod() });
   const again = (await storeForEmail(OWNER))!;
-  await send({ k: "s", t: readToken(again.statsId!, STORE_SCOPE), n: 2, b: "p:prod000001", c: "" });
+  const now = Date.now();
+  const window = allowanceWindow(again, now)!.id;
+  let place = 1;
+  while (!readSlot(window, place)) place += 1;
+  noteReadStore(again.statsId, again, now, place);
+  let seed = 0;
+  let nonce = "";
+  do nonce = `reach${String((seed += 1)).padStart(11, "0")}`;
+  while (!readSampled(nonce));
+  const visitor = readToken(again.statsId, STORE_SCOPE, now, nonce);
+  is("a visitor drawn at the window's reading slot is given a token", visitor !== "", true);
+  await send({ k: "s", t: visitor, n: 2, b: "p:prod000001", c: "" });
   const [one] = await redis.pipeline([["HGET", `nl:stats:${again.statsId}:${new Date().toISOString().slice(0, 10)}`, "sr:2.p:prod000001>"]]);
   is("counted under its own field", one, "1");
 

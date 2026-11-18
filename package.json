@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "oxlint",
     "test": "node tests/run.mjs",
     "test:local": "node tests/e2e/run.mjs",
     "test:client": "node tests/client-bundles.mjs"
@@ -31,16 +31,12 @@
     "@types/react-dom": "^19",
     "axe-core": "4.13.0",
     "esbuild": "^0.28.2",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.5",
+    "oxlint": "1.90.0",
     "playwright-core": "1.56.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
-    "zod": "4.6.6",
-    "@typescript-eslint/typescript-estree": {
-      "minimatch": "11.0.1"
-    }
+    "zod": "4.6.6"
   }
 }

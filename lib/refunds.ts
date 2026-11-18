@@ -370,7 +370,8 @@ export async function lostDisputesSince(
     // stays before this page and the caller keeps its anchor.
     if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return leave(false);
     const page = listed.data as unknown[];
-    if (!page.every(closingKnown)) return leave(false);
+    const latest = Math.floor(Date.now() / 1000) + 300;
+    if (!page.every((event) => closingKnown(event) && (event as { created: number }).created <= latest)) return leave(false);
     const events = page as Record<string, unknown>[];
     for (const event of events) {
       const dispute = (event.data as { object: Record<string, unknown> }).object;

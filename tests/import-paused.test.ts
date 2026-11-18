@@ -16,7 +16,7 @@ import { GET as importGet, POST as importPost } from "@/app/api/store/import/rou
 import { POST as funnelPost } from "@/app/api/store/import/funnel/route";
 import { claimHandle, ensureListId, ensureStatsId, recordPlanDispute, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { RAW_DAYS, advanceImports, jobOf, runImport, startImport } from "@/lib/imports";
+import { IMPORT_KEEP_SECONDS, RAW_DAYS, advanceImports, jobOf, runImport, startImport } from "@/lib/imports";
 import { FUNNEL_PAUSED, IMPORTS_PAUSED, IMPORT_ALLOWANCES, IMPORT_ROWS_KEPT_DAYS, importAllowanceFor } from "@/lib/import-limits";
 import { costsPaused, newCostCode } from "@/lib/plan-standing";
 import { leadsKey } from "@/lib/contacts";
@@ -163,6 +163,18 @@ async function main() {
   }
   const endedOne = await importGet(new NextRequest(`https://marktmorgen.com/api/store/import?id=${endedId}`, { headers: { cookie, host: "marktmorgen.com" } }));
   is("where it stands still reads", [endedOne.status, ((await endedOne.json()) as { import?: { state?: string } }).import?.state], [200, "queued"]);
+
+  part("A paused import waits as long as its own record is kept, never longer (Claude 7 on #3980, reconfirmed by Claude 4 and Codex N1)");
+  // Each five-minute pass of a paused import writes its record and renews its keys; on a store nobody pays that was
+  // forever. Past IMPORT_KEEP_SECONDS from its start it ends, says so, and leaves the job's line.
+  const kept = (await redis.pipeline([["GET", `nl:import:${endedId}`]]))[0] as string;
+  const aged = JSON.parse(kept) as { at: number };
+  aged.at = Date.now() - (IMPORT_KEEP_SECONDS + 3600) * 1000;
+  await redis.pipeline([["SET", `nl:import:${endedId}`, JSON.stringify(aged)]]);
+  const lapsed = await runImport(endedId, Date.now() + 30_000);
+  is("it ends as failed, with nothing applied", [lapsed?.state, lapsed?.done], ["failed", 0]);
+  is("it leaves the five-minute job's line", await redis.pipeline([["SISMEMBER", "nl:imports:active", endedId]]), [0]);
+  is("and the next pass writes nothing more", (await runImport(endedId, Date.now() + 30_000))?.state, "failed");
 
   part("What the creator is told");
   is("the days the words promise are the days the rows are kept", IMPORT_ROWS_KEPT_DAYS, RAW_DAYS);

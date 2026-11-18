@@ -941,6 +941,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:upd:latest:@lib/product-updates.ts": { what: "A product's latest update: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:upd:off:@lib/product-updates.ts": { what: "A buyer who stopped updates", parts: [kept(MARK, "Updates go to buyers: one mark a buyer, kept for good.")] },
   "nl:upd:stop:@lib/product-updates.ts": { what: "An update's stop link: one for each address a store writes to, the same in every email", parts: [kept(LINK_BYTES, "Updates go to buyers: one a buyer, kept while they are written to.")] },
+  "nl:updheld@lib/product-updates.ts": company("Updates held while their store is switched off, by when the mail job looks at each again", "One sorted set of send ids (24 characters each), a member for each send held, out once it goes back in the queue (a day later at most) or ends with its 60 days (Claude 7 on #3403)."),
   "nl:updq@lib/product-updates.ts": company("Updates under way", "One sorted set, members gone when sent."),
   "nl:confirm:@lib/purchase-email.ts": short("An order's confirmation sent", "order", 40, MARK),
   "nl:confirm-room:@lib/purchase-email.ts": short("An order's admitted room given back, once", "order", 2, MARK),

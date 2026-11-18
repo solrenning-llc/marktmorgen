@@ -5,12 +5,13 @@ import { type NextRequest, after } from "next/server";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readListings, readProduct } from "@/lib/catalog";
+import { readAsking, readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
 import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
 import { bestBundleSwap } from "@/lib/cart-bundle";
+import { heldByABundle } from "@/lib/bundle-rules";
 import { cartPicks } from "@/lib/store-collections";
 import { readSoldCounts } from "@/lib/sold-count";
 import { cartWords } from "@/lib/buyer-words/cart";
@@ -31,7 +32,7 @@ import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/requ
 import { productSegment } from "@/lib/product-slug";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
-import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
+import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { cartOfferOwner } from "@/lib/cart-offers";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
@@ -69,7 +70,14 @@ export async function GET(request: NextRequest) {
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
+  // Which lines ask questions at checkout: those are bought from their own page, which asks them, and the cart
+  // checkout below refuses them (#4350), so they are not payable here. A reading that cannot be had is never
+  // "asks nothing" (rule 24): no line is payable right now.
+  const [stocks, asking] = await Promise.all([
+    Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)),
+    readAsking(store, listings.filter((p) => cartable(p)).map((p) => p.id)).catch(() => null),
+  ]);
+  const left = new Map(stocks);
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -81,8 +89,13 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && asking !== null && !asking.has(id) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
+  // A product a bundle in the same cart already hands over is not payable on its own line: the bundle brings it (lib/bundle-rules.ts, heldByABundle).
+  // Only a bundle that can be paid for itself brings anything: one sold out or coming soon holds nothing back.
+  const payableIds = new Set(items.filter((item) => item.ok).map((item) => item.id));
+  const inABundle = new Set(heldByABundle(listings.filter((p) => !p.bundle || payableIds.has(p.id))).map((p) => p.id));
+  for (const item of items) if (inABundle.has(item.id)) item.ok = false;
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));
   const sending = cartShipping(shippable.map(cartItemOf), country);
@@ -317,6 +330,8 @@ export async function POST(request: NextRequest) {
   if (!coming) return away(`/@${store.handle}?cart=error#cart`);
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
+  // A product a bundle in the same cart already hands over would be charged twice for one copy: back to the cart, nothing charged.
+  if (heldByABundle(products).length > 0) return away(`/@${store.handle}?cart=changed#cart`);
   // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
   // back to the cart to try again, nothing charged.
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
@@ -340,7 +355,7 @@ export async function POST(request: NextRequest) {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
     }).catch(() => null);
-    const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderShown(store);
+    const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && products.every((p) => assistReminderOffered(store, p));
     // Offers after paying, from the first product in the cart whose funnel is
     // on (lib/cart-offers.ts): a secret for this browser, its fingerprint on
     // the checkout, as for one product (app/api/store/checkout/route.ts).

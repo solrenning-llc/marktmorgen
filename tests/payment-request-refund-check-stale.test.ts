@@ -52,11 +52,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
 }) as typeof fetch;
 
-type Internals = { H: Record<string, unknown> | null };
-const internals = (React as unknown as Record<string, Internals>).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
 /**
- * useRouter reads the app router through useContext, which the test hook runner does not give: the app router is
- * a stand-in that only counts refreshes, and any other context (the layout router) its default value.
+ * useRouter reads the app router through useContext, given to the hook runner as a context map (no change to React's
+ * own dispatcher): the app router is a stand-in that only counts refreshes, and any other context (the layout
+ * router) its default value.
  */
 let refreshes = 0;
 const router = { refresh: () => { refreshes += 1; }, push: () => {}, replace: () => {}, prefetch: () => {}, back: () => {}, forward: () => {} };
@@ -83,12 +82,10 @@ async function main(): Promise<void> {
     let rows = [first];
     const listeners = new Set<() => void>();
     const Host = () => {
-      const H = internals.H!;
-      if (!H.useContext) H.useContext = (context: React.Context<unknown>) => (context === (AppRouterContext as React.Context<unknown>) ? router : (context as unknown as { _currentValue: unknown })._currentValue);
       const given = React.useSyncExternalStore((change) => { listeners.add(change); return () => listeners.delete(change); }, () => rows);
       return PaymentRequestsStudio({ rows: given, now, currency: "usd", canSend: false, open: true, closedWhy: "", limits: { open: 10, kept: 50 }, openNow: 0, emails: { used: 0, limit: 100 }, shareWords: "", taxOn: false, prefill: { email: "", name: "", text: "", amount: "" }, dueFirst: "2026-11-08", dueLast: "2026-12-08" });
     };
-    const page = await mount(Host, {});
+    const page = await mount(Host, {}, new Map<unknown, unknown>([[AppRouterContext, router]]));
     const button = find(page.tree(), (n) => n.type === "button" && texts(n.props?.children).join("").includes("Check refunds for this payment"))[0];
     if (!button) throw new Error("the check was not offered");
     routeAnswer = answer;

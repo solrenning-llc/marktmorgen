@@ -20,8 +20,12 @@ const same = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.leng
 
 export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void };
 
-/** Renders `component(props)`, runs its effects, and re-renders on every state change. */
-export async function mount<P>(component: (props: P) => unknown, props: P): Promise<Mounted> {
+/**
+ * Renders `component(props)`, runs its effects, and re-renders on every state change. `contexts`, when given, is what
+ * useContext answers for each context it holds (any other context answers its default value); without it the runner
+ * has no useContext, as before.
+ */
+export async function mount<P>(component: (props: P) => unknown, props: P, contexts?: ReadonlyMap<unknown, unknown>): Promise<Mounted> {
   const slots: Slot[] = [];
   let index = 0;
   let dirty = false;
@@ -76,6 +80,10 @@ export async function mount<P>(component: (props: P) => unknown, props: P): Prom
     },
   };
   (dispatcher as Record<string, unknown>).useLayoutEffect = dispatcher.useEffect;
+  if (contexts) {
+    (dispatcher as Record<string, unknown>).useContext = (context: unknown) =>
+      contexts.has(context) ? contexts.get(context) : (context as { _currentValue: unknown })._currentValue;
+  }
   const render = () => {
     const before = internals.H;
     internals.H = dispatcher;

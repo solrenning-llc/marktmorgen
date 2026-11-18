@@ -19,10 +19,10 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $5.88 | $33.46 | $5.85 | 10.76% | $0.25 | positive | no |
 | Store yearly ($690) | $690.00 | $543.30 | $85.65 | $67.11 | $332.50 | $58.04 | 10.68% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $27.46 | $228.86 | $41.25 | 11.66% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $313.70 | $2,262.43 | $405.32 | 11.46% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $27.47 | $228.85 | $41.25 | 11.66% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $313.72 | $2,262.42 | $405.31 | 11.46% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $57.84 | $512.34 | $92.67 | 11.78% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $663.75 | $5,061.11 | $909.46 | 11.56% | $1.00 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $663.82 | $5,061.05 | $909.45 | 11.56% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |
@@ -36,8 +36,8 @@ A month's receipts after every fee and reserve (netOf), less every cost line at 
 
 | Interval | Store | Studio | Scale |
 | --- | --- | --- | --- |
-| Monthly plan | US$46.04 | US$311.21 | US$695.47 |
-| A month of a yearly plan | US$37.99 | US$256.08 | US$572.20 |
+| Monthly plan | US$46.04 | US$311.20 | US$695.47 |
+| A month of a yearly plan | US$37.99 | US$256.08 | US$572.19 |
 
 ## LLC fixed costs — owner decision22 October2026
 

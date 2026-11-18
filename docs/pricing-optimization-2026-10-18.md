@@ -186,7 +186,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | ε -0.5: C over A | ε -1: C over A | ε -1.5: C over A | ε -2: C over A |
 | --- | --- | --- | --- | --- |
 | Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.12× ($149 against $189) | 1.27× ($149 against $189) |
-| Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.40× ($349 against $679) | 1.95× ($349 against $679) |
+| Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.39× ($349 against $679) | 1.95× ($349 against $679) |
 | Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.44× ($659 against $1,369) | 2.08× ($659 against $1,369) |
 
 **Each cut alone.** The same, one figure at a time cut to a tenth of #553's (rounded down as a page prints it), every other kept: the lowest price that keeps 60%, and the profit index over A's best in the two scenarios where a cut can lower the price.

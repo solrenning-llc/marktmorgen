@@ -676,17 +676,25 @@ export async function dropProductInvites(
       held.push({ field, token });
     }
     if (held.length) {
-      // The links first, their DEL read, and only then the invitations and their reminders (Codex N4's MEDIUM on
-      // #4831): an invitation is the only way back to its link, and Redis does not run a pipeline as one, so a link
-      // whose deletion is not known done keeps the invitation that leads to it, found again by the next try.
-      const gone = repliesFor(await redisPipeline([["DEL", ...held.map((h) => linkKey(h.token))]]), 1);
-      if (!gone || countOf(gone[0]) === null) throw new UnknownReplyError("the deletion of a removed membership's invitation links");
-      const commands: (string | number)[][] = [
-        ["HDEL", key, ...held.map((h) => h.field)],
-        ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-      ];
-      const replies = repliesFor(await redisPipeline(commands), commands.length);
-      if (!replies || !replies.every((r) => countOf(r) !== null)) throw new UnknownReplyError("the deletion of a removed membership's invitations");
+      // The invitation is the retry reference for both the link and the reminder.
+      // Confirm the two independent deletions before removing that reference.
+      const links = [...new Set(held.map((h) => linkKey(h.token)))];
+      const fields = [...new Set(held.map((h) => h.field))];
+      const removedWithin = (reply: unknown, requested: number): boolean => {
+        const count = countOf(reply);
+        return count !== null && count <= requested;
+      };
+      const related = repliesFor(await redisPipeline([
+        ["DEL", ...links],
+        ["ZREM", DUE_KEY, ...fields.map((field) => `${store.sid}|${field}`)],
+      ]), 2);
+      if (!related || !removedWithin(related[0], links.length) || !removedWithin(related[1], fields.length)) {
+        throw new UnknownReplyError("the deletion of a removed membership's invitation links or reminders");
+      }
+      const invitations = repliesFor(await redisPipeline([["HDEL", key, ...fields]]), 1);
+      if (!invitations || !removedWithin(invitations[0], fields.length)) {
+        throw new UnknownReplyError("the deletion of a removed membership's invitations");
+      }
       dropped += held.length;
     }
     cursor = page.next;

@@ -124,7 +124,7 @@ export function emailedAnswer(told: ReplyNotice): boolean | "unknown" {
 
 /**
  * Whether this address may be told: "open", "stopped" (bounced, complained,
- * or deleted from the store) or "unknown" when a check did not read exactly.
+ * refused, or deleted from the store) or "unknown" when a check did not read exactly.
  */
 async function recipient(store: Store, email: string): Promise<"open" | "stopped" | "unknown"> {
   const listId = store.listId ?? null;
@@ -145,7 +145,8 @@ async function recipient(store: Store, email: string): Promise<"open" | "stopped
   if (contact === null) return "open";
   const read = parseContact(contact);
   if (typeof contact !== "string" || !read) return "unknown";
-  return read.gone === "bounced" || read.gone === "complained" ? "stopped" : "open";
+  // Every way an address is taken off stops it, "refused" included, as lib/community-mail.ts reads it (Claude 5 on #3583).
+  return read.gone === "bounced" || read.gone === "complained" || read.gone === "refused" ? "stopped" : "open";
 }
 
 /**
@@ -156,12 +157,16 @@ async function recipient(store: Store, email: string): Promise<"open" | "stopped
  * not say, so it may have gone; it is not tried again); "already" (the mark
  * was taken before, by a send that went or did not);
  * "stopped" (an address not to write to); "unknown" (a check or the mark did
- * not read, so nothing was sent); "none" (nothing to tell, or no address).
+ * not read, so nothing was sent); "none" (nothing to tell, no address, or a
+ * lesson that no longer exists).
  */
 export async function tellBuyerOfReply(input: NoticeInput, send: (message: NoticeMessage) => Promise<boolean> = sendEmail): Promise<ReplyNotice> {
   const { store, submission } = input;
   if (submission.state !== "reviewed" || !submission.reply || submission.target.kind !== "lesson") return "none";
   if (!ID.test(submission.folder) || !ID.test(submission.id)) return "none";
+  // A lesson deleted after the file was sent has no title and no page: nothing to tell about it, before the mark and
+  // before any store email is taken (Claude 5's MÉDIO 1 and Codex N4 on #3583; WCAG 2.4.9, VR item 2).
+  if (!input.lessonTitle.trim()) return "none";
   const to = oneAddress(submission.buyer);
   if (!to) return "none";
   const mark = toldKey(submission.folder, submission.id);

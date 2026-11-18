@@ -1305,7 +1305,14 @@ export default function PrivacyPage() {
           (at most {MAX_SUBMISSION_KEEP_DAYS} days after the file was sent),
           the file is deleted within about a day, and its record with it; if
           the file could not be deleted that day, we try again every day until
-          it is. When a buyer is deleted from the store, their files and
+          it is. When the creator replies, we send the buyer one email from
+          the store&apos;s name, through our email provider, with the
+          creator&apos;s whole reply, the name of the file and the title of
+          the lesson; it is not sent to an address that bounced, complained,
+          was refused or was deleted from the store. On the lesson page, a
+          reply not seen yet is marked new: which replies a browser has
+          already shown is kept only in that browser, and never sent to us.
+          When a buyer is deleted from the store, their files and
           records are deleted at once (a file within a day, if the file
           store does not answer right away), and an upload they had started
           is canceled. A buyer who wants what they sent deleted sooner can delete

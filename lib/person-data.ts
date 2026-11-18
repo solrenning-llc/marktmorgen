@@ -114,6 +114,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
   { file: "lib/submission-store.ts", how: "erased", what: "Files they sent you for review on a lesson, with their note, your reply and their address; an upload still open is stopped. Kept files are deleted by themselves when the keeping time you chose ends" },
+  { file: "lib/submission-upload.ts", how: "none", what: "Which of your replies to their files on a lesson they have already seen is kept only in their own browser, and never sent to us; your reply itself reached them by one email, with the file's name and the lesson's title (Privacy #lesson-submissions)" },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
   { file: "lib/lesson-notes.ts", how: "erased", what: "Their private notes on lessons, which only they could see" },

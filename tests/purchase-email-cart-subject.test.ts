@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   part("The subject names what was bought");
   is("one product: its name, as before", subject({ product: id(baking) }, 2400), "Your order from Harbor Kitchen: Sunday Baking");
   is("a cart of two: both", subject({ product: id(baking), cart: "yes", bump: id(pantry), bump_cents: "900" }, 3300), "Your order from Harbor Kitchen: Sunday Baking and Pantry Checklist");
-  is("a box ticked at checkout: both", subject({ product: id(baking), bump: id(planner), bump_cents: "1500" }, 3900), "Your order from Harbor Kitchen: Sunday Baking and Meal Planner");
+  is("a box checked at checkout: both", subject({ product: id(baking), bump: id(planner), bump_cents: "1500" }, 3900), "Your order from Harbor Kitchen: Sunday Baking and Meal Planner");
   done();
 }
 

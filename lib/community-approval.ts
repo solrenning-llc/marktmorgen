@@ -555,11 +555,14 @@ export async function storesWithHeld(now = nowSeconds(), limit = 500): Promise<s
   const replies = repliesFor(
     await redisPipeline([
       ["ZREMRANGEBYSCORE", HELD_STORES, "-inf", now - (HELD_DAYS + 1) * DAY],
+      // A listed store missing from the line (let go by a run while it held again, and not put back: Codex X6's LOW
+      // on #3033) joins it at the front, as lib/call-meetings.ts does; a store already in line keeps its place.
+      ["ZUNIONSTORE", HELD_TURNS, 2, HELD_TURNS, HELD_STORES, "WEIGHTS", 1, 0, "AGGREGATE", "MAX"],
       ["ZRANGEBYSCORE", HELD_TURNS, "-inf", "+inf", "LIMIT", 0, Math.max(1, limit)],
     ]),
-    2,
+    3,
   );
-  const line = replies && countOf(replies[0]) !== null ? stringList(replies[1]) : null;
+  const line = replies && countOf(replies[0]) !== null && countOf(replies[1]) !== null ? stringList(replies[2]) : null;
   if (!line || line.some((sid) => !STORE_SID.test(sid))) throw new UnknownReplyError("the stores with held community items");
   if (!line.length) return [];
   const listed = repliesFor(await redisPipeline(line.map((sid) => ["ZSCORE", HELD_STORES, sid])), line.length)?.map(scoreOf);
@@ -573,7 +576,9 @@ export async function storesWithHeld(now = nowSeconds(), limit = 500): Promise<s
  * Takes stores let go from the list out of the line, then looks at the list
  * again: a hold that landed meanwhile wrote the list before the line, so it is
  * found here and its store is put back. An unknown answer puts them all back,
- * so a store is never dropped on one (it comes up again on the next run).
+ * so a store is never dropped on one (it comes up again on the next run); and
+ * when even the put-back fails, the next run's union of the list into the line
+ * (storesWithHeld) brings back every store still listed.
  */
 async function leaveLine(gone: string[], now: number): Promise<void> {
   const replies = repliesFor(

@@ -131,6 +131,14 @@ async function main(): Promise<void> {
   closings = [shaped(77, { status: "warning_closed" }), closing(78, "won", "pi_tb14shape00000078"), shaped(79, { payment_intent: null }), closing(80, "lost", "pi_tb14shape00000080")];
   const knownOutcomes = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
   is("known outcomes read as they are: complete, each lost one a row", [knownOutcomes.complete, knownOutcomes.rows.map((row) => row.id)], [true, ["evt_closed0000000079", "evt_closed0000000080"]]);
+  // A prevented dispute (#3321): lost by its own money withdrawn and not put back; not lost with none withdrawn; unknown,
+  // so the read is incomplete, when its money cannot be read.
+  const moved = (amount: number) => [{ object: "balance_transaction", id: `txn_tb14prev${amount}`, amount }];
+  closings = [shaped(82, { status: "prevented", balance_transactions: moved(-2500) }), shaped(83, { status: "prevented", balance_transactions: [] })];
+  const prevented = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
+  is("a prevented dispute with its money gone is a lost row; one with none withdrawn is not", [prevented.complete, prevented.rows.map((row) => row.id)], [true, ["evt_closed0000000082"]]);
+  closings = [shaped(84, { status: "prevented" })];
+  is("a prevented dispute whose money cannot be read: the read is incomplete", (await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600)).complete, false);
   closings = [];
   const made = await addProduct("owner@tb14.example", "Bread Course", "", "25", null);
   if (!made.ok) throw new Error("no product");
@@ -403,6 +411,12 @@ async function main(): Promise<void> {
     is(`gifts, ${label} unknown: not marked read, and the anchor stays`, [await read(giftSeen, String(event.id)), (await realPipeline([["GET", giftAnchor]]))[0]], [0, anchorThen]);
     await revokeRefundedGifts(store, Date.now() + 10_000, drop);
     is(`gifts, ${label}: the next run finishes it and marks it read`, [await holds(to), Boolean((await readGift(started.gift.id))?.revoked), await read(giftSeen, String(event.id))], [false, true, 1]);
+  }
+
+  // The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts), never for good.
+  for (const key of [preSeen, giftSeen]) {
+    const ttl = (await realPipeline([["TTL", key]]))[0] as number;
+    is(`${key.split(":")[1]}: the refunds already handled keep an expiry of at most thirty days`, [ttl > 0, ttl <= 30 * 86_400], [true, true]);
   }
 
   part("Booked calls: a lost dispute frees the booking's time, as a full refund does");

@@ -46,7 +46,7 @@ async function main(): Promise<void> {
 
   await claimHandle(OWNER, "draftbump", "Draft Bump", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestDraftBump01", true);
+  await setStripeAccount(OWNER, "acct_1TestDraftBmp01", true);
   await setSubscription(OWNER, { customerId: "cus_Owner00002", subscriptionId: "sub_Owner00002", active: true, period: paidPeriod() });
   const ids: Record<string, string> = {};
   for (const [title, price] of [["Course", "49"], ["Secret", "19"], ["Later", "29"]]) {
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   const shown = activeBumps(listings, course).map((b) => b.target.title);
   is("no draft is drawn as a box on the public product page", shown, []);
 
-  // 3. Ticked at checkout: a draft is not sold.
+  // 3. Checked at checkout: a draft is not sold.
   checkouts.length = 0;
   await createCheckout(store, course, "https://marktmorgen.com", "", { bumps: [ids.Secret, ids.Later], digitalConsent: TEST_CONSENT });
   const sent = checkouts[0];
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     const name = sent?.get(`line_items[${i}][price_data][product_data][name]`);
     if (name) names.push(name);
   }
-  is("a draft ticked at checkout is not charged as a line", names, ["Course"]);
+  is("a draft checked at checkout is not charged as a line", names, ["Course"]);
   done();
 }
 

@@ -32,9 +32,9 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, BOOK_STRIPE_PAGES, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BookSizes, bookWork } from "@/lib/api-read-rules";
-import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
+import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -249,11 +249,44 @@ export async function onTheirWay(store: Store): Promise<Set<string>> {
 
 /** Who can be paid now: owed, cleared, and not already on their way through PayPal. */
 export function payableLines(book: Book, away: Set<string>): BatchLine[] {
-  return owedLines(book).filter((line) => !away.has(line.affiliate.id));
+  return owedLinesWhere(book, (affiliate) => !away.has(affiliate.id));
 }
 
-/** The address a line is paid to, as the body sends it. */
-const receiverOf = (line: BatchLine) => payAddress(line.affiliate).slice(0, 127);
+/**
+ * Of those, who a PayPal batch can pay: an affiliate whose PayPal address is longer than PayPal's receiver field
+ * holds (PAYPAL_RECEIVER_MAX) is left out of every batch, never sent under a cut address. They stay owed, never on
+ * their way, and the payout file (lib/affiliate-payouts.ts), which carries the address whole, can pay them.
+ */
+export function paypalPayableLines(book: Book, away: Set<string>): BatchLine[] {
+  return owedLinesWhere(book, (affiliate) => !away.has(affiliate.id) && paypalCanReceive(affiliate));
+}
+
+/**
+ * How many affiliates are owed something cleared, not on their way, and left out of every PayPal batch because PayPal
+ * cannot take their address (Claude 7 on #4318). Counted over the whole book, not cut at the batch ceiling, so the
+ * creator is never told that nobody is owed while someone is.
+ */
+export function paypalLeftOut(book: Book, away: Set<string>): number {
+  return book.rows.filter((row) => row.payable > 0 && row.affiliate.status === "approved" && !away.has(row.affiliate.id) && !paypalCanReceive(row.affiliate)).length;
+}
+
+/** What the creator is told about them, in the studio's PayPal panel and in the payday email. */
+export function paypalLeftOutText(count: number): string {
+  const who = count === 1 ? "1 affiliate is" : `${count} affiliates are`;
+  const their = count === 1 ? "their PayPal address is" : "their PayPal addresses are";
+  return `${who} owed money PayPal cannot send: ${their} longer than PayPal takes (${PAYPAL_RECEIVER_MAX} characters). Pay them another way, such as Wise, with the batch download on your affiliate page.`;
+}
+
+/** The most characters PayPal's receiver field holds (payments_payouts_batch_v1, payout_item receiver: maxLength 127). */
+export const PAYPAL_RECEIVER_MAX = 127;
+/**
+ * The address a line is paid to, as the body sends it: whole, never cut. An address cut to PayPal's length is
+ * another inbox (".store.com.br" cut to ".store.com" is another domain's), so the money would go to somebody else
+ * and the book would say "paid" once PayPal reported it.
+ */
+const receiverOf = (line: BatchLine) => payAddress(line.affiliate);
+/** Whether PayPal can take this affiliate's address as a receiver at all: one longer than it holds is never sent. */
+const paypalCanReceive = (affiliate: Affiliate) => payAddress(affiliate).length <= PAYPAL_RECEIVER_MAX;
 /**
  * Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681): an HMAC
  * under a key derived from the server's own secret, so it cannot be turned back by guessing addresses (Revisor 2's
@@ -448,14 +481,14 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const book = await readBook(store, undefined, { titles: false });
       // What is owed is not known while refunds could not be read from Stripe.
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
-      if (!payableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
+      if (!paypalPayableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
       const token = await bearer(store);
       if (!token) return { ok: false, reason: "reconnect" };
       const { auth, sender } = token;
       // The lock may have run out while the book or PayPal's token took their time (#4618): another press or the
       // payday may have taken it since and sent these people. So who is on their way is read again now, after the
       // slow calls, and the lock must still be ours right before the batch is written down; otherwise nothing is sent.
-      const lines = payableLines(book, await onTheirWay(store));
+      const lines = paypalPayableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
       if (!(await holdLock(lock))) return { ok: false, reason: "busy" };
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;

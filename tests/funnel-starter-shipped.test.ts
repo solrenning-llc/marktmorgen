@@ -66,7 +66,6 @@ const cannot: [string, Partial<ShipCandidate>, RegExp][] = [
   ["free", { priceCents: 0 }, /paid/],
   ["membership", { recurring: { interval: "month" } }, /membership/],
   ["call", { call: {} }, /a call/],
-  ["pwyw", { pwyw: true }, /price the buyer chooses/],
   ["plan", { plan: {} }, /payment plan/],
   ["delivery", { file: {} }, /file/],
   ["delivery", { link: "x" }, /link/],
@@ -77,6 +76,8 @@ const cannot: [string, Partial<ShipCandidate>, RegExp][] = [
 ];
 is("each product that cannot ship is named in it", cannot.filter(([why, change, words]) => shipProblem({ ...base, ...change }) !== why || !words.test(first)).map(([why]) => why), []);
 is("a product that can ship has no problem", shipProblem(base), null);
+// A price the buyer chooses ships since 514 [PF2] (16 November 2026), so the sentence no longer says it cannot.
+is("a price the buyer chooses can ship, and the sentence does not say otherwise", [shipProblem({ ...base, pwyw: { suggestedCents: 2_500 } as never }), /price the buyer chooses/.test(first)], [null, false]);
 
 part("Where it shows");
 is("designers and photographers see it, with its line", [NICHE_FIT.designers["physical-product"], nicheCampaignLabels("designers").includes("Sell something you ship")], ["For prints or pieces you make and ship.", true]);

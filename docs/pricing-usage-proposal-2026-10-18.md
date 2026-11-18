@@ -42,7 +42,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | 2.0% | 60.18% | 60.14% | $59.58 | 0.66 |
-| $129 / $1,290 **(recommended)** | 86.7% | 60.19% | 60.05% | $77.65 | 0.51 |
+| $129 / $1,290 **(recommended)** | 85.3% | 60.19% | 60.05% | $77.65 | 0.51 |
 | $149 / $1,490 | 100.0% | 60.51% | 60.39% | $90.17 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.89% | 60.78% | $102.91 | 0.38 |
 | $199 / $1,990 | 100.0% | 61.31% | 61.22% | $122.02 | 0.32 |
@@ -89,7 +89,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Storage: included · #553 · before #553 | **4 GB** · 5 GB · 5 GB | **20.5 GB** · 40 GB · 40 GB | **47.5 GB** · 80 GB · 80 GB |
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
 | Access emails a month: included · #553 · before #553 | **120** · 150 · 150 | **200** · 400 · 400 | **590** · 1,000 · 1,000 |
-| Store emails a month: included · #553 · before #553 | **64** · 75 · 75 | **150** · 300 · 300 | **470** · 800 · 800 |
+| Store emails a month: included · #553 · before #553 | **63** · 75 · 75 | **150** · 300 · 300 | **470** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.19% | 60.40% | 60.49% |
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.02% | 60.04% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.06% | 12.14% | 12.18% |

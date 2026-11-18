@@ -40,6 +40,12 @@ async function main(): Promise<void> {
     is(`a share kept as ${JSON.stringify(value)} is an unreadable pool`, await data.besideHeld(store, [id]), null);
   }
   await redisPipeline([["HSET", pool, `b:${id}`, String(BESIDE_PRODUCT)]]);
+  // A reply with a hole where a slot should be (Claude 5's LOW): not a reply, so the pool is unreadable too.
+  const plain = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "HMGET" && commands[0][1] === pool ? [Object.assign(new Array(2), { 1: String(BESIDE_PRODUCT) })] : plain(commands)) as typeof redis.pipeline;
+  is("a reply with a hole where a slot should be is an unreadable pool", await data.besideHeld(store, ["none-such", id]), null);
+  redis.pipeline = plain;
 
   // Every room script on this store answers as `mode` says; the pool's own key is left alone.
   let mode: "unknown" | "full" | null = null;

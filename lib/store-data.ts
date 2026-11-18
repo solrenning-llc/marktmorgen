@@ -26,6 +26,7 @@
  * scripts/test_store_data_redis.py runs the script on a real Redis.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { replyList, repliesFor } from "@/lib/redis-reply";
 import { StoreFullError } from "@/lib/store-full";
 import { largerPlanFor } from "@/lib/larger-plan";
 import { type DataFields, besidePoolFor, contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
@@ -342,8 +343,9 @@ export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<s
   const key = besideKey(store);
   if (!key || !isRedisConfigured()) return null;
   try {
-    const [reply] = await redisPipeline([["HMGET", key, ...ids.map((id) => `b:${id}`)]]);
-    if (!Array.isArray(reply) || reply.length !== ids.length) return null;
+    // Slot by slot (rule 24; Claude 5's LOW on #4846): a hole, an inherited slot or a getter is not a reply either.
+    const reply = replyList(repliesFor(await redisPipeline([["HMGET", key, ...ids.map((id) => `b:${id}`)]]), 1)?.[0]);
+    if (!reply || reply.length !== ids.length) return null;
     // Read exactly (Codex P on #4846, MEDIUM): HMGET answers a share the pool's script wrote as a decimal whole number
     // of bytes (it writes only above zero) and nothing for a slot without one. Any other value is not a share the pool
     // wrote: the pool is unreadable, never "not held" (a share taken twice) nor "held" (a product counted nowhere).

@@ -42,9 +42,11 @@ import {
   type PitchStatus,
   type Sender,
   cleanSender,
+  PAGE_READ_CHARS,
   contactPages,
   countryRule,
   isOwnAddress,
+  openingTags,
   pageText,
   parsePitch,
   pitchFooter,
@@ -101,7 +103,16 @@ export type SiteRead = {
 };
 
 const meta = (html: string, name: string): string => {
-  const tag = new RegExp(`<meta\\b[^>]*(?:name|property)\\s*=\\s*["']${name}["'][^>]*>`, "i").exec(html)?.[0] ?? "";
+  // Each whole tag read once and its name looked for inside it, so a page of "<meta " with no ">", or of one "<meta"
+  // holding many name=, is read in linear time (#4592; Claude 6 on #4619).
+  const named = new RegExp(`(?:name|property)\\s*=\\s*["']${name}["']`, "i");
+  let tag = "";
+  for (const found of openingTags(html.slice(0, PAGE_READ_CHARS), "meta")) {
+    if (named.test(found.tag)) {
+      tag = found.tag;
+      break;
+    }
+  }
   const content = /content\s*=\s*"([^"]*)"|content\s*=\s*'([^']*)'/i.exec(tag);
   return pageText(content?.[1] ?? content?.[2] ?? "").slice(0, 400);
 };
@@ -163,7 +174,8 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
       if (!found.has(address.email)) found.set(address.email, { ...address, refuses: refusesProposals(around(text, address.email)) });
     }
   }
-  const title = pageText(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(front.html)?.[1] ?? "");
+  // A title is short: bounded, so a page of "<title>" with no end is read in linear time (#4592).
+  const title = pageText(/<title\b[^<>]*>([\s\S]{0,2000}?)<\/title>/i.exec(front.html.slice(0, PAGE_READ_CHARS))?.[1] ?? "");
   const company = (meta(front.html, "og:site_name") || title.split(/\s[|–—·-]\s/)[0] || siteDomain(home.hostname)).slice(0, 120);
   const about = meta(front.html, "description") || meta(front.html, "og:description");
   return { ok: true, site: { domain: siteDomain(home.hostname), home: `${home.origin}/`, company, about, found: [...found.values()].slice(0, 12) } };

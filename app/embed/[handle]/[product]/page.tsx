@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { admitPageAndHold, isResting } from "@/lib/traffic";
 import { NewTab } from "@/components/new-tab";
 import { forVisitor } from "@/lib/visitor";
 import { connection } from "next/server";
@@ -7,7 +8,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { cache } from "react";
 import { type Listing, type Store, normaliseHandle } from "@/lib/store";
 import { storeForHandleExactly } from "@/lib/store-exact";
-import { readListingExactly, readListings } from "@/lib/catalog";
+import { idsOfKind, readListingExactly, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
@@ -27,6 +28,7 @@ import { EmbedMessenger } from "@/components/embed-messenger";
 import { StoreBeacon } from "@/components/store-beacon";
 import { SlotPicker } from "@/components/slot-picker";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
+import { bookTimesUnits } from "@/lib/book-page-rules";
 import { bookingLength, offeredLengths } from "@/lib/call-lengths";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { chargeNow } from "@/lib/call-deposit";
@@ -154,8 +156,25 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const product = loaded.product;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = loaded.store ? await forVisitor(loaded.store) : null;
+  // One of the store's public requests, counted before anything else is read (#4634), as the store's own pages do
+  // (app/[handle]/p/[product]/page.tsx): the card is dynamic, so every render reached the reads below with no ceiling.
+  // Past the store's requests (or a count that cannot be made) the card reads nothing more.
+  // A weekly call's times asked of the frame (`view=times`, opened by the script in a frame) are paid for before Stripe is
+  // asked, as on the booking page (lib/book-page-rules.ts, bookTimesUnits): a site's Referer is easy to forge. They are
+  // held in the frame's own count, one INCRBY of the store's requests for both (tests/embed-card-metered.test.ts), and
+  // given back below when the frame does not draw them. Room for the frame and none for its times: the frame, saying the
+  // times could not be read, with nothing of them read.
+  const timesHold =
+    store && product && mode === "overlay" && query.view === "times" && product.call?.kind === "weekly"
+      ? bookTimesUnits(idsOfKind(store, "call").length)
+      : 0;
+  const times = store && timesHold > 0 ? await admitPageAndHold(store, timesHold) : null;
+  const resting = store && product ? (times ? times.admitted === "resting" : await isResting(store)) : false;
+  const timesPaid = times?.admitted === "all";
   // Opened by the checkout script: counted, and what it may show (lib/embed-open.ts).
-  const open: ScriptOpen | null = mode && store ? await readScriptOpen(store, mode, query) : null;
+  // Its request already taken above when there is a product, so the open does not take a second one; without one
+  // (an unknown id or an unread listing) nothing above counted, so the open counts its own (Claude 7 on #4645).
+  const open: ScriptOpen | null = mode && store && !resting ? await readScriptOpen(store, mode, query, Boolean(product)) : null;
   // The card's own links, tagged as the code that opened it was.
   const tag = (url: string) => (open ? withTags(url, open.tags, { via: open.via }) : tagged(url, place));
   // As a page of its own, links stay in the tab; in a frame, they open a new one.
@@ -180,6 +199,20 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           ) : (
             "This product is no longer on sale."
           )}
+        </p>
+      </div>
+    );
+  }
+
+  if (resting) {
+    return (
+      <div className="flex h-screen items-center justify-center p-4" style={{ background: "transparent" }}>
+        <style>{SEE_THROUGH}</style>
+        <p lang={speech(store).lang.locale} className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
+          {`${speech(store).w.cardUnread} `}
+          <a href={tag(`/@${store.handle}`)} {...aside} className="font-semibold underline underline-offset-4">
+            {speech(store).w.seeStore(store.name)}
+          </a>
         </p>
       </div>
     );
@@ -249,6 +282,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     for (const [key, value] of Object.entries(extra)) next.set(key, value);
     return `?${next.toString()}${to ? `#${to}` : ""}`;
   };
+  // Times held above that this frame does not draw are given back: only the frame's own request stays counted.
+  if (times && !calendar) await times.release();
   if (calendar && query.view === "times") {
     const call = product as CallListing;
     const b = bookingWords(store.language);
@@ -259,7 +294,9 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     // frame books the call's own length, so it shows that length's times, as the booking page does.
     const offerable = offeredLengths(call.call, product.priceCents, { pkg: false, team: false }).length > 0;
     const askedLength = offerable ? bookingLength(call.call, product.priceCents, asked) : null;
-    const read = await slotsForProduct(store, call, null, askedLength?.minutes ?? null);
+    // The times were paid for with the frame's own request, above (admitPageAndHold). When they did not fit, nothing is
+    // read and the frame says the times could not be read.
+    const read = timesPaid ? await slotsForProduct(store, call, null, askedLength?.minutes ?? null) : null;
     const choices = read ? offeredLengths(call.call, product.priceCents, { pkg: false, team: read.team }) : [];
     const chosen = choices.length ? askedLength ?? choices[0] : null;
     const cents = chosen ? chosen.cents : product.priceCents;

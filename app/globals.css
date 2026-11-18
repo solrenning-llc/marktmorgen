@@ -96,6 +96,7 @@
   --mint-soft: #e5f6ef;
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
+  --amber-text: #6b3d00; /* warning copy on amber-soft: 8.32:1 (amber itself is 5.97:1) */
   --amber-soft: #fdf3e1;
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
@@ -246,7 +247,9 @@ body {
   color: var(--violet-ink);
 }
 
-:where(a, button, [role="button"], input, select, textarea, summary):focus-visible,
+/* [tabindex="0"]: a box made focusable so the keyboard can scroll it (a wide table, a long text) gets the same ring
+   as a control, not only the browser's own (2.4.7, 2.4.13; tests/focus-ring-regions.test.ts). */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex="0"]):focus-visible,
 :where(input[type="radio"]):focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -1223,7 +1226,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -2388,6 +2391,16 @@ a.chip {
   border-color: var(--st-accent-text);
   box-shadow: 0 0 0 3px var(--st-accent-soft);
 }
+/* No block of the digital consent box is wider than 80 characters, wherever it is drawn (1.4.8 AAA,
+   tests/consent-box-line-length.test.ts): its paragraphs and the sentence the buyer checks (the label's span); its
+   error box and its screen-reader-only line keep their width. In @layer components at no weight, like the store
+   front's caps below: where the box sits in .st-measure or [data-store-layout] their narrower 34ch still applies,
+   and Tailwind's utilities still win. */
+@layer components {
+  :where([data-digital-consent]) :where(p:not(.st-note, .sr-only), label > span) {
+    max-width: 46ch;
+  }
+}
 /* Keyboard focus stays distinct even when a creator picks a very pale or
    dark accent. Each opaque band is large enough to be seen on its own. */
 .st-field:focus-visible {
@@ -2583,6 +2596,14 @@ select.st-field:not([multiple]),
   align-items: center;
   min-height: 2.75rem;
 }
+/* The same on every other page under a store (tip, waitlist, letters, blog, manage, renew, pay, ...): a way back drawn
+   directly inside a <div> or <nav> stands alone, so it is a 44 px target too (2.5.5 AAA,
+   tests/store-back-links-target.test.ts). A link in a sentence sits in a <p> or <span> and keeps its line. */
+.st-page :is(div, nav) > a.st-footer-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
 /* A summary drawn as such a link (the presale's "Or join the waitlist") opens from a 44 px row by its padding, so it
    stays a list item with its triangle. The first padding is for a browser without the lh unit. */
 [data-store-layout] summary.st-footer-link {
@@ -2590,6 +2611,24 @@ select.st-field:not([multiple]),
   padding-block: 0.625rem;
   padding-block: calc((2.75rem - 1lh) / 2);
 }
+/* begin studio target floor (AX274 audit, cloud P)
+ * In the studio, every disclosure summary and every label that wraps a checkbox or a radio is a target at least
+ * 44 px tall (WCAG 2.2 2.5.5 Target Size (Enhanced), AAA; AX274 Part A item 4). About 50 summaries and 167 checkboxes
+ * across its components measured 13 to 20 px; a label is the checkbox's target too, since a click on it ticks the box.
+ * app/studio/layout.tsx marks the studio's pages with data-studio (display: contents, so no box of its own). In a layer
+ * and behind :where, so a size or a padding a control sets for itself with a utility still wins (tests/studio-target-floor.test.ts).
+ * align-content centers a one-line summary's words, its open/closed marker with them, in the taller row.
+ */
+@layer components {
+  [data-studio] :where(summary) {
+    min-height: 2.75rem;
+    align-content: center;
+  }
+  [data-studio] :where(label:has(> input[type="checkbox"], > input[type="radio"])) {
+    min-height: 2.75rem;
+  }
+}
+/* end studio target floor */
 /* A line of the store front's sentences, and of its questions, stays at or under 80 characters at any width (WCAG
    1.4.8): the cards (li) keep the grid's columns, their words are capped. Counted in Chromium, 56ch let a real sentence
    reach 81 a line and words of narrow letters (i, l, t, f, j, r) 126; at 34ch they measured 51 and 75.
@@ -5029,6 +5068,15 @@ fieldset:disabled .cm-poll-row {
   .st-has-sticky {
     padding-bottom: 6.5rem;
   }
+  /*
+   * WCAG 2.2 2.4.11/2.4.12: the browser keeps what has keyboard focus above the
+   * bar instead of under it (tests/sticky-buy-focus.test.ts). Held while the bar
+   * is away too: focus can scroll the buy box off screen, and the bar then comes
+   * back over what was just focused.
+   */
+  html:has(.st-sticky-buy) {
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
 }
 .st-sticky-price {
   min-width: 0;
@@ -5323,6 +5371,7 @@ html:has([data-product-editor]) {
   --danger: #ff7b6e;
   --amber-soft: #2e2210;
   --amber: #ffcf8a;
+  --amber-text: #ffcf8a;
   --background: var(--paper);
   --foreground: var(--ink);
 }

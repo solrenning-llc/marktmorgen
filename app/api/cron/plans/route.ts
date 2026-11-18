@@ -3,7 +3,7 @@ import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { settlePlans } from "@/lib/plans";
+import { PLANS_PER_RUN, settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { syncPlanDisputes } from "@/lib/plan-disputes";
@@ -19,6 +19,13 @@ import { sendWinBacks } from "@/lib/winback-send";
 import { ensureDemoStore } from "@/lib/demo-seed";
 
 export const maxDuration = 60;
+
+/**
+ * The plans' own share of a run (PLAN_SETTLE_RUN.runMs in tests/plan-cost-registry.ts): first, as they are money a
+ * buyer agreed to, and never all of it, so the disputes and the stores' subscriptions after them still run. Plans
+ * not reached wait in their lines for the next run.
+ */
+const PLANS_MS = 25_000;
 
 /**
  * Run on a schedule by Vercel, once a day, for the jobs that keep money
@@ -78,11 +85,15 @@ async function run(request: NextRequest): Promise<Response> {
   // Leaves time to answer inside maxDuration, whatever the jobs find.
   const deadline = Date.now() + 45_000;
   try {
+    // Without the platform's key no call to Stripe can be made: the plans are not tried at all, so no failure of
+    // ours is counted against them (lib/plans.ts, isAccountRefusal), and no plan can have been opened.
     let plans = null;
-    try {
-      plans = await settlePlans();
-    } catch (error) {
-      console.error("settling payment plans failed", error);
+    if (isBillingConfigured()) {
+      try {
+        plans = await settlePlans(PLANS_PER_RUN, Math.min(deadline, Date.now() + PLANS_MS));
+      } catch (error) {
+        console.error("settling payment plans failed", error);
+      }
     }
     // A creator who disputed a payment for their plan has what costs us to
     // run paused, as for an unpaid renewal (232 [CA1] unit 5). At most eight
@@ -107,10 +118,15 @@ async function run(request: NextRequest): Promise<Response> {
     // and makes the working card the one used next time (lib/payment-recovery.ts).
     // Before the upkeep below, because it is money agreed to, and upkeep can
     // wait a day while a member's access cannot.
+    // Every pass below that threw is named here and fails the run (#4280), except the two the route keeps as
+    // best-effort (the research pruning and the demo store): a pass caught to null was logged while the run still
+    // answered ok with HTTP 200, so members' failed renewals or invite credit failing on every run never showed.
+    const failedPasses: string[] = [];
     let recovered = null;
     try {
       recovered = await recoverFailedPayments(deadline);
     } catch (error) {
+      failedPasses.push("recoverFailedPayments");
       console.error("writing about failed renewals failed", error);
     }
     // Former members who agreed to hear from the creator: one come-back
@@ -119,6 +135,7 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       comeBack = await sendWinBacks(deadline);
     } catch (error) {
+      failedPasses.push("sendWinBacks");
       console.error("sending come-back offers failed", error);
     }
     // Running members who stopped coming, where the creator turned it on:
@@ -127,6 +144,7 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       nudged = await sendMemberNudges(deadline);
     } catch (error) {
+      failedPasses.push("sendMemberNudges");
       console.error("sending emails to members who stopped coming failed", error);
     }
     // Monthly members whose membership has a yearly price, where the creator
@@ -135,6 +153,7 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       yearly = await sendYearlyAsks(deadline);
     } catch (error) {
+      failedPasses.push("sendYearlyAsks");
       console.error("sending the yearly offer failed", error);
     }
     // The numbers stores show others, counted once a day (lib/verified-numbers.ts).
@@ -142,10 +161,12 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       verified = await sendVerified(deadline);
     } catch (error) {
+      failedPasses.push("sendVerified");
       console.error("reading the shared numbers failed", error);
     }
     // The ranges stores are set beside, from the last two weeks' samples (lib/benchmarks.ts): one read and one write.
     const benchmarks = await refreshRanges().then((r) => (r ? r.stores : null)).catch((error: unknown) => {
+      failedPasses.push("refreshRanges");
       console.error("working out the ranges of stores failed", error);
       return null;
     });
@@ -155,12 +176,14 @@ async function run(request: NextRequest): Promise<Response> {
     try {
       invites = await settleInvites(deadline);
     } catch (error) {
+      failedPasses.push("settleInvites");
       console.error("adding invite credit failed", error);
     }
     let catalogs = null;
     try {
       catalogs = await moveAllStores(deadline);
     } catch (error) {
+      failedPasses.push("moveAllStores");
       console.error("moving stores to product records failed", error);
     }
     // Creator research answers are kept 24 months, as the privacy policy says.
@@ -175,8 +198,12 @@ async function run(request: NextRequest): Promise<Response> {
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
     // A subscription whose paid-up state could not be applied or checked
     // makes the run a failed one, not a healthy one (lib/billing-sync.ts).
-    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured());
-    return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
+    // Without the platform's key the plans are not tried (null), as the rest; a pass that threw still fails the run.
+    const ok = ((plans !== null && billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured()) && failedPasses.length === 0;
+    return Response.json(
+      { ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo, failedPasses },
+      { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } },
+    );
   } finally {
     await releaseMark("nl:plans:lock", lock);
   }

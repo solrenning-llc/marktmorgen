@@ -26,7 +26,7 @@ import { unpaidNotice } from "@/lib/checkout-return";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { canMove, chargedIn, confirmBooking, moveLink, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
@@ -51,13 +51,14 @@ import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
-import { readPaid, stillPending } from "@/lib/paypal-sales";
+import { PENDING_GIVE_UP_SECONDS, canceledFor, readPaid, stillPending } from "@/lib/paypal-sales";
+import { paypalCancelWords } from "@/lib/buyer-words/paypal-cancel";
 import { paypalHandedOver } from "@/lib/paypal-handed";
 import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { after } from "next/server";
-import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, fromStore, introOf, storeBase } from "@/lib/purchase-email";
+import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, firstChargeSaid, fromStore, introOf, storeBase, type SessionRecord } from "@/lib/purchase-email";
 import { firstChargeCents } from "@/lib/yearly-price";
 import { readConfig } from "@/lib/community";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
@@ -77,7 +78,8 @@ import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
-import { speech } from "@/lib/buyer-words";
+import { everyPhrase, speech } from "@/lib/buyer-words";
+import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
@@ -116,6 +118,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   declined: { always: true },
   failed: { always: false },
   checking: { always: false },
+  busy: { always: true },
   unavailable: { always: true },
   changed: { always: true },
 };
@@ -446,7 +449,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       moves: order.call.moves,
       answers: order.answers,
       amountCents: order.amount,
-      currency: order.currency,
+      currency: order.record.currency,
       lead: order.call.lead,
       pi: order.call.pi,
       due,
@@ -632,12 +635,22 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const ended = order.state === "paid" && order.membership === "ended";
   // The creator's own note after paying, read only for a product that has one (lib/thanks-note.ts).
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
+  // How often a membership charges as it was bought, read from the order: a monthly one may have been paid yearly
+  // (lib/yearly-price.ts), and one charged every few months is said so, "every 3 months" (609 [WP8]), even if the
+  // product changed while the checkout was open.
+  const paidAs = order.state === "paid" && order.product.recurring ? paidEveryOf((order.record.metadata ?? {}) as Record<string, string>, order.product.recurring) : null;
+  const paidPhrase = paidAs ? everyPhrase(store, paidAs.interval, paidAs.count) : speech(store).w.every("month");
   // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
   // The first charge after a free trial or a move, as the checkout made it: the year's price when paid yearly.
   const firstCents = order.state === "paid" && order.product.recurring ? firstChargeCents(order.product, order.option, paidEvery, store.tiers) : null;
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
+  // A membership whose discount came off its first charge, said as the confirmation email says it, never "$10 a month"
+  // when only the first charge was $10 (rule 27; lib/purchase-email.ts, firstChargeSaid); "unread" names no price.
+  const firstChargeLine = order.state === "paid" && order.product.recurring && !introPaid ? firstChargeSaid(store, order.record as SessionRecord, order.product) : null;
+  // A paid call's amounts in person, only in the currency Stripe charged, read exactly (lib/calls.ts, chargedIn).
+  const dueIn = order.state === "paid" ? chargedIn(order.record.currency) : null;
 
   // Each license key this order earns: given here if the five-minute job
   // that sends the confirmation has not given it already. A sale only ever
@@ -830,16 +843,16 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   ? t.nothingChargedToday
                   : booked && order.record.metadata && (order.record.metadata as Record<string, string>).package
                     ? t.oneSessionOfPackage
-                  : t.forPrice(
+                  : firstChargeLine !== null ? "" : t.forPrice(
                       order.product.recurring
                         ? introPaid
                           ? speech(store).w.introThen(
                               money(introPaid.cents, order.currency),
                               introPaid.count,
                               order.product.recurring.interval,
-                              t.priceEvery(money(introPaid.regular, order.currency), speech(store).w.every(paidEvery)),
+                              t.priceEvery(money(introPaid.regular, order.currency), paidPhrase),
                             )
-                          : t.priceEvery(money(order.amount, order.currency), speech(store).w.every(paidEvery))
+                          : t.priceEvery(money(order.amount, order.currency), paidPhrase)
                         : order.plan
                           ? t.priceToday(money(order.amount, order.currency))
                           : money(order.amount, order.currency),
@@ -870,6 +883,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   )}
                 </p>
               ) : null}
+              {firstChargeLine && firstChargeLine !== "unread" && !ended ? (
+                <p
+                  className="mt-3 rounded-2xl px-4 py-3 text-sm"
+                  style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
+                  data-first-charge=""
+                >
+                  {firstChargeLine}
+                </p>
+              ) : null}
               {order.plan ? (
                 <p
                   className="mt-3 rounded-2xl px-4 py-3 text-sm"
@@ -886,8 +908,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {canManage(store) ? (
                     <>
                       {order.endsAfter > 0
-                        ? t.renewsForSelf(speech(store).w.every(paidEvery), order.endsAfter)
-                        : t.renewsUntilSelf(speech(store).w.every(paidEvery))}
+                        ? t.renewsForSelf(paidPhrase, order.endsAfter)
+                        : t.renewsUntilSelf(paidPhrase)}
                       <Link href={`/@${store.handle}/manage`} className="font-semibold underline underline-offset-4">
                         {t.manageMembership}
                       </Link>
@@ -895,8 +917,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     </>
                   ) : (
                     order.endsAfter > 0
-                      ? t.renewsForReply(speech(store).w.every(paidEvery), order.endsAfter, store.name)
-                      : t.renewsUntilReply(speech(store).w.every(paidEvery), store.name)
+                      ? t.renewsForReply(paidPhrase, order.endsAfter, store.name)
+                      : t.renewsUntilReply(paidPhrase, store.name)
                   )}
                 </p>
               ) : null}
@@ -947,7 +969,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     <p className="mt-5 text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(booked.setup.place))}</p>
                   ) : null}
                   {/* The code and what is left to pay in person, as Stripe's page said before paying (lib/call-deposit.ts). */}
-                  {dueLines(bookingWords(store.language), due ?? null, { currency: order.currency || store.currency, locale, storeName: store.name }).map((line) => (
+                  {(dueIn ? dueLines(bookingWords(store.language), due ?? null, { currency: dueIn, locale, storeName: store.name }) : []).map((line) => (
                     <p key={line} className="mt-2 text-sm" data-call-due="">{line}</p>
                   ))}
                   {/* The cancellation deadline promised when paying (lib/call-setup.ts, readCancelPromise). */}
@@ -1479,6 +1501,15 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
           return false;
         })
       : false;
+  // Canceled because PayPal never confirmed the payment (lib/paypal-sales.ts, cancelOrder): said so, also to a buyer
+  // PayPal gave no address for. A mark that cannot be read is unknown, never "not found".
+  const canceled =
+    !ours && allowed && !unread && !waiting
+      ? await canceledFor(store, order).catch(() => {
+          unread = true;
+          return null;
+        })
+      : null;
   const fresh = ours ? saleClock() - ours.at < DOWNLOAD_WINDOW_SECONDS : false;
   const link = ours && delivered && fresh ? await ordersLinkFor(store, ours.email, storeBase(store)).catch(() => null) : null;
   const t = thanksWords(store.language);
@@ -1546,6 +1577,12 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             <>
               <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{t.ppCouldNotCheck}</h1>
               <p className="st-muted mt-4">{t.ppCouldNotCheckBody}</p>
+            </>
+          ) : canceled ? (
+            <>
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{paypalCancelWords(store.language).heading}</h1>
+              <p className="st-muted mt-4">{paypalCancelWords(store.language).pageBody(Math.round(PENDING_GIVE_UP_SECONDS / 86_400))}</p>
+              <p className="st-muted mt-3">{canceled.charged === "none" ? paypalCancelWords(store.language).notCharged : paypalCancelWords(store.language).pagePending(store.name)}</p>
             </>
           ) : waiting ? (
             <>

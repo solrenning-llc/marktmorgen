@@ -721,7 +721,7 @@ export default function PrivacyPage() {
           &quot;Clear my answers&quot; removes them at once. Once a try is
           recorded, or for a quiz that draws its questions again, what was
           kept is never put back and is removed the next time that lesson
-          opens in that browser; none older than 30 days is used.
+          opens in that browser; none older than 7 days is used.
           Each time a lesson or the library opens in that browser, any quiz
           draft older than that or unreadable is removed, for any lesson or
           student, and signing out removes them all. Clearing the

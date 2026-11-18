@@ -27,7 +27,7 @@
  */
 
 export const QUIZ_KEEP_PREFIX = "mm:quiz:";
-export const QUIZ_KEEP_DAYS = 30;
+export const QUIZ_KEEP_DAYS = 7;
 const KEEP_MS = QUIZ_KEEP_DAYS * 86_400_000;
 
 /** Where one student's draft of one lesson's quiz is kept in this browser; `who` is the server's code for the student. */

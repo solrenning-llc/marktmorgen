@@ -15,7 +15,16 @@ import {gateReading} from '@/lib/tax-gate';
 import {reviewedReceivingTaxInput} from './reviewed-receiving-fixture';
 import {syntheticTaxContext} from './customer-tax-review-fixture';
 import {netOf} from './plan-cost-model';
+import {worstMonthKept} from './worst-month-kept';
 
+test('the dated report holds the worst month each plan keeps under the LC reading, exactly (Claude 4 LOW on #4854)',()=>{
+ const doc=readFileSync('docs/margin-alignment-2026-10-18.md','utf8');
+ for(const cycle of ['month','year'] as const){
+  const label=cycle==='month'?'Monthly plan':'A month of a yearly plan';
+  const row=['',label,...worstMonthKept(cycle).map((v)=>'US$'+v),''].join(' | ').trim();
+  assert.ok(doc.includes(row),'the document lists '+row);
+ }
+});
 test('the dated report remains explicitly historical and matches its reproducible figures',()=>{
  const generated=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE);
  assert.ok(generated.startsWith(HISTORICAL_TAX_NOTICE));

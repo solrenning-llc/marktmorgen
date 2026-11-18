@@ -68,6 +68,12 @@ async function main(): Promise<void> {
   is("on success, the heading takes it (the line is gone)", /toast\([^)]*\);\s*heading\.current\?\.focus\(\)/.test(panel), true);
   is("on failure, the message takes it", /role="alert"[^>]*tabIndex=\{-1\}/.test(panel) && /message\.current\?\.focus\(\)/.test(panel), true);
 
+  part("5b. The focus is never dropped while approving or after the last line (Claude 4's LOWs on #3485 @eff4ed6779)");
+  is("the panel stays, with its heading, after its last line is approved", /if \(!lines\.length && !cleared\) return null;/.test(panel), true);
+  is("and says nothing is waiting now", /No commissions are waiting for a buyer check now\./.test(panel), true);
+  is("the confirm button is never natively disabled while the request runs", /ref=\{confirmButton\}[^>]*\sdisabled=/.test(panel), false);
+  is("it says so with aria-disabled, and its handler refuses a second press", /ref=\{confirmButton\}[^>]*aria-disabled=\{busy !== null\}/.test(panel) && /if \(busy !== null\) return;/.test(panel), true);
+
   part("6. A batch of sales that read in another shape never holds the place of the sales behind them");
   redis.clear();
   sessions = {};

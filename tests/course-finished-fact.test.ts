@@ -119,7 +119,8 @@ async function main(): Promise<void> {
   is(
     "it reads the count only when a block of the page asks for it and the course gives a certificate now",
     page.includes('product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))') &&
-      page.includes("certificateOn = course?.certificate === true;") &&
+      page.includes("certificateOn: course?.certificate === true,") &&
+      page.includes("const certificateOn = courseFacts?.certificateOn === true;") &&
       page.includes("await earnedCount(product.course.id).catch(() => null)"),
     true,
   );

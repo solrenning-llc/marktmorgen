@@ -199,7 +199,6 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/plan-late-notice.ts": { how: "passing", days: 400, what: "If a payment of your payment plan was taken after the plan ended and then refunded: whether you were emailed about that refund and how many times it was tried, kept under the payment's Stripe invoice only, so you are never emailed about it twice. Your address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
-  "lib/purchase-moves.ts": { how: "passing", days: 2, what: "A request to move your purchases to another address, with both addresses and when each confirmed it, kept for its day and one more; found only by the links emailed to the two addresses" },
 };
 
 /** True only when every module is copied or holds only marks: the condition for giving the copy to anybody. */

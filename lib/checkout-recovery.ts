@@ -58,7 +58,7 @@ import { activePwyw } from "@/lib/pay-what-you-want";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import { readListing, readListings } from "@/lib/catalog";
-import { BUMP_KEYS } from "@/lib/bundle-rules";
+import { BUMP_KEYS, picks } from "@/lib/bundle-rules";
 import { cartable, readCartIds } from "@/lib/cart-rules";
 import { cartWords } from "@/lib/buyer-words/cart";
 import { saleOff, salePrice } from "@/lib/store-sale";
@@ -618,7 +618,8 @@ async function deliver(
     // products only, covering every price): never for a pre-order, whose checkout takes no plan (lib/store-checkout.ts),
     // nor for a product coming soon, whose page has a waitlist or a pre-order where the plan would be (lib/preorders.ts).
     // Coming soon is one exact read, only for a product with a plan; unknown is "coming soon": no plan line on a guess.
-    const offered = about.preorder ? null : activePlan(product);
+    // A bundle the buyer picks from is bought on PickBundleForm, which offers no plan (Claude 3, Claude 7, Codex N4).
+    const offered = about.preorder || picks(product) !== null ? null : activePlan(product);
     const plan = offered && !(await isComingSoon(store, product.id).catch(() => true)) ? offered : null;
     subject = how.subject ?? g.recoverSubject(product.title);
     text = [

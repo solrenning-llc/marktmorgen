@@ -139,7 +139,7 @@ async function main(): Promise<void> {
   const history = read("components/affiliate-commission-history.tsx");
   is("the creator's history names the state instead of calling it a partial refund", /buyer not confirmed/i.test(history), true);
   const panel = read("components/affiliate-unconfirmed.tsx");
-  is("the panel asks before it approves (3.3.6) and says what approving does", [/Approve/.test(panel), /next payment/i.test(panel), /Cancel/.test(panel), /tier-confirm/.test(panel)], [true, true, true, true]);
+  is("the panel asks before it approves (3.3.6) and says what approving does", [/Approve/.test(panel), /joins your payment batch, unless a hold/.test(panel), /Cancel/.test(panel), /tier-confirm/.test(panel)], [true, true, true, true]);
   is("it announces results to a screen reader and keeps targets 44px", [/role="status"|role="alert"/.test(panel), /min-h-11|min-h-\[44px\]/.test(panel)], [true, true]);
   is("the studio shows it", /AffiliateUnconfirmed/.test(read("components/affiliate-studio.tsx")), true);
   is("the affiliate's page says it, in words", /"buyer not confirmed"/.test(read("lib/buyer-words/affiliates.ts")), true);

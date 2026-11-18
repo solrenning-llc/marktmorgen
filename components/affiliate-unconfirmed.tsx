@@ -42,6 +42,9 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ ref: string; text: string } | null>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
+  // Where the focus goes after approving (Codex X6, LOW on #3485): the heading once the line is gone, the message on a failure.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const message = useRef<HTMLParagraphElement>(null);
   // Each line's opener as it is on the page now, by the line's ref: opening the confirmation takes the opener off the
   // page and closing it draws a new one, so the node kept from the press is never the one to focus (review of #3485, M2).
   const openers = useRef(new Map<string, HTMLButtonElement>());
@@ -59,6 +62,11 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
     if (back) openers.current.get(back)?.focus();
   }, [asking]);
 
+  // A failure's message takes the focus once it is on the page.
+  useEffect(() => {
+    if (problem) message.current?.focus();
+  }, [problem]);
+
   if (!lines.length) return null;
 
   async function approve(ref: string) {
@@ -68,17 +76,18 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
     setBusy(null);
     if (failed) return setProblem({ ref, text: failed });
     setAsking(null);
-    toast("Approved. It is in your next payment batch.");
+    toast("Approved. It counts as owed and joins your payment batch, unless a hold on your store or on this affiliate still keeps it out.");
+    heading.current?.focus();
     router.refresh();
   }
 
   return (
     <section aria-labelledby="unconfirmed-title" className="card p-6 sm:p-8">
-      <h2 id="unconfirmed-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+      <h2 id="unconfirmed-title" ref={heading} tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
         Commissions waiting for a buyer check
       </h2>
       <p className="mt-2 text-sm text-ink-soft">
-        {`These sales did not give us the buyer's email, so we cannot tell whether the buyer is the affiliate who made the sale or the affiliate who invited them. For a sale, we keep looking for ${days} days and decide on our own if the email turns up. A membership's renewal cannot be looked up again, so it waits for you. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
+        {`These sales did not give us the buyer's email, or we could not read an affiliate's record, so we cannot tell whether the buyer is the affiliate who made the sale or the affiliate who invited them. For a sale, we keep looking for ${days} days and decide on our own if the email turns up. A membership's renewal cannot be looked up again, so it waits for you. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
       </p>
       <p className="mt-2 text-sm text-ink-soft" role="status">
         {total > lines.length ? `Showing ${lines.length} of ${total} waiting.` : `${total} waiting.`}
@@ -120,7 +129,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
                 <div className="notice notice-warn mt-3 text-sm" role="group" aria-label={`Confirm approving ${money(line.commission, line.currency)} for ${who2}`}>
                   <p className="font-semibold text-ink">{`Approve ${money(line.commission, line.currency)} for ${who2}?`}</p>
                   <p className="mt-1 text-ink-soft">
-                    Approve only if you know the buyer is neither this affiliate nor the affiliate they invited who made the sale. It goes into your next payment batch and counts as owed. You cannot undo it here. If it was a mistake, record a smaller payout.
+                    Approve only if you know the buyer is neither this affiliate nor the affiliate they invited who made the sale. It counts as owed and joins your payment batch, unless a hold on your store or on this affiliate still keeps it out. You cannot undo it here. If it was a mistake, record a smaller payout.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button ref={confirmButton} type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center" disabled={busy !== null} onClick={() => approve(line.ref)}>
@@ -143,7 +152,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
                 </div>
               )}
               {problem?.ref === line.ref ? (
-                <p className="notice notice-error mt-3 text-sm" role="alert">
+                <p ref={message} className="notice notice-error mt-3 text-sm" role="alert" tabIndex={-1}>
                   {problem.text}
                 </p>
               ) : null}

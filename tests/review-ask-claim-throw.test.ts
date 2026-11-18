@@ -15,13 +15,13 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 const person = "review-person@example.test";
 const reference = "cs_test_ReviewProof001";
-async function setup() {
+async function setup(opts: { again?: number; paidDaysAgo?: number } = {}) {
   redis.clear();
   const owner = "review-owner@example.test";
   const batches: { to: string | string[] }[][] = [];
   let productId = "";
   const now = Math.floor(Date.now() / 1000);
-  const paidAt = now - 8 * 86400;
+  const paidAt = now - (opts.paidDaysAgo ?? 8) * 86400;
   process.env.STRIPE_SECRET_KEY = "sk_test_reviews_only_a_stand_in";
   // Existing allowlisted synthetic provider credential; never a live account.
   process.env.RESEND_API_KEY = "re_test_updates_only_a_stand_in";
@@ -45,7 +45,7 @@ async function setup() {
   await setStripeAccount(owner, "acct_1TestHarbor0001", true);
   await setSubscription(owner, { customerId: "cus_ReviewProof", subscriptionId: "sub_ReviewProof", active: true, tier: "pro", period: paidPeriod() });
   await setMailSettings(owner, { fromName: "Review Proof", address: "1 Example St, Example City" });
-  await setReviewAsk(owner, { days: 7 });
+  await setReviewAsk(owner, opts.again ? { days: 7, again: opts.again } : { days: 7 });
   const made = await addProduct(owner, "Review evidence", "", "27", null);
   assert.ok(made.ok); productId = made.product.id;
   await setProductLink(owner, productId, "https://example.com/review");
@@ -93,5 +93,40 @@ test("a throw after the first email's claim never drops the order unsent", async
     const second = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
     assert.deepEqual(second, { sent: 1, dropped: 0, waiting: 0 }, "the next run sends it, never drops it");
     assert.equal(r.batches.flat().length, 1, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+
+test("a lost reminder-claim reply never drops the reminder unsent (Codex L and U on #4495)", async () => {
+  const oldFetch = globalThis.fetch;
+  // Paid 11 days ago, the first went 4 days ago, a reminder 3 days after it: due a day ago.
+  const r = await setup({ again: 3, paidDaysAgo: 11 });
+  redis.run(["SET", `nl:rev:ask:sent:${reference}`, `sent:${r.now - 4 * 86400}`, "EX", 120 * 86400]);
+  redis.run(["ZADD", ASK_DUE_KEY, r.now - 86400, r.member]);
+  try {
+    let lost = false;
+    redis.pipeline = async (commands) => {
+      // The reminder's claim (whatever it is) is applied, and its reply is lost.
+      const removal = commands[0]?.[0] === "ZREM" && commands[0]?.[1] === ASK_DUE_KEY && commands[0]?.[2] === r.member && commands.length === 1;
+      const ownClaim = commands[0]?.[0] === "SET" && String(commands[0]?.[1]).startsWith(`nl:rev:ask:sent:${reference}:`) && commands[0]?.includes("NX");
+      if (!lost && (removal || ownClaim)) {
+        await r.original(commands);
+        lost = true;
+        throw new Error("synthetic lost Redis reply after apply");
+      }
+      return r.original(commands);
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    const first = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now).catch(() => "threw" as const);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(lost, true, "the claim's reply was lost");
+    assert.notEqual(first, "threw");
+    const second = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 1801);
+    assert.equal(r.batches.flat().length, 1, "the reminder is delivered exactly once");
+    assert.equal(redis.run(["GET", `nl:rev:ask:sent:${reference}`]), "again");
+    assert.equal(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "and is off the list once sent");
+    assert.equal((first as { sent: number }).sent + second.sent, 1);
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });

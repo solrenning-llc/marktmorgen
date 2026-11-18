@@ -251,6 +251,17 @@ try {
     const context = await createIsolatedContext({ ...options, serviceWorkers: "block" });
     await context.addInitScript(() => {
       window.__mmNavigationRsc = [];
+      // A navigation of the test's own (page.goto, a link) can cut off an RSC fetch still in flight. WebKit reports the
+      // cut-off as a rejected fetch ("... due to access control checks") that Next does not catch, so it reached
+      // "no page threw" although nothing in the page failed (CV (e), 17 November 2026, #4843 and others). Only such a
+      // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
+      // beforeunload marks it for one second only: a leave the page refuses (its own unload protection, which
+      // Playwright's dialog handling answers by staying) must not hide a later failure. pagehide is the real unload;
+      // pageshow (a page restored from the back/forward cache) clears it.
+      let leaving = false, leaveTimer;
+      addEventListener("beforeunload", () => { leaving = true; clearTimeout(leaveTimer); leaveTimer = setTimeout(() => { leaving = false; }, 1000); });
+      addEventListener("pagehide", () => { clearTimeout(leaveTimer); leaving = true; });
+      addEventListener("pageshow", () => { clearTimeout(leaveTimer); leaving = false; });
       const original = window.fetch;
       window.fetch = async function (...args) {
         const input = args[0], url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, location.href);
@@ -260,7 +271,7 @@ try {
           const response = await original.apply(this,args);
           if (entry) response.clone().text().then(() => {entry.done=true;},() => {entry.done=true;});
           return response;
-        } catch(error) {if(entry)entry.done=true;throw error;}
+        } catch(error) {if(entry){entry.done=true;if(leaving)return new Promise(()=>{});}throw error;}
       };
     });
     const newPage = context.newPage.bind(context);

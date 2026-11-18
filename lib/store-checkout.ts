@@ -145,6 +145,20 @@ export function fromPriceCents(product: Listing): number {
 }
 
 /** A code only for people who bought here before that Stripe would not take on this checkout (lib/returning-code.ts). */
+/**
+ * The checkout boxes the buyer ticked turned the order into one the EU VAT gate refuses (lib/eu-vat-gate.ts
+ * consumerGate): thrown before Stripe is asked anything, so nothing is held or charged, and the buyer is sent back to
+ * the page as for the product itself.
+ */
+export class BoxesRefused extends Error {
+  readonly reason: "refused" | "billing";
+  constructor(reason: "refused" | "billing") {
+    super("A checkout box makes this order one the EU VAT gate refuses");
+    this.name = "BoxesRefused";
+    this.reason = reason;
+  }
+}
+
 export class ReturningCodeRefused extends Error {
   /** "code": Stripe would not take its coupon (used up, ended, deleted); "other": the code cannot go on this checkout. */
   readonly reason: "code" | "other";
@@ -180,6 +194,11 @@ export async function createCheckout(
     held?: boolean;
     /** For a bundle its buyer builds: the products they ticked (lib/bundle-rules.ts, chosenItems). */
     picked?: string[];
+    /**
+     * The EU VAT gate for the whole order (lib/eu-vat-gate.ts consumerGate), asked again with the boxes the buyer
+     * ticked, as they are read here: a box the order's place refuses throws BoxesRefused before Stripe is asked.
+     */
+    gateBoxes?: (boxes: { product: Listing; members?: ReadonlyMap<string, Listing> }[]) => { ok: true } | { ok: false; reason: "refused" | "billing" };
     /**
      * The fingerprint of the secret the buyer's browser keeps, when an upsell
      * follows: the card is then kept for payments made while they are there.
@@ -443,7 +462,7 @@ export async function createCheckout(
   const checked = new Set((extras.bumps ?? []).slice(0, MAX_BUMPS + 1));
   const shown = checked.size && !membership && !pwyw && product.bumps.length ? activeBumps(await readListings(store, bumpTargets(product)), product) : [];
   if (checked.has("yes") && shown[0]) checked.add(shown[0].target.id);
-  const added: { key: BumpKey; bump: Bump; target: Listing }[] = [];
+  const added: { key: BumpKey; bump: Bump; target: Listing; bundled: Listing[] | null }[] = [];
   for (const offer of shown) {
     if (!checked.has(offer.target.id)) continue;
     // A bundle ticked at checkout: its list is written down the same way.
@@ -468,7 +487,14 @@ export async function createCheckout(
     // creator left out of the programme never earns the front product's rate.
     body.set(`metadata[${key}_cents]`, String(offer.bump.priceCents));
     if (!recurring) body.set(`payment_intent_data[metadata][${key}]`, offer.target.id);
-    added.push({ key, bump: offer.bump, target: offer.target });
+    added.push({ key, bump: offer.bump, target: offer.target, bundled });
+  }
+  // The order read whole by the EU VAT gate, boxes included, before anything is sent (Claude 7 on #4572).
+  if (added.length && extras.gateBoxes) {
+    // A bundle box is read by the members already read above, so the gate costs no read of its own.
+    const boxes = added.map(({ target, bundled }) => ({ product: target, members: bundled ? new Map(bundled.map((listing) => [listing.id, listing] as const)) : undefined }));
+    const gate = extras.gateBoxes(boxes);
+    if (!gate.ok) throw new BoxesRefused(gate.reason);
   }
   if (added.length) body.set("metadata[title]", [name, ...added.map((a) => a.target.title)].join(" + ").slice(0, 480));
 

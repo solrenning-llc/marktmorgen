@@ -33,6 +33,7 @@ import { NextRequest } from "next/server";
 import { paidPeriod } from "./billing-period-fixture";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Command = (string | number)[];
 
@@ -86,6 +87,9 @@ const SUB = "sub_CardGate000001";
 const CUSTOMER = "cus_CardGate00001";
 const ACCOUNT = "acct_1NumberGatesAAA";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {

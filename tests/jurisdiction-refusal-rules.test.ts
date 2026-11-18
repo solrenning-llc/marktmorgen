@@ -116,7 +116,16 @@ is("a record with a field the gate does not know: the gate says not ready, and n
 part("Every piece counts");
 is("US and US: collected there, so sold", decide(["US", "US"]), { allowed: true, jurisdictions: ["US"] });
 const mixed = decide(["US", "DE"]);
-is("one piece in the EU refuses, though the other is in the US", [mixed.allowed, mixed.allowed ? null : mixed.reason, mixed.jurisdictions], [false, "refused-jurisdiction", ["US", "EU"]]);
+// Two pieces that name two countries contradict each other (art. 24b of Regulation 282/2011 needs two that do not;
+// Claude 4 nuvem AH on #3681): the country is not confirmed, whatever each would allow.
+is("a piece in the US and one in the EU: the country is not confirmed", [mixed.allowed, mixed.allowed ? null : mixed.reason, mixed.jurisdictions], [false, "location-unknown", []]);
+const ALL_COLLECT = [record("EU", "collect"), record("UK", "collect"), record("US", "collect"), record("other", "collect")];
+const twoStates = decide(["DE", "FR"], ALL_COLLECT);
+is("Germany and France, though the EU collects: not confirmed", [twoStates.allowed, twoStates.allowed ? null : twoStates.reason], [false, "location-unknown"]);
+const euEu = decide(["EU", "EU"], ALL_COLLECT);
+is("EU and EU, though the EU collects: not a country, not confirmed", [euEu.allowed, euEu.allowed ? null : euEu.reason], [false, "location-unknown"]);
+is("the same member state twice, where the EU collects: sold", decide(["DE", "DE"], ALL_COLLECT), { allowed: true, jurisdictions: ["EU"] });
+is("GB and its reserved UK agree on one country", decide(["GB", "UK"], ALL_COLLECT), { allowed: true, jurisdictions: ["UK"] });
 is("Brazil and Brazil: other, collected, sold", decide(["BR", "BR"]).allowed, true);
 is("Germany twice: refused", decide(["DE", "DE"]).allowed, false);
 is("the United Kingdom: refused", decide(["GB", "GB"]).allowed, false);
@@ -125,7 +134,8 @@ part("Where each country belongs");
 is("the 27 member states", EU_MEMBER_STATES.length, 27);
 is("each is in the EU, and only there", EU_MEMBER_STATES.filter((c) => JSON.stringify(candidateJurisdictions(c)) !== JSON.stringify(["EU"])), []);
 is("Greece is GR, its ISO code (EL is only VAT's own prefix)", EU_MEMBER_STATES.includes("GR"), true);
-is("the code EU itself", candidateJurisdictions("EU"), ["EU"]);
+// "EU" is no country (Codex C2, 5878540574): it never stands for a member state, whose rate the sale needs.
+is("the code EU itself is not a country", candidateJurisdictions("EU"), null);
 is("GB and the reserved UK", [candidateJurisdictions("GB"), candidateJurisdictions("UK")], [["UK"], ["UK"]]);
 is("the United States", candidateJurisdictions("US"), ["US"]);
 is("Brazil, Canada, Norway, Switzerland", ["BR", "CA", "NO", "CH"].map(candidateJurisdictions), [["other"], ["other"], ["other"], ["other"]]);

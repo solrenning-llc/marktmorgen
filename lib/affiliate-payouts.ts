@@ -61,8 +61,17 @@ export type BatchLine = {
  * payout; that is money to come back, not a payment, and is left out.
  */
 export function owedLines(book: Book): BatchLine[] {
+  return owedLinesWhere(book, () => true);
+}
+
+/**
+ * The same, among the affiliates a batch can take (`include`), with the 5,000-row ceiling applied last (Codex X5 on
+ * #4318): otherwise 5,000 larger balances nobody can send this time (on their way, or an address PayPal cannot take)
+ * would fill the ceiling, and the next affiliate who can be paid would never be.
+ */
+export function owedLinesWhere(book: Book, include: (affiliate: Affiliate) => boolean): BatchLine[] {
   return book.rows
-    .filter((row: Row) => row.payable > 0 && row.affiliate.status === "approved")
+    .filter((row: Row) => row.payable > 0 && row.affiliate.status === "approved" && include(row.affiliate))
     .sort((a, b) => b.payable - a.payable)
     .slice(0, MAX_BATCH_ROWS)
     .map((row) => ({ affiliate: row.affiliate, cents: row.payable }));

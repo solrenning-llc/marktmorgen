@@ -209,6 +209,10 @@ async function main(): Promise<void> {
     is("paid before the yes, noted after it: the 10% agreed then, not the 20% of now", await percentOf("cs_test_d_before_yes"), 10);
     await noteSession(await store(), onD("cs_test_d_after_yes", t2 + 60, charged("pi_d_after_yes", t2 + 100, t2 + 3600)));
     is("paid after the yes: 20%", await percentOf("cs_test_d_after_yes"), 20);
+    const atBoundary = await noteSession(await store(), onD("cs_test_d_approval_second", t2 - 60, charged("pi_d_approval_second", t2 - 30, t2)))
+      .then(() => "noted", (error: Error) => error.name);
+    is("payment and approval in the same recorded second need ordering evidence",
+      [atBoundary, await percentOf("cs_test_d_approval_second")], ["UnknownReplyError", null]);
     const older = await noteSession(await store(), onD("cs_test_d_before_start", t0 - 7200, charged("pi_d_before_start", t0 - 7000, t0 - 3600))).then(() => "noted", (error: Error) => error.name);
     is("paid before the 10% began, two changes back: unknown, never guessed", [older, await percentOf("cs_test_d_before_start")], ["UnknownReplyError", null]);
     const kept = await read(s4);

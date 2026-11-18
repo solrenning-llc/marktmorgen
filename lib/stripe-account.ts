@@ -13,6 +13,7 @@
  * one of them quietly missing a header.
  */
 
+import { parseStripeText, stripeJson } from "@/lib/stripe-http-error";
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { DEMO_CONNECTED_ACCOUNT, demoKey } from "@/lib/demo-account";
 
@@ -94,7 +95,7 @@ export class StripeBodyTooLarge extends Error {
 
 /** A Stripe answer's JSON, read up to `maxBytes` (none when 0): past it the reading stops and StripeBodyTooLarge is thrown. */
 async function jsonWithin(response: Response, maxBytes: number): Promise<Record<string, unknown>> {
-  if (!maxBytes) return (await response.json()) as Record<string, unknown>;
+  if (!maxBytes) return stripeJson(response);
   const declared = Number(response.headers?.get?.("content-length") ?? NaN);
   if (Number.isFinite(declared) && declared > maxBytes) {
     await response.body?.cancel().catch(() => {});
@@ -105,7 +106,7 @@ async function jsonWithin(response: Response, maxBytes: number): Promise<Record<
     // A response with no stream to read (a stand-in in a test): its whole text, measured before it is parsed.
     const text = typeof response.text === "function" ? await response.text() : JSON.stringify(await response.json());
     if (Buffer.byteLength(text, "utf8") > maxBytes) throw new StripeBodyTooLarge(maxBytes);
-    return JSON.parse(text) as Record<string, unknown>;
+    return parseStripeText(text, response);
   }
   const parts: Uint8Array[] = [];
   let size = 0;
@@ -119,7 +120,7 @@ async function jsonWithin(response: Response, maxBytes: number): Promise<Record<
     }
     parts.push(value);
   }
-  return JSON.parse(Buffer.concat(parts).toString("utf8")) as Record<string, unknown>;
+  return parseStripeText(Buffer.concat(parts).toString("utf8"), response);
 }
 
 /**
@@ -206,6 +207,8 @@ export async function onAccount(
       cache: "no-store",
       signal,
     });
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts), read within
+    // maxBytes when the caller gives one (jsonWithin).
     return { response, data: await jsonWithin(response, maxBytes) };
   });
   if (!response.ok) {

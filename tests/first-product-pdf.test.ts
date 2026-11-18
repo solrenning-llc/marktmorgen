@@ -7,14 +7,14 @@
  *   - an empty heading or group name is the outline's own, and a renamed one is the creator's;
  *   - only a guide is made (the other formats would promise boxes, room or fields the PDF does not draw yet);
  *   - the file says only what the creator wrote: the title, who made it, then each written part; an empty part is
- *     left out; a long unbroken run of letters is cut into pieces;
+ *     left out; a long unbroken run stays exact while the drawing layout wraps it;
  *   - the file is tagged for a screen reader: a structure tree, marked content, its language and its title shown;
  *   - the route, with a real session, answers with the file to download, and refuses a missing title or letters
  *     the fonts cannot draw before taking the rest of its studio requests;
  *   - the longest file, measured, stays inside what FIRST_PRODUCT_PDF_UNITS studio requests are priced at.
  */
 import { NextRequest } from "next/server";
-import { PDFArray, PDFDict, PDFDocument, PDFName, type PDFRef } from "pdf-lib";
+import { decodePDFRawStream, PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, type PDFRef } from "pdf-lib";
 import { readFileSync } from "node:fs";
 import {
   FIRST_PRODUCT_LONG_WORD,
@@ -88,7 +88,9 @@ async function main(): Promise<void> {
     [{ ok: false, reason: "format" }, { ok: false, reason: "format" }, { ok: false, reason: "format" }],
   );
   const link = "https://example.com/" + "x".repeat(100);
-  is("a long unbroken run of letters is cut into pieces, nothing lost", [breakLongWords(`see ${link}`).split(" ").every((w) => Array.from(w).length <= FIRST_PRODUCT_LONG_WORD), breakLongWords(`see ${link}`).replace(/ /g, ""), breakLongWords("short words stay")], [true, `see${link}`, "short words stay"]);
+  is("a long unbroken run stays exact before the drawing layout", [breakLongWords(`see ${link}`), breakLongWords("short words stay"), FIRST_PRODUCT_LONG_WORD], [`see ${link}`, "short words stay", 40]);
+  const linkRead = readFirstProduct({ ...guide, parts: guide.parts.map((p, i) => (i === 1 ? { ...p, body: link } : p)) });
+  is("a long link stays byte-for-byte intact before layout", linkRead.ok ? firstProductTexts(linkRead.sheet, "Harbor Kitchen")[3]?.text : null, link);
   is("a file name from the title", [firstProductFileName("Bread at home: a guide!"), firstProductFileName("???")], ["Bread-at-home-a-guide.pdf", "my-product.pdf"]);
 
   part("Tagged for a screen reader");
@@ -98,6 +100,19 @@ async function main(): Promise<void> {
   const kids = root.lookup(PDFName.of("K"), PDFDict).lookup(PDFName.of("K"), PDFArray).asArray().map((ref) => doc.context.lookup(ref as PDFRef, PDFDict));
   is("a structure tree in reading order: the title, who made it, a heading and its words", kids.map((k) => k.get(PDFName.of("S"))?.toString()), ["/H1", "/P", "/H2", "/P"]);
   is("marked, with its title and language", [Boolean(doc.catalog.get(PDFName.of("MarkInfo"))), doc.getTitle(), doc.catalog.get(PDFName.of("Lang"))?.toString()], [true, "Bread at home", "(en)"]);
+  const linkBytes = linkRead.ok ? await firstProductPdf(linkRead.sheet, "Harbor Kitchen", "en") : new Uint8Array();
+  const linkDoc = await PDFDocument.load(linkBytes);
+  const linkRoot = linkDoc.catalog.lookup(PDFName.of("StructTreeRoot"), PDFDict);
+  const linkKids = linkRoot.lookup(PDFName.of("K"), PDFDict).lookup(PDFName.of("K"), PDFArray).asArray().map((ref) => linkDoc.context.lookup(ref as PDFRef, PDFDict));
+  const linkActual = linkKids[3]?.get(PDFName.of("ActualText"));
+  is("the tagged paragraph exposes the creator's exact long link to readers and extraction", linkActual instanceof PDFHexString ? linkActual.decodeText() : null, link);
+  const markedText = linkDoc.getPages().flatMap((page) => {
+    const contents = page.node.Contents();
+    const streams = contents instanceof PDFArray ? contents.asArray().map((ref) => linkDoc.context.lookup(ref)) : [contents];
+    return streams.flatMap((stream) => stream instanceof PDFRawStream ? [Buffer.from(decodePDFRawStream(stream).decode()).toString("ascii")] : []);
+  }).join("\n");
+  const expectedActual = PDFHexString.fromText(link).toString();
+  is("the content stream also records the exact text of the wrapped link", markedText.includes(`/ActualText ${expectedActual}`), true);
 
   part("The route");
   const owner = "first@example.com";

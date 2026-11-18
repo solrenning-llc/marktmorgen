@@ -190,7 +190,7 @@ async function main(): Promise<void> {
   await setRoom(0);
   const teamCode = readFileSync("lib/team.ts", "utf8");
   const move = teamCode.slice(teamCode.indexOf("export async function moveMemberships"));
-  is("the old address's restrictions are forgotten under the team's lock, after the team names the new one", move.indexOf("await forgetPipelineAccess(store, before)") > move.indexOf("await saveTeam(sid,") && move.indexOf("await forgetPipelineAccess(store, before)") < move.indexOf("if (!role) continue;"), true);
+  is("the old address's restrictions are forgotten under the team's lock, after the team names the new one", move.indexOf("await forgetPipelineAccess(store, before)") > move.indexOf("await saveTeam(sid,") && move.indexOf("await forgetPipelineAccess(store, before)") < move.indexOf("if (!outcome) continue;"), true);
 
   part("Round 4: a hidden pipeline's name is never told by a refusal");
   // Sam: no access to Coaching; Workshops as kept from above.

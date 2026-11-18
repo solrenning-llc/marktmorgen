@@ -11,6 +11,7 @@
  */
 import { readFileSync } from "node:fs";
 import { connectPayPal, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { claimMark, releaseMark } from "@/lib/claim-mark";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -110,11 +111,50 @@ async function main(): Promise<void> {
   redis.pipeline = real as typeof redis.pipeline;
   is("no token asked, and both say they could not check", [tokens, unknownPress.asked, unknownPress.unavailable, unknownView.unavailable], [0, false, true, true]);
 
+  part("A release that is not confirmed is said so, and no try is promised at once (Codex L on #4212, MEDIUM)");
+  {
+    // The mark is let go by one compare-and-delete script; when its answer is lost the mark stays until it runs out
+    // (lib/redis-lock.ts, releaseLock), so the next press would find it taken and ask PayPal nothing.
+    const lostRelease = async (batch: (string | number)[][]) => {
+      if (batch[0]?.[0] === "EVAL" && String(batch[0]?.[1]).startsWith("-- marktmorgen:release:v1") && String(batch[0]?.[3]).startsWith("nl:pp:")) {
+        await real(batch);
+        return [{ odd: true }];
+      }
+      return real(batch);
+    };
+    await redis.pipeline([["DEL", "nl:test:release"]]);
+    is("a mark taken for the check", await claimMark("nl:test:release", 60, "mine"), "ours");
+    is("a confirmed release says true", await releaseMark("nl:test:release", "mine"), true);
+    is("a release of a mark held by another says false", [await claimMark("nl:test:release", 60, "theirs"), await releaseMark("nl:test:release", "mine")], ["ours", false]);
+    await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`, "nl:test:release"]]);
+    tokenDown = true;
+    redis.pipeline = lostRelease as typeof redis.pipeline;
+    const unsure = await settlePayPal(store, { press: true });
+    redis.pipeline = real as typeof redis.pipeline;
+    tokenDown = false;
+    is("no token, release not confirmed: could not check, and no try at once", [unsure.asked, unsure.unavailable, unsure.retryNow === true], [false, true, false]);
+    await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]);
+    tokenDown = true;
+    const sure = await settlePayPal(store, { press: true });
+    tokenDown = false;
+    is("no token, release confirmed: could not check, and a try at once", [sure.unavailable, sure.retryNow], [true, true]);
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      if (batch[0]?.[0] === "SET" && String(batch[0]?.[1]).startsWith("nl:pp:")) throw new Error("synthetic lost SET NX");
+      if (batch[0]?.[0] === "GET" && String(batch[0]?.[1]).startsWith("nl:pp:")) return [{ odd: true }];
+      return real(batch);
+    }) as typeof redis.pipeline;
+    await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]).catch(() => undefined);
+    const unknownMark = await settlePayPal(store, { press: true });
+    redis.pipeline = real as typeof redis.pipeline;
+    is("a mark that could not be confirmed: could not check, and no try at once", [unknownMark.unavailable, unknownMark.retryNow === true], [true, false]);
+  }
+
   part("The button tells the two apart");
   const button = readFileSync("components/paypal-payouts.tsx", "utf8");
   const couldNot = button.indexOf("data.unavailable");
   const minute = button.indexOf("PayPal was asked less than a minute ago.");
   is("an unavailable reading has its own sentence, read before the one-minute wait", [couldNot > 0, minute > couldNot, button.includes("We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away.")], [true, true, true]);
+  is("try again right away only when the reading says so; otherwise in a minute", [button.includes("data.retryNow"), button.includes("We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute.")], [true, true]);
   done();
 }
 

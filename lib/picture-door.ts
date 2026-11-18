@@ -106,6 +106,21 @@ const SWEEP_BATCH = 25;
 const LEFT_BEHIND_BATCH = 100;
 /** A picture's mark that a record took it: a later note for the name opens no door. */
 const takenKey = (path: string) => `nl:pictures:taken:${path}`;
+
+// A lost removal acknowledgement is not permission to delete. Requeue only the same
+// still-unclaimed door, without overwriting a newer score or a concurrent take.
+const RESTORE_SWEEP_NOTES = `-- marktmorgen:picture-sweep-restore:v1
+local restored = 0
+for i = 2, #KEYS, 2 do
+  local path = ARGV[i - 1]
+  local score = ARGV[i]
+  local note = redis.call("ZSCORE", KEYS[i], path)
+  if note and tonumber(note) == tonumber(score) and redis.call("EXISTS", KEYS[i + 1]) == 0 then
+    restored = restored + redis.call("ZADD", KEYS[1], "NX", score, path)
+  end
+end
+return restored
+`;
 /** A sorted-set score in its exact shape (a number, or the numeric string the REST API sends), or null. */
 function scoreOf(reply: unknown): number | null {
   if (typeof reply !== "number" && !(typeof reply === "string" && /^\d{1,16}(\.\d+)?$/.test(reply))) return null;
@@ -321,8 +336,8 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
  * until then; a removal of the note answered in another shape leaves it to dropLeftBehind and the list's expiry. A
  * delete that fails puts its pictures back on the list for the next run. The list, the pipeline and each ZREM are read
  * in their exact shape (CX-123 rule 24): a read in another shape throws and deletes nothing; a removal in another
- * shape deletes nothing, keeps the file (storage, never a picture deleted from under a record), and is logged. A name
- * that is not a picture door's is taken off the list and deleted from nowhere.
+ * shape deletes nothing and tries to restore the same still-unclaimed door's note for the next sweep. A name that
+ * is not a picture door's is taken off the list and deleted from nowhere.
  *
  * The run's cap is the company's, oldest first: a store with many untaken pictures may take a run, and the others go
  * on the next day; each store's untaken pictures stay bounded by PICTURE_DOOR_MAX meanwhile.
@@ -353,6 +368,18 @@ export async function sweepPictureDoors(
     const reply = await redisPipeline([["ZADD", UNCLAIMED_KEY, ...back.flatMap(([path, noted]) => [noted, path])]]).then((replies) => repliesFor(replies, 1)?.[0], () => null);
     if (countOf(reply) === null) console.error(`putting back ${back.length} unclaimed pictures (${why}): unknown reply, they may be left`);
   };
+  const restoreUnconfirmed = async (back: [string, number][]) => {
+    const notes = back.flatMap(([path, noted]) => {
+      const key = doorsKey(path);
+      return key === null ? [] : [{ key, path, noted }];
+    });
+    if (notes.length === 0) return;
+    const keys = notes.flatMap(({ key, path }) => [key, takenKey(path)]);
+    const entries = notes.flatMap(({ path, noted }) => [path, noted]);
+    const result = await redisPipeline([["EVAL", RESTORE_SWEEP_NOTES, keys.length + 1, UNCLAIMED_KEY, ...keys, ...entries]])
+      .then((replies) => countOf(repliesFor(replies, 1)?.[0]), () => null);
+    if (result === null || result > notes.length) console.error("restoring unconfirmed picture sweep notes: unknown reply");
+  };
   for (let at = 0; at < listed.length; at += SWEEP_BATCH) {
     const batch = listed.slice(at, at + SWEEP_BATCH);
     let takes: unknown[] | null;
@@ -360,18 +387,17 @@ export async function sweepPictureDoors(
       takes = repliesFor(await redisPipeline(batch.map(([path]) => ["ZREM", UNCLAIMED_KEY, path])), batch.length);
     } catch (error) {
       console.error(`taking ${batch.length} unclaimed pictures off their list: no reply, their files are kept`, error);
-      unknown += batch.length;
-      continue;
+      takes = null;
     }
     if (!takes) {
       unknown += batch.length;
+      await restoreUnconfirmed(batch);
       continue;
     }
-    const won = batch.filter(([path], i) => {
-      if (takes[i] === 1) return doorsKey(path) !== null;
-      if (takes[i] !== 0) unknown += 1;
-      return false;
-    });
+    const unconfirmed = batch.filter((_, i) => takes[i] !== 0 && takes[i] !== 1);
+    unknown += unconfirmed.length;
+    await restoreUnconfirmed(unconfirmed);
+    const won = batch.filter(([path], i) => takes[i] === 1 && doorsKey(path) !== null);
     if (won.length === 0) continue;
     // Each store note read before the file: a picture taken off its store's list only (by the code before the list
     // of unclaimed pictures, after a rollback; Claude 2 on #3347) has no note there, and is kept. Exact shapes only:

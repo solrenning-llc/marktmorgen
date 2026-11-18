@@ -172,6 +172,23 @@ async function main(): Promise<void> {
   is("a short removal reply deletes nothing", await run(Date.now()), []);
   bend = null;
   is("the file is still kept", files.has(unsure), true);
+  is("the confirmed matching door is still scheduled after a short removal reply", onList(unsure), true);
+  is("the next known removal can finish the sweep", await run(Date.now()), [unsure]);
+
+  const markedMeanwhile = await uploaded();
+  const replacedMeanwhile = await uploaded();
+  age(markedMeanwhile, GRACE + 2 * 60 * 60 * 1000);
+  age(replacedMeanwhile, GRACE + 2 * 60 * 60 * 1000);
+  bend = (commands, replies) => {
+    if (!commands.every((c) => c[0] === "ZREM" && c[1] === UNCLAIMED)) return replies;
+    redis.run(["SET", `nl:pictures:taken:${markedMeanwhile}`, "1", "EX", door.PICTURE_TAKEN_SECONDS]);
+    redis.run(["ZADD", doors, Date.now(), replacedMeanwhile]);
+    return [];
+  };
+  is("an unknown removal does not delete or requeue a marked path or a changed generation", await run(Date.now()), []);
+  bend = null;
+  is("neither contested note is restored to the sweep index", [onList(markedMeanwhile), onList(replacedMeanwhile)], [false, false]);
+  is("both contested files are retained", [files.has(markedMeanwhile), files.has(replacedMeanwhile)], [true, true]);
   const unsureTake = await uploaded();
   bend = (commands, replies) => (commands.some((c) => c[0] === "ZREM" && c[1] === UNCLAIMED) ? replies.map((r, i) => (commands[i][1] === UNCLAIMED ? "1" : r)) : replies);
   is("an attach whose removal from the list is answered \"1\" is refused as unknown", await attach(unsureTake), [500, "server_error"]);

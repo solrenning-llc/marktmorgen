@@ -217,6 +217,20 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        if (key.startsWith("-- marktmorgen:picture-sweep-restore:v1\n")) {
+          const keyCount = Number(args[0]);
+          const index = args[1];
+          let restored = 0;
+          for (let i = 2; i <= keyCount; i += 2) {
+            const path = args[keyCount + i - 1];
+            const score = args[keyCount + i];
+            const note = this.run(["ZSCORE", args[i], path]);
+            if (note !== null && Number(note) === Number(score) && this.run(["EXISTS", args[i + 1]]) === 0) {
+              restored += Number(this.run(["ZADD", index, "NX", score, path]));
+            }
+          }
+          return restored;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

@@ -79,22 +79,24 @@ function withoutAttempt(request: PaymentRequest): PaymentRequest {
  * did not, and when the next reminder is due.
  */
 export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; request: PaymentRequest }> {
+  const ordinal = request.sent.length;
   // The attempt is written onto the request before the email goes (Codex L, MEDIUM, review of #4501): an outcome
   // whose write then fails leaves it there, and the next try records that email as sent at its attempt, handing
   // nothing over again, since the senders forget the idempotency key after a day. Only a certain refusal, written
   // down, lets the same email go again. A write that fails here throws before anything is handed over.
   const begun = await changeRequest(store, request.id, (current) => {
+    if (current.sent.length !== ordinal) return { next: null, answer: "moved" as const };
     if (current.sendingAt) return { next: { ...withoutAttempt(current), sent: [...current.sent, current.sendingAt], failed: "" }, answer: "recorded" as const };
-    if (current.sent.length !== request.sent.length) return { next: null, answer: "moved" as const };
     return { next: { ...current, sendingAt: now, failed: "" }, answer: "go" as const };
   }, now);
-  if (begun?.answer === "recorded") {
-    console.error("a payment request email may have gone before its outcome was written; recorded as sent, not sent again", request.id, request.sent.length);
+  if (!begun) return { sent: false, request };
+  if (begun.answer === "recorded") {
+    console.error("a payment request email may have gone before its outcome was written; recorded as sent, not sent again", request.id, ordinal);
     return { sent: true, request: begun.request };
   }
   // Another send of the same email got there first and wrote its outcome: nothing more goes.
-  if (begun?.answer === "moved") return { sent: begun.request.sent.length > request.sent.length, request: begun.request };
-  const reminder = request.sent.length > 0;
+  if (begun.answer === "moved") return { sent: begun.request.sent.length > ordinal, request: begun.request };
+  const reminder = ordinal > 0;
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
   const total = said.money(request.total);
@@ -129,17 +131,22 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
     replyTo: store.email,
     subject: (reminder ? w.reminderSubject(store.name, total) : w.subject(store.name, total)).slice(0, 180),
     text,
-    idempotencyKey: `nimbus-payreq:${request.id}:${request.sent.length}`,
+    idempotencyKey: `nimbus-payreq:${request.id}:${ordinal}`,
   }).catch(() => "refused" as const);
   // An answer that is not known (a server error or a lost answer after the email was handed over) may have reached
   // the buyer: it counts as sent (rule 30), so the daily job never asks again a day later, when neither sender still
   // knows the key (webhooks/cron audit, Claude 1, 12/11/2026). Only a certain refusal is "not sent".
-  if (outcome === "uncertain") console.error("a payment request email may have gone; it is not sent again", request.id, request.sent.length);
+  if (outcome === "uncertain") console.error("a payment request email may have gone; it is not sent again", request.id, ordinal);
   const sent = outcome !== "refused";
   // Written onto the record as it is now, not as it was read before the email
   // went: a payment made while it was being sent stays paid (MM-SA-02).
   const failed = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
-  const done = await changeRequest(store, request.id, (current) => ({ next: sent ? { ...withoutAttempt(current), sent: [...current.sent, now], failed: "" } : { ...withoutAttempt(current), failed }, answer: null }), now);
+  const done = await changeRequest(store, request.id, (current) => {
+    // A concurrent caller may already have accounted for this ordinal. Its next attempt is not ours to finish.
+    if (current.sent.length !== ordinal || current.sendingAt !== now) return { next: null, answer: null };
+    const rest = withoutAttempt(current);
+    return { next: sent ? { ...rest, sent: [...rest.sent, now], failed: "" } : { ...rest, failed }, answer: null };
+  }, now);
   return { sent, request: done?.request ?? request };
 }
 

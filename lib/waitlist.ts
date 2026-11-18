@@ -20,7 +20,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchRefusal, NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
-import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
+import { fromLine, mailDay, releaseDay, render, reserveDay } from "@/lib/mail";
 import { allowancesUsedStrict } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { upsertContact } from "@/lib/contacts";
@@ -225,8 +225,12 @@ export const WAIT_CONFIRM_CALLS = 3;
  */
 export const WAIT_CONFIRM_UNITS = 1;
 
-/** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false; reason?: "busy" }> {
+/**
+ * Presses the button in the email: the address now counts, and joins the creator's list if it asked to. `first` is
+ * true when this press found the spot unconfirmed, false on any press after; read and then written in two trips, so
+ * two presses at once can both see true: a filter only, never a count (lib/path-lead.ts decides once).
+ */
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string; first: boolean } | { ok: false; reason?: "busy" }> {
   // Switched off after notices about its content: the spot does not count and joins no list (lib/store-join.ts listOpen).
   if (store?.suspended) return { ok: false };
   const grant = await readWaitToken(token);
@@ -253,7 +257,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     });
     if (added?.gone) return { ok: false };
   }
-  return { ok: true, productId: grant.p };
+  return { ok: true, productId: grant.p, first: !entry.ok };
 }
 
 /** Takes an address off a waitlist. */
@@ -505,7 +509,8 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
         break;
       }
-      if (!(await reserveDay(chunk.length))) break;
+      const day = mailDay();
+      if (!(await reserveDay(chunk.length, day))) break;
       const messages = chunk.map(([email, entry]) => {
         const page = `${SITE_URL}/@${store.handle}/waitlist?leave=${entry.t}`;
         const door = {
@@ -524,11 +529,11 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       const why: BatchRefusal = { byMeter: false };
       const outcome = await sendBatch(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" }, undefined, undefined, why);
       if (outcome === "retry") {
-        await releaseDay(chunk.length);
+        await releaseDay(chunk.length, day);
         break;
       }
       if (outcome === "refused") {
-        await releaseDay(chunk.length);
+        await releaseDay(chunk.length, day);
         // A refusal the store's meter accounts for is a wait, never a pass-over (Claude 3 cloud O's MEDIUM on #4473):
         // a funded window it cannot reserve, the room taken by another email since the read above, or a read that
         // cannot be made. The cursor stays, the lists stay, and the next run tries the same people again. The meter's own

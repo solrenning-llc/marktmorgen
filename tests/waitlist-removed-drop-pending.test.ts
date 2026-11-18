@@ -139,6 +139,39 @@ test("a join that passed its coming-soon check before the removal never writes i
   });
 });
 
+test("a join asked again over its place never rewrites it after the removal's drop (the fenced swap, merge of main)", async () => {
+  await quiet(async () => {
+    const { shop, sid, pid, made } = await world({ soon: true });
+    const joiner = "waitlist-pending-again@example.test";
+    const join = () => waitlist.joinWaitlist({ store: shop, product: made as unknown as Listing, email: joiner, consent: false, ip: "203.0.113.10", origin: "https://marktmorgen.com" });
+    // This world sends no email, so the join answers without "sent"; only its written place matters here.
+    await join();
+    const placed = redis.run(["HGET", `nl:wl:${sid}:${pid}`, joiner]);
+    assert.equal(typeof placed, "string", "the first join writes its place");
+    const base: Pipeline = redis.pipeline.bind(redis);
+    let dropped = false;
+    let swapCommand: (string | number)[] | null = null;
+    // Asked again: the removal lands between the re-read of its place and the write over it.
+    const intercept = (async (commands) => {
+      const swap = commands.find((c) => c[0] === "EVAL" && c.includes(`nl:wl:${sid}:${pid}`) && c.includes(placed as string));
+      if (swap && !dropped) {
+        dropped = true;
+        swapCommand = swap;
+        redis.pipeline = base;
+        try { await waitlist.dropWaitlist(sid, pid); } finally { redis.pipeline = intercept; }
+      }
+      return base(commands);
+    }) as Pipeline;
+    redis.pipeline = intercept;
+    let result: string;
+    try { result = await join(); } finally { redis.pipeline = base; }
+    assert.equal(dropped, true, "the removal ran between the re-read and the write over the place");
+    assert.ok(String(swapCommand?.[1]).includes("SISMEMBER"), "the write over the place checks coming soon in the same step");
+    assert.equal(redis.run(["HGET", `nl:wl:${sid}:${pid}`, joiner]), null, `the place is not written back after the drop (join answered ${result})`);
+    assert.equal(result, "closed");
+  });
+});
+
 test("an erasure counts every waitlist mark it walks, and an oversized set is unknown", async () => {
   const { shop, sid } = await world({ soon: true });
   const stale = Array.from({ length: 30 }, (_, i) => `gone${String(i).padStart(4, "0")}`);

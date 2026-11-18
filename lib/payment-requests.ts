@@ -218,7 +218,8 @@ const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expir
 /**
  * Whether the checkout Stripe answered for a request's session is that request's own (#4447): its id must be the
  * request's session, and a paid one must name this request and this store in its metadata. Anything else is someone
- * else's answer. (A session Stripe no longer has, a 404, is read as null by the caller and never reaches here.)
+ * else's answer. (A 404 for the session never reaches here: inside the window it may come from an account other than the
+ * one the checkout was opened on, so the caller lets it throw into its error handling, X8 after #4513.)
  */
 function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
   if (known.id !== request.session) return false;

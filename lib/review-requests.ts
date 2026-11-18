@@ -39,7 +39,7 @@ import { stopTags } from "@/lib/mail-health-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
+import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -247,8 +247,10 @@ export async function sendReviewRequests(
 ): Promise<AskCounts> {
   const counts: AskCounts = { sent: 0, dropped: 0, waiting: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", ASK_DUE_KEY, 0, nowSeconds, "LIMIT", 0, MAX_ASKS_PER_RUN]]);
-  const members = Array.isArray(raw) ? (raw as string[]) : [];
+  // Read exactly (rule 24): a reply of another shape is unknown, never "nothing due"; the cron reports it failed.
+  const raw = repliesFor(await redisPipeline([["ZRANGEBYSCORE", ASK_DUE_KEY, 0, nowSeconds, "LIMIT", 0, MAX_ASKS_PER_RUN]]), 1)?.[0];
+  if (!Array.isArray(raw) || !raw.every((m) => typeof m === "string")) throw new exactReply.UnknownReplyError("the review requests that are due");
+  const members = raw as string[];
   const stores = new Map<string, Store | null>();
   const groups = new Map<string, { store: Store; ready: Ready[] }>();
   const drop = async (member: string) => {
@@ -405,7 +407,8 @@ export async function sendReviewRequests(
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
-    const reserved = await reserve(store, ready.length);
+    const day = mailDay();
+    const reserved = await reserve(store, ready.length, false, day);
     if (reserved !== "ok") {
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
@@ -415,7 +418,7 @@ export async function sendReviewRequests(
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
     if (outcome !== "sent") {
-      await release(store, ready.length);
+      await release(store, ready.length, day);
       if (outcome === "refused") {
         await unclaim(null);
         for (const item of ready) await drop(item.member);

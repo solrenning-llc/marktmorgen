@@ -857,7 +857,9 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     let listed: ReturnType<typeof readStripePage>;
     try {
       // Each row in the shape lib/refunds.ts reads a refund (its payment an id or null): any other row is unreadable.
-      listed = readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`);
+      const latest = Math.floor(Date.now() / 1000) + 300;
+      listed = readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
     } catch (error) {
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading a store's refunds for license keys failed", store.handle, error);

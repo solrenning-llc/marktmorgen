@@ -83,7 +83,7 @@ test("the earnings record reads the end at the sale's own time", async () => {
   const source = readFileSync("lib/affiliates.ts", "utf8");
   // Since main's orders of several lines (each partner on the lines of their own products), read per line.
   // The share in force when the sale was paid (shareAt, Codex G's point 3 on #1924), its end read at that time too.
-  assert.match(source, /shareOn\(shareAt\(a, sale\.at\), line\.product, sale\.at\) > 0/);
+  assert.match(source, /shareOn\(held, line\.product, sale\.at\) > 0/);
   assert.match(source, /percent: shareOn\(held, theirs\[0\]\.product, sale\.at\)/);
 });
 

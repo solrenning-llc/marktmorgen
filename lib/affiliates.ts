@@ -3039,18 +3039,16 @@ export async function notePartners(
   const lines = sale.lines ?? [{ product: sale.product, cents: 1 }];
   const charged = lines.reduce((sum, line) => sum + line.cents, 0);
   const goods = Math.max(0, sale.base - (sale.shipping ?? 0));
-  const holders = (partners ?? (await listPartners(store))).filter(
-    (a) => a.status === "approved" && lines.some((line) => shareOn(shareAt(a, sale.at), line.product, sale.at) > 0),
-  );
-  if (!holders.length) return;
+  const holders = (partners ?? (await listPartners(store))).filter((partner) => partner.status === "approved");
   // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched: the partner's inbox or
   // their payout address (payAddress), as an own lead is (lib/affiliate-leads.ts isOwn; issue #4046, part 2).
   const buyer = sale.buyer ? canonicalEmail(sale.buyer) : "";
   const commands: (string | number)[][] = [];
   for (const partner of holders) {
     // The share in force when the sale was paid, never one that came into force since (Codex G's point 3 on #1924).
-    const held = shareAt(partner, sale.at);
-    const theirs = lines.filter((line) => shareOn(held, line.product) > 0);
+    const held = shareAt(partner, sale.at, lines);
+    const theirs = lines.filter((line) => shareOn(held, line.product, sale.at) > 0);
+    if (!theirs.length) continue;
     const weight = theirs.reduce((sum, line) => sum + line.cents, 0);
     // The whole order: every line that was charged is theirs (an order whose every line is free, only when every line is).
     const whole = weight === charged && (charged > 0 || theirs.length === lines.length);
@@ -3210,12 +3208,26 @@ function bumpCents(value: unknown): number {
  * kept. A sale is credited at what was agreed when it was paid, never at a share accepted since. A share kept from
  * before shareFrom was recorded is in force throughout. Paid before two changes: UnknownReplyError, and it waits.
  */
-function shareAt(partner: Pick<Affiliate, "share" | "shareFrom" | "shareBefore">, atSeconds: number): PartnerShare | null {
-  if (partner.shareFrom === undefined || atSeconds >= partner.shareFrom) return partner.share;
+function shareAt(
+  partner: Pick<Affiliate, "share" | "shareFrom" | "shareBefore">,
+  atSeconds: number,
+  lines: readonly { product: string }[],
+): PartnerShare | null {
+  if (partner.shareFrom === undefined || atSeconds > partner.shareFrom) return partner.share;
+  if (atSeconds === partner.shareFrom) {
+    // A charge and an acceptance in the same second cannot be ordered from these timestamps.
+    const before = partner.shareBefore;
+    if (!before || before.from === atSeconds || lines.some(({ product }) =>
+      shareOn(before.share, product, atSeconds) !== shareOn(partner.share, product, atSeconds)
+    )) {
+      throw new UnknownReplyError("the order of a payment and a partner's share change");
+    }
+    return partner.share;
+  }
   // Paid before the share in force began: the one before it, when that one had begun (option c1).
   const before = partner.shareBefore;
   if (!before) return null;
-  if (before.from === undefined || atSeconds >= before.from) return before.share;
+  if (before.from === undefined || atSeconds > before.from) return before.share;
   // Paid before two changes: what was agreed then is not kept, so it is not known (rule 24), never guessed or zero.
   throw new UnknownReplyError("the share a partner held when a sale was paid");
 }

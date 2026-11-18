@@ -188,7 +188,11 @@ async function main(): Promise<void> {
   const realPipeline = redis.pipeline.bind(redis);
   let breakLapsedSave = "";
   (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (commands: (string | number)[][]) => {
-    if (breakLapsedSave && commands.some((c) => c[0] === "SET" && c[1] === breakLapsedSave && String(c[2]).includes('"lapsed"'))) {
+    // The dated record's save: a plain SET, or the compare-and-set EVAL of #3501's stateSaver (key at 3, state last).
+    const lapsedSave = (c: (string | number)[]) =>
+      (c[0] === "SET" && c[1] === breakLapsedSave && String(c[2]).includes('"lapsed"')) ||
+      (c[0] === "EVAL" && c[3] === breakLapsedSave && String(c[c.length - 1]).includes('"lapsed"'));
+    if (breakLapsedSave && commands.some(lapsedSave)) {
       breakLapsedSave = "";
       throw new Error("redis timeout (stand-in)");
     }

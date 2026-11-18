@@ -9,6 +9,7 @@
  */
 import * as data from "@/lib/store-data";
 import * as registry from "./plan-cost-registry";
+import * as storeModule from "@/lib/store";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { done, is } from "./check";
 
@@ -25,4 +26,16 @@ for (const tier of ["creator", "pro", "scale"] as const) {
 }
 const studio = r.COST_LINES.find((line) => line.id === "studio");
 is("the studio line names the pool's commands", Boolean(studio?.sources.some((s) => s.file === "lib/store-data.ts" && s.names.includes("BESIDE_SAVE_COMMANDS"))), true);
+// The sweep's batch (lib/store.ts, moveBesideToPool; Claude 4's MEDIUM on #4847): the lock taken and let go, the store
+// read, the pool's fields and the room's slots read, the lock held on, then the pool's TAKE_DATA for its shares and the
+// room's TAKE_DATA giving them back, each counted at its inner commands. The room's key may list expiring months, so its
+// script also reads and removes the months that are over and rewrites the list: 7 + 2 a slot (takeDataCommands).
+const st = storeModule as unknown as { MOVE_BESIDE_BATCH: number; MOVE_BESIDE_BATCH_COMMANDS: number };
+const dd = data as unknown as { takeDataCommands?: (slots: number) => number; DATA_EXPIRED_COMMANDS: number };
+is("a room take costs its EVAL, its 4 fixed commands, the months that are over, and 2 a slot", dd.takeDataCommands?.(1), 1 + 4 + dd.DATA_EXPIRED_COMMANDS + 2);
+is(
+  "a sweep batch is priced at both scripts' inner commands",
+  st.MOVE_BESIDE_BATCH_COMMANDS,
+  3 + 1 + 2 + 1 + (d.poolTakeCommands?.(st.MOVE_BESIDE_BATCH) ?? 0) + (dd.takeDataCommands?.(st.MOVE_BESIDE_BATCH) ?? 0),
+);
 done();

@@ -61,7 +61,8 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   },
 
   // Community pictures and students' files: storage is priced, the operations are not (audit 7).
-  "app/api/store/community/upload/route.ts": { issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
+  // The name checked free before a place is taken (#3414): one head inside the buyer action just taken, priced in line buyer-actions.
+  "app/api/store/community/upload/route.ts": { head: { line: "buyer-actions" }, issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
   "components/community-composer.tsx": { uploadPresigned: { open: "audit 7: a community picture's put, every try" } },
   "lib/community-files.ts": { head: { open: "audit 7: a community picture's checks" }, get: { open: "audit 7: a community picture's checks" }, del: DELETE_IS_FREE },
   "app/api/store/community/image/route.ts": { get: { line: "public-requests" } },

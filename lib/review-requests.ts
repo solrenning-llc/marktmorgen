@@ -42,7 +42,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { holdLock } from "@/lib/redis-lock";
-import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
+import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -485,10 +485,12 @@ export async function sendReviewRequests(
     let maybeSent = false;
     let ready: Ready[] = prepared;
     let unheld = 0;
+    // Every give-back goes to the day the allowance was taken from (lib/mail.ts mailDay, #3928), never to a later one.
+    const day = mailDay();
     try {
     // The allowance is reserved while every claim is still short (Codex G on #4360): a refusal here, or a stop
     // before the claims are stretched, leaves claims that lapse in CLAIM_SECONDS, so the order is asked again.
-    const reserved = await reserve(store, prepared.length);
+    const reserved = await reserve(store, prepared.length, false, day);
     if (reserved !== "ok") {
       await unclaim(prepared, nowSeconds + RETRY_SECONDS.plan);
       undone = true;
@@ -523,7 +525,7 @@ export async function sendReviewRequests(
       await unclaim(ready, null);
       for (const item of ready) await drop(item.member);
       undone = true;
-      await release(store, ready.length);
+      await release(store, ready.length, day);
       continue;
     }
     if (outcome !== "sent") {
@@ -531,7 +533,7 @@ export async function sendReviewRequests(
       // go only once the give-back succeeded; when it throws they stay stretched, as on main, so the order is never
       // put in another batch under another key and sent twice (Codex X2 on #4360).
       maybeSent = true;
-      await release(store, ready.length);
+      await release(store, ready.length, day);
       maybeSent = false;
       await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
       undone = true;
@@ -547,7 +549,7 @@ export async function sendReviewRequests(
     } finally {
       // Nothing went for the claims not stretched: their share of the allowance is given back, best effort (a give-back
       // that fails only leaves the month counted higher, never an email sent past it).
-      if (unheld > 0) await release(store, unheld).catch((error) => console.error("giving back a review request's allowance failed", error));
+      if (unheld > 0) await release(store, unheld, day).catch((error) => console.error("giving back a review request's allowance failed", error));
     }
   }
   return counts;

@@ -271,6 +271,11 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
+        if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, mark] = args;
+          return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;
@@ -964,6 +969,16 @@ export class MemoryRedis {
           if (!Number.isSafeInteger(peak)) return -1;
           const count = this.run(["ZCARD", index]) as number;
           this.run(["HSET", month, "count", count, "peak", Math.max(count, peak), "day", day, "complete", complete]);
+          this.run(["EXPIRE", month, seconds]); return 1;
+        }
+        // lib/held-stores.ts HELD_ONCE (DONO-3): a store counted once in a month, its mark and its count together.
+        if (key.startsWith("-- marktmorgen:held-once:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, month, mark, field, seconds] = args;
+          const type = this.run(["TYPE", month]);
+          if (type !== "none" && type !== "hash") return -1;
+          const raw = this.run(["HGET", month, field]);
+          if (raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          if (this.run(["HSETNX", month, mark, "1"]) === 1) this.run(["HINCRBY", month, field, 1]);
           this.run(["EXPIRE", month, seconds]); return 1;
         }
         // CX-67: one funded held-store reconfirmation per UTC day, site ceiling.

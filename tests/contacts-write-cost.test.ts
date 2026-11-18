@@ -92,7 +92,7 @@ async function main() {
     const fencedRound = await measure(() => upsertContact(list, "fenced@example.com", { agreed: true, explicit: true, source: "free", sid, fence: { key: "cost:fence", seconds: 3600 } }, ROOM));
     is("a fenced sign-up (a waitlist confirmation), no race", fencedRound <= CONTACT_COMMANDS_MOST.upsertRound, true);
     is("(control) the fenced sign-up was written", typeof redis.run(["HGET", leadsKey(list), "fenced@example.com"]), "string");
-    const note = await measure(() => noteProduct(list, email, "p2", "Two", { sid: "", statsId: "", handle: "" }));
+    const note = await measure(() => noteProduct(list, email, "p2", "Two", { ...ROOM, sid: "", statsId: "", handle: "" }));
     is("a purchase noted", note <= CONTACT_COMMANDS_MOST.noteProductRound, true);
     const token = (await tokensFor(list, [email], "h")).get(email) ?? "";
     is("control: the link exists", token.length > 0, true);

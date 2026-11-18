@@ -1,6 +1,7 @@
 import { MemoryRedis } from "@/lib/redis-memory";
 import { spendCommands } from "@/lib/redis-ceiling";
-export const store = new MemoryRedis();
+import { withTakeScripts } from "./redis-take-scripts";
+export const store = withTakeScripts(new MemoryRedis());
 export const isRedisConfigured = () => true;
 /**
  * Held to the command ceiling of the work it runs in (lib/redis-ceiling.ts), as lib/redis.ts is: a refusal is a

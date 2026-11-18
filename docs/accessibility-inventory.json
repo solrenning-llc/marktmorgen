@@ -470,6 +470,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/problem/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/problem",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/orders/sessions/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/orders/sessions",
@@ -1367,6 +1378,7 @@
     "components/audio-embed.tsx",
     "components/automation-draft.tsx",
     "components/beside-stores.tsx",
+    "components/billing-country-field.tsx",
     "components/block-picker.tsx",
     "components/block-rewrite.tsx",
     "components/blog-body.tsx",
@@ -1538,6 +1550,7 @@
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
     "components/new-tab.tsx",
+    "components/next-action-draft.tsx",
     "components/next-actions-panel.tsx",
     "components/next-offer-box.tsx",
     "components/next-offer-card.tsx",
@@ -1551,6 +1564,7 @@
     "components/old-addresses.tsx",
     "components/older-purchases.tsx",
     "components/option-link-copy.tsx",
+    "components/order-problem-form.tsx",
     "components/orders-bundle.tsx",
     "components/orders-shared.tsx",
     "components/outreach-studio.tsx",
@@ -1610,6 +1624,7 @@
     "components/pricing-cycle.tsx",
     "components/pricing-value.tsx",
     "components/print-button.tsx",
+    "components/problem-notice.tsx",
     "components/product-about-view.tsx",
     "components/product-editor.tsx",
     "components/product-image-editor.tsx",
@@ -1832,6 +1847,7 @@
     "app/api/store/affiliates/join/route.ts",
     "app/api/store/affiliates/kit/route.ts",
     "app/api/store/affiliates/open/route.ts",
+    "app/api/store/affiliates/partner-answer/route.ts",
     "app/api/store/affiliates/payout-batch/route.ts",
     "app/api/store/affiliates/paypal/route.ts",
     "app/api/store/affiliates/payto/route.ts",
@@ -1986,6 +2002,7 @@
     "app/api/store/member-discount/route.ts",
     "app/api/store/meta-ads/route.ts",
     "app/api/store/move/open/route.ts",
+    "app/api/store/next-actions/draft/route.ts",
     "app/api/store/next-offer/route.ts",
     "app/api/store/no-count/route.ts",
     "app/api/store/notes/route.ts",
@@ -2195,6 +2212,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 150
+    "pageTemplates": 151
   }
 }

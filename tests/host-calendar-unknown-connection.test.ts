@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   part("Control: a connected host is shown connected and can choose Google");
   const url = await beginConsent("google", { statsId: store.statsId!, sid: store.sid!, sessionCookie: session, email: OWNER, host: hostId(OWNER), scopes: GOOGLE_HOST_SCOPES });
   const taken = await takeConsent("google", new URL(url).searchParams.get("state") ?? "", { sessionCookie: session, email: OWNER });
-  const connected = taken ? await finishConsent("google", { statsId: taken.statsId, code: "good", verifier: taken.verifier, by: OWNER, owner: { email: store.email, handle: store.handle }, host: taken.host }) : { ok: false };
+  const connected = taken ? await finishConsent("google", { statsId: taken.statsId, code: "good", verifier: taken.verifier, by: OWNER, owner: { email: store.email, handle: store.handle }, host: taken.host, startedAt: taken.at }) : { ok: false };
   is("the host's Google Calendar is connected", connected.ok, true);
   const healthy = await hostCalendarView(store, OWNER, "UTC");
   is("the page shows the connection and does not call it unread", [healthy.google?.account ?? null, healthy.googleUnread === true], [OWNER, false]);

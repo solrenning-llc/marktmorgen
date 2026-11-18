@@ -79,12 +79,14 @@ const STALE_SECONDS = 6 * 60 * 60;
 
 const QUEUE = "nl:recover:asks";
 /**
- * One store's asks, the same members at the same times as in QUEUE, written and taken out with it: what a person's
- * erasure and copy read (Claude 2 nuvem B on #4290), so they never scan every store's asks. Its size is the store's
- * own (ASKS_PER_STORE_DAY a day for the longest wait). Kept a week past the longest wait and its retries' hours,
- * renewed at each ask, only as a net under a job that stopped: an ask leaves it when the job takes it.
+ * One person's asks at one store, the same members at the same times as in QUEUE, written and taken out with it: what
+ * that person's erasure and copy read (Claude 2 nuvem B on #4290), so they never scan every store's asks, nor every
+ * buyer's asks at the store (Claude 7 on #4290: a store's whole index is about 330 KB at its ceiling). Named by a
+ * hash of the store and the address, so the key holds no address. Kept a week past the longest wait and its retries'
+ * hours, renewed at each ask, only as a net under a job that stopped: an ask leaves it when the job takes it.
  */
-const storeQueue = (statsId: string) => `nl:recover:asks:s:${statsId}`;
+export const askIndexKey = (statsId: string, email: string) =>
+  `nl:recover:asks:s:${statsId}:${createHash("sha256").update(`nimbus-recover-ask:${statsId}|${normaliseEmail(email) ?? ""}`).digest("hex").slice(0, 32)}`;
 const STORE_QUEUE_SECONDS = 3 * 86_400 + 6 * 3600 + 7 * 86_400;
 
 export type AskOutcome =
@@ -150,17 +152,22 @@ export async function askCartReminder(input: { store: Store; items: Listing[]; e
  * Takes one person's asks at one store off the queue (lib/person-erasure.ts): each member holds their address in
  * plain text and waits up to three days for its time (ASK_WHENS), more with the send's retries, so it is deleted
  * with them rather than left for the job to skip (webhooks/cron audit, Claude 1, 12/11/2026). Only this store's index
- * (storeQueue) is read, never the queue of every store, and each ask is taken out of both. Read exactly (CX-123 rule
+ * (askIndexKey, the person's own) is read, never the queue of every store, and each ask is taken out of both. Read exactly (CX-123 rule
  * 24): the read, or the removal's counts, in another shape throws, so the erasure says this part did not finish and is
  * tried again, never "nothing here". Counts what it took off the queue.
  */
 export async function forgetAskPerson(statsId: string | null, rawEmail: string): Promise<number> {
   const theirs = await askMembersOf(statsId, rawEmail);
   if (!theirs.length) return 0;
-  const replies = repliesFor(await redisPipeline([["ZREM", QUEUE, ...theirs], ["ZREM", storeQueue(statsId as string), ...theirs]]), 2);
-  const taken = countOf(replies?.[0]);
-  const fromIndex = countOf(replies?.[1]);
-  if (taken === null || taken > theirs.length || fromIndex === null || fromIndex > theirs.length) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
+  // The index is the only way back to these members, which hold the address in plain text: it is taken out only once
+  // the queue's removal answered exactly (Codex L and U on #4290). A lost answer to the index's removal after it was
+  // applied leaves nothing behind: the queue is already clean, and a retry finds the index empty.
+  const global = repliesFor(await redisPipeline([["ZREM", QUEUE, ...theirs]]), 1);
+  const taken = countOf(global?.[0]);
+  if (taken === null || taken > theirs.length) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
+  const index = repliesFor(await redisPipeline([["ZREM", askIndexKey(statsId as string, rawEmail), ...theirs]]), 1);
+  const fromIndex = countOf(index?.[0]);
+  if (fromIndex === null || fromIndex > theirs.length) throw new UnknownReplyError("the removal of a person's checkout reminder ask index");
   return taken;
 }
 
@@ -176,7 +183,7 @@ export async function asksOf(statsId: string | null, rawEmail: string): Promise<
 async function askMembersOf(statsId: string | null, rawEmail: string): Promise<string[]> {
   const email = normaliseEmail(rawEmail);
   if (!statsId || !email || !isRedisConfigured()) return [];
-  const members = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", storeQueue(statsId), "-inf", "+inf"]]), 1)?.[0]);
+  const members = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", askIndexKey(statsId, email), "-inf", "+inf"]]), 1)?.[0]);
   if (members === null) throw new UnknownReplyError("a store's checkout reminder asks");
   return [...new Set(members)].filter((member) => {
     const ask = parseAsk(member);
@@ -203,8 +210,8 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
   const member = askMember({ statsId, handle: store.handle, productId, email, askedAt, from, after });
   await redisPipeline([
     ["ZADD", QUEUE, askedAt + after, member],
-    ["ZADD", storeQueue(statsId), askedAt + after, member],
-    ["EXPIRE", storeQueue(statsId), STORE_QUEUE_SECONDS],
+    ["ZADD", askIndexKey(statsId, email), askedAt + after, member],
+    ["EXPIRE", askIndexKey(statsId, email), STORE_QUEUE_SECONDS],
   ]);
   return "asked";
 }
@@ -222,7 +229,7 @@ async function again(ask: Ask, now: number): Promise<boolean> {
   if (tries >= REMINDER_RETRIES || at - (ask.askedAt + ask.after) > STALE_SECONDS) return false;
   try {
     const member = askMember({ ...ask, tries: tries + 1 });
-    const [added] = await redisPipeline([["ZADD", QUEUE, at, member], ["ZADD", storeQueue(ask.statsId), at, member], ["EXPIRE", storeQueue(ask.statsId), STORE_QUEUE_SECONDS]]);
+    const [added] = await redisPipeline([["ZADD", QUEUE, at, member], ["ZADD", askIndexKey(ask.statsId, ask.email), at, member], ["EXPIRE", askIndexKey(ask.statsId, ask.email), STORE_QUEUE_SECONDS]]);
     // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
     if (added === 1 || added === 0) return true;
     console.error("putting an asked-for reminder back answered in no known shape", ask.handle);
@@ -254,7 +261,7 @@ export async function sendAsked(
     if (Date.now() >= deadline) break;
     const ask = parseAsk(member);
     // Out of the store's index with the queue, so neither keeps an ask the job has taken.
-    const [taken] = await redisPipeline([["ZREM", QUEUE, member], ...(ask ? [["ZREM", storeQueue(ask.statsId), member]] : [])]);
+    const [taken] = await redisPipeline([["ZREM", QUEUE, member], ...(ask ? [["ZREM", askIndexKey(ask.statsId, ask.email), member]] : [])]);
     if (Number(taken) !== 1) continue;
     if (!ask || now - (ask.askedAt + ask.after) > STALE_SECONDS) {
       counts.skipped += 1;

@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ASK_AFTER_SECONDS, askMember, asksOf, parseAsk } from "@/lib/checkout-ask";
+import { ASK_AFTER_SECONDS, askIndexKey, askMember, asksOf, parseAsk } from "@/lib/checkout-ask";
 import { ASK_WHENS } from "@/lib/ask-when";
 import { erasePerson } from "@/lib/person-erasure";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
@@ -47,9 +47,10 @@ test("a person's checkout reminder asks leave the queue with them, and nobody el
     const someoneElse = askMember({ ...base, email: OTHER, from: "page", after: ASK_WHENS.days });
     const otherStore = askMember({ ...base, statsId: "0123456789abcdef0123456789abcdef", email: PERSON, from: "checkout", after: ASK_AFTER_SECONDS });
     redis.run(["ZADD", QUEUE, now + ASK_WHENS.days, onPage, now + ASK_AFTER_SECONDS, atCheckout, now + ASK_WHENS.days, someoneElse, now + ASK_AFTER_SECONDS, otherStore]);
-    // Each store's own index, as an ask is written (lib/checkout-ask.ts keep).
-    redis.run(["ZADD", `nl:recover:asks:s:${statsId}`, now + ASK_WHENS.days, onPage, now + ASK_AFTER_SECONDS, atCheckout, now + ASK_WHENS.days, someoneElse]);
-    redis.run(["ZADD", "nl:recover:asks:s:0123456789abcdef0123456789abcdef", now + ASK_AFTER_SECONDS, otherStore]);
+    // Each person's own index at each store, as an ask is written (lib/checkout-ask.ts keep; tests/checkout-ask-index.test.ts).
+    redis.run(["ZADD", askIndexKey(statsId, PERSON), now + ASK_WHENS.days, onPage, now + ASK_AFTER_SECONDS, atCheckout]);
+    redis.run(["ZADD", askIndexKey(statsId, OTHER), now + ASK_WHENS.days, someoneElse]);
+    redis.run(["ZADD", askIndexKey("0123456789abcdef0123456789abcdef", PERSON), now + ASK_AFTER_SECONDS, otherStore]);
 
     const copy = await asksOf(statsId, PERSON);
     assert.deepEqual(copy.map((a) => a.from).sort(), ["checkout", "page"], "their copy lists both asks still waiting at this store");
@@ -79,7 +80,7 @@ test("a person's erasure reads only their store's asks, however many other store
   const statsId = "abcdefabcdefabcdefabcdefabcdef12";
   const now = Math.floor(Date.now() / 1000);
   const mine = askMember({ statsId, handle: "askindex", productId: "prod01", email: PERSON, askedAt: now, from: "page", after: ASK_WHENS.days });
-  const STORE_QUEUE = `nl:recover:asks:s:${statsId}`;
+  const STORE_QUEUE = askIndexKey(statsId, PERSON);
   // Their ask, put back by the job after a failed send: the queue's own path (again), so it is written as the code writes it.
   redis.run(["ZADD", QUEUE, now - 10, mine]);
   const broken = async () => {
@@ -122,8 +123,8 @@ test("a person's erasure reads only their store's asks, however many other store
   // Sent (or dropped) by the job: it leaves the index with the queue.
   const later = askMember({ statsId, handle: "askindex", productId: "prod01", email: OTHER, askedAt: now - 100, from: "checkout", after: ASK_AFTER_SECONDS });
   redis.run(["ZADD", QUEUE, now - 5, later]);
-  redis.run(["ZADD", STORE_QUEUE, now - 5, later]);
+  redis.run(["ZADD", askIndexKey(statsId, OTHER), now - 5, later]);
   const gone = async () => null;
   await sendAsked(gone, Date.now() + 10_000);
-  assert.equal(redis.run(["ZSCORE", STORE_QUEUE, later]), null, "an ask the job took leaves the store's index too");
+  assert.equal(redis.run(["ZSCORE", askIndexKey(statsId, OTHER), later]), null, "an ask the job took leaves its person's index too");
 });

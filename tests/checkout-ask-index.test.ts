@@ -15,7 +15,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { askCartReminder, askIndexKey, askMember, askReminder, forgetAskPerson } from "@/lib/checkout-ask";
 import { ASK_WHENS } from "@/lib/ask-when";
-import { readListing } from "@/lib/catalog";
+import { readListing, readListings } from "@/lib/catalog";
+import { MAX_CART } from "@/lib/cart-rules";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -40,7 +41,7 @@ async function shop() {
   await setSubscription(OWNER, { customerId: "cus_AskIndex01", subscriptionId: "sub_AskIndex01", active: true, tier: "pro", period: paidPeriod() });
   await setRecovery(OWNER, { enabled: true, address: "9 Kiln Road, Portland, OR 97201", asks: true });
   const ids: string[] = [];
-  for (const title of ["Glaze Chart", "Kiln Guide"]) {
+  for (const title of ["Glaze Chart", "Kiln Guide", "Clay Notes", "Wheel Basics"]) {
     const made = await addProduct(OWNER, title, "", "12", null);
     assert.ok(made.ok);
     await setProductLink(OWNER, made.product.id, `https://example.com/${made.product.id}`);
@@ -84,6 +85,21 @@ test("an ask costs no more than the later page it is paid as", async () => {
   }
   console.log(`an ask sends ${sent} commands besides its public request; a later page is priced at ${COMMANDS.laterPage}`);
   assert.ok(sent <= COMMANDS.laterPage, `an ask sends ${sent} commands, a later page is priced at ${COMMANDS.laterPage}`);
+  // A whole cart, at its largest (MAX_CART), reads every listing it names (Claude 7).
+  assert.equal(ids.length, MAX_CART);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sent += commands.length;
+    return real(commands);
+  }) as typeof redis.pipeline;
+  sent = 0;
+  try {
+    const found = (await storeForHandle(store.handle))!;
+    assert.equal(await askCartReminder({ store: found, items: await readListings(found, ids), email: OTHER, ip: "203.0.113.9" }), "asked");
+  } finally {
+    redis.pipeline = real;
+  }
+  console.log(`a cart's ask (${MAX_CART} products) sends ${sent} commands besides its public request`);
+  assert.ok(sent <= COMMANDS.laterPage, `a cart's ask sends ${sent} commands, a later page is priced at ${COMMANDS.laterPage}`);
 });
 
 test("a failed global removal keeps the person's index for the erasure's retry (Codex L and U)", async () => {

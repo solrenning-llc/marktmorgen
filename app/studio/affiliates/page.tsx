@@ -198,6 +198,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           invoicesChecked={book?.invoicesChecked ?? true}
           invoicesPastCeiling={book?.invoicesPastCeiling ?? false}
           unlinkedInvoices={book?.unlinkedInvoices ?? 0}
+          // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
           today={new Date().toISOString().slice(0, 10)}
           currency={store.currency}
           elsewhere={book?.elsewhere ?? 0}

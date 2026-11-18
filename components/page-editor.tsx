@@ -2986,6 +2986,7 @@ function RowEditor({
   // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
   // begun in an earlier drawing of the row keeps its place (lib/row-edit-rules.ts, shiftHeld).
   const mine = useRef([0, 0, 0]);
+  // oxlint-disable-next-line react/refs -- initial state copied once from a constant ref value; pre-existing and not flagged by the former ESLint React Compiler rule
   const [mineShown, setMineShown] = useState(mine.current);
   // Whether this drawing is still on screen, so what happens after it closed is said by the page editor instead.
   const drawn = useRef(true);

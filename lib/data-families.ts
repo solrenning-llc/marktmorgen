@@ -365,9 +365,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:pfunnel:done:": E, "nl:pfunnel:seen:": E, "nl:pfunnels:": E,
   "nl:phone:cfg:": E, "nl:phone:seen:": X(40), "nl:phone:st:": E,
   "nl:picture-r2:drop": C,
-  // A store's picture uploads not yet put on anything (lib/picture-door.ts): each note goes when taken or swept, 30 days after its door,
-  // and the list expires PICTURE_DOORS_KEPT_SECONDS (32 days) after its last note.
-  "nl:pictures:doors:": X(32),
+  // A store's picture uploads not yet put on anything (lib/picture-door.ts): each note goes when taken or swept, 30 days after its door
+  // or later behind the sweep's backlog; the list has no expiry (Codex G, Codex X6 on #3347) and goes with its store, named by its files' folder.
+  "nl:pictures:doors:": E,
   // A picture's mark that a record took it (lib/picture-door.ts, takenKey): a day.
   "nl:pictures:taken:": X(1),
   "nl:pinv:": Cr(30),

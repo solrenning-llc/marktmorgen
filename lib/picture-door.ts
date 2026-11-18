@@ -74,8 +74,16 @@ import { essentialLimitState, type LimitState } from "@/lib/request-guard";
  * MAX_IMAGE_BYTES (lib/product-image.ts). A store note whose picture is no
  * longer on that list (taken or swept while the store's own removal was lost)
  * is dropped when the store reaches its cap, so it can never keep the door
- * shut, and the store's list expires PICTURE_DOORS_KEPT_SECONDS after its
- * last note.
+ * shut. The store's list has no expiry (Codex G, Codex X6 on #3347): its note
+ * is the sweep's only proof that a picture was the door's own and never taken,
+ * and the sweep reads PICTURE_SWEEP_PER_RUN a day, oldest first, so a picture
+ * may wait past its grace for as long as the company's backlog lasts; a list
+ * that expired first left such a picture kept for good and off every list.
+ * Every door's note writes PERSIST, so a list written with the earlier expiry
+ * loses it at its store's next door. A list is gone once its last note is
+ * taken, swept or dropped, and with its store at the closing (an erase by the
+ * store's files' folder, lib/data-families.ts); left-behind notes stay
+ * bounded by PICTURE_DOOR_MAX meanwhile.
  *
  * Each door is a write to the file store, and a picture never put on anything
  * stays there until the sweep, so the doors are capped before one is signed (owner rule MR: a
@@ -92,8 +100,6 @@ export const PICTURE_DOOR_MAX = 1_000;
 export const PICTURE_DOORS_PER_HOUR = 200;
 /** How long after its door an untaken picture is swept: 30 days (owner decision DONO-8, 9 November 2026), far past its day (PICTURE_DOOR_SECONDS). */
 export const PICTURE_SWEEP_AFTER_SECONDS = 30 * 24 * 60 * 60;
-/** How long a store's list is kept after its last note: the grace and two days more for the daily sweep to reach it. */
-export const PICTURE_DOORS_KEPT_SECONDS = 32 * 24 * 60 * 60;
 /** How long a taken name stays marked: longer than any door request between its check of the file store and its note. */
 export const PICTURE_TAKEN_SECONDS = 24 * 60 * 60;
 /** The most unclaimed pictures one run of the sweep takes off the list and deletes, oldest first; the next run goes on. */
@@ -197,17 +203,18 @@ export async function notePictureDoor(path: string, now = Date.now()): Promise<b
   const replies = repliesFor(await redisPipeline([
     ["ZADD", key, now, path],
     ["ZADD", UNCLAIMED_KEY, now, path],
-    ["EXPIRE", key, PICTURE_DOORS_KEPT_SECONDS],
+    // No expiry: the note must outlive the sweep's backlog (Codex G, Codex X6 on #3347); PERSIST drops an earlier one.
+    ["PERSIST", key],
     // Read after the adds: a take marks before it removes, so a note either was removed by it or sees its mark.
     ["EXISTS", takenKey(path)],
     ["ZCARD", key],
   ]), 5);
-  // Noted only on its whole acknowledgement (Codex P on #2156): 0 or 1 for each add, the expiry set, an exact 0 or 1
+  // Noted only on its whole acknowledgement (Codex P on #2156): 0 or 1 for each add and for the expiry dropped, an exact 0 or 1
   // for the mark, and the store list's exact count. Anything else is not a note, and the upload is not opened (a name
   // written with no file is swept as nothing).
   if (!replies) return false;
-  const [added, listed, expiry, marked, count] = replies.map(countOf);
-  if ((added !== 0 && added !== 1) || (listed !== 0 && listed !== 1) || expiry !== 1 || (marked !== 0 && marked !== 1) || count === null) return false;
+  const [added, listed, persisted, marked, count] = replies.map(countOf);
+  if ((added !== 0 && added !== 1) || (listed !== 0 && listed !== 1) || (persisted !== 0 && persisted !== 1) || (marked !== 0 && marked !== 1) || count === null) return false;
   if (marked === 1) {
     // Taken by a record already: this note must never put the name back for the sweep. Best effort; should it fail,
     // the sweep keeps the file, stored before this note.
@@ -333,7 +340,7 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
  * before a late note could read as stored after it. The taken mark the late note reads, and its taking itself back
  * off both lists, still keep such a picture; a deletion needs both to miss.
  * Its store's note is taken off once its file is gone (or proven not to be the door's), so the store's cap counts it
- * until then; a removal of the note answered in another shape leaves it to dropLeftBehind and the list's expiry. A
+ * until then; a removal of the note answered in another shape leaves it to dropLeftBehind and the store's closing. A
  * delete that fails puts its pictures back on the list for the next run. The list, the pipeline and each ZREM are read
  * in their exact shape (CX-123 rule 24): a read in another shape throws and deletes nothing; a removal in another
  * shape deletes nothing and tries to restore the same still-unclaimed door's note for the next sweep. A name that

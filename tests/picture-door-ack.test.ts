@@ -37,11 +37,11 @@ async function take(replies: unknown[]): Promise<string[] | "unknown"> {
 async function main(): Promise<void> {
   part("The upload door needs its whole write acknowledgement");
   is("a short write reply does not open the upload door", await withReply([0], () => notePictureDoor(PATH, NOW)), false);
-  // Both adds, the store list's expiry, the taken mark's absence and the store's count (lib/picture-door.ts, since rule 24
+  // Both adds, the store list's expiry dropped (PERSIST, Codex X6 on #3347), the taken mark's absence and the store's count (lib/picture-door.ts, since rule 24
   // inventory A1b: the store's list and the list of unclaimed pictures; since Claude 2 on #3347: the expiry and the mark).
   is("the canonical write reply opens it", await withReply([1, 1, 1, 0, 1], () => notePictureDoor(PATH, NOW)), true);
   is("a numeric-looking mark answer does not open it", await withReply([1, 1, 1, "0", 1], () => notePictureDoor(PATH, NOW)), false);
-  is("an expiry not set does not open it", await withReply([1, 1, 0, 0, 1], () => notePictureDoor(PATH, NOW)), false);
+  is("an expiry drop answered in another shape does not open it", await withReply([1, 1, 2, 0, 1], () => notePictureDoor(PATH, NOW)), false);
   is("a name already taken does not open it", await withReplies([[1, 1, 1, 1, 1], [1, 1]], () => notePictureDoor(PATH, NOW)), false);
 
   part("Taking a picture needs an exact removal acknowledgement");

@@ -28,7 +28,7 @@ import { POST as upload } from "@/app/api/store/image/upload/route";
 import { POST as productImage } from "@/app/api/store/image/route";
 import { POST as linkImage } from "@/app/api/store/link-image/route";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
 import { COST_LINES, NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
@@ -237,6 +237,18 @@ async function main(): Promise<void> {
   const reopened = await upload(post("/api/store/image/upload", session, { type: "blob.generate-presigned-url", payload: { pathname: waiting, clientPayload: JSON.stringify({ productId }), multipart: false } }));
   is("and the door opens again", await answer(reopened), [200, "ok"]);
   is("the refusal's sentence no longer says the pictures are from the last day", /last day/.test(STUDIO_MESSAGES.pictures_waiting ?? ""), false);
+
+  part("A picture behind a backlog keeps its store note until the sweep reaches it (Codex G, Codex X6 on #3347)");
+  // The sweep reads PICTURE_SWEEP_PER_RUN a day, oldest first, so a picture may wait past its grace for days. Its
+  // store note is the proof that it was the door's own and never taken, and it must outlive that wait.
+  redis.run(["DEL", UNCLAIMED, doors]);
+  const behind = await uploaded();
+  is("the store's list is written with no expiry", redis.run(["TTL", doors]), -1);
+  advance(GRACE + 5 * DAY);
+  is("its store note is still there after a backlog of days past its grace", onStore(behind), true);
+  is("so the sweep that finally reaches it deletes it", await run(Date.now() + GRACE + 5 * DAY), [behind]);
+  is("its file is gone", files.has(behind), false);
+  is("and both notes are gone", [onStore(behind), onList(behind)], [false, false]);
 
   part("The course job runs the sweep, and the registry says what the door keeps");
   const cron = readFileSync(join(process.cwd(), "app/api/cron/courses/route.ts"), "utf8");

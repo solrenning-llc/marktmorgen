@@ -7,7 +7,8 @@
  *   - the sweep checks the file itself: one stored before its note, or whose check cannot be read, is never deleted;
  *   - the grace is 30 days: a picture a day old is kept;
  *   - a store note left behind once its picture was taken or swept no longer counts against the store's cap, and the
- *     store's list has an expiry, so such notes can never keep the upload door shut;
+ *     door drops them at the cap, so such notes can never keep the upload door shut; the store's list has no expiry
+ *     (Codex G, Codex X6 on #3347), so a note waiting behind the sweep's backlog keeps its proof;
  *   - an untaken note still waiting for the sweep keeps counting (the cap still bounds what the file store keeps);
  *   - a picture taken off its store's list only (by the code before the list of unclaimed pictures, after a rollback;
  *     Claude 2 on #3347 @1eef9e91e1) is never deleted: the sweep deletes only while the store's note is still there,
@@ -234,8 +235,7 @@ async function main(): Promise<void> {
   is("it is noted on both lists", [onStore(reopened), onList(reopened)], [true, true]);
   is("left-behind notes were dropped from the store's list", (redis.run(["ZCARD", doors]) as number) <= door.PICTURE_DOOR_MAX, true);
   const ttl = redis.run(["TTL", doors]) as number;
-  is("the store's list has an expiry", ttl > 0, true);
-  is("no longer than the grace and the days kept after it", ttl <= (door as unknown as { PICTURE_DOORS_KEPT_SECONDS: number }).PICTURE_DOORS_KEPT_SECONDS, true);
+  is("the store's list has no expiry: a note waiting behind the sweep's backlog keeps its proof (Codex X6 on #3347)", ttl, -1);
 
   part("Untaken notes still waiting for the sweep keep counting");
   redis.run(["DEL", UNCLAIMED, doors]);

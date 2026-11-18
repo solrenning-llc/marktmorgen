@@ -38,9 +38,6 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
   "nl:adsrv:ctx:": ["lib/ad-events.ts", "CTX_SECONDS"],
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
-  // A store's picture uploads not yet put on anything (a capped part): each note goes when its picture is taken or swept,
-  // and the list is written with its expiry, PICTURE_DOORS_KEPT_SECONDS after its last note.
-  "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOORS_KEPT_SECONDS"],
   // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
   "nl:oprob:": ["lib/order-problem-rules.ts", "ORDER_PROBLEM_REPLY_DAYS"],
   "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],

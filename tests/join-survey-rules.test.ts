@@ -119,6 +119,25 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   // Claude 6 on #3652 (LOW): cases where only taking out the invisible characters lets the address be found.
   is("an invisible character inside a bare web address does not keep it", clean("see janesmith​.dev/shop ok"), "see ok");
   is("an invisible character inside a written-out address does not keep it", clean("write jane at​ gmail dot com ok"), "write ok");
+  // Claude 6 on #3652 @438121fa18 (MEDIUM, privacy): an address, web address or handle typed in fullwidth characters
+  // (a CJK input method in fullwidth mode) was kept. Built at run time from plain text, so no tracked file holds one.
+  const fullwidth = (text: string) => Array.from(text, (c) => (c >= "!" && c <= "~" ? String.fromCharCode(c.charCodeAt(0) + 0xfee0) : c)).join("");
+  is("an email address in fullwidth characters is taken out", clean(`write ${fullwidth("jane@gmail.com")} ok`), "write ok");
+  is("a bare web address in fullwidth characters is taken out", clean(`see ${fullwidth("janesmith.dev/shop")} ok`), "see ok");
+  is("a web address with www in fullwidth characters is taken out", clean(`see ${fullwidth("www.janesmith.dev")} ok`), "see ok");
+  is("an email address with only its domain in fullwidth is taken out", clean(`mail jane@gmail${fullwidth(".com")} ok`), "mail ok");
+  is("a handle in fullwidth characters is taken out", clean(`ig ${fullwidth("@janesmith")} ok`), "ig ok");
+  is("control: fullwidth words with no address stay readable", clean(`I want ${fullwidth("ABC")} courses`).includes("courses"), true);
+  // Claude 6 (LOW): an address spelled with bracketed markers and no spaces was kept whole.
+  is("an email address spelled with (at) and (dot) and no spaces is taken out", clean("write jane(at)gmail(dot)com ok"), "write ok");
+}
+{
+  // Claude 6 on #3652 (LOW): the cut to the limit could end on half of a character outside the basic plane.
+  const kept = (cleanJoinAnswer(on, { v: 1, choice: "other", comment: "a" + "\u{1F600}".repeat(200) }) as { answer: { comment: string } }).answer.comment;
+  is("a comment cut to the limit never ends on half a character", /[\ud800-\udbff]$/.test(kept), false);
+  const hope = editJoinSurvey(on, { own: [{ id: own(1), text: "a" + "\u{1F600}".repeat(60) }] });
+  const ownWords = joinChoices(hope).map((c) => c.label).join("");
+  is("nor does a creator's own choice cut to its limit", /[\ud800-\udbff](?![\udc00-\udfff])/.test(ownWords), false);
 }
 is("a comment that is not text is none", (cleanJoinAnswer(on, { v: 1, choice: "learn", comment: 5 }) as { answer: { comment: string } }).answer.comment, "");
 is("a choice that is not offered", cleanJoinAnswer(on, { v: 1, choice: "bogus", comment: "" }), { ok: false, problem: "choice" });

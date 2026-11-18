@@ -184,7 +184,8 @@ async function doors() {
   is("disputeLost: a blocked one beside an unknown one is not decided", await rejects(() => disputeLost("acct_C5Prevented", payment)), true);
 
   part("lib/refunds.ts lostDisputesSince: the sweep reads every closing whose money went back, and carries what decided it");
-  const event = (id: string, s: Shape) => ({ id, created: 1_800_000_000, data: { object: { ...fields(s), payment_intent: "pi_C5Prevented01", charge: CHARGE } } });
+  const created = Math.floor(Date.now() / 1000) - 60;
+  const event = (id: string, s: Shape) => ({ id, created, data: { object: { ...fields(s), payment_intent: "pi_C5Prevented01", charge: CHARGE } } });
   events = {
     object: "list",
     has_more: false,
@@ -209,9 +210,9 @@ async function doors() {
     events = { object: "list", has_more: false, data: [event("evt_C5Unknown001", s)] };
     is(`lostDisputesSince: ${s.label} stops the sweep incomplete`, (await lostDisputesSince("acct_C5Prevented", 0)).complete, false);
   }
-  events = { object: "list", has_more: false, data: [{ id: "evt_C5NoCharge01", created: 1_800_000_000, data: { object: { ...fields(resolution), payment_intent: "pi_C5Prevented01", charge: null } } }] };
+  events = { object: "list", has_more: false, data: [{ id: "evt_C5NoCharge01", created, data: { object: { ...fields(resolution), payment_intent: "pi_C5Prevented01", charge: null } } }] };
   is("lostDisputesSince: a resolved prevention without its charge is unknown, never passed over", (await lostDisputesSince("acct_C5Prevented", 0)).complete, false);
-  events = { object: "list", has_more: false, data: [{ id: "evt_C5NoCharge02", created: 1_800_000_000, data: { object: { ...fields(block), payment_intent: "pi_C5Prevented01", charge: null } } }] };
+  events = { object: "list", has_more: false, data: [{ id: "evt_C5NoCharge02", created, data: { object: { ...fields(block), payment_intent: "pi_C5Prevented01", charge: null } } }] };
   is("lostDisputesSince: a blocked one needs no charge: it takes nothing back", (await lostDisputesSince("acct_C5Prevented", 0)).complete, true);
 }
 

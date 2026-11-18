@@ -86,7 +86,8 @@ export function roomReads(bookings: number): number {
   return bookings > 0 ? Math.ceil((bookings * ROOM_KEYS_PER_BOOKING) / ROOM_KEYS_PER_MGET) : 0;
 }
 
-const unreadableRooms = () => new Error("The booking rooms could not be read.");
+/** A room reply off its shape (rule 24): an UnknownReplyError, as every unknown Redis answer, in words a page can show. */
+const unreadableRooms = (): UnknownReplyError => Object.assign(new UnknownReplyError("the bookings' rooms"), { message: "The booking rooms could not be read." });
 
 /** Only explicit nulls prove that no room or meeting was stored. */
 function roomReplies(reply: unknown, count: number): (string | null)[] {

@@ -47,8 +47,10 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
+import { randomBytes } from "node:crypto";
 import { orderWrite } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { releaseLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -333,6 +335,77 @@ export async function onboardingUrl(store: Store, returnUrl: string): Promise<st
   const links = Array.isArray(made.links) ? (made.links as { rel?: unknown; href?: unknown }[]) : [];
   const action = links.find((l) => l.rel === "action_url");
   return typeof action?.href === "string" && action.href.startsWith("https://") ? action.href : null;
+}
+
+/**
+ * A connect started from this store's studio (app/api/store/paypal/connect), kept a day: the way back from PayPal
+ * (app/api/store/paypal/onboarded) is a GET any page can send the creator to, and PayPal answers for the store's
+ * tracking id for as long as the creator has not removed Marktmorgen in their PayPal settings. So the way back is
+ * taken only while this mark is there: a visit from the browser's history, or from a link on another site, after
+ * the creator stopped selling with PayPal (or before they ever asked) connects nothing. Ended by a way back that
+ * connected, and by disconnecting. One per store, holding the attempt's own random token: the way back writes the
+ * seller only while that same token is still there, read again under the store's write lock
+ * (lib/store.ts connectPayPalSellerIf), so a disconnect, or a newer connect, made while PayPal was being asked wins
+ * over the older way back (Codex X4 on #4345).
+ */
+export const ONBOARDING_SECONDS = 86_400;
+const onboardingKey = (statsId: string) => `nl:ppsell:start:${statsId}`;
+/** An attempt's token: the moment it began (milliseconds, 13 digits) and 32 random hex characters. */
+const ATTEMPT = /^(\d{13})-[0-9a-f]{32}$/;
+/** When an attempt began, from its token; 0 for one that is not a token. */
+export function attemptStartedAt(attempt: string): number {
+  const m = ATTEMPT.exec(attempt);
+  return m ? Number(m[1]) : 0;
+}
+
+/** Writes a new attempt's mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
+export async function markOnboarding(statsId: string): Promise<string> {
+  const attempt = `${String(Date.now()).padStart(13, "0")}-${randomBytes(16).toString("hex")}`;
+  const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), attempt, "EX", ONBOARDING_SECONDS]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a PayPal connect's start");
+  return attempt;
+}
+
+/**
+ * The connect started from the studio: its attempt token, false when none was started, or "unknown" for any reply not
+ * exactly GET's (rule 24).
+ */
+export async function onboardingStarted(statsId: string): Promise<string | false | "unknown"> {
+  const read = repliesFor(await redisPipeline([["GET", onboardingKey(statsId)]]), 1);
+  if (!read) return "unknown";
+  if (read[0] === null) return false;
+  return typeof read[0] === "string" && ATTEMPT.test(read[0]) ? read[0] : "unknown";
+}
+
+/** Whether this attempt is still the store's current connect: true, false, or "unknown" (rule 24). */
+export async function onboardingStill(statsId: string, attempt: string): Promise<boolean | "unknown"> {
+  const now = await onboardingStarted(statsId);
+  return now === "unknown" ? "unknown" : now === attempt;
+}
+
+/**
+ * Ends this attempt's own mark after its way back connected: only while the mark still holds this attempt's token, in
+ * one script (lib/redis-lock.ts releaseLock: GET and DEL together), so a newer connect started meanwhile keeps its mark
+ * and can finish (Codex G on #4345). Never throws; a mark it could not end runs out within ONBOARDING_SECONDS.
+ */
+export async function endOnboarding(statsId: string, attempt: string): Promise<void> {
+  if (!ATTEMPT.test(attempt)) return;
+  await releaseLock({ key: onboardingKey(statsId), token: attempt, ttlSeconds: ONBOARDING_SECONDS });
+}
+
+/**
+ * Ends any connect in progress before a disconnect is written: true only when the DEL's reply is exactly its own
+ * (0 or 1). Run before the store's seller is cleared, so a way back still asking PayPal finds no attempt under the
+ * store's write lock and writes nothing.
+ */
+export async function stopOnboarding(statsId: string): Promise<boolean> {
+  try {
+    const gone = repliesFor(await redisPipeline([["DEL", onboardingKey(statsId)]]), 1);
+    return gone !== null && (gone[0] === 0 || gone[0] === 1);
+  } catch (error) {
+    console.error("ending a PayPal connect's start failed", error);
+    return false;
+  }
 }
 
 export type SellerCheck = { ok: true; merchant: string } | { ok: false; reason: "id" | "email" | "receivable" | "permissions" | "error" };
@@ -1073,11 +1146,23 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   // down a payment PayPal completes; one every try was refused for, or the sweep let go of, has nothing under watch,
   // so the buyer is shown the store's notice rather than told PayPal is still taking it (Codex X2's MEDIUM 1, Claude
   // 5's LEVE on #3411); one paid since it was read is shown as paid.
-  if (tries >= CAPTURE_TRIES_PER_ORDER) return standing(order, opened);
+  // A reply that does not read here, or in watchFirst below, takes nothing and writes nothing: the buyer is told it did
+  // not go through (the store's notice), never shown a server error (Claude 1's LOW 1 on #3411; CX-123 rule 24).
+  const unread = (error: unknown, what: string): CaptureResult => {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    console.error(`a PayPal order's ${what} could not be read`, order, error);
+    return { ok: false, reason: "unknown" };
+  };
+  if (tries >= CAPTURE_TRIES_PER_ORDER) return standing(order, opened).catch((error) => unread(error, "standing"));
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
   // and a record ended since it was read, or less than a day from thirty past its opening, is no order to take a payment
   // for).
-  const watched = await watchFirst(order, opened);
+  let watched: Awaited<ReturnType<typeof watchFirst>>;
+  try {
+    watched = await watchFirst(order, opened);
+  } catch (error) {
+    return unread(error, "watch");
+  }
   if (watched === "gone") return { ok: false, reason: "unknown" };
   // Two returns at once can both read a count under the bound; the count this step took decides (the INCR), so PayPal
   // is never asked more than CAPTURE_TRIES_PER_ORDER times an order, as above, and a refused one wrote nothing past its
@@ -1804,29 +1889,54 @@ export async function paypalCounts(statsId: string | null): Promise<{ sales: num
 /**
  * The store's PayPal sales paid since `since` (seconds), newest first, at most
  * `limit`: one range and one read of the orders. Nothing is asked of PayPal.
+ * `now` (seconds) tells a record that expired by design from one not read.
  */
-export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
+export async function readPayPalSales(statsId: string | null, since: number, limit: number, now = Math.floor(Date.now() / 1000)): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
-  // The orders, as a list of text no longer than the LIMIT asked ([] is none): any other reply is unknown, never "no
-  // PayPal sales" (CX-123 rule 24). A member that is not an order id is a sale this reading lacks: partial.
-  const members = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
-  if (!members || members.length > limit + 1) throw new UnknownReplyError("the PayPal sales");
-  const list = members.filter((o) => ORDER_ID.test(o));
-  let partial = list.length < members.length || list.length > limit;
-  if (!list.length) return { sales: [], partial };
-  const asked = list.slice(0, limit);
-  // One slot for each record asked, text or null (its record ended): anything else is unknown.
-  const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...asked.map(paidKey)]]), 1)?.[0], asked.length);
-  if (!rows || rows.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the PayPal sales' records");
-  const sales: Paid[] = [];
-  for (const raw of rows) {
-    if (raw === null) continue;
-    // A record that does not read, or is not this store's, is not guessed at; nor is the reading complete without it.
-    const paid = jsonObject(raw);
-    if (paid && paid.store === statsId && typeof paid.order === "string") sales.push(paid as unknown as Paid);
-    else partial = true;
+  // Read exactly, as the refunds beside it are (readPayPalRefundsWithCoverage; rule 24): the list as a list of text no
+  // longer than asked, each member with its time, else unknown and thrown, never "no PayPal sales".
+  const flat = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "WITHSCORES", "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * (limit + 1)) throw new UnknownReplyError("the PayPal sales");
+  const orders: string[] = [];
+  const paidAt = new Map<string, number>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const time = /^\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(time)) throw new UnknownReplyError("the PayPal sales");
+    orders.push(flat[i]);
+    paidAt.set(flat[i], time);
   }
-  return { sales, partial };
+  const listed = orders.slice(0, limit);
+  // An order that is not an order id, a record Redis answered as missing or one written for another store is a sale
+  // this reading could not count: the reading is partial, never whole without it.
+  let missing = listed.some((o) => !ORDER_ID.test(o));
+  const list = listed.filter((o) => ORDER_ID.test(o));
+  const partial = orders.length > limit;
+  if (!list.length) return { sales: [], partial: partial || missing };
+  const what = "a PayPal sale's record";
+  const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...list.map(paidKey)]]), 1)?.[0], list.length);
+  if (!rows) throw new UnknownReplyError(what);
+  const sales: Paid[] = [];
+  list.forEach((order, i) => {
+    const raw = rows[i];
+    if (raw === null) {
+      // Its record is written with the member, at its time, and kept PAID_KEPT_SECONDS: past that it expired by design
+      // and the member is only waiting for the next sale's trim (Codex L and Codex V on #4001), outside what is kept.
+      // Missing inside that window, it is a sale this reading could not count.
+      if ((paidAt.get(order) ?? now) + PAID_KEPT_SECONDS > now) missing = true;
+      return;
+    }
+    if (typeof raw !== "string") throw new UnknownReplyError(what);
+    let paid: unknown;
+    try {
+      paid = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError(what);
+    }
+    if (!paid || typeof paid !== "object" || Array.isArray(paid) || (paid as Paid).order !== order || typeof (paid as Paid).store !== "string") throw new UnknownReplyError(what);
+    if ((paid as Paid).store === statsId) sales.push(paid as Paid);
+    else missing = true;
+  });
+  return { sales, partial: partial || missing };
 }
 
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */

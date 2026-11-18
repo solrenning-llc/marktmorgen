@@ -71,7 +71,7 @@ async function openStore(owner: string, handle: string, account: string, id: str
   await setStripeAccount(owner, account, true);
   await setSubscription(owner, { customerId: `cus_${id}`, subscriptionId: `sub_${id}`, active: true, period: paidPeriod() });
   // A members import needs the postal address its emails carry since main's move-members work (lib/move-members.ts,
-  // movePostal). A synthetic one, as tests/members-import-emails-month.test.ts gives.
+  // movePostal; merge of main, 18 November 2026). A synthetic one, as tests/members-import-emails-month.test.ts gives.
   await setMailSettings(owner, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   const guide = await addProduct(owner, "The Guide", "", "12", null);
   const club = await addProduct(owner, "The Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });
@@ -151,11 +151,24 @@ async function main(): Promise<void> {
     is("the report counts the member as added, not already", [after?.counts.added, after?.counts.already], [1, 0]);
   }
 
-  part("Members: the step fails while the link is set, and is done again");
+  // Since main's move-members work (lib/move-members.ts INVITE_UNLESS_ERASED, merge of main, 18 November 2026) an
+  // import writes the invitation, its link and its reminder in one step, so no separate SET of the link can fail. The
+  // nearest failure left: that step is written and its reply is lost. The next try finds the invitation its own and
+  // answers it as new (issue #3957), with the link written in that first step.
+  part("Members: the step that writes the invitation and its link is written, its reply lost, and is done again");
   {
     const before = emails.length;
     const id = await members(store, OWNER, "linked@example.com", renews);
-    const failure = failOnce((c) => c[0] === "SET" && String(c[1]).startsWith("nl:mv:link:"));
+    let lost = false;
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      const replies = await original(commands);
+      if (!lost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:invite-unless-erased:"))) {
+        lost = true;
+        throw new Error("synthetic failure: the invitations were written, the reply lost");
+      }
+      return replies;
+    };
+    const failure = { fired: () => lost };
     let after;
     try {
       after = await run(id);
@@ -164,7 +177,7 @@ async function main(): Promise<void> {
     }
     store = await fresh();
     const invite = await readInvite(store.statsId!, inviteField("linked@example.com", club.product.id));
-    is("the failure happened while the link was set", failure.fired(), true);
+    is("the failure happened after the invitation and its link were written", failure.fired(), true);
     is("the member is emailed exactly once, counted as added", [after?.state, sentTo("linked@example.com", before), after?.counts.added, after?.counts.already], ["done", 1, 1, 0]);
     is("the link in the email opens: it is kept under the invitation's token", invite ? redis.run(["EXISTS", linkKey(invite.t)]) : "no invitation", 1);
   }

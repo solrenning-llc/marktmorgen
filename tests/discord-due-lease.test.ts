@@ -12,8 +12,9 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount
 import { emailKey, storeKey } from "@/lib/learn";
 import { CHECK_HOURS } from "@/lib/discord-rules";
 import { joinServer, sweepDiscord } from "@/lib/discord-access";
-import { DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, saveServer, setProductRoles } from "@/lib/discord-store";
+import { DISCORD_DUE_PER_RUN, DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, saveServer, setProductRoles } from "@/lib/discord-store";
 import { store as redis } from "./redis-stub";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -189,6 +190,29 @@ async function main(): Promise<void> {
   redis.pipeline = realLine;
   is("she holds the role", (await readMember(room, BEA))?.r, [ROLE]);
   is("and is still in line, so a later refund is checked", (await score(beaEntry)) !== null, true);
+  part("What the line costs, counted (Claude 7 on #4239): a company fixed cost of the scheduled job, never zero");
+  {
+    const real = redis.pipeline.bind(redis);
+    let sent = 0;
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      sent += batch.length;
+      return real(batch);
+    }) as typeof redis.pipeline;
+    try {
+      for (let i = 0; i < 3; i += 1) await checkSoon(`sid-count-${i}`, `30000000000000009${i}`);
+      sent = 0;
+      const line = await dueMembers(clock + 60_000, DISCORD_DUE_PER_RUN);
+      is("the line handed out the three", line.length, 3);
+      is("one read of the line and one lease, whatever its length", sent, 2);
+      sent = 0;
+      await sweepDiscord(Date.now() + 30_000, clock + DUE_LEASE_SECONDS * 1_000 + 120_000);
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+    }
+    is("a run hands out at most DISCORD_DUE_PER_RUN people by default", DISCORD_DUE_PER_RUN, 200);
+    is("its line in the cost registry names the job's commands", /lib\/discord-store\.ts/.test(NOT_A_COST.DISCORD_DUE_PER_RUN ?? "") && /never zero/.test(NOT_A_COST.DISCORD_DUE_PER_RUN ?? ""), true);
+  }
+
   done();
 }
 

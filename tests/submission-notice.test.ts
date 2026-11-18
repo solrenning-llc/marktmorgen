@@ -132,7 +132,8 @@ async function main(): Promise<void> {
 
   part("Addresses that cannot or may not be written to are skipped");
   const contact = (gone: string) => JSON.stringify({ agreed: true, unsub: true, unsubAt: "2026-11-01T00:00:00Z", gone });
-  for (const gone of ["bounced", "complained"]) {
+  // "refused" too, as lib/community-mail.ts stops on it (Claude 5's LEVE 1 on #3583).
+  for (const gone of ["bounced", "complained", "refused"]) {
     const s = kept();
     await redis.pipeline([["HSET", leadsKey("list0001"), s.buyer, contact(gone)]]);
     is(`an address that ${gone} is skipped`, await tellBuyerOfReply({ store: STORE, ...where, submission: s }, send), "stopped");
@@ -201,6 +202,12 @@ async function main(): Promise<void> {
   is("waiting", await tellBuyerOfReply({ store: STORE, ...where, submission: kept({ state: "submitted", reply: null, closedAt: 0 }) }, send), "none");
   is("withdrawn", await tellBuyerOfReply({ store: STORE, ...where, submission: kept({ state: "withdrawn", reply: null }) }, send), "none");
   is("no address", await tellBuyerOfReply({ store: STORE, ...where, submission: kept({ buyer: "not an address" }) }, send), "none");
+  // The lesson was deleted after the file was sent (findLesson null, no title): no email about "“”" with a link to a
+  // page that no longer opens, no store email taken, and no once-only mark (Claude 5's MÉDIO 1, Codex N4 on #3583).
+  const orphan = kept();
+  is("a lesson that no longer exists", await tellBuyerOfReply({ store: STORE, ...where, lessonTitle: "", submission: orphan }, send), "none");
+  is("a title of spaces only", await tellBuyerOfReply({ store: STORE, ...where, lessonTitle: "  ", submission: kept() }, send), "none");
+  is("and no mark was taken for it", (await pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${orphan.id}`]]))[0], 0);
   is("still four", sent.length, 4);
 
   part("Its Redis commands, at most");
@@ -270,6 +277,17 @@ async function main(): Promise<void> {
   is("the browser's storage is read and written only inside try", /try \{[^}]*localStorage\.getItem/.test(box) && /try \{[^}]*localStorage\.setItem/.test(box), true);
   is("the email's link lands on the box", box.includes('id="submission"'), true);
   is("English", [SUBMISSIONS_WORDS.en.newReply, SUBMISSIONS_WORDS.en.newReplies(1), SUBMISSIONS_WORDS.en.newReplies(3)], ["New reply", "1 new reply since this device last showed this list.", "3 new replies since this device last showed this list."]);
+
+  part("What the privacy policy and the person-data list say of it (Claude 5's MÉDIO 2 on #3583)");
+  const policy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8");
+  const section = (policy.split('<p id="lesson-submissions">')[1] ?? "").split("</p>")[0].replace(/\s+/g, " ");
+  is("the section is there", section.length > 0, true);
+  is("it says the reply goes by one email through the email provider", /one email from the store&apos;s name, through our email provider/.test(section), true);
+  is("with the whole reply, the file's name and the lesson's title", /the creator&apos;s whole reply, the name of the file and the title of the lesson/.test(section), true);
+  is("and never to a stopped address", /bounced, complained, was refused or was deleted from the store/.test(section), true);
+  is("and that the replies already shown are kept only in the browser", /kept only in that browser, and never sent to us/.test(section), true);
+  const people = readFileSync(join(process.cwd(), "lib/person-data.ts"), "utf8");
+  is("the person-data list names the browser's seen replies", /file: "lib\/submission-upload\.ts", how: "none"[^\n]*Privacy #lesson-submissions/.test(people), true);
   done();
 }
 

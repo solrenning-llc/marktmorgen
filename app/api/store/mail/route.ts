@@ -258,11 +258,13 @@ export async function POST(request: NextRequest) {
       const created = await createBroadcast(store, {
         subject: text(body.subject, 400),
         body: text(body.body, MAX_MAIL_BODY * 2),
-        productId: text(body.productId, 40),
-        notProductId: text(body.notProductId, 40),
-        who: text(body.who, 10),
+        // The choices of who it reaches go as they came, so a wrong type is refused there, never turned into "" and so
+        // into everyone (Codex L on #3925); createBroadcast reads each exactly.
+        productId: body.productId,
+        notProductId: body.notProductId,
+        who: body.who,
         narrow: body.narrow,
-        label: text(body.label, 80),
+        label: body.label,
         sendAt: typeof body.sendAt === "number" ? body.sendAt : undefined,
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).

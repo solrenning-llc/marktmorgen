@@ -217,6 +217,10 @@ export const fr: BuyerWords = {
       title: "PayPal n'a pas accepté le paiement",
       body: "Rien n'a été débité. Réessayez avec une autre carte ou un autre compte dans PayPal, ou payez par carte ici.",
     },
+    "paypal-confirming": {
+      title: "Ce paiement PayPal est en cours de confirmation",
+      body: "Un autre onglet ou un deuxième clic est en train de le terminer. Vérifiez vos e-mails pour le reçu avant de payer à nouveau. Si PayPal indique un prélèvement et qu'aucun reçu n'arrive, écrivez à la boutique en répondant au reçu de PayPal.",
+    },
     "paypal-error": {
       title: "Ce paiement PayPal n'a pas pu être associé à cette boutique",
       body: "Rien n'a été remis en échange. Si PayPal indique un débit, écrivez à la boutique en répondant au reçu de PayPal.",

@@ -85,6 +85,7 @@ import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
+import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
@@ -313,6 +314,14 @@ export const STRIPE_WAIT_SECONDS = 2;
  */
 export const ORDER_RENEWAL_STOP = (STRIPE_WAIT_SECONDS / RENEWALS_AT_ONCE + STRIPE_WAIT_SECONDS / 100) * MEMORY_SECOND;
 /**
+ * A purchase for several's settlement (lib/group-buy.ts settleGroup; Claude 7's cost MEDIUM on #4494): before any place
+ * is handed out, its payment is read on the creator's account with its charge expanded, and givenBack may then read the
+ * payment's dispute: GROUP_SETTLE_STRIPE_CALLS waits at the most, each STRIPE_WAIT_SECONDS held at 2 GB, once per group
+ * order. Held inside ORDER_COMPUTE beside the cart's stock share (tests/group-refunded-before-settle.test.ts).
+ */
+export const GROUP_SETTLE_STRIPE_CALLS = 2;
+export const GROUP_SETTLE_STRIPE_WAIT = GROUP_SETTLE_STRIPE_CALLS * STRIPE_WAIT_SECONDS * MEMORY_SECOND;
+/**
  * Queue item 307 [EC1]: not a line of any plan. What telling a closing
  * store's buyers and settling its members costs at the most, for each buyer
  * its cap allows (queue item 307 [EC1],
@@ -483,6 +492,22 @@ export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
  * remembered, doubled, and stays a ceiling to be read and dated before any margin is certified.
  */
 export const BLOB_ADVANCED_OPERATION = 10 / 1e6;
+/**
+ * The daily sweep's commands for one community picture door never used (lib/community-files.ts,
+ * sweepCommunityUploads): its share of the list read, the ZREM, the GET of its note, the DECR that gives its place
+ * back and the SET when the count went below zero, and the ZADD when it is listed again.
+ */
+export const COMMUNITY_SWEEP_COMMANDS = 6;
+/**
+ * The most one community picture door costs (app/api/store/community/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the member, the store, its pace, the buyer action, the place, the note,
+ * its listing read back, and a place given back), twenty kilobytes through the database, one head of the file store
+ * to refuse a name it already has, the browser's upload through the door and the sweep's delete of it when it is never
+ * used (two Advanced Operations), and the sweep's commands for it. One buyer action is taken before the head;
+ * tests/community-door-cost.test.ts holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ */
+export const COMMUNITY_DOOR_COST =
+  request("wait", 40 + TAKE_COMMANDS, 20_000) + BLOB_SIMPLE_OPERATION + 2 * BLOB_ADVANCED_OPERATION + COMMUNITY_SWEEP_COMMANDS * COMMAND;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -2047,7 +2072,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/chat/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/messages/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
-      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
+      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "head(pathname)", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
       // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
       { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path)", "releaseTaskHold(file.path)"] },
@@ -2755,6 +2780,18 @@ export const API_SALES_ANSWER_BYTES = SALES_KEY_BYTES.page + SALES_ID_LENGTH + S
  */
 export const API_SALES_READ = CALL + 1 * CPU_SECOND + (STRIPE_TIMEOUT_MS / 1000 + SHAPES.light.seconds) * MEMORY_SECOND
   + (20 + 2 * TAKE_COMMANDS + 1) * COMMAND + (20_000 + SALES_TITLE_IDS * 16_384) * DB_BYTE + API_SALES_ANSWER_BYTES * ORIGIN_PER_BYTE;
+
+/**
+ * One run of the one-time walk that notes the products of private podcast feeds granted before the product note
+ * (#4471; lib/podcast-access.ts notePodcastProducts, run by app/api/cron/recount every hour until it is done): its
+ * commands and bytes at their ceilings (NOTE_RUN_COMMANDS, NOTE_RUN_BYTES), each SCAN page taken at its COUNT (1,000
+ * names, as if every key examined were a feed's index of another store). A company cost (100% Marktmorgen, FX275),
+ * never a plan's: one run covers twice the database the daily backup accepts; on a larger one, how many runs it takes
+ * is not known, so its total stays unknown, never zero (docs/funded-exposure-review.md). Once it is done, a run sends
+ * two commands. What a deletion adds while it is not done is in its own units
+ * (lib/erasure-rules.ts, ERASE_FIXED_COMMANDS and ERASE_PER.podcastProducts).
+ */
+export const PODCAST_NOTE_RUN_USD = NOTE_RUN_COMMANDS * COMMAND + NOTE_RUN_BYTES * DB_BYTE;
 
 /** Additional Path growth reading: at most eight 256 KB products, three 80 KB campaigns, three bounded reviews and their indexes. Fifty commands and 3 MB include admission overhead; reserved separately before reading. No provider call. */
 export const PATH_GROWTH_READ = request("write", 50, 3_000_000);

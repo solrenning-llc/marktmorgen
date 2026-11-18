@@ -171,6 +171,15 @@ async function main(): Promise<void> {
   is("a review step before saving, with a way back", editor.includes("Review your member prices") && editor.includes("Confirm and save") && editor.includes("Go back and change"), true);
   is("errors are announced and the server's words are shown", editor.includes('role="alert"') && editor.includes("message"), true);
   is("a rule can be removed", editor.includes("Remove this rule"), true);
+  // Codex X6's re-check of #3026 (LOW): leaving the review (going back, a failed save, a save) took the focus nowhere,
+  // since the review's buttons are gone. Every way out goes through leaveReview, which puts it on a control still there.
+  const leave = editor.slice(editor.indexOf("function leaveReview("), editor.indexOf("async function save("));
+  is("the review is left only through leaveReview", [(editor.match(/setReviewing\(false\)/g) ?? []).length, leave.includes("setReviewing(false)")], [1, true]);
+  is("going back and a failed save return the focus to Review changes, a save to the editor's heading",
+    [(editor.match(/leaveReview\("review"\)/g) ?? []).length, (editor.match(/leaveReview\("heading"\)/g) ?? []).length], [3, 1]);
+  is("the focus moves once the editor is drawn again, to Review changes unless it is off, else to the heading",
+    leave.includes("requestAnimationFrame(") && leave.includes("!button.disabled") && leave.includes("editHeadingRef.current)?.focus()"), true);
+  is("both targets exist in the editor", editor.includes("ref={reviewButtonRef}") && editor.includes("ref={editHeadingRef} tabIndex={-1}"), true);
   is("the same check runs before review", editor.includes("checkMemberEdit("), true);
   is("a product no longer sold is taken out on opening, said so, saved only after the review", editor.includes("rule.by.filter((id) => sold.has(id))") && editor.includes("is no longer sold"), true);
 

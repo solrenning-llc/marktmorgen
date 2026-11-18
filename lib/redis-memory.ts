@@ -2366,6 +2366,30 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/community-files.ts NOTE_PICTURE: a name with no note and no mark is noted for the member and listed, together.
+        if (key.startsWith("-- marktmorgen:community-picture-note:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, note, doors, author, seconds, at, path] = args;
+          if (this.run(["SET", note, author, "NX", "EX", seconds]) !== "OK") return 0;
+          this.run(["ZADD", doors, at, path]);
+          return 1;
+        }
+        // lib/community-files.ts TAKE_PICTURE: the member's note becomes the picture's mark, kept with no end, and the
+        // path leaves the doors' list, together.
+        if (key.startsWith("-- marktmorgen:community-picture-take:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, note, doors, author, mark, path] = args;
+          if (this.run(["GET", note]) !== author) return 0;
+          this.run(["SET", note, mark]);
+          this.run(["ZREM", doors, path]);
+          return 1;
+        }
+        // lib/community-files.ts UNTAKE_PICTURE: only the member's own mark becomes their note again, listed, together.
+        if (key.startsWith("-- marktmorgen:community-picture-untake:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, note, doors, mark, author, seconds, at, path] = args;
+          if (this.run(["GET", note]) !== mark) return 0;
+          this.run(["SET", note, author, "EX", seconds]);
+          this.run(["ZADD", doors, at, path]);
+          return 1;
+        }
         // lib/meta-ads.ts WRITE_IF_CONNECTED: a write (and its deletes) only while the connection is exactly the one read;
         // -1, as the script answers, for a call of any other shape (tests/meta-redis-scripts.test.ts holds it to Redis).
         if (key.startsWith("-- marktmorgen:meta-if-connected:v1\n")) {

@@ -838,18 +838,25 @@ async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipp
  */
 async function firstSeen(job: ImportJob, keys: { key: string; line: number }[], tried?: Set<number>): Promise<(number | null)[]> {
   if (!keys.length) return [];
-  const answers = await redisPipeline([
+  const answers = repliesFor(await redisPipeline([
     ...keys.map(({ key, line }) => ["HSETNX", seenKey(job.id), key, String(line)]),
     ["EXPIRE", seenKey(job.id), KEEP_SECONDS],
-  ]);
-  const again = keys.map((_, i) => Number(answers[i]) !== 1);
-  const lines = again.some(Boolean)
-    ? ((await redisPipeline([["HMGET", seenKey(job.id), ...keys.map((k) => k.key)]]))[0] as unknown[])
-    : [];
+  ]), keys.length + 1);
+  const marks = answers?.slice(0, keys.length);
+  if (!marks || answers?.[keys.length] !== 1 || marks.some((mark) => mark !== 0 && mark !== 1)) {
+    throw new UnknownReplyError("which import rows were already seen");
+  }
+  if (!marks.includes(0)) return keys.map(() => null);
+
+  const read = repliesFor(await redisPipeline([["HMGET", seenKey(job.id), ...keys.map(({ key }) => key)]]), 1);
+  const lines = repliesFor(read?.[0], keys.length);
+  if (!lines || !lines.every((row) => typeof row === "string" && /^[1-9]\d*$/.test(row) && Number.isSafeInteger(Number(row)))) {
+    throw new UnknownReplyError("where the import rows were first seen");
+  }
   return keys.map(({ line }, i) => {
-    if (!again[i]) return null;
-    const earlier = Number(Array.isArray(lines) ? lines[i] : NaN);
-    if (Number.isFinite(earlier) && earlier !== line) return earlier;
+    if (marks[i] === 1) return null;
+    const earlier = Number(lines[i]);
+    if (earlier !== line) return earlier;
     tried?.add(i);
     return null;
   });

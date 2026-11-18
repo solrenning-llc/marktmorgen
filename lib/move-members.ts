@@ -167,7 +167,8 @@ async function ownInvites(statsId: string, job: string, found: { row: { email: s
   if (!found.length) return own;
   const replies: unknown = await redisPipeline([["HMGET", invitesKey(statsId), ...found.map((f) => f.field)]]);
   const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
-  if (!Array.isArray(reply) || reply.length !== found.length || !reply.every((raw) => raw === null || typeof raw === "string")) {
+  if (!Array.isArray(reply) || reply.length !== found.length || !Array.from(reply).every((raw) => raw === null || typeof raw === "string")) {
+    // Array.from reads a hole of a sparse reply as undefined, which fails here; reply.every would skip it (Codex P).
     throw new Error("the invitations already written could not be read");
   }
   found.forEach(({ row, field }, i) => {

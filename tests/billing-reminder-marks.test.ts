@@ -13,6 +13,7 @@
 import { sendFailedPlanNotices, sendReminders } from "@/lib/billing-reminders";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { DUNNING_CURSOR_COMMANDS } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_failed_plan_only";
 process.env.RESEND_API_KEY = "re_test_failed_plan_only";
@@ -174,6 +175,44 @@ async function main(): Promise<void> {
   const third = await sendReminders(NOW);
   is("then starts from the top again, and never sends twice", [sentTo("sub_TrialMany5020@example.com"), third.seen], [1, 5_000]);
   lists.trialing = [];
+
+  part("The list cursors and a mark's second DEL are the cost registry's commands (Codex L on #3215)");
+  {
+    const real = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    /** Every DEL of a key starting with this fails, as Redis can, and is counted as sent all the same. */
+    let failDel = "";
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      if (failDel && commands[0]?.[0] === "DEL" && String(commands[0]?.[1] ?? "").startsWith(failDel)) throw new Error("Redis did not answer");
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const on = (prefix: string, names: string[]) => sent.filter((c) => names.includes(String(c[0])) && String(c[1] ?? "").startsWith(prefix)).length;
+    try {
+      redis.clear();
+      lists.trialing = [trial("sub_TrialCount001", 7)];
+      lists.past_due = [failing("sub_FailedCount01")];
+      await sendReminders(NOW);
+      await sendFailedPlanNotices();
+      is(
+        "each walk of a list: one GET of its cursor and one SET or DEL",
+        ["trialing", "active", "past_due"].map((s) => [on(`nl:remind:after:${s}`, ["GET"]), on(`nl:remind:after:${s}`, ["SET", "DEL"])]),
+        [1, 1, 1].map(() => [1, DUNNING_CURSOR_COMMANDS.afterCursorPerListWalk - 1]),
+      );
+      sent.length = 0;
+      redis.clear();
+      lists.past_due = [];
+      lists.trialing = [trial("sub_TrialCount002", 7)];
+      emailWorks = false;
+      failDel = "nl:remind:trial:";
+      await sendReminders(NOW);
+      is("an email that did not go: its mark's DEL tried at most twice, however long Redis fails", on("nl:remind:trial:", ["DEL"]), DUNNING_CURSOR_COMMANDS.letGoDeletesPerFailedEmail);
+    } finally {
+      redis.pipeline = real;
+      emailWorks = true;
+      lists.trialing = [];
+    }
+  }
 
   done();
 }

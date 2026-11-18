@@ -17,6 +17,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setPr
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { DUNNING_CURSOR_COMMANDS } from "./plan-cost-registry";
 
 const realNow = Date.now;
 let shift = 0;
@@ -366,6 +367,32 @@ async function main(): Promise<void> {
     slow.clear();
     await run();
     is("the next run: the held store, then the third, never the second again first", [told(`${first.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1]);
+  }
+
+  part("The store walk: each store's cursor of failed renewals is the cost registry's commands (Codex L on #3215)");
+  reset();
+  {
+    const [first, second, third] = await threeStores();
+    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));
+    // The first store held by the last run: swept first, never again when the walk comes round to it.
+    await redis.pipeline([["SET", "nl:dun:cursor", "0|0|1|0|1"]]);
+    const real = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await run();
+    } finally {
+      redis.pipeline = real;
+    }
+    const on = (account: string, names: string[]) => sent.filter((c) => names.includes(String(c[0])) && String(c[1] ?? "") === `nl:dun:due:${account}`).length;
+    is(
+      "each store swept once a run: one GET of its cursor and one SET or DEL",
+      [first, second, third].map((s) => [on(s.account, ["GET"]), on(s.account, ["SET", "DEL"])]),
+      [first, second, third].map(() => [1, DUNNING_CURSOR_COMMANDS.dueCursorPerStoreSweep - 1]),
+    );
   }
 
   done();

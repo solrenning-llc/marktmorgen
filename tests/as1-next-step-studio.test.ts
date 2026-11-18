@@ -29,7 +29,7 @@ import { coursesWords } from "@/lib/buyer-words/courses";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductExtras, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
+import { MAX_PRODUCT_BYTES, readListing } from "@/lib/catalog";
 import { POST as courseRoute } from "@/app/api/store/course/route";
 import { POST as noThanksRoute } from "@/app/api/store/course/no-thanks/route";
 import { CourseNextStep } from "@/components/course-next-step";
@@ -166,15 +166,22 @@ test("a product that is never shown as a next step is refused when it is saved, 
   assert.match(field, /limited number, free products and bundles the student builds are never shown/, "the studio says which products are never shown, before the save");
 });
 
-test("the studio's field: labeled, its count said, the product list the store's own", () => {
-  const html = renderToStaticMarkup(
-    createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {} } as never }, createElement(CourseNextStep, { productId: "course000001", current: { productId: "advanced0001", line: "Go deeper." }, choices: [{ id: "advanced0001", title: "Advanced watercolor" }], maxLine: MAX_NEXT_STEP_LINE })),
+test("the studio's field has stable labels, descriptions and a readable error counter", () => {
+  const render = (line: string) => renderToStaticMarkup(
+    createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {} } as never }, createElement(CourseNextStep, { productId: "course000001", current: { productId: "advanced0001", line }, choices: [{ id: "advanced0001", title: "Advanced watercolor" }], maxLine: MAX_NEXT_STEP_LINE })),
   );
-  assert.match(html, /<label[^>]*>[\s\S]*Product to suggest next[\s\S]*<select[\s\S]*<\/label>/);
-  assert.match(html, /<option value="">None: show no next step<\/option>/);
-  assert.match(html, /<option value="advanced0001" selected="">Advanced watercolor<\/option>/);
-  assert.match(html, /Your line \(optional\)[\s\S]*<textarea/);
-  assert.ok(html.includes(`10 of ${MAX_NEXT_STEP_LINE} characters`), "the count, in words");
+  for (const line of ["Go deeper.", "a".repeat(MAX_NEXT_STEP_LINE + 1)]) {
+    const html = render(line);
+    assert.match(html, /<label[^>]*for="([^"]+-product)"[^>]*>Product to suggest next<\/label>\s*<select[^>]*id="\1"[^>]*aria-describedby="\1-help"/);
+    assert.match(html, /<label[^>]*for="([^"]+-line)"[^>]*>Your line \(optional\)<\/label>\s*<textarea[^>]*id="\1"[^>]*aria-describedby="\1-help \1-count"/);
+    assert.match(html, /<option value="">None: show no next step<\/option>/);
+    assert.match(html, /<option value="advanced0001" selected="">Advanced watercolor<\/option>/);
+  }
+  const valid = render("Go deeper.");
+  assert.ok(valid.includes(`10 of ${MAX_NEXT_STEP_LINE} characters`), "the count, in words");
+  const over = render("a".repeat(MAX_NEXT_STEP_LINE + 1));
+  assert.match(over, /<textarea[^>]*aria-invalid="true"/);
+  assert.match(over, /<span[^>]*id="[^"]+-line-count"[^>]*class="[^"]*\btext-danger-text\b[^"]*"/);
   const field = readFileSync("components/course-next-step.tsx", "utf8");
   assert.ok(!field.includes("course-next-step-rules\""), "the page loads none of the rules' word lists");
 });
@@ -325,11 +332,17 @@ test("No thanks is kept by the server for a year, on both addresses of the cours
 test("the PayPal reads are paid inside the reading's own public requests (rule MR: the ceiling before the spend)", async () => {
   const { NEXT_OFFER_REQUEST_UNITS } = await import("@/lib/next-offer-rules");
   const { MAX_BUNDLE_ITEMS } = await import("@/lib/bundle-rules");
-  const { COMMAND, NEXT_OFFER_READ } = await import("./plan-cost-registry");
+  const { COMMAND, DB_BYTE, NEXT_OFFER_READ } = await import("./plan-cost-registry");
   const { laterPageCost } = await import("./traffic-cost");
-  // ownedBeforeCart's reading (NEXT_OFFER_READ) and one SCARD for the product and each product of a bundle at most.
-  const most = NEXT_OFFER_READ + (1 + MAX_BUNDLE_ITEMS) * COMMAND;
-  assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= most, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${most}`);
+  const listing = COMMAND + MAX_PRODUCT_BYTES * DB_BYTE;
+  const ownership = NEXT_OFFER_READ + (1 + MAX_BUNDLE_ITEMS) * COMMAND;
+  assert.ok(laterPageCost() >= listing, `${laterPageCost()} < listing ${listing}`);
+  assert.ok((NEXT_OFFER_REQUEST_UNITS - 1) * laterPageCost() >= ownership, `${NEXT_OFFER_REQUEST_UNITS - 1} x ${laterPageCost()} < ${ownership}`);
   const source = readFileSync("lib/course-next-step.ts", "utf8");
-  assert.ok(source.indexOf("ownedBeforeCart(store, input.email)") < source.indexOf("paypalOwned(store, input.email"), "read only after the requests are taken");
+  const first = source.indexOf("takeBuyerRead(store, 1)");
+  const listingAt = source.indexOf("readListing(store, step.productId)");
+  const rest = source.indexOf("takeBuyerRead(store, CART_OFFER_REQUEST_UNITS - 1)");
+  const owned = source.indexOf("ownedHere(store, input.email)");
+  const paypal = source.indexOf("paypalOwned(store, input.email");
+  assert.ok(first >= 0 && first < listingAt && rest > listingAt && rest < owned && owned < paypal, "each ceiling is taken before its spend");
 });

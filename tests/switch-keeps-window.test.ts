@@ -577,7 +577,9 @@ async function main(): Promise<void> {
     // SES parking together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
     // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #4514 (17 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
+    // #4514's command ceiling (Claude 7's and Claude 5's MEDIUM): the invite job's Redis commands and list bytes priced,
+    // about ten cents more a month on each plan; figures as the model computes them, still above zero (MR).
+    // Merge of main into #4514 after HOTSPOT #3013 (18 November 2026, Claude 3 cloud R): main's model and this PR together, monthly
     // 44.33, 309.83, 694.40 -> 44.27, 309.77, 694.34; figures as the model computes them, still above zero (MR); no cost lowered.
     is("11: Store, Studio and Scale keep 44.27, 309.77 and 694.34 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.27", "309.77", "694.34"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
@@ -612,7 +614,8 @@ async function main(): Promise<void> {
     // 36.28, 256.78, 574.21 -> 36.28, 256.77, 574.19; figures as the model computes them, still above zero (MR); no cost lowered.
     // Merge of main 01ab5f10e2 into #3591 (17 November 2026, Claude 3 local): this PR's costs and main's (#4246's SES
     // parking) together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    // Merge of main into #4514 (17 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
+    // The same #4514 command ceiling, on each plan's yearly month; still above zero (MR). Cost is not lowered.
+    // Merge of main into #4514 after HOTSPOT #3013 (18 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
     // 36.27, 254.70, 571.13 -> 36.22, 254.64, 571.07; figures as the model computes them, still above zero (MR); no cost lowered.
     is("11: and 36.22, 254.64 and 571.07 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.22", "254.64", "571.07"]);
   } finally {

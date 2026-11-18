@@ -274,6 +274,9 @@ async function main(): Promise<void> {
   redis.run(["SET", `nl:pod:${OTHER_POD}:public`, JSON.stringify({ category: "Arts", explicit: false, episodes: {} })]);
   is("there before the closing", stored() !== null, true);
   const T = Date.now();
+  // A closing store is erased only once its plan has ended: a running plan keeps it (PlanRunsAgainError,
+  // lib/closed-store-data.ts, Claude 5's MEDIUM on #3643, now on main).
+  await setSubscription(OWNER, { active: false });
   await markDue(OWNER, T - 1000);
   for (let run = 0; run < 6 && !(await eraseClosed(Date.now() + 30_000, async () => {}, T)).done; run += 1);
   is("the closed store's public feed settings are gone", stored(), null);

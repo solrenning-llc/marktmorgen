@@ -7,6 +7,7 @@ import { applyPause, pauseForRule, pausePreview, planPause, tellPaused, undoPaus
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { ROLE_NAMES, parseTeamRole } from "@/lib/team-roles";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { forgetPerson } from "@/lib/phone-alerts";
 
 /** A person off the team keeps no device here (lib/phone-alerts.ts). Never fails the change itself. */
@@ -30,6 +31,7 @@ const ANSWERS: Record<string, number> = {
   changed: 409,
   unsaved: 503,
   unsure: 503,
+  unread: 503,
   not_found: 404,
 };
 
@@ -182,6 +184,11 @@ export async function POST(request: NextRequest) {
 
     return fail("invalid");
   } catch (error) {
+    // The team or its log answered in an unknown shape (lib/team.ts, rule 24): said as not read (503), so it is tried again.
+    if (error instanceof UnknownReplyError) {
+      console.error("a team change could not read the team", error);
+      return fail("unread");
+    }
     console.error("a team change failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

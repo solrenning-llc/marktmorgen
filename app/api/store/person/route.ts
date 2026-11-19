@@ -6,6 +6,7 @@ import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
 import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
 import { erasePerson } from "@/lib/person-erasure";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
 const FINDS_PER_HOUR = 200;
@@ -45,7 +46,14 @@ export async function POST(request: NextRequest) {
       if (!email) return Response.json({ ok: false, error: "expired" }, { status: 410 });
       const result = await erasePerson(guarded.store, email, { kind: "team", who: guarded.email, role: guarded.role });
       if (result.ok) {
-        await forgetFindToken(token);
+        // The search token holds the address (#4800): not confirmed deleted, the erasure is not finished. Answered as the
+        // erasure's own unfinished parts are, so pressing again (the token still opens the page) deletes it.
+        try {
+          await forgetFindToken(token);
+        } catch (error) {
+          console.error("deleting a buyer page's search token after an erasure was not confirmed", error);
+          return Response.json({ ok: false, error: "incomplete", failed: ["lib/buyer-profile.ts"] }, { status: 503 });
+        }
         const left = result.notes.includes("discord-roles") ? "&discord=1" : "";
         return Response.json({ ok: true, records: result.records, notes: result.notes, href: studioPath(guarded.store, `erased=1${left}`, "people") }, noStore);
       }
@@ -56,7 +64,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: result.reason, ...said }, { status: result.reason === "email" ? 400 : 503 });
     }
 
-    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
+    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const person = typeof body.person === "string" ? body.person : "";
     if (body.action === "note") {
@@ -71,6 +79,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // The notes could not be read exactly (rule 24): a note may have been written before it, so never "did not save".
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("a buyer's page could not do that", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

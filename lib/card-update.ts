@@ -45,6 +45,8 @@ const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 
 /** States in which a membership is over, and has no card to keep. */
 const OVER = new Set(["canceled", "incomplete_expired"]);
+/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 11/11/2026). */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -54,16 +56,40 @@ async function sha256Hex(value: string): Promise<string> {
 const linkKey = async (token: string) => `nl:card:link:${(await sha256Hex(`nimbus-card:${token}`)).slice(0, 40)}`;
 const opensKey = async (token: string) => `nl:card:opens:${(await sha256Hex(`nimbus-card-opens:${token}`)).slice(0, 40)}`;
 export const openKey = (account: string, sub: string) => `nl:card:open:${account}:${sub}`;
+/** What a finished page leaves under openKey: done, not waiting, so finishing it again is still safe (finishCardUpdate). */
+export const CARD_DONE = "done:";
+/** The page kept as waiting, or null when none is (none kept, or one already finished). */
+export function waitingCardPage(kept: string | null): string | null {
+  return kept !== null && !kept.startsWith(CARD_DONE) ? kept : null;
+}
+/** Swaps a key from one value to another only while it still holds the first (the same script as lib/calls.ts LOCK_SWAP). */
+const SWAP_IF_SAME = '-- marktmorgen:call-lock-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
 
 export type CardGrant = { a: string; c: string; s: string };
 
-/** A new link for one membership, to put in an email. */
+/**
+ * A new link for one membership, to put in an email, only once Redis answered its SET with exactly "OK" (CX-123
+ * rule 24, the exact SET of lib/membership-manage.ts and lib/buyer-library.ts). Any other answer (none, nil, a
+ * word, two replies, or a reply lost after the SET may have landed) throws, so the caller emails nothing and lets
+ * its mark go for the next run (lib/payment-recovery.ts, noticeCards); the link, in case it did land, is removed
+ * first, since nobody was given it. Removal is best effort: CARD_LINK_SECONDS still ends it.
+ *
+ * A link that was stored is kept when its email then fails: the notice is sent under an idempotency key, and a
+ * send whose outcome was unknown may have reached the member, so their link must still open.
+ */
 export async function cardLink(account: string, customer: string, subscription: string): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   const grant: CardGrant = { a: account, c: customer, s: subscription };
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify(grant), "EX", CARD_LINK_SECONDS]]);
+  const key = await linkKey(token);
+  let stored = false;
+  try {
+    stored = repliesFor(await redisPipeline([["SET", key, JSON.stringify(grant), "EX", CARD_LINK_SECONDS]]), 1)?.[0] === "OK";
+  } finally {
+    if (!stored) await redisPipeline([["DEL", key]]).catch((error) => console.error("removing a card link that was not stored failed", error));
+  }
+  if (!stored) throw new Error("a card link was not stored, so no notice is sent with it");
   return token;
 }
 
@@ -107,6 +133,8 @@ async function subFor(store: Store, account: string, customer: string, subscript
   if (!SUB_PATTERN.test(subscription)) return null;
   const sub = (await onAccount("GET", account, `/subscriptions/${subscription}?expand[]=latest_invoice`)) as SubRow;
   if (!isOwnReply(sub, subscription)) return null;
+  // Rule 24: a status Stripe has no name for (or none) is unknown, never "not ended": no page, no card set, no payment.
+  if (typeof sub.status !== "string" || !SUB_STATUSES.has(sub.status)) return null;
   if (customerOf(sub) !== customer || !saleHandles(store).has(sub.metadata?.store ?? "")) return null;
   return sub;
 }
@@ -197,7 +225,16 @@ export async function openCardUpdate(store: Store, token: string, origin: string
   }
 }
 
-export type CardFinish = "updated" | "paid" | "declined" | "canceled" | "error";
+/**
+ * What finishing a card update came to. "unsure": Stripe answered the card's setting with something that is not
+ * this membership with the card asked for (rules 24 and 30), so the card may or may not be set: never said set,
+ * nothing is paid with it, and the page stays open (nl:card:open, kept OPEN_SECONDS) so it can be finished again.
+ * What finishes it again is the member returning from Stripe's page again (app/api/store/manage/card), or the daily job (lib/payment-recovery.ts,
+ * noticeCards), which reads a waiting update only for a membership whose card notice is due and only while the
+ * store's card notice is on. A membership with neither is not retried by anything: the key runs out and "unsure"
+ * stays unconfirmed (Revisor 2's LOW on #3644).
+ */
+export type CardFinish = "updated" | "paid" | "declined" | "canceled" | "unsure" | "error";
 
 /**
  * After Stripe's page: the card it saved becomes the one this membership is
@@ -225,21 +262,45 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
     const subscription = intent?.metadata?.subscription ?? session.metadata?.subscription ?? "";
     const customer = typeof session.customer === "string" ? session.customer : "";
     if (intent?.status !== "succeeded" || !PM_PATTERN.test(method) || !CUSTOMER_PATTERN.test(customer)) return "error";
+    // Only the page kept for this membership sets its card (Codex X5's MEDIUM on #3644): an older page coming back
+    // after a newer one was opened, none kept, or an answer of another shape changes nothing. This page already
+    // finished (its done mark, no newer page since) runs again as before: safe, the same card and no second payment.
+    const keptReply = repliesFor(await redisPipeline([["GET", openKey(account, subscription)]]), 1);
+    if (!keptReply || (keptReply[0] !== null && typeof keptReply[0] !== "string")) return "error";
+    if (keptReply[0] !== sessionId && keptReply[0] !== `${CARD_DONE}${sessionId}`) return "error";
     const sub = await subFor(store, account, customer, subscription);
     if (!sub || OVER.has(String(sub.status))) return "error";
 
-    await onAccount("POST", account, `/subscriptions/${subscription}`, new URLSearchParams({ default_payment_method: method }));
-    await redisPipeline([["DEL", openKey(account, subscription)]]).catch(() => {});
+    let set: unknown;
+    try {
+      set = await onAccount("POST", account, `/subscriptions/${subscription}`, new URLSearchParams({ default_payment_method: method }));
+    } catch (error) {
+      // A 4xx is Stripe refusing the set: nothing was changed. Anything else (a 5xx, a timeout, a lost connection) may
+      // have landed, the same uncertainty as a reply we cannot read: unsure, never "nothing changed" (Claude 6 on #3644).
+      if (error instanceof StripeError && error.status >= 400 && error.status < 500) throw error;
+      console.error("setting the card's membership is not known to have landed", store.handle, error);
+      return "unsure";
+    }
+    // Only this membership's own reply, with the card asked for, says the card is set (Claude 6 on #3639).
+    if (!isOwnReply(set, subscription) || (set as { default_payment_method?: unknown }).default_payment_method !== method) return "unsure";
+    // Done only while the page kept is still this one: a newer page opened meanwhile stays waiting for the daily job.
+    await redisPipeline([["EVAL", SWAP_IF_SAME, 1, openKey(account, subscription), sessionId, `${CARD_DONE}${sessionId}`, OPEN_SECONDS]]).catch(() => {});
 
     const invoice = owes(sub);
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
     if (!invoiceId) return "updated";
     try {
-      await onAccount("POST", account, `/invoices/${invoiceId}/pay`, new URLSearchParams({ payment_method: method }), undefined, `nimbus-card-pay:${invoiceId}:${method}`);
-      return "paid";
+      const paid = await onAccount("POST", account, `/invoices/${invoiceId}/pay`, new URLSearchParams({ payment_method: method }), undefined, `nimbus-card-pay:${invoiceId}:${method}`);
+      // "Paid" only from this invoice's own reply saying so; any other answer leaves the card set and says no more.
+      return isOwnReply(paid, invoiceId) && (paid as { status?: unknown }).status === "paid" ? "paid" : "updated";
     } catch (error) {
-      if (error instanceof StripeError && (error.status === 402 || error.status === 400)) return "declined";
-      throw error;
+      // 402 is the card refused. Anything else (a 400 for an invoice no longer payable, a 409 while the same pay is
+      // in flight, a 5xx, a timeout) leaves the card set, which its reply confirmed, and the payment not known: the
+      // page says the card is updated and nothing about the payment (Claude 6 on #3639 and #3644). The idempotency
+      // key and owes() reading the invoice again keep a second run from paying twice.
+      if (error instanceof StripeError && error.status === 402) return "declined";
+      console.error("paying with the new card is not known to have gone through", store.handle, error);
+      return "updated";
     }
   } catch (error) {
     console.error("finishing a card update failed", store.handle, error);

@@ -356,7 +356,11 @@ export async function latestUpdate(store: Store, productId: string): Promise<Upd
 }
 
 async function save(job: UpdateJob): Promise<void> {
-  await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]);
+  const reply = await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]);
+  // A terminal write is followed by dequeueing. Leave the job queued if the state was not confirmed.
+  if ((job.status === "sent" || job.status === "failed") && repliesFor(reply, 1)?.[0] !== "OK") {
+    throw new UnknownReplyError("the terminal product update state");
+  }
 }
 
 /**

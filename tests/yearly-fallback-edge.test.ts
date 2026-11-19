@@ -50,6 +50,8 @@ const fresh = (): State => ({ interval: "year", pendingUpdate: false, year: { st
 let updateMode: "paid" | "declined" | "declined-paid-latest" | "declined-unexpanded" | "declined-latest-is-year" | "applied-open" | "timeout" | "timeout-applied" | "500" | "400" | "409" | "429" | "price-inactive" = "paid";
 let failInvoiceReadAt = -1; // 1-based count of GET /invoices/YEAR to answer 500
 let invoiceReadCount = 0;
+/** A payment or an inexact pause confirmation observed on the final read, before any move. */
+let finalYearReply: ((row: Record<string, unknown>) => Record<string, unknown>) | null = null;
 let monthVoidFails = false;
 let yearVoidFails = false;
 let yearPaidOnVoid = false; // the year gets paid by the member right as we void
@@ -121,7 +123,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "GET" && path === `/invoices/${YEAR}`) {
     invoiceReadCount += 1;
     if (invoiceReadCount === failInvoiceReadAt) return err(500, "api_error");
-    return json(invoiceReadCount === yearReplyAt ? replyAs(yearJson(), yearReplyId, yearReplyStatus) : yearJson());
+    const row = invoiceReadCount === 2 && finalYearReply ? finalYearReply(yearJson()) : yearJson();
+    return json(invoiceReadCount === yearReplyAt ? replyAs(row, yearReplyId, yearReplyStatus) : row);
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
   if (method === "POST" && path === `/invoices/${YEAR}`) {
@@ -213,6 +216,7 @@ async function reset(): Promise<void> {
   updateMode = "paid";
   failInvoiceReadAt = -1;
   invoiceReadCount = 0;
+  finalYearReply = null;
   monthVoidFails = false;
   yearVoidFails = false;
   yearPaidOnVoid = false;
@@ -243,6 +247,32 @@ async function main(): Promise<void> {
   await setProductYearly(OWNER, product, { cents: 20000 });
   const store = (await storeForEmail(OWNER)) as Store;
   const move = () => moveToMonthly(store, "cus_Dana000001", SUB, YEAR);
+
+  part("The final invoice read still proves nothing paid and retries paused");
+  const missing = (row: Record<string, unknown>, field: string): Record<string, unknown> => {
+    const copy = { ...row };
+    delete copy[field];
+    return copy;
+  };
+  const changes: [string, (row: Record<string, unknown>) => Record<string, unknown>][] = [
+    ["a partial payment arrived while the year was being paused", (row) => { st.year.amount_paid = 5000; return { ...row, amount_paid: 5000 }; }],
+    ["the pause did not apply and the year is still retried", (row) => { st.year.auto_advance = true; return { ...row, auto_advance: true }; }],
+    ["amount_paid missing", (row) => missing(row, "amount_paid")],
+    ["amount_paid null", (row) => ({ ...row, amount_paid: null })],
+    ["amount_paid a string", (row) => ({ ...row, amount_paid: "0" })],
+    ["amount_paid a negative count", (row) => ({ ...row, amount_paid: -1 })],
+    ["auto_advance missing", (row) => missing(row, "auto_advance")],
+    ["auto_advance null", (row) => ({ ...row, auto_advance: null })],
+    ["auto_advance a string", (row) => ({ ...row, auto_advance: "false" })],
+  ];
+  for (const [label, change] of changes) {
+    await reset();
+    finalYearReply = change;
+    const result = await move();
+    is(`${label}: no monthly move or invoice is created`, [reason(result), moves().length, st.interval, st.month], ["fallback", 0, "year", null]);
+    is(`${label}: the existing year stays open and resumes its own retries`, [st.year.status, st.year.auto_advance, posts().filter((path) => path.endsWith("/void")), posts().at(-1)], ["open", true, [], `/invoices/${YEAR}:auto_advance=true`]);
+    if (label.startsWith("a partial payment")) is("the partial payment is kept as observed", st.year.amount_paid, 5000);
+  }
 
   part("Move: cases that already hold");
   await reset();

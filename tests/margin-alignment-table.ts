@@ -10,6 +10,7 @@
  * price, a limit, a fee or a reading that is not regenerated is caught.
  */
 import { MOST_TAX_READING } from "./historical-receiving-model";
+import { worstMonthKept } from "./worst-month-kept";
 const gateReading=()=>MOST_TAX_READING;
 export const HISTORICAL_TAX_NOTICE='> **Historical tax model — superseded by TX.** These dated sizing/most-tax figures are retained for history. Current profit and capacity require complete scoped annual books, exchange operations, FX and applicable component facts through the real reviewed model; missing evidence is unknown, never a zero cost or permission to sell.\n\n';
 import { PLAN_PRICES, PLAN_TITLES, TIERS, type Cycle, type Tier } from "@/lib/plan";
@@ -148,6 +149,15 @@ export function renderMarginAlignment(plansOnSale: boolean, assistantOnSale: boo
   out.push(...currentPriceMarginRows(plansOnSale, assistantOnSale));
   out.push("");
   out.push("Caption rows select their worst modeled net share under the binding reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.");
+  out.push("");
+  out.push("## What each plan keeps in its worst month, under the LC reading");
+  out.push("");
+  out.push("A month's receipts after every fee and reserve (netOf), less every cost line at its limit (worstCost), then IRPF 15% and IOF 0.38% on that profit (MOST_CORRECT_READING, the LC rule of 1 November 2026). tests/switch-keeps-window.test.ts section 11 holds each one above zero (rule MR); this table holds the exact figures, through this document's staleness test (tests/worst-month-kept.ts, one formula for both).");
+  out.push("");
+  out.push("| Interval | Store | Studio | Scale |");
+  out.push("| --- | --- | --- | --- |");
+  out.push(`| Monthly plan | US$${worstMonthKept("month").join(" | US$")} |`);
+  out.push(`| A month of a yearly plan | US$${worstMonthKept("year").join(" | US$")} |`);
   out.push("");
   out.push(renderLlcFixedCostStatus());
   out.push("SR3 must additionally establish the official costs and acceptance of ITIN/acceptance-agent work if applicable, a US-resident legal representative and a real US business address. Existing registered-agent/mailbox/GDPR quotations do not prove these requirements. Complete company costs and the actual minimum paying base remain unknown.");

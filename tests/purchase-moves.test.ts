@@ -16,6 +16,7 @@ import {
 import { MAX_MOVES_PER_ADDRESS_DAY, MOVE_CONFIRM_SECONDS } from "@/lib/purchase-move-rules";
 import { MOVE_MARK_SECONDS } from "@/lib/purchase-moves";
 import { PERSON_DATA } from "@/lib/person-data";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis, advance } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -157,6 +158,23 @@ async function main(): Promise<void> {
   const ranLost = await askPurchaseMove({ from: "k@example.com", to: "l@example.com", scope: "all", now: t0 });
   redis.pipeline = pipe;
   is("control: the step ran but its answer was lost: unknown, no link, and the count still ends by itself", [ranLost, dayKeys().map((k) => (redis.run(["TTL", k]) as number) > 0)], [{ ok: false, reason: "unknown" }, [true]]);
+
+  part("An unreadable Redis envelope is an unknown request result");
+  for (const unreadableStep of ["EVAL", "SET"]) {
+    redis.clear();
+    redis.pipeline = async (commands) => {
+      const replies = await pipe(commands);
+      if (commands[0]?.[0] === unreadableStep) throw new UnknownReplyError("a reply envelope");
+      return replies;
+    };
+    try {
+      const result = await askPurchaseMove({ from: "m@example.test", to: "n@example.test", scope: "all", now: t0 })
+        .catch((error: unknown) => error instanceof Error ? error.name : String(error));
+      is(`an unreadable ${unreadableStep} envelope returns unknown without links`, result, { ok: false, reason: "unknown" });
+    } finally {
+      redis.pipeline = pipe;
+    }
+  }
 
   part("The register says what is kept, and for how long");
   is("expires by itself", PERSON_DATA.filter((d) => d.file === "lib/purchase-moves.ts").map((d) => d.how), ["expires"]);

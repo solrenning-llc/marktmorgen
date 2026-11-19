@@ -28,7 +28,7 @@ import { newLeadId, sendPaidOrders, sendRenewals, sendServerLead, sendServerPurc
 import { adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 import { erasePerson } from "@/lib/person-erasure";
 import { NO_PIXELS } from "@/lib/pixels";
-import { ensureListId, setAdsServer, setPixels, storeForEmail } from "@/lib/store";
+import { ERASING_KEY, ensureListId, erasingField, setAdsServer, setPixels, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
 import { OWNER, makeWorld } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -39,6 +39,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_ad_events_erasure_stand_in";
 
 const NOW = Date.now();
 const SEC = Math.floor(NOW / 1000);
+const storeIdDel = (sid: string): (string | number)[] => ["DEL", storeIdCommand(sid)[1]];
 const META_TOKEN = "EAAB" + "m".repeat(60);
 const BUYER = "Member@Example.com";
 const COOKIES = { _fbp: "fb.1.1700000000.111", _fbc: "fb.1.1700000000.IwAR0abc", _ttp: "ttp0abc", _ga: "GA1.1.123.456", fbclid: "IwAR0abc", clickAt: String(SEC - 3600) };
@@ -46,12 +47,18 @@ const COOKIES = { _fbp: "fb.1.1700000000.111", _fbc: "fb.1.1700000000.IwAR0abc",
 let sessions: Record<string, unknown>[] = [];
 let invoices: Record<string, unknown>[] = [];
 let toMeta = 0;
+/** Codex L's L-20261119-1153: the store's erasure, run while Meta is still answering a conversion already started. */
+let eraseStoreDuringMeta: { sid: string; statsId: string } | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "graph.facebook.com") {
     toMeta += 1;
+    if (eraseStoreDuringMeta) {
+      const { sid, statsId } = eraseStoreDuringMeta;
+      await redis.pipeline([storeIdDel(sid), ["DEL", `nl:adsrv:last:${statsId}`]]);
+    }
     return json({ events_received: 1 });
   }
   const path = url.pathname.replace(/^\/v1/, "");
@@ -257,6 +264,34 @@ async function main(): Promise<void> {
   is("the five-minute pass sends the other", await sendPaidOrders(store, [sessions[1]], NOW), 1);
   is("both to Meta", toMeta, 2);
   is("what either checkout kept is gone", [redis.run(["GET", ctxKey(T3)]), redis.run(["GET", ctxKey(T4)])], [null, null]);
+
+  part("An ad platform's answer that comes back after the store was erased does not write the studio's last answers again (Codex L, L-20261119-1153)");
+  {
+    const idKey = storeIdCommand(store.sid)[1];
+    is("the store is live before the lead", Number(redis.run(["EXISTS", idKey])), 1);
+    eraseStoreDuringMeta = { sid: store.sid, statsId };
+    try {
+      is("the lead already started still reaches the platform", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "late-answer@example.com", product: "guide00001" }, NOW), true);
+    } finally {
+      eraseStoreDuringMeta = null;
+    }
+    is("the erasure took the store's live id while Meta answered", Number(redis.run(["EXISTS", idKey])), 0);
+    is("and the late answer did not recreate the last-answer record it deleted", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
+  }
+  part("While the store's erasure is under way (its field in nl:closed:erasing), a late answer writes nothing either");
+  {
+    const idKey = storeIdCommand(store.sid)[1];
+    redis.run(["SET", idKey, storeRef(store)]);
+    const field = await erasingField(storeRef(store));
+    redis.run(["HSET", ERASING_KEY, field, "1"]);
+    is("the lead still reaches the platform", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "late-answer2@example.com", product: "guide00001" }, NOW), true);
+    is("nothing is written under erasure", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
+    redis.run(["HDEL", ERASING_KEY, field]);
+    is("once live and not erasing, the last answers are kept as before", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "late-answer3@example.com", product: "guide00001" }, NOW), true);
+    const kept = redis.run(["GET", `nl:adsrv:last:${statsId}`]);
+    is("kept with the platform's answer", typeof kept === "string" && (JSON.parse(kept) as { kind?: string }).kind === "lead", true);
+    is("for ninety days", Number(redis.run(["TTL", `nl:adsrv:last:${statsId}`])), 90 * 86400);
+  }
 
   done();
 }

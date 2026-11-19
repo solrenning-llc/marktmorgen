@@ -72,8 +72,8 @@ async function main(): Promise<void> {
     }
     if (method === "GET" && url.pathname === "/v1/invoices") {
       is("dispute lookup belongs to this add-on", url.searchParams.get("subscription"), plan.subscriptionId);
-      // Stripe's own list shape (lib/stripe-list.ts reads it exactly): each invoice with its id, the charge expanded with its id, has_more.
-      return Response.json({ object: "list", data: [{ id: "in_SyncAssist01", charge: { id: "ch_SyncAssist01", disputed } }], has_more: false });
+      // Stripe's own list shape (lib/stripe-list.ts reads it exactly): each invoice with its id, its subscription (#4440), the charge expanded with its id, has_more.
+      return Response.json({ object: "list", data: [{ id: "in_SyncAssist01", subscription: plan.subscriptionId, charge: { id: "ch_SyncAssist01", disputed } }], has_more: false });
     }
     if (method === "GET" && url.pathname === "/v1/prices") {
       // Stripe's price object always carries recurring.interval_count; a month unit every two months is not monthly.

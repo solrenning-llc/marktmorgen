@@ -33,6 +33,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const lte = Number(url.searchParams.get("created[lte]"));
     return answer({ object: "list", data: events.filter((e) => Number(e.created) >= gte && Number(e.created) <= lte), has_more: false });
   }
+  // Main's customersOf also asks Stripe's customer search (R43): nobody else under the address here.
+  if (path === "/customers/search") return answer({ object: "search_result", data: [], has_more: false });
   if (path === "/customers") return answer({ object: "list", data: [...customers].filter(([, e]) => e === url.searchParams.get("email")).map(([id, email]) => ({ id, object: "customer", email })), has_more: false });
   const customer = path.match(/^\/customers\/(cus_\w+)$/);
   if (customer) return answer({ id: customer[1], email: customers.get(customer[1]) ?? null });

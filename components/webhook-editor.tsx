@@ -315,7 +315,7 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
       ) : null}
 
       <details className="mt-5 rounded-[12px] bg-paper px-4 py-3 text-sm ring-1 ring-line">
-        <summary className="cursor-pointer font-semibold text-ink-soft transition hover:text-violet-deep">How sending works</summary>
+        <summary className="cursor-pointer py-3 font-semibold text-ink-soft transition hover:text-violet-deep">How sending works</summary>
         <ul className="mt-3 space-y-2 text-ink-soft">
           <li>Each event is a POST with a JSON body: its id, type, time, your store, and the details (product, amount, buyer).</li>
           <li>

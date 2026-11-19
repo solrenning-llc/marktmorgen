@@ -70,6 +70,7 @@ import { POST as ranswers } from "@/app/api/store/answers/route";
 import { POST as rassistant_settings } from "@/app/api/store/assistant-settings/route";
 import { POST as rblog } from "@/app/api/store/blog/route";
 import { POST as rbundle } from "@/app/api/store/bundle/route";
+import { POST as rcampaign_landing } from "@/app/api/store/campaign-landing/route";
 import { POST as rcommunity } from "@/app/api/store/community/route";
 import { POST as rcommunity_chat } from "@/app/api/store/community/chat/route";
 import { POST as rcommunity_events } from "@/app/api/store/community/events/route";
@@ -128,6 +129,7 @@ const ROUTES: Record<string, Handler> = {
   "assistant-settings": rassistant_settings as Handler,
   "blog": rblog as Handler,
   "bundle": rbundle as Handler,
+  "campaign-landing": rcampaign_landing as Handler,
   "community": rcommunity as Handler,
   "community/chat": rcommunity_chat as Handler,
   "community/events": rcommunity_events as Handler,
@@ -323,6 +325,7 @@ async function main(): Promise<void> {
     ["option", { action: "remove", id: "x" }],
     ["podcast", { action: "remove", id: xid, episode: "x" }],
     ["page-funnels", { action: "remove", id: "x" }],
+    ["campaign-landing", { action: "remove", product: xid, campaign: "x" }],
     ["stream/captions", { action: "remove", lessonId: "x", lang: "en" }],
   ];
   for (const [path, body] of plainRoutes) is(`${path}: ${String(body.action)} is refused`, await answer(await (await route(path))(json(`/api/store/${path}`, locked, body))), LOCKED);
@@ -374,6 +377,7 @@ async function main(): Promise<void> {
     ["crm", { action: "unpipeline", id: "x", moveTo: "x" }],
     ["notes", { action: "remove", id: "x" }],
     ["spend", { action: "remove", id: "x" }],
+    ["spend", { action: "remove-unreadable" }],
     ["outreach", { action: "drop", id: "x" }],
     ["mail", { action: "segment-remove", id: "x" }],
     ["mail", { action: "draft-remove", id: "x" }],
@@ -436,9 +440,11 @@ async function main(): Promise<void> {
     "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
+    "campaign-landing": ["act:products:remove"],
     "community": ["lockedFor"],
     "community/chat": ["lockedFor"],
     "community/events": ["act:events:cancel", "act:events:delete", "lockedFor"],
+    "community/challenges": ["act:events:delete"],
     "community/approval": ["act:community:held-remove", "need:settings"],
     "community/manage": ["act:community:report-delete", "need:settings"],
     "community/push": ["not:a member's own device, signed up for notifications again at will"],
@@ -489,7 +495,7 @@ async function main(): Promise<void> {
     "stream/captions": ["act:products:remove"],
     "team": ["need:team"],
     "resend": ["act:orders:resend"],
-    "waitlist": ["act:products:launch"],
+    "waitlist": ["need:send"],
     "webhooks": ["need:settings"],
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
@@ -546,6 +552,7 @@ async function main(): Promise<void> {
     "bundle": { clear: "act:products", create: "open:adds", save: "open:edits" },
     "assistant-memory": "need:settings",
     "calendar": "need:settings",
+    "campaign-landing": { remove: "act:products", save: "open:edits" },
     "community": {
       comment: "open:adds", delete: "lockedFor", "delete-comment": "lockedFor", edit: "open:edits", "edit-comment": "open:edits",
       hide: "open:reversible", "hide-comment": "open:reversible", like: "open:adds", "like-comment": "open:adds", mute: "open:reversible",
@@ -556,18 +563,19 @@ async function main(): Promise<void> {
     "community/approval": { approve: "open:adds", remove: "act:community:held-remove", setting: "need:settings" },
     "community/chat": { clear: "lockedFor", say: "open:adds", unsay: "lockedFor" },
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
+    "community/challenges": { create: "open:adds", delete: "act:events" },
     "community/manage": {
-      access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
+      "about-page": "need:settings", access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
       messages: "need:settings", onboarding: "need:settings", "report-delete": "act:community", rewards: "need:settings", room: "need:settings",
       settings: "need:settings", "space-add": "need:settings", "space-edit": "need:settings", "space-move": "need:settings", "space-remove": "need:settings",
     },
     "community/push": "not:a member's own device, signed up for notifications again at will",
     "course": {
-      block: "open:reversible", body: "open:edits", cert: "open:reversible", "cert-months": "open:edits", "cm-delete": "act:products",
+      "access-end": "open:edits", block: "open:reversible", body: "open:edits", cert: "open:reversible", "cert-months": "open:edits", "cm-delete": "act:products",
       "cm-hide": "open:reversible", "cm-on": "open:reversible", "cm-reply": "open:adds", disable: "open:only a course with nothing in it turns back into a product",
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",
-      "module-move": "open:edits", "module-remove": "act:products", outline: "open:adds", quiz: "act:products:quiz-remove",
+      "module-move": "open:edits", "module-remove": "act:products", "next-step": "open:edits", outline: "open:adds", quiz: "act:products:quiz-remove",
       retries: "open:gives a student their quiz tries back", review: "open:edits", shelf: "open:edits", start: "open:edits", task: "act:products:task-remove",
       template: "open:adds", withdraw: "act:products",
     },
@@ -596,7 +604,8 @@ async function main(): Promise<void> {
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",
-      "flow-resolve": "need:send", "flow-run": "need:send", "flow-runs": "need:send", "flow-sample": "need:send", import: "need:send",
+      "flow-resolve": "need:send", "flow-restore": "need:send", "flow-run": "need:send", "flow-runs": "need:send", "flow-sample": "need:send",
+       "flow-versions": "need:send", import: "need:send",
       keep: "need:send", "segment-remove": "act:draft", "segment-save": "open:edits", settings: "need:settings", starters: "need:send",
       test: "open:one email to the person who pressed it, at their own address",
     },
@@ -617,11 +626,11 @@ async function main(): Promise<void> {
     "saved-blocks": { apply: "open:adds", remove: "act:page", save: "open:adds", update: "open:edits" },
     "short-links": { add: "open:adds", remove: "act:page", target: "open:edits" },
     "site-page": { add: "open:adds", copy: "open:adds", export: "open:reads", import: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
-    "spend": { add: "open:adds", remove: "act:stats" },
+    "spend": { add: "open:adds", remove: "act:stats", "remove-unreadable": "act:stats:remove" },
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },
     "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },
-    "waitlist": { launch: "act:products", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
+    "waitlist": { launch: "need:send", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
     "webhooks": "need:settings",
     "course/task": "not:a student replacing or taking back their own handed-in work",
   };

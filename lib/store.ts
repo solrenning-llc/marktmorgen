@@ -50,7 +50,6 @@ import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
-import { writeAbout } from "@/lib/product-about";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -93,6 +92,7 @@ import { type AffiliateSetting, parseAffiliateSetting } from "@/lib/affiliate-se
 import { type ReviewAsk, parseReviewAsk } from "@/lib/review-ask";
 import { type PwywProblem, pwywProblem } from "@/lib/pay-what-you-want";
 import { type CheckoutField } from "@/lib/checkout-fields";
+import { writeAbout } from "@/lib/product-about";
 import { type Currency, DEFAULT_CURRENCY, currencyRule, parseCurrency, priceBounds, priceInRange, readMoney } from "@/lib/money";
 import { type Intro, type IntroProblem, introProblem } from "@/lib/intro-price";
 import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-price";

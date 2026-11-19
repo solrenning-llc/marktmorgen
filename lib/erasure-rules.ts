@@ -89,7 +89,8 @@ export type ErasureSize = {
  * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (Claude 3 on #3473) the read of the memberships whose
  * invitations wait to be deleted (lib/move-members.ts withPendingInvites), one SMEMBERS: 558 before it.
  */
-export const ERASE_FIXED_COMMANDS = 559;
+// Benefit-mark erasure: EVAL plus its three calls replaces three commands (+1); no public allowance changes.
+export const ERASE_FIXED_COMMANDS = 560;
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted

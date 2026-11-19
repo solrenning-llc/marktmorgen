@@ -1490,6 +1490,14 @@ export class MemoryRedis {
           out.push(this.run(["SADD", who, person]));
           return out;
         }
+        // lib/tier-benefits.ts FORGET_BENEFIT_PERSON: the exact snapshot removed in one operation.
+        if (key.startsWith("-- marktmorgen:forget-benefit-person:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, marks, who, person] = args;
+          this.scriptCalls += 1;
+          const flat = this.run(["HGETALL", marks]);
+          const listed = this.run(["SREM", who, person]);
+          return [this.run(["DEL", marks]), listed, flat];
+        }
         // lib/calendar-sync.ts CALENDAR_CONFIG_SWAP: a store's calendar settings written only over the exact text they
         // were read as ("1"), or only while still absent ("0"); 0 when changed since (issue #3984).
         if (key.startsWith("-- marktmorgen:calendar-config-swap:v1\n") && args[0] === "1" && args.length === 5) {

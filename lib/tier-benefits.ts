@@ -511,20 +511,25 @@ export async function benefitMarksOf(store: Store, person: string): Promise<{ be
 
 // ------------------------------------------------------------------ erasure
 
+/** Removes the marks and returns only the bytes this erasure actually removed. */
+const FORGET_BENEFIT_PERSON = `-- marktmorgen:forget-benefit-person:v1
+local flat = redis.call("HGETALL", KEYS[1])
+local listed = redis.call("SREM", KEYS[2], ARGV[1])
+return {redis.call("DEL", KEYS[1]), listed, flat}`;
+
 /** A deleted person's marks (lib/person-erasure.ts): how many keys went. Throws when the answer cannot be read. */
 export async function forgetBenefitPerson(store: Store, person: string): Promise<number> {
   if (!store.statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
-  const key = marksKey(store.statsId, person);
-  const [held] = repliesFor(await redisPipeline([["HGETALL", key]]), 1) ?? [];
-  const flat = stringList(held);
-  const replies = repliesFor(await redisPipeline([["DEL", key], ["SREM", whoKey(store.statsId), person]]), 2);
+  const reply = repliesFor(await redisPipeline([["EVAL", FORGET_BENEFIT_PERSON, 2, marksKey(store.statsId, person), whoKey(store.statsId), person]]), 1);
+  const replies = repliesFor(reply?.[0], 3);
   const gone = replies ? countOf(replies[0]) : null;
   const unlisted = replies ? countOf(replies[1]) : null;
-  // One key and one member: only 0 or 1 is a possible answer; anything else leaves the step to retry.
-  if (gone === null || gone > 1 || unlisted === null || unlisted > 1) throw new UnknownReplyError("deleting a person's benefit marks");
+  const flat = stringList(replies?.[2]);
+  // One key and one member: keep #4880's exact counts, and read the atomic snapshot whole.
+  if ((gone !== 0 && gone !== 1) || (unlisted !== 0 && unlisted !== 1) || !flat || flat.length % 2 !== 0 ||
+      (gone === 0 && flat.length !== 0)) throw new UnknownReplyError("deleting a person's benefit marks");
   let bytes = 0;
-  if (flat) for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
-  // Their place in the list goes with them, and its room.
+  for (let i = 0; i < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
   if (unlisted === 1) bytes += whoBytes(person);
   if (bytes) await giveData(store, [{ slot: SLOT, bytes }]);
   return gone;

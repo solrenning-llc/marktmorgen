@@ -254,7 +254,7 @@ async function main(): Promise<void> {
   const impossibleEraseReply = async (answer: [number, number]) => {
     let error: unknown = null;
     redis.pipeline = (async (commands: (string | number)[][]) =>
-      commands.length === 2 && commands[0]?.[0] === "DEL" && commands[1]?.[0] === "SREM" ? answer : erasePipeline(commands)) as typeof redis.pipeline;
+      commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:forget-benefit-person:v1\n") ? [[answer[0], answer[1], []]] : erasePipeline(commands)) as typeof redis.pipeline;
     try {
       await forgetBenefitPerson(store, annKey);
     } catch (caught) {

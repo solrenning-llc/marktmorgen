@@ -16,6 +16,8 @@ let sessions: unknown[] = [];
 let invoices: unknown[] = [];
 let refunds: unknown[] = [];
 let invoicePayments: Record<string, unknown>[] = [];
+/** Allocations made before the bulk read's window (created[gte]): only the one-by-one lookup by intent lists them. */
+let olderPayments: Record<string, unknown>[] = [];
 /** The bulk read answers page after page with more behind each (partial), and the one-by-one lookup says more too. */
 let endless = false;
 let page = 0;
@@ -31,7 +33,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     if (intent) {
       if (filteredReply) return new Response(JSON.stringify(filteredReply), { status: 200 });
       // The one-by-one lookup answers honestly: every invoice payment of that intent, one at a time.
-      const rows = invoicePayments.filter((row) => (row.payment as { payment_intent?: string }).payment_intent === intent);
+      const rows = [...invoicePayments, ...olderPayments].filter((row) => (row.payment as { payment_intent?: string }).payment_intent === intent);
       return list(rows.slice(0, 1), endless || rows.length > 1);
     }
     if (!endless) return list(invoicePayments);
@@ -143,6 +145,16 @@ async function main() {
   is("a partial bulk read confirms nothing; the lookup that says more confirms nothing either: kept unknown", usd((await readSales(store, NOW))!)?.keptCents ?? null, null);
   endless = false;
   is("read whole again: $40 kept, known", usd((await readSales(store, NOW))!)?.keptCents, 4000);
+
+  // Codex N1 on #4549 (MEDIUM, money, lot 61): the bulk read lists only allocations since the window's start, so a
+  // payment that also paid another invoice before it looked as if it paid only the store's, read whole, and was
+  // confirmed. Only the lookup by the payment itself, which lists every allocation, may prove it is the store's alone.
+  part("The same payment also paid another invoice before the bulk read's window");
+  olderPayments = [pay("inpay_old", "in_other_old", "pi_sharedintent01")];
+  const older = usd((await readSales(store, NOW))!);
+  is("a refund of a payment that also paid an older invoice: kept unknown", [older?.keptCents ?? null, older?.missing], [null, ["refunds"]]);
+  olderPayments = [];
+  is("control, no older allocation: the lookup proves it, $40 kept", usd((await readSales(store, NOW))!)?.keptCents, 4000);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

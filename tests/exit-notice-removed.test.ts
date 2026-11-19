@@ -61,6 +61,21 @@ async function main(): Promise<void> {
   const [released] = await redis.pipeline([["GET", storeHandleKey("exitremoved")]]);
   is("the released address still shows the notice weeks after the day first chosen", exitAnswerForValue(released, chosenDay + 100 * DAY).kind, "moved");
 
+  part("Codex N1's MEDIUM on #3730: with no closing read (null), a notice whose day has passed is never taken away");
+  const KEPT = "exitkept@example.com";
+  await claimHandle(KEPT, "exitkept", "Exit Kept", "");
+  const keptRef = storeRef((await storeForEmail(KEPT))!);
+  await store.chooseExitNotice(keptRef, "https://example.com/", { endedAt, day: chosenDay }, endedAt + DAY);
+  // closingOf answers null once the closing walk has gone far enough: that is not a closing cancelled before its day.
+  const late = await store.chooseExitNotice(keptRef, "", null, chosenDay + DAY);
+  is("a removal after the notice's day, with no closing read: refused", late.ok ? "removed" : late.reason, "not_closing");
+  is("and the notice the old address promises is kept", (await storeForEmail(KEPT))?.exitNotice?.closedAt, chosenDay);
+  const sameDay = await store.chooseExitNotice(keptRef, "", null, chosenDay);
+  is("on the notice's day itself: refused too", sameDay.ok ? "removed" : sameDay.reason, "not_closing");
+  // Control: a closing cancelled before its day (null too) may still take a notice away whose day is ahead.
+  const early = await store.chooseExitNotice(keptRef, "", null, chosenDay - DAY);
+  is("control: before the notice's day, with no closing, it can still be taken away", [early.ok, (await storeForEmail(KEPT))?.exitNotice], [true, undefined]);
+
   part("LOW: read once a render, and only for a store whose plan has ended");
   const page = readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8");
   is("the page reads closingDayBegun, never closingOf", [/closingDayBegun/.test(page), /closingOf\(/.test(page)], [true, false]);

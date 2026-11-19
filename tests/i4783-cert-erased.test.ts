@@ -110,6 +110,42 @@ async function main(): Promise<void> {
     is("no certificate is kept for the erased student", await certificateOf(course.id, emailKey(student)), null);
   }
 
+  part("X5: an unconfirmed take-back keeps the references needed by erasure");
+  for (const mode of ["not-applied", "applied-lost-ack"] as const) {
+    redis.clear();
+    const student = `rollback-${mode}@example.com`;
+    const who = emailKey(student);
+    await original([suppressCommand(LIST, student)]);
+    let refused = false;
+    let id = "";
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!refused && commands.some(([name, key]) => name === "DEL" && /^nl:cert:[^:]+$/.test(String(key)))) {
+        refused = true;
+        const results: unknown[] = [];
+        for (const command of commands) {
+          if (command[0] === "DEL" && /^nl:cert:[^:]+$/.test(String(command[1]))) {
+            id = String(command[1]).slice("nl:cert:".length);
+            if (mode === "applied-lost-ack") await original([command]);
+            results.push(null);
+          } else results.push((await original([command]))[0]);
+        }
+        return results;
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    let rejected = false;
+    try { await press(student); } catch { rejected = true; } finally { redis.pipeline = original; }
+    is(`${mode}: the cleanup refused an unknown receipt`, [refused, rejected], [true, true]);
+    is(`${mode}: both lists and the slot still find the possibly kept record`, [
+      redis.run(["SISMEMBER", `nl:course:${course.id}:certs:all`, id]),
+      redis.run(["SISMEMBER", `nl:course:${course.id}:certs:by:${who}`, id]),
+      redis.run(["HGET", `nl:course:${course.id}:certs`, who]),
+    ], [1, 1, id]);
+    await forgetCertificatesPerson([course.id], student, ROOM);
+    is(`${mode}: a later erasure leaves no personal record`, await readCertificate(id), null);
+    is(`${mode}: a later erasure clears its slot`, await certificateOf(course.id, who), null);
+  }
+
   part("Control: a student nobody erased gets their certificate");
   const kept = await press("other@example.com");
   is("issued, fresh", kept.ok && kept.fresh, true);

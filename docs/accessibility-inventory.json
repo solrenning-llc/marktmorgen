@@ -89,6 +89,17 @@
       ]
     },
     {
+      "source": "app/[handle]/community/about/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/community/about",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/community/challenges/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/community/challenges",
@@ -1540,6 +1551,7 @@
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",
+    "components/mail-access-review.tsx",
     "components/mail-click.tsx",
     "components/mail-designer.tsx",
     "components/mail-picture-button.tsx",
@@ -1669,6 +1681,7 @@
     "components/share-panel.tsx",
     "components/share-row.tsx",
     "components/shipping-editor.tsx",
+    "components/short-links-off-notice.tsx",
     "components/short-links.tsx",
     "components/side-panel-switch.tsx",
     "components/signin-form.tsx",
@@ -1786,6 +1799,7 @@
     "app/api/auth/signout-all/route.ts",
     "app/api/auth/signout/route.ts",
     "app/api/auth/two-step/route.ts",
+    "app/api/backup/files/route.ts",
     "app/api/billing/assistant/route.ts",
     "app/api/billing/cancel/route.ts",
     "app/api/billing/checkout/route.ts",
@@ -2042,6 +2056,7 @@
     "app/api/store/podcast/link/route.ts",
     "app/api/store/podcast/open/route.ts",
     "app/api/store/podcast/play/[token]/[episode]/route.ts",
+    "app/api/store/podcast/public/[handle]/[product]/route.ts",
     "app/api/store/podcast/route.ts",
     "app/api/store/preorder/route.ts",
     "app/api/store/preview/route.ts",
@@ -2213,6 +2228,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 151
+    "pageTemplates": 152
   }
 }

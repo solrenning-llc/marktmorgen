@@ -565,7 +565,7 @@ async function main(): Promise<void> {
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
     "community/challenges": { create: "open:adds", delete: "act:events" },
     "community/manage": {
-      access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
+      "about-page": "need:settings", access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
       messages: "need:settings", onboarding: "need:settings", "report-delete": "act:community", rewards: "need:settings", room: "need:settings",
       settings: "need:settings", "space-add": "need:settings", "space-edit": "need:settings", "space-move": "need:settings", "space-remove": "need:settings",
     },

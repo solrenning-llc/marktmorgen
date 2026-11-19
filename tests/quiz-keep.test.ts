@@ -209,6 +209,22 @@ part("The key in the browser says nothing about the course (review of #4324, MED
   is("the privacy policy no longer says the key names the store, the course and the lesson", /followed by the store, the course, the lesson/.test(policy), false);
 }
 
+part("The creator reorders a question's choices: the old draft is never put back (review of #4324, HIGH 8)");
+{
+  // Kept by place (value={ci}), a draft for the old order would mark choices the student never picked, and they could
+  // spend a try on them. The server's code for the quiz (quizVersion: each question's id, kind, words and choices in
+  // order) goes into the draft, and a draft for another code is dropped.
+  const q = (id: string, choices: string[]) => ({ id, text: `${id}?`, kind: "single" as const, choices, correct: [0], explanation: "" });
+  const before = [q("aaaaaaaaaaa1", ["Clay", "Glaze"]), q("aaaaaaaaaaa2", ["Kiln", "Wheel"])];
+  const reordered = [q("aaaaaaaaaaa1", ["Glaze", "Clay"]), q("aaaaaaaaaaa2", ["Kiln", "Wheel"])];
+  const swapped = [q("aaaaaaaaaaa1", ["Clay", "Slip"]), q("aaaaaaaaaaa2", ["Kiln", "Wheel"])];
+  const saved = JSON.stringify(draftOf(inputs, shown, 0, NOW - 60_000, keepKey.quizVersion(before)));
+  is("the same quiz: put back", keepRules.draftToRestore(saved, shown, 0, NOW, keepKey.quizVersion(before)) !== null, true);
+  is("the same ids with the choices reordered: dropped, never put back on other choices", keepRules.draftToRestore(saved, shown, 0, NOW, keepKey.quizVersion(reordered)), null);
+  is("a choice replaced: dropped too", keepRules.draftToRestore(saved, shown, 0, NOW, keepKey.quizVersion(swapped)), null);
+  is("the code is made on the server, never in the browser: the keeping never imports it", /from "@\/lib\/quiz-keep-key"/.test(readFileSync("components/quiz-keep.tsx", "utf8")), false);
+}
+
 part("Kept for this tab only, unless the student chooses the device (review of #4324, the plan of 6995178754)");
 {
   // Privacy by default for students who may be children (ICO Children's Code, standard 7), and only session data in the

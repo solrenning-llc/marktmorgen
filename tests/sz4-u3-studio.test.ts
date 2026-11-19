@@ -158,9 +158,22 @@ async function main(): Promise<void> {
   is(
     "every product, with an example",
     memberRuleLine({ id: "r2", percent: 50, by: [G], all: true, products: [] }, words, "USD"),
-    `Buyers of Knife Guide will pay 50% less on every product a sale can cover, now and added later. For example, ${at(2700, 50)} instead of ${formatMoney(2700, "USD")} for Meal Planner.`,
+    `Buyers of Knife Guide will pay 50% less on products a sale can cover, now and added later, when the discounted price meets the ${formatMoney(50, "USD")} checkout minimum. For example, ${at(2700, 50)} instead of ${formatMoney(2700, "USD")} for Meal Planner.`,
   );
   is("every percentage on the list reads back", MEMBER_PERCENT_CHOICES.every((p) => memberRuleLine({ id: "r", percent: p, by: [C], all: false, products: [P] }, words, "USD").includes(at(2700, p))), true);
+  const pocket = { id: "pocket-guide", title: "Pocket Guide", priceCents: 100 };
+  const withPocket = { ...words, discounted: [pocket, ...words.discounted.filter((product) => product.id === P)] };
+  const floorRule = { id: "below-floor", percent: 90, by: [C], all: false, products: [pocket.id] };
+  const selected = memberRuleLine(floorRule, withPocket, "USD");
+  is("a picked product keeps its price when this rule would go below the checkout minimum", selected.includes(formatMoney(100, "USD")) && selected.includes("minimum") && !selected.includes(formatMoney(10, "USD")), true);
+  const automatic = memberRuleLine({ ...floorRule, all: true, products: [] }, withPocket, "USD");
+  is("an all-products rule names the minimum and gives an eligible example", automatic.includes(formatMoney(50, "USD")) && automatic.includes("Meal Planner") && !automatic.includes("Pocket Guide"), true);
+  const atFloor = memberRuleLine({ ...floorRule, percent: 50 }, withPocket, "USD");
+  const onlyPocket = memberRuleLine({ ...floorRule, all: true, products: [] }, { ...words, discounted: [pocket] }, "USD");
+  is("an all-products rule whose only product falls below the minimum says so", onlyPocket.endsWith("None of your products meets that minimum with this rule yet."), true);
+  const noneCovered = memberRuleLine({ ...floorRule, all: true, products: [] }, { ...words, discounted: [] }, "USD");
+  is("an all-products rule with no product to cover still says how to add one", noneCovered.endsWith("None of your products can have it yet: add one sold once at one price."), true);
+  is("a discounted price exactly at the checkout minimum is shown as payable", atFloor.includes(formatMoney(50, "USD")) && !atFloor.includes("would go below"), true);
   is("the browser runs the same check as the server", checkMemberEdit({ on: true, rules: [rule({ percent: 3 })] }, words, true).ok, false);
 
   part("The editor");

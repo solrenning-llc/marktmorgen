@@ -33,6 +33,12 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set]);
     return n;
   },
+  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while its key exists and it is not erasing.
+  "store-cache-live:v1": (run, [live, erasing, key], [field, value, seconds]) => {
+    if (Number(run(["EXISTS", live])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
+    run(["SET", key, value, "EX", seconds]);
+    return 1;
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);
@@ -56,12 +62,6 @@ const SCRIPTS: Record<string, Script> = {
     const gone = (members.length ? 1 : 0) + values.filter((v) => v !== null).length;
     run(["DEL", set, ...plain]);
     return [members, values, gone];
-  },
-  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while its key exists and it is not erasing.
-  "store-cache-live:v1": (run, [live, erasing, key], [field, value, seconds]) => {
-    if (Number(run(["EXISTS", live])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
-    run(["SET", key, value, "EX", seconds]);
-    return 1;
   },
 };
 

@@ -8,6 +8,7 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { UK_SWITCH_ON } from "./vat-switch-on";
 import {
   UK_VAT_COLLECT_REVIEWED, UK_VAT_RATE, toPence, ukCheckout, ukInvoice, ukPlace, ukReturn, ukReturnCsv, ukVatAdjustment, ukVatOnTop, ukVatRecord,
 } from "@/lib/uk-vat";
@@ -36,7 +37,7 @@ test("the UK consumer needs two agreeing items; the Isle of Man is not settled; 
 
 test("unreviewed nothing is collected; reviewed, an electronic service is collected on top, half up", () => {
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, now }), { kind: "refuse", reason: "review" });
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication: false }), {
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now, publication: false }), {
     kind: "collect", vat: { priceCents: 1000, vatCents: 200, totalCents: 1200, basisPoints: 2000 }, place: { kind: "uk", evidence: gb },
   });
   assert.deepEqual(ukVatOnTop(1), { priceCents: 1, vatCents: 0, totalCents: 1, basisPoints: 2000 });
@@ -47,10 +48,10 @@ test("unreviewed nothing is collected; reviewed, an electronic service is collec
 
 test("goods, a live service, an unknown product, an unknown place and an expired rate are refused; outside and free go on", () => {
   for (const [supply, reason] of [["goods", "goods"], ["human", "human"], ["unknown", "supply"]] as const) {
-    assert.deepEqual(ukCheckout({ supply, priceCents: 1000, items: gb, reviewed: true, now }), { kind: "refuse", reason });
+    assert.deepEqual(ukCheckout({ supply, priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now }), { kind: "refuse", reason });
   }
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: { ip: "GB", billing: "FR" }, reviewed: true, now }), { kind: "refuse", reason: "place" });
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now: new Date("2027-01-01T00:00:00Z") }), { kind: "refuse", reason: "rate-expired" });
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: { ip: "GB", billing: "FR" }, vatSwitch: UK_SWITCH_ON, now }), { kind: "refuse", reason: "place" });
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now: new Date("2027-01-01T00:00:00Z") }), { kind: "refuse", reason: "rate-expired" });
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: { ip: "US", billing: "US" }, now }), { kind: "outside", country: "US" });
   assert.deepEqual(ukCheckout({ supply: "free", priceCents: 0, items: gb, now }), { kind: "free" });
 });
@@ -58,16 +59,16 @@ test("goods, a live service, an unknown product, an unknown place and an expired
 test("an electronic service is charged UK VAT only when it is classified as not an e-publication (Claude 5 on #4574 @2dc6127da7, MEDIO 1)", () => {
   // E-publications are zero-rated in the UK (VAT Act 1994 Sch. 8 Group 3, as extended by SI 2020/459). The TX policy
   // forbids picking the reading with more tax, so an unclassified product, or an e-publication, is refused, never charged 20%.
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now }), { kind: "refuse", reason: "publication" });
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication: true }), { kind: "refuse", reason: "publication" });
-  assert.equal(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication: false }).kind, "collect");
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now }), { kind: "refuse", reason: "publication" });
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now, publication: true }), { kind: "refuse", reason: "publication" });
+  assert.equal(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now, publication: false }).kind, "collect");
   // Only `false` classifies: anything else is unknown.
   for (const publication of [null, 0, "false", "no"] as unknown as boolean[]) {
-    assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now, publication }), { kind: "refuse", reason: "publication" });
+    assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now, publication }), { kind: "refuse", reason: "publication" });
   }
   // The review gate and the other refusals come first and are unchanged.
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, now }), { kind: "refuse", reason: "review" });
-  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now: new Date("2027-01-01T00:00:00Z"), publication: false }), { kind: "refuse", reason: "rate-expired" });
+  assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now: new Date("2027-01-01T00:00:00Z"), publication: false }), { kind: "refuse", reason: "rate-expired" });
 });
 
 const vat = ukVatOnTop(1000)!;
@@ -114,7 +115,7 @@ test("input that is not the expected shape never throws; 'UK' is not a country c
   assert.deepEqual(ukPlace({ ip: "UK", billing: "UK" }), { kind: "unknown", reason: "not-a-country" });
   assert.equal(ukReturn([], null as never), null);
   assert.equal(ukReturn(null as never, { start: "2027-04-01", end: "2027-06-30", filedOn: "2027-07-01" }), null);
-  assert.equal(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now: new Date(Number.NaN) }).kind, "refuse");
+  assert.equal(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, vatSwitch: UK_SWITCH_ON, now: new Date(Number.NaN) }).kind, "refuse");
 });
 
 test("a refund keeps the rate's VAT on its amount and leaves no VAT on nothing", () => {

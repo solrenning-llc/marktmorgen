@@ -426,8 +426,10 @@ async function main(): Promise<void> {
     is("and the Path's money with it is unknown, no sale counted as kept", await money(store0), [0, null]);
     bend = null;
     redis.run(["SET", `nl:ppsell:paid:${order(3)}`, "{not json"]);
-    const read = await readPayPalSales(statsId, 0, 300);
-    is("a record that does not read: left out, and partial", [read.sales.length, read.partial], [2, true]);
+    // Main's exact reader (rule 24): an unreadable record makes the whole reading unknown, never complete, and the
+    // Path counts no sale or money over it (Codex U's and P's merge of #3443).
+    is("an unreadable record is unknown under main's exact reader", await shape(), "unknown");
+    is("the Path cannot count sales or money over that unread record", await money(store0), [0, null]);
   }
 
   part("The studio says so");
@@ -501,9 +503,8 @@ async function main(): Promise<void> {
     const other = paid(statsId, 8, 9900, now - 30);
     redis.run(["SET", `nl:ppsell:paid:${order(9)}`, JSON.stringify(other)]);
     redis.run(["ZADD", `nl:ppsell:sales:${statsId}`, String(now - 30), order(9)]);
-    const read = await readPayPalSales(statsId, 0, 300);
-    is("the record that is not the listed order's own is left out, and the reading says it is partial", [read.sales.some((p) => p.order === order(8)), read.partial], [false, true]);
-    is("the store's own sales are still read", read.sales.map((p) => p.order).sort(), [order(1), order(2), order(3)]);
+    const unknown = await readPayPalSales(statsId, 0, 300).then(() => false, (error) => error instanceof UnknownReplyError);
+    is("the record that is not the listed order's own makes the reading unknown, never another order's sale", unknown, true);
   }
 
   part("Codex U's MEDIUM: the money's wait also holds when the counts could not be read either");

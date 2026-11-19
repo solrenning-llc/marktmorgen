@@ -62,7 +62,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
   const [rows, setRows] = useState<Row[]>(() => product.fields.map(toRow));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
 
   // Something free is given for an email address and never meets a checkout.
   if (product.priceCents === 0) return null;
@@ -105,7 +105,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
             {" · "}
             <button
               type="button"
-              className={link}
+              className={`inline-flex ${link}`}
               aria-disabled={ready ? undefined : true}
               disabled={!ready}
               onClick={() => {
@@ -120,7 +120,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
         ) : (
           <button
             type="button"
-            className={`block ${link}`}
+            className={`flex ${link}`}
             aria-disabled={ready ? undefined : true}
             disabled={!ready}
             onClick={() => {

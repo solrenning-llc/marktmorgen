@@ -41,6 +41,7 @@ import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, productIds, recordListings } from "@/lib/catalog";
 import { plainAmount } from "@/lib/money";
+import { csvCell as platformCsvCell } from "@/lib/csv";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
@@ -214,7 +215,7 @@ export async function recordHit(
     // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
     let opened: number | null = null;
     try {
-      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
     } catch (error) {
       console.error("counting a product page's view failed", error);
     }
@@ -231,7 +232,7 @@ export async function recordHit(
   ];
   let replies: unknown[];
   try {
-    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
   } catch (error) {
     // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
     await redisPipeline(unknownExpiries()).catch(() => null);
@@ -273,21 +274,17 @@ export async function recordHit(
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
  * item seen and the one clicked, on the day's record. A reading may come
  * on a day with no view yet (its token is good for two hours, so a page shown
- * at 23:30 UTC may be read at 00:30), so it gives the day's record its expiry
- * itself (Claude 5 on #2571). Two commands, and only for the visitors the
- * page chose to measure.
+ * at 23:30 UTC may be read at 00:30, Claude 5 on #2571; or a page left open
+ * past midnight), so it may create the record: the capped count gives it its
+ * expiry then, inside the same script (lib/capped-count.ts, version 3), so the
+ * count and the expiry are written together or not at all. One command, and
+ * only for the visitors the page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  const counts = countsKey(statsId, dayKey(now));
-  try {
-    // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
-    // keep their room.
-    await cappedCount(counts, REACH_FIELDS_MAX, [{ field, by: 1 }]);
-  } finally {
-    // Sent whatever the count answered: an answer lost after the write leaves the record as it would be.
-    await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
-  }
+  // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
+  // keep their room.
+  await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }], TTL_SECONDS);
 }
 
 /** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
@@ -316,7 +313,7 @@ export async function countHeard(statsId: string, answer: string, cents: number,
   if (!isRedisConfigured()) return;
   const counts = countsKey(statsId, dayKey(now));
   await redisPipeline([
-    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [
+    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [
       { hash: 0, field: `h:${answer}`, by: 1 },
       ...(cents > 0 ? [{ hash: 0, field: `hc:${answer}`, by: Math.round(cents) }] : []),
       // A sale no link credited to any channel: what its buyer said is the only
@@ -345,7 +342,7 @@ export async function countSearchMiss(statsId: string, words: string[], now = Da
   const counts = countsKey(statsId, dayKey(now));
   try {
     await redisPipeline([
-      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
+      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
       ["EXPIRE", counts, TTL_SECONDS],
     ]);
   } catch (error) {
@@ -464,7 +461,9 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
   } else if (readsSales(store)) {
     const start = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
     sales = await readPaidSales(store, start, 1)
-      .then(({ sales: rows }) => {
+      .then(({ sales: rows, partial }) => {
+        // A reading that is not whole (past one page, or PayPal not read) is not today's count: not read just now.
+        if (partial) return null;
         const own = rows.filter((sale) => sale.currency === store.currency && dayKey(sale.created) === date);
         return { sales: own.length, cents: own.reduce((n, sale) => n + sale.cents, 0) };
       })
@@ -2622,14 +2621,13 @@ export function studioStats(
 // ---- Files to take away -------------------------------------------------------
 
 /**
- * One spreadsheet cell: quoted always, and a leading character a spreadsheet
- * would read as a formula defused, because a product name or a buyer's name
- * is text somebody else typed and must never run on the creator's computer.
+ * One spreadsheet cell: the platform's one cell rule (lib/csv.ts), quoted
+ * always and a leading formula character defused even after spaces, because a
+ * product name or a buyer's name is text somebody else typed and must never
+ * run on the creator's computer.
  */
 export function csvCell(value: string | number): string {
-  const text = String(value);
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
+  return platformCsvCell(value);
 }
 
 export function csvRow(values: (string | number)[]): string {

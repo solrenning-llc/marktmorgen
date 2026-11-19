@@ -18,7 +18,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
       <form action="https://quiz.test/sent" method="post">
         <input type="hidden" name="handle" value="shop" />
         <input type="hidden" name="shown" value={shown} />
-        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint }} />
+        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} language="en" words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint, quizKeptAsk: w.quizKeptAsk, quizKeptRestore: w.quizKeptRestore, quizKeptStartOver: w.quizKeptStartOver }} />
         <fieldset><legend>One?</legend>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" /> A</label>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="1" /> B</label>
@@ -94,6 +94,11 @@ try {
   const putBack = (count) => tab.waitForFunction((n) => document.querySelectorAll('input[name^="q_"]:checked').length === n, count);
   const forgotten = () => tab.waitForFunction((k) => sessionStorage.getItem(k) === null && localStorage.getItem(k) === null, ADA);
   const status = () => tab.getByRole("status").textContent();
+  // Nothing is put back until the student asks (review of #4324, MEDIUM 9; WCAG 3.3.6 and 4.1.3).
+  const ask = () => tab.getByText(/^Restore your answers from .+\?$/);
+  const restore = async () => {
+    await tab.getByRole("button", { name: "Restore", exact: true }).click();
+  };
 
   await open(ada);
   is("nothing kept and nothing said at first, though the status line is already there, empty", [await kept(), await status()], [null, ""]);
@@ -108,15 +113,22 @@ try {
   is("and turning it off takes it off the device again, back to this tab only", [await onDevice(), JSON.parse((await kept()) ?? "null")?.answers], [null, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] }]);
 
   await open(ada);
+  await ask().waitFor();
+  is("coming back asks first, with the draft's date, and puts nothing back on its own", [await picked(), await status(), await tab.getByRole("button", { name: "Start over" }).count()], [[false, false, false, false], "", 1]);
+  await restore();
   await putBack(2);
-  is("coming back puts the choices back", await picked(), [false, true, false, true]);
+  is("Restore puts the choices back", await picked(), [false, true, false, true]);
   await tab.getByRole("status").filter({ hasText: "are back" }).waitFor();
-  is("and says so in the status line that was there, empty, before", await status(), BACK);
+  is("and says so in the status line, only after the student asked", [await status(), await ask().count()], [BACK, 0]);
+  await tab.getByLabel("A", { exact: true }).check();
+  await tab.getByLabel("B", { exact: true }).check();
+  is("the first change clears the status line", await status(), "");
 
   await tab.getByRole("button", { name: "Check my answers" }).click();
   await tab.getByText("monthly quiz submission allowance").waitFor();
   is("the server refused the try (429): the draft is still there", [sent.length, JSON.parse(await kept()).answers], [1, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] }]);
   await open(ada);
+  await restore();
   await putBack(2);
   is("and the lesson puts the answers back", await picked(), [false, true, false, true]);
 
@@ -124,8 +136,14 @@ try {
   await tab.getByRole("button", { name: "Check my answers" }).click().catch(() => {});
   await tab.waitForTimeout(300);
   await open(ada);
+  await restore();
   await putBack(2);
   is("the connection dropped on sending: still put back", await picked(), [false, true, false, true]);
+  await open(ada);
+  await tab.getByRole("button", { name: "Start over" }).click();
+  is("Start over puts nothing back and forgets the draft", [await picked(), await kept(), await ask().count()], [[false, false, false, false], null, 0]);
+  await tab.getByLabel("B", { exact: true }).check();
+  await tab.getByLabel("D", { exact: true }).check();
 
   await open(bo);
   is("another student on the same browser gets nothing back, and sees no one's answers", [await picked(), await status(), await tab.getByRole("button", { name: "Clear my answers" }).count()], [[false, false, false, false], "", 0]);
@@ -138,6 +156,7 @@ try {
   await open(ada);
   await tab.getByLabel("A", { exact: true }).check();
   await open(ada);
+  await restore();
   await tab.getByRole("button", { name: "Clear my answers" }).click();
   is("Clear my answers empties the choices and forgets them", [await picked(), await kept()], [[false, false, false, false], null]);
   is("says so, and the focus goes to the quiz's first choice, not nowhere", [await status(), await tab.evaluate(() => document.activeElement?.getAttribute("name"))], ["Your answers are cleared.", "q_aaaaaaaaaaa1"]);

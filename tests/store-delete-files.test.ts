@@ -12,7 +12,7 @@ import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
-import { queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
+import { FORGET_TRIES, queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
 import { claimHandle, createStore, ensureStatsId, imageFolder, storeFolder, storeRef } from "@/lib/store";
 import { files, state } from "./store-delete-files-world";
 import { done, is, part } from "./check";
@@ -99,6 +99,66 @@ async function main(): Promise<void> {
   is("its picture is still there, and the store is in the daily line", [files.has(thirdPicture), line.some((field) => field.endsWith(`|${third.store.sid}`))], [true, true]);
   const retried = await retryStoreForgets(Date.now() + 30_000);
   is("the line's next try lists it again and deletes its picture", [retried.done, files.has(thirdPicture)], [1, false]);
+
+  part("A webhook failure never spends the file cleanup round without trying its readable files");
+  const blocked = await createStore(owner, "filesblocked", "Files blocked", "");
+  if (!blocked.ok) throw new Error("no extra store for independent cleanup");
+  const blockedRef = storeRef(blocked.store);
+  const blockedStore = (await ensureStatsId(blockedRef))!;
+  const blockedPicture = `images/${await imageFolder(blockedRef)}/person-picture.webp`;
+  files.set(blockedPicture, 40_000);
+  state.listFailing = true;
+  try { await deleteFromStudio(owner, "filesblocked", blocked.store.sid); }
+  finally { state.listFailing = false; }
+  is("the initially unreadable picture is still queued", [files.has(blockedPicture), redis.run(["HEXISTS", "nl:forget:q", `${blockedStore.statsId}|${blocked.store.sid}`])], [true, 1]);
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = async commands => {
+    if (commands.some(([name, key]) => name === "LRANGE" && key === `nl:hooks:log:${blockedStore.statsId}`)) throw new Error("synthetic webhook log outage");
+    return pipeline(commands);
+  };
+  let givenUp = 0;
+  try {
+    for (let i = 1; i < FORGET_TRIES; i++) {
+      const attempt = await retryStoreForgets(Date.now() + 30_000);
+      givenUp += attempt.gaveUp;
+      is("an unavailable Redis family never reports the whole cleanup done", attempt.done, 0);
+    }
+  } finally { redis.pipeline = pipeline; }
+  is("webhooks remain unconfirmed but their failure did not retain the readable picture", [givenUp, files.has(blockedPicture)], [1, false]);
+  await queueStoreForget(blockedStore.statsId, blocked.store.sid);
+  await retryStoreForgets(Date.now() + 30_000);
+  is("a later Redis-only recovery has no forgotten picture left behind", files.has(blockedPicture), false);
+
+
+  part("A readable file pass cut off after a Redis failure keeps its unspent try");
+  const late = await createStore(owner, "fileslate", "Files late", "");
+  if (!late.ok) throw new Error("no extra store for bounded cleanup");
+  const lateRef = storeRef(late.store);
+  const lateStore = (await ensureStatsId(lateRef))!;
+  const latePicture = `images/${await imageFolder(lateRef)}/person-late.webp`;
+  files.set(latePicture, 40_000);
+  state.listFailing = true;
+  try { await deleteFromStudio(owner, "fileslate", late.store.sid); }
+  finally { state.listFailing = false; }
+  const realNow = Date.now;
+  let clock = realNow();
+  const until = clock + 5000;
+  Date.now = () => clock;
+  redis.pipeline = async commands => {
+    if (commands.some(([name, key]) => name === "LRANGE" && key === `nl:hooks:log:${lateStore.statsId}`)) {
+      clock = until + 1;
+      throw new Error("synthetic webhook outage at the deadline");
+    }
+    return pipeline(commands);
+  };
+  try {
+    const cut = await retryStoreForgets(until, clock);
+    const entry = JSON.parse(String(redis.run(["HGET", "nl:forget:q", `${lateStore.statsId}|${late.store.sid}`])));
+    is("the deadline retains the picture and spends a late pass, not a failed try", [cut.left, cut.failed, entry.tries, entry.late, files.has(latePicture)], [1, 0, 1, 1, true]);
+  } finally { redis.pipeline = pipeline; Date.now = realNow; }
+  const lateRecovered = await retryStoreForgets(Date.now() + 30_000);
+  is("the next bounded run deletes its picture and finishes", [lateRecovered.done, files.has(latePicture)], [1, false]);
+
   done();
 }
 

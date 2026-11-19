@@ -525,6 +525,17 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
     is("support after recipient 50 is held before a Resend read, even beside a real store", [result, mailReads - beforeReads], ["held", 0]);
   }
 
+  part("One bound for the recipients read and the truncated flag (Codex X6's LOW on #3481)");
+  {
+    // list() reads at most this many announced recipients, and the flag that forces the support path is raised past
+    // the same number: two literals could drift apart and let a recipient past the read bound skip the ceiling again.
+    const source = readFileSync("lib/inbound-mail.ts", "utf8");
+    const bound = (inbound as Record<string, unknown>).ANNOUNCED_RECIPIENTS_READ;
+    is("the bound is one exported whole number", Number.isSafeInteger(bound) && (bound as number) > 0, true);
+    is("list() slices at that bound", /\.slice\(0, ANNOUNCED_RECIPIENTS_READ\)/.test(source), true);
+    is("the truncated flag compares with that bound", /announcedTo\.length > ANNOUNCED_RECIPIENTS_READ/.test(source), true);
+    is("no other literal bound is left beside them", /\.slice\(0, 50\)|announcedTo\.length > 50/.test(source), false);
+  }
   globalThis.fetch = originalFetch;
   fixture.restore();
   done();

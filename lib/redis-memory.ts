@@ -271,6 +271,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
+        if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, who, prefix] = args;
+          // As Redis does: a list that is not there reads as none and deletes nothing (SMEMBERS here would leave an empty set).
+          const members = this.run(["EXISTS", who]) === 1 ? (this.run(["SMEMBERS", who]) as string[]) : [];
+          if (members.some((session) => !/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(session))) return [-1, members.length];
+          let gone = 0;
+          for (const session of members) gone += Number(this.run(["DEL", prefix + session]));
+          if (members.length) gone += Number(this.run(["DEL", who]));
+          return [gone, members.length];
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

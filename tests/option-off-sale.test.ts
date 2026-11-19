@@ -24,7 +24,7 @@ import { handsOver, namedPriceOffered, parseOptions, sellableOptions, withInvite
 import { createCheckout, fromPriceCents } from "@/lib/store-checkout";
 import { directoryRow } from "@/lib/affiliate-directory";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { priceWords } from "@/lib/answers";
+import { deliveryWords, priceWords } from "@/lib/answers";
 import { canGift, givableOptions, givenOption } from "@/lib/gift-rules";
 import { canGroup } from "@/lib/group-rules";
 import { activePlan, planFor, planState } from "@/lib/product-extras";
@@ -165,6 +165,16 @@ async function main(): Promise<void> {
   is("with the lower one off sale, the directory lists the lowest price still on sale", await rowOf(), 3000);
   const fonts = (await readProduct((await storeForEmail(owner))!, pack.product.id))!;
   is("the assistant names only the prices on sale", [priceWords(fonts, "usd").includes("Basic"), priceWords(fonts, "usd").includes("Plus")], [false, true]);
+  // Codex L's and Codex U's MEDIUM (L-20261119-0042, U-20261119-0101): a file held only by a price off sale is not
+  // promised to a buyer who can pick only the link.
+  const delivery = {
+    ...both,
+    options: [
+      option({ id: "d1", file: { path: "stores/off-sale.pdf" } as ProductOption["file"], link: null, offSale: true }),
+      option({ id: "d2", label: "Link", file: null, link: "https://example.com/live" }),
+    ],
+  } as Listing;
+  is("the assistant ignores a file held only by a price off sale", deliveryWords(delivery), "After paying, the buyer gets the link on the page they land on, and by email.");
   takeOffSale(packIds[1]);
   const gone = (await readProduct((await storeForEmail(owner))!, pack.product.id))!;
   is("every price off sale: the directory lists nothing for it, and the assistant says it is not on sale", [await rowOf(), priceWords(gone, "usd")], [null, "It is not on sale right now."]);

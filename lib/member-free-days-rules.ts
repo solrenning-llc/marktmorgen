@@ -131,7 +131,8 @@ export function freeDaysState(sub: Raw, nowSeconds: number): { nextCharge: numbe
   const status = sub.status;
   if (status !== "active" && status !== "trialing") return { nextCharge: 0, blocked: "behind" };
   const nextCharge = status === "trialing" ? num(sub.trial_end) : periodEnd(sub);
-  if (sub.cancel_at_period_end === true || num(sub.cancel_at)) return { nextCharge, blocked: "ending" };
+  // A fixed number of payments was sold even before finishPlan confirms cancel_at.
+  if (metaOf(sub).ends_after || sub.cancel_at_period_end === true || num(sub.cancel_at)) return { nextCharge, blocked: "ending" };
   if (sub.pause_collection && typeof sub.pause_collection === "object") return { nextCharge, blocked: "paused" };
   if (sub.schedule) return { nextCharge, blocked: "scheduled" };
   if (nextCharge <= nowSeconds) return { nextCharge, blocked: "unknown" };

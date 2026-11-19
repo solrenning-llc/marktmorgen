@@ -762,6 +762,15 @@ export class MemoryRedis {
           if (this.run(["HGET", hash, field]) !== value) return 0;
           return this.run(["HDEL", hash, field, mark]);
         }
+        // lib/course-finish.ts: only the live pending attempt can become a confirmed finish.
+        if (key.startsWith("-- marktmorgen:course-finish-confirm:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, mark, token, seconds] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", mark]) !== token) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", mark, "1", "EX", seconds]);
+          return 1;
+        }
         // lib/traffic.ts FLY_SHARE_HOLD: a hold added to a connection's share of copies only under a token not yet there.
         if (key.startsWith("-- marktmorgen:fly-share-hold:v1\n") && args[0] === "1" && args.length === 6) {
           const [, hash, field, token, units, keep] = args;

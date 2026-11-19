@@ -2502,6 +2502,7 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
+      { file: "lib/course-finish.ts", names: ["FINISH_PENDING_SECONDS", "CONFIRM_FINISH", "withCutoff(cutoff", "releaseMark(key, token)"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
       // 543 [CM2]: a post or comment held for approval is the same action, a few commands lighter than one published, inside the community's and the member's ceilings;
       // a hold first sweeps at most HOLD_SWEEP expired items. A member's visit to the community reads their own held items with one read (heldOf), MGET only when they have some.
@@ -2535,7 +2536,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],
-    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. A confirmed course finish adds one EVAL with one GET and one SET inside it (three commands); cleanup uses the existing token-owned release (EVAL, GET, and at most DEL). The three-command confirmation is charged to the existing 100-command action envelope; the single-flow finish measures 22 including Lua-internal commands, not a proof of every workflow configuration. Workflow starts retain their separate daily run and command ceilings. A pending attempt uses the same finish key for at most 60 seconds, with network work cut off one Redis timeout before expiry; confirmed marks retain the existing 400-day maximum. Capacity refusals leave the event retryable under the same allowances, never additional runs past them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
   },
   {
     id: "webhooks",

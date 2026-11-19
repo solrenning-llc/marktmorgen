@@ -25,7 +25,7 @@
  * reads a student and course, and a lesson undone and done again reads
  * nothing (independent review, 12 November 2026).
  *
- *   nl:course:<courseId>:fin:<student>    "1", 400 days
+ *   nl:course:<courseId>:fin:<student>    pending owner, 60 seconds; confirmed "1", 400 days
  *   nl:course:<courseId>:open:<student>   "1", 400 days
  *   nl:course:<courseId>:reach:<student>  the highest step passed, 400 days
  */
@@ -38,8 +38,15 @@ import { takeBuyerAction } from "@/lib/buyer-actions";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
 import { FINISH_KEEP_SECONDS } from "@/lib/course-finish-rules";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
+import { REDIS_TIMEOUT_MS, withCutoff } from "@/lib/fetch-timeout";
 
 export { FINISH_KEEP_SECONDS };
+
+// A pending attempt is a lease, not the 400-day record of a confirmed event. Network work ends a full Redis
+// timeout before its lease can expire; failed cleanup is then bounded, and a late owner cannot confirm another's.
+const FINISH_PENDING_SECONDS = 60;
+const CONFIRM_FINISH = '-- marktmorgen:course-finish-confirm:v1\nif redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\nredis.call("SET", KEYS[1], "1", "EX", ARGV[2])\nreturn 1';
 
 const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
 const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;
@@ -117,15 +124,21 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
       await noteReached(store, productId, courseId, email, share);
       return false;
     }
-    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", FINISH_KEEP_SECONDS]]);
+    const key = finishedKey(courseId, email), token = claimValue();
+    const cutoff = Date.now() + FINISH_PENDING_SECONDS * 1_000 - REDIS_TIMEOUT_MS;
+    const claim = await redisPipeline([["SET", key, token, "NX", "EX", FINISH_PENDING_SECONDS]]);
     if (!confirmedClaim(claim)) return false;
     // Finishing is also every share reached, for a student who got here without one starting (one read of the sequences for both).
     try {
-      await enrollOrThrow(store, email, { joined: false, finished: productId, reached: { productId, share } });
+      await withCutoff(cutoff, () => enrollOrThrow(store, email, { joined: false, finished: productId, reached: { productId, share } }));
+      // Only our still-live attempt can become the durable mark. Erasing it, or a newer attempt taking it,
+      // cannot be undone by this completion; an unknown acknowledgement is never treated as confirmation.
+      const [confirmed] = exactReplies(await redisPipeline([["EVAL", CONFIRM_FINISH, 1, key, token, FINISH_KEEP_SECONDS]]), 1, "the confirmed course finish");
+      if (confirmed !== 1) return false;
     } catch (error) {
       // Not known to have started: the claim is let go so the next view tries again (Codex X5 on #3989); a start that
       // did land is not made twice, each being claimed once per sequence.
-      await redisPipeline([["DEL", finishedKey(courseId, email)]]).catch(() => {});
+      await releaseMark(key, token);
       throw error;
     }
     return true;

@@ -835,7 +835,7 @@ export async function enrollOrThrow(store: Store, email: string, event: EnrollEv
   // Only someone who may be written to starts one; their one start is not
   // spent on a moment they could not have received it.
   if (!(await isMailable(store.listId, address))) return;
-  await startFlows(store, flows, [address]);
+  await startFlows(store, flows, [address], true);
 }
 
 /**
@@ -845,11 +845,12 @@ export async function enrollOrThrow(store: Store, email: string, event: EnrollEv
  * Says how many starts were new; throws UnknownReplyError, after the
  * definite starts, when a claim's reply was unknown.
  */
-async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
+async function startFlows(store: Store, flows: Flow[], addresses: string[], retryDeferred = false): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
   let unknown = false;
+  let deferred = false;
   for (const flow of flows) {
     if (!flow.steps.length) continue;
     // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
@@ -868,6 +869,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     const admitted = await admitRuns(store.listId, dailyRunLimit(store), claimed.length, now);
     const fresh = claimed.slice(0, admitted);
     const refused = claimed.slice(admitted);
+    if (refused.length) deferred = true;
     if (refused.length) await redisPipeline(refused.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
     if (!fresh.length) continue;
     // Each run takes room in the store's data room before it starts, at the
@@ -875,6 +877,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     // it does not start, and its start and its place in the day go back.
     const room = await takeData(store, [{ until: runGoneBy(flow, now) * 1000, bytes: fresh.length * runBytes(flow) }]);
     if (!room.ok) {
+      deferred = true;
       await redisPipeline(fresh.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
       await refuseRuns(store.listId, fresh.length, now);
       continue;
@@ -906,6 +909,9 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     started += fresh.length;
   }
   if (unknown) throw new UnknownReplyError("a sequence's once-only start");
+  // A caller that persists its event must retry known capacity refusals as well as unknown writes. Ordinary
+  // internal starters still receive their count, and enroll() keeps its existing catch-and-log boundary.
+  if (retryDeferred && deferred) throw new Error("A sequence start was deferred by its existing daily or data-room allowance");
   return started;
 }
 

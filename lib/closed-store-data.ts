@@ -206,9 +206,19 @@ async function sharedAccount(store: Store): Promise<boolean> {
   return others.some((other) => other.sid !== store.sid && other.stripeAccountId === store.stripeAccountId);
 }
 
-/** Puts a store in line for the next walk. */
+/**
+ * Puts a store in line for the next walk. Only Redis's exact answer confirms it (#4221, Codex U): ZADD NX's integer,
+ * 1 put in line, 0 already in line (its first time kept). Any other reply is resolved by an exact read-back of the
+ * store's score; when that does not show it in line either, it throws UnknownReplyError, so a caller never saves
+ * `due` (lib/plan-closing.ts) for a store the walk would never reach, and the next run asks again.
+ */
 export async function markDue(ref: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]);
+  const added = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]), 1);
+  if (added && (added[0] === 0 || added[0] === 1)) return;
+  const back = repliesFor(await redisPipeline([["ZSCORE", DUE_KEY, ref]]), 1);
+  const score = back?.[0];
+  if ((typeof score === "string" || typeof score === "number") && String(score).trim() !== "" && Number.isFinite(Number(score))) return;
+  throw new UnknownReplyError("a closed store's place in line for the walk");
 }
 
 /**

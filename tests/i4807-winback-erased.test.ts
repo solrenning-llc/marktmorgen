@@ -8,7 +8,7 @@
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
 import { leadsKey, upsertContact } from "@/lib/contacts";
 import { suppressCommand } from "@/lib/suppression";
-import { forgetWinbackPerson, sendWinBacks } from "@/lib/winback-send";
+import { ERASED_LINK_COMMANDS, UNWRITTEN_LINK_COMMANDS, forgetWinbackPerson, sendWinBacks } from "@/lib/winback-send";
 import { forgetNoted } from "@/lib/erasure-index";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { store as redis } from "./redis-stub";
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
     const gus = "gus@example.com";
     const fay = "fay@example.com";
     const { store } = await world("odd DEL", gus, "sub_GusLater00001", "cus_GusLater0001");
-    const product = String((events[0]?.data?.object as { metadata?: Record<string, string> })?.metadata?.product);
+    const product = String((events[0] as { data?: { object?: { metadata?: Record<string, string> } } } | undefined)?.data?.object?.metadata?.product);
     customers.set("cus_FayErased001", fay);
     await upsertContact(store.listId as string, fay, { agreed: true, explicit: true, source: "buyer" }, ROOM);
     ended("sub_FayErased00001", "cus_FayErased001", { store: "wberased", product });
@@ -194,6 +194,8 @@ async function main(): Promise<void> {
     const second = await sendWinBacks(Date.now() + 30_000, now);
     is("the next run sends gus's offer once, and never fay's", [second.sent, handed.filter((m) => m.to.includes(gus)).length, handed.filter((m) => m.to.includes(fay)).length], [1, 1, 0]);
     is("nothing keeps fay's address", holdingAddress(fay), []);
+    // Priced with the links not written (come-back-unwritten-links): one such offer a run, never dearer than that one.
+    is(`a late erasure's offer (${ERASED_LINK_COMMANDS} commands) costs no more than a link not written (${UNWRITTEN_LINK_COMMANDS})`, ERASED_LINK_COMMANDS <= UNWRITTEN_LINK_COMMANDS, true);
   }
 
   part("The dearest offer that is sent, every script's own command counted (3rjdf on #4807): inside WINBACK_OFFER_COMMANDS");

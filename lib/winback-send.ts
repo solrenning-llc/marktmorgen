@@ -334,6 +334,13 @@ const TAKE_BACK_COMMANDS = 1 + 2 * 3;
  * (come-back-unwritten-links) and held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.
  */
 export const UNWRITTEN_LINK_COMMANDS = MARK_COMMANDS + CLAIM_COMMANDS + TOKEN_COMMANDS + LINK_WRITE_COMMANDS + TAKE_BACK_COMMANDS;
+/**
+ * An offer whose address was erased after its link was written (#4807, C5-20261119-0900-4807): the same steps up to
+ * the link, then the print read again (HEXISTS), the link's DEL and the once-mark let go (RELEASE, one EVAL and its GET
+ * and DEL), with nothing sent. Counted with the links not written (UNWRITTEN_LINKS_PER_RUN) and never more than one of
+ * those (held in tests/i4807-winback-erased.test.ts), so come-back-unwritten-links prices it too.
+ */
+export const ERASED_LINK_COMMANDS = MARK_COMMANDS + CLAIM_COMMANDS + TOKEN_COMMANDS + LINK_WRITE_COMMANDS + 1 + 1 + 3;
 
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;
@@ -436,8 +443,22 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;
         continue;
       }
-      // An erasure that came after the claim: its print is read again just before the email, which then never goes.
-      if (!(await stillFree(store.listId, email))) continue;
+      // An erasure that came after the claim (#4807): the print is read again just before the email, which then never
+      // goes, and the link holding the address is taken back (C5-20261119-0900-4807, condition 1). Its DEL is read
+      // exactly: 0 or 1; anything else stops the store's run, the link left to expire with its erasure note. The
+      // once-mark is let go too, so nothing of the person stays. Counted with the links not written: no email is
+      // taken for it, so at most UNWRITTEN_LINKS_PER_RUN a store a run, priced in come-back-unwritten-links.
+      if (!(await stillFree(store.listId, email))) {
+        const gone = countOf(repliesFor(await redisPipeline([["DEL", linkKey(token)]]).catch(() => null), 1)?.[0]);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        unwritten += 1;
+        if (gone === null || gone > 1) {
+          console.error("a come-back link was not taken back as asked after an erasure; the store's run stops", store.handle);
+          break;
+        }
+        if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;
+        continue;
+      }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,

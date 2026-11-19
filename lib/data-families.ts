@@ -45,7 +45,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
-  "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
+  "nl:backup:del:", "nl:backup:delcount:", "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
@@ -78,7 +78,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
-  "nl:orders:open:", "nl:orders:pending:", "nl:rcode:link:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
+  "nl:orders:held:", "nl:orders:open:", "nl:orders:pending:", "nl:rcode:link:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk", "nl:held:refused:", "nl:held:silent:", "nl:held:answered:",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
@@ -102,7 +102,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
-  "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop", "nl:stamp:noroom:",
   "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
@@ -211,6 +211,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,
   "nl:assist:c:": X(1), "nl:assist:missed:": E, "nl:assist:next:": X(3), "nl:assist:nextlock:": X(1), "nl:assist:pool:": E, "nl:assist:remind:": X(3), "nl:assist:remindq": I, "nl:assist:remindwho:": X(3),
+  "nl:backup:del:": C, "nl:backup:delcount:": C, // the backup's deletion records and their per-store month count (lib/backup-deletions.ts), the company's bookkeeping
   "nl:backup:files:day:": C, // the backup files route's day count (lib/backup-files-source.ts), no store's
   "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
@@ -345,7 +346,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // to retain a closed store's payload without reviewed funding/cleanup.
   "nl:order-confirmation:closed:": C, "nl:order-confirmation:erased:": C, "nl:order-confirmation:due": C, "nl:order-confirmation:person:": C, "nl:order-confirmation:row:": C,
   "nl:order-confirmation:source:": C, "nl:order-confirmation:store:": C,
-  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:rcode:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
+  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:held:": X(2), "nl:rcode:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
   // Legacy marks expire in45days. The inactive original-window checkpoint
   // may retain its receipt for767days; this is not its legacy price envelope.
   "nl:orders:seen:": X(767),
@@ -445,6 +446,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ship:mail:all": C, "nl:ship:mail:closed:": C, "nl:ship:mail:due": C, "nl:ship:mail:erased:": C,
   "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
+  // The hour counts (two hours each) and a resting store's check (a minute) and own count of the hour (two hours) are the
+  // company's and gone by themselves, as its opens in flight (four minutes); its mark is kept at most 32 days and two hours
+  // (a paying store until its window ends) and the studio's notice that its links were turned off 30 days.
+  "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(36), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),

@@ -200,7 +200,8 @@ export const BOOK_INVOICES_KEPT_LINES = 5_000;
 /**
  * The studio requests a reading of the book that was not counted ahead takes before it reads and writes back those
  * kept invoices (lib/affiliates.ts, readBook): the studio's affiliates page, its spreadsheet, the payout file and its
- * confirmation, the PayPal press, payday and the PayPal settling. Two commands and BOOK_INVOICES_KEPT_BYTES each way
+ * confirmation, the PayPal press, payday and the PayPal settling. Five commands (the GET, and the write back as one
+ * script of four, fenced by the store's erasure: lib/affiliates.ts KEEP_INVOICES) and BOOK_INVOICES_KEPT_BYTES each way
  * at a heavy request's price, held in tests/affiliate-kept-invoices-counted.test.ts. The API and MCP readers count
  * them in bookWork, and the affiliate's own page in affiliatePageCost (AFFILIATE_KEPT_INVOICES_UNITS).
  */

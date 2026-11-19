@@ -76,7 +76,7 @@
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
-import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
+import { ERASING_KEY, MAX_STORE_BYTES, STORE_ID_PATTERN, erasingField, saleHandles, storeForEmailSeen, storeForId, storeIdCommand, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 // Every cell of the book follows the platform's one cell rule: quoted always, a leading formula character defused after spaces.
@@ -4711,12 +4711,12 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     if (keep?.walk) {
       keep.walk.fails += 1;
       if (keep.walk.fails >= INVOICE_WALK_TRIES) keep.walk = null;
-      await writeInvoiceKeep(statsId, keep).catch(() => undefined);
+      await writeInvoiceKeep(store, statsId, keep).catch(() => undefined);
     }
     throw error;
   }
   if (changed && keep) {
-    const wrote = await writeInvoiceKeep(statsId, keep);
+    const wrote = await writeInvoiceKeep(store, statsId, keep);
     if (wrote === "ceiling") over = start;
     else if (wrote === "kept" && keep.kept) over = null;
     if (wrote !== "kept") complete = false;
@@ -4857,10 +4857,32 @@ async function readInvoiceKeep(statsId: string, account: string, tag: string, si
 }
 
 /**
- * Keeps them for the next reading: "kept"; "ceiling" when they are past INVOICES_KEPT_MAX_LINES or
- * INVOICES_KEPT_MAX_BYTES, and only the mark of it is kept; "failed" when Redis does not say it kept them.
+ * The kept invoices (or the mark of going past their ceiling) written only while the store is live (Codex
+ * L-20261119-1003): its id key is there and its erasure has not begun (ERASING_KEY, written before anything of the
+ * store is deleted, removed with its record and its id in the same fenced step, lib/store.ts). A reading that started
+ * before the erasure and writes after it writes nothing, so the invoice, payment and affiliate ids never come back.
+ * EVAL, EXISTS, HEXISTS and SET: four commands in place of the SET. A store with no id yet (one never opened in the
+ * studio since ids were given, lib/store.ts ensureStoreId) is fenced by the erasure field alone, so its walk is still
+ * kept: its erasure writes that field before deleting anything either way.
  */
-async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<"kept" | "ceiling" | "failed"> {
+const KEEP_INVOICES = `-- marktmorgen:aff-invoice-keep:v1
+if (ARGV[4] == "1" and redis.call("EXISTS", KEYS[1]) ~= 1) or redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
+if redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3]).ok ~= "OK" then return 0 end
+return 1`;
+
+async function keepIfLive(store: Store, statsId: string, value: string): Promise<boolean> {
+  const hasId = STORE_ID_PATTERN.test(store.sid);
+  const [, idKey] = storeIdCommand(hasId ? store.sid : "none");
+  const [kept] = await redisPipeline([["EVAL", KEEP_INVOICES, 3, idKey, ERASING_KEY, invoiceKeepKey(statsId), await erasingField(storeRef(store)), value, INVOICE_KEEP_SECONDS, hasId ? "1" : "0"]]);
+  return kept === 1;
+}
+
+/**
+ * Keeps them for the next reading, only while the store is live (keepIfLive): "kept"; "ceiling" when they are past
+ * INVOICES_KEPT_MAX_LINES or INVOICES_KEPT_MAX_BYTES, and only the mark of it is kept; "failed" when Redis does not
+ * say it kept them, the store's erasure included.
+ */
+async function writeInvoiceKeep(store: Store, statsId: string, keep: InvoiceKeep): Promise<"kept" | "ceiling" | "failed"> {
   const once = (set: InvoiceSet): InvoiceSet => {
     const seen = new Set<string>();
     return {
@@ -4883,11 +4905,10 @@ async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<"ke
     // Only the mark of it, in place of what was kept (one command, as the DEL it replaces): the readings that begin
     // again carry it, so the creator is told reloading will not help, not "try again in a moment".
     const mark = JSON.stringify({ v: 1, account: keep.account, handles: keep.handles, since: keep.since, kept: null, walk: null, over: Math.floor(Date.now() / 1000) });
-    await redisPipeline([["SET", invoiceKeepKey(statsId), mark, "EX", INVOICE_KEEP_SECONDS]]).catch(() => undefined);
+    await keepIfLive(store, statsId, mark).catch(() => undefined);
     return "ceiling";
   }
-  const [set] = await redisPipeline([["SET", invoiceKeepKey(statsId), value, "EX", INVOICE_KEEP_SECONDS]]);
-  return set === "OK" ? "kept" : "failed";
+  return (await keepIfLive(store, statsId, value)) ? "kept" : "failed";
 }
 
 /** What one invoice listed gives the book. */

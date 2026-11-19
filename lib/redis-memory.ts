@@ -271,6 +271,13 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/affiliates.ts KEEP_INVOICES: a store's kept invoices written only while its id is there and its erasure
+        // has not begun (Codex L-20261119-1003).
+        if (key.startsWith("-- marktmorgen:aff-invoice-keep:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, storeId, erasing, target, field, value, seconds, hasId] = args;
+          if ((hasId === "1" && this.run(["EXISTS", storeId]) !== 1) || this.run(["HEXISTS", erasing, field]) !== 0) return 0;
+          return this.run(["SET", target, value, "EX", seconds]) === "OK" ? 1 : 0;
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

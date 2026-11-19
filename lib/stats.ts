@@ -29,7 +29,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
-import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
+import { type DiscountCodeRow, type DiscountElsewhere, type DiscountRow, discountCodes, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
@@ -41,10 +41,11 @@ import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, productIds, recordListings } from "@/lib/catalog";
 import { plainAmount } from "@/lib/money";
+import { csvCell as platformCsvCell } from "@/lib/csv";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
-import { reachRows } from "@/lib/page-read";
+import { type ReadingsPartial, reachRows, readingsPartial } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
 import { type TaxSummary, taxSummary } from "@/lib/tax-summary";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
@@ -68,10 +69,34 @@ const MAX_SOURCES = 40;
  * and the day's totals stay right. A day of a busy store names some 60.
  */
 export const DAY_FIELDS_MAX = 100;
+/**
+ * The most fields a day's record may have when a reach beacon adds one (#4608): below DAY_FIELDS_MAX, so the
+ * store page's reach fields, which any visitor can name through app/api/store/read, never take the last places of
+ * the day. Past this, a new reach field counts under "~"; views, sources, countries and answers keep their room, and
+ * the day's first view still gives the record its end.
+ */
+export const REACH_FIELDS_MAX = 70;
 /** The most fields the all-time record may have between the trims that read it (readLife): its own and LIFE_MAX_FIELDS of counts. */
 export const LIFE_WRITE_MAX = 2_100;
 
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * The counts one capped-count EVAL answered (lib/capped-count.ts), read exactly: a list of `fields` whole numbers
+ * at or above zero, each a number or its decimal text. Anything else is not known (rule 24), never "not the first".
+ */
+function knownCounts(replies: unknown, fields: number): number[] | null {
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const reply: unknown = replies[0];
+  if (!Array.isArray(reply) || reply.length !== fields) return null;
+  const out: number[] = [];
+  for (const value of reply as unknown[]) {
+    const n = typeof value === "number" ? value : typeof value === "string" && /^(0|[1-9][0-9]{0,15})$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+    out.push(n);
+  }
+  return out;
+}
 const countsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}`;
 const visitorsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}:u`;
 const lifeKey = (statsId: string) => `nl:stats:${statsId}:life`;
@@ -186,14 +211,36 @@ export async function recordHit(
     // day, because every visit's cost is held to what a plan charges for it
     // (tests/traffic-cost.ts). The day's count only, not the all-time
     // record, so "all time" has no figure for it rather than a wrong one.
-    const [opened] = await cappedCount(counts, DAY_FIELDS_MAX, [{ field: `pv:${hit.id}`, by: 1 }]);
-    if (opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+    // An answer that is not known (lost after the write, or in another shape) may be the day's first write too:
+    // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
+    let opened: number | null = null;
+    try {
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+    } catch (error) {
+      console.error("counting a product page's view failed", error);
+    }
+    if (opened === null || opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]).catch(() => null);
     return null;
   } else {
     return null;
   }
-  const [counted, ...results] = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
-  const values = Array.isArray(counted) ? counted.map(Number) : [];
+  // The expiries an unknown answer still sends: what this hit may have written first today. Never the all-time
+  // record's start, which only a known first write may say (rule 24).
+  const unknownExpiries = (): (string | number)[][] => [
+    ["EXPIRE", counts, TTL_SECONDS],
+    ...(hit.kind === "view" ? [["EXPIRE", liveKey(store.statsId as string), 86400], ["EXPIRE", visitorsKey(store.statsId as string, day), TTL_SECONDS]] : []),
+  ];
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+  } catch (error) {
+    // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
+    await redisPipeline(unknownExpiries()).catch(() => null);
+    throw error;
+  }
+  const [counted, ...results] = Array.isArray(replies) ? replies : [];
+  const known = knownCounts([counted], tally.length);
+  const values = known ?? [];
   // Written once, not on every hit (11 October 2026: every visit's commands
   // are a cost held to what a plan charges, tests/traffic-cost.ts, and these
   // three were sent on every page view though they change nothing after the
@@ -201,30 +248,57 @@ export async function recordHit(
   // — so filling it from the kept days never counts that day or any after it
   // twice — with the day's first write of this kind; the visitors' expiry with
   // the visitor new to the day, who is a visitor for all time too.
-  const follow: (string | number)[][] = [];
+  const follow: (string | number)[][] = known ? [] : unknownExpiries();
   if (firstAt >= 0 && values[firstAt] === 1) {
     follow.push(["EXPIRE", counts, TTL_SECONDS], ["HSETNX", life, "started", day]);
     // Those who were on before today let go once a day, so a store viewed
     // every day and never looked at live keeps a day of them, not every one.
     if (hit.kind === "view") follow.push(["ZREMRANGEBYSCORE", liveKey(store.statsId), 0, now - 30 * 60_000], ["EXPIRE", liveKey(store.statsId), 86400]);
   }
-  if (pfAt >= 0 && Number(results[pfAt]) === 1) {
+  if (pfAt >= 0 && (results[pfAt] === 1 || results[pfAt] === "1")) {
     follow.push(["HINCRBY", life, "u", 1], ["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
+  } else if (pfAt >= 0 && results[pfAt] !== 0 && results[pfAt] !== "0") {
+    // Not known whether this visitor was new to the day: the day's visitors keep their expiry, and nobody is counted.
+    follow.push(["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
   }
-  if (follow.length) await redisPipeline(follow);
+  // Each key's expiry once: an unknown answer already sends the visitors' expiry, and a visitor new to the day would
+  // send it again (Claude 1's review of #3676).
+  const expiring = new Set<string>();
+  const once = follow.filter((c) => c[0] !== "EXPIRE" || (!expiring.has(String(c[1])) && Boolean(expiring.add(String(c[1])))));
+  if (once.length) await redisPipeline(once);
   // The store page's views so far today, for the busy-day alert (lib/stats-report.ts).
   return hit.kind === "view" ? values[firstAt] || null : null;
 }
 
 /**
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
- * item seen and the one clicked, on the day's record, which the day's first
- * view has already given its expiry. One command, and only for the visitors
- * the page chose to measure.
+ * item seen and the one clicked, on the day's record. A reading may come
+ * on a day with no view yet (its token is good for two hours, so a page shown
+ * at 23:30 UTC may be read at 00:30, Claude 5 on #2571; or a page left open
+ * past midnight), so it may create the record: the capped count gives it its
+ * expiry then, inside the same script (lib/capped-count.ts, version 3), so the
+ * count and the expiry are written together or not at all. One command, and
+ * only for the visitors the page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
+  // keep their room.
+  await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }], TTL_SECONDS);
+}
+
+/** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
+export const CONFIRMED_LEAD_FIELD = "lc";
+/**
+ * One confirmed lead on the store's all-time record, for lib/path-lead.ts,
+ * which sends it once an address's mark is newly taken. A HINCRBY of its own,
+ * outside the record's capped count (cappedCount), as "u" is: a record already
+ * at LIFE_WRITE_MAX would put a new field under "~" and Path would never see
+ * it (review 6748073377 of #3431, L4). One field more at the most, and its
+ * answer is exactly the new count, which the caller reads.
+ */
+export function confirmedLeadCommand(statsId: string): (string | number)[] {
+  return ["HINCRBY", lifeKey(statsId), CONFIRMED_LEAD_FIELD, 1];
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -239,7 +313,7 @@ export async function countHeard(statsId: string, answer: string, cents: number,
   if (!isRedisConfigured()) return;
   const counts = countsKey(statsId, dayKey(now));
   await redisPipeline([
-    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [
+    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [
       { hash: 0, field: `h:${answer}`, by: 1 },
       ...(cents > 0 ? [{ hash: 0, field: `hc:${answer}`, by: Math.round(cents) }] : []),
       // A sale no link credited to any channel: what its buyer said is the only
@@ -257,12 +331,24 @@ export async function countHeard(statsId: string, answer: string, cents: number,
  * came looking for and could not buy — an idea for the next product, or a
  * word missing from a title. Only the words, lower case, at most 40
  * characters; nothing about who searched. One command, for a search, which
- * one connection may make 30 times in ten minutes.
+ * one connection may make 30 times in ten minutes. The day's expiry goes with
+ * the count, in the same request, as with countHeard: on a day with no
+ * counted view the search may be the record's first write, and the day's
+ * first view, which otherwise writes the expiry, may never come.
  */
 export async function countSearchMiss(statsId: string, words: string[], now = Date.now()): Promise<void> {
   const term = words.join(" ").slice(0, 40).trim();
   if (!term || !isRedisConfigured()) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field: `q:${term}`, by: 1 }]);
+  const counts = countsKey(statsId, dayKey(now));
+  try {
+    await redisPipeline([
+      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
+      ["EXPIRE", counts, TTL_SECONDS],
+    ]);
+  } catch (error) {
+    // Never thrown at the store's page, as before (cappedCount never throws): a count not made is a count missed.
+    console.error("counting a search that found nothing failed", error);
+  }
 }
 
 /** The store page's views and the checkouts started from one day to another, both counted: one read a day, at most 90. */
@@ -275,11 +361,21 @@ export async function daysCounts(statsId: string, from: string, to: string): Pro
     if (day > to) break;
     dates.push(day);
   }
-  const replies = await redisPipeline(dates.map((d) => ["HMGET", countsKey(statsId, d), "v", "c"]));
+  // Read exactly (unknown is never zero): the quiet-sales email says what these mean ("Nobody has visited"), so a
+  // day in another shape throws, and the email goes without the numbers rather than with wrong ones.
+  const what = "a store's visits and checkouts by day";
+  const replies = repliesFor(await redisPipeline(dates.map((d) => ["HMGET", countsKey(statsId, d), "v", "c"])), dates.length);
+  if (!replies) throw new UnknownReplyError(what);
+  const kept = (raw: unknown): number => {
+    if (raw === null) return 0;
+    if (typeof raw !== "string" || !/^(0|[1-9]\d{0,14})$/.test(raw)) throw new UnknownReplyError(what);
+    return Number(raw);
+  };
   for (const reply of replies) {
-    if (!Array.isArray(reply)) continue;
-    out.views += Number(reply[0]) || 0;
-    out.checkouts += Number(reply[1]) || 0;
+    const pair = repliesFor(reply, 2);
+    if (!pair) throw new UnknownReplyError(what);
+    out.views += kept(pair[0]);
+    out.checkouts += kept(pair[1]);
   }
   return out;
 }
@@ -288,16 +384,30 @@ export async function daysCounts(statsId: string, from: string, to: string): Pro
 export async function viewsBefore(store: Store, days: number, now = Date.now()): Promise<number[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
   const dates = lastDays(now - 86400_000, days);
-  const replies = await redisPipeline(dates.map((d) => ["HGET", countsKey(store.statsId as string, d), "v"]));
-  return replies.map((r) => Number(r) || 0);
+  // Read exactly (rule 24): nil is a day with no views; a reply lost or of another shape is unknown, never zero, so
+  // the busy-day email never compares today with a fortnight nobody read (lib/stats-report.ts, maybeBusyAlert).
+  const replies = repliesFor(await redisPipeline(dates.map((d) => ["HGET", countsKey(store.statsId as string, d), "v"])), dates.length);
+  if (!replies) throw new UnknownReplyError("the store page's views of the last days");
+  return replies.map((r) => {
+    if (r === null) return 0;
+    const n = typeof r === "string" && /^\d{1,15}$/.test(r) ? Number(r) : NaN;
+    if (!Number.isSafeInteger(n)) throw new UnknownReplyError("the store page's views of a day");
+    return n;
+  });
+}
+
+/** One HGETALL of a day's counts, read exactly (rule 24; exactPairs): unknown throws, never "none counted". */
+async function dayCountsExact(statsId: string, day: string): Promise<[string, number][]> {
+  const replies = repliesFor(await redisPipeline([["HGETALL", countsKey(statsId, day)]]), 1);
+  if (!replies) throw new UnknownReplyError("a day's counts");
+  return exactPairs(replies[0]);
 }
 
 /** Today's channels by views so far, biggest first. */
 export async function sourcesToday(store: Store, now = Date.now()): Promise<Ranked> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", countsKey(store.statsId, dayKey(now))]]);
   const tally = new Tally();
-  for (const [field, count] of pairs(raw)) if (field.startsWith("r:")) tally.add(field, count);
+  for (const [field, count] of await dayCountsExact(store.statsId, dayKey(now))) if (field.startsWith("r:")) tally.add(field, count);
   return tally.window(0).sources;
 }
 
@@ -326,14 +436,21 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
   const empty: Today = { date, visitors: 0, views: 0, checkouts: 0, sources: [], sales: null };
   if (!store.statsId || !isRedisConfigured()) return empty;
   const statsId = store.statsId;
-  const [raw, people, cached] = await redisPipeline([
+  // Read exactly (rule 24): a reply lost or of another shape throws, and the studio says today could not be read
+  // (app/api/store/live/route.ts answers it as null), never "0 visitors" as a real number.
+  const replies = repliesFor(await redisPipeline([
     ["HGETALL", countsKey(statsId, date)],
     ["PFCOUNT", visitorsKey(statsId, date)],
     ["GET", todaySalesKey(statsId, date)],
-  ]);
+  ]), 3);
+  if (!replies) throw new UnknownReplyError("today's numbers");
+  const [raw, people, cached] = replies;
+  const visitors = countOf(people);
+  if (visitors === null) throw new UnknownReplyError("today's visitors");
+  if (cached !== null && typeof cached !== "string") throw new UnknownReplyError("today's sales kept");
   const tally = new Tally();
-  for (const [field, count] of pairs(raw)) tally.add(field, count);
-  const window = tally.window(Number(people) || 0);
+  for (const [field, count] of exactPairs(raw)) tally.add(field, count);
+  const window = tally.window(visitors);
   let sales: Today["sales"] = null;
   if (typeof cached === "string") {
     try {
@@ -344,7 +461,9 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
   } else if (readsSales(store)) {
     const start = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
     sales = await readPaidSales(store, start, 1)
-      .then(({ sales: rows }) => {
+      .then(({ sales: rows, partial }) => {
+        // A reading that is not whole (past one page, or PayPal not read) is not today's count: not read just now.
+        if (partial) return null;
         const own = rows.filter((sale) => sale.currency === store.currency && dayKey(sale.created) === date);
         return { sales: own.length, cents: own.reduce((n, sale) => n + sale.cents, 0) };
       })
@@ -384,11 +503,14 @@ export async function readLive(store: Store, now = Date.now()): Promise<Live> {
   const empty: Live = { visitors: 0, sources: [] };
   if (!store.statsId || !isRedisConfigured()) return empty;
   const key = liveKey(store.statsId);
-  const [, members] = await redisPipeline([
+  // Read exactly (rule 24): members and their scores in pairs, or unknown, never "nobody here" (the live route
+  // answers a throw as not read).
+  const replies = repliesFor(await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - 30 * 60_000],
     ["ZRANGEBYSCORE", key, now - LIVE_MINUTES * 60_000, "+inf", "WITHSCORES"],
-  ]);
-  const flat = Array.isArray(members) ? (members as unknown[]).map(String) : [];
+  ]), 2);
+  const flat = replies ? stringList(replies[1]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("who is on the store now");
   const latest = new Map<string, { source: string; at: number }>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const [who, source] = flat[i].split("|");
@@ -454,6 +576,8 @@ export type Stats = {
   previousTrafficAvailable?: Record<"d7" | "d30" | "d90", boolean>;
   /** Everything since `since`, or null when it could not be read. */
   life: (WindowStats & { since: string }) | null;
+  /** Whether this window's page readings went past their ceiling, so time on page and reading depth are partial (lib/page-read.ts). */
+  readsPartial?: ReadingsPartial | "unknown" | null;
 };
 
 const ranked = (map: Map<string, number>): Ranked =>
@@ -617,11 +741,14 @@ export async function readStats(store: Store, now = Date.now()): Promise<Stats |
     d30: { visitors: Number(results[base + 4]) || 0, ...sum(days.slice(-60, -30)) },
     d90: { visitors: Number(results[base + 5]) || 0, ...olderTotals },
   };
-  const life = await readLife(store, now).catch((error) => {
-    console.error("reading all-time counts failed", error);
-    return null;
-  });
-  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life };
+  const [life, readsPartial] = await Promise.all([
+    readLife(store, now).catch((error) => {
+      console.error("reading all-time counts failed", error);
+      return null;
+    }),
+    readingsPartial(store, now),
+  ]);
+  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life, readsPartial };
 }
 
 /**
@@ -657,7 +784,7 @@ export async function campaignViews(
 }
 
 /** Fields the all-time record keeps for itself rather than as counts. */
-const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap"]);
+const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap", CONFIRMED_LEAD_FIELD]);
 /** Beyond this many fields, the smallest sources and tags are let go. */
 const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
@@ -911,7 +1038,7 @@ export type SalesStats = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (lib/discount-impact.ts); null with no discounted sale. */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean };
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[]; codes: DiscountCodeRow[] };
   /** When buyers bought over the 90 days: checkouts by hour of the week in UTC, Sunday 0:00 first (hoursOfWeek). */
   hours?: { sales: number[]; cents: number[] };
 };
@@ -1261,11 +1388,25 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(meta).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/** The billing reasons of a membership's payments after the checkout's own ("subscription_create"). */
+const AFTER_CHECKOUT_REASONS = new Set(["subscription_cycle", "subscription_update"]);
+
+/**
+ * A paid invoice of a membership or payment plan that the checkout did not already count: a period renewal
+ * ("subscription_cycle") or a plan change charged at once ("subscription_update", lib/tier-switch.ts,
+ * lib/yearly-switch.ts), both money kept, as a refund of either is subtracted (MM-E2E-SUB-1;
+ * docs/bx2-earnings-design.md). Any other reason ("manual", an unknown or future one) is never taken as membership
+ * money, even with this store's metadata (MM-E2E-SUB-2), as lib/plan-refund-rules.ts reads only known reasons.
+ */
+function paidAfterCheckout(invoice: Record<string, unknown>): boolean {
+  return invoice.status === "paid" && typeof invoice.billing_reason === "string" && AFTER_CHECKOUT_REASONS.has(invoice.billing_reason);
+}
+
 /**
  * The payments after the first of this store's memberships and payment plans
- * since `since` (seconds): paid invoices Stripe made because a period came
- * round (billing_reason "subscription_cycle"), on subscriptions this store
- * opened. At most `pages` pages of a hundred. Pure on what it is handed, so a
+ * since `since` (seconds): paid invoices after the checkout's own
+ * (paidAfterCheckout: a period renewal or a plan change charged at once), on
+ * subscriptions this store opened. At most `pages` pages of a hundred. Pure on what it is handed, so a
  * test can give it invoices.
  */
 export function renewalsFrom(
@@ -1284,7 +1425,7 @@ export function renewalsFrom(
   // and handed on as an ordinary record of own keys, which a page can take.
   const bySourceDay: ChannelDays = Object.create(null);
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     if (currencyOf(invoice) !== currency) continue;
@@ -1322,7 +1463,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
   const handles = saleHandles(store);
   const out: Entry[] = [];
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
@@ -1366,6 +1507,13 @@ export type RenewalPayment = {
   currency: string;
   /** The payment, when the invoice names it: on the invoice itself in older API versions, or among its payments when they come with it; empty otherwise, so a refund of it cannot be matched. */
   paymentIntent: string;
+  /**
+   * Every paid payment the invoice names, each once: one paid in parts has several (#4410). `paymentsComplete`
+   * says whether they are known to be all of them: the one on the invoice itself (older API versions), or its
+   * list of payments when that list says there is no more and every paid one names its payment intent.
+   */
+  paymentIntents: string[];
+  paymentsComplete: boolean;
   /** The channel the subscription was sold through, by the same rule as renewalEntries: "" for direct, UNRECORDED when it says nothing. */
   channel: string;
   /** The invoice, to find its payment among the account's invoice payments when the invoice does not name it. */
@@ -1412,7 +1560,7 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
 /**
  * The paid renewals of this store since `since` (seconds), each with the
  * buyer's address as the invoice has it: the same invoices renewalEntries
- * counts (paid, billing_reason "subscription_cycle", this store's handles),
+ * counts (paidAfterCheckout, this store's handles),
  * at most `pages` pages of a hundred; `partial` when there were more.
  */
 export async function readRenewalPayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ rows: RenewalPayment[]; partial: boolean }> {
@@ -1429,18 +1577,24 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const invoice of rows) {
-      if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+      if (!paidAfterCheckout(invoice)) continue;
       if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
       const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
       const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
       if (cents <= 0 || !email) continue;
       const meta = invoiceMeta(invoice);
-      const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
-      const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";
+      const listed = invoice.payments as { data?: unknown; has_more?: unknown } | null | undefined;
+      const paidListed = (Array.isArray(listed?.data) ? (listed.data as { status?: unknown; payment?: { payment_intent?: unknown } | null }[]) : []).filter((p) => p?.status === "paid").map((p) => p.payment?.payment_intent);
+      const listedIntents = [...new Set(paidListed.filter((intent): intent is string => typeof intent === "string" && intent !== ""))];
+      const ownIntent = typeof invoice.payment_intent === "string" && invoice.payment_intent ? invoice.payment_intent : "";
+      const paymentIntent = ownIntent || (listedIntents[0] ?? "");
+      // All of an invoice paid in parts, not only its first part (#4410); its list counts as whole only when it says so.
+      const paymentIntents = ownIntent ? [ownIntent] : listedIntents;
+      const paymentsComplete = Boolean(ownIntent) || (listedIntents.length > 0 && listed?.has_more === false && listedIntents.length === paidListed.length);
       const channel = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
       const currency = currencyOf(invoice);
       if (!currency) partial = true;
-      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency, paymentIntent, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
+      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency, paymentIntent, paymentIntents, paymentsComplete, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
     }
     if (!list.has_more) break;
     // Out of time: what was read is kept, and the reading says it is partial.
@@ -1553,8 +1707,10 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
 /**
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
- * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none; an answer in any other
+ * where visits came from (r:<source>), the visitors (u) and the confirmed
+ * leads (lc: addresses that used their confirmation link, lib/path-lead.ts),
+ * which Marktmorgen Path reads; the addresses only asked for (fs:<channel>)
+ * are there too, for the store's numbers, never as Path's leads. Empty when there is none; an answer in any other
  * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {
@@ -1810,9 +1966,14 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     !(out.refundsIn?.d90 ?? []).some((r) => r.source === UNRECORDED);
   out.levers = measureSalesLevers(read,store.currency,readPartial,now);
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
+  const refundedIntents = new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean));
   out.discounts = {
-    rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
+    rows: discountImpact(read, refundedIntents, store.currency, now, STATS_DAYS),
     refundsRead: refundRows !== null,
+    // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
+    elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
+    // The same checkouts by the code they used (760 [STN7], unit 2), from the same sales: nothing more is read.
+    codes: discountCodes(read, refundedIntents, store.currency, now, STATS_DAYS),
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),
@@ -2121,6 +2282,8 @@ export type StatsData = {
    * clicked it, in the order of the page. Measured on one visitor in eight.
    */
   reach: Record<"d7" | "d30" | "d90", { visitors: number; rows: ReachItem[] }>;
+  /** Set when this month's page readings reached their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
+  readsPartial?: ReadingsPartial | "unknown" | null;
   /**
    * The stretch of days just before each window, to set the window beside:
    * the 7 days before the last 7, and so on. Sales and money are null where
@@ -2166,7 +2329,7 @@ export type StatsData = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (SalesStats.discounts). */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean } | null;
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[]; codes?: DiscountCodeRow[] } | null;
   /** Checkouts by hour of the week in UTC over the 90 days (SalesStats.hours); the browser turns them to its own time. */
   hours?: { sales: number[]; cents: number[] } | null;
   /**
@@ -2447,20 +2610,20 @@ export function studioStats(
       d30: reachItems(store, w.d30.reach ?? {}, titles),
       d90: reachItems(store, w.d90.reach ?? {}, titles),
     },
+    readsPartial: stats.readsPartial ?? null,
   };
 }
 
 // ---- Files to take away -------------------------------------------------------
 
 /**
- * One spreadsheet cell: quoted always, and a leading character a spreadsheet
- * would read as a formula defused, because a product name or a buyer's name
- * is text somebody else typed and must never run on the creator's computer.
+ * One spreadsheet cell: the platform's one cell rule (lib/csv.ts), quoted
+ * always and a leading formula character defused even after spaces, because a
+ * product name or a buyer's name is text somebody else typed and must never
+ * run on the creator's computer.
  */
 export function csvCell(value: string | number): string {
-  const text = String(value);
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
+  return platformCsvCell(value);
 }
 
 export function csvRow(values: (string | number)[]): string {

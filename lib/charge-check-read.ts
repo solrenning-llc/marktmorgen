@@ -40,6 +40,7 @@
  * Stripe; `platformGet` is the real one. Nothing runs it yet: the cron and
  * the records it decides against come with the next units.
  */
+import { StripeUnreadableReply } from "@/lib/stripe-http-error";
 import { onPlatformAt } from "@/lib/billing";
 
 export const CHARGE_CHECK_VERSION = "2026-10-28.endive";
@@ -120,7 +121,7 @@ const INVOICE_ID = /^in_[A-Za-z0-9]+$/;
 /** A Stripe list as the pages describe it, or null. */
 function list(value: unknown): { data: unknown[]; hasMore: boolean } | null {
   const v = record(value);
-  if (!v || v.object !== "list" || !Array.isArray(v.data) || typeof v.has_more !== "boolean") return null;
+  if (!v || v.object !== "list" || !Array.isArray(v.data) || v.data.length > PAGE_LIMIT || typeof v.has_more !== "boolean") return null;
   return { data: v.data, hasMore: v.has_more };
 }
 
@@ -142,6 +143,19 @@ async function wholeLines(
 ): Promise<{ lines: unknown[] } | { reason: string }> {
   const first = list(invoice.lines);
   if (!first) return { reason: "lines_unreadable" };
+  // A repeated provider row is not evidence of a second charge. The
+  // decision counts periods, so never hand it duplicate (or unnamed) lines
+  // as a complete invoice, within one page or across several pages.
+  const seen = new Set<string>();
+  const take = (data: unknown[]) => {
+    for (const raw of data) {
+      const id = lineId(raw);
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+    }
+    return true;
+  };
+  if (!take(first.data)) return { reason: "lines_unreadable" };
   const lines = [...first.data];
   if (!first.hasMore) return { lines };
   const url = record(invoice.lines)?.url;
@@ -161,6 +175,7 @@ async function wholeLines(
     }
     if (!next) return { reason: "lines_unreadable" };
     if (next.hasMore && next.data.length === 0) return { reason: "lines_unreadable" };
+    if (!take(next.data)) return { reason: "lines_unreadable" };
     lines.push(...next.data);
     more = next.hasMore;
   }
@@ -326,7 +341,9 @@ export async function readPaidInvoice(options: {
     calls += 1;
     invoice = record(await get(`/invoices/${id}`));
   } catch (error) {
-    const status = (error as { status?: unknown } | null | undefined)?.status;
+    // A page in front of Stripe that is not JSON (lib/stripe-http-error.ts) carries a status that is not Stripe's own:
+    // never a final "not found".
+    const status = error instanceof StripeUnreadableReply ? null : (error as { status?: unknown } | null | undefined)?.status;
     return status === 404 ? { reason: "not_found", final: true, calls } : { reason: "not_answered", final: false, calls };
   }
   if (!invoice) return { reason: "unexpected", final: false, calls };

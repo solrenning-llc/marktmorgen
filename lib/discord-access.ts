@@ -19,13 +19,15 @@ import { holdsProductsOrThrow } from "@/lib/community-access";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { emailKey, storeKey } from "@/lib/learn";
-import { type Store, storeForId } from "@/lib/store";
+import type { Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { giveRole, putMember, removeMember, takeRole } from "@/lib/discord";
 import { KICK_TRIES, rolesDiff, rolesFor } from "@/lib/discord-rules";
 import {
   type Member,
   accountOf,
   checkSoon,
+  dropDue,
   dueMembers,
   forgetMember,
   keepMember,
@@ -80,7 +82,19 @@ export async function joinServer(input: { store: Store; email: string; accessTok
     if (before && before !== user.id) old = await readMember(room, before);
     mine = await readMember(room, user.id);
     if (before && before !== user.id) {
-      for (const role of old?.r ?? []) await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account");
+      // A take that failed (a 429, a 5xx, no answer) leaves the earlier account its role: it is not forgotten and the
+      // join fails, so the earlier account stays in the register and the periodic check, and a later try takes it back.
+      const kept: string[] = [];
+      for (const role of old?.r ?? []) {
+        if ((await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account")) === "failed") kept.push(role);
+      }
+      if (kept.length) {
+        // Its record then lists only the roles Discord still gives it: one taken is not held any more, so the next
+        // check (rolesDiff(member.r, wanted)) gives it back while the buyer still holds it, and the failed one stays
+        // on the record to be taken later (#4087 review).
+        if (old) await keepMember(room, store.sid, before, { ...old, r: kept }, input.now);
+        return { ok: false, reason: "failed" };
+      }
       await forgetMember(room, store.sid, before, email);
     }
   } catch (error) {
@@ -103,7 +117,8 @@ export async function joinServer(input: { store: Store; email: string; accessTok
     }
   }
   const at = Math.floor((input.now ?? Date.now()) / 1000);
-  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given.filter((r) => wanted.includes(r)), at: mine?.at || at, checked: at }, input.now);
+  // A role no longer held whose take failed stays in `r`, as checkMember keeps it, so the next check takes it back.
+  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given, at: mine?.at || at, checked: at }, input.now);
   return { ok: true, serverId: server.id, added: placed === "added", roles: wanted.length };
 }
 
@@ -111,16 +126,31 @@ export type Checked = "kept" | "changed" | "ended" | "gone" | "later";
 
 /** Checks one person again, and gives or takes back roles to match what they hold now. */
 export async function checkMember(sid: string, userId: string, now = Date.now()): Promise<Checked> {
-  // A store read that fails is unknown, never "gone" (CX-123 rule 24): the person was already taken off the line
-  // (dueMembers), so "gone" on an error would drop them for good and a later cancellation or refund would never take
-  // their paid roles back. The error goes up to sweepDiscord, which puts them back in line for the next run.
-  const store = await storeForId(sid);
-  if (!store) return "gone";
+  // A store read that fails is unknown, never "gone" (CX-123 rule 24): "gone" takes the person off the line
+  // (dropDue), so "gone" on an error would drop them for good and a later cancellation or refund would never take
+  // their paid roles back. The error goes up to sweepDiscord, which puts them back in line for the next run (and the
+  // lease in dueMembers brings them back if even that cannot reach Redis). The store
+  // is read exactly (lib/store-exact.ts): only a confirmed absent id key is "gone"; a reply of another shape, or a key
+  // leading to a record that cannot be read, throws like a failed request.
+  const store = await storeForIdExactly(sid);
+  if (store === "unknown") throw new UnknownReplyError(`the store ${sid} for the Discord check`);
+  if (store === "none") {
+    // Off the line, which only leases the people it hands out (dueMembers): nothing is left to check.
+    await dropDue(sid, userId);
+    return "gone";
+  }
   const room = storeKey(store);
   // Read exactly: an unknown server, member or roles read throws (sweepDiscord keeps the person in line), never read
   // as "gone" (dropped from the checks, roles never taken back) or "no product gives a role" (a paying buyer's roles taken).
   const [server, member] = await Promise.all([readServerOrThrow(room), readMember(room, userId)]);
-  if (!server || !member) return "gone";
+  if (!server || !member) {
+    await dropDue(sid, userId);
+    // A rejoin between the member read and dropDue wrote a fresh entry that dropDue just took off (Claude 1 cloud's
+    // LOW on #4239): read the member again and put them back in line if they are there now, so a later refund is
+    // still checked. Only with a server: without one, nobody is checked, and putting them back would loop for ever.
+    if (server && (await readMember(room, userId))) await checkSoon(sid, userId);
+    return "gone";
+  }
   const byProduct = await productRolesOrThrow(room);
   let held: string[];
   try {

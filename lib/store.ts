@@ -1885,12 +1885,12 @@ async function commit(owner: string, held: Held, before: Store, next: Store, cha
  * to product records first if it has not been yet, and hands `work` the store
  * and the way to save it. Returns null when the address has no store.
  */
-async function withStore<T>(email: string, work: (store: Store, save: Save, held: Held) => Promise<T>): Promise<T | null> {
+async function withStore<T>(email: string, work: (store: Store, save: Save, held: Held) => Promise<T>, waitMs = LOCK_WAIT_MS): Promise<T | null> {
   if (!email || !isRedisConfigured()) return null;
   const owner = await ownerKey(email);
   let held: Held;
   try {
-    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, LOCK_WAIT_MS);
+    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, Math.max(0, Math.min(waitMs, LOCK_WAIT_MS)));
   } catch (error) {
     if (error instanceof LockBusyError) throw new StoreBusyError();
     throw error;
@@ -2850,6 +2850,7 @@ async function onProduct<R extends string>(
   change: (product: Product, store: Store) => Product | Refusal<R> | Promise<Product | Refusal<R>>,
   extra: (store: Store, product: Product) => Partial<Store> = () => ({}),
   after?: (store: Store, product: Product) => Promise<void>,
+  lockWaitMs = LOCK_WAIT_MS,
 ): Promise<{ ok: true; store: Store; product: Product; before: Product } | Refusal<R | "none" | "unknown">> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
@@ -2860,7 +2861,7 @@ async function onProduct<R extends string>(
     // Still under the lock: what has to be written with the record, so no other write of the product comes between.
     if (after) await after(saved, changed);
     return { ok: true as const, store: saved, product: changed, before: product };
-  });
+  }, lockWaitMs);
   return result ?? { ok: false, reason: "none" };
 }
 
@@ -4785,13 +4786,18 @@ export type HiddenResult =
 /**
  * Publishes a draft, or takes a product off the store without removing it.
  * A hidden product keeps everything it has, its buyers keep what they bought,
- * and a bundle that holds it still hands it over.
+ * and a bundle that holds it still hands it over. `lockWaitMs` shortens how
+ * long it waits for a store another write holds (never past LOCK_WAIT_MS):
+ * the hourly job's hide step waits little, so a busy store is tried again an
+ * hour later instead of spending the run (lib/child-safety.ts); a store still
+ * busy then throws StoreBusyError, as any write here.
  */
 export async function setProductHidden(
   email: string,
   id: string,
   hidden: boolean,
   mayPublish?: (store: Store, product: Product) => Promise<boolean>,
+  options: { lockWaitMs?: number } = {},
 ): Promise<HiddenResult> {
   // `mayPublish` looks again, under the lock a product's page is saved under, at what a draft would publish:
   // false answers "held", and the product stays as it was (754 [STN1], Codex P on #3693).
@@ -4800,7 +4806,7 @@ export async function setProductHidden(
     // Older stores with a visible offer have unknown historical timing, never backfilled as now.
     if (!store.activationTracked || hidden || store.firstOfferPublishedAt || store.catalog.items.some(item => (item.kind & KIND.hidden) === 0)) return {};
     return { firstOfferPublishedAt: new Date().toISOString() };
-  });
+  }, undefined, options.lockWaitMs);
   return done.ok ? { ok: true, store: done.store, product: done.product } : done;
 }
 

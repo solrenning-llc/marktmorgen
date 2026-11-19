@@ -39,6 +39,7 @@ import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from 
 import { moneyField } from "@/lib/money";
 import { productIdFromAddress, readAsking, readListing, readListings } from "@/lib/catalog";
 import { offerableTargets } from "@/lib/child-safety-holds";
+import { holdState } from "@/lib/child-safety";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -124,8 +125,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   if (await isResting(store)) return { store, asked, resting: true };
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
-  // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked, resting: false } : null;
+  // A draft has no page until the creator publishes it, nor has a product held for a child-safety report, even when
+  // taking it off the store did not go through after its mark was written; a mark that cannot be read is not a yes
+  // (lib/child-safety.ts; Revisor 2 on #3588). One GET, for the head and the page alike (cache).
+  if (!product || product.hidden) return null;
+  return (await holdState(store, product.id)) === "free" ? { store, product, asked, resting: false } : null;
 });
 
 /** The product's description and its sales page, each read once a request, by the title and by the page (React cache). */

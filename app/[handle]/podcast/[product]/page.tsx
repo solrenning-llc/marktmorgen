@@ -13,6 +13,7 @@ import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { contentOpenTo } from "@/lib/child-safety";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -48,6 +49,10 @@ export default async function PodcastPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const product = await readListing(store, productId);
   if (!product?.podcast) redirect(`/@${store.handle}`);
+  const session = (await cookies()).get(SESSION_COOKIE)?.value;
+  // A podcast held for a child-safety report (lib/child-safety.ts) is the store's owner's only: not its listeners,
+  // with their own feed or not, and not the team. A hold that cannot be read refuses the same way.
+  if (!(await contentOpenTo(store, product.id, session))) redirect(`/@${store.handle}`);
   const said = speech(store);
   const w = coursesWords(store.language);
   const query = await searchParams;
@@ -59,7 +64,7 @@ export default async function PodcastPage({ params, searchParams }: Params) {
   // the store's owner and team, signed in; anyone else goes where an id that
   // does not exist goes (MM-SA-30). A listener without the token asks for it
   // from their orders page, which lists their feeds.
-  if (product.hidden && !mine && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
+  if (product.hidden && !mine && !(await seesDrafts(store, session))) redirect(`/@${store.handle}`);
   const feed = mine ? `${SITE_URL}/api/store/podcast/feed/${mine}.xml` : null;
   const notice = w.podcastNotices[status];
 

@@ -40,6 +40,7 @@ import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { holdState } from "@/lib/child-safety";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
 import { AccessUncheckedNote } from "@/components/access-unchecked-note";
@@ -86,6 +87,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const jar = await cookies();
   const access = await courseAccess(store, product, jar, course);
+  // A product held for a child-safety report is read by the store's owner only (lib/child-safety.ts): not its
+  // students, not the team, not a visitor on a preview; a hold that cannot be read refuses the same way. They go
+  // where an id that does not exist goes.
+  if (!access.learner?.owner && (await holdState(store, product.id)) !== "free") redirect(`/@${store.handle}`);
   // A signed-in student whose access is known not to be open: their places in this course's videos go from their device
   // (650 [WG10]); never while it could not be checked (lib/course-door.ts), when they may well still have it.
   const forgetKey = forgetsOnDevice(access) && access.learner ? devicePlaceKey(course.id, access.learner.email) : null;

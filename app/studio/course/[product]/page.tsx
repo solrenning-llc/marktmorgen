@@ -31,6 +31,7 @@ import {
   WithdrawCertificate,
 } from "@/components/course-editor";
 import { readListing, readTitles, visibleIds } from "@/lib/catalog";
+import { holdState } from "@/lib/child-safety";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
@@ -79,6 +80,13 @@ export default async function StudioCoursePage({
   const seesBuyers = seesBuyerAddresses(view.role);
   const product = await readListing(store, productId);
   if (!product?.course) redirect(studioPath(store));
+  // A product held for a child-safety report is the store's owner's only (lib/child-safety.ts), as the studio's course
+  // route already answers (Revisor 2 on #3588): nobody else on the team reads what it holds. A hold that cannot be read
+  // is not a yes; the studio says which it was.
+  if (view.role !== "owner") {
+    const hold = await holdState(store, product.id);
+    if (hold !== "free") redirect(studioPath(store, hold === "held" ? "team=held" : "team=unchecked"));
+  }
   const course = await readCourse(product.course.id);
   if (!course) redirect(studioPath(store));
   const folder = await storeFolder(view.ref);

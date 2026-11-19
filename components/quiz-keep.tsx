@@ -83,13 +83,15 @@ export function QuizKeep({
     const fromDevice = read(local);
     const raw = fromDevice ?? read(session);
     device.current = fromDevice !== null;
-    const draft = draftToRestore(raw, shown, tries, Date.now(), version);
+    // A choice picked before this script ran is the student's answer (LOW 13): nothing is offered over it.
+    const pickedEarly = choices().filter((input) => input.checked);
+    const draft = pickedEarly.length ? null : draftToRestore(raw, shown, tries, Date.now(), version);
     if (draft) {
       // Offered, not put back: the student chooses Restore or Start over (WCAG 3.3.6), and nothing is said before that.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- the draft was read from storage outside React.
       setOffer(draft);
       setOnDevice(device.current);
-    } else if (raw !== null) {
+    } else if (raw !== null && !pickedEarly.length) {
       forget(key);
       device.current = false;
     }
@@ -116,6 +118,12 @@ export function QuizKeep({
       }
     };
     saveNow.current = () => save();
+    // And it is what is kept from now on, as if picked with the script running.
+    if (pickedEarly.length) {
+      // The whole form as it stands is this tab's answer, so no older answer to another question is merged back in.
+      for (const input of choices()) touched.add(input.name);
+      save();
+    }
     // Another tab wrote the device's draft: an offer not yet taken here shows what is kept now, or goes with it.
     const fromOtherTab = (event: StorageEvent) => {
       if (event.key !== key || event.storageArea !== local) return;

@@ -22,6 +22,7 @@
  * allowance, and a claim says only that the move may now be made.
  */
 import { createHash, randomBytes } from "node:crypto";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { claimMark, claimValue } from "@/lib/claim-mark";
 import {
   type MoveRequest,
@@ -98,6 +99,27 @@ local n = redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[1])
 return n`;
 
+const DAY_TAKEN = Symbol("purchase move day taken");
+export type MoveDayTaken = { ok: true; from: string; now: number; [DAY_TAKEN]: true };
+export type MoveDay = MoveDayTaken | { ok: false; reason: "email" | "over" | "unknown" };
+
+/**
+ * Takes one of an address's daily attempts without making a request. The
+ * opaque result lets a caller do a privacy check after the count, then make
+ * the request without counting it twice.
+ */
+export async function takePurchaseMoveDay(rawFrom: unknown, now = Date.now()): Promise<MoveDay> {
+  if (typeof rawFrom !== "string") return { ok: false, reason: "email" };
+  const from = normaliseEmail(rawFrom);
+  if (!from || from.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(from)) return { ok: false, reason: "email" };
+  if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
+  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, dayKey(from, now), MOVE_MARK_SECONDS]]), 1);
+  const count = counted ? countOf(counted[0]) : null;
+  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
+  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  return { ok: true, from, now, [DAY_TAKEN]: true };
+}
+
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };
 
 /**
@@ -105,7 +127,7 @@ export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string
  * store (its id) or "all". Counts against the old address's three a day
  * before anything is written; the request and both links end with its day.
  */
-export async function askPurchaseMove(input: { from: unknown; to: unknown; scope: unknown; now?: number }): Promise<MoveAsk> {
+export async function askPurchaseMove(input: { from: unknown; to: unknown; scope: unknown; now?: number; day?: MoveDayTaken }): Promise<MoveAsk> {
   const now = input.now ?? Date.now();
   const made = newMoveRequest({ from: input.from, to: input.to, scope: readMoveScope(input.scope), now: seconds(now) });
   if (typeof made === "string") return { ok: false, reason: made };
@@ -114,11 +136,12 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   const json = JSON.stringify(record);
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
-  const day = dayKey(made.from, now);
-  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
-  const count = counted ? countOf(counted[0]) : null;
-  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
-  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  if (input.day) {
+    if (input.day[DAY_TAKEN] !== true || input.day.from !== made.from || input.day.now !== now) return { ok: false, reason: "unknown" };
+  } else {
+    const day = await takePurchaseMoveDay(made.from, now);
+    if (!day.ok) return { ok: false, reason: day.reason === "email" ? "unknown" : day.reason };
+  }
 
   const id = randomBytes(16).toString("hex");
   const fromToken = randomBytes(24).toString("hex");

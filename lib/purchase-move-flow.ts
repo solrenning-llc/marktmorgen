@@ -10,10 +10,11 @@
  * request first holds a public request of the store's buyers' side
  * (lib/traffic.ts), before anything is read, so nobody can make the store
  * read more than it was paid for; it is refused, with nothing read, when the
- * store has no room. Then: an address the store deleted, the current one or
- * the new one, is refused (lib/suppression.ts: what the person-data registry
- * promises for an `expires` module, "never acted on for a deleted address");
- * at most three requests an address a day (lib/purchase-moves.ts); and the
+ * store has no room. Then: at most three attempts an address a day
+ * (lib/purchase-moves.ts); an address the store deleted, the current one or
+ * the new one, is never contacted and its deletion is not disclosed
+ * (lib/suppression.ts: what the person-data registry promises for an
+ * `expires` module, "never acted on for a deleted address"); and the
  * two emails, one link to each address, the current one first. Each is
  * taken from the store's access emails before it goes (lib/email.ts,
  * EmailMeter "store", "transactional"; the new address, typed by the buyer,
@@ -46,7 +47,7 @@ import { sendEmail } from "@/lib/email";
 import { suppressedAmong } from "@/lib/suppression";
 import { takePublicRequest } from "@/lib/traffic";
 import { type MoveSide, type MoveState, moveState, readMoveAddresses } from "@/lib/purchase-move-rules";
-import { askPurchaseMove, confirmPurchaseMove, readMoveLink } from "@/lib/purchase-moves";
+import { askPurchaseMove, confirmPurchaseMove, readMoveLink, takePurchaseMoveDay } from "@/lib/purchase-moves";
 import { PURCHASE_MOVE_DELIVERED, purchaseMoveOpen } from "@/lib/purchase-move-open";
 import { type AskState, type ConfirmState, moveWords } from "@/lib/purchase-move-words";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
@@ -107,13 +108,22 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
   if (!current) return "signed-out";
   const addresses = readMoveAddresses(current, input.to);
   if (addresses === "email" || addresses === "same") return addresses;
+  let day: Awaited<ReturnType<typeof takePurchaseMoveDay>>;
+  try {
+    day = await takePurchaseMoveDay(addresses.from, now);
+  } catch {
+    return "error";
+  }
+  if (!day.ok) return day.reason === "over" || day.reason === "email" ? day.reason : "error";
   const deleted = await deletedAmong(store, [addresses.from, addresses.to]);
   if (deleted === "unknown") return "error";
-  if (deleted) return "deleted";
+  // The same public answer as a normal request, but no request, link or email
+  // is made: suppression membership is not exposed to the person typing `to`.
+  if (deleted) return "sent";
 
   let asked: Awaited<ReturnType<typeof askPurchaseMove>>;
   try {
-    asked = await askPurchaseMove({ from: addresses.from, to: addresses.to, scope: store.sid, now });
+    asked = await askPurchaseMove({ from: addresses.from, to: addresses.to, scope: store.sid, now, day });
   } catch {
     return "error";
   }

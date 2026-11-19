@@ -102,3 +102,19 @@ test("a stored question is read by the shape it was written in, not by today's l
   const empty = await assistantStore("voice.empty@example.com", "voice-empty", [["   ", S(now - 60_000)]]);
   await assert.rejects(() => assistantMissedExact(empty));
 });
+
+test("a historical assistant question omits the contact address before the summary prompt (Codex P and X4 on #3731, MEDIUM)", async () => {
+  // A row kept before the writer removed contact details: the reader for the summary takes them out again, as the
+  // studio's own reader does (lib/inbox-rules.ts forAi), so no address reaches the model or the screen.
+  const address = "synthetic＠example．invalid";
+  const store = await assistantStore("voice.old-contact@example.test", "voice-old-contact", [
+    [`Where is the printable guide? Replies to ${address}`, S(now - 86_400_000)],
+  ]);
+  const read = await assistantMissedExact(store);
+  assert.deepEqual(read.map((q) => q.question), ["Where is the printable guide? Replies to [email]"]);
+  const { items, unread } = await gatherVoice(store, now);
+  assert.deepEqual(unread, []);
+  const questions = items.filter((item) => item.source === "assistant");
+  assert.deepEqual(questions.map((item) => item.text), ["Where is the printable guide? Replies to [email]"]);
+  assert.ok(!voicePrompt(questions).includes(address));
+});

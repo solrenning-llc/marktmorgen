@@ -86,6 +86,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "We could not finish the move just now",
     body: "Your account was not moved, and it stays at its old address. Log in, then try the move again in a minute.",
   },
+  // Past the account's finished moves in 30 days (lib/move-pace.ts MOVES_PER_30_DAYS; app/api/auth/move).
+  "move-limited": {
+    title: "This account has moved too often for now",
+    body: "Nothing was changed, and your account stays at its old address. An account's sign-in address can change 10 times in 30 days. Try again later, or reply to any email from us if you need it moved sooner.",
+  },
   "move-error": {
     title: "The move did not finish",
     body: "Nothing was changed. Log in and try again.",

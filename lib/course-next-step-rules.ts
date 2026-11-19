@@ -127,8 +127,10 @@ export function lineProblem(line: string): NextStepProblem | null {
   if (any(PRESSURE)) return "pressure";
   if (any(DEAL_WORDS)) return "deal";
   // A figure in digits (any numeric character) or written in words or Roman numerals in any store language, read by the
-  // assistant's own reader (Codex N1, G and T on #3530): "Ten students completed it" is a count too.
-  if (any(/\p{N}/u) || read.some(writesAFigure)) return "number";
+  // assistant's own reader (Codex N1, G and T on #3530): "Ten students completed it" is a count too. The reader gets the
+  // reading that keeps its accents: it folds them itself, after it has told the French "très" from the Spanish "tres"
+  // (Codex X7 on #3530), which the accentless reading can no longer do.
+  if (any(/\p{N}/u) || writesAFigure(read[0])) return "number";
   if (any(/["“”«»„‟]/)) return "quote";
   if (any(/[!¡]/)) return "exclaim";
   return null;

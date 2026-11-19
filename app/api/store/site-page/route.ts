@@ -15,7 +15,7 @@ import { exactReplies } from "@/lib/redis-exact";
 import { claimNewPictures, dropPage, letGoUnlessShown, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { deleteOrSweep } from "@/lib/file-drop";
 import { ownsImagePath } from "@/lib/product-image";
-import { pictureChecker } from "@/lib/picture-check";
+import { PictureCheckRefused, paidFromStudio, pictureChecker } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, parseSitePages, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -324,8 +324,9 @@ export async function POST(request: NextRequest) {
         if (fresh.some((path) => !ownsImagePath(path, folder))) return refuse("pictures");
         // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
         // from the shared folder (lib/sales-page-store.ts, claimNewPictures). Only those this save takes from the door
-        // are checked in the file store, and once (MR audit gap 1).
-        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => (await countStudio(store, "page", units)).ok), claimed))) return refuse("pictures");
+        // are checked in the file store (MR audit gap 1); one whose check did not finish is checked once more, paid for
+        // first as a studio request (lib/picture-check.ts, pictureChecker).
+        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => paidFromStudio(await countStudio(store, "page", units))), claimed))) return refuse("pictures");
       }
       await writePage(statsId, key, page, store).catch(async (error: unknown) => {
         await letGoUnlessShown(statsId, key, claimed).catch(() => {});
@@ -355,6 +356,8 @@ export async function POST(request: NextRequest) {
     return refuse("invalid");
   } catch (error) {
     if (error instanceof StoreFullError) return refuse("store_full", 409);
+    // A picture's check made again that the studio's requests could not pay for: said as that (Codex N1 on #2843).
+    if (error instanceof PictureCheckRefused) return Response.json({ ok: false, error: "studio_used", message: error.words }, { status: 429 });
     console.error("changing a store's pages failed", error);
     return refuse("server_error", 500);
   }

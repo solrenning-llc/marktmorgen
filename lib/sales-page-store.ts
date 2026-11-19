@@ -33,7 +33,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
 import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { returnToDoor, takePictureDoor } from "@/lib/picture-door";
+import { PictureCheckRefused, returnToDoor, takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
@@ -124,7 +124,7 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  * the page is refused with server_error before it is written.
  */
 export async function claimNewPictures(
-  statsId: string, pageId: string, paths: string[], check?: (taken: ReadonlyMap<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
+  statsId: string, pageId: string, paths: string[], check?: (taken: ReadonlyMap<string, number>) => Promise<{ good: string[]; unknown: string[]; refused?: string }>,
   claimed?: Map<string, number>,
 ): Promise<boolean> {
   const unique = [...new Set(paths)];
@@ -158,7 +158,9 @@ export async function claimNewPictures(
   const backChecked = (paths: string[]) => returnToDoor(paths.map((path) => [path, Math.floor(taken.get(path) as number) + 0.5]));
   if (checks.unknown.length || fresh.length !== unclaimed.length) {
     await backChecked(fresh);
-    if (checks.unknown.length) throw new Error("page pictures: a check of the file store did not finish");
+    // A check made again that the studio's requests could not pay for is said as that, with the count's words
+    // (Codex N1 on #2843, LOW 3); any other check that did not finish stays ours to say.
+    if (checks.unknown.length) throw checks.refused ? new PictureCheckRefused(checks.refused) : new Error("page pictures: a check of the file store did not finish");
     return false;
   }
   if (fresh.length === 0) return true;

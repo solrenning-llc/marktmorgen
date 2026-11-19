@@ -10,6 +10,7 @@
 import { BlobNotFoundError } from "@vercel/blob";
 import { get, head } from "@/lib/blob";
 import { dropTakenPictures, putBackOnce, returnToDoor } from "@/lib/picture-door";
+export { PictureCheckRefused } from "@/lib/picture-door";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { sniffPhotoType } from "@/lib/store-photo";
 
@@ -68,8 +69,25 @@ export async function isStoredPicture(path: string): Promise<boolean> {
   return (await pictureVerdict(path)) === "picture";
 }
 
-/** What the checks of a page save's pictures found: the pictures, and those whose check did not finish. */
-export type PictureChecks = { good: string[]; unknown: string[] };
+/**
+ * What the checks of a page save's pictures found: the pictures, and those whose check did not finish. `refused` holds
+ * the studio's own words when a check made again was not made because the studio's requests could not pay for it
+ * (Codex N1 on #2843, LOW 3): the save then says that, never the generic server_error.
+ */
+export type PictureChecks = { good: string[]; unknown: string[]; refused?: string };
+
+/** What paying for checks made again answered: paid, refused with the words the creator is shown, or not known. */
+export type PicturePayment = { paid: true } | { paid: false; refused?: string };
+
+/**
+ * The payment read from a studio count (lib/studio-route.ts, countStudio): a count that could not be read is not
+ * known, never a refusal; every other "no" is a refusal with the count's own words.
+ */
+export function paidFromStudio(counted: { ok: true } | { ok: false; reason: string; message: string }): PicturePayment {
+  if (counted.ok) return { paid: true };
+  return counted.reason === "unknown" || !counted.message ? { paid: false } : { paid: false, refused: counted.message };
+}
+
 
 /**
  * The check of the pictures a page save has just taken from the picture door (lib/sales-page-store.ts,
@@ -83,10 +101,11 @@ export type PictureChecks = { good: string[]; unknown: string[] };
  * less than a studio request at its dearest); refused, nothing is checked and the picture is put back as it was. A
  * check made again that does not finish either leaves the file kept, out of the door: the creator uploads it again.
  */
-export function pictureChecker(pay: (units: number) => Promise<boolean>): (taken: ReadonlyMap<string, number>) => Promise<PictureChecks> {
+export function pictureChecker(pay: (units: number) => Promise<PicturePayment>): (taken: ReadonlyMap<string, number>) => Promise<PictureChecks> {
   return async (taken) => {
     const again = [...taken].filter(([, at]) => putBackOnce(at)).map(([path]) => path);
-    const paid = again.length === 0 || (await pay(again.length).catch(() => false));
+    const payment: PicturePayment = again.length === 0 ? { paid: true } : await pay(again.length).catch((): PicturePayment => ({ paid: false }));
+    const paid = payment.paid;
     const good: string[] = [];
     const bad: string[] = [];
     const unknown: string[] = [];
@@ -107,6 +126,6 @@ export function pictureChecker(pay: (units: number) => Promise<boolean>): (taken
     }
     if (bad.length) await dropTakenPictures(new Map(taken), bad);
     if (back.length) await returnToDoor(back);
-    return { good, unknown };
+    return payment.paid === false && payment.refused ? { good, unknown, refused: payment.refused } : { good, unknown };
   };
 }

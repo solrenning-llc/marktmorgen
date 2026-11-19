@@ -12,7 +12,7 @@ import { lockRead } from "@/lib/two-step-unknown";
 import { claimNewPictures, letGoUnlessShown, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { deleteOrSweep } from "@/lib/file-drop";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
-import { pictureChecker } from "@/lib/picture-check";
+import { PictureCheckRefused, paidFromStudio, pictureChecker } from "@/lib/picture-check";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -116,9 +116,10 @@ export async function POST(request: NextRequest) {
       }
       // Each new one fresh from the picture door or already this page's, never another record's picture from the
       // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
-      // Only those this save takes from the door are checked in the file store, and once (MR audit gap 1): one taken
-      // by an earlier save was checked then, so a save tried again never asks Blob about the same picture twice.
-      if (!(await claimNewPictures(store.statsId, id, fresh, pictureChecker(async (units) => (await countStudio(store, "products", units)).ok), claimed))) {
+      // Only those this save takes from the door are checked in the file store (MR audit gap 1): one taken by an earlier
+      // save was checked then. A picture is asked about again only after its check did not finish: put back on the door
+      // once, its check made again is paid for first, one studio request each (lib/picture-check.ts, pictureChecker).
+      if (!(await claimNewPictures(store.statsId, id, fresh, pictureChecker(async (units) => paidFromStudio(await countStudio(store, "products", units))), claimed))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }
@@ -163,6 +164,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, blocks: saved.blocks.length, page: saved });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // A picture's check made again that the studio's requests could not pay for: said as that (Codex N1 on #2843).
+    if (error instanceof PictureCheckRefused) return Response.json({ ok: false, error: "studio_used", message: error.words }, { status: 429 });
     console.error("saving a product page failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

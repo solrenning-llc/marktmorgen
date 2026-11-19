@@ -86,7 +86,11 @@ async function readGrant(token: string): Promise<Grant | null> {
   const replies = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
   if (!replies) throw new UnknownReplyError("a back-in-stock link");
   if (replies[0] === null) return null;
-  return parseGrant(replies[0]);
+  // Only Redis's own nil is "no link" (Codex G on #3616, rule 24): a kept value that does not read is unknown, so a
+  // leave is never answered as an expired link while the address stays on the list.
+  const grant = parseGrant(replies[0]);
+  if (!grant) throw new UnknownReplyError("a back-in-stock link");
+  return grant;
 }
 
 /**

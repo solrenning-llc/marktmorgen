@@ -192,6 +192,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/buyer-orders.ts": { how: "passing", days: 1, what: "A link to your purchases that was emailed to you works for 24 hours" },
   "lib/returning-code.ts": { how: "passing", days: 1, what: "If you asked for a code kept for returning buyers, the one-time link emailed to you is kept with the code, the product and your address for 30 minutes, then deleted" },
   "lib/membership-manage.ts": { how: "passing", days: 1, what: "A link to manage your membership that was emailed to you works for an hour" },
+  "lib/mail-frequency.ts": { how: "passing", days: 7, what: "When the store last emailed you, kept under a one-way code made from the store and your address so the gap the store chose between its emails holds; it says nothing else about you and is gone by itself within seven days" },
   "lib/request-guard.ts": { how: "passing", days: 32, what: "How often your address asked for things, counted by one-way codes, for at most 32 days" },
   "lib/erasure-request.ts": { how: "passing", days: 1, what: "A link you asked for to delete your data works for an hour" },
   "lib/store-assistant.ts": { how: "passing", days: 1, what: "What you asked the store's assistant, under a random code only your browser holds and with no name or address, deleted a day after your last message; it cannot be found by your address" },

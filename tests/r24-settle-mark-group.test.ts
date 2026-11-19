@@ -45,6 +45,13 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     emails += 1;
     return answer({ id: `email_r24claim${emails}` });
   }
+  // settleGroup reads the payment before it settles (#4494): the synthetic PaymentIntent, succeeded, with its own charge,
+  // neither refunded nor disputed. Every other read (refunds, disputes) is an empty list.
+  const paid = /^\/v1\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(url.pathname);
+  if (paid) {
+    const pi = paid[1];
+    return answer({ id: pi, object: "payment_intent", status: "succeeded", latest_charge: { id: `ch_${pi.slice(3)}`, object: "charge", payment_intent: pi, refunded: false, disputed: false } });
+  }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
@@ -141,7 +148,9 @@ async function groups() {
     const { id, settle } = await newGroup();
     const before = emails;
     is("an OK mark: settled once, one receipt", [await settle(), Boolean((await readGroup(id))?.paid), emails - before], ["settled", true, 1]);
-    is("settled again: already, nothing more sent", [await settle(), emails - before], ["already", 1]);
+    // Main keeps the mark once the group is paid and throws on a taken mark, never "already" (Claude 2 K and Claude 6 on
+    // #2872): settled again within the mark's 300 seconds is thrown, and nothing more is sent.
+    is("settled again within the mark: thrown, nothing more sent", [(await failure(settle)).startsWith("threw"), emails - before], [true, 1]);
   }
   {
     const { id, settle } = await newGroup();
@@ -159,7 +168,9 @@ async function groups() {
     const raced = await failure(settle).finally(() => {
       redis.pipeline = original;
     });
-    is("a nil mark, the group paid by the other run: already, nothing sent again", [raced, emails - before], ["resolved already", 0]);
+    // A taken mark is thrown, even once the other run has marked the group paid (Claude 2 K and Claude 6 on #2872): an
+    // "already" here could certify a receipt the other run never sent.
+    is("a nil mark, the group paid by the other run: thrown, nothing sent again", [raced.startsWith("threw"), emails - before], [true, 0]);
   }
   {
     const { id, settle } = await newGroup();

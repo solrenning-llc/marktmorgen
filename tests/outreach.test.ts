@@ -353,6 +353,31 @@ async function main(): Promise<void> {
     is("and the business is closed to the store all the same", (await readStopLink(answered.pitch.stop))?.stopped, true);
   }
   is("and the card counts those stops too", tally(await listPitches(store)), [4, 2, 5]);
+  {
+    // Codex L and U on #4123: the creator's mark lands after the business's stop, from a copy read before it.
+    const domain = "willowbrook.com";
+    const answered = await startPitch(store, { ...input, page: `https://${domain}/contact`, email: `hello@${domain}`, company: domain }, { reader: site({ [`https://${domain}/contact`]: `<p>hello@${domain}</p>` }), now: NOW + 180 });
+    if (!answered.ok) throw new Error(`no pitch to ${domain}: ${answered.reason}`);
+    await setPitchStatus(store, answered.pitch.id, "sent", NOW + 181);
+    const original = redis.pipeline.bind(redis);
+    let stoppedDuringMark = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const result = await original(commands);
+      if (!stoppedDuringMark && commands.length === 1 && commands[0][0] === "HGET" && commands[0][2] === answered.pitch.id) {
+        stoppedDuringMark = true;
+        is("the business stop lands after the creator read the pitch", await stopFromLink(answered.pitch.stop, false, NOW + 182), true);
+      }
+      return result;
+    }) as typeof redis.pipeline;
+    try {
+      is("the creator's mark completes", (await setPitchStatus(store, answered.pitch.id, "replied", NOW + 183))?.status, "replied");
+    } finally {
+      redis.pipeline = original;
+    }
+    const kept = (await listPitches(store)).find((p) => p.id === answered.pitch.id);
+    is("the inverse race keeps the answer and the request to stop", [stoppedDuringMark, kept?.status, (kept?.stoppedAt ?? 0) > 0], [true, "replied", true]);
+    is("and the business remains closed", (await readStopLink(answered.pitch.stop))?.stopped, true);
+  }
 
   part("Closed to every store");
   const two = await claimHandle("other@example.com", "bakes", "Bakes by Mo", "");

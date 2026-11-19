@@ -22,8 +22,9 @@
  * Like cancelling a membership, this works whatever state the creator's own
  * Marktmorgen subscription is in: somebody paid for that file, and they get it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
-import { packageState, readBought } from "@/lib/call-packages";
+import { packageReadCommands, packageState, readBought } from "@/lib/call-packages";
 import { giftFrom } from "@/lib/gifts";
 import { readPreorder, soonOne } from "@/lib/preorders";
 import { readPreorderJob } from "@/lib/preorder-rules";
@@ -39,7 +40,7 @@ import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
-import { isLiveSub, soldAMembership } from "@/lib/membership-access";
+import { liveExpanded, soldAMembership } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
@@ -699,7 +700,8 @@ async function purchaseFromSession(
     const product = bought ? await find(meta.product) : null;
     if (!bought || !product) return null;
     if ((await refundedFor(account, session, meter)) !== false) return null;
-    await meter?.take(bought.holds.length);
+    // One EXISTS a hold, the record of paid sessions and a seen session written down (packageReadCommands).
+    await meter?.take(packageReadCommands(bought));
     const state = await packageState(bought);
     return { customer: null, purchase: {
       reference: id,
@@ -728,8 +730,8 @@ async function purchaseFromSession(
   // A membership hands its thing over while it is being paid for.
   const member = soldAMembership(product, { mode: session.mode, metadata: meta });
   if (member) {
-    const sub = session.subscription as { status?: unknown } | null;
-    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+    // One that cannot be read throws (rule 24): never shown as ended, with the way to renew, to somebody who pays.
+    if (!liveExpanded(session.subscription)) {
       return { customer: null, purchase: {
         reference: id,
         kind: "sale",
@@ -1040,27 +1042,13 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   return kept.slice(0, MAX_LISTED);
 }
 
-/** A whole number from one up after INCR, or null when the reply is not exactly that. */
-function incremented(reply: unknown): number | null {
-  const count = countOf(reply);
-  return count !== null && count >= 1 ? count : null;
-}
-
 /**
  * Whether one more request fits in the hour: true or false on a count read in
  * its exact shape, null when the answer is missing, cut short or of another
  * shape, which is never taken as room (CX-123 rule 24).
  */
 async function within(key: string, limit: number): Promise<boolean | null> {
-  const both = repliesFor(
-    await redisPipeline([
-      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-      ["INCR", key],
-    ]),
-    2,
-  );
-  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
-  const count = incremented(both[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count === null ? null : count <= limit;
 }
 

@@ -226,7 +226,7 @@ part("Said in every language, and in the privacy policy");
 {
   const keys = ["quizKeptBack", "quizKeptClear", "quizKeptCleared", "quizKeepDevice", "quizKeepDeviceHint"] as const;
   for (const [lang, w] of Object.entries(COURSES_WORDS)) {
-    is(`${lang}: every phrase`, keys.every((k) => typeof (w as Record<string, unknown>)[k] === "string" && ((w as Record<string, string>)[k]).length > 3), true);
+    is(`${lang}: every phrase`, keys.every((k) => typeof (w as Record<string, unknown>)[k] === "string" && (((w as unknown) as Record<string, string>)[k]).length > 3), true);
     if (lang !== "en") is(`${lang}: not left in English`, keys.filter((k) => (w as Record<string, unknown>)[k] === (COURSES_WORDS.en as Record<string, unknown>)[k]), []);
   }
   const privacy = readFileSync("app/privacy/page.tsx", "utf8");

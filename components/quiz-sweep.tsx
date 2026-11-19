@@ -20,13 +20,16 @@ export function QuizSweep() {
   return null;
 }
 
-/** Drawn on the page signing out ends on: removes every quiz draft from this browser (forgetAllQuizDrafts). Draws nothing. */
+/** Drawn on the page signing out ends on: removes every quiz draft from this browser, device and tab (forgetAllQuizDrafts). Draws nothing. */
 export function ForgetQuizDrafts() {
   useEffect(() => {
-    try {
-      forgetAllQuizDrafts(window.localStorage);
-    } catch {
-      // Storage blocked: nothing was kept there either.
+    // On the device, where the student chose to keep one, and in this tab.
+    for (const area of ["localStorage", "sessionStorage"] as const) {
+      try {
+        forgetAllQuizDrafts(window[area]);
+      } catch {
+        // Storage blocked: nothing was kept there either.
+      }
     }
   }, []);
   return null;

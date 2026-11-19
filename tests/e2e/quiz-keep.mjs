@@ -18,7 +18,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
       <form action="https://quiz.test/sent" method="post">
         <input type="hidden" name="handle" value="shop" />
         <input type="hidden" name="shown" value={shown} />
-        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared }} />
+        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint }} />
         <fieldset><legend>One?</legend>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" /> A</label>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="1" /> B</label>
@@ -97,8 +97,8 @@ try {
 
   await open(ada);
   is("nothing kept and nothing said at first, though the status line is already there, empty", [await kept(), await status()], [null, ""]);
-  await tab.getByLabel("B").check();
-  await tab.getByLabel("D").check();
+  await tab.getByLabel("B", { exact: true }).check();
+  await tab.getByLabel("D", { exact: true }).check();
   is("each choice is kept in this tab as it is made, under this student's code", JSON.parse(await kept()).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] });
   is("and not on the device: keeping it there is off by default", [await onDevice(), await tab.getByLabel(DEVICE).isChecked()], [null, false]);
   is("nothing was sent", sent.length, 0);
@@ -136,19 +136,19 @@ try {
   is("once the server recorded a try, the draft is never put back, and is forgotten", [await picked(), await kept()], [[false, false, false, false], null]);
 
   await open(ada);
-  await tab.getByLabel("A").check();
+  await tab.getByLabel("A", { exact: true }).check();
   await open(ada);
   await tab.getByRole("button", { name: "Clear my answers" }).click();
   is("Clear my answers empties the choices and forgets them", [await picked(), await kept()], [[false, false, false, false], null]);
   is("says so, and the focus goes to the quiz's first choice, not nowhere", [await status(), await tab.evaluate(() => document.activeElement?.getAttribute("name"))], ["Your answers are cleared.", "q_aaaaaaaaaaa1"]);
 
-  await tab.getByLabel("A").check();
+  await tab.getByLabel("A", { exact: true }).check();
   await open(adaQuizChanged);
   await forgotten();
   is("a quiz the creator changed since never gets the old choices, and they are forgotten (review of #4324)", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);
 
   await open(ada);
-  await tab.getByLabel("A").check();
+  await tab.getByLabel("A", { exact: true }).check();
   await open(adaOtherQuestions);
   await forgotten();
   is("a try with other questions never gets them, and they are forgotten", [await picked(), await kept(), await status()], [[false, false, false, false], null, ""]);
@@ -161,7 +161,7 @@ try {
     await tab.locator("[data-quiz-forget]").waitFor({ state: "attached" });
   };
   await open(ada);
-  await tab.getByLabel("B").check();
+  await tab.getByLabel("B", { exact: true }).check();
   is("(control) a draft is kept before the lesson closes", JSON.parse(await kept()).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] });
   await openForget(adaWaiting);
   await tab.waitForTimeout(200);
@@ -175,8 +175,8 @@ try {
     Object.defineProperty(window, "sessionStorage", { get() { throw new Error("denied"); } });
   });
   await open(ada);
-  await tab.getByLabel("B").check();
-  is("a browser that keeps nothing: the quiz still works, nothing is said", [await tab.getByLabel("B").isChecked(), await status()], [true, ""]);
+  await tab.getByLabel("B", { exact: true }).check();
+  is("a browser that keeps nothing: the quiz still works, nothing is said", [await tab.getByLabel("B", { exact: true }).isChecked(), await status()], [true, ""]);
   is("no script error", errors, []);
 } finally {
   await browser.close();

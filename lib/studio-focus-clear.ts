@@ -38,3 +38,13 @@ export function focusScrollBy(input: FocusClearInput): number {
   if (!Number.isFinite(controlTop) || !Number.isFinite(barsBottom) || barsBottom <= 0) return 0;
   return controlTop < barsBottom ? controlTop - barsBottom - FOCUS_CLEAR_ROOM : 0;
 }
+
+/**
+ * The top of what a person sees for a focused control: the control itself, or, when it is visually hidden (a 1 px or
+ * empty box, as an sr-only radio inside its label), its visible label. A hidden control with no label gives NaN, no
+ * reading, so the rule answers 0: there is nothing on screen to bring clear.
+ */
+export function visibleTop(own: Readonly<{ top: number; width: number; height: number }>, label: Readonly<{ top: number }> | null): number {
+  if (own.width > 1 && own.height > 1) return own.top;
+  return label ? label.top : Number.NaN;
+}

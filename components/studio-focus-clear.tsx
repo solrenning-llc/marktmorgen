@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { focusScrollBy } from "@/lib/studio-focus-clear";
+import { focusScrollBy, visibleTop } from "@/lib/studio-focus-clear";
 
 /**
  * Keeps a focused control clear of the studio's sticky header and section bar where the browser does not
@@ -13,6 +13,12 @@ import { focusScrollBy } from "@/lib/studio-focus-clear";
  * touch press is left alone until that press ends: moving the page under the pointer would carry the click away.
  * Draws nothing.
  */
+/** The control's own label: the first one the browser links to it, or the label it sits in. */
+function labelOf(control: Element): Element | null {
+  const linked = "labels" in control ? (control as HTMLInputElement).labels : null;
+  return linked?.[0] ?? control.closest("label");
+}
+
 export function StudioFocusClear() {
   useEffect(() => {
     // True from a press's pointerdown until just after its click: the focus it gives is the click's own.
@@ -39,7 +45,8 @@ export function StudioFocusClear() {
       const inDialog = control.closest('dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]') !== null;
       if (pressing || inBars || inDialog || bars.length === 0) return;
       const by = focusScrollBy({
-        controlTop: control.getBoundingClientRect().top,
+        // A visually hidden control (an sr-only radio inside its label) is measured by the label a person sees.
+        controlTop: visibleTop(control.getBoundingClientRect(), labelOf(control)?.getBoundingClientRect() ?? null),
         barsBottom: Math.max(...bars.map((bar) => bar.getBoundingClientRect().bottom)),
         inDialog,
         inBars,

@@ -19,7 +19,7 @@
  * was taken off, as on any other checkout here.
  */
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
@@ -215,6 +215,11 @@ export async function createCartCheckout(
     if (extras.cameFrom.medium) body.set("metadata[utm_medium]", extras.cameFrom.medium);
     if (extras.cameFrom.campaign) body.set("metadata[utm_campaign]", extras.cameFrom.campaign);
   }
+  // A cart is one order, admitted before Stripe's page opens (lib/order-admission.ts), and before
+  // the creator's Stripe account is read for a code (below): a cart the store cannot take reads nothing (rule MR; audit G2).
+  const admitted = await admitOrders(store, 1, Date.now(), itemsHandedOver(products));
+  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
+  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
   // One discount at a time, as everywhere here: a code box only when nothing was taken off already.
   const box = !discounted && store.hasDiscounts;
   // A code from a link goes on by itself, as on one product's checkout
@@ -251,10 +256,6 @@ export async function createCartCheckout(
     keepConsentOn(body, extras.digitalConsent, "digital", 1);
     body.set(`payment_intent_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, "digital"));
   }
-  // A cart is one order, admitted before Stripe's page opens (lib/order-admission.ts).
-  const admitted = await admitOrders(store, 1, Date.now(), itemsHandedOver(products));
-  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
-  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
 
   for (;;) {
     try {
@@ -263,6 +264,8 @@ export async function createCartCheckout(
       else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
       const session = await onAccount("POST", store.stripeAccountId, "/checkout/sessions", body);
       if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
+      // Our record that this cart's checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+      await holdCheckout(store, session.id, admitted);
       return { url: session.url, id: session.id };
     } catch (error) {
       if (named && error instanceof StripeError && error.status === 400) {

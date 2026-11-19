@@ -72,6 +72,11 @@ export const EARNINGS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
 
 const ID = /^[A-Za-z0-9_]{3,255}$/;
 const CURRENCY = /^[A-Za-z]{3}$/;
+// A documented non-money state may be excluded; an unknown state cannot prove the record is not money.
+const CHECKOUT_STATUSES = new Set(["open", "complete", "expired"]);
+const CHECKOUT_PAYMENT_STATUSES = new Set(["paid", "unpaid", "no_payment_required"]);
+const INTENT_STATUSES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
+const INVOICE_STATUSES = new Set(["draft", "open", "paid", "uncollectible", "void"]);
 
 /** A whole count of seconds after 1970, or null. */
 const seconds = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
@@ -121,7 +126,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       const meta = metadataOf(row);
       const status = text(row, "status");
       const paid = text(row, "payment_status");
-      if (!meta || status === null || paid === null) return null;
+      if (!meta || status === null || paid === null || !CHECKOUT_STATUSES.has(status) || !CHECKOUT_PAYMENT_STATUSES.has(paid)) return null;
       if (!ours(meta) || status !== "complete" || paid !== "paid") return "skip";
       return money(row, "amount_total", created);
     },
@@ -129,7 +134,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
     extras: (row, created) => {
       const meta = metadataOf(row);
       const status = text(row, "status");
-      if (!meta || status === null) return null;
+      if (!meta || status === null || !INTENT_STATUSES.has(status)) return null;
       if (ownField(meta, "kind") !== "upsell" || !ours(meta) || status !== "succeeded") return "skip";
       return money(row, "amount", created);
     },
@@ -138,7 +143,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
     invoices: (row, created) => {
       const status = text(row, "status");
       const reason = text(row, "billing_reason");
-      if (status === null || reason === null) return null;
+      if (status === null || reason === null || !INVOICE_STATUSES.has(status)) return null;
       if (status !== "paid" || reason === "subscription_create") return "skip";
       // An invoice of no subscription (one the creator sent by hand, or a quote's): not a membership's.
       const parent = ownField(row, "parent");

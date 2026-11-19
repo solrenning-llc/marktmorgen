@@ -519,11 +519,13 @@ export async function forgetBenefitPerson(store: Store, person: string): Promise
   const flat = stringList(held);
   const replies = repliesFor(await redisPipeline([["DEL", key], ["SREM", whoKey(store.statsId), person]]), 2);
   const gone = replies ? countOf(replies[0]) : null;
-  if (gone === null || !replies || countOf(replies[1]) === null) throw new UnknownReplyError("deleting a person's benefit marks");
+  const unlisted = replies ? countOf(replies[1]) : null;
+  // One key and one member: only 0 or 1 is a possible answer; anything else leaves the step to retry.
+  if (gone === null || gone > 1 || unlisted === null || unlisted > 1) throw new UnknownReplyError("deleting a person's benefit marks");
   let bytes = 0;
   if (flat) for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
   // Their place in the list goes with them, and its room.
-  if (countOf(replies[1]) === 1) bytes += whoBytes(person);
+  if (unlisted === 1) bytes += whoBytes(person);
   if (bytes) await giveData(store, [{ slot: SLOT, bytes }]);
   return gone;
 }

@@ -24,6 +24,7 @@
  *   account      a creator's or teammate's own sign-in and account, not a store's people
  *   none         found by the scan, and keeps nothing about a store's people
  */
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 
 export type PersonData =
   | { file: string; how: "erased"; what: string; via?: string; only?: ErasureBy }
@@ -113,6 +114,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
+  { file: "lib/backup-deletions.ts", how: "kept", what: "Built but off: once the file backup is turned on, deleting a file they handed in keeps a note of that file's name, which holds a one-way fingerprint of their address (never the address), as for every deleted file, whose name may hold your original file name. The note stays in our database for 14 days after the last deletion of that day, and in the backup for 92 days", why: "The note is how the backup finds the copy of the deleted file and deletes it too, a deletion they asked for included. It holds nothing else about them and is used for nothing else." },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
   { file: "lib/lesson-notes.ts", how: "erased", what: "Their private notes on lessons, which only they could see" },
@@ -149,7 +151,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/paypal-sales.ts", how: "kept", what: "PayPal orders: the order and capture ids, the product, the amount, the date, the buyer's address and, for something opened right away, the box they checked before paying (\"yes\", the version and kind of its words and the time)", why: "They are the sale's own record, kept 400 days for refunds, disputes and your books, and nowhere else but in PayPal." },
   { file: "lib/licence-keys.ts", how: "kept", what: "License keys sold: the key, the sale it came from and the buyer's address", why: "The key is what was bought; it stays theirs, and the sale needs it for refunds." },
   { file: "lib/licence-activations.ts", how: "kept", what: "The devices a license key runs on, each as a one-way code made with a key only the server holds, different for every license key and never the identifier the creator's software sent, and when the buyer freed one", why: "They hold the key to the number of devices it was sold for, so they are kept with the key, which the erasure keeps too; nobody can turn a code back into the device or match it on another key, and they are gone by themselves 400 days after their last change." },
-  { file: "lib/gifts.ts", how: "kept", what: "Gifts bought: who paid, who it was for, and the payment", why: "They are the order's record, for refunds and delivery." },
+  { file: "lib/gifts.ts", how: "kept", what: "Gifts bought: who paid, who it was for, the name and the message the giver typed for them, and the payment", why: "They are the order's record, for refunds and delivery." },
   { file: "lib/group-buy.ts", how: "kept", what: "Places bought for a group: the purchase and the address each place went to", why: "They are the order's record, for refunds and delivery." },
   { file: "lib/preorders.ts", how: "kept", what: "Pre-orders: who paid and what became of the order", why: "They are the order's record until it is delivered or refunded." },
   { file: "lib/call-packages.ts", how: "kept", what: "Packages of calls bought: the buyer's address and the sessions left", why: "They are the order's record: the calls still owed to them." },
@@ -208,8 +210,11 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
 ];
 
+/** Whether a line is said today: the backup's deletion records only once their reviews are filled (VR item 2). */
+const saidToday = (d: PersonData) => d.file !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null);
+
 /** Whether a line holds for this door. */
-const holdsFor = (d: PersonData, door?: ErasureBy) => !door || !("only" in d) || !d.only || d.only === door;
+const holdsFor = (d: PersonData, door?: ErasureBy) => saidToday(d) && (!door || !("only" in d) || !d.only || d.only === door);
 
 /** The lines of one kind, each said once, in the order above; for one door when given. */
 export function linesOf(how: PersonData["how"], door?: ErasureBy): string[] {

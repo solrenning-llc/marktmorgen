@@ -46,11 +46,16 @@ export type FxCeiling = Readonly<{
   validThrough: string;
 }>;
 
-/** One reviewed scope: the counter's place totals are the rule's applicable supplies over its whole window. */
+/**
+ * One reviewed scope: the counter's place totals are the rule's applicable supplies over its whole window. It holds
+ * from `reviewedOn` through `validThrough` (UTC days), like a rate: what the checkout sells and the window both move,
+ * so a review lapses and is read again (Claude 3's LOW on #4902).
+ */
 export type ScopeReview = Readonly<{
   ruleId: TaxThresholdRuleId;
   evidence: string;
   reviewedOn: string;
+  validThrough: string;
 }>;
 
 export type OtherCountryReviews = Readonly<{ fx: readonly FxCeiling[]; scopes: readonly ScopeReview[] }>;
@@ -182,7 +187,9 @@ export function otherCountrySnapshotUnder(
   }
   const proposedMinor = convert(sale.amountMinor, sale.currency, to, day, reviews.fx);
   if (proposedMinor === null) return UNKNOWN;
-  const reviewed = reviews.scopes.some((scope) => scope.ruleId === ruleId && typeof scope.reviewedOn === "string" && DAY.test(scope.reviewedOn) && scope.reviewedOn <= day && typeof scope.evidence === "string" && scope.evidence.length > 0);
+  const reviewed = reviews.scopes.some((scope) => scope.ruleId === ruleId && typeof scope.evidence === "string" && scope.evidence.length > 0
+    && typeof scope.reviewedOn === "string" && DAY.test(scope.reviewedOn) && scope.reviewedOn <= day
+    && typeof scope.validThrough === "string" && DAY.test(scope.validThrough) && day <= scope.validThrough);
   return {
     ruleId,
     currency: to,

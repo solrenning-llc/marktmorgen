@@ -153,7 +153,7 @@ test("without a reviewed scope the snapshot says so, and the assessment refuses"
   for (const scope of [
     { ...REVIEWS.scopes[0], validThrough: "2026-11-18" },
     { ...REVIEWS.scopes[0], validThrough: "2026-1-31" },
-    (({ validThrough: _drop, ...rest }) => rest)(REVIEWS.scopes[0]),
+    Object.fromEntries(Object.entries(REVIEWS.scopes[0]).filter(([key]) => key !== "validThrough")),
   ]) {
     const lapsed = otherCountrySnapshotUnder({ ...REVIEWS, scopes: [scope as never] }, "CA", totals(1), sale(1), NOW);
     assert.ok("ruleId" in lapsed && lapsed.applicableScopeReviewed === false && lapsed.completeRollingCoverage === false, JSON.stringify(scope));

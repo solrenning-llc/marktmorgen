@@ -1709,8 +1709,11 @@ async function decideCalendars(entry: Batched): Promise<string[]> {
     const serves = typeof email === "string" ? await servesAnother(email, entry.sid) : null;
     if (serves === true) continue;
     if (serves === false) {
-      const reply = repliesFor(await redisPipeline([["DEL", ...hostCalendarKeys(hostId(email))]]), 1)?.[0];
-      if (Number.isSafeInteger(reply) && (reply as number) >= 0) continue;
+      // One DEL of the calendar's keys answers how many it removed: only 0 to that many is a count; anything above it
+      // proves nothing, and the host is decided again on the next run (Codex U, U-20261119-0633).
+      const keys = hostCalendarKeys(hostId(email));
+      const reply = repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0];
+      if (Number.isSafeInteger(reply) && (reply as number) >= 0 && (reply as number) <= keys.length) continue;
       console.error("deleting a closed store's host's calendar was not confirmed; it is decided again on the next run", reply);
     }
     undecided.push(email);

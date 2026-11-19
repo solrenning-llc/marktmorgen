@@ -36,7 +36,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
+import { type BatchMessage, type SendOutcome, NIMBUS_FROM, sendBatch, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -76,7 +76,7 @@ export const UPDATE_HELD_LOOK_SECONDS = 86_400;
 export const UPDATE_HELD_PER_RUN = 100;
 /**
  * Tries, a day apart, of the company email that tells the creator a send which waited to the end of its 60 days was
- * not sent to everyone (Claude 7 on #3403, MEDIUM 1): a refused or unknown try is tried again the next day; past the
+ * not sent to everyone (Claude 7 on #3403, MEDIUM 1): a refusal is tried again the next day; past the
  * last one the send ends all the same, logged.
  */
 export const UPDATE_END_NOTICE_TRIES = 3;
@@ -419,13 +419,13 @@ async function hold(id: string, nowSeconds: number): Promise<void> {
 
 /**
  * Tells the store's owner that a send which waited to the end of its 60 days was not sent to everyone (Claude 7 on
- * #3403, MEDIUM 1): one company email, under one key a send so a retry the provider already took is not sent twice.
- * True only when it was sent; a store with no address to write to has nobody to tell, and counts as told.
+ * #3403, MEDIUM 1). The sender's receipt is separate from its acceptance: do not retry a notice it may have taken.
+ * A store with no address to write to has nobody to tell, and counts as told.
  */
-async function tellEnded(store: Store, job: UpdateJob): Promise<boolean> {
-  if (!store.email) return true;
+async function tellEnded(store: Store, job: UpdateJob): Promise<SendOutcome> {
+  if (!store.email) return "sent";
   const because = job.why === "plan" ? "your plan did not include email" : "your store's pages and sales were switched off after notices about its content";
-  return sendEmail({
+  return sendEmailOutcome({
     meter: { by: "company" },
     from: NIMBUS_FROM,
     to: store.email,
@@ -438,7 +438,7 @@ async function tellEnded(store: Store, job: UpdateJob): Promise<boolean> {
       "You can send a new update from the product's page in your studio.",
     ].join("\n"),
     idempotencyKey: `update-ended-${job.id}`,
-  }).catch(() => false);
+  }).catch(() => "uncertain");
 }
 
 /**
@@ -472,17 +472,19 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
     // wait below, so a send held while the store is off or its plan has no email never stays queued without end.
     if (nowSeconds >= job.createdAt + KEEP_SECONDS) {
       // One that waited to its end was not sent to everyone: the creator is told by a company email, never left to
-      // find it out (Claude 7 on #3403, MEDIUM 1). A try that is not sent is tried again the next day, at most
-      // UPDATE_END_NOTICE_TRIES; nothing more goes to a buyer meanwhile (its recipient list is gone with its 60 days).
+      // find it out (Claude 7 on #3403, MEDIUM 1). A confirmed refusal is tried again the next day, at most
+      // UPDATE_END_NOTICE_TRIES. Nothing more goes to a buyer (its recipient list expired).
       if (job.status === "waiting") {
         const tries = (job.told ?? 0) + 1;
-        if (!(await tellEnded(store, job)) && tries < UPDATE_END_NOTICE_TRIES) {
+        const notice = await tellEnded(store, job);
+        if (notice === "refused" && tries < UPDATE_END_NOTICE_TRIES) {
           job = { ...job, told: tries };
           await save(job);
           await hold(id, nowSeconds);
           return job;
         }
-        if (tries >= UPDATE_END_NOTICE_TRIES) console.error("a product update ended without its creator told", id);
+        if (notice === "uncertain") console.error("the sender may have taken a product update's end notice", id);
+        if (notice === "refused") console.error("a product update ended without its creator told", id);
       }
       job = { ...job, status: "failed", note: "The recipient list expired. Nothing more was sent." };
       await save(job);

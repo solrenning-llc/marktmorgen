@@ -271,6 +271,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
+        if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, who, prefix] = args;
+          // As Redis does: a list that is not there reads as none and deletes nothing (SMEMBERS here would leave an empty set).
+          const members = this.run(["EXISTS", who]) === 1 ? (this.run(["SMEMBERS", who]) as string[]) : [];
+          if (members.some((session) => !/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(session))) return [-1, members.length];
+          let gone = 0;
+          for (const session of members) gone += Number(this.run(["DEL", prefix + session]));
+          if (members.length) gone += Number(this.run(["DEL", who]));
+          return [gone, members.length];
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
@@ -1179,6 +1190,22 @@ export class MemoryRedis {
           const [, storeId, erasing, watch, field, score, order] = args;
           if (this.run(["EXISTS", storeId]) === 0 || this.run(["HEXISTS", erasing, field]) === 1) return -1;
           return this.run(["ZADD", watch, score, order]);
+        }
+        // lib/payment-request-store.ts: the observed request and every index deleted together, only by its holder.
+        if (key.startsWith("-- marktmorgen:payreq-delete:v1\n") && args[0] === "6" && args.length === 11) {
+          const [, lock, target, store, open, due, person, token, observed, id, member] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          if (this.run(["GET", target]) !== observed) return 2;
+          for (const [at, index] of [store, open, due, person].entries()) {
+            this.live(index);
+            const value = this.data.get(index);
+            // Redis removes an empty zset; the stand-in retains its empty array.
+            const kind = Array.isArray(value) && value.length === 0 ? "none" : this.run(["TYPE", index]);
+            if (kind !== "none" && kind !== (at === 3 ? "set" : "zset")) return 3;
+          }
+          this.run(["ZREM", store, id]); this.run(["ZREM", open, id]); this.run(["ZREM", due, member]);
+          this.run(["SREM", person, id]); this.run(["DEL", target]);
+          return 1;
         }
         // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
         // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
@@ -2651,6 +2678,19 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
+        // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
+        // exists and the closing walk has not installed its erasure field. The final two keys and final argument are
+        // the fence and are removed before the ordinary write is modelled.
+        if (key.startsWith("-- marktmorgen:order-write-if-store-live:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isSafeInteger(count) || count < 3 || argv.length < 2 || argv.at(-1) === "") return [-1];
+          const [storeId, erasing] = keys.slice(-2);
+          const field = argv.at(-1) as string;
+          if (this.run(["EXISTS", storeId]) !== 1 || this.run(["HEXISTS", erasing, field]) === 1) return [-3];
+          return this.orderWrite([String(count - 2), ...keys.slice(0, -2), ...argv.slice(0, -1)]);
+        }
         // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.
         if (key.startsWith("-- marktmorgen:license-sale-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, sales, reference, expected, next] = args;

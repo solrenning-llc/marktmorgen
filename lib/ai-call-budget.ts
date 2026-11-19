@@ -21,6 +21,13 @@ export function noteAiDispatch(storeId: string): boolean {
   budget.dispatched++;
   return true;
 }
+/** How many calls the running job's budget has seen reach the provider so far
+ * (noteAiDispatch), so a job told in steps knows which of its steps really
+ * started (lib/ai.ts, writePage); null outside a job. */
+export function aiDispatchCount(): number | null {
+  const budget = context.getStore();
+  return budget && !budget.closed ? budget.dispatched : null;
+}
 /** What a job's own budget saw, filled in when the job ends: `owned` is false
  * when it ran inside a parent's budget, whose calls it cannot tell apart. */
 export type AiCallReport = { owned: boolean; dispatched: number };

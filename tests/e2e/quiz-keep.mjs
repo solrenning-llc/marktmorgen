@@ -18,7 +18,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
       <form action="https://quiz.test/sent" method="post">
         <input type="hidden" name="handle" value="shop" />
         <input type="hidden" name="shown" value={shown} />
-        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} language="en" words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint, quizKeptAsk: w.quizKeptAsk, quizKeptRestore: w.quizKeptRestore, quizKeptStartOver: w.quizKeptStartOver }} />
+        <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} language="en" words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint, quizKeptAsk: w.quizKeptAsk, quizKeptRestore: w.quizKeptRestore, quizKeptStartOver: w.quizKeptStartOver, quizKeptUndo: w.quizKeptUndo, quizKeptUndone: w.quizKeptUndone }} />
         <fieldset><legend>One?</legend>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" /> A</label>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="1" /> B</label>
@@ -159,7 +159,16 @@ try {
   await restore();
   await tab.getByRole("button", { name: "Clear my answers" }).click();
   is("Clear my answers empties the choices and forgets them", [await picked(), await kept()], [[false, false, false, false], null]);
-  is("says so, and the focus goes to the quiz's first choice, not nowhere", [await status(), await tab.evaluate(() => document.activeElement?.getAttribute("name"))], ["Your answers are cleared.", "q_aaaaaaaaaaa1"]);
+  // Review of #4324 (MEDIUM 10): clearing is never final at once. The focus goes to a text saying the answers were
+  // cleared, and Undo, with no time limit (2.2.3), puts them back until the next change.
+  is("says so where the focus goes, never nowhere", [await tab.evaluate(() => document.activeElement?.textContent), await tab.evaluate(() => document.activeElement?.getAttribute("tabindex"))], ["Your answers are cleared.", "-1"]);
+  await tab.getByRole("button", { name: "Undo" }).click();
+  is("Undo puts the cleared answers back, and keeps them again", [await picked(), JSON.parse((await kept()) ?? "null")?.answers], [[true, false, false, false], { q_aaaaaaaaaaa1: [0], q_aaaaaaaaaaa2: [] }]);
+  is("and says so", await status(), "Your answers are back.");
+  await tab.getByRole("button", { name: "Clear my answers" }).click();
+  await tab.getByLabel("C", { exact: true }).check();
+  is("once another answer is picked, there is nothing left to undo", await tab.getByRole("button", { name: "Undo" }).count(), 0);
+  await tab.getByLabel("C", { exact: true }).uncheck();
 
   await tab.getByLabel("A", { exact: true }).check();
   await open(adaQuizChanged);

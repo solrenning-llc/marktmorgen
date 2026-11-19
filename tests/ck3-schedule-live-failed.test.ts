@@ -181,6 +181,34 @@ async function main() {
       redis.run = realRun;
     }
 
+    // Codex T (T-20261119-0922, MEDIUM, money): an ordinary failure, here the schedule's end reached before any try,
+    // wrote its decision, left the due list and queued its notice in one plain pipeline. An interrupted notice write
+    // left it failed and out of the due list with no notice queued, and the repair only ran for an unconfirmed stop.
+    part("An ordinary failure interrupted at its notice keeps the notice recoverable, and the creator is told once");
+    await reset();
+    await redis.pipeline([["DEL", sched.TELL_KEY]]);
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    notices.length = 0;
+    const plainRun = redis.run.bind(redis);
+    let cut = false;
+    redis.run = (command) => {
+      if (!cut && command[0] === "ZADD" && command[1] === sched.TELL_KEY) {
+        cut = true;
+        throw new Error("synthetic write interruption before an ordinary failure's notice was queued");
+      }
+      return plainRun(command);
+    };
+    try {
+      await sched.activateScheduledCodes(Date.now() + 10_000, end, telling as typeof deps);
+      is("the failed decision stays due until its notice is queued", [cut, await isDue(), await failedFlag()], [true, true, true]);
+      await sched.activateScheduledCodes(Date.now() + 10_000, end + RETRY_SECONDS, telling as typeof deps);
+      await sched.activateScheduledCodes(Date.now() + 10_000, end + 2 * RETRY_SECONDS, telling as typeof deps);
+      is("the repair sends the ordinary warning once", notices.map((n) => [n.code, n.stopUnconfirmed === true]), [["TESTCODE", false]]);
+      is("and nothing is left due", await isDue(), false);
+    } finally {
+      redis.run = plainRun;
+    }
+
     part("A repeatedly failed notice enqueue spends the existing finite notice budget");
     await reset();
     await redis.pipeline([["DEL", sched.TELL_KEY]]);

@@ -357,7 +357,7 @@
    },
    "coefYear": {
     "ai": 0,
-    "video": 69,
+    "video": 70,
     "storage": 153,
     "orders": 505,
     "store-email": 82,
@@ -6543,7 +6543,7 @@
     "store-email": 871,
     "transactional-email": 1125,
     "list-email": 10800,
-    "visits": 12569
+    "visits": 12570
    }
   }
  }

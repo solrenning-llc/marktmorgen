@@ -419,9 +419,19 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       if (once !== "ours") {
         // Heard one lately, erased, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the
         // next run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
-        // Erased too (Codex X7 on #4877): the membership's mark is a pseudonymous id of the person's subscription, let go
-        // with the erasure, never kept for its 90 days.
-        if (once === "unknown" || once === "erased") await releaseMark(sentKey(account, subId), claim);
+        if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
+        if (once === "erased") {
+          // The membership's mark is a pseudonymous id of the erased person's subscription (Codex X7 on #4877): let go
+          // with the erasure, its release read (Codex L on #4877). Not confirmed, it is tried once more at once; still
+          // not confirmed, Redis is not answering as asked, so the store's run stops there, counted with the links not
+          // written (UNWRITTEN_LINKS_PER_RUN), and the mark is never taken as cleaned.
+          const letGo = (await releaseMark(sentKey(account, subId), claim)) || (await releaseMark(sentKey(account, subId), claim));
+          if (!letGo) {
+            console.error("a come-back mark of an erased person could not be let go; the store's run stops", store.handle);
+            unwritten += 1;
+            break;
+          }
+        }
         continue;
       }
 

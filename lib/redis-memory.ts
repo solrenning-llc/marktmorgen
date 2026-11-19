@@ -142,10 +142,10 @@ export class MemoryRedis {
           const [, prints, once, link, notes, print, onceValue, onceSeconds, grant, linkSeconds, at, oldest, notesSeconds] = args;
           if (this.run(["HEXISTS", prints, print]) === 1) return 2;
           if (this.run(["SET", once, onceValue, "NX", "EX", onceSeconds]) !== "OK") return 0;
-          this.run(["SET", link, grant, "EX", linkSeconds]);
           this.run(["ZADD", notes, at, link]);
           this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
           this.run(["EXPIRE", notes, notesSeconds]);
+          this.run(["SET", link, grant, "EX", linkSeconds]);
           return 1;
         }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.

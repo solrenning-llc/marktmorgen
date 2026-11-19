@@ -67,15 +67,16 @@ const countKey = (statsId: string) => `nl:wb:n:${statsId}`;
 export const WINBACK_CLAIM = `-- marktmorgen:winback-claim:v1
 if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 1 then return 2 end
 if not redis.call("SET", KEYS[2], ARGV[2], "NX", "EX", ARGV[3]) then return 0 end
-redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[5])
 redis.call("ZADD", KEYS[4], ARGV[6], KEYS[3])
 redis.call("ZREMRANGEBYSCORE", KEYS[4], "-inf", ARGV[7])
 redis.call("EXPIRE", KEYS[4], ARGV[8])
+-- Redis script errors do not roll earlier writes back: keep the address only after its erasure note is complete.
+redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[5])
 return 1`;
 
 type WinbackClaim = "ours" | "taken" | "erased" | "unknown";
 
-/** WINBACK_CLAIM, read exactly: a reply of another shape is read back from the once-mark, as claimMark does. */
+/** A lost claim receipt is confirmed by its exact grant, written LAST, after the erasure index, not by an earlier mark. */
 async function claimOffer(listId: string, email: string, once: string, onceValue: string, link: string, grant: string, statsId: string): Promise<WinbackClaim> {
   const note = noteForErasure(statsId, email, link);
   const [zadd, prune, expire] = note;
@@ -93,8 +94,8 @@ async function claimOffer(listId: string, email: string, once: string, onceValue
   if (reply === 0) return "taken";
   if (reply === 2) return "erased";
   try {
-    const held = repliesFor(await redisPipeline([["GET", once]]), 1);
-    if (held && held[0] === onceValue) return "ours";
+    const held = repliesFor(await redisPipeline([["GET", link]]), 1);
+    if (held && held[0] === grant) return "ours";
   } catch {
     // unknown below
   }
@@ -315,7 +316,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const once = await claimOffer(store.listId, email, onceKey(statsId, email, product.id), onceValue, linkKey(token), JSON.stringify(grant), statsId);
       if (once !== "ours") {
         // Heard one lately, erased, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the
-        // next run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
+        // next run asks again. An oddly answered complete script is proved by its exact final grant above; a partial script is never ours.
         if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
         continue;
       }

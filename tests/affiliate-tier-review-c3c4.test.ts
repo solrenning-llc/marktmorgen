@@ -81,7 +81,7 @@ const invoice = (id: string, email: string | null) => ({
   id, status: "paid", billing_reason: "subscription_cycle", amount_paid: 5_000, currency: "usd", ...(email ? { customer_email: email } : {}),
   created: NOW - 900, status_transitions: { paid_at: NOW - 900 }, total_taxes: [],
   parent: { subscription_details: { metadata: { store: "harbor", product: "prod01", via: BEA, via_rate: "30", kind: "plan" } } },
-  payments: { data: [{ payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
+  payments: { object: "list", has_more: false, data: [{ status: "paid", payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
 });
 
 async function setup() {

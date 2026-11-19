@@ -63,7 +63,7 @@ import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { PATH_LEAD_DAYS } from "@/lib/path-lead";
-import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
+import { BOOK_INVOICES_KEPT_BYTES, NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
@@ -283,6 +283,8 @@ export const FAMILIES: Record<string, Family> = {
     parts: [
       capped(MAX_AFFILIATES * (1_536 + 4 * ENTRY_BYTES), "MAX_AFFILIATES records (an address, a note of MAX_NOTE_LENGTH in any script, the rest), each with its address, code and click counts.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"), src("lib/affiliates.ts", "MAX_NOTE_LENGTH")),
       kept(512, "A sale credited and up to two partners' shares of it; while its buyer is not confirmed, also its place on the store's list the five-minute job reads again (a reference and a time), taken from the same room in the same write."),
+      // Audit A1 (9 November 2026): the paid invoices the book read whole, kept for the next reading.
+      capped(BOOK_INVOICES_KEPT_BYTES + KEY, "One record a store of the membership and plan payments the book read whole (an invoice's line, never the buyer's address), INVOICES_KEPT_MAX_BYTES at the most, INVOICE_KEEP_SECONDS after the last reading that wrote it.", src("lib/affiliates.ts", "INVOICES_KEPT_MAX_BYTES", "INVOICE_KEEP_SECONDS")),
       kept(3 * REFUND_MARK_MAX_BYTES, "The refund kept on the sale and on each partner's share when read on the account it was paid into (lib/affiliates.ts AFFILIATE_REFUND_MARK): one field, `rf`, in base 36, the account being the record's own `acct`."),
     ],
   },
@@ -416,7 +418,8 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept until 200 days after the call it moved to, two years at most", "call", 730, KB),
-  "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
+  "nl:closed:claims:@lib/closed-store-data.ts": company("Where a closing store's preparation stopped in its hosts' claims, until it reaches their end", "The company's job: one key a closing store with more claims than a walk reads, deleted with the store and expiring by itself CLAIMS_LEFT_DAYS (14) after the last walk that wrote it (lib/closed-store-data.ts, clearClaims)."),
+  "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts); one whose hosts' own calendars are not decided yet stays after its walk, set aside with only its ref, its id and those hosts, until each is known (decideCalendars)."),
   "nl:closed:due@lib/closed-store-data.ts": company("Closed stores waiting for the walk that deletes their records", "The company's job: a member a closed store, taken out when its walk begins."),
   "nl:closed:due@lib/store.ts": company("The same walk's line, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 6's P6/P7 on #3643)."),
   "nl:closed:erasing@lib/store.ts": company("Stores whose erasure has begun, so no plan starts on one and a payment for it is returned (Codex N1's HIGH on #3156)", "The company's job: a field per store (the hash of its ref, no address), written through the closing walk's fence before its first delete and deleted in the same fenced step as the record (closeStoreRecord)."),
@@ -447,7 +450,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:store:leads:@lib/contact-rules.ts": follower("nl:store:leads:"),
   "nl:@lib/closed-store-data.ts": company("Not a key: the start of every key a follower may delete", "Read only, to check what is deleted."),
   "nl:plan:closing:@lib/closed-store-data.ts": { what: "The closing job's record of a store, read again before the walk prepares it", parts: [capped(0, "Read only: counted with lib/plan-closing.ts.")] },
-  "nl:account:stores:@lib/closed-store-data.ts": { what: "An account's other stores, read before the walk deletes what a closing store's Stripe account names", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
+  "nl:account:stores:@lib/closed-store-data.ts": { what: "An account's other stores, read exactly before the walk deletes what a closing store's Stripe account names or a host's own calendar (ownsAnother, accountHeld)", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:owner:@lib/closed-store-data.ts": { what: "A store's record, read in the same step as the walk deletes what a closing store's key or account names (CLOSING_UNHELD)", parts: [capped(0, "Read only: the same record lib/store.ts keeps, counted there.")] },
   "nl:call:remindq@lib/call-records.ts": company("Call reminders due", "One sorted set for every store, members gone when sent: each a booked call's, an order's."),
   "nl:call:creator-reminded:@lib/call-reminders.ts": short("The creator reminded of a call", "call", 430, 2 * MARK),
@@ -826,7 +829,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:outreach:stop:all@lib/outreach.ts": company("Domains that asked that nobody here write to them", "One set for every store."),
   "nl:outreach:stoplink:@lib/outreach.ts": room("A pitch's stop link, kept for good: counted in the room when the pitch is written (OUTREACH_TRACE_BYTES)", "lib/outreach.ts"),
   // A discount code with a start and an end set ahead (511 [CK3], lib/discount-schedule.ts): one small field a code, gone once it is switched on.
-  "nl:dsched:@lib/discount-schedule.ts": { what: "A store's discount codes waiting for their start", parts: [capped(KEY + MAX_SCHEDULED_CODES * (ENTRY_BYTES + 176), "MAX_SCHEDULED_CODES fields: a promotion code id (80 characters at most) and its code (24), start, end, tries, failed mark, and the failure email's tries and settled mark (unit 2).", src("lib/discount-schedule-rules.ts", "MAX_SCHEDULED_CODES"))] },
+  "nl:dsched:@lib/discount-schedule.ts": { what: "A store's discount codes waiting for their start", parts: [capped(KEY + MAX_SCHEDULED_CODES * (ENTRY_BYTES + 176), "MAX_SCHEDULED_CODES fields: a promotion code id (80 characters at most) and its code (24), start, end, tries, failed mark, and the failure notice's attempts (failed enqueue attempts included, at most the unchanged NOTICE_TRIES) and settled mark (unit 2); the same n field is used, with no added field.", src("lib/discount-schedule-rules.ts", "MAX_SCHEDULED_CODES"))] },
   "nl:dsched:due@lib/discount-schedule.ts": company("Discount codes due to be switched on", "One sorted set for every store, at most MAX_SCHEDULED_CODES members a store (lib/discount-schedule-rules.ts), each taken out once its code is switched on, canceled, failed, or its store gone."),
   "nl:dsched:tell@lib/discount-schedule.ts": company("Failed discount codes whose email to the creator is due", "One sorted set for every store, at most MAX_SCHEDULED_CODES members a store (lib/discount-schedule-rules.ts), each taken out once its email went, was tried NOTICE_TRIES times, or its code or store went."),
   "nl:dsched:lock:@lib/discount-schedule.ts": { what: "One change to a store's scheduled codes at a time", parts: [capped(KEY, "One key a store, held a minute at most.", src("lib/discount-schedule.ts", "LOCK_SECONDS"))] },
@@ -1251,6 +1254,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:yearask:count:@lib/yearly-ask.ts": short("Asks counted a month", "day", 62, 128),
   "nl:yearask:cursor@lib/yearly-ask.ts": company("Where the yearly ask stopped", "One key, the company's job."),
   "nl:firstsale:@lib/yearly-offer.ts": company("A store's first sale", "The company's offer to a creator about their own plan."),
+  "nl:soldbefore:@lib/yearly-offer.ts": { what: "A store whose earlier sales were not all read, so the search stops", parts: [capped(KEY, "One a store, for as long as the store is: erased with it.")] },
   "nl:yearly-offer:@lib/yearly-offer.ts": company("A yearly offer made", "The company's offer to a creator about their own plan."),
   "nl:tier:@lib/yearly-switch.ts": short("A membership's lock while it goes yearly", "request", 1, 128, REQ("tier switch")),
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),

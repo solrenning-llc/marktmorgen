@@ -2,7 +2,7 @@
  * Focal return on #3339, finding 2 (CX-123 rule 24): the creator's calendars
  * are read for every call time offered (lib/calls.ts readBusy, through
  * lib/calendar-sync.ts calendarBusy). A read that fails on the way there, such
- * as the call listing's GET that gives the zone for all-day times
+ * as the call listing's read (a GET, or its key in an MGET) that gives the zone for all-day times
  * (homeZone), must never read as "nothing busy".
  *
  * Held here, with synthetic data only:
@@ -27,6 +27,7 @@ import { type CallListing, holdAndCheckout, slotsForProduct } from "@/lib/calls"
 import type { CallSetup } from "@/lib/call-setup";
 import { addFeed, calendarBusy, LOOKAHEAD_DAYS } from "@/lib/calendar-sync";
 import { store as redis } from "./redis-stub";
+import { listingKeysRead } from "./listing-reads";
 import { done, is, part } from "./check";
 import { NY, weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
@@ -49,7 +50,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-// While `failListing` is above zero, that many GETs of a call listing record fail as a dropped connection does,
+// While `failListing` is above zero, that many reads of a call listing record fail as a dropped connection does,
+// alone (GET) or among others (lib/catalog.ts getMany reads them LISTINGS_PER_MGET at one MGET),
 // counting only those sent once the calendar settings have answered: the one calendarBusy sends for the zone of
 // all-day times (homeZone). The booking page's own read of its dated sessions goes first and answers.
 let failListing = 0;
@@ -57,7 +59,7 @@ let failedListing = 0;
 let settingsAnswered = false;
 const run = redis.pipeline;
 redis.pipeline = async (commands) => {
-  if (settingsAnswered && failListing > 0 && commands.some((c) => c[0] === "GET" && /^nl:catalog:[^:]+:l:/.test(String(c[1])))) {
+  if (settingsAnswered && failListing > 0 && commands.some((c) => listingKeysRead(c).length > 0)) {
     failListing -= 1;
     failedListing += 1;
     throw new Error("connection reset");

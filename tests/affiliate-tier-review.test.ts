@@ -73,7 +73,7 @@ const renewal = (id: string) => ({
   total_taxes: [],
   customer_email: null,
   parent: { subscription_details: { metadata: { store: "harbor", product: "prod01", via: BEA, via_rate: "30", via_months: "12", via_at: String(NOW - 40 * DAY) } } },
-  payments: { data: [{ status: "paid", payment: { payment_intent: `pi_${id}` } }] },
+  payments: { object: "list", has_more: false, data: [{ status: "paid", payment: { payment_intent: `pi_${id}` } }] },
 });
 
 async function main(): Promise<void> {

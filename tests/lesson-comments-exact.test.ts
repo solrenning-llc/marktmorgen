@@ -271,6 +271,10 @@ test("the studio says whether comments are on could not be read, never On or Off
   const html = studio({ initialOn: null });
   assert.match(html, /could not be read/);
   assert.doesNotMatch(html, />On<|>Off</);
+  // Codex X6's LOW (and Claude's earlier LOW) on #3554: beside "Comments under lessons", a tag "Not read" reads like
+  // "the comments are unread". The tag says the state is unknown; the paragraph below says why (AX274 3.1.5).
+  assert.match(html, /<span class="tag ">Unknown<\/span>/);
+  assert.doesNotMatch(html, />Not read</);
 });
 
 function toggle(newComments: number | null) {

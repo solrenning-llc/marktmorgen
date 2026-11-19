@@ -610,6 +610,22 @@ export class MemoryRedis {
           for (const target of targets) this.run(["DEL", target]);
           return 1;
         }
+        // lib/payment-request-store.ts: the observed request and every index deleted together, only by its holder.
+        if (key.startsWith("-- marktmorgen:payreq-delete:v1\n") && args[0] === "6" && args.length === 11) {
+          const [, lock, target, store, open, due, person, token, observed, id, member] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          if (this.run(["GET", target]) !== observed) return 2;
+          for (const [at, index] of [store, open, due, person].entries()) {
+            this.live(index);
+            const value = this.data.get(index);
+            // Redis removes an empty zset; the stand-in retains its empty array.
+            const kind = Array.isArray(value) && value.length === 0 ? "none" : this.run(["TYPE", index]);
+            if (kind !== "none" && kind !== (at === 3 ? "set" : "zset")) return 3;
+          }
+          this.run(["ZREM", store, id]); this.run(["ZREM", open, id]); this.run(["ZREM", due, member]);
+          this.run(["SREM", person, id]); this.run(["DEL", target]);
+          return 1;
+        }
         // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
         // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
         if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "4" && args.length === 13) {

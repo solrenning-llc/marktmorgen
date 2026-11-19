@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   part("A delete whose pipeline reply is cut short");
   const real = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.length === 5 && commands[0][0] === "DEL" && commands[0][1] === requestRecordKey(made.request.id)) return [];
+    if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:payreq-delete:v1\n")) return [];
     return real(commands);
   }) as typeof redis.pipeline;
   let answer = "";
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   is("an unconfirmed delete is not reported as deleted", answer === "deleted", false);
   is("the record is still stored", typeof redis.run(["GET", requestRecordKey(made.request.id)]), "string");
 
-  // Five replies, one of which is not a removal's 0 or 1: an error in its slot, or a count no single removal gives.
+  // A single script acknowledgement is required; the old malformed five-slot replies remain invalid.
   for (const [what, replies] of [
     ["an error in the last slot", [1, 1, 1, 1, new Error("ERR wrong kind of value")]],
     ["an error reply object in the first slot", [{ error: "ERR" }, 1, 1, 1, 1]],
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   ] as const) {
     part(`A delete whose five replies hold ${what}`);
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      if (commands.length === 5 && commands[0][0] === "DEL" && commands[0][1] === requestRecordKey(made.request.id)) return [...replies];
+      if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:payreq-delete:v1\n")) return [...replies];
       return real(commands);
     }) as typeof redis.pipeline;
     let said = "";

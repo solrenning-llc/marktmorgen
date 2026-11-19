@@ -114,26 +114,31 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   const json = JSON.stringify(record);
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
-  const day = dayKey(made.from, now);
-  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
-  const count = counted ? countOf(counted[0]) : null;
-  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
-  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  try {
+    const day = dayKey(made.from, now);
+    const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
+    const count = counted ? countOf(counted[0]) : null;
+    const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
+    if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
 
-  const id = randomBytes(16).toString("hex");
-  const fromToken = randomBytes(24).toString("hex");
-  const toToken = randomBytes(24).toString("hex");
-  const wrote = repliesFor(
-    await redisPipeline([
-      ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
-      ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-      ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-    ]),
-    3,
-  );
-  // Not exactly written: no link goes out.
-  if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
-  return { ok: true, id, fromToken, toToken };
+    const id = randomBytes(16).toString("hex");
+    const fromToken = randomBytes(24).toString("hex");
+    const toToken = randomBytes(24).toString("hex");
+    const wrote = repliesFor(
+      await redisPipeline([
+        ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
+        ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+        ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+      ]),
+      3,
+    );
+    // Not exactly written: no link goes out.
+    if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
+    return { ok: true, id, fromToken, toToken };
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
+    throw error;
+  }
 }
 
 /**

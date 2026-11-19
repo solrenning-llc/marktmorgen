@@ -28,8 +28,8 @@ const REVIEWS: OtherCountryReviews = {
     { from: "USD", to: "NOK", numerator: 12, denominator: 1, source: SOURCE, checkedOn: "2026-11-01", validThrough: "2026-11-30" },
   ],
   scopes: [
-    { ruleId: "ca-specified-supplies", evidence: "synthetic review", reviewedOn: "2026-11-01" },
-    { ruleId: "no-remote-services", evidence: "synthetic review", reviewedOn: "2026-11-01" },
+    { ruleId: "ca-specified-supplies", evidence: "synthetic review", reviewedOn: "2026-11-01", validThrough: "2026-12-31" },
+    { ruleId: "no-remote-services", evidence: "synthetic review", reviewedOn: "2026-11-01", validThrough: "2026-12-31" },
   ],
 };
 // placeTotals("store-sales", place, since) as Claude 4's lib/place-sales.ts answers it (7020577795).
@@ -149,6 +149,19 @@ test("without a reviewed scope the snapshot says so, and the assessment refuses"
   assert.equal(assessOtherCountry("CA", snapshot, NOW).status, "unknown");
   const future = otherCountrySnapshotUnder({ ...REVIEWS, scopes: [{ ...REVIEWS.scopes[0], reviewedOn: "2026-11-20" }] }, "CA", totals(1), sale(1), NOW);
   assert.equal(assessOtherCountry("CA", future, NOW).status, "unknown");
+  // A scope review lapses (Claude 3's LOW on #4902): past its validThrough, or without one, it no longer stands.
+  for (const scope of [
+    { ...REVIEWS.scopes[0], validThrough: "2026-11-18" },
+    { ...REVIEWS.scopes[0], validThrough: "2026-1-31" },
+    (({ validThrough: _drop, ...rest }) => rest)(REVIEWS.scopes[0]),
+  ]) {
+    const lapsed = otherCountrySnapshotUnder({ ...REVIEWS, scopes: [scope as never] }, "CA", totals(1), sale(1), NOW);
+    assert.ok("ruleId" in lapsed && lapsed.applicableScopeReviewed === false && lapsed.completeRollingCoverage === false, JSON.stringify(scope));
+    assert.equal(assessOtherCountry("CA", lapsed, NOW).status, "unknown", JSON.stringify(scope));
+  }
+  // Still valid on its last day.
+  const lastDay = otherCountrySnapshotUnder({ ...REVIEWS, scopes: [{ ...REVIEWS.scopes[0], validThrough: DAY }] }, "CA", totals(1), sale(1), NOW);
+  assert.equal(assessOtherCountry("CA", lastDay, NOW).status, "below-threshold");
 });
 
 test("a snapshot made for one country is never assessed for another", () => {

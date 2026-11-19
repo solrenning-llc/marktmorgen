@@ -1,7 +1,7 @@
 /** Exercise the real queued worker: unknown erasure evidence must not permit email. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceUpdate, startUpdate } from "@/lib/product-updates";
+import { advanceUpdate, readUpdateJob, startUpdate } from "@/lib/product-updates";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { usedThisMonth } from "@/lib/mail";
@@ -95,4 +95,35 @@ for (const presence of unknownPresenceReplies) test("Q: unknown recipient-list p
   const held=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
   assert.deepEqual({status:held?.status,done:held?.done,sent:held?.sent,mail:r.batches.flat().length,queued:redis.run(["SISMEMBER","nl:updq",r.job.id]),recipients:redis.run(["LRANGE",recipients,0,-1])},{status:"waiting",done:0,sent:0,mail:0,queued:1,recipients:[person]});
  }finally{redis.pipeline=r.original;}
+});
+
+for (const committed of [false, true]) test(`an unconfirmed terminal write is retried without sending again (committed: ${committed})`, async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  const jobKey = `nl:upd:job:${r.job.id}`;
+  redis.pipeline = async commands => {
+    const [write] = commands;
+    if (commands.length !== 1 || write?.[0] !== "SET" || write[1] !== jobKey
+        || JSON.parse(String(write[2])).status !== "sent") return r.original(commands);
+    if (committed) await r.original(commands);
+    return ["unconfirmed"];
+  };
+  try {
+    const advance = () => advanceUpdate(r.job.id, storeForHandle, Date.now() + 20_000);
+    const outcome = await advance().then(() => "returned", () => "unknown");
+    const job = await readUpdateJob(r.job.id);
+    assert.deepEqual(
+      [outcome, job?.status, job?.done, job?.sent, redis.run(["SISMEMBER", "nl:updq", r.job.id]), r.batches.length],
+      ["unknown", committed ? "sent" : "sending", 1, 1, 1, 1],
+    );
+    redis.pipeline = r.original;
+    const finished = await advance();
+    assert.deepEqual(
+      [finished?.status, (await readUpdateJob(r.job.id))?.status, redis.run(["SISMEMBER", "nl:updq", r.job.id]), r.batches.length],
+      ["sent", "sent", 0, 1],
+    );
+  } finally {
+    redis.pipeline = r.original;
+    globalThis.fetch = oldFetch;
+  }
 });

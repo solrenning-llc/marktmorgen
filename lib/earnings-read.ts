@@ -163,11 +163,24 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
     // fails (Codex N1's MEDIUM on #3022); the money given back then is `reinstated`, said not read. A canceled one
     // (only a refund waiting on the buyer can be) never took money: nothing. One waiting on the buyer
     // (`requires_action`) may yet go out, and a status not documented is not understood: unknown, never skipped.
+    //
+    // Whose refund it is (Codex T's LEVE on #3022): the account may sell for more than one store, so a refund is this
+    // store's only when its payment, listed expanded, names one of this store's handles in its metadata, as a checkout
+    // of the store writes it (payment_intent_data[metadata][store]). Another store's is skipped. A payment not
+    // expanded, of another object, or naming no store (a membership's renewal, whose payment carries none) is
+    // unknown: the month is never shown with a smaller exact net than the store had.
     refunds: (row, created) => {
       if (ownField(row, "object") !== "refund") return null;
       const status = text(row, "status");
-      if (status === "succeeded" || status === "pending" || status === "failed") return money(row, "amount", created);
-      return status === "canceled" ? "skip" : null;
+      if (status === "canceled") return "skip";
+      if (status !== "succeeded" && status !== "pending" && status !== "failed") return null;
+      const intent = ownField(row, "payment_intent");
+      if (!plainObject(intent) || ownField(intent, "object") !== "payment_intent") return null;
+      const meta = metadataOf(intent);
+      const owner = meta ? ownField(meta, "store") : undefined;
+      if (typeof owner !== "string") return null;
+      if (!handles.has(owner)) return "skip";
+      return money(row, "amount", created);
     },
   };
 }
@@ -278,7 +291,8 @@ export async function readEarningsLists(store: Store, since: number): Promise<Pr
       stripeList(account, "/payment_intents", "sale", sinceSec, p.extras, take.extras).catch(unread("sale")),
       // Only paid invoices are listed (as readRenewals): void, open or draft ones never use up its pages (review of #3022).
       stripeList(account, "/invoices", "renewal", sinceSec, p.invoices, take.invoices, "&status=paid").catch(unread("renewal")),
-      stripeList(account, "/refunds", "refund", sinceSec, p.refunds, take.refunds).catch(unread("refund")),
+      // Each refund with its payment, to read which store sold it (Codex T on #3022); the same pages, larger rows.
+      stripeList(account, "/refunds", "refund", sinceSec, p.refunds, take.refunds, "&expand[]=data.payment_intent").catch(unread("refund")),
     ]);
     // Disputes are read only from their own balance transactions, not confirmed here; money given back goes with them.
     return { source: "stripe", lists, notRead: ["dispute", "reinstated"] };

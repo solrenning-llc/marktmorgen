@@ -411,9 +411,11 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept until 200 days after the call it moved to, two years at most", "call", 730, KB),
-  "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
+  "nl:closed:claims:@lib/closed-store-data.ts": company("Where a closing store's preparation stopped in its hosts' claims, until it reaches their end", "The company's job: one key a closing store with more claims than a walk reads, deleted with the store and expiring by itself CLAIMS_LEFT_DAYS (14) after the last walk that wrote it (lib/closed-store-data.ts, clearClaims)."),
+  "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts); one whose hosts' own calendars are not decided yet stays after its walk, set aside with only its ref, its id and those hosts, until each is known (decideCalendars)."),
   "nl:closed:due@lib/closed-store-data.ts": company("Closed stores waiting for the walk that deletes their records", "The company's job: a member a closed store, taken out when its walk begins."),
   "nl:closed:due@lib/store.ts": company("The same walk's line, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 6's P6/P7 on #3643)."),
+  "nl:closed:erasing@lib/store.ts": company("Stores whose erasure has begun, so no plan starts on one and a payment for it is returned (Codex N1's HIGH on #3156)", "The company's job: a field per store (the hash of its ref, no address), written through the closing walk's fence before its first delete and deleted in the same fenced step as the record (closeStoreRecord)."),
   "nl:closed:walk@lib/closed-store-data.ts": company("Where the walk that deletes closed stores' records is", "One key, the company's job."),
   "nl:*@lib/closed-store-data.ts": company("The pattern the walk reads the database by", "Not a key: a pattern."),
   // The families whose keys a closing store's follower reads before the walk deletes them: names, not keys.
@@ -440,6 +442,9 @@ export const FAMILIES: Record<string, Family> = {
   // Only the key's builder lives here (no imports), for readers such as lib/community-mail.ts; lib/contacts.ts holds it.
   "nl:store:leads:@lib/contact-rules.ts": follower("nl:store:leads:"),
   "nl:@lib/closed-store-data.ts": company("Not a key: the start of every key a follower may delete", "Read only, to check what is deleted."),
+  "nl:plan:closing:@lib/closed-store-data.ts": { what: "The closing job's record of a store, read again before the walk prepares it", parts: [capped(0, "Read only: counted with lib/plan-closing.ts.")] },
+  "nl:account:stores:@lib/closed-store-data.ts": { what: "An account's other stores, read exactly before the walk deletes what a closing store's Stripe account names or a host's own calendar (ownsAnother, accountHeld)", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
+  "nl:store:owner:@lib/closed-store-data.ts": { what: "A store's record, read in the same step as the walk deletes what a closing store's key or account names (CLOSING_UNHELD)", parts: [capped(0, "Read only: the same record lib/store.ts keeps, counted there.")] },
   "nl:call:remindq@lib/call-records.ts": company("Call reminders due", "One sorted set for every store, members gone when sent: each a booked call's, an order's."),
   "nl:call:creator-reminded:@lib/call-reminders.ts": short("The creator reminded of a call", "call", 430, 2 * MARK),
   "nl:call:reminded:@lib/call-reminders.ts": short("A buyer reminded of a call", "call", 430, 2 * MARK),

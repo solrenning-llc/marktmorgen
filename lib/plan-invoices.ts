@@ -119,7 +119,7 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
         subscriptionOf(row) === owner.subscription &&
         (status === "draft" || (SHOWN_STATUSES as readonly unknown[]).includes(status)) &&
         hasOwnField(row, "number") && (number === null || (typeof number === "string" && number.length > 0 && number.length <= 100)) &&
-        typeof created === "number" && Number.isSafeInteger(created) && created > 0 &&
+        typeof created === "number" && Number.isSafeInteger(created) && created > 0 && Number.isFinite(new Date(created * 1000).getTime()) &&
         typeof total === "number" && Number.isSafeInteger(total) &&
         cents(ownField(row, "amount_paid")) && cents(ownField(row, "amount_remaining")) &&
         typeof currency === "string" && /^[a-z]{3}$/.test(currency)

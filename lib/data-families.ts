@@ -45,7 +45,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
-  "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
+  "nl:backup:del:", "nl:backup:delcount:", "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
@@ -84,7 +84,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:picture-r2:drop", "nl:pictures:doors:", "nl:pinv:", "nl:pathlead:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-refund:next", "nl:plan-withdraw:", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:late-told:", "nl:plans:lock", "nl:plans:pending", "nl:plans:retry",
-  "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
+  "nl:pod:by:*", "nl:pod:n:", "nl:pod:ok:", "nl:podnote:walk", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:pace:", "nl:pp:press:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:read:once:", "nl:recent:", "nl:recent:feed:",
@@ -211,6 +211,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,
   "nl:assist:c:": X(1), "nl:assist:missed:": E, "nl:assist:next:": X(3), "nl:assist:nextlock:": X(1), "nl:assist:pool:": E, "nl:assist:remind:": X(3), "nl:assist:remindq": I, "nl:assist:remindwho:": X(3),
+  "nl:backup:del:": C, "nl:backup:delcount:": C, // the backup's deletion records and their per-store month count (lib/backup-deletions.ts), the company's bookkeeping
   "nl:backup:files:day:": C, // the backup files route's day count (lib/backup-files-source.ts), no store's
   "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
@@ -385,7 +386,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // The one-time walk that notes the products of feeds granted before nl:pod:pids: (lib/podcast-access.ts): its pattern, and its one company key.
   "nl:pod:by:*": C, "nl:podnote:walk": C,
   // nl:pp:settle:after: one store id for the whole company, where the daily PayPal settling stopped, gone in 7 days.
-  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
+  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:pace:": X(1), "nl:pp:press:": X(1), "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
   "nl:ppsell:back:": E, "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
   // A PayPal order canceled because PayPal never confirmed it (lib/paypal-sales.ts, CANCELED_KEPT_SECONDS): named by the

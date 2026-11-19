@@ -10,9 +10,10 @@
  *   - AI drafts, uploads and lesson video follow costStandingOf
  *     (lib/plan-standing.ts: lib/ai.ts, lib/ai-spend.ts, lib/upload-budget.ts,
  *     videoLimitFor, picturesLimitFor, taskRoomFor, and the upload routes'
- *     own refusal); a buyer's new review photo follows costsPaused
- *     (app/api/store/review/route.ts, unit 4b1); imports and funnel
- *     migrations follow costPauseCode and costsPaused
+ *     own refusal); a buyer's new review photo follows newCostCode
+ *     (app/api/store/review/route.ts, unit 4b1; since the original 4c,
+ *     also once the plan is not running); imports and funnel
+ *     migrations follow newCostCode
  *     (app/api/store/import, app/api/store/import/funnel, lib/imports.ts
  *     runImport, unit 4b2); new Zoom, Google Calendar and Meta connections
  *     and Meta's daily read follow costPauseCode (lib/integration-pause.ts,

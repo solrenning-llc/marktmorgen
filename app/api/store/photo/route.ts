@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
 import { dropPhotoUpload, notePhotoUpload, setPhotoId, settlePhotos, storeForEmail, storeForEmailSeen } from "@/lib/store";
 import { MAX_PHOTO_BYTES, decodePhoto, deletePhoto, newPhotoId, writePhoto } from "@/lib/store-photo";
+import { newCostCode } from "@/lib/plan-standing";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 /**
  * Puts a photo on the creator's page, or takes it off.
@@ -49,7 +51,9 @@ export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "page", Math.ceil(MAX_PHOTO_BYTES * 1.4) + 1_000, (sent) => (sent.remove === true ? "remove" : ""));
   if (!guarded.ok) return guarded.response;
   // So does a new one, which deletes the one there.
-  if (guarded.store.photoId && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");
+  const lock = guarded.store.photoId ? await lockRead(lockedFor(request, "page", "replace")) : false;
+  if (lock instanceof Response) return lock;
+  if (lock) return refusedJson("locked");
 
   try {
     if (guarded.body.remove === true) {
@@ -65,6 +69,12 @@ export async function POST(request: NextRequest) {
       if (result.store.photoLeft?.length) await settlePhotos(guarded.ref);
       return Response.json({ ok: true, photoId: null });
     }
+
+    // A new photo is new storage nobody pays for while the plan's renewal is
+    // unpaid, a payment for it is disputed or the plan has ended (232 [CA1],
+    // lib/plan-standing.ts newCostCode). Taking the photo off stays open.
+    const paused = newCostCode(guarded.store);
+    if (paused) return Response.json({ ok: false, error: paused }, { status: 409 });
 
     const decoded = decodePhoto(guarded.body.photo);
     if (typeof decoded === "string") {

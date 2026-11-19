@@ -185,8 +185,13 @@ export const forgetBoth = async (statsId: string | null, sid: string): Promise<v
  * slow file store cannot run into the closing job's own time.
  */
 const forgetTry: ForgetWork = async (statsId, sid, community, until, files) => {
-  await forgetBoth(statsId, sid);
+  let redisFailure: { error: unknown } | null = null;
+  try { await forgetBoth(statsId, sid); } catch (error) { redisFailure = { error }; }
+  // Readable file folders are independent of the Redis families. Give them their bounded turn even when one of
+  // those families failed; otherwise the whole round can be spent without listing a single readable folder.
+  // OutOfTime still propagates directly, so the existing late-pass bound and unspent try stay in force.
   if (files) await removeDeletedStoreFiles(sid, community, undefined, until);
+  if (redisFailure) throw redisFailure.error;
 };
 
 /**

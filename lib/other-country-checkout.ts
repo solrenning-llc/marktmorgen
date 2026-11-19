@@ -18,8 +18,8 @@ import { TAX_THRESHOLD_RULES } from "@/lib/tax-threshold";
  *   2. The exchange rate is the reviewed, dated ceiling of lib/other-country-snapshot.ts, never a guess: no reviewed
  *      rate or scope is "unknown", which refuses.
  *   3. Reserve before Stripe: the sale is reserved in the per-place counter first and the totals are read after, so
- *      two sales at once each see the other. A reservation not confirmed as "reserved" refuses. Every refusal after
- *      reserving releases it (a release that fails leaves a reservation that only counts against later sales, the
+ *      two sales at once each see the other. A reservation not confirmed as "reserved" refuses, and one that may
+ *      exist ("unknown", or a reserve that threw) is released first. Every refusal after reserving releases it (a release that fails leaves a reservation that only counts against later sales, the
  *      dearer side). The caller settles it on payment and releases it on failure, expiry or refund.
  *   4. Nothing opens: DEEMED_SUPPLIER_RECORDS stays empty, so production answers "not-recorded" before anything is
  *      counted; a "threshold" record is a reviewed step for the coordinator and the owner; PLANS_ON_SALE and
@@ -155,7 +155,12 @@ export async function thresholdCheckoutDecisionUnder(
     await release(counter, own.ref);
     return no;
   }
-  if (reservation !== "reserved") return no;
+  if (reservation !== "reserved") {
+    // "unknown": the counter could not say whether it reserved, so it may exist; release it (idempotent). "refused":
+    // nothing was reserved under this ref, and releasing it could free another sale's reservation with the same ref.
+    if (reservation !== "refused") await release(counter, own.ref);
+    return no;
+  }
   let totals: unknown;
   try {
     totals = await counter.totals(OTHER_COUNTRY_LEDGER, place, since, now);

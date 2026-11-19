@@ -13,7 +13,8 @@
  *
  * Browser-safe.
  */
-import { formatMoney } from "./money";
+import { currencyRule, formatMoney, parseCurrency } from "./money";
+import { salePrice } from "./store-sale";
 import {
   MAX_MEMBER_PRODUCTS,
   MAX_MEMBER_QUALIFYING,
@@ -111,11 +112,6 @@ export function checkMemberEdit(raw: unknown, choices: MemberEditChoices, connec
   return { ok: true, value };
 }
 
-/** A price with this percentage off, as Stripe takes a percentage coupon off. */
-function lowered(cents: number, percent: number): number {
-  return cents - Math.round((cents * percent) / 100);
-}
-
 function list(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
   if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
@@ -140,16 +136,27 @@ export function memberRuleLine(rule: MemberRule, choices: MemberEditChoices, cur
   const buyers = held.filter((q) => !q.membership).map((q) => q.title);
   const who = [members.length ? `members of ${either(members)}` : "", buyers.length ? `buyers of ${either(buyers)}` : ""].filter(Boolean).join(" or ") || "nobody";
   const Who = who.charAt(0).toUpperCase() + who.slice(1);
-  const price = (d: MemberDiscounted) => `${formatMoney(lowered(d.priceCents, rule.percent), currency)} instead of ${formatMoney(d.priceCents, currency)} for ${d.title}`;
+  const floor = currencyRule(parseCurrency(currency)).minCharge;
+  const minimum = formatMoney(floor, currency);
+  const discountedPrice = (d: MemberDiscounted) => salePrice(d.priceCents, rule.percent);
+  const price = (d: MemberDiscounted) => {
+    const normal = formatMoney(d.priceCents, currency);
+    const discounted = discountedPrice(d);
+    if (discounted < floor) return `${normal} for ${d.title} (this rule would go below the ${minimum} checkout minimum)`;
+    return `${formatMoney(discounted, currency)} instead of ${normal} for ${d.title}`;
+  };
 
   if (rule.all) {
-    const example = choices.discounted.find((d) => !rule.by.includes(d.id));
-    const start = `${Who} will pay ${rule.percent}% less on every product a sale can cover, now and added later.`;
-    return example ? `${start} For example, ${price(example)}.` : `${start} None of your products can have it yet: add one sold once at one price.`;
+    const covered = choices.discounted.filter((d) => !rule.by.includes(d.id));
+    const example = covered.find((d) => discountedPrice(d) >= floor);
+    const start = `${Who} will pay ${rule.percent}% less on products a sale can cover, now and added later, when the discounted price meets the ${minimum} checkout minimum.`;
+    if (example) return `${start} For example, ${price(example)}.`;
+    // No product to cover at all is said as before; products that only fall below the minimum are said as that.
+    return covered.length === 0 ? `${start} None of your products can have it yet: add one sold once at one price.` : `${start} None of your products meets that minimum with this rule yet.`;
   }
   const byProduct = new Map(choices.discounted.map((d) => [d.id, d]));
   const lowerOn = rule.products.map((id) => byProduct.get(id)).filter((d): d is MemberDiscounted => Boolean(d));
   const named = lowerOn.slice(0, NAMED).map(price);
   const more = lowerOn.length - named.length;
-  return `${Who} will pay ${list(more > 0 ? [...named, `${more} more ${more === 1 ? "product" : "products"} at ${rule.percent}% less`] : named)}.`;
+  return `${Who} will pay ${list(more > 0 ? [...named, `${more} more ${more === 1 ? "product" : "products"}`] : named)}.`;
 }

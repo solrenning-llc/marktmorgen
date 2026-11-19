@@ -1461,7 +1461,8 @@ export const PLAN_SETTLE_RUN = { readCommandsPerRun: 2, plansPerRun: 200, ownCom
  * - ordersPerStoreRun: at most REFUND_WATCH_BATCH due orders read from it a run;
  * - payPalReadsPerOrderLook: one GET of the order's capture at PayPal each time it is looked at (inside the job's run
  *   deadline; no dated source here gives PayPal's price per API call, so it is an open gap, never zero);
- * - ownCommandsPerOrderLook: the paid record's GET and one write of the list (ZADD for the next look, or ZREM);
+ * - ownCommandsPerOrderLook: the paid record's GET and one write of the list: ZREM, or, for the next look, the order put
+ *   back only while the store is live (PAYPAL_WATCH_IF_LIVE, Codex G-1144: the EVAL and its EXISTS, HEXISTS and ZADD), 5;
  * - looksPerOrderPerDayAtMost: nextLook asks hourly the first week (24 a day), every six hours until day 30 (4 a day)
  *   and daily until PayPal's 180 days (looksPerOrderPerDayAfter30Days); a capture in a status not known here is asked
  *   daily until its paid record ends (daysWatchedAtMost, PAID_KEPT_SECONDS).
@@ -1475,7 +1476,7 @@ export const PAYPAL_REFUND_WATCH = {
   listReadsPerStoreRun: 1,
   ordersPerStoreRun: 25,
   payPalReadsPerOrderLook: 1,
-  ownCommandsPerOrderLook: 2,
+  ownCommandsPerOrderLook: 5,
   looksPerOrderPerDayAtMost: 24,
   looksPerOrderPerDayAfter30Days: 1,
   daysWatchedAtMost: 400,
@@ -1490,8 +1491,9 @@ export const PAYPAL_REFUND_WATCH = {
  * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, the refund
  *   set's ZADD and EXPIRE and, for a capture reversed, failed or declined, the reversed set's ZADD and EXPIRE: at most 4
  *   a look, on the first look and on every retry (Claude 6 on #3464, MEDIUM);
- * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on (one ZADD) and
- *   tells nothing, so its worst is the marks, one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
+ * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on, only while the
+ *   store is live (PAYPAL_WATCH_IF_LIVE: the EVAL and its EXISTS, HEXISTS and ZADD, 4 commands; Codex G-1144) and
+ *   tells nothing, so its worst is the marks, one script and that fenced write an hour (looksPerDayAtMost, the watch's own hourly look),
  *   for as long as the watch keeps the order (daysAtMost, the paid record's 400 days): no count of tries, bounded by
  *   the watch itself and by its REFUND_WATCH_BATCH orders a run.
  * A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
@@ -1502,7 +1504,7 @@ export const PAYPAL_REFUND_KEPT = {
   writesPerScript: 1,
   commandsPerScriptAtMost: 11,
   markCommandsPerRefundLookAtMost: 4,
-  retryWritesPerFailedLook: 1,
+  retryWritesPerFailedLook: 4,
   looksPerDayAtMost: 24,
   daysAtMost: 400,
 } as const;
@@ -2141,6 +2143,18 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/team.ts", names: ["MAX_TEAM"] },
     ],
     basis: "Each host's calendar read at most once a sync interval all month (about seven commands and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
+  },
+  {
+    id: "own-call-host-claims",
+    feature: "An ordinary weekly call checked against its store owner's time on other stores' teams at the reservation, inside ORDER_COMPUTE (lib/host-claims.ts, 9 November 2026; read only at the checkout since 16 November 2026)",
+    // No visit reads the owner's claims (owner's decision of 16 November 2026 on #3490, "ler só no checkout"): they are
+    // read at the hold and the move, inside the order they are admitted as (ORDER_COMPUTE), so nothing a visit.
+    monthlyUsd: () => 0,
+    sources: [
+      { file: "lib/calls.ts", names: ["ownerClaims", "claimOwner", "bookingOwn", "OWN_CLAIM_CAP"] },
+      { file: "lib/host-claims.ts", names: ["readClaims", "claimHosts", "confirmClaim", "releaseClaim"] },
+    ],
+    basis: "Nothing a visit, since the owner's decision of 16 November 2026 on #3490 (\"ler só no checkout\"): an ordinary weekly call's page, its embedded calendar, its move page and a checkout reminder's check for an open time (lib/checkout-recovery.ts, hasOpenTime, through slotsForProduct) no longer read the store owner's claims. They are read at the reservation, inside the order it is admitted as (CALL_ORDER_UNITS, ORDER_COMPUTE): the hold reads the claims and runs the claim script (two commands) and refuses a time sold on another store as just taken, with nothing charged; the confirmation reads its diary entry and writes the claim and its lifetime (at most four); a move reads and writes again (two) and refuses the same way; a hold given back or a refund lets it go (one). A few commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page.",
   },
   {
     id: "quizzes",
@@ -3258,6 +3272,7 @@ export const NOT_A_COST: Record<string, string> = {
   EMAIL_CODE_TRIES_PER_ADDRESS_HOUR: "Code tries one address may take in the hour, all its requests together (652 [WG12], Claude 4): the bound on the commands above for one address, past which a try is refused after its count; the requests themselves are bounded by the sign-in limits (RATE_LIMIT, ADDRESS_LIMIT).",
   EMAIL_CODE_TRIES_PER_ADDRESS_DAY: "Code tries one address may take in a day from its first, all its requests together (Claude 3 on #2736): past them only the link opens, so the guesses against one address stay at this many a day, whatever the hourly limit renews.",
   EMAIL_CODE_TRIES_PER_IP_HOUR: "Code tries one machine may take in the hour (Claude 3 on #2736), counted before any record is read: the bound on the reads a machine can buy with made-up request ids, two commands each past it.",
+  OLD_PAYMENT_LOOKUPS_PER_READING: "Lookups of a refunded or disputed payment's own invoice (GET /invoice_payments filtered by the payment, the invoice expanded, one call each) one reading of a store's numbers may ask the creator's Stripe account (lib/stats.ts, paymentOfStoreInvoice; #4549), only for a refund or dispute in the reading's window whose payment the invoices it already read do not confirm, at most OLD_PAYMENT_LOOKUPS_PER_READING (10) a reading, so at most 10 more calls than before per reading. Past it, or when Stripe cannot be asked or answers in another shape, the payment stays unconfirmed and the kept total reads unknown. No store command; Stripe bills no API call: bounded by the readings of the store's numbers its own pages and jobs already make, whose costs are their own lines. Held by tests/stats-old-payment-confirm.test.ts (10 calls at most). Its dollar figure is not a line of lib/llc-fixed-costs.ts, not certified, never zero.",
   DISPUTE_READS_PER_READING: "Questions about a dispute (GET /disputes?charge=) one reading of a store's booked calls may ask Stripe, only for a charge Stripe marks as disputed (lib/calls.ts, callOrLost; lib/refunds.ts, keptUnlessLost); one for a booking read alone (paidCall). Past it, or when Stripe cannot be asked, the booking keeps its time. No store command and no other call; Stripe bills no API call: bounded by the readings the store's own pages and jobs already make, whose costs are their own lines.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   BACKUP_FILES_PAGES_PER_STORE: "The provider pages one complete listing of one source of one store may take in the backup files route (273 [BK1] files part 1, lib/backup-files-contract.ts, lib/backup-files-source.ts): a bound that only refuses (a store past it is answered over_bound, never complete), not a figure of its own. What the route spends is a company cost (the company's backup, 100% Marktmorgen under FX275), priced by backupFilesRouteWorstMonth (lib/backup-files-source.ts, held by tests/backup-files-cost.test.ts; Claude 7's MÉDIO on #3313): each admitted page, counted by takeDayPage against the review's maxPagesPerDay a source a UTC day before any provider call, at BACKUP_FILES_PAGE_MICRO_USD (1,548, the dated review's ceiling per call of docs/backup-costs-2026-11-08.md section 5b: the function held its whole maxDuration at 2 GB on CPU in the dearest region, a full page of answer as Fast Origin Transfer and Fast Data Transfer with its CDN Request, the two Upstash commands of the count and a page of Upstash bandwidth, one listing and one Blob signing token as Advanced Operations, no free quota), for each source on, and the one call a source a day the Worker may be refused past it (BACKUP_FILES_DAY_CEILING_REFUSALS, lib/backup-files-contract.ts: the Worker stops that source for the rest of the UTC day; priced at a whole page; Codex N1's LOW 1 on #3313), 32 UTC days a month, plus R2's rounding block and 10% room; 0 while BACKUP_FILES_ROUTE_REVIEW (lib/backup-files-review.ts) is null, since the route answers 404 before any command; unknown (null), never zero, if Bunny Stream, whose listing price is not read, is turned on. At a review of 40 pages a day that is 9,418,148 micro-dollars, $9.42 a month. It joins LLC_FIXED_COST_IDS (lib/llc-fixed-costs.ts) once #3481, which changes that same line, is in (rule 3: one pull request at a time on it); until then the owner's review of the route is what admits any of it, and nothing calls the route.",

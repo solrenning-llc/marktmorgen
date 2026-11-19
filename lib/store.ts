@@ -2162,7 +2162,7 @@ export async function settleDeletedStore(gone: { ref: string; sid: string; email
 export type DeleteResult =
   /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
   | { ok: true; store: Store; unsure?: true }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" | "closing" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -2171,7 +2171,12 @@ export type DeleteResult =
  * Only a store with no products, no subscription in good standing and no
  * domain of its own can go: a store that has sold something has buyers who
  * will come back to it, and a store that is paying would be deleted with
- * money still running. Its addresses are let go the way a released address
+ * money still running. A Store assistant add-on that still renews holds the
+ * store too: once its address is let go nothing finds that subscription again
+ * (lib/assistant-billing.ts, applyListedAssistant reads the store by
+ * `assistant_for`), so it would charge every month for a store that is gone
+ * (#4080). Set to stop at the end of its month, or ended, it charges nothing
+ * more and does not hold it. Its addresses are let go the way a released address
  * is — dark for a month before anyone else may take them — so a link
  * already shared leads nowhere rather than to a stranger. An account's first
  * store is its home, and is never deleted here.
@@ -2198,6 +2203,13 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
     if (!store.extra) return { ok: false, reason: "first" };
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
+    if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
+    // Not active is not "stopped": a past_due or unpaid add-on (lib/assistant-billing.ts assistantPlanOf) is written
+    // down as not active while Stripe may still charge it, and once the store is gone nothing finds it again. It holds
+    // the store until it is known to stop: set to stop at the end of its month, or ended at Stripe (`terminal`). A
+    // period unread or run out is not proof of an end, as Stripe renews a past_due one (Codex X6 and T on #4202).
+    const plan = store.assistantPlan;
+    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.terminal !== true) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
     // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
     // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused

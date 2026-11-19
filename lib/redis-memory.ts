@@ -1185,6 +1185,12 @@ export class MemoryRedis {
           for (const target of targets) this.run(["DEL", target]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_WATCH_IF_LIVE: an order put back on a store's refund watch only while the store is live.
+        if (key.startsWith("-- marktmorgen:paypal-watch-if-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, storeId, erasing, watch, field, score, order] = args;
+          if (this.run(["EXISTS", storeId]) === 0 || this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          return this.run(["ZADD", watch, score, order]);
+        }
         // lib/payment-request-store.ts: the observed request and every index deleted together, only by its holder.
         if (key.startsWith("-- marktmorgen:payreq-delete:v1\n") && args[0] === "6" && args.length === 11) {
           const [, lock, target, store, open, due, person, token, observed, id, member] = args;
@@ -1944,7 +1950,7 @@ export class MemoryRedis {
           held.delete(args[2]);
           return value;
         }
-        if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
+        if (key.startsWith("-- marktmorgen:host-claim:v2\n")) return this.hostClaim(args);
         // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
         if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
           const [, list, ...triples] = args;
@@ -3918,6 +3924,7 @@ export class MemoryRedis {
       if (held !== undefined && !(held instanceof Map)) return [-3, i + 1];
     }
     const drops: string[][] = [];
+    const paid: boolean[] = [];
     for (let i = 0; i < keys.length; i += 1) {
       const [gap, d0, d1, cap] = argv.slice(6 + i * 4, 10 + i * 4).map(Number);
       if (![gap, d0, d1, cap].every(Number.isFinite) || gap < 0) return [-3, i + 1];
@@ -3929,7 +3936,9 @@ export class MemoryRedis {
         if (!m) return [-3, i + 1];
         const [a, b, u] = [Number(m[1]), Number(m[2]), Number(m[3])];
         if ((u > 0 && u < now) || b < now - 172_800_000) stale.push(field);
-        else if (field !== claim) {
+        else if (field === claim) {
+          if (u === 0) paid[i] = true;
+        } else {
           if (s < b + gap && e + gap > a) return [-1, i + 1];
           if (a >= d0 && a < d1) today += 1;
         }
@@ -3941,7 +3950,7 @@ export class MemoryRedis {
     keys.forEach((k, i) => {
       const hash = this.hash(k);
       for (const field of drops[i]) hash.delete(field);
-      hash.set(claim, `${s}|${e}|${hold}|${ref}`);
+      hash.set(claim, `${s}|${e}|${paid[i] ? 0 : hold}|${ref}`);
       const ends = this.until.get(k);
       const left = ends === undefined ? -1 : ends - this.now();
       if (left < keep) this.until.set(k, this.now() + keep);

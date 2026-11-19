@@ -16,7 +16,7 @@ import { setSendHooksForTests } from "@/lib/webhooks";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
-import { PAYPAL_PENDING_SWEEP, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
+import { PAYPAL_PARTLY_KEPT, PAYPAL_PENDING_SWEEP, PAYPAL_REFUND_KEPT, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -132,11 +132,14 @@ async function main(): Promise<void> {
     await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", priced.order]]);
     const first = await look();
     is("the first look reads the mark once and writes it once", [first.filter((c) => c[0] === "HEXISTS").length, first.filter((c) => c[0] === "EVAL").length], [1, 1]);
-    is("the whole first look is within the lines' sum", first.length <= counted, true);
+    is("the whole first look is within the lines' sum", first.length <= counted + PAYPAL_PARTLY_KEPT.markReadsPerLook + PAYPAL_PARTLY_KEPT.scriptsPerFirstLook, true);
+    is("its one script carries one write, the HSETNX", first.filter((c) => c[0] === "EVAL").map((c) => [Number(c[2 + Number(c[2]) + 1]), c[2 + Number(c[2]) + 2]]), [[PAYPAL_PARTLY_KEPT.writesPerScript, "HSETNX"]]);
+    is("the script is the refund in full's ORDER_WRITE, priced the same", PAYPAL_PARTLY_KEPT.commandsPerScriptAtMost, PAYPAL_REFUND_KEPT.commandsPerScriptAtMost);
     await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", priced.order]]);
     const later = await look();
     is("a later look reads the mark again and writes nothing", [later.filter((c) => c[0] === "HEXISTS").length, later.filter((c) => c[0] === "EVAL").length], [1, 0]);
-    is("the whole later look is within the lines' sum", later.length <= counted, true);
+    is("the whole later look is within the lines' sum", later.length <= counted + PAYPAL_PARTLY_KEPT.markReadsPerLook, true);
+    is("looked at no more often, nor longer, than the watch keeps it", [PAYPAL_PARTLY_KEPT.looksPerDayAtMost, PAYPAL_PARTLY_KEPT.daysAtMost], [PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost, PAYPAL_REFUND_WATCH.daysWatchedAtMost]);
   }
 
   part("Another sale, still completed, keeps paying in full");

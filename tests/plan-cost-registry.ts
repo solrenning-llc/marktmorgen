@@ -1507,6 +1507,30 @@ export const PAYPAL_REFUND_KEPT = {
   daysAtMost: 400,
 } as const;
 /**
+ * The refund in part kept for good by the same watch (lib/paypal-sales.ts, watchPayPal, partlyRefundedKey; #4131,
+ * Claude 6's MEDIUM): an order PayPal says is PARTIALLY_REFUNDED stays watched for a refund in full, so:
+ * - markReadsPerLook: every look at it first asks whether the mark is kept already (one HEXISTS), the first look and
+ *   every later one, for as long as the watch keeps the order;
+ * - scriptsPerFirstLook / writesPerScript: the first look writes the mark with one ORDER_WRITE script carrying one
+ *   HSETNX, charged to the store's room, as PAYPAL_REFUND_KEPT's write is; later looks find it and write nothing;
+ * - commandsPerScriptAtMost: the same script's own calls at their dearest as PAYPAL_REFUND_KEPT's (11);
+ * - retryWritesPerFailedLook: a read or write not known puts the order back an hour on (one ZADD, in place of the
+ *   look's own list write), so its worst is the HEXISTS and one script an hour (looksPerDayAtMost, the watch's own
+ *   hourly look), for as long as the watch keeps the order (daysAtMost, the paid record's 400 days).
+ * The look's other commands are PAYPAL_REFUND_WATCH's (the paid record's GET and the list write) and the run's list
+ * reads. A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
+ * tests/affiliate-paypal-partial-refund.test.ts.
+ */
+export const PAYPAL_PARTLY_KEPT = {
+  markReadsPerLook: 1,
+  scriptsPerFirstLook: 1,
+  writesPerScript: 1,
+  commandsPerScriptAtMost: 11,
+  retryWritesPerFailedLook: 1,
+  looksPerDayAtMost: 24,
+  daysAtMost: 400,
+} as const;
+/**
  * The other half of the same function, the sweep of the store's pending PayPal orders (lib/paypal-sales.ts, watchPayPal,
  * pendingKey; Claude 6's second money review of #3392, LEVE 6), run by the same five-minute job:
  * - listReadsPerStoreRun: one ZRANGEBYSCORE of the store's pending list a run;

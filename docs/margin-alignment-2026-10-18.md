@@ -22,7 +22,7 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 | Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $26.85 | $229.33 | $41.39 | 11.70% | $0.25 | positive | no |
 | Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $306.26 | $2,268.25 | $406.94 | 11.51% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $55.49 | $514.18 | $93.18 | 11.84% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $635.51 | $5,083.18 | $915.63 | 11.64% | $1.00 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $635.52 | $5,083.18 | $915.62 | 11.64% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |

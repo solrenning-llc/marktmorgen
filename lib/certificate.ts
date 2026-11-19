@@ -380,14 +380,16 @@ export async function issueCertificate(input: {
  */
 async function takeBackIssued(courseId: string, who: string, id: string, room: DataStore, bytes: number): Promise<void> {
   const what = "a certificate taken back from a student erased meanwhile";
-  const [record, all, mine, slot] = exactReplies(await redisPipeline([
-    ["DEL", certKey(id)],
+  // Keep every reference until the record's deletion is known: a partial pipeline must not orphan personal data.
+  const [record] = exactReplies(await redisPipeline([["DEL", certKey(id)]]), 1, what);
+  if (replyCount(record, what) > 1) throw new UnknownReply(what);
+  if (record === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes }]);
+  const [all, mine, slot] = exactReplies(await redisPipeline([
     ["SREM", allKey(courseId), id],
     ["SREM", byKey(courseId, who), id],
     ["EVAL", HDEL_IF_EQUAL, 1, indexKey(courseId), who, id],
-  ]), 4, what);
-  for (const n of [record, all, mine, slot]) if (replyCount(n, what) > 1) throw new UnknownReply(what);
-  if (record === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes }]);
+  ]), 3, what);
+  for (const n of [all, mine, slot]) if (replyCount(n, what) > 1) throw new UnknownReply(what);
 }
 
 /**

@@ -1164,6 +1164,13 @@ export type Replied =
   | { ok: true; submission: KeptSubmission }
   | { ok: false; reason: "gone" | "state" | "expired" | "full" | "too_long" };
 
+/** Reply and waiting-place removal commit together; no partial pipeline can strand an answered file's place. */
+export const SUBMISSION_REPLY_WRITE = `-- marktmorgen:submission-reply-write:v1
+if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+redis.call("ZREM", KEYS[2], ARGV[1])
+redis.call("SET", KEYS[1], ARGV[2], "XX", "EX", ARGV[3])
+return 1`;
+
 /**
  * The creator's reply to one kept file, in words (a file with it comes in a
  * later unit): one reply at a time for each file (a lock), the record read
@@ -1196,16 +1203,17 @@ export async function replySubmission(
       }
     }
     const replies = repliesFor(
-      await redisPipeline([
-        ["SET", key, json, "XX", "EX", Math.max(1, until - nowSeconds)],
-        ["ZREM", liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who), kept.id],
-      ]),
-      2,
+      await redisPipeline([[
+        "EVAL", SUBMISSION_REPLY_WRITE, 2, key,
+        liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who),
+        kept.id, json, Math.max(1, until - nowSeconds),
+      ]]),
+      1,
     );
     if (!replies) throw new UnknownReplyError("a submission's reply");
     // Deleted since it was read (its buyer, or its time): nothing was written.
-    if (replies[0] === null) return { ok: false as const, reason: "gone" as const };
-    if (replies[0] !== "OK" || countOf(replies[1]) === null) throw new UnknownReplyError("a submission's reply");
+    if (replies[0] === 0) return { ok: false as const, reason: "gone" as const };
+    if (replies[0] !== 1) throw new UnknownReplyError("a submission's reply");
     return { ok: true as const, submission: next };
   });
 }

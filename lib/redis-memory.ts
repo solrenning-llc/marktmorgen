@@ -356,6 +356,14 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // A creator's reply and the removal of its buyer's waiting place are one atomic step.
+        if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, record, live, id, json, seconds] = args;
+          if (this.run(["EXISTS", record]) === 0) return 0;
+          this.run(["ZREM", live, id]);
+          this.run(["SET", record, json, "XX", "EX", seconds]);
+          return 1;
+        }
         // lib/submission-store.ts SUBMISSION_SLOT_TAKE: a slot's turn taken off only while still at the score read.
         if (key.startsWith("-- marktmorgen:submission-slot-take:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, score] = args;

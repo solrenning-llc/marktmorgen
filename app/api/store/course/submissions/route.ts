@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { seesBuyerAddresses } from "@/lib/buyer-addresses";
 import { jsonAccess } from "@/lib/studio-route";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readListingExactly } from "@/lib/catalog";
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
           const title = lesson?.lesson.title ?? "A lesson removed since";
           if (row.submission === "unread") return { id: row.id, lessonId: row.lessonId, lessonTitle: title, unread: true };
           const s = row.submission;
-          return { id: row.id, lessonId: row.lessonId, lessonTitle: title, buyer: s.buyer, file: s.file, note: s.note, at: s.at, keepUntil: s.keepUntil, state: s.state, reply: s.reply };
+          return { id: row.id, lessonId: row.lessonId, lessonTitle: title, buyer: seesBuyerAddresses(access.role) ? s.buyer : "", file: s.file, note: s.note, at: s.at, keepUntil: s.keepUntil, state: s.state, reply: s.reply };
         }),
       });
     }

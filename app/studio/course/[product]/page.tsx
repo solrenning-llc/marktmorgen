@@ -242,7 +242,7 @@ export default async function StudioCoursePage({
         ) : null}
 
         {/* Files buyers sent for review (750 [CD1]): shown only once the buyer's side works (lib/submission-switch.ts). */}
-        {SUBMISSIONS_READY ? <SubmissionReview productId={product.id} /> : null}
+        {SUBMISSIONS_READY ? <SubmissionReview productId={product.id} showBuyerAddresses={seesBuyers} /> : null}
 
         <CourseCommentsStudio
           productId={product.id}

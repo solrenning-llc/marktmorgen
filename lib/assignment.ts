@@ -631,7 +631,10 @@ export async function review(input: {
 
 /** Notes a file a student was let upload, so one never handed in is deleted (sweepTaskUploads). */
 export async function noteTaskUpload(path: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DOORS_KEY, Math.floor(now / 1000), path]]);
+  // Read exactly (#4871, Codex X7): one ZADD of one member answers 0 (listed already) or 1 (listed anew). Anything
+  // else may not have listed it, so it throws UnknownReplyError and the caller keeps the path, never "queued".
+  const added = countOf(repliesFor(await redisPipeline([["ZADD", DOORS_KEY, Math.floor(now / 1000), path]]), 1)?.[0]);
+  if (added === null || added > 1) throw new UnknownReplyError("a file handed to the daily job that deletes uploads nobody kept");
 }
 
 /**

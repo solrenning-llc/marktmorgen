@@ -99,7 +99,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/shipment-mail-outbox.ts": { how: "copied", what: "Your saved shipping-update messages and their pending state, if the queue has been activated; deletion fences are kept as one-way marks" },
   "lib/order-confirmation-outbox.ts": { how: "copied", what: "Your linked purchase confirmations, original payment reference, amount and pending state, if the queue has been activated; erasure and duplicate-prevention fences are kept as one-way marks" },
   "lib/resend-fallback-budget.ts": { how: "marks", what: "Linked financial send-intent and message fingerprints, quota holds and outcome marks, without a plain address or message; no account-wide ledger of other people's sends is included" },
-  "lib/person-erasure.ts": { how: "marks", what: "While a deletion is not finished, the names of your uploaded files still to be deleted, under a one-way fingerprint" },
+  "lib/person-erasure.ts": { how: "copied", what: "While a deletion is not finished, the names of your uploaded files still to be deleted, under a one-way fingerprint" },
   "lib/orders.ts": { how: "marks", what: "Order-reference and accounting fingerprints that prevent counting a payment twice; they contain no plain email message and do not prove delivery" },
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
@@ -283,6 +283,15 @@ async function packageForCopy(checkout: string): Promise<Bought | null> {
 }
 
 export const COPIERS: Readonly<Record<string, Copier>> = {
+  // The exact paths of the person's files still to be deleted, kept while a deletion is not finished (#4808): data
+  // about the person, so read exactly (#4871, Codex L). A reply that does not read is unknown, never a copy without it.
+  "lib/person-erasure.ts": async (s) => {
+    if (!s.listId) return [];
+    const reply = repliesFor(await redisPipeline([["SMEMBERS", `nl:erase:files:${s.listId}:${suppressionPrint(s.listId, s.email)}`]]), 1);
+    const paths = reply ? stringList(reply[0]) : null;
+    if (!paths) throw new UnknownReplyError("the names of the person's files still to be deleted");
+    return paths;
+  },
   "lib/shipment-mail-outbox.ts": s => shipmentMailOf(s.statsId, s.email),
   "lib/order-confirmation-outbox.ts": s => orderConfirmationMailOf(s.statsId, s.email),
   "lib/contacts.ts": async (s) => {

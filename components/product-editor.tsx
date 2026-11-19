@@ -181,6 +181,8 @@ const MESSAGES: Record<string, string> = {
   memberships: "Members or payment plans are still being charged for this on Stripe. Cancel them in your Stripe dashboard first, then remove it, so nobody keeps paying for something removed.",
   stripe: "We could not check with Stripe whether anyone is still being charged for this. Nothing was removed. Try again in a moment.",
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
+  // Removed memberships whose members' invitations from an import are not yet deleted, and the store's list of those is full.
+  member_invites: "This product cannot be removed yet: too many removed memberships in your store still have invitations to delete. Write to support about it.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
   shipped: "This is a physical product you ship: it is sold once, for a price, with nothing else to hand over. Under Shipping, stop shipping it first to change that.",
@@ -1341,7 +1343,7 @@ function OptionsBlock({
                     onClick={() =>
                       run({ action: "move", id: option.id, direction: "up" }, () => {})
                     }
-                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-12 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move up
                   </button>
@@ -1354,7 +1356,7 @@ function OptionsBlock({
                         () => {},
                       )
                     }
-                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-12 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move down
                   </button>
@@ -2131,7 +2133,7 @@ export function ProductEditor({
     // and change, which is not something to read in three seconds.
     setSilenced(quiet);
     // Removed, but its campaign words could not be confirmed deleted (#1947): said, never a plain "removed".
-    if (pending) toast("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
+    if (pending) toast("Product removed. Some of what it kept (its campaign words, or its members' invitations) could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
     else if (confirmation) toast(confirmation);
     router.refresh();
   }
@@ -2198,7 +2200,7 @@ export function ProductEditor({
     }
   }
 
-  const quiet = "inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
+  const quiet = "inline-flex min-h-12 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
 
   return (
     <StoreCurrency value={currency}>

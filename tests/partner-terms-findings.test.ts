@@ -154,6 +154,20 @@ async function main(): Promise<void> {
   is("an offer with no time at all near the end: unknown, never the clock", await offerAt(paidOffer("pi_offer_no_time", undefined, "ch_only_id")), "UnknownReplyError");
   is("and nothing of them was credited", (await earned()).filter((key) => key.startsWith("pi_offer_unk") || key.startsWith("pi_offer_no_time")).length, 0);
   is("an offer made after the end, its charge not read: no share and no wait", [await offerAt(paidOffer("pi_offer_late", end + 60, "ch_only_id")), (await earned()).includes(`pi_offer_late:${q}`)], ["noted", false]);
+  // Claude 4 on #3485 (MEDIUM): an offer whose order's link is still pending (no `via`, kind "upsell", a parent order)
+  // leaves noteCharge to follow that order (notePendingOffer); a partner's step that failed before it is thrown there
+  // too, so the job credits it again, never only logged.
+  {
+    const failing = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c.some((w) => String(w).includes(`nl:aff:${statsId}:shares`)))) throw new Error("synthetic: the share's write failed");
+      return failing(commands);
+    }) as typeof redis.pipeline;
+    const pending = { ...paidOffer("pi_offer_pending_failed", end - 7000, settledCharge("pi_offer_pending_failed", end - 3600, end - 6000)), metadata: { product: A, title: "Book", kind: "upsell", parent: "cs_test_pending_parent" } };
+    const failed = await offerAt(pending);
+    redis.pipeline = failing;
+    is("an offer whose order's link is pending: a partner's step that fails is thrown, so the job credits it again", failed, "Error");
+  }
   {
     const failing = redis.pipeline;
     redis.pipeline = (async (commands: (string | number)[][]) => {

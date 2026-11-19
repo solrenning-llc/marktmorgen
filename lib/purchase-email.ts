@@ -37,7 +37,7 @@
 import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { ADMITTED_FIELD, OPEN_HOURS, settleAdmitted } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OPEN_HOURS, settlePaidCheckout } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
@@ -142,6 +142,8 @@ export type SessionRecord = {
   customer_details?: { email?: unknown } | null;
   consent?: { promotions?: unknown } | null;
   after_expiration?: { recovery?: { enabled?: unknown } | null } | null;
+  /** The expired session this one was made from by Stripe's recovery link, or null (lib/order-admission.ts, settlePaidCheckout). */
+  recovered_from?: unknown;
 };
 
 /** A name that can sit inside the quotes of an email's From line. */
@@ -612,9 +614,10 @@ export async function confirmPurchase(
     // if counted (lib/orders.ts, countOrder).
     if ((await countOrder(store, `checkout:${sessionId}`, paid, Date.now())) === "unknown") return outcome;
     // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts): once per
-    // checkout, however many runs answer "sent" for it.
+    // checkout, however many runs answer "sent" for it; a Stripe recovery copy only by taking its original's record,
+    // so a place given back at expiry is never given back twice.
     if (read.session?.metadata?.[ADMITTED_FIELD] !== undefined && (await firstToGiveRoomBack(sessionId))) {
-      await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
+      await settlePaidCheckout(store, read.session, read.items ?? 1);
     }
   }
   return outcome;

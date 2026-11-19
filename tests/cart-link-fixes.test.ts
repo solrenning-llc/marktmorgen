@@ -25,6 +25,7 @@ import { MAX_PRODUCT_BYTES, productIds } from "@/lib/catalog";
 import { addDraftProducts, claimHandle, ensureStatsId, setProductHidden, setSubscription, storeForEmail } from "@/lib/store";
 import { countStudio } from "@/lib/studio-route";
 import { paidPeriod } from "./billing-period-fixture";
+import { listingKeysRead, listingValues } from "./listing-reads";
 import { store as redis } from "./redis-stub";
 
 globalThis.fetch = async () => {
@@ -111,20 +112,21 @@ function watch(hmget?: (batch: (string | number)[][]) => unknown[] | null): { se
   const base = redis.pipeline.bind(redis);
   const seen: Watch = { reads: 0, bytes: 0, debits: [], paidBeforeFirst: null, weighs: 0 };
   redis.pipeline = async (batch) => {
-    if (batch.some((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))) && seen.paidBeforeFirst === null) seen.paidBeforeFirst = seen.debits.reduce((a, b) => a + b, 0);
+    if (batch.some((c) => listingKeysRead(c).length > 0) && seen.paidBeforeFirst === null) seen.paidBeforeFirst = seen.debits.reduce((a, b) => a + b, 0);
     if (batch.some((c) => c[0] === "HMGET" && /^nl:data:/.test(String(c[1])))) {
       seen.weighs += 1;
       const forced = hmget?.(batch as (string | number)[][]);
       if (forced) return forced;
     }
     const answers = await base(batch);
-    batch.forEach((c, i) => {
+    batch.forEach((c) => {
       if (c[0] === "INCRBY" && String(c[1]).includes(":studio:")) seen.debits.push(Number(c[2]));
-      if (c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))) {
-        seen.reads += 1;
-        seen.bytes += Buffer.byteLength(String(answers[i]));
-      }
     });
+    // Each listing record read, alone or in an MGET (lib/catalog.ts getMany), and the bytes it answered.
+    for (const read of listingValues(batch, answers)) {
+      seen.reads += 1;
+      seen.bytes += Buffer.byteLength(String(read.value));
+    }
     return answers;
   };
   return { seen, stop: () => (redis.pipeline = base) };

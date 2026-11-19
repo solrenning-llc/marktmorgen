@@ -5390,7 +5390,7 @@ async function markRefunds(account: string, marks: { key: string; field: string;
  * product (its title is ""), and nothing is read for the names: for a reader
  * that prints no product, as the payout file (lib/affiliate-payouts.ts).
  */
-export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean; keptPaid?: boolean } = {}): Promise<Book> {
+export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean; keptPaid?: boolean; payoutUndo?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, unlinkedInvoices: 0, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   // Read exactly, every reply and every record (rule 24): the book decides what is paid (payWithPayPal, the payday,
@@ -5733,8 +5733,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   const unconfirmed = new Set(lines.filter((l) => l.unconfirmed === 1 && l.commission > 0).map((l) => l.ref.replace(/^tier2:/, ""))).size;
   // Each payout says whether PayPal sent it (#4606), also an older one under a random id with its item's mark: the
   // studio draws no Undo on those. Marks that cannot be read draw no Undo either; the route refuses all the same.
-  const sent = await sentThroughPayPal(paid).catch(() => paid.map(() => true));
-  return { rows, lines, payouts: paid.map((payout, i) => ({ ...payout, sent: sent[i] })), refundsChecked, invoicesChecked, invoicesPastCeiling, unlinkedInvoices, currency: store.currency, elsewhere, unconfirmed };
+  // Only the studio's Undo asks (payoutUndo; Codex V's MEDIUM on #4614): every other reader (the payout file, the API,
+  // the rebuild) reads no legacy item mark, so its cost never grows with the older payouts, outside bookWork.
+  const sent = limits.payoutUndo ? await sentThroughPayPal(paid).catch(() => paid.map(() => true)) : null;
+  const shownPayouts = sent ? paid.map((payout, i) => ({ ...payout, sent: sent[i] })) : paid;
+  return { rows, lines, payouts: shownPayouts, refundsChecked, invoicesChecked, invoicesPastCeiling, unlinkedInvoices, currency: store.currency, elsewhere, unconfirmed };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */

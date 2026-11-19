@@ -54,7 +54,9 @@ import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./pl
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, PLAY_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, PLAY_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
+import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
+import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { PLAY_REQUEST_UNITS } from "@/lib/lesson-play-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
@@ -291,6 +293,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // 9 November 2026): more than its paces, its reads, its hold and its ticket cost.
   assert.ok(PLAY_REQUEST_UNITS * laterPageCost() >= PLAY_READ, `${PLAY_REQUEST_UNITS} x ${laterPageCost()} < ${PLAY_READ}`);
   console.log(`a press of Play: $${PLAY_READ.toFixed(6)} at most, counted as ${PLAY_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A short link that opens: its link and store read, its count in the hour and its refund, taken as SHORT_LINK_OPEN_UNITS public requests (Claude 5, 7 November 2026).
+  assert.ok(SHORT_LINK_OPEN_UNITS * laterPageCost() >= SHORT_LINK_OPEN_READ, `${SHORT_LINK_OPEN_UNITS} x ${laterPageCost()} < ${SHORT_LINK_OPEN_READ}`);
+  // A funnel's address pays its product steps as a collection's products: a funnel never holds more steps than a collection is proven for.
+  assert.ok(MAX_FUNNEL_PAGES <= MAX_COLLECTION_PRODUCTS, `${MAX_FUNNEL_PAGES} funnel steps > ${MAX_COLLECTION_PRODUCTS}`);
+  console.log(`a short link opened:$${SHORT_LINK_OPEN_READ.toFixed(6)} at most, counted as ${SHORT_LINK_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);

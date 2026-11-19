@@ -421,6 +421,7 @@ export async function POST(request: NextRequest) {
         channel: {
           ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays),
           ...ads,
+          ...pendingChannel(credit),
           ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
           ...pendingChannel(credit),
         },

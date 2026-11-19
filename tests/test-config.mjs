@@ -82,6 +82,7 @@ function centralAliases(file,root,here){
  if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='picture-owner-followup.test.ts'||file==='picture-door-replies.test.ts'||file==='encanto-tone-route.test.ts'||file==='picture-door-ceiling.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(file==='alt-ai-order.test.ts'||file==='alt-ai-order-page.test.ts')aliases['@/lib/blob']=join(here,'alt-ai-order-world.ts');
  if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts','studio-calendar-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(file==='deals-page-hidden-channels.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='plan-invoices.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
@@ -96,6 +97,7 @@ function centralAliases(file,root,here){
  if(file==='cron-checks-exact.test.ts')for(const name of ['email','verify-mail','verify-stripe'])aliases['@/lib/'+name]=join(here,'cron-checks-exact-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='numbers-email-claim.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats'])aliases['@/lib/'+name]=join(here,'numbers-email-claim-world.ts');
+ if(file==='numbers-email-retry.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats','chat-summary','ad-spend'])aliases['@/lib/'+name]=join(here,'numbers-email-retry-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
  if(file==='affiliate-payout-batch-route.test.ts')aliases['@/lib/studio-route']=join(here,'affiliate-payout-batch-route-world.ts');

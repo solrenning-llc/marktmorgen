@@ -6,6 +6,7 @@
  *   nl:pp:open:<statsId>     batches sent and not yet settled: what each affiliate was sent
  *   nl:pp:item:<item>        a PayPal payout item already written into the book (once)
  *   nl:pp:stores             the stores with a batch still open, for the daily job
+ *   nl:pp:pace:<statsId>     a reading asked for by a view, so the next views for a few minutes do not ask PayPal again
  *
  * How it works, and why this way. PayPal's Payouts API only ever sends money
  * from the balance of the account whose app makes the call. So the creator
@@ -38,6 +39,7 @@ import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/af
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -60,6 +62,16 @@ const linkKey = (statsId: string) => `nl:pp:${statsId}`;
 const openKey = (statsId: string) => `nl:pp:open:${statsId}`;
 const itemKey = (item: string) => `nl:pp:item:${item}`;
 const STORES = "nl:pp:stores";
+const paceKey = (statsId: string) => `nl:pp:pace:${statsId}`;
+/** How long a reading asked for by a view stands for the next views (settlePayPal, `paced`). */
+const SETTLE_PACE_SECONDS = 300;
+/**
+ * The studio's "Check with PayPal" press: never held back by a view's pace (it would answer a check that was not made,
+ * reviews of #4212), but by its own mark, so a creator who presses again within this time is told PayPal was asked
+ * already, and repeated presses stay bounded.
+ */
+export const PRESS_PACE_SECONDS = 60;
+const pressKey = (statsId: string) => `nl:pp:press:${statsId}`;
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
 
 type Link = { client: string; secret: string; at: number; auto: boolean };
@@ -624,7 +636,16 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   }
 }
 
-export type Settled = { paid: number; released: number; waiting: number };
+/**
+ * `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within
+ * PRESS_PACE_SECONDS, an unknown mark, or no token). `unavailable`: true, and only then present, when it was not asked
+ * because nothing could be checked (no token, or a pace mark that could not be confirmed), not because it was asked
+ * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212). `retryNow`: with `unavailable`,
+ * true only when no mark of this reading is left (none was taken, or its release was confirmed), so a new try asks at
+ * once; false when the mark could not be confirmed taken or let go, so the next try may find it until it runs out
+ * (Codex L on #4212).
+ */
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean; retryNow?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -642,8 +663,13 @@ async function earlierItemMark(item: string): Promise<boolean> {
  * Reads every open batch from PayPal and writes into the book what PayPal
  * says was paid — once per item, whoever asks first. Items PayPal could not
  * pay go back to owed; the rest stay on their way.
+ *
+ * `paced`: asked for by a view (the studio's affiliates page, the route's "settle"), not by the daily job. Each reading
+ * is a new token from the creator's PayPal app and up to 10 pages of every open batch, so one reading is made per store
+ * every SETTLE_PACE_SECONDS and the views between them ask PayPal nothing: everyone is still on their way, as they were,
+ * until the next reading or the daily job (which is never paced). A pace mark that cannot be confirmed asks nothing.
  */
-export async function settlePayPal(store: Store): Promise<Settled> {
+export async function settlePayPal(store: Store, options: { paced?: boolean; press?: boolean } = {}): Promise<Settled> {
   const out: Settled = { paid: 0, released: 0, waiting: 0 };
   if (!store.statsId || !isRedisConfigured()) return out;
   const statsId = store.statsId;
@@ -665,8 +691,20 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       undropped.add(field);
     }
   }
+  const onTheirWayNow = () => ({ ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0), asked: false });
+  // A press is held back only by its own mark; a view by the view's. An unknown mark asks nothing.
+  const pace = options.press ? { key: pressKey(statsId), seconds: PRESS_PACE_SECONDS } : options.paced ? { key: paceKey(statsId), seconds: SETTLE_PACE_SECONDS } : null;
+  const mark = pace ? claimValue() : "";
+  const claimed = pace ? await claimMark(pace.key, pace.seconds, mark) : "ours";
+  if (claimed === "taken") return onTheirWayNow();
+  if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true, retryNow: false };
   const token = await bearer(store).catch(() => null);
-  if (!token) return { ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  if (!token) {
+    // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
+    // press asks again (review of #4212, LEVE).
+    const released = pace ? await releaseMark(pace.key, mark) : true;
+    return { ...onTheirWayNow(), unavailable: true, retryNow: released };
+  }
   const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {

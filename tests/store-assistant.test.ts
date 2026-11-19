@@ -26,7 +26,7 @@ import { addProduct, claimHandle, ensureStatsId, setAssistant, setAssistantPlan,
 import { readListing } from "@/lib/catalog";
 import { parsePage } from "@/lib/sales-page";
 import { readInbox } from "@/lib/inbox";
-import { ANTHROPIC_RATES, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
+import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -271,7 +271,9 @@ async function main(): Promise<void> {
   next = { status: 529 };
   is("a provider error answers nothing", (await askAssistant({ store, text: "Is it a PDF?", facts, now })).ok, false);
   const afterError = await poolOf(store.statsId!, window.id);
-  is("and was not billed: the whole reservation is given back", [afterError.held, afterError.spent, afterError.n], [0, lost.spent, lost.n]);
+  // Rule 23 (9 Nov 2026, second pre-review MEDIUM 3): was [0, lost.spent, lost.n], the whole reservation given back. The
+  // call was made and waited on, so it is settled at its own cost and the message's extra, as an answer is.
+  is("and was not billed: only the call's own cost and the message's extra are spent, the rest given back", [afterError.held, afterError.spent, afterError.n], [0, lost.spent + AI_CALL_INFRA_MICRO_USD + assistantMessageExtraMicroUsd(), lost.n + 1]);
   next = "lost";
   is("a lost connection answers nothing", (await askAssistant({ store, text: "Is it a PDF?", facts, now })).ok, false);
   const afterLost = await poolOf(store.statsId!, window.id);
@@ -287,8 +289,9 @@ async function main(): Promise<void> {
   is("past the pool, nothing is asked of the model: the chat becomes the creator's form", [spent.ok ? "answered" : spent.reason, asked.length], ["spent", callsBefore]);
   is("the studio sees none left", (await assistantLeft(store, now))?.left, 0);
   is("and the question can still be left for the creator, at no AI cost", (await handToCreator({ store, email: "late@example.com", text: "Is there a printed version?", now })).ok, true);
-  // Two at once with room for exactly one.
-  await redis.pipeline([["HSET", `nl:assist:pool:${store.statsId}:${window.id}`, "spent", String(assistantPoolMicroUsd() - Math.max(holdOf("Is it a PDF?"), holdOf("Is it printable?")) - 1)]]);
+  // Two at once with room for exactly one. Changed 9 Nov 2026 (audit ALTO 2, rule 23): the pool is reserved at a message's
+  // worst before the facts are read (the request's own size is not known yet), so "room for one" is the worst plus one.
+  await redis.pipeline([["HSET", `nl:assist:pool:${store.statsId}:${window.id}`, "spent", String(assistantPoolMicroUsd() - worst - 1)]]);
   const both = await Promise.all([askAssistant({ store, text: "Is it a PDF?", facts, now }), askAssistant({ store, text: "Is it printable?", facts, now })]);
   is("two at once with room for one: one is answered, one is told the month is used", both.map((r) => (r.ok ? "answered" : r.reason)).sort(), ["answered", "spent"]);
 

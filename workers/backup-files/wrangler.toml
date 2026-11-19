@@ -1,0 +1,35 @@
+# 273 [BK1], files part 2: the files-and-videos backup Worker
+# (docs/backup-costs-2026-11-08.md, 5.1 and 5a; docs/incident-response.md, 8.3).
+# For the separate backup account only, deployed by the owner once the cost is
+# approved; no workflow deploys it. Secrets, set by the owner with
+# `wrangler secret put`, never in this file: BACKUP_FILES_ROUTE_SECRET (the
+# route's own secret, the only thing of production this account holds),
+# BACKUP_FILES_HEARTBEAT_URL and BACKUP_FILES_ALARM_URL (the external monitor's).
+name = "marktmorgen-files-backup"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+# Buffer, which lib/backup-files-contract.ts uses to weigh a page.
+compatibility_flags = ["nodejs_compat"]
+
+# No public URL and no route: only the cron below can start it (7a, item 7).
+workers_dev = false
+preview_urls = false
+
+[triggers]
+# One lane, once an hour: a cron of an hour or more has 15 minutes of CPU and wall time.
+crons = ["17 * * * *"]
+
+# Workers Logs off: its price from 1 December 2026 is not read (5a).
+[observability]
+enabled = false
+
+[vars]
+BACKUP_FILES_ROUTE_URL = "https://marktmorgen.com/api/backup/files"
+
+[[r2_buckets]]
+binding = "FILES_BUCKET"
+bucket_name = "marktmorgen-files-backup"
+
+[[r2_buckets]]
+binding = "VIDEOS_BUCKET"
+bucket_name = "marktmorgen-videos-backup"

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { lockRead } from "@/lib/two-step-unknown";
-import { deleteFile as del, headFile as head } from "@/lib/file-store";
+import { headFile as head } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -120,9 +121,7 @@ export async function POST(request: NextRequest) {
       ? new Set<string>()
       : await (delivery ? Promise.resolve(delivery) : readDelivery(result.store, id)).then((found) => audioPlayedBy(found?.product)).catch(() => null);
     if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
-      await del(removed.pathname).catch((error: unknown) => {
-        console.error("could not delete the replaced file", error);
-      });
+      await deleteOrSweep(removed.pathname, "the replaced file");
       // Buyers' stamped copies of it go with it.
       await dropStamped(removed);
     }

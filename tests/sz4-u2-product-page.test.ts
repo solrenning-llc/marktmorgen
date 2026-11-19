@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   let store = (await storeForEmail(OWNER))!;
   const product = (await readListing(store, planner.product.id))!;
   const clubNow = (await readListing(store, club.product.id))!;
-  const place = { selling: true, soon: false, remaining: null, ready: true, related: [] };
+  const place = { selling: true, soon: false, unread: false, remaining: null, ready: true, related: [] };
 
   is("a proved member: the percentage", memberShown(store, product, { state: "member", percent: 20, email: "m@example.com" }), 20);
   is("unknown: the normal price", memberShown(store, product, { state: "unknown" }), 0);
@@ -90,6 +90,8 @@ async function main(): Promise<void> {
   is("not while the store cannot take a payment", memberPriceCanShow(store, product, { ...place, selling: false }), false);
   is("not while it is coming soon", memberPriceCanShow(store, product, { ...place, soon: true }), false);
   is("not when sold out", memberPriceCanShow(store, product, { ...place, remaining: 0 }), false);
+  // Codex X6's LOW on #3021: stock or keys not read leave remaining null, and the buy area says it cannot be bought now.
+  is("not while its stock or keys could not be read", memberPriceCanShow(store, product, { ...place, unread: true }), false);
   is("not on a bundle not ready to hand over", memberPriceCanShow(store, product, { ...place, ready: false }), false);
   is("not on a membership (a rule never covers it)", memberPriceCanShow(store, clubNow, place), false);
   is("not on a product with several prices", memberPriceCanShow(store, { ...product, options: [{ id: "o1", label: "Big", priceCents: 4000, details: [], best: false }] } as unknown as typeof product, place), false);
@@ -142,6 +144,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
   is("drawn for each request: it reads the visitor's cookies", page.includes("await cookies()"), true);
   is("never cached for everybody", ["export const revalidate", "force-static", "generateStaticParams", '"use cache"', "unstable_cache"].filter((piece) => page.includes(piece)), []);
+  is("the page passes its unread stock or keys to the member-price check", /memberPriceCanShow\(store, product, \{[^}]*\bunread\b[^}]*\}\)/.test(page), true);
   is("the server is asked only where a member price could show", /memberPriceCanShow\([^)]*\{[^}]*\}\)\s*\?\s*await memberPriceFor\(/.test(page), true);
   is("an answer that fails is unknown: the normal price", /await memberPriceFor\([\s\S]*?\)\.catch\(/.test(page), true);
   is("the buy box is given the member price", /<BuyBox [^>]*member=\{member\}/.test(page), true);

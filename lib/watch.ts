@@ -42,10 +42,10 @@
  */
 import { storeKeysOf } from "@/lib/delivery";
 import { WINDOW_ID, allowanceWindow, calendarWindow } from "@/lib/allowance-window";
-import { storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { ERASING_KEY, erasingField, storeFolder, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { PLAYER_SECONDS, isStreamConfigured, streamWatched } from "@/lib/stream";
 import { MEASURE_EVERY_MS, MEASURE_SOON_MS } from "@/lib/watch-rules";
 
@@ -54,6 +54,23 @@ const secondsKey = (folder: string, month: string) => `nl:watch:sec:${folder}:${
 const foldersKey = (month: string) => `nl:watch:folders:${month}`;
 const openedKey = (folder: string) => `nl:watch:opened:${folder}`;
 const DUE = "nl:watch:due";
+
+/**
+ * Applies one measurement only while the store identity resolved before the
+ * video-service request is still live. Store erasure removes the id key first
+ * and keeps the erasing field for the walk, so neither a stale service answer
+ * nor a stale due snapshot can recreate usage after deletion.
+ */
+const WATCH_WRITE_IF_LIVE = `-- marktmorgen:watch-write-live:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('HEXISTS', KEYS[2], ARGV[2]) == 1 then return 0 end
+local ok, commands = pcall(cjson.decode, ARGV[3])
+if not ok or type(commands) ~= 'table' then return redis.error_reply('invalid watch writes') end
+for _, command in ipairs(commands) do redis.call(unpack(command)) end
+return 1`;
+/** The EVAL itself and its two guard reads; the remaining calls replace the old write commands. */
+export const WATCH_WRITE_FENCE_EXTRA_COMMANDS = 3;
+/** A billing window can touch parts of 32 UTC days, with at most one scheduled read an hour. */
+export const WATCH_MEASURE_RUNS_PER_WINDOW = 32 * 24;
 
 /** A month's figures are kept long enough to be billed, asked about and answered for. */
 const KEEP_SECONDS = 400 * 24 * 60 * 60;
@@ -136,16 +153,25 @@ export async function watchedFolders(month = calendarWindow().id): Promise<strin
  * rule 24): the calendar month then would put the seconds where the store's
  * own window, which the video admission reads, never sees them.
  */
-async function windowOfFolder(folder: string, now: number): Promise<string | null> {
+type WatchScope = { window: string; live?: { idKey: string; ref: string; erasing: string } };
+
+async function scopeOfFolder(folder: string, now: number): Promise<WatchScope | null> {
   try {
     const [key] = await storeKeysOf([folder]);
     const store = key ? await storeForEmail(key) : null;
-    if (store && (await storeFolder(storeRef(store))) === folder) return allowanceWindow(store, now)?.id ?? null;
+    if (store) {
+      const ref = storeRef(store);
+      if ((await storeFolder(ref)) !== folder) return null;
+      const window = allowanceWindow(store, now)?.id;
+      return window ? { window, live: { idKey: storeIdCommand(store.sid)[1], ref, erasing: await erasingField(ref) } } : null;
+    }
+    // An owner mapping without a readable store is unknown, not an orphan.
+    if (key) return null;
   } catch (error) {
     console.error("could not read whose video was watched; measured again soon", error);
     return null;
   }
-  return calendarWindow(now).id;
+  return { window: calendarWindow(now).id };
 }
 
 /**
@@ -154,8 +180,14 @@ async function windowOfFolder(folder: string, now: number): Promise<string | nul
  * last totals kept here, or whose store it is, could not be read, and then
  * nothing was changed.
  */
-export async function measure(folder: string, now = Date.now()): Promise<number | null> {
-  if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder)) return 0;
+type MeasureResult = { added: number; live: boolean };
+
+async function measureOne(folder: string, now: number): Promise<MeasureResult | null> {
+  if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder)) return { added: 0, live: true };
+  // Resolve before the provider call. If erasure starts while that call is in
+  // flight, the atomic write below observes the missing id or erasing field.
+  const scope = await scopeOfFolder(folder, now);
+  if (scope === null) return null;
   const videos = await streamWatched(folder);
   if (videos === null) return null;
 
@@ -203,20 +235,34 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
   if (added > 0) {
     // Added to the store's window (lib/allowance-window.ts), where its video
     // stops; the line of stores is kept by the calendar month.
-    const window = await windowOfFolder(folder, now);
-    // Unknown: nothing is written, the last totals included, so the next
-    // reading adds this growth to the right window, once.
-    if (window === null) return null;
     const month = calendarWindow(now).id;
     writes.push(
-      ["INCRBY", secondsKey(folder, window), added],
-      ["EXPIRE", secondsKey(folder, window), KEEP_SECONDS],
+      ["INCRBY", secondsKey(folder, scope.window), added],
+      ["EXPIRE", secondsKey(folder, scope.window), KEEP_SECONDS],
       ["SADD", foldersKey(month), folder],
       ["EXPIRE", foldersKey(month), KEEP_SECONDS],
     );
   }
-  if (writes.length) await redisPipeline(writes);
-  return added;
+  if (writes.length) {
+    if (!scope.live) await redisPipeline(writes);
+    else {
+      const read = repliesFor(await redisPipeline([[
+        "EVAL", WATCH_WRITE_IF_LIVE, 2, scope.live.idKey, ERASING_KEY,
+        scope.live.ref, scope.live.erasing, JSON.stringify(writes),
+      ]]), 1);
+      const kept = read ? countOf(read[0]) : null;
+      if (kept === 0) return { added: 0, live: false };
+      if (kept !== 1) return null;
+    }
+  }
+  // An orphan remains the historical, deliberate calendar-window case. Only
+  // a live store whose atomic fence was refused is an erased stale snapshot.
+  return { added, live: true };
+}
+
+export async function measure(folder: string, now = Date.now()): Promise<number | null> {
+  const result = await measureOne(folder, now);
+  return result?.added ?? null;
 }
 
 /**
@@ -231,11 +277,18 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
   for (const folder of Array.isArray(due) ? due : []) {
     if (Date.now() > deadline) return counts;
     if (typeof folder !== "string") continue;
-    const added = await measure(folder, now);
-    if (added === null) {
+    const measured = await measureOne(folder, now);
+    if (measured === null) {
       await redisPipeline([["ZADD", DUE, now + AGAIN_MS, folder]]);
       continue;
     }
+    if (!measured.live) {
+      // Erasure may have removed the due member before this stale snapshot
+      // reached the service. Never put it back from an old opened marker.
+      await redisPipeline([["ZREM", DUE, folder]]);
+      continue;
+    }
+    const added = measured.added;
     counts.read += 1;
     counts.seconds += added;
     // No key: no lesson of theirs opened for a week. A reply of any other

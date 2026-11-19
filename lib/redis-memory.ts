@@ -1034,6 +1034,16 @@ export class MemoryRedis {
           }
           return [1, out];
         }
+        // lib/watch.ts WATCH_WRITE_IF_LIVE: one video-meter reading is kept only while the store resolved before
+        // the provider request still exists and its erasure has not begun.
+        if (key.startsWith("-- marktmorgen:watch-write-live:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, idKey, erasingKey, ref, field, json] = args;
+          if (this.run(["GET", idKey]) !== ref || this.run(["HEXISTS", erasingKey, field]) === 1) return 0;
+          const commands = JSON.parse(json) as (string | number)[][];
+          if (!Array.isArray(commands) || commands.some((command) => !Array.isArray(command) || command.length < 2)) throw new Error("invalid watch writes");
+          for (const command of commands) this.run(command);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:held-state:v1\n") && args[0] === "2" && args.length === 6) {
           const [, index, month, held, ref, due] = args;
           if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);

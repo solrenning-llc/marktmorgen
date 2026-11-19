@@ -62,6 +62,7 @@ import { monthlyEmails, type Tier } from "@/lib/plan";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
+import { WATCH_MEASURE_RUNS_PER_WINDOW, WATCH_WRITE_FENCE_EXTRA_COMMANDS } from "@/lib/watch";
 import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
@@ -1826,12 +1827,13 @@ export const COST_LINES: CostLine[] = [
   {
     id: "video",
     feature: "Lesson video watched",
-    monthlyUsd: (tier) => PAID_VIDEO_HOURS[tier] * hourCost(),
+    monthlyUsd: (tier) => PAID_VIDEO_HOURS[tier] * hourCost() + WATCH_MEASURE_RUNS_PER_WINDOW * WATCH_WRITE_FENCE_EXTRA_COMMANDS * COMMAND,
     sources: [
       { file: "lib/video-admission-rules.ts", names: ["PAID_VIDEO_HOURS"] },
       { file: "lib/watch-rules.ts", names: ["VIDEO_HOURS_INCLUDED", "VIDEO_SECONDS_INCLUDED", "VIDEO_CENTS_PER_HOUR_OVER"] },
+      { file: "lib/watch.ts", names: ["WATCH_MEASURE_RUNS_PER_WINDOW", "WATCH_WRITE_FENCE_EXTRA_COMMANDS"] },
     ],
-    basis: "Every admitted hour watched. The legacy invoice line past 400 hours is never reached: admission stops at the plan's hours (tests/plan-cost-registry.test.ts holds it below).",
+    basis: "Every admitted hour watched. The erasure fence is priced for one scheduled measurement in every hour of the 32 UTC days a billing window can touch: the EVAL plus its two guard redis.call reads; its other redis.call writes replace the commands the measurement already sent. The legacy invoice line past 400 hours is never reached: admission stops at the plan's hours (tests/plan-cost-registry.test.ts holds it below).",
   },
   {
     id: "visits",

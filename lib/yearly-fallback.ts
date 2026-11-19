@@ -247,7 +247,9 @@ export async function moveToMonthly(store: Store, customer: string, subscription
         const still = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v);
         // Another invoice's "open" never proves the year still unpaid: the catch below turns its retries back on.
         if (!isOwnReply(still, failedInvoice)) throw new NotOwnReply(failedInvoice);
-        if (still.status !== "open") {
+        // An open invoice may have become partly paid, or its pause may not
+        // have applied. Both facts must still be known before charging a month.
+        if (still.status !== "open" || still.amount_paid !== 0 || still.auto_advance !== false) {
           if (still.status !== "paid") await retryYear(account, failedInvoice);
           return { ok: false, reason: "fallback" };
         }

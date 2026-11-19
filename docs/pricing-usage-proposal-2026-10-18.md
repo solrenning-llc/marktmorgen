@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $139.90 | $1,436.85 | $69 / $690 |
+| Store | $139.90 | $1,436.95 | $69 / $690 |
 | Studio | $278.40 | $3,066.90 | $449 / $4,490 |
-| Scale | $495.75 | $5,637.50 | $999 / $9,990 |
+| Scale | $495.75 | $5,637.68 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -57,7 +57,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $449 / $4,490 **(recommended)** | 38.6% | 60.40% | 60.01% | $271.21 | 0.97 |
+| $449 / $4,490 **(recommended)** | 38.6% | 60.40% | 60.01% | $271.20 | 0.97 |
 
 ### Scale
 
@@ -93,7 +93,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, monthly (sizing reading) | 60.22% | 60.40% | 60.45% |
 | Net at full included use, yearly (sizing reading) | 60.04% | 60.01% | 60.00% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.06% | 12.14% | 12.16% |
-| Net a customer, a month, at full included use | $89.74 | $271.21 | $603.96 |
+| Net a customer, a month, at full included use | $89.74 | $271.20 | $603.96 |
 | The same at #553's price | $37.62 | $263.99 | $592.26 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.

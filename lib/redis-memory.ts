@@ -729,6 +729,14 @@ export class MemoryRedis {
           this.run(["ZADD", all, at, member]);
           return 1;
         }
+        // lib/assignment.ts REVIEW_WRITE_IF: a creator's review written only over the work it read.
+        if (key.startsWith("-- marktmorgen:review-write-if:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, sub, waiting, expected, json, member] = args;
+          if (this.run(["GET", sub]) !== expected) return 0;
+          this.run(["SET", sub, json]);
+          this.run(["ZREM", waiting, member]);
+          return 1;
+        }
         // lib/email-sync.ts WRITE_IF_READ: how a try went written (and queued) only over the job record as it was read.
         if (key.startsWith("-- marktmorgen:esync-write-if-read:v1\n") && args[0] === "2" && args.length === 8) {
           const [, job, queue, expected, json, seconds, due, member] = args;

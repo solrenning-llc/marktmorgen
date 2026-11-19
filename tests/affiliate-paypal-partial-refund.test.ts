@@ -16,6 +16,7 @@ import { setSendHooksForTests } from "@/lib/webhooks";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { PAYPAL_PENDING_SWEEP, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -104,6 +105,39 @@ async function main(): Promise<void> {
   is("its line says partly refunded and earns nothing", [line?.status, line?.commission], ["partly refunded", 0]);
   is("the mark names the payment, kept for good as the book's line is", [(await redis.pipeline([["HEXISTS", `nl:ppsell:partback:${store.statsId}`, `paypal:${sold.capture}`]]))[0], (await redis.pipeline([["TTL", `nl:ppsell:partback:${store.statsId}`]]))[0]], [1, -1]);
   is("the order stays watched for a refund in full", (await redis.pipeline([["ZSCORE", `nl:ppsell:watch:${store.statsId}`, sold.order]]))[0] !== null, true);
+
+  // Claude 6 on #4131 (MEDIUM, cost): every command of a look at an order PayPal says is refunded in part is held to
+  // the cost lines' sum, the first look (with the mark's one write) and every later one (its HEXISTS each time), so no
+  // step of that path can go uncounted (as the refund in full's look is held in tests/affiliate-refund-lifetime.test.ts).
+  part("Every command of a look at an order refunded in part is a cost line's");
+  {
+    const recorded = async (run: () => Promise<unknown>) => {
+      const original = redis.pipeline.bind(redis);
+      const sent: (string | number)[][] = [];
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        sent.push(...commands);
+        return original(commands);
+      }) as typeof redis.pipeline;
+      try {
+        await run();
+      } finally {
+        redis.pipeline = original;
+      }
+      return sent;
+    };
+    const look = async () => recorded(() => watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {}, refunded: async () => {} }));
+    const counted = PAYPAL_PENDING_SWEEP.listReadsPerStoreRun + PAYPAL_REFUND_WATCH.listReadsPerStoreRun + PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook;
+    const priced = await sell();
+    captures.set(priced.capture, "PARTIALLY_REFUNDED");
+    await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", priced.order]]);
+    const first = await look();
+    is("the first look reads the mark once and writes it once", [first.filter((c) => c[0] === "HEXISTS").length, first.filter((c) => c[0] === "EVAL").length], [1, 1]);
+    is("the whole first look is within the lines' sum", first.length <= counted, true);
+    await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", priced.order]]);
+    const later = await look();
+    is("a later look reads the mark again and writes nothing", [later.filter((c) => c[0] === "HEXISTS").length, later.filter((c) => c[0] === "EVAL").length], [1, 0]);
+    is("the whole later look is within the lines' sum", later.length <= counted, true);
+  }
 
   part("Another sale, still completed, keeps paying in full");
   await sell();

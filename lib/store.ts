@@ -49,7 +49,7 @@ import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held, LockBusyError, applyIfHeld, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -930,6 +930,29 @@ async function sha256Hex(value: string): Promise<string> {
 export const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
+/**
+ * A store whose erasure has begun (Codex N1's HIGH on #3156): the closing walk (lib/closed-store-data.ts, prepareStore)
+ * writes one field here, through the same fence as its first delete and before anything of the live store is deleted,
+ * and closeStoreRecord removes it in the same fenced step as the record. While it is there no plan starts on the store
+ * (setSubscription, withRestartPublicationRecord) and a plan paid for it is returned in full like one paid on its closing
+ * day (lib/closing-plan-guard.ts, closingSince): a store half erased is never opened again. The field is the hash of
+ * the store's ref, as its record key is, so no address is written in it.
+ */
+export const ERASING_KEY = "nl:closed:erasing";
+export const erasingField = async (ref: string) => (await sha256Hex(`nimbus-erasing:${ref.toLowerCase()}`)).slice(0, 40);
+/**
+ * When this store's erasure began (ms), or null when it has not. Read exactly (rule 24): an answer that is neither nil
+ * nor a whole number of ms throws, never read as "not erasing", so a plan is never started on a guess.
+ */
+export async function erasingSince(ref: string): Promise<number | null> {
+  const read = repliesFor(await redisPipeline([["HGET", ERASING_KEY, await erasingField(ref)]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("whether a store's erasure has begun");
+  if (raw === null) return null;
+  if (!/^\d{1,16}$/.test(raw)) throw new UnknownReplyError("whether a store's erasure has begun");
+  return Number(raw);
+}
+
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 /**
  * Whether a handle's key, as read, still leads to a store: not free, not held
@@ -1355,6 +1378,8 @@ export async function withRestartPublicationRecord<T>(
   const entry=Object.getOwnPropertyDescriptor(reply,"0");
   if(!entry||!Object.hasOwn(entry,"value"))return null;
   const record=restartPublicationRecord(entry.value,ref,goal);if(!record)return null;
+  // A store whose erasure has begun never starts again (Codex N1's HIGH on #3156).
+  if((await erasingSince(ref))!==null)return null;
   return await work({...record,owner,held});
  }catch{return null;}
  finally{await releaseLockStrict(held);}
@@ -2230,7 +2255,7 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
 export async function closeStoreRecord(
   store: Store,
   extraKeys: string[] = [],
-  beforeDelete?: (fresh: Store | null) => Promise<void>,
+  beforeDelete?: (fresh: Store | null, held: Held) => Promise<void>,
 ): Promise<boolean> {
   const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
@@ -2256,27 +2281,31 @@ export async function closeStoreRecord(
     // made once and never changed, says so (Claude 7's LEVE on #3643). Only then is a different sid read as the same store.
     const sameLegacy = store.sid === "" && Boolean(store.statsId) && fresh?.statsId === store.statsId;
     if (fresh && fresh.sid !== store.sid && !sameLegacy) return false;
-    await beforeDelete?.(fresh);
-    // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
-    // go first, and the record last. Its id leaves its account's list at both addresses read, as one moved since is the
-    // account's now (Claude 6 on #3643). Only "OK" for each hold and a count for each removal is done (rule 24): any
-    // other answer throws before the record goes, so the record stays, the closing walk prepares the store again and
-    // every step is run again (Claude 6's MEDIUM on #3643).
+    // The lock held is passed on, so what the caller deletes here is made only while it is still held (lib/closed-store-data.ts, fencedBy).
+    await beforeDelete?.(fresh, held);
+    // Its addresses are held back (those it has now too: one moved to since is its own), its id and places go, and the
+    // record last, all in the steps that read the store's lock as still ours (applyIfHeld, CLOSING_FENCED): a lock that
+    // ran out before them (a paused function, a slow network) lets none of them land on a store whose plan started
+    // again in that moment, which kept its address and its id (Codex M's focal M1 on #3156, on #3643's design). Its id
+    // leaves its account's list at both addresses read, as one moved since is the account's now (Claude 6 on #3643). An
+    // answer that is not "done" or "not ours" throws before anything is said closed (rule 24): the closing walk reads the
+    // record before it walks the store, and prepares it again while it is there.
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
     const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
-    const holds = [...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
     // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
     const sid = sameLegacy && fresh ? fresh.sid : store.sid;
-    const removals = [
-      ...(STORE_ID_PATTERN.test(sid) ? [["DEL", storeIdKey(sid)], ...[...accounts].map((account) => ["SREM", account, sid])] : []),
-      ["ZREM", ENDED_INDEX, storeRef(store)],
-      ["SREM", SHARING_INDEX, storeRef(store)],
+    const changes: FencedChange[] = [
+      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(RELEASE_QUARANTINE_DAYS * 24 * 60 * 60)] })),
+      ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
+      { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
+      { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
+      // The record is the very last change, so it goes in the last step even when the changes take more than one
+      // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
+      // The erasing mark goes in the same step as the record (Codex N1's HIGH on #3156), never before it.
+      { op: "HDEL", key: ERASING_KEY, words: [await erasingField(storeRef(store))] },
+      ...[beforeMoveKeyOf(owner), ...extraKeys, owner].map((key) => ({ op: "DEL", key, words: [] })),
     ];
-    const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
-    if (!replies || replies.some((reply, i) => (i < holds.length ? reply !== "OK" : countOf(reply) === null))) {
-      throw new UnknownReplyError("a closing store's addresses held back and its places released");
-    }
-    if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner), ...extraKeys]))) throw new StoreBusyError();
+    if (!(await applyIfHeld(held, changes))) throw new StoreBusyError();
     return true;
   } finally {
     await releaseLock(held);
@@ -2447,6 +2476,9 @@ export async function setSubscription(
     stripeCustomerId: expected.stripeCustomerId, subscriptionId: expected.subscriptionId,
     subscriptionActive: expected.subscriptionActive, tier: expected.tier, cycle: expected.cycle } : null;
   const result = await withStore<Store | null>(email, async (store, save) => {
+    // No plan runs on a store whose erasure has begun (Codex N1's HIGH on #3156): read under the store's lock, exactly,
+    // so a start racing the walk's first delete is refused; a payment for it is returned (closingSince).
+    if (fields.active && (await erasingSince(storeRef(store))) !== null) return null;
     if (source && (store.sid !== source.sid || store.statsId !== source.statsId ||
         store.stripeCustomerId !== source.stripeCustomerId || store.subscriptionId !== source.subscriptionId ||
         store.subscriptionActive !== source.subscriptionActive || store.tier !== source.tier || store.cycle !== source.cycle)) return null;

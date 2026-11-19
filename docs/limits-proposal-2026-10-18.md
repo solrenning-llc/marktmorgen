@@ -20,14 +20,14 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Storage | 5 GiB | 5 GiB | 40 GiB → **4 GiB** | 40 GiB → **4 GiB** | 80 GiB → **65 GiB** | 80 GiB → **8 GiB** |
 | Orders a month | 200 | 200 | 450 → **45** | 450 → **45** | 1,500 | 1,500 → **150** |
 | Store emails a month | 75 | 75 | 300 → **30** | 300 → **30** | 800 | 800 → **80** |
-| Access emails a month | 150 | 150 | 400 → **72** | 400 → **40** | 1,000 | 1,000 → **130** |
+| Access emails a month | 150 | 150 | 400 → **67** | 400 → **40** | 1,000 | 1,000 → **130** |
 | List emails a month | none today | none today | 7,000 | 7,000 → **3,800** | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
 | Net with the cuts | not reachable | not reachable | **60.00%** | **60.01%** | **60.00%** | **60.00%** |
-| Every printed line at 10% / at zero | 56.52% / 56.72% | 56.04% / 56.26% | 61.29% / 61.56% | 61.01% / 61.30% | 61.79% / 62.05% | 61.52% / 61.82% |
-| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 59.16% of today | 44.05% of today | 79.46% of today | 62.23% of today |
+| Every printed line at 10% / at zero | 56.52% / 56.71% | 56.04% / 56.25% | 61.29% / 61.56% | 61.01% / 61.30% | 61.79% / 62.05% | 61.52% / 61.82% |
+| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 59.14% of today | 44.05% of today | 79.45% of today | 62.23% of today |
 
-Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 56.72%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 56.26%: its hidden lines and receiving alone take more than the floor leaves).
+Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 56.71%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 56.25%: its hidden lines and receiving alone take more than the floor leaves).
 
 ## How each line compares
 

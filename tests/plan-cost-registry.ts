@@ -79,15 +79,15 @@ import { PICTURE_DOOR_MAX } from "@/lib/picture-door";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
-import { MAX_TEAM } from "@/lib/team";
+import { MAX_TEAM, MEMBER_STORES_READ } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
-import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES } from "@/lib/store";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
@@ -2233,6 +2233,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A course's "Next step" reads what the student has through the same door, only when nothing else keeps the card away (560 [AS1], 10 November 2026).
+      { file: "lib/course-next-step.ts", names: ["takeBuyerRead(store, 1)", "readListing(store, step.productId)", "takeBuyerRead(store, CART_OFFER_REQUEST_UNITS - 1)", "ownedHere(store, input.email)", "paypalOwned(store, input.email", "if (!nextStepShown({ step, courseProductId, product, owned: false, dismissed: false }).shown"] },
       // A member price's proof reads what the visitor holds from the creator's Stripe account (two calls at most) and the purchases
       // brought over, counted before, at the next product's own count and inside its bounds (620 [SZ4], 6 November 2026;
       // MAX_MEMBER_QUALIFYING listings and MEMBER_PRICE_STRIPE_CALLS held under NEXT_OFFER_READ's in tests/member-price.test.ts).
@@ -2392,6 +2394,8 @@ export const COST_LINES: CostLine[] = [
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },
+      // The health copy checks the erasure prints atomically with its write (EVAL + HMGET + SET, two commands over SET).
+      { file: "lib/member-health.ts", names: ["memberHealth", "keepUnlessErased"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
@@ -2433,10 +2437,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 22;", "if (extra > 0 && !(await pay(extra))) throw new InvitesUnpaidError();", "if (!(await pay(1))) throw new InvitesUnpaidError();", "if (!firstPaid && !(await pay(1))) throw new InvitesUnpaidError();", "if (covered > 1 && !(await pay(covered - 1))) throw new InvitesUnpaidError();", "PENDING_MAX = 20;"] },
       { file: "app/api/store/product/route.ts", names: ["await notePendingInvites(guarded.store, id, pay);", "await dropProductInvites(removed.store, id, pay, !!before)"] },
       // A discount code scheduled ahead (511 [CK3]) takes SCHEDULE_UNITS more studio requests before Stripe is asked, one for each try the
-      // five-minute job may make to switch it on (each one call to the creator's Stripe account, which bills none, and a few commands),
+      // five-minute job may make to switch it on, and since #4522 one for each of the STOP_TRIES runs that may switch it off when the last
+      // try left it live (each run at most two calls to the creator's Stripe account, which bills none, and a few commands),
       // and one for each try of the email that it failed (unit 2: a few commands; the email itself from the store's email figure, EMAIL_SITES).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
-      { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES + NOTICE_TRIES", "MAX_SCHEDULED_CODES", "NOTICE_RETRY_SECONDS"] },
+      { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES + STOP_TRIES + NOTICE_TRIES", "STOP_TRIES = 3", "MAX_SCHEDULED_CODES", "NOTICE_RETRY_SECONDS"] },
       { file: "app/api/cron/imports/route.ts", names: ["activateScheduledCodes("] },
       // A delivery check (479 [SB2], unit 2) takes DELIVERY_CHECK_UNITS studio requests before the product is read and
       // anything it hands over is asked for; tests/delivery-check.test.ts holds them over the check at its worst.
@@ -2705,9 +2710,12 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports and list downloads after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "decideCalendars", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "dueForErasure", "CLOSING_UNHELD", "fencedBy", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
+      { file: "lib/redis-lock.ts", names: ["applyIfHeld", "CLOSING_FENCED", "FENCED_KEYS"] },
       { file: "lib/closed-store-data.ts", names: ["queueDeleted", "admitDeleted", "BATCH_SWAP", "DELETE_SETTLES_MS", "if (!entry.deleted) await finish(entry, now)", "settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] })", "await forgetBoth(entry.statsId ?? null, entry.sid)", "await queueStoreForget(entry.statsId ?? null, entry.sid)"] },
-      { file: "lib/store.ts", names: ["await queue(store)", "deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner)])", "storeExactly", "settleDeletedStore", "DELETED_HOLD"] },
+      { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ", "dropTeam", "KeysNotSwept"] },
+      { file: "lib/store.ts", names: ["storeForIdExact", "MAX_STORES_PER_ACCOUNT"] },
+      { file: "lib/store.ts", names: ["await queue(store)", "applyIfHeld(held, changes)", "storeExactly", "settleDeletedStore", "DELETED_HOLD"] },
       { file: "lib/store-forget-retry.ts", names: ["FORGET_TRY_COMMANDS", "forgetBoth"] },
       { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
       { file: "app/api/store/stores/route.ts", names: ["deleteStore(ref, queueDeleted)"] },
@@ -2721,7 +2729,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/store-export.ts", names: ["listValuesShape(store)"] },
       { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / LIST_VALUES_PER_READ) * fields", "LIST_VALUES_PER_READ = 1_000;", "readValues(LIST_VALUES_PER_READ)", "if (!valued.has(email)) waiting.add(email);"] },
       { file: "lib/joined-stores.ts", names: ["QUARTERS_KEPT", "PERSON_RECORD_MONTHS"] },
-      { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
+      { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "CLAIM_PAGES"] },
       { file: "tests/store-data-registry.ts", names: ["closingBytes", "followedBytes", "TRIAL_UNITS"] },
       { file: "lib/data-families.ts", names: ["FOLLOWED_FAMILIES", "CLOSING"] },
       { file: "lib/order-data.ts", names: ["ORDER_KEY_BYTES"] },
@@ -2761,7 +2769,83 @@ export const WALK_START_READ_COMMANDS = 1;
  * the record closeStoreRecord already reads and the ZREM's own answer: no command more.
  */
 export const PLAN_RUNS_READ_COMMANDS = 1;
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS;
+/**
+ * Whether a store in line is still due, read right before it is prepared (lib/closed-store-data.ts dueForErasure, #3156):
+ * its place in the final closing line and the closing job's record, in one pipeline of two commands.
+ */
+export const DUE_READ_COMMANDS = 2;
+/**
+ * What the erasing mark adds to a store's preparation (Codex N1's HIGH on #3156, lib/closed-store-data.ts forgetLive and
+ * prepareStore, lib/store.ts erasingSince and closeStoreRecord; Claude 5's LOW): the lock made to last before it
+ * (holdLock: EVAL, GET, EXPIRE); its own fenced step (the EVAL, its read of the lock and the HSET); the mark read under
+ * the lock before the record goes (one HGET); the mark read before anything is touched, for a store whose plan reads
+ * running and whose closing day is out of the final line (one HGET, counted always); and its HDEL in the record's own
+ * fenced step.
+ */
+export const ERASING_MARK_COMMANDS = 3 + 3 + 1 + 1 + 1;
+/**
+ * What fencing the live store's deletes by the store's lock adds (#3156 on #3643: lib/closed-store-data.ts forgetLive,
+ * fencedBy; lib/redis-lock.ts applyIfHeld, CLOSING_FENCED): the lock made to last again (holdLock: EVAL, GET, EXPIRE)
+ * once before each host's claims and before the team and the last keys; each fenced step's EVAL and its read of the
+ * lock (two commands beside its deletes) for each page of a host's claims and for the ten other steps (team, the two
+ * steps of its keys for the API, webhooks, email platform, phones, Path, hosts' calendars and address, and the
+ * record's closing); and the record's closing made as one fenced step with the record and its copy from before a move
+ * deleted one DEL each (one DEL more than the fenced-del it replaces).
+ */
+export const FENCED_PREPARE_COMMANDS = (1 + MAX_TEAM) * 3 + 2 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10) + 1;
+/**
+ * What prepareStore reads, for its owner and each of its team as a host, of whether they serve another store before
+ * their own calendar goes, read exactly (Claude 6 on #3156): the stores they are on as one of a team
+ * (lib/team.ts, memberStoresExact: the index, then each store's team, id and record, MEMBER_STORES_READ of them at the
+ * most, past which it throws), and the stores they own (lib/closed-store-data.ts, ownsAnother: their first store, their
+ * account's set and each of its stores, MAX_STORES_PER_ACCOUNT at the most, past which it throws). Until then five were
+ * counted, though memberStores read up to fifty stores at three commands each. And, past MEMBER_STORES_READ, the one
+ * SREM that takes the ids read that are no store they serve out of the index, so the next read goes past them (Codex G
+ * on #3660, decideCalendarRuns), then each id taken out read again (its team's GET, MEMBER_STORES_READ at the most) and
+ * one SADD that puts back those joined meanwhile or not known (Claude 1 C3 on #3660).
+ */
+export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 1 + 2 + MAX_STORES_PER_ACCOUNT + MEMBER_STORES_READ + 1;
+/**
+ * Where a walk's preparation stopped in its hosts' claims (lib/closed-store-data.ts, clearClaims; Claude 4 on #3660):
+ * read once (GET), and written when the claims are more than a walk reads (the lock made to last, then the SET in one
+ * fenced step), deleted with the store's other keys (in a DEL already counted). A store whose hosts' claims are more
+ * than CLAIM_PAGES pages a host (more than the claims can be, plan-closing-rules.ts) waits a walk and is prepared again
+ * from where it stopped: each such walk is one more preparation at this count.
+ */
+export const CLAIMS_LEFT_COMMANDS = 3;
+/**
+ * A host whose serving another store could not be known at the preparation (lib/closed-store-data.ts, servesAnother;
+ * Claude 4's MEDIUM on #3660) is kept in the store's batch entry and read again before the store is finished
+ * (decideCalendars), each run until it is known: for each such host (its owner and its team, 1 + MAX_TEAM at the most)
+ * the same read of the stores it serves (SERVED_COMMANDS) and one DEL of its calendar, and the entry written once
+ * (HSET). Fewer commands than one preparation (PREPARE_COMMANDS, tests/closed-store.test.ts), and, as a walk that
+ * stopped in its hosts' claims, each run it takes again is one more preparation at that count; it lasts only while a
+ * reply does not read (rule 24), never as a plan's allowance, or while a longer index than is read is read past, at
+ * most decideCalendarRuns reads, each stale id's share carried by STALE_ID_COMMANDS (Codex G on #3660).
+ */
+export const DECIDE_CALENDARS_COMMANDS = (1 + MAX_TEAM) * (SERVED_COMMANDS + 1) + 1;
+/**
+ * How many reads of a host's team index (a preparation, then each run's decideCalendars) decide whether they serve
+ * another store at the most, for an index of `ids` ids, every reply reading (Codex G's MEDIUM on #3660): an index of
+ * MEMBER_STORES_READ or fewer is decided by its first read; a longer one is read past, each read taking out of it the
+ * ids it read that are no store the person serves (lib/team.ts, memberStoresExact), every one but the closing store
+ * itself, so at least MEMBER_STORES_READ - 1 a read, until what is left is read in one go. Its lifetime bound: a host
+ * is never read again once decided, and a reply that does not read (rule 24) is the only thing that takes it longer.
+ */
+export function decideCalendarRuns(ids: number): number {
+  return ids <= MEMBER_STORES_READ ? 1 : 1 + Math.ceil((ids - MEMBER_STORES_READ) / (MEMBER_STORES_READ - 1));
+}
+/**
+ * What one stale id in a host's team index costs to read past, at the most (decideCalendarRuns): its share of a read
+ * of the stores they serve, with its DEL and the entry's HSET, over the MEMBER_STORES_READ - 1 ids each read takes
+ * out. An id is stale in a person's index only where the SREM taking it out did not land: at a store's closing
+ * (lib/team.ts, dropTeam: its team at the end, MAX_TEAM at the most, one in each teammate's index), carried here by
+ * the closing store for each of its team places (PREPARE_COMMANDS); or at a removal from a live store's team, which is
+ * then said not finished and repeated (KeysNotSwept), a reply that did not read (rule 24), never a plan's allowance.
+ * Each id is read past once: it is out of the index after.
+ */
+export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORES_READ - 1));
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS) + CLAIMS_LEFT_COMMANDS + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS + MAX_TEAM * STALE_ID_COMMANDS;
 
 /**
  * Commands one daily visit of a closing store sends at the most (lib/plan-closing.ts, closeOne), outside what a

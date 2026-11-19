@@ -104,6 +104,17 @@ export async function readAbouts(statsId: string | null, productIds: string[]): 
  * Writes a description, or forgets it when it is empty, after taking its
  * room in the store's data room (DataRoomError when it does not fit).
  */
+/** The description's key, for a write that goes with the product's own record (lib/store.ts, PRODUCT_WITH_ABOUT). */
+export const aboutKeyOf = aboutKey;
+
+/**
+ * Takes a description's room in the store's data room before it is written (as writeAbout does), when the write
+ * itself goes with the product's record in the catalog commit (lib/store.ts editProduct).
+ */
+export async function takeAboutRoom(room: DataStore, productId: string, text: string): Promise<void> {
+  await needData(room, [{ slot: `ab:${productId}`, bytes: text ? dataBytes([text], 1) : 0, set: true }]);
+}
+
 export async function writeAbout(statsId: string, productId: string, text: string, room: DataStore, always = false): Promise<void> {
   const changes = [{ slot: `ab:${productId}`, bytes: text ? dataBytes([text], 1) : 0, set: true }];
   if (always) await noteData(room, changes);

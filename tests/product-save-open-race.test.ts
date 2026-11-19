@@ -43,7 +43,10 @@ async function main() {
     const continueB = new Promise<void>(resolve => { release = resolve; });
     let paused = false;
     redis.pipeline = async commands => {
-      if (!paused && commands.some(command => command[0] === "SET" && String(command[1]).startsWith("nl:product:about:") && command[2] === wordsB)) {
+      // Changed (rule 23, Codex N1 on #4238): the description now goes with the product's record in one script
+      // (PRODUCT_WITH_ABOUT), so B is held just before that step, where it used to be held before the description's SET.
+      if (!paused && commands.some(command => (command[0] === "SET" && String(command[1]).startsWith("nl:product:about:") && command[2] === wordsB) ||
+        (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:product-with-about:") && command.includes(wordsB)))) {
         paused = true;
         reached();
         await continueB;
@@ -89,7 +92,8 @@ async function main() {
   let refusedNamespace = false;
   let descriptionWrites = 0;
   redis.pipeline = async commands => {
-    descriptionWrites += commands.filter(command => command[0] === "SET" && String(command[1]).startsWith("nl:product:about:")).length;
+    descriptionWrites += commands.filter(command => (command[0] === "SET" && String(command[1]).startsWith("nl:product:about:")) ||
+      (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:product-with-about:"))).length;
     if (!refusedNamespace && commands.some(command => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:fenced-set:v1") && String(command[4]).startsWith("nl:store:owner:") && String(command[6]).includes('"statsId":"'))) {
       refusedNamespace = true;
       return [0];

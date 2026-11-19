@@ -199,7 +199,7 @@ function LinkForm({
       <fieldset className="space-y-3">
         <legend className="field-label">How it shows</legend>
         {draft.header ? null : (
-        <label className="flex items-start gap-3 text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
           <input
             type="checkbox"
             checked={draft.spotlight}
@@ -213,7 +213,7 @@ function LinkForm({
         </label>
         )}
         {plays && !draft.header ? (
-          <label className="flex items-start gap-3 text-sm text-ink">
+          <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.play}

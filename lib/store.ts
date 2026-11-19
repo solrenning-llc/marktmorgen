@@ -2627,6 +2627,9 @@ async function closingUnderway(store: Store): Promise<boolean> {
  * account's other stores keep their folders as they are, because their keys
  * never held the address.
  */
+/** Deletes only the unchanged losing copy, with both locks, the handle and stable id still agreeing. */
+const SETTLE_MOVE_COPY = '-- marktmorgen:move-copy-settle:v1\nif redis.call("GET", KEYS[1]) ~= ARGV[1] or redis.call("GET", KEYS[2]) ~= ARGV[2] then return 0 end\nif redis.call("GET", KEYS[3]) ~= ARGV[3] or redis.call("GET", KEYS[4]) ~= ARGV[3] or redis.call("GET", KEYS[5]) ~= ARGV[4] then return 0 end\nreturn redis.call("DEL", KEYS[5])';
+
 /**
  * A move that wrote the store at its new address and could not take it off
  * the old one leaves it on both (lib/move-repair.ts). With both stores' locks
@@ -2648,10 +2651,12 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string, cop
   const to = toEmail.toLowerCase();
   const settled = await withStore(from, (a, _saveA, heldA) =>
     withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
-      if (!a.handle || a.handle !== b.handle) return null;
-      const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
+      if (!a.handle || a.handle !== b.handle || !STORE_ID_PATTERN.test(a.sid) || a.sid !== b.sid || a.email.toLowerCase() !== from || b.email.toLowerCase() !== to) return null;
+      const identity = repliesFor(await redisPipeline([["GET", handleKey(a.handle)], ["GET", storeIdKey(a.sid)]]), 2);
+      if (!identity) throw new UnknownReplyError("a doubled store's identity");
+      const [points, byId] = identity;
       const home = typeof points === "string" ? points.toLowerCase() : "";
-      if (home !== from && home !== to) return null;
+      if ((home !== from && home !== to) || byId !== home) return null;
       // The copy left behind: deleted only while it is still what the move wrote (review of #2140), or, with no
       // print noted, while both records are the same but for the address.
       const left = home === from ? b : a;
@@ -2659,10 +2664,11 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string, cop
       // With a print, the whole stored record is compared too, not only its print, which is taken without the
       // address (Claude 7 on #2271, MEDIUM): the copy is deleted only while the record kept there is exactly what
       // its reader gives back, at its own address, so a field the reader drops or another address in it is kept.
-      const [stored] = copy ? await redisPipeline([["GET", await ownerKey(leftAt)]]) : [null];
-      const untouched = copy
-        ? stored === recordJson(left) && left.email.toLowerCase() === leftAt && (await copyPrint(left)) === copy
-        : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" });
+      const record = repliesFor(await redisPipeline([["GET", await ownerKey(leftAt)]]), 1);
+      if (!record) throw new UnknownReplyError("a doubled store's losing copy");
+      const untouched = record[0] === recordJson(left) && (copy
+        ? (await copyPrint(left)) === copy
+        : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" }));
       if (!untouched) return null;
       const read = repliesFor(await redisPipeline([["SMEMBERS", await accountKey(from)]]), 1);
       // Rule 30: the same exact read as accountStores; an unknown member stops the repair before any write.
@@ -2670,13 +2676,29 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string, cop
       if (!extras) throw new UnknownReplyError("an account's stores");
       for (const sid of extras) {
         const back = await withStore(extraRef(sid), async (extra, _save, held) => {
+          if (!extra.extra || extra.sid !== sid || ![from, to].includes(extra.email.toLowerCase())) {
+            throw new UnknownReplyError("a doubled store's other-store identity");
+          }
           if (extra.email.toLowerCase() === home) return true;
           return setIfHeld(held, await ownerKey(extraRef(sid)), recordJson({ ...extra, email: home }));
         });
-        if (back === false) throw new StoreBusyError();
+        if (back !== true) throw new StoreBusyError();
       }
-      if (home === to && extras.length) await redisPipeline([["SADD", await accountKey(to), ...extras], ["DEL", await accountKey(from)]]);
-      if (!(await deleteIfHeldOnly(home === from ? heldB : heldA, [await ownerKey(home === from ? to : from)]))) throw new StoreBusyError();
+      if (home === to && extras.length) {
+        // A pipeline is not a transaction: retain the source index until its destination is confirmed.
+        const added = repliesFor(await redisPipeline([["SADD", await accountKey(to), ...extras]]), 1);
+        const count = added ? countOf(added[0]) : null;
+        if (count === null || count > extras.length) throw new UnknownReplyError("a repaired account's destination index");
+        const removed = repliesFor(await redisPipeline([["DEL", await accountKey(from)]]), 1);
+        if (removed?.[0] !== 1) throw new UnknownReplyError("a repaired account's source index");
+      }
+      // Identity, both locks and the whole losing record are checked together with deletion.
+      // A late change after the reads above is kept for manual repair, never deleted.
+      const receipt = repliesFor(await redisPipeline([["EVAL", SETTLE_MOVE_COPY, 5,
+        heldA.key, heldB.key, handleKey(a.handle), storeIdKey(left.sid), await ownerKey(leftAt),
+        heldA.token, heldB.token, home, recordJson(left),
+      ]]), 1);
+      if (receipt?.[0] !== 1) throw new StoreBusyError();
       return home;
     }),
   );

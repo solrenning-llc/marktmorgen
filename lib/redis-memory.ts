@@ -1874,6 +1874,13 @@ export class MemoryRedis {
           }
           return written;
         }
+        // lib/store.ts SETTLE_MOVE_COPY: only the unchanged copy of the same id, at the selected home.
+        if (key.startsWith("-- marktmorgen:move-copy-settle:v1\n") && args[0] === "5" && args.length === 10) {
+          const [, lockA, lockB, handle, id, target, tokenA, tokenB, home, value] = args;
+          if (this.run(["GET", lockA]) !== tokenA || this.run(["GET", lockB]) !== tokenB) return 0;
+          if (this.run(["GET", handle]) !== home || this.run(["GET", id]) !== home || this.run(["GET", target]) !== value) return 0;
+          return this.run(["DEL", target]);
+        }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
         if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {

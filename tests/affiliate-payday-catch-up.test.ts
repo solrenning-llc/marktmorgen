@@ -140,9 +140,14 @@ async function main(): Promise<void> {
     await sendPaydayEmails(Date.now() + 20_000, new Date(Date.now()));
   };
   {
-    // A run stopped as its press begins (here the press's first read throws out of the run, as the function's 60 s
-    // would stop it): the month was already kept, so no later run this month presses; the affiliate stays owed.
+    // A run stopped as its press begins: the month was already kept, so no later run this month presses; the affiliate
+    // stays owed. The press's link read fails here. Since #2844 the press catches it (an unknown link pays nothing and
+    // answers "error", rule 24) instead of letting it throw out of the run, so the error injected here is an unknown
+    // the press handled, not a stop; payday counts a press that answered "error" as FAILED, not as sent, so the owner's
+    // report still sees a payday that paid nothing by an error (HOLD 6922548572 on #2844 and the author's decision
+    // after it). Its "could not pay" email goes once, on the run, and never again that month.
     const store = await autoPayStore();
+    const emailsBefore = sent.length;
     let linkReads = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
       if (commands.some((c) => c[0] === "GET" && c[1] === `nl:pp:${store.statsId}`) && ++linkReads === 2) throw new Error("the run stopped here");
@@ -151,8 +156,10 @@ async function main(): Promise<void> {
     const stopped = await run();
     redis.pipeline = pipeline2;
     is("stopped mid-press: counted failed, nothing pressed", [stopped.failed, presses], [1, 0]);
+    is("and not counted as sent; its email went once", [stopped.sent, sent.length - emailsBefore], [0, 1]);
     await nextDay();
     is("and a run one day later does not press: one press a month at most", presses, 0);
+    is("nor sends that email again", sent.length - emailsBefore, 1);
     is("the affiliate is still owed, for the next payday or the studio's press", payableLines(await readBook(store), await onTheirWay(store)).length, 1);
   }
   {

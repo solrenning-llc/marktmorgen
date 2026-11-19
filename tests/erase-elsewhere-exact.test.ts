@@ -139,6 +139,24 @@ async function main(): Promise<void> {
     const stores = await walkAt(at);
     is("control: an owner with no other store loses their calendar with their last store", [stores, calendarKept(OWNER)], [1, [0, 0, 0, 0]]);
   }
+  // Codex U (U-20261119-0641): the account set holds at most four extra stores.
+  part("MEDIUM: an impossible fifth extra store never proves that an owner has no other store");
+  {
+    fresh();
+    const at = await closing(OWNER, "too-many-owner-stores");
+    // MAX_STORES_PER_ACCOUNT is five including the first store, so its account set can hold at most four extras.
+    // Five syntactically valid, stale members are a damaged/unknown set, never proof that none is live.
+    for (let i = 0; i < 5; i += 1) redis.run(["SADD", accountStoresKey(OWNER), createHash("md5").update(`owner-stale-${i}`).digest("hex")]);
+    const stores = await walkAt(at);
+    is("the store is erased, but the shared calendar stays undecided on the impossible set", [stores, calendarKept(OWNER), redis.run(["HLEN", BATCH_KEY])], [1, [1, 1, 1, 1], 1]);
+  }
+  {
+    fresh();
+    const at = await closing(OWNER, "limitcontrol");
+    for (let i = 0; i < 4; i += 1) redis.run(["SADD", accountStoresKey(OWNER), createHash("md5").update(`owner-stale-control-${i}`).digest("hex")]);
+    const stores = await walkAt(at);
+    is("control: four extra members fit the account limit and, when all are confirmed stale, the last calendar goes", [stores, calendarKept(OWNER), redis.run(["HLEN", BATCH_KEY])], [1, [0, 0, 0, 0], 0]);
+  }
 
   // X owns the closing store and hosts on Y's live store as a teammate.
   const X = "host-x@example.com";

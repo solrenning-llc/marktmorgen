@@ -364,6 +364,31 @@ async function main(): Promise<void> {
     }
   }
 
+  part("MEDIUM: an impossibly large owner-store set is never proof that no live store holds the closed store's account");
+  {
+    const ACCOUNT = "acct_1overfull0acct0";
+    const taxKey = `nl:taxreg:${ACCOUNT}`;
+    const accountSet = `nl:account:stores:${createHash("sha256").update(`nimbus-account-stores:${OWNER}`).digest("hex").slice(0, 40)}`;
+    const impossible = Array.from({ length: 5 }, (_, n) => `${n + 1}`.repeat(32));
+    await fresh();
+    is("the owner has a first store", (await claimHandle(OWNER, "owners-home", "Home store", "")).ok, true);
+    const made = await createStore(OWNER, "closing", "Closing store", "");
+    if (!made.ok) throw new Error(`no other store: ${made.reason}`);
+    const ref = storeRef(made.store);
+    await setStripeAccount(ref, ACCOUNT, true);
+    await original([["SET", taxKey, "must-stay"]]);
+    await closeForErasure(ref);
+    await markDue(ref, Date.now() - 1_000);
+    dyingAt("SCAN");
+    is("the walk prepares the closed store and stops at its first page", [await outcome(walk), (await original([["HLEN", BATCH_KEY]]))[0]], ["threw", 1]);
+    await original([["SADD", accountSet, ...impossible]]);
+    is("five extra ids exceed the account's four-extra-store bound: the run stops and the account's records stay",
+      [await run(), finished, (await original([["GET", taxKey]]))[0]], ["unknown", [], "must-stay"]);
+    await original([["SREM", accountSet, impossible.at(-1)!]]);
+    is("four valid stale extra ids remain within the bound: the walk may finish and remove the unused account records",
+      [await run(), finished, (await original([["GET", taxKey]]))[0]], ["done:true begun:0 finished:1", [ref], null]);
+  }
+
   done();
 }
 

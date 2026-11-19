@@ -44,6 +44,10 @@ const REASONS: ReadonlyMap<string, DeclineGroup> = new Map(Object.entries({
   highest_risk_level: "fraud",
   elevated_risk_level: "fraud",
   rule: "fraud",
+  // The bank restricts the card (Stripe: it may have been reported lost or stolen) or declines it for a security
+  // reason: met like fraud, never with asking for the same card again (Codex X6 on #1913).
+  restricted_card: "fraud",
+  security_violation: "fraud",
   currency_not_supported: "unsupported",
   card_not_supported: "unsupported",
   transaction_not_allowed: "unsupported",

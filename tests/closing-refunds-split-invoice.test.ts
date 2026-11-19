@@ -111,7 +111,7 @@ async function seller(label: string, pi?: string): Promise<{ shop: Store; folder
   return { shop, folder };
 }
 
-const saved = async (folder: string) => JSON.parse(String((await redis.pipeline([["HGET", paidKey(folder), SUB]]))[0])) as { r?: string; back?: number };
+const saved = async (folder: string) => JSON.parse(String((await redis.pipeline([["HGET", paidKey(folder), SUB]]))[0])) as { r?: string; back?: number; want?: number };
 const usedCalls = async (folder: string) => CALLS - Number((await redis.pipeline([["HGET", workKey(folder), "calls"]]))[0]);
 
 async function main() {
@@ -287,6 +287,27 @@ async function main() {
   await giveBackUnused(eleven.shop, DAY);
   is("$50 goes back through the second charge", posts.map((p) => [p.pi, p.amount, p.ok]), [[B, 5000, true]]);
   is("settled done with $50 back", [(await saved(eleven.folder)).r, (await saved(eleven.folder)).back], ["done", 5000]);
+
+  part("A partial dispute and the other charge cannot cover all unused time");
+  redis.clear();
+  charges.clear();
+  disputes.clear();
+  made.length = 0;
+  posts = [];
+  charges.set(A, { amount: 6000, refunded: 0 });
+  charges.set(B, { amount: 4000, refunded: 0 });
+  disputes.set(A, [{ amount: 500, status: "lost" }]);
+  const residual = await seller("residual");
+  const beforeClosing = await giveBackUnused(residual.shop, DAY);
+  is("$40 goes back through the available charge", posts.map(({ pi, amount }) => [pi, amount]), [[B, 4000]]);
+  is("the outstanding $5 keeps the member eligible for reconciliation",
+    [typeof beforeClosing === "object" && beforeClosing.done.length, (await unusedRows(residual.shop, DAY)).length], [0, 1]);
+  const closing = await giveBackUnused(residual.shop, DAY, { final: true });
+  is("the closing-day notice reports exactly the unpaid $5",
+    typeof closing === "object" && closing.unmade.map(({ sub, amount, cur }) => [sub, amount, cur]), [[SUB, 500, "usd"]]);
+  const savedResidual = await saved(residual.folder);
+  is("the closing-day remainder is saved for notice without repeating the $40 refund",
+    [savedResidual.r, savedResidual.want, posts.length, charges.get(B)?.refunded], ["over", 500, 1, 4000]);
 
   part("A dispute whose status does not read: nothing is given back, tried again, never settled");
   redis.clear();

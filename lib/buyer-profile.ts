@@ -786,5 +786,8 @@ export async function forgetNotesPerson(statsId: string | null, person: string, 
 /** Spends a search's token once the person it found is deleted (lib/person-erasure.ts). */
 export async function forgetFindToken(token: string): Promise<void> {
   if (!FIND_TOKEN.test(token) || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", findKey(token)]]);
+  // Read exactly (#4800): the token holds the address, so only one reply, 0 (already gone) or 1, is done; any other
+  // throws UnknownReplyError and the erasure is said not finished, never complete with the token kept.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", findKey(token)]]), 1)?.[0]);
+  if (gone === null || gone > 1) throw new UnknownReplyError("a buyer page's search token deleted");
 }

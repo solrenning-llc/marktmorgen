@@ -1733,6 +1733,7 @@
     "components/students-bulk.tsx",
     "components/studio-app.tsx",
     "components/studio-bell.tsx",
+    "components/studio-focus-clear.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",

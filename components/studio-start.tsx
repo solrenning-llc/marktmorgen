@@ -1,6 +1,7 @@
 import type { ActivationTiming } from "@/lib/store-activation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { StudioFocusClear } from "@/components/studio-focus-clear";
 import { START_STEP_UNKNOWN, startList, startProgressWords } from "@/lib/studio-start-rules";
 
 export type StartStep = {
@@ -128,6 +129,7 @@ export function StudioNav({ items }: { items: { href: string; label: string }[] 
           </li>
         ))}
       </ul>
+      <StudioFocusClear />
     </nav>
   );
 }

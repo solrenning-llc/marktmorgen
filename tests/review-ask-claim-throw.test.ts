@@ -103,6 +103,70 @@ test("a throw after the first email's claim never drops the order unsent", async
 const SENT = `nl:rev:ask:sent:${reference}`;
 const AGAIN = `${SENT}:again`;
 
+test("a stale first-request worker keeps the reminder scheduled by a concurrent sender", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup(3);
+  try {
+    let otherRunSent = 0;
+    let interrupted = false;
+    redis.pipeline = async (commands) => {
+      if (!interrupted && commands.some((c) => c[0] === "SET" && c[1] === SENT && c.includes("NX"))) {
+        interrupted = true;
+        const other = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+        otherRunSent = other.sent;
+      }
+      return r.original(commands);
+    };
+    const stale = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    assert.equal(otherRunSent, 1, "the concurrent worker sent the first request");
+    assert.equal(stale.sent, 0, "the stale worker did not send a second first request");
+    assert.equal(Number(redis.run(["ZSCORE", ASK_DUE_KEY, r.member])), r.now + 3 * 86400, "the scheduled reminder survives");
+    const reminder = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 3 * 86400);
+    assert.equal(reminder.sent, 1, "the reminder is sent on its due day");
+    assert.equal(r.batches.flat().length, 2, "one first request and one reminder");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+test("a worker that read a stretched first claim keeps the reminder completed before it resumes", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup(3);
+  let finish!: () => void;
+  let reached!: () => void;
+  const held = new Promise<void>((resolve) => { finish = resolve; });
+  const atCompletion = new Promise<void>((resolve) => { reached = resolve; });
+  let second: Promise<Awaited<ReturnType<typeof sendReviewRequests>>> | undefined;
+  try {
+    let readStarted = false;
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "SET" && c[1] === SENT && String(c[2]).startsWith("sent:"))) {
+        reached();
+        await held;
+      }
+      if (!readStarted && commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === SENT) {
+        readStarted = true;
+        second = sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+        await atCompletion;
+        const staleRead = await r.original(commands);
+        assert.match(String(staleRead[0]), /^sending:/, "the paused reader saw the sender's stretched claim");
+        finish();
+        assert.equal((await second).sent, 1, "the other sender completes before the reader resumes");
+        return staleRead;
+      }
+      return r.original(commands);
+    };
+    const stale = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    assert.equal(stale.sent, 0, "the stale reader does not send the first email again");
+    assert.equal(Number(redis.run(["ZSCORE", ASK_DUE_KEY, r.member])), r.now + 3 * 86400, "the completed reminder survives the stale mark read");
+    assert.equal((await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 3 * 86400)).sent, 1, "the reminder is sent on its due day");
+    assert.equal(r.batches.flat().length, 2, "one first request and one reminder, no duplicate");
+  } finally {
+    finish();
+    if (second) await second;
+    redis.pipeline = r.base;
+    globalThis.fetch = oldFetch;
+  }
+});
+
 test("a first whose claim cannot be let go of waits for it to lapse, never dropped", async () => {
   const oldFetch = globalThis.fetch;
   const r = await setup();

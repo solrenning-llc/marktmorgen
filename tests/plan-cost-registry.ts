@@ -2391,7 +2391,11 @@ export const COST_LINES: CostLine[] = [
       // try left it live (each run at most two calls to the creator's Stripe account, which bills none, and a few commands),
       // and one for each try of the email that it failed (unit 2: a few commands; the email itself from the store's email figure, EMAIL_SITES).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
-      { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES + STOP_TRIES + NOTICE_TRIES", "STOP_TRIES = 3", "MAX_SCHEDULED_CODES", "NOTICE_RETRY_SECONDS"] },
+      { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES + STOP_TRIES + NOTICE_TRIES", "STOP_TRIES = 3", "NOTICE_TRIES = 3", "MAX_SCHEDULED_CODES", "NOTICE_RETRY_SECONDS"] },
+      // The terminal notice handoff is six commands including EVAL and its five calls. Failed enqueue work
+      // spends the same NOTICE_TRIES counter before ZADD can fail; successful handoff restores that reservation
+      // before tellOne counts its actual send. No fourth notice phase or unpaid indefinite repair is added.
+      { file: "lib/discount-schedule.ts", names: ["FAIL_AND_TELL", "notices: entry.notices + 1", "entry.notices < NOTICE_TRIES"] },
       { file: "app/api/cron/imports/route.ts", names: ["activateScheduledCodes("] },
       // A delivery check (479 [SB2], unit 2) takes DELIVERY_CHECK_UNITS studio requests before the product is read and
       // anything it hands over is asked for; tests/delivery-check.test.ts holds them over the check at its worst.

@@ -240,11 +240,12 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
  * pipeline, not one step), so the address check closes the moment between the two. An attempt written also keeps
  * the run and its history RUN_KEEP_SECONDS again, and renews its place in the list of runs: a sequence can last longer
  * than that (20 steps of up to 35 days), and a run that keeps stepping never expires in the middle of it, to be taken
- * for an erased one (Claude 5 on #2287). In the same step, so no command is added.
+ * for an erased one (Claude 5 on #2287). The shared index also lives for that period, and drops its past-retention
+ * entries, so a workflow purge can still find active runs. It is all in the same script.
  * KEYS: the lease, the run, its history, the list of runs. ARGV: the lease member, its score, the open attempt, the
  * event, RUN_KEEP_SECONDS, the person, now.
  */
-const CLAIM_IF_LEASED = `-- marktmorgen:flow-claim-if-leased:v2
+const CLAIM_IF_LEASED = `-- marktmorgen:flow-claim-if-leased:v3
 local held = redis.call('ZSCORE', KEYS[1], ARGV[1])
 if held == false or tonumber(held) ~= tonumber(ARGV[2]) then return -1 end
 if redis.call('HEXISTS', KEYS[2], 'email') == 0 then return -1 end
@@ -254,6 +255,8 @@ if claimed == 1 then
   redis.call('EXPIRE', KEYS[2], ARGV[5])
   redis.call('EXPIRE', KEYS[3], ARGV[5])
   redis.call('ZADD', KEYS[4], ARGV[7], ARGV[6])
+  redis.call('ZREMRANGEBYSCORE', KEYS[4], 0, tonumber(ARGV[7]) - tonumber(ARGV[5]))
+  redis.call('EXPIRE', KEYS[4], ARGV[5])
 end
 return claimed`;
 

@@ -370,7 +370,7 @@ export class MemoryRedis {
         // lib/flow-runs.ts CLAIM_IF_LEASED: an attempt written only while the lease is held at its score and the run
         // holds its address (-1 otherwise, nothing written); HSETNX's reply, and on 1 the event, the run and history
         // kept again for the full time and the run's place in the list renewed, in the same step.
-        if (key.startsWith("-- marktmorgen:flow-claim-if-leased:v2\n") && args[0] === "4" && args.length === 12) {
+        if (key.startsWith("-- marktmorgen:flow-claim-if-leased:v3\n") && args[0] === "4" && args.length === 12) {
           const [, lease, run, log, index, member, score, open, entry, keep, person, now] = args;
           const held = this.run(["ZSCORE", lease, member]);
           if (held === null || held === undefined || Number(held) !== Number(score)) return -1;
@@ -381,6 +381,8 @@ export class MemoryRedis {
             this.run(["EXPIRE", run, keep]);
             this.run(["EXPIRE", log, keep]);
             this.run(["ZADD", index, now, person]);
+            this.run(["ZREMRANGEBYSCORE", index, 0, Number(now) - Number(keep)]);
+            this.run(["EXPIRE", index, keep]);
           }
           return claimed;
         }

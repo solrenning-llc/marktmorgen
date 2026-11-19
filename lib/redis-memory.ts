@@ -871,6 +871,14 @@ export class MemoryRedis {
           this.run(["EXPIRE", hash, keep]);
           return 0;
         }
+        // lib/sales-page-store.ts PAGE_WITH_CLAIMS: a page and its new pictures' owner written in one step.
+        if (key.startsWith("-- marktmorgen:page-with-claims:v1\n") && args[0] === "2" && args.length >= 6) {
+          const [, page, pics, mode, json, owner, ...paths] = args;
+          if (mode === "SET") this.run(["SET", page, json]);
+          else this.run(["DEL", page]);
+          for (const path of paths) this.run(["HSET", pics, path, owner]);
+          return 1 + paths.length;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

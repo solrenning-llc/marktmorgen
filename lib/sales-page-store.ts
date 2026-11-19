@@ -319,6 +319,17 @@ export function hasBlocks(page: SalesPage): boolean {
 }
 
 /**
+ * A page and the new pictures it shows written down as its own in one step (Codex N1 on #2843, lot 60): a /pipeline
+ * request is not a transaction, so a page SET and HSETs after it could land apart. KEYS[1] the page, KEYS[2] the
+ * store's picture owners; ARGV[1] "SET" with the page in ARGV[2], or "DEL"; ARGV[3] the page's id; ARGV[4..] the paths.
+ * Returns 1 plus the number of claims written.
+ */
+export const PAGE_WITH_CLAIMS = `-- marktmorgen:page-with-claims:v1
+if ARGV[1] == "SET" then redis.call("SET", KEYS[1], ARGV[2]) else redis.call("DEL", KEYS[1]) end
+for i = 4, #ARGV do redis.call("HSET", KEYS[2], ARGV[i], ARGV[3]) end
+return 1 + #ARGV - 3`;
+
+/**
  * Writes a page, or forgets it when it has no blocks and nothing else set.
  * Its room is taken first (DataRoomError when it does not fit); `always`
  * counts it whatever it comes to, for what the store already had.
@@ -344,10 +355,14 @@ export async function writePage(statsId: string, productId: string, page: SalesP
   else await needData(room, changes);
   // Which saved sections the page carries, before and after (lib/saved-blocks.ts).
   commands.push(...usesCommands(statsId, productId, sectionsOfRecord(before), empty ? [] : sectionsOn(page)));
-  // The new pictures this save claimed (claimNewPictures' `claimed`) are written down as this page's in the same request
-  // as the page, so both land or neither does (Codex N1 on #2843). Only those the page shows.
+  // The new pictures this save claimed (claimNewPictures' `claimed`) are written down as this page's in one script with
+  // the page itself (PAGE_WITH_CLAIMS), so both land or neither does (Codex N1 on #2843, lots 59 and 60). Only those
+  // the page shows.
   const shown = new Set(empty ? [] : picturePaths(page));
-  for (const path of claims?.keys() ?? []) if (shown.has(path)) commands.push(["HSET", picsKey(statsId), path, productId]);
+  const owned = [...(claims?.keys() ?? [])].filter((path) => shown.has(path));
+  if (owned.length > 0) {
+    commands[0] = ["EVAL", PAGE_WITH_CLAIMS, 2, pageKey(statsId, productId), picsKey(statsId), empty ? "DEL" : "SET", empty ? "" : json, productId, ...owned];
+  }
   await redisPipeline(commands);
 }
 

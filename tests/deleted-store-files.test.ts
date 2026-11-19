@@ -12,7 +12,7 @@ import { claimHandle, createStore, deleteStore, imageFolder, setCommunity, store
 import { communityFolder } from "@/lib/community-image";
 import { picturesKept, takePicturePlace } from "@/lib/community-files";
 import { type FolderHands, deletedStoreFolders, removeDeletedStoreFiles } from "@/lib/deleted-store-files";
-import { queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
+import { FORGET_TRIES, queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
 import { store as redis } from "./redis-stub";
 import * as blobWorld from "./deleted-store-files-world";
 import { done, is, part } from "./check";
@@ -87,6 +87,21 @@ async function main(): Promise<void> {
   const seen: (string | null)[] = [];
   const tried = await retryStoreForgets(Date.now() + 10_000, Date.now(), async (_stats, _sid, community) => { seen.push(community); });
   is("a try from the line is handed the community the store had", [tried.done, seen], [1, [communityId]]);
+
+  // Codex N1's LOW 2 on #4348 (N1-20261119-1017): a given-up entry is never read to walk files again (a kept field
+  // puts the store back in line with files: false), so the deleted community's id it carried was an identifier kept
+  // for good with no use. The line keeps it while it may still walk the files; the kept record does not.
+  part("A given-up entry keeps its counts, never the deleted community's id");
+  await queueStoreForget(null, spare.sid, Date.now(), communityId);
+  const failing = async () => { throw new Error("synthetic: the store's forgetting fails every time"); };
+  let rounds = 0;
+  for (let i = 0; i < FORGET_TRIES + 2 && rounds === 0; i += 1) rounds = (await retryStoreForgets(Date.now() + 10_000, Date.now() + i * 86_400_000, failing)).gaveUp;
+  const keptRows = (await redis.pipeline([["HVALS", "nl:forget:kept"]]))[0] as string[];
+  const keptRow = keptRows.map((row) => JSON.parse(row) as Record<string, unknown>).find((row) => row.tries === FORGET_TRIES);
+  is("the store was given up after its tries", [rounds, keptRow?.tries], [1, FORGET_TRIES]);
+  is("its kept record has no community id", keptRow ? Object.keys(keptRow).includes("community") : "no kept row", false);
+  is("and keeps its counts and times", keptRow ? ["first", "last", "tries"].every((key) => key in keptRow) : false, true);
+  await redis.pipeline([["DEL", "nl:forget:kept"]]);
   const route = readFileSync("app/api/store/stores/route.ts", "utf8");
   // Since the merge of main (16 November 2026), the delete's first try at the files is main's own forgetStoreFiles
   // (with its daily sweep for a delete that fails); a folder it could not list puts the store in this line.

@@ -43,7 +43,11 @@ const TITLES: Readonly<Record<string, string>> = {
   get_page_reading: "How far the page is read",
   get_page_versions: "Earlier page versions",
   list_saved_blocks: "Saved sections",
+  list_bundle_choices: "Products for a bundle",
+  get_imports: "Imports",
   propose_product_description: "Propose a product description",
+  propose_product_title: "Propose a product title",
+  propose_product_summary: "Propose a product summary",
   get_store: "Which store",
 };
 
@@ -163,6 +167,28 @@ const DRAFTS: readonly ToolDraft[] = [
     annotations: { readOnlyHint: true },
   },
   {
+    name: "list_bundle_choices",
+    description:
+      "The store's products a bundle may be made of, 20 a page in the creator's order, each with whether it can go in and why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), by the same rule as the creator's bundle picker. Each call reads one page; pass cursor: next_cursor from the last answer for the next one, until next_cursor is null. It counts as a few of the store's API requests, set by the most a page could read.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Words in the product's name; left out, every product." },
+        cursor: { type: "string", description: "Where the page starts: next_cursor from the previous answer; left out, the first page." },
+        bundle: { type: "string", description: "The bundle being made, from list_products, left out of its own list." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_imports",
+    description:
+      "The store's latest imports from another platform (contacts, products, purchases or members), newest first: how far each is and what its rows came to, as counts. Never the file's name, who started it or the rows themselves. It counts as a few of the store's API requests, set by the most it could read.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "propose_product_description",
     description:
       "Prepares a new long description for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
@@ -173,6 +199,36 @@ const DRAFTS: readonly ToolDraft[] = [
         description: { type: "string", description: "The whole new description as plain text: a blank line starts a paragraph, a line starting with \"- \" is a point in a list." },
       },
       required: ["product", "description"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false },
+  },
+  {
+    name: "propose_product_title",
+    description:
+      "Prepares a new title for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        title: { type: "string", description: "The whole new title, on one line." },
+      },
+      required: ["product", "title"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false },
+  },
+  {
+    name: "propose_product_summary",
+    description:
+      "Prepares a new short summary for one product (the line under its title), for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        summary: { type: "string", description: "The whole new summary, on one line; empty takes it off." },
+      },
+      required: ["product", "summary"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false },

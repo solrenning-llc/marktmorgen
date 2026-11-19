@@ -50,6 +50,8 @@ export function StoreCoach({ checks }: { checks: StoreCheck[] }) {
               </div>
               <Link href={check.href} className="btn btn-secondary btn-sm shrink-0">
                 Do it
+                {/* Which step, for a screen reader's list of links (WCAG 2.4.9): each "Do it" goes somewhere else. */}
+                <span className="sr-only">{`: ${check.label}`}</span>
                 <Icon name="arrow-right" size={16} />
               </Link>
             </li>
@@ -58,7 +60,7 @@ export function StoreCoach({ checks }: { checks: StoreCheck[] }) {
       ) : null}
       {done.length ? (
         <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-bold text-ink-soft">{`Already done (${done.length})`}</summary>
+          <summary className="cursor-pointer py-3 text-sm font-bold text-ink-soft">{`Already done (${done.length})`}</summary>
           <ul className="mt-2 space-y-1">
             {done.map((check) => (
               <li key={check.id} className="flex items-center gap-2 text-sm text-ink">

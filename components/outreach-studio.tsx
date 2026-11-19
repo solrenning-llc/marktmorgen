@@ -28,6 +28,8 @@ import {
 } from "@/lib/outreach-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import { OutreachResultsCard } from "@/components/outreach-results";
+import { outreachResults } from "@/lib/outreach-results";
 
 type Site = { domain: string; home: string; company: string; about: string; found: (FoundAddress & { refuses: boolean })[] };
 
@@ -40,7 +42,7 @@ const MESSAGES: Record<string, string> = {
   notes: "Say in a sentence or two what you would offer them.",
   used: "This month's writing help is used up. It starts again on the first of the month.",
   off: "Writing help is not switched on for this store yet.",
-  failed: "The email could not be written just now. Nothing was counted. Try again in a moment.",
+  failed: "The email could not be written just now. Try again in a moment. If the request reached the AI, it counted as one of this month's writing jobs.",
   full: "Your list of pitches is full. Mark the old ones as answered or delete old drafts first.",
   room: STUDIO_MESSAGES.store_full,
   busy: "This can't be saved right now. Nothing was counted. Try again in a minute.",
@@ -48,7 +50,7 @@ const MESSAGES: Record<string, string> = {
   day: "That is today's limit of site reads. Try again tomorrow.",
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
-  server_error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
+  server_error: "Something went wrong on our side. Try again in a moment. If an email was being written, this try may have counted as one of this month's writing jobs.",
   unavailable: "This could not be checked just now. Reload the page to see where it stands, then try again.",
 };
 
@@ -223,7 +225,14 @@ const OFF_WORDS: Record<AiOff, string> = {
   setup: "Writing help is not switched on for this store yet, so a pitch cannot be written here.",
 };
 
-export function OutreachStudio({ sender: saved, pitches: first, left, on, off = "setup", storeUrl }: { sender: Sender; pitches: Pitch[]; left: number; on: boolean; off?: AiOff | null; storeUrl: string }) {
+/** The line under "Write the email": this month's writing jobs left, or, when they could not be read, that (rule 24). */
+export function outreachWriteHint(jobs: number | null): string {
+  if (jobs === null) return "We could not check your AI allowance just now. Reload the page in a minute to try again.";
+  return `Uses one of this month's writing jobs (${jobs} left). At most ${PITCHES_PER_DAY} pitches a day.`;
+}
+
+/** `left` is null when the month's writing jobs could not be read: said so, never as 0 left. */
+export function OutreachStudio({ sender: saved, pitches: first, left, on, off = "setup", storeUrl }: { sender: Sender; pitches: Pitch[]; left: number | null; on: boolean; off?: AiOff | null; storeUrl: string }) {
   const [sender, setSender] = useState(saved);
   const [name, setName] = useState(saved.name);
   const [address, setAddress] = useState(saved.address);
@@ -237,7 +246,7 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
   const [chosen, setChosen] = useState("");
   const [busy, setBusy] = useState<"sender" | "find" | "draft" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [jobs, setJobs] = useState(left);
+  const [jobs, setJobs] = useState<number | null>(left);
 
   const rule = countryRule(country);
   const senderReady = sender.name !== "" && sender.address !== "";
@@ -289,7 +298,7 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
   }
 
   return (
-    <div className="mt-8 grid gap-6">
+    <div className="mt-8 grid gap-6 [overflow-wrap:anywhere] [&>*]:min-w-0">
       <section className="card p-6 sm:p-8" aria-labelledby="who-title">
         <h2 id="who-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           Who is writing
@@ -425,10 +434,10 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
                     );
                   })}
                 </div>
-                <button type="button" onClick={write} aria-busy={busy === "draft"} disabled={busy !== null || chosen === ""} className="btn btn-primary mt-5">
+                <button type="button" onClick={write} aria-busy={busy === "draft"} disabled={busy !== null || chosen === "" || jobs === null} className="btn btn-primary mt-5">
                   {busy === "draft" ? "Writing…" : "Write the email"}
                 </button>
-                <p className="field-hint mt-2">{`Uses one of this month's writing jobs (${jobs} left). At most ${PITCHES_PER_DAY} pitches a day.`}</p>
+                <p className="field-hint mt-2">{outreachWriteHint(jobs)}</p>
               </fieldset>
             )}
           </div>
@@ -439,6 +448,8 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
           </p>
         ) : null}
       </section>
+
+      <OutreachResultsCard results={outreachResults(pitches)} />
 
       <section aria-labelledby="list-title">
         <h2 id="list-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

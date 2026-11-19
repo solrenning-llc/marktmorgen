@@ -26,7 +26,9 @@ export const event = { id: "c".repeat(12), title: "Synthetic event", start: Date
 export const store = { handle: "synthetic", name: "Synthetic store", email: "owner@example.com", language: "en",
   community: { id: "d".repeat(32), on: true }, mail: { fromName: "Synthetic store" } } as Store;
 export const readConfig = async () => config;
+export const readConfigExact = readConfig;
 export const readMembers = async (_community: string, keys: string[]) => new Map(members.filter(m => keys.includes(m.k)).map(m => [m.k, m]));
+export const readMembersExact = readMembers;
 export const mailableMembers = async () => members;
 /** The member as the record holds it (lib/community.ts): tokenFor reads it again after writing a stop-link record. */
 export const readMember = async (_community: string, key: string) => members.find(m => m.k === key) ?? null;
@@ -43,8 +45,18 @@ export const setMemberToken = async (_community: string, member: Member, token: 
   return record.t;
 };
 export const holdsTicket = async () => true;
+/** Who may see a gated space (lib/community-access.ts maySeeSpace): everybody unless a test says otherwise. */
+export let seesSpace: (email: string) => boolean = () => true;
+export const setSeesSpace = (rule: (email: string) => boolean) => { seesSpace = rule; };
+export const maySeeSpace = async (_store: unknown, _config: unknown, _space: unknown, viewer: { email: string }) => seesSpace(viewer.email);
+/** The post an announcement is about, for a send queued before it kept its space (lib/community.ts readPost). */
+export let postSpace: string | null = null;
+export const setPostSpace = (space: string | null) => { postSpace = space; };
+export const readPost = async (_community: string, post: string) => (postSpace === null ? null : { id: post, sp: postSpace });
+export const askingAgainWontTell = () => false;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
+export const readEventExact = readEvent;
 /** The next reading of who is coming answers in an unknown shape, as lib/community-events.ts then throws. */
 export let rsvpUnknown = false;
 export const setRsvpUnknown = (on: boolean) => { rsvpUnknown = on; };
@@ -63,13 +75,17 @@ export const sendBatch = async (messages: unknown[]) => { sent.push(messages); r
 export const BATCH_SIZE = 100;
 export const CHECKED_BATCH_SIZE = 25;
 export const SENDER_WAIT_NOTE = "Waiting for the sender.";
+export const SENDER_RETRY_NOTE = "Paused for a moment: the service that sends our email did not take this batch just now. It is tried again by itself.";
 export const canWrite = () => true;
 export const fromLine = () => "Synthetic <sender@example.com>";
 export const storeSender = fromLine;
 export const monthlyAllowance = () => 100;
-export const reserve = async () => "ok";
+/** Every reservation taken, as release records every one given back: what is held is their difference. */
+export const reserved: number[] = [];
+export const reserve = async (_store: unknown, n: number) => { reserved.push(n); return "ok"; };
 export const released: number[] = [];
 export const release = async (_store: unknown, n: number) => { released.push(n); };
+export const mailDay = () => "nl:mail:day:synthetic";
 export const render = (_store: unknown, subject: string, text: string) => ({ subject, text, html: text, headers: {} });
 export const bodyHtml = (text: string) => text;
 /** As lib/order-data.ts answers it: each command run, its reply in order (the room is not modelled here). */
@@ -77,5 +93,5 @@ export const orderWrite = async (_owner: unknown, commands: (string | number)[][
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; released.length = 0; tokenWriteFails = false; rsvpUnknown = false;
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; reserved.length = 0; released.length = 0; tokenWriteFails = false; rsvpUnknown = false; seesSpace = () => true; postSpace = null;
 }

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { storeForHandle } from "@/lib/store";
+import { type ExactStore, storeForHandleExactly } from "@/lib/store-exact";
 import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { readLetterGrant, spendLetterOpen } from "@/lib/letter-access";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -24,8 +24,30 @@ function browserLanguage(request: NextRequest): string {
 export async function GET(request: NextRequest) {
   const origin = originFrom(request);
   const token = request.nextUrl.searchParams.get("token") ?? "";
-  const grant = await readLetterGrant(token);
-  const store = grant ? await storeForHandle(grant.h) : null;
+  const busy = (language: unknown) =>
+    new Response(letterWords(language).linkBusy, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
+    });
+  // The link's grant read only in its exact shape (rule 24): an unknown reply is "try again", never "expired".
+  let grant: Awaited<ReturnType<typeof readLetterGrant>>;
+  try {
+    grant = await readLetterGrant(token);
+  } catch (error) {
+    console.error("reading an emailed link's grant failed", error);
+    return busy(browserLanguage(request));
+  }
+  // The store the link names, read exactly too (Claude 1 and H2 on #3779): a handle gone is "expired", but a reply lost
+  // or in another shape is "try again", never "expired" and never a bare server error.
+  let found: ExactStore | null = null;
+  try {
+    found = grant ? await storeForHandleExactly(grant.h) : null;
+  } catch (error) {
+    console.error("reading the store of an emailed link failed", error);
+    return busy(browserLanguage(request));
+  }
+  if (found === "unknown") return busy(browserLanguage(request));
+  const store = found === "none" ? null : found;
   const gone = (language: unknown) =>
     new Response(letterWords(language).linkGone, {
       status: 410,
@@ -41,10 +63,7 @@ export async function GET(request: NextRequest) {
     spent = await spendLetterOpen(token);
   } catch (error) {
     console.error("counting an emailed link's opens failed", error);
-    return new Response(letterWords(store.language).linkBusy, {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
-    });
+    return busy(store.language);
   }
   if (!spent) return gone(store.language);
   const pass = await mintPass(store, grant.e, "all");

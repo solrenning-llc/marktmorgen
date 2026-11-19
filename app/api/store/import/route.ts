@@ -59,6 +59,8 @@ function startInput(body: Record<string, unknown>) {
     tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string").slice(0, 10) : [],
     email: body.email === true,
     stopped: body.stopped === true,
+    // Only an explicit false says the file has no status column; anything else is read as having one.
+    statusColumn: body.statusColumn !== false,
     dateOrder: text(body.dateOrder, 3),
     source: body.source === "clickfunnels" ? ("clickfunnels" as const) : ("csv" as const),
   };
@@ -142,7 +144,7 @@ export async function POST(request: NextRequest) {
       const starts = importAllowanceFor(store).starts;
       if (!(await withinMonth("import-start-month", store.sid || guarded.ref, starts, windowId(store)))) return refuse("starts_month", 429, { limit: starts });
       const started = await startImport(store, email, kind, startInput(body));
-      if (!started.ok) return refuse(started.reason, started.reason === "busy" ? 409 : 400, { limit: started.limit });
+      if (!started.ok) return refuse(started.reason, started.reason === "busy" ? 409 : 400, { limit: started.limit, opens: started.opens });
       return Response.json({ ok: true, import: view(started.job) });
     }
 

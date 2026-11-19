@@ -36,7 +36,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
-import { readPayPalSales } from "@/lib/paypal-sales";
+import { paypalOrderKeys } from "@/lib/paypal-sales";
 import { importedBuyers } from "@/lib/imported-purchases";
 import { storeBase } from "@/lib/purchase-email";
 import { formatMoney } from "@/lib/money";
@@ -49,7 +49,7 @@ import {
   type BuyerLetter,
   buyerNotice,
   letterHtml,
-  refundShortLetter, refundUnmadeLetter,
+  refundLapsedLetter, refundShortLetter, refundUnmadeLetter, renewalsUnstoppedLetter,
   staysOpenLetter,
   unusedOf,
 } from "@/lib/closing-buyers-rules";
@@ -76,11 +76,21 @@ const isUntold = (raw: unknown): boolean => typeof raw === "string" && UNTOLD_MA
  * Marks `field` as not told and says whether this call wrote it, so it is counted once (CX-123 rule 24). HSETNX
  * answers 1 (written) or 0 (there already). Any other reply is not "not written": the field is read back once (HGET),
  * and only our own mark counts. Nil there is not written (tried again next run); another mark or a told time is not
- * ours. A read-back out of shape, text the list never holds included (markOf), gives back the `certain` credit taken
- * before it this round, whose emails will not go now, and throws UnknownReplyError, so the closing job holds and
- * tries again.
+ * ours. A read-back out of shape, text the list never holds included (markOf), throws UnknownReplyError, so the
+ * closing job holds and tries again. Any throw here (that one, or a round trip that fails on the HSETNX or the
+ * read-back: Codex C2 on #3009) gives back, once, the `certain` credit taken before it this round, whose emails will
+ * not go now; the unknown mark itself is never given back.
  */
 async function markUntold(folder: string, field: string, certain: number): Promise<boolean> {
+  try {
+    return await markUntoldOnce(folder, field);
+  } catch (error) {
+    await returnCredit(folder, certain).catch((failed) => console.error("giving back a closing's email credit failed; not tried again", failed));
+    throw error;
+  }
+}
+
+async function markUntoldOnce(folder: string, field: string): Promise<boolean> {
   const mark = untoldMark();
   const written = repliesFor(await redisPipeline([["HSETNX", toldKey(folder), field, mark]]), 1)?.[0];
   if (written === 1 || written === 0) return written === 1;
@@ -88,7 +98,6 @@ async function markUntold(folder: string, field: string, certain: number): Promi
   if (back === mark) return true;
   // Nil, or what the list holds (a mark, or a told time) that is not ours: not written by this call.
   if (back === null || (typeof back === "string" && markOf(back) !== null)) return false;
-  await returnCredit(folder, certain).catch((failed) => console.error("giving back a closing's email credit failed; not tried again", failed));
   throw new UnknownReplyError("whether a closing's buyer was marked as not told");
 }
 
@@ -148,7 +157,72 @@ export function buyerPagesCap(cap: number): number {
   return Math.ceil((2 * cap) / 100) + 5;
 }
 
-const CURSOR = /^(start|\d{1,3}\|[!-~]{0,800})$/;
+const CURSOR = /^(start|pp\|\d{1,7}|\d{1,3}\|[!-~]{0,800})$/;
+
+/**
+ * The most PayPal sales read in one page for a closing's buyers (#4258): one range of at most this many order ids
+ * and one MGET of their records, each up to MAX_PAID_BYTES (lib/paypal-sales.ts), a page counted against the
+ * closing's page cap (buyerPagesCap) and the run's BUYER_PAGES_PER_RUN like a page of Stripe payments.
+ */
+export const PAYPAL_PAGE = 100;
+/** The store's PayPal sales, scored by when each was paid: the same key as lib/paypal-sales.ts's salesKey. */
+const paypalSalesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
+/** A PayPal order's paid record: lib/paypal-sales.ts's paidKey, through its exported pair (order key, paid key). */
+const paypalPaidKey = (order: string): string | null => paypalOrderKeys(order)[1] ?? null;
+/** The told list's field for a PayPal sale whose buyer could not be read (counted once, as `#<sub>` is for a member). */
+const unreadField = (order: string) => `#pp:${/^[!-~]{1,64}$/.test(order) ? order : createHash("sha256").update(order).digest("hex").slice(0, 16)}`;
+
+/**
+ * The range of the store's PayPal sales, newest first, from `offset`, at most `n` ids, read exactly (rule 24): null
+ * when the reply is out of shape. Newest first so a sale paid during the closing moves the rest down (read again,
+ * told once by the told list) and the oldest leaving the list moves nothing before it: no sale is skipped.
+ */
+async function paypalIds(statsId: string, offset: number, n: number): Promise<string[] | null> {
+  const ids = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", paypalSalesKey(statsId), "+inf", "0", "LIMIT", String(offset), String(n)]]), 1)?.[0]);
+  return ids && ids.length <= n ? ids : null;
+}
+
+/**
+ * One page of the store's PayPal buyers (#4258): `read`, how many sales the page held; `emails`, the buyers whose
+ * record read as this store's sale of that order; `unread`, the sales whose buyer cannot be known (an id that is not
+ * an order, a record Redis answered as missing, text that is not a record, one written for another store or another
+ * order), to be counted as not told, never dropped. Null when Redis answered out of shape: nothing on the page is
+ * acted on, and it is read again on the next run.
+ */
+async function paypalPage(statsId: string, offset: number): Promise<{ read: number; emails: string[]; unread: string[] } | null> {
+  const ids = await paypalIds(statsId, offset, PAYPAL_PAGE);
+  if (!ids) return null;
+  const unread: string[] = [];
+  const orders: { order: string; key: string }[] = [];
+  for (const order of ids) {
+    const key = paypalPaidKey(order);
+    if (key) orders.push({ order, key });
+    else unread.push(order);
+  }
+  const emails: string[] = [];
+  if (orders.length) {
+    const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...orders.map((o) => o.key)]]), 1)?.[0], orders.length);
+    if (!rows) return null;
+    for (const [i, { order }] of orders.entries()) {
+      const raw = rows[i];
+      if (raw !== null && typeof raw !== "string") return null;
+      let paid: unknown = null;
+      try {
+        paid = typeof raw === "string" ? JSON.parse(raw) : null;
+      } catch {
+        paid = null;
+      }
+      const sale = paid && typeof paid === "object" && !Array.isArray(paid) ? (paid as { store?: unknown; order?: unknown; email?: unknown }) : null;
+      // Read as tell() reads it (normaliseEmail, EMAIL_PATTERN): an address that is not one is unread, so the sale is
+      // counted as not told (its unreadField mark keeps it once), never dropped before the told list (Codex L's MEDIUM,
+      // Claude 3 cloud S on #4427).
+      const email = sale && sale.store === statsId && sale.order === order && typeof sale.email === "string" ? normaliseEmail(sale.email) : "";
+      if (EMAIL_PATTERN.test(email)) emails.push(email);
+      else unread.push(order);
+    }
+  }
+  return { read: ids.length, emails, unread };
+}
 
 /**
  * One page of Stripe's payment search, only in its exact shape (rule 30, the
@@ -171,12 +245,13 @@ function searchPageOf(reply: unknown): { rows: Record<string, unknown>[]; next: 
 /**
  * Tells the next part of the store's buyers. `after` is where the last run
  * stopped ("" the first time: then the buyers kept here, the members held
- * and those brought over or paid with PayPal, are told first; each address
- * told is written down at once, so a run that stops part-way never writes to
- * anybody twice). Then the payments that name this store in their own
+ * and those brought over, are told first; each address told is written down
+ * at once, so a run that stops part-way never writes to anybody twice). Then
+ * its PayPal sales, PAYPAL_PAGE a page from the cursor `pp|<offset>` (#4258),
+ * a sale whose buyer cannot be read counted as not told. Then the payments that name this store in their own
  * metadata, found by Stripe's search on the creator's account (never the
- * account's whole history), BUYER_PAGES_PER_RUN pages a run and `maxPages`
- * in all; at that cap it is done, and says it was `capped`. `day` is the
+ * account's whole history). BUYER_PAGES_PER_RUN pages a run and `maxPages`
+ * in all, PayPal's and Stripe's together; at that cap it is done, and says it was `capped`. `day` is the
  * closing day the emails name.
  */
 export async function tellBuyers(store: Store, endedAt: number, day: number, after: string, until: number, pagesRead = 0, maxPages = Number.POSITIVE_INFINITY): Promise<Told> {
@@ -228,15 +303,46 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     for (const sub of held.missing) if (await markUntold(folder, `#${sub}`, 0)) out.untold += 1;
     const kept: string[] = [...members.keys()];
     kept.push(...(await importedBuyers(store.statsId)).keys());
-    kept.push(...(await readPayPalSales(store.statsId, 0, 100_000)).sales.map((sale) => sale.email));
     if (!(await tell(kept))) return out;
+    out.after = "pp|0";
+  }
+  // Pages left in this run, PayPal's and Stripe's together.
+  let budget = BUYER_PAGES_PER_RUN;
+  if (out.after.startsWith("pp|")) {
+    // The PayPal buyers, a page at a time, each page told before the next is read (#4258).
+    const statsId = store.statsId;
+    let offset = Number(out.after.slice(3));
+    while (statsId && isRedisConfigured()) {
+      if (out.pages >= maxPages) {
+        // At the cap: one id past it says whether any sale is left unread (then the round is capped, never silent).
+        const left = await paypalIds(statsId, offset, 1);
+        if (!left) return out;
+        if (left.length) return { ...out, done: true, capped: true };
+        break;
+      }
+      if (budget <= 0 || Date.now() > until) return out;
+      const page = await paypalPage(statsId, offset);
+      if (!page) {
+        console.error("closing-buyers: a page of the store's PayPal sales was not read in its shape; tried again");
+        return out;
+      }
+      if (!page.read) break;
+      out.pages += 1;
+      budget -= 1;
+      // Counted once however many times the page is read (HSETNX of our own mark).
+      for (const order of page.unread) if (await markUntold(folder, unreadField(order), 0)) out.untold += 1;
+      if (!(await tell(page.emails))) return out;
+      offset += page.read;
+      out.after = `pp|${offset}`;
+      if (page.read < PAYPAL_PAGE) break;
+    }
     out.after = "start";
   }
   const account = store.stripeAccountId;
   if (!account) return { ...out, done: true };
   const handles = [...saleHandles(store)];
   let [h, page] = out.after === "start" ? [0, ""] : [Number(out.after.split("|")[0]), out.after.slice(out.after.indexOf("|") + 1)];
-  for (let run = 0; run < BUYER_PAGES_PER_RUN; run += 1) {
+  for (; budget > 0; budget -= 1) {
     if (h >= handles.length) return { ...out, done: true };
     if (out.pages >= maxPages) return { ...out, done: true, capped: true };
     if (Date.now() > until) return out;
@@ -306,13 +412,34 @@ export async function toldOf(store: Store, email: string): Promise<{ toldAt: num
 
 /**
  * The email to members whose refund could not be made on the closing day.
- * Paid for by the follow-up taken when they were told; one who was not told
- * takes it from the store's credit now. True when every one went or was
+ * A member told of the closing had ONE follow-up paid for by its notice
+ * (EMAILS_PER_BUYER_PER_ENDING): its first follow-up takes nothing more. Any
+ * letter past it, to an address in `followed` (already sent a follow-up) or
+ * sent a letter earlier in this same call, takes one credit from the store's
+ * closing like a member never told (Claude 1 cloud's review of #3463: the
+ * lapse and renewals letters went unpaid to told members). For "lapse" and
+ * "renewals", which hold the store until everyone is told, the credit is all
+ * or nothing: one letter not paid for sends nothing, so a held store does not
+ * send its free letters again on every run. True when every one went or was
  * counted as not coverable.
  */
-export async function tellRefundShort(store: Store, short: { email: string; amount: number; cur: string }[], endedAt: number, why: "balance" | "limit" = "balance"): Promise<{ sent: number; untold: number; ok: boolean }> {
+export async function tellRefundShort(
+  store: Store,
+  short: { email: string; amount: number; cur: string; also?: { amount: number; cur: string }[] }[],
+  endedAt: number,
+  why: "balance" | "limit" | "lapse" | "renewals" = "balance",
+  /** The closing day, for "lapse" and "renewals": the letter says it (DONO-3). */
+  closedOn = 0,
+  options: {
+    /** Addresses already sent their one follow-up (a paid period marked `m`): a told member's next letter takes a credit. */
+    followed?: Iterable<string>;
+    /** "lapse" only: the renewals were not stopped either, said in the same letter. */
+    renewals?: boolean;
+  } = {},
+): Promise<{ sent: number; untold: number; uncredited: number; ok: boolean }> {
   const postal = companyPostal();
-  const out = { sent: 0, untold: 0, ok: true };
+  // `uncredited`: of `untold`, those left out because the closing's email credit ran out (not a bad address).
+  const out = { sent: 0, untold: 0, uncredited: 0, ok: true };
   if (!short.length) return out;
   if (!postal) return { ...out, ok: false };
   const folder = await storeFolder(storeRef(store));
@@ -330,23 +457,36 @@ export async function tellRefundShort(store: Store, short: { email: string; amou
     if (mark === null) return { ...out, ok: false };
     rows.push({ row, email, told: typeof mark === "number" });
   }
+  /** Addresses whose one funded follow-up is spent: before this call, or by a letter of it. */
+  const spent = new Set([...(options.followed ?? [])].map((email) => normaliseEmail(email)));
+  const allOrNothing = why === "lapse" || why === "renewals";
   const going: BatchMessage[] = [];
   const addresses: string[] = [];
   let taken = 0;
   for (const { row, email, told } of rows) {
-    if (!told) {
+    if (!told || spent.has(email)) {
       if (!(await takeCreditOrGiveBack(folder, 1, taken))) {
         out.untold += 1;
+        out.uncredited += 1;
         continue;
       }
       taken += 1;
     }
+    spent.add(email);
     addresses.push(email);
-    const letter = why === "limit" ? refundUnmadeLetter : refundShortLetter;
-    going.push(message(store, email, letter({ store: store.name, amount: formatMoney(row.amount, row.cur), contact: contactOf(store) }), postal));
+    const amount = [{ amount: row.amount, cur: row.cur }, ...(row.also ?? [])].map((part) => formatMoney(part.amount, part.cur)).join(" and ");
+    const input = { store: store.name, amount, contact: contactOf(store) };
+    const letter = why === "renewals" ? renewalsUnstoppedLetter({ store: input.store, contact: input.contact, closedOn }) : why === "lapse" ? refundLapsedLetter({ ...input, closedOn, renewals: options.renewals === true }) : why === "limit" ? refundUnmadeLetter(input) : refundShortLetter(input);
+    going.push(message(store, email, letter, postal));
   }
+  if (allOrNothing && out.uncredited > 0) {
+    // Not everyone can be told: nothing goes, the credit taken is given back, and the store is held to try again.
+    await returnCredit(folder, taken);
+    return out;
+  }
+  const kind = why === "renewals" ? "renewals" : why === "lapse" ? (options.renewals ? "lapsedrenewals" : "lapsed") : why === "limit" ? "unmade" : "short";
   for (let i = 0; i < going.length; i += 100) {
-    if (!(await send(going.slice(i, i + 100), batchKey(why === "limit" ? "unmade" : "short", folder, endedAt, addresses.slice(i, i + 100))))) return { ...out, ok: false };
+    if (!(await send(going.slice(i, i + 100), batchKey(kind, folder, endedAt, addresses.slice(i, i + 100))))) return { ...out, ok: false };
     out.sent += Math.min(100, going.length - i);
   }
   return out;

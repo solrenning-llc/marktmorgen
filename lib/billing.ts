@@ -1,4 +1,5 @@
 import {activateRestartContract,type RestartContractActivation} from "@/lib/contract-restart-activation";
+import { stripeJson } from "@/lib/stripe-http-error";
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
 import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
@@ -18,6 +19,7 @@ import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRest
  * we promised not to take, or us billing ourselves.
  */
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { withLock } from "@/lib/redis-lock";
 import {
   type Cycle,
   type Tier,
@@ -94,6 +96,19 @@ export class BillingError extends Error {
   }
 }
 
+/**
+ * A plan switch sent to Stripe whose outcome is not known: the answer was lost,
+ * unreadable or a server error, or what came back could not be confirmed after
+ * Stripe took it. Stripe may have moved the subscription and charged for it, so
+ * this is never told to the creator as "nothing changed".
+ */
+export class SwitchUnconfirmedError extends Error {
+  constructor(cause: unknown) {
+    super(`The plan switch was sent to Stripe and its outcome is not confirmed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "SwitchUnconfirmedError";
+  }
+}
+
 export async function onPlatform(
   method: "GET" | "POST" | "DELETE",
   path: string,
@@ -117,7 +132,8 @@ export async function onPlatform(
       cache: "no-store",
       signal,
     });
-    return { response, data: (await response.json()) as Record<string, unknown> };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts).
+    return { response, data: await stripeJson(response) };
   });
   if (!response.ok) {
     const error = data.error as
@@ -278,17 +294,91 @@ function writeInline(body: URLSearchParams, tier: Tier, cycle: Cycle): void {
  * Once per store: a store that has ever started a subscription with us —
  * trial or not, cancelled or not — pays from the first day when it starts
  * again. Otherwise cancelling inside the trial and starting over would be a
- * free store for as long as anyone cared to keep doing it. The studio reads
- * the same answer, so the button never promises a trial the checkout does not
- * open with.
+ * free store for as long as anyone cared to keep doing it. The studio's
+ * buttons read this answer.
  *
  * And once per account: the trial is for an account's first store, the one
  * that decides whether we are worth paying for. Every other store an account
  * makes is a subscription of its own from its first day — five stores are
  * not five trials in a row.
+ *
+ * This reads the store record only. A closed store's record is gone, so the
+ * checkout asks trialOfferedTo below, which also reads the person's history at
+ * Stripe. The studio does not: a page load makes no Stripe request (its Search
+ * API limit is shared with the checkout's own search), so for a person whose
+ * earlier store closed the studio can still say "trial" while the checkout
+ * opens without one; Stripe's Checkout page shows the amount due today before
+ * any charge.
  */
 export function trialOffered(store: Pick<Store, "stripeCustomerId" | "subscriptionId" | "extra">): boolean {
   return !store.extra && !store.stripeCustomerId && !store.subscriptionId;
+}
+
+/** The most of our customers with one address whose subscriptions are read for an earlier plan or trial (as lib/plan-refund.ts reads). */
+export const TRIAL_HISTORY_CUSTOMERS = 5;
+
+/**
+ * Whether the person behind this store is offered the free trial: the store's
+ * own rule above, and nothing at our own Stripe account showing the same person
+ * already had a store of ours on a plan, or any trial. Once per person, as the
+ * money-back guarantee is (lib/plan-refund.ts): a store that closes takes its
+ * record with it (closeStoreRecord), not its customer at Stripe, so a person
+ * whose first store closed and who makes another is not offered a second trial.
+ * Only the checkout reads this answer (bounded: one search and at most
+ * TRIAL_HISTORY_CUSTOMERS subscription lists per checkout); the studio's
+ * pages keep trialOffered and make no Stripe request on a load.
+ *
+ * Read: every customer of ours with the store's sign-in address (Stripe's
+ * customer search by `email`, the query lib/plan-refund.ts uses; it can lag a
+ * new customer by under a minute) and the customer the checkout opens for, then
+ * every subscription of each, in any status. A subscription naming a store
+ * (`metadata[store]`, a plan of ours) or with a `trial_start` ends the offer.
+ *
+ * Never a trial on a guess (CX-123 rule 24): a failed request, an answer in
+ * another shape, an unreadable row, a list longer than one page or more
+ * same-address customers than TRIAL_HISTORY_CUSTOMERS all answer false, and
+ * the checkout opens from today.
+ */
+export async function trialOfferedTo(
+  store: Pick<Store, "email" | "stripeCustomerId" | "subscriptionId" | "extra">,
+  customerId: string | null = store.stripeCustomerId,
+): Promise<boolean> {
+  if (!trialOffered(store)) return false;
+  try {
+    const email = normaliseEmail(store.email);
+    if (!email) return false;
+    const people = new Set<string>();
+    if (customerId) {
+      if (!CUSTOMER_PATTERN.test(customerId)) return false;
+      people.add(customerId);
+    }
+    const search: unknown = await onPlatformAt(STRIPE_LIST_VERSION, "GET", `/customers/search?${new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" })}`);
+    if (!plainObject(search) || ownField(search, "object") !== "search_result") return false;
+    const found = readStripePage(search, (row) => typeof ownField(row, "email") === "string", CUSTOMER_PATTERN);
+    if (found.unreadable > 0 || found.hasMore) return false;
+    for (const row of found.rows) if (normaliseEmail(ownField(row, "email") as string) === email) people.add(row.id);
+    if (people.size > TRIAL_HISTORY_CUSTOMERS) return false;
+    const answers = await Promise.all([...people].map(async (customer) => {
+      const listed: unknown = await onPlatformAt(STRIPE_LIST_VERSION, "GET", `/subscriptions?${new URLSearchParams({ customer, status: "all", limit: "100" })}`);
+      if (!plainObject(listed) || ownField(listed, "object") !== "list") return false;
+      const read = readStripePage(listed, (row) => {
+        const started = ownField(row, "trial_start");
+        const meta = ownField(row, "metadata");
+        // A store field Stripe holds is always a word; one that is present and not a word is unknown, never "none".
+        const named = plainObject(meta) && hasOwnField(meta, "store") ? ownField(meta, "store") : "";
+        return ownField(row, "customer") === customer && hasOwnField(row, "trial_start") && (started === null || (Number.isSafeInteger(started) && (started as number) >= 0)) && plainObject(meta) && typeof named === "string";
+      }, SUBSCRIPTION_PATTERN);
+      const before = read.rows.some((row) => {
+        const named = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");
+        return ownField(row, "trial_start") !== null || (typeof named === "string" && named !== "");
+      });
+      return !before && read.unreadable === 0 && !read.hasMore;
+    }));
+    return answers.every(Boolean);
+  } catch (error) {
+    console.error("reading whether this person had a plan or trial before failed; no trial is offered", error);
+    return false;
+  }
 }
 
 /**
@@ -343,7 +433,7 @@ export async function createBillingCheckout(
   } else {
     body.set("customer_email", store.email);
   }
-  if (trialOffered(store)) {
+  if (await trialOfferedTo(store, customerId)) {
     body.set("subscription_data[trial_period_days]", String(TRIAL_DAYS));
     body.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
   }
@@ -410,15 +500,33 @@ export type StartedSubscription = {
   shared: boolean;
   /** The period paid for, which the store's allowances follow (lib/allowance-window.ts); null when Stripe did not say. */
   period: BillingPeriod | null;
+  /** Stripe could not be asked about the subscription: `active` is false because nothing is known, never because it stopped. */
+  unknown?: true;
 };
+
+/**
+ * Whether a plan checkout's address and customer make it this store's, by
+ * ownedBy's rule: the store may have changed its address since the checkout
+ * opened (renaming does not rewrite Stripe's metadata). Its current and
+ * earlier addresses lead only here; one it let go may be another creator's
+ * now, so it counts only with this store's own customer. Its current address
+ * counts first, as it always did: one it let go of and took back stays on the
+ * released list, and a first plan's checkout makes a new customer.
+ */
+function sessionOwnedBy(store: Store, named: unknown, customerId: string): boolean {
+  if (typeof named !== "string" || !named) return false;
+  if (named === store.handle) return true;
+  if ((store.releasedHandles ?? []).includes(named)) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId;
+  return (store.previousHandles ?? []).includes(named);
+}
 
 /**
  * Reads a returning checkout session and says what it actually created.
  *
  * The session id arrives in a URL the creator's browser followed, so it is
  * treated as a claim, not a fact: it must look like a session id, Stripe must
- * know it, it must be a subscription, and its metadata must name this very
- * store. A session from somewhere else buys nothing here.
+ * know it, it must be a subscription, and its metadata must name an address of
+ * this very store (sessionOwnedBy). A session from somewhere else buys nothing here.
  */
 export async function readStartedSubscription(
   store: Store,
@@ -439,9 +547,9 @@ export async function readStartedSubscription(
 
   if (session.mode !== "subscription") return null;
   const metadata = session.metadata as Record<string, string> | null;
-  if (metadata?.store !== store.handle) return null;
-
   const customerId = typeof session.customer === "string" ? session.customer : "";
+  if (!metadata || !sessionOwnedBy(store, metadata.store, customerId)) return null;
+
   const subscriptionId =
     typeof session.subscription === "string" ? session.subscription : "";
   if (!CUSTOMER_PATTERN.test(customerId)) return null;
@@ -454,7 +562,7 @@ export async function readStartedSubscription(
     const subscription=await subscriptionRecord(subscriptionId);
     if(!subscription||subscription.id!==subscriptionId||subscription.customer!==customerId)return null;
     const meta=subscription.metadata as Record<string,unknown>|null;
-    if(meta?.store!==store.handle||meta?.funding_grant!==metadata.funding_grant||meta?.funding_review!==metadata.funding_review)return null;
+    if(meta?.store!==metadata.store||meta?.funding_grant!==metadata.funding_grant||meta?.funding_review!==metadata.funding_review)return null;
     state=stateOf(subscription);
     if(state.state!=="active"||state.changePending)return null;
     const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
@@ -479,11 +587,14 @@ export async function readStartedSubscription(
     try{subscription=await subscriptionRecord(subscriptionId);}
     catch(error){
       console.error("reading the subscription failed",error);
-      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null};
+      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null,unknown:true};
     }
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;
     state=subscription?stateOf(subscription):{state:"inactive",reason:"missing"};
+    // A reply without its plan line says nothing: thrown, so the return route
+    // writes nothing and the daily job settles it (lib/billing-sync.ts).
+    if(state.state==="unknown")throw new Error("The started subscription's plan is unknown");
   }
   return {
     customerId,
@@ -613,11 +724,62 @@ export function planOf(subscription: Record<string, unknown>): { tier: Tier; cyc
   return { tier, cycle, amountCents, shared: isSharedPrice(tier, cycle, amountCents) };
 }
 
+/** An own data property of a plain object, never a getter or an inherited one. */
+function ownDataField(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+}
+const plainRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * Whether a subscription carries its one plan line in its exact shape
+ * (CX-123 rule 24): `items.data` a list of exactly one line whose price has a
+ * whole positive `unit_amount` and a `recurring.interval` of month or year,
+ * agreeing with the price's name when it has one. A quantity, currency or
+ * interval_count Stripe sends that is not 1, "usd" and 1 is off every plan's
+ * design (ensurePrice and checkout make them so) and is unknown too. Anything
+ * else says nothing about which plan is paid for, never the lowest plan at $0.
+ */
+function hasExactPlanLine(subscription: Record<string, unknown>): boolean {
+  const items = ownDataField(subscription, "items");
+  if (!plainRecord(items)) return false;
+  const data = ownDataField(items, "data");
+  if (!Array.isArray(data) || data.length !== 1) return false;
+  const line = ownDataField(data, "0");
+  if (!plainRecord(line)) return false;
+  // Absent stays as before (older fixtures and replies); present must be the design's.
+  if (Object.hasOwn(line, "quantity") && ownDataField(line, "quantity") !== 1) return false;
+  const price = ownDataField(line, "price");
+  if (!plainRecord(price)) return false;
+  if (Object.hasOwn(price, "currency") && ownDataField(price, "currency") !== "usd") return false;
+  const amount = ownDataField(price, "unit_amount");
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) return false;
+  const recurring = ownDataField(price, "recurring");
+  if (!plainRecord(recurring)) return false;
+  const interval = ownDataField(recurring, "interval");
+  if (interval !== "month" && interval !== "year") return false;
+  if (Object.hasOwn(recurring, "interval_count") && ownDataField(recurring, "interval_count") !== 1) return false;
+  const named = planFromLookupKey(ownDataField(price, "lookup_key"));
+  return !named || named.cycle === interval;
+}
+
 /** One reading of a subscription, used for what Stripe sends back either way. */
 export function stateOf(subscription: Record<string, unknown>): SubscriptionState {
   const status = typeof subscription.status === "string" ? subscription.status : "";
   if (!GOOD.has(status)) return { state: "inactive", reason: status || "unknown" };
   if (status === "past_due" && !pastDueInGrace(subscription)) return { state: "inactive", reason: "past_due" };
+
+  // A subscription in good standing is a plan only as Stripe sends one in full:
+  // its one plan line, and whether and when it stops, both explicit. A reply
+  // without them is unknown, and every caller keeps what it wrote down.
+  const cancelAtField = ownDataField(subscription, "cancel_at");
+  const stopsField = ownDataField(subscription, "cancel_at_period_end");
+  if (!hasExactPlanLine(subscription) || typeof stopsField !== "boolean" ||
+      !(cancelAtField === null || (typeof cancelAtField === "number" && Number.isSafeInteger(cancelAtField) && cancelAtField >= 0))) {
+    return { state: "unknown" };
+  }
 
   const trialing = status === "trialing";
   // Newer versions also fill `cancel_at` when a subscription is set to stop at
@@ -647,6 +809,8 @@ export function periodOf(subscription: Record<string, unknown>, trialing: boolea
 export async function readSubscription(
   subscriptionId: string,
   fundingStore?:Store,
+  /** Told why Stripe could not be asked, for a caller that must tell no answer from an unknown one (lib/stripe-silence.ts). */
+  failed?: (error: unknown) => void,
 ): Promise<SubscriptionState> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
@@ -663,6 +827,7 @@ export async function readSubscription(
       return { state: "inactive", reason: "missing" };
     }
     console.error("reading the subscription failed", error);
+    failed?.(error);
     return { state: "unknown" };
   }
 
@@ -697,6 +862,28 @@ export async function subscriptionRecord(subscriptionId: string): Promise<Record
   }
 }
 
+/** The id an expanded Stripe field names: the string itself, or the object's own `id`; "" otherwise. */
+function namedId(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string") return (raw as { id: string }).id;
+  return "";
+}
+
+/**
+ * Whether a subscription's expanded latest invoice is that subscription's and its customer's own (#4449): it names
+ * the subscription (at the top level in older API versions, or under parent.subscription_details) and the same
+ * customer. An invoice of another subscription or customer, or one naming neither, is never used for a pay link or
+ * an email: its link and amount would be someone else's.
+ */
+export function ownLatestInvoice(subscription: Record<string, unknown>, invoice: Record<string, unknown>): boolean {
+  const subscriptionId = namedId(subscription.id);
+  const customerId = namedId(subscription.customer);
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const named = [namedId(invoice.subscription), namedId(parent?.subscription_details?.subscription)].filter(Boolean);
+  if (!subscriptionId || !customerId || named.length === 0 || named.some((id) => id !== subscriptionId)) return false;
+  return namedId(invoice.customer) === customerId;
+}
+
 /**
  * Stripe's own page where an unpaid renewal is paid (232 [CA1] unit 4): the
  * hosted page of the subscription's latest invoice, while the subscription
@@ -714,6 +901,7 @@ export async function renewalInvoicePage(subscriptionId: string): Promise<string
     if (subscription?.id !== subscriptionId || subscription.status !== "past_due") return null;
     const invoice = subscription.latest_invoice as { status?: unknown; amount_due?: unknown; hosted_invoice_url?: unknown } | string | null;
     if (!invoice || typeof invoice !== "object" || invoice.status !== "open") return null;
+    if (!ownLatestInvoice(subscription, invoice as Record<string, unknown>)) return null;
     if (typeof invoice.amount_due !== "number" || invoice.amount_due <= 0) return null;
     const url = typeof invoice.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
     return INVOICE_PAGE.test(url) ? url : null;
@@ -1123,6 +1311,27 @@ export function observeRestartedPlan(
  * Errors are thrown, not swallowed: the caller has to tell the creator that
  * nothing changed, and "Stripe did not answer" is not "cancelled".
  */
+/**
+ * The mark a plan refund leaves on a subscription whose stop it set (lib/plan-refund-flow.ts): only a stop that still
+ * carries it is ever taken back by that flow. Every other write of the stop, here, clears it in the same call, so a
+ * stop the creator sets or takes back themselves is theirs from then on (Claude 1 on #3740).
+ */
+export const PLAN_REFUND_STOP_MARK = "plan_refund_stop";
+
+/**
+ * One lock per subscription for every change of its stop (Codex U on #3740): the plan refund's read-then-take-back
+ * and the creator's own cancel or resume never interleave, so a change the creator was told is done is never undone.
+ * What it covers: every change made through this code, which is the only way a creator changes their plan (the
+ * studio's billing route, plan breaks; there is no Stripe portal for a creator's plan). Stripe offers no conditional
+ * update, so a change written straight into the platform's own Stripe account (by its owner, in the Dashboard) takes
+ * no lock: one landing inside a take-back's GET and POST, a window of one request, is not fenced.
+ */
+export const planStopLockKey = (subscriptionId: string) => `nl:lock:plan-stop:${subscriptionId}`;
+// Longer than the work it guards, so it cannot lapse in the middle (Claude 7 on #3740): a GET and a POST, each up to
+// STRIPE_TIMEOUT_MS (20 s), with room to spare; the take-back also checks the lock is still held before its POST.
+export const PLAN_STOP_LOCK_SECONDS = 60;
+export const PLAN_STOP_LOCK_WAIT_MS = 3_000;
+
 export async function setCancelAtPeriodEnd(
   subscriptionId: string,
   cancel: boolean,
@@ -1130,10 +1339,13 @@ export async function setCancelAtPeriodEnd(
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
   }
-  const subscription = await onPlatform(
-    "POST",
-    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" }),
+  // A lock that cannot be taken throws (LockBusyError): the caller says nothing changed, and the creator tries again.
+  const subscription = await withLock(planStopLockKey(subscriptionId), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, () =>
+    onPlatform(
+      "POST",
+      `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false", [`metadata[${PLAN_REFUND_STOP_MARK}]`]: "" }),
+    ),
   );
   // Only an identified, explicit provider observation can confirm this change.
   // Unknown replies must throw so callers retain paid access and pause evidence.
@@ -1143,6 +1355,7 @@ export async function setCancelAtPeriodEnd(
     throw new Error("The cancellation response does not identify the requested subscription state");
   }
   const state = stateOf(subscription);
+  if (state.state === "unknown") throw new Error("The cancellation response does not carry the subscription's plan");
   if (state.state === "active" &&
       (typeof subscription.cancel_at_period_end !== "boolean" || state.cancelsAtEnd !== cancel)) {
     throw new Error("The subscription did not acknowledge the requested cancellation setting");
@@ -1247,11 +1460,18 @@ export async function switchPlan(
   assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
   if(funding)await onPlatform('POST',path,new URLSearchParams({'metadata[funding_pending_grant]':funding.id,'metadata[funding_pending_review]':funding.reviewId}));
+  // From here the change itself is on its way to Stripe. A refusal Stripe
+  // states (a 4xx with its reason) changed nothing; any other failure, such as
+  // a lost or unreadable answer or a server error, may have switched and billed.
+  const sendChange = () => onPlatform("POST", path, body).catch((error: unknown) => {
+    if (error instanceof BillingError && error.status >= 400 && error.status < 500) throw error;
+    throw new SwitchUnconfirmedError(error);
+  });
   let updated: Record<string, unknown>;
   try {
     assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
-    updated = await onPlatform("POST", path, body);
+    updated = await sendChange();
   } catch (error) {
     // A price archived at Stripe since we last read it. The creator asked to
     // change plan once; they should not have to ask twice because of our own
@@ -1264,28 +1484,33 @@ export async function switchPlan(
     body.set("items[0][price]", await ensurePrice(choice.tier, choice.cycle));
     assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
-    updated = await onPlatform("POST", path, body);
+    updated = await sendChange();
   }
 
-  const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
-  if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
-  if (updated.pending_update) {
-    const invoice = updated.latest_invoice as { hosted_invoice_url?: unknown } | null;
-    const url = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
-    if (INVOICE_PAGE.test(url) || (LOCAL_PAGE.test(url) && STRIPE_API.startsWith("http://127.0.0.1"))) {
-      return { kind: "confirm", url };
+  // Stripe has taken the change: whatever fails from here, it may have switched and billed.
+  try {
+    const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
+    if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
+    if (updated.pending_update) {
+      const invoice = updated.latest_invoice as { hosted_invoice_url?: unknown } | null;
+      const url = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
+      if (INVOICE_PAGE.test(url) || (LOCAL_PAGE.test(url) && STRIPE_API.startsWith("http://127.0.0.1"))) {
+        return { kind: "confirm", url };
+      }
+      return { kind: "refused", reason: "pending" };
     }
-    return { kind: "refused", reason: "pending" };
+    const observedState=stateOf(updated);
+    if(funding&&(observedState.state!=='active'||observedState.tier!==choice.tier||observedState.cycle!==choice.cycle))throw new Error('Switch observation does not match the requested plan');
+    if(funding&&!(await activateObservedSwitch(funding.statsId,funding.id,funding.reviewId,subscriptionId,updated)))throw new Error('Switch funding activation was not acknowledged');
+    // The price says which plan this is; the note is for whoever reads the
+    // subscription in the Stripe dashboard. Missing it changes nothing charged.
+    await onPlatform("POST", path, new URLSearchParams({ "metadata[tier]": choice.tier,...(funding?{"metadata[funding_grant]":funding.id,"metadata[funding_review]":funding.reviewId,"metadata[funding_action]":"switch","metadata[funding_pending_grant]":"","metadata[funding_pending_review]":""}:{}) })).catch((error) =>
+      console.error("noting the plan on the subscription failed", error),
+    );
+    return { kind: "switched", state: funding&&observedState.state==="active"?{...observedState,period:fundedPeriod(observedState.period)}:observedState };
+  } catch (error) {
+    throw new SwitchUnconfirmedError(error);
   }
-  const observedState=stateOf(updated);
-  if(funding&&(observedState.state!=='active'||observedState.tier!==choice.tier||observedState.cycle!==choice.cycle))throw new Error('Switch observation does not match the requested plan');
-  if(funding&&!(await activateObservedSwitch(funding.statsId,funding.id,funding.reviewId,subscriptionId,updated)))throw new Error('Switch funding activation was not acknowledged');
-  // The price says which plan this is; the note is for whoever reads the
-  // subscription in the Stripe dashboard. Missing it changes nothing charged.
-  await onPlatform("POST", path, new URLSearchParams({ "metadata[tier]": choice.tier,...(funding?{"metadata[funding_grant]":funding.id,"metadata[funding_review]":funding.reviewId,"metadata[funding_action]":"switch","metadata[funding_pending_grant]":"","metadata[funding_pending_review]":""}:{}) })).catch((error) =>
-    console.error("noting the plan on the subscription failed", error),
-  );
-  return { kind: "switched", state: funding&&observedState.state==="active"?{...observedState,period:fundedPeriod(observedState.period)}:observedState };
 }
 
 /**
@@ -1360,6 +1585,13 @@ export function ownedBy(store: Store, subscription: Record<string, unknown>): bo
   // An address this store let go of may be another store's now: a
   // subscription under it is this store's only when it pays as this store's
   // own customer, never by the email address alone.
+  // This runs before the current-address check on purpose, unlike
+  // sessionOwnedBy: an address let go of and then taken back stays on the
+  // released list, and a subscription seen here (webhook, daily sync) may be
+  // one another creator bought while holding it. sessionOwnedBy reads a
+  // checkout this store just opened, whose first plan makes a customer the
+  // store has not saved yet, so it counts the current address first. Do not
+  // align the two orders.
   if (store.releasedHandles.includes(named)) return sameCustomer;
   const handles = new Set([store.handle, ...store.previousHandles]);
   if (!handles.has(named)) return false;
@@ -1411,19 +1643,26 @@ async function activateObservedSwitch(statsId:string,grantId:string,reviewId:str
  if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=='usd'||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return false;
  return activateSwitchContract({statsId,grantId,reviewId,subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,trialing:state.trialing,periodStartSeconds:(state.trialing?subscription.trial_start:periodStart(subscription)) as number,periodEndSeconds:(state.trialing?subscription.trial_end:periodEnd(subscription,false)) as number});
 }
+/**
+ * The plan as observed, once its funding (if any) is acknowledged. Whose it is
+ * is ownedBy's word alone: renaming does not rewrite the address in Stripe, so
+ * a store's own plan stays under the address it was bought with, an earlier
+ * one or one let go (then only with this store's own customer). The funded
+ * receipt itself is bound to the store's statsId (lib/contract-funding.ts).
+ */
 export async function startedFromObservedSubscription(store:Store,subscription:Record<string,unknown>):Promise<StartedSubscription|null>{
  const started=startedFrom(subscription);
  if(!started)return null;
  const meta=subscription.metadata as Record<string,unknown>|null|undefined;
  if(hasSwitchFunding(subscription)){
-  if(!ownedBy(store,subscription)||meta?.store!==store.handle||meta?.funding_action!==undefined&&meta.funding_action!=='switch')return null;
+  if(!ownedBy(store,subscription)||meta?.funding_action!==undefined&&meta.funding_action!=='switch')return null;
   const pending=meta?.funding_pending_grant!==undefined||meta?.funding_pending_review!==undefined;
   const grantId=pending?meta?.funding_pending_grant:meta?.funding_grant,reviewId=pending?meta?.funding_pending_review:meta?.funding_review;
   if(typeof grantId!=='string'||typeof reviewId!=='string')return null;
   return await activateObservedSwitch(store.statsId??'',grantId,reviewId,started.subscriptionId,subscription)?{...started,period:fundedPeriod(started.period)}:null;
  }
  if(meta?.funding_grant===undefined&&meta?.funding_review===undefined)return started;
- if(!ownedBy(store,subscription)||meta?.store!==store.handle||typeof meta.funding_grant!=="string"||typeof meta.funding_review!=="string")return null;
+ if(!ownedBy(store,subscription)||typeof meta.funding_grant!=="string"||typeof meta.funding_review!=="string")return null;
  const state=stateOf(subscription);
  if(state.state!=="active"||state.changePending)return null;
  const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
@@ -1550,6 +1789,8 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
     price.recurring = recurring;
     items.data = [item];
     member.items = items;
+    // Whether and when it stops, explicit too: an unknown row is neither adopted nor ended as lapsed.
+    if (stateOf(member).state === "unknown") throw new Error("Subscription search member state is unknown");
     if (member.status === "trialing") {
       if (typeof member.trial_start !== "number" || !Number.isSafeInteger(member.trial_start) ||
           typeof member.trial_end !== "number" || !Number.isSafeInteger(member.trial_end) ||
@@ -1926,8 +2167,13 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
     const listed = await onPlatform("GET", `/refunds?${query}`, undefined, { version: CHARGE_VERSION });
     if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.has_more !== false) return null;
     const out = { returned: 0, inFlight: 0, failed: 0, paid: intent.amount_received as number };
+    // Each refund counts once, by its own id: a list that repeats an id cannot
+    // prove its rows are distinct, so it is unreadable, never a doubled sum
+    // that would close a debt only partly returned (issue #4452).
+    const seen = new Set<string>();
     for (const row of listed.data as Record<string, unknown>[]) {
-      if (!row || row.object !== "refund" || typeof row.id !== "string") return null;
+      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
+      seen.add(row.id);
       const intent = typeof row.payment_intent === "string" ? row.payment_intent : (row.payment_intent as { id?: unknown } | null | undefined)?.id;
       if (intent !== paymentIntent) return null;
       if (row.status === "succeeded") {

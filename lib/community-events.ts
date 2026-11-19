@@ -55,9 +55,9 @@
  * oldest one that is over makes room for a new one. Every limit is in
  * lib/community-text.ts, where the studio reads it too.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -73,6 +73,7 @@ import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { communityWords } from "@/lib/buyer-words/community";
+import { eventFileWords } from "@/lib/buyer-words/event-file";
 import { LANGUAGES } from "@/lib/store-language";
 import {
   EVENT_LENGTHS,
@@ -219,6 +220,21 @@ export async function readEvent(id: string, event: string): Promise<CommunityEve
   return parseEvent(raw);
 }
 
+/**
+ * The event, read exactly (rules 24 and 30): null only when its GET answered exactly nil, so the event is gone (or
+ * its id names none). A lost reply, one in another shape or a value that does not parse throws UnknownReplyError:
+ * an event that did not read is not one that is gone, so what would be closed because it is gone is kept.
+ */
+export async function readEventExact(id: string, event: string): Promise<CommunityEvent | null> {
+  if (!ITEM_ID.test(event)) return null;
+  const replies = repliesFor(await redisPipeline([["GET", eventKey(id, event)]]), 1);
+  if (!replies) throw new UnknownReplyError("a live event");
+  if (replies[0] === null) return null;
+  const parsed = parseEvent(replies[0]);
+  if (!parsed) throw new UnknownReplyError("a live event");
+  return parsed;
+}
+
 export async function readEvents(id: string, ids: string[]): Promise<CommunityEvent[]> {
   const wanted = ids.filter((e) => ITEM_ID.test(e));
   if (!wanted.length) return [];
@@ -252,14 +268,42 @@ export async function upcomingEvents(id: string, now = Date.now()): Promise<Comm
 
 /**
  * Every event a community holds, soonest first, for the one-time walk that
- * puts what already exists into the search index (lib/community-index.ts).
+ * puts what already exists into the search index (lib/community-walk.ts).
  * Bounded by what a community keeps, which is what the index holds anyway.
+ *
+ * Read exactly (CX-123 rule 24, Claude 4 on #3263): the walk is marked done once, ever, so an unread calendar must
+ * never pass for an empty one. Only a list confirmed empty is no events, and only an event whose GET answered nil is
+ * one that is gone. A list or a row in any other shape (an id that is not an event's, text that is not an event)
+ * throws UnknownReplyError, and the walk stops unmarked. The walk is its only caller.
  */
 export async function allEvents(id: string): Promise<CommunityEvent[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MAX_KEPT_EVENTS]]);
-  const { ids } = flatIds(raw);
-  return readEvents(id, ids);
+  const what = "a community's calendar";
+  const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MAX_KEPT_EVENTS]]), 1)?.[0]);
+  // Member and score in pairs.
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  const ids = flat.filter((_, i) => i % 2 === 0);
+  if (!ids.length) return [];
+  if (ids.some((e) => !ITEM_ID.test(e))) throw new UnknownReplyError(what);
+  const rows = repliesFor(await redisPipeline(ids.map((e) => ["GET", eventKey(id, e)])), ids.length);
+  if (!rows) throw new UnknownReplyError(what);
+  return rows.flatMap((raw) => {
+    if (raw === null) return [];
+    const event = parseEvent(raw);
+    if (!event) throw new UnknownReplyError(what);
+    return [event];
+  });
+}
+
+/**
+ * How many events the walk of the archive reads, and pays for before it reads them (lib/community-walk.ts), read
+ * exactly (CX-123 rule 24, Claude 4 on #3263): ZCARD's own count, or UnknownReplyError, never 0 from an unknown answer.
+ */
+export async function eventCountExact(id: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the community's events count");
+  return Math.min(n, MAX_KEPT_EVENTS);
 }
 
 export type PastPage = { events: CommunityEvent[]; next: number | null };
@@ -407,12 +451,37 @@ export type CreateResult = { ok: true; event: CommunityEvent } | { ok: false; re
  * The slot an event and everyone coming to it is counted in, in the store's
  * data room (lib/store-data.ts): its record, its place in the calendar, its
  * three reminders in the queue, the words it is found by, and each place
- * taken (RSVP_BYTES).
+ * taken (RSVP_BYTES: 96 until a place's value carried its attempt mark, 17 bytes more, ":" and 16 hex; Codex V on
+ * #2992).
  */
 const EVENT_SLOT = (event: string) => `cm:e:${event}`;
-export const RSVP_BYTES = 96;
+export const RSVP_BYTES = 113;
 function eventBytes(event: CommunityEvent): number {
   return dataBytes([JSON.stringify(event)], 5) + indexBytes([event.title, event.about]);
+}
+
+/**
+ * Lets the oldest events that are over leave the calendar, `need` of them, and answers how many left (rules 24 and 30;
+ * Claude 5 on #3845, 6908545844). Each entry is read exactly: one whose event answered exactly nil leaves the index
+ * with its keys (an orphan a half-run pipeline left behind); one that is not an event id leaves the index only; one
+ * in an unknown shape stays and is not counted. A prune that could not make the room never lets a new event in, so
+ * the index never passes MAX_KEPT_EVENTS and no member's erasure is held by it.
+ */
+async function pruneOldest(id: string, need: number, now: number, room: DataStore): Promise<number> {
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, need]]), 1)?.[0]);
+  if (!listed) return 0;
+  let left = 0;
+  const strays = listed.filter((e) => !ITEM_ID.test(e));
+  if (strays.length) left += countOf(repliesFor(await redisPipeline([["ZREM", indexKey(id), ...strays]]), 1)?.[0]) ?? 0;
+  const ids = listed.filter((e) => ITEM_ID.test(e));
+  if (!ids.length) return left;
+  const replies = repliesFor(await redisPipeline(ids.map((e) => ["GET", eventKey(id, e)])), ids.length);
+  if (!replies) return left;
+  for (let i = 0; i < ids.length; i++) {
+    const event = replies[i] === null ? ids[i] : parseEvent(replies[i])?.id === ids[i] ? ids[i] : null;
+    if (event && (await forgetEventId(id, event, room))) left++;
+  }
+  return left;
 }
 
 /**
@@ -423,12 +492,11 @@ function eventBytes(event: CommunityEvent): number {
 export async function createEvent(store: Store, input: EventInput, now = Date.now()): Promise<CreateResult> {
   const id = store.community?.id as string;
   if ((await upcomingCount(id, now)) >= MAX_UPCOMING_EVENTS) return { ok: false, reason: "full" };
-  const [kept] = await redisPipeline([["ZCARD", indexKey(id)]]);
-  if (Number(kept) >= MAX_KEPT_EVENTS) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, Number(kept) - MAX_KEPT_EVENTS + 1]]);
-    const oldest = (Array.isArray(raw) ? (raw as string[]) : []).filter((e) => ITEM_ID.test(e));
-    if (!oldest.length) return { ok: false, reason: "full" };
-    for (const gone of await readEvents(id, oldest)) await forgetEvent(id, gone, store);
+  // Read exactly (rule 24; Claude 5 on #3845): an unreadable count is unknown, so nothing is made, never an event past the cap.
+  const kept = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (kept === null) throw new UnknownReplyError("the events a community keeps");
+  if (kept >= MAX_KEPT_EVENTS) {
+    if ((await pruneOldest(id, kept - MAX_KEPT_EVENTS + 1, now, store)) < kept - MAX_KEPT_EVENTS + 1) return { ok: false, reason: "full" };
   }
   const event: CommunityEvent = {
     id: newItemId(),
@@ -565,12 +633,18 @@ export function readReplay(raw: unknown): Video | null {
 }
 
 async function forgetEvent(id: string, event: CommunityEvent, room: DataStore): Promise<void> {
-  await redisPipeline([
-    ["DEL", eventKey(id, event.id), rsvpKey(id, event.id), countKey(id, event.id)],
-    ["ZREM", indexKey(id), event.id],
-  ]);
-  await unindexEvent(id, event.id).catch(() => {});
-  await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: 0, set: true }]);
+  await forgetEventId(id, event.id, room);
+}
+
+/** An event's keys and its place in the calendar let go; true only when the ZREM answered exactly that it left. */
+async function forgetEventId(id: string, event: string, room: DataStore): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([
+    ["DEL", eventKey(id, event), rsvpKey(id, event), countKey(id, event)],
+    ["ZREM", indexKey(id), event],
+  ]), 2);
+  await unindexEvent(id, event).catch(() => {});
+  await giveData(room, [{ slot: EVENT_SLOT(event), bytes: 0, set: true }]);
+  return countOf(replies?.[1]) === 1;
 }
 
 /** Takes an event away for good: only one that is cancelled or over, so nobody coming is left without word. */
@@ -595,13 +669,15 @@ export async function mayAttend(
   config: CommunityConfig,
   event: CommunityEvent,
   viewer: { owner: boolean; email: string },
+  /** `strict`, for deciding who a reminder goes to (lib/community-event-mail.ts): an answer not had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
   if (viewer.owner) return true;
   if (!event.only.length) return true;
   const ids = event.only.filter((p) => config.access.includes(p));
   if (!ids.length) return false;
   const id = store.community?.id as string;
-  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`);
+  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
 }
 
 export type JoinWindow = {
@@ -662,23 +738,60 @@ export type RsvpResult = "added" | "already" | "full" | "closed";
  * itself, so a request that dies halfway cannot leave a count that says
  * "full" when it is not.
  */
+/**
+ * A place's value is "seconds:attempt": when it was taken, and a random mark of the request that wrote it. A place
+ * taken back (an unknown answer, a list over the cap) is deleted only while it still holds that request's own mark,
+ * so a concurrent request's place for the same member is never deleted (Codex V on #2992). One EVAL, as the HDEL was.
+ */
+export const RELEASE_RSVP = `-- marktmorgen:event-rsvp-release:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+/**
+ * Deletes this request's own place, never another request's for the same member. True only when it deleted it now: the
+ * room is given back only then, since a deletion in between (a cancel) gave it back already. An unknown reply keeps
+ * the room taken, never given back twice.
+ */
+async function releaseOwnRsvp(list: string, member: string, mark: string): Promise<boolean> {
+  return repliesFor(await redisPipeline([["EVAL", RELEASE_RSVP, 1, list, member, mark]]), 1)?.[0] === 1;
+}
+/** When a place was taken, from its value: plain seconds (before the attempt mark) or "seconds:attempt". */
+export function rsvpSeconds(value: unknown): number {
+  return Number(String(value ?? "").split(":", 1)[0]) || 0;
+}
+
 export async function rsvp(id: string, event: CommunityEvent, member: string, room: DataStore, now = Date.now()): Promise<RsvpResult> {
   if (event.cancelled || isOver(event, now)) return "closed";
-  const [already] = await redisPipeline([["HEXISTS", rsvpKey(id, event.id), member]]);
-  if (Number(already) === 1) return "already";
+  // Each answer read exactly (sweep app5, finding 2; CX-123 rules 24 and 30): an unknown one fails (the page says the
+  // RSVP did not go through), never "already going", and never leaves somebody over the cap.
+  const already = repliesFor(await redisPipeline([["HEXISTS", rsvpKey(id, event.id), member]]), 1)?.[0];
+  if (already !== 0 && already !== 1) throw new UnknownReplyError("whether a member has a place");
+  if (already === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-  const [added, length] = await redisPipeline([
-    ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
-    ["HLEN", rsvpKey(id, event.id)],
-  ]);
-  if (Number(added) !== 1) {
+  const mark = `${Math.floor(now / 1000)}:${randomBytes(8).toString("hex")}`;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HSETNX", rsvpKey(id, event.id), member, mark],
+      ["HLEN", rsvpKey(id, event.id)],
+    ]),
+    2,
+  );
+  const added = replies?.[0];
+  const length = countOf(replies?.[1]);
+  if (added === 0) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }
-  if (event.cap > 0 && Number(length) > event.cap) {
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+  if (added !== 1 || length === null) {
+    // Whether the place was written, or how many now hold one, is unknown: it is taken back, never kept over the cap,
+    // and only if it is this request's own (another request's place for the same member is kept). Its room is given
+    // back only when this deleted it.
+    if (await releaseOwnRsvp(rsvpKey(id, event.id), member, mark)) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    throw new UnknownReplyError("a place taken at an event");
+  }
+  if (event.cap > 0 && length > event.cap) {
+    // Given back only when this took the place away: a deletion of the member in between gave it back already.
+    if (await releaseOwnRsvp(rsvpKey(id, event.id), member, mark)) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
   }
   return "added";
@@ -691,13 +804,29 @@ export async function cancelRsvp(id: string, event: CommunityEvent, member: stri
   return Number(removed) === 1;
 }
 
-/** How many are coming to each event, and whether this member is. */
-export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number; mine: boolean }>> {
-  const out = new Map<string, { going: number; mine: boolean }>();
+/**
+ * How many are coming to an event, and whether this member is; null where it could not be read.
+ * Each is read exactly and on its own (sweep app5, finding 2; CX-123 rules 24 and 30): a count in another shape is
+ * unknown, never "nobody is coming" with places left, and the member's own place is read apart from the count, so an
+ * unknown count never hides a place they hold nor withholds the way in, and an unknown place is never "not going".
+ */
+export type RsvpNumbers = { going: number | null; mine: boolean | null };
+
+/** How many are coming to each event, and whether this member is, each null when unknown; an unreachable Redis is all unknown. */
+export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, RsvpNumbers>> {
+  const out = new Map<string, RsvpNumbers>();
   if (!events.length) return out;
-  const rows = await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]));
+  const commands = events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]);
+  const rows = repliesFor(
+    await redisPipeline(commands).catch((error: unknown) => {
+      console.error("reading an event's places failed", error);
+      return null;
+    }),
+    commands.length,
+  );
   events.forEach((e, i) => {
-    out.set(e.id, { going: Number(rows[i * 2]) || 0, mine: Number(rows[i * 2 + 1]) === 1 });
+    const there = rows?.[i * 2 + 1];
+    out.set(e.id, { going: countOf(rows?.[i * 2]), mine: there === 1 ? true : there === 0 ? false : null });
   });
   return out;
 }
@@ -713,27 +842,38 @@ const RSVP_PAGES = 200;
  * or cancellation is then not sent to a short list as if it were everyone (lib/community-event-mail.ts, startJob).
  */
 export async function rsvpList(id: string, eventId: string, limit = 100_000): Promise<{ key: string; at: number }[]> {
-  const out: { key: string; at: number }[] = [];
+  // By member: HSCAN may hand the same field back twice during a walk, and a person coming is one person, counted
+  // once and emailed once (a send's readers must not repeat, lib/community-event-mail.ts recipientBatch). The latest
+  // reading of the field is kept.
+  const seen = new Map<string, number>();
   let cursor = "0";
   for (let page = 0; ; page += 1) {
-    if (page === RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
+    if (page >= RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
     const read = scanPage(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]));
     // A hash answers field and value: an odd page is not one.
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
     const flat = read.items;
-    for (let i = 0; i + 1 < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
+    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], rsvpSeconds(flat[i + 1]));
     cursor = read.next;
-    if (cursor === "0" || out.length >= limit) break;
+    if (cursor === "0" || seen.size >= limit) break;
   }
-  return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
+  return [...seen]
+    .slice(0, limit)
+    .map(([key, at]) => ({ key, at }))
+    .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }
 
-/** Which of these members are still coming, asked when an email to them goes out. */
+/**
+ * Which of these members are still coming, asked when an email to them goes out, read exactly (rules 24 and 30): one
+ * is not coming only when its field answered exactly nil. A reply lost, cut short or in another shape, or a field that
+ * is not a string, throws UnknownReplyError: a list that did not read is not a list of nobody coming.
+ */
 export async function stillGoing(id: string, eventId: string, members: string[]): Promise<Set<string>> {
   if (!members.length) return new Set();
-  const [raw] = await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]);
-  const rows = Array.isArray(raw) ? raw : [];
-  return new Set(members.filter((_, i) => rows[i] !== null && rows[i] !== undefined));
+  const replies = repliesFor(await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]), 1);
+  const rows = replies && repliesFor(replies[0], members.length);
+  if (!rows || rows.some((row) => row !== null && typeof row !== "string")) throw new UnknownReplyError("who is coming to an event");
+  return new Set(members.filter((_, i) => rows[i] !== null));
 }
 
 // ------------------------------------------------------------------ words and files
@@ -798,15 +938,17 @@ export function lengthWords(minutes: number): string {
  * The calendar file for an event: the page to join from, never the room —
  * the page asks who is opening it, a calendar cannot. Same UID for every
  * version, and a sequence that goes up with each move, so a calendar that
- * imports it again moves the event rather than adding a second one.
+ * imports it again moves the event rather than adding a second one. Its
+ * words are the store's language (lib/buyer-words/event-file.ts).
  */
-export function eventIcs(store: Pick<Store, "handle" | "name">, event: CommunityEvent, communityName: string): string {
+export function eventIcs(store: Pick<Store, "handle" | "name" | "language">, event: CommunityEvent, communityName: string): string {
   const page = eventAddress(store, event.id);
+  const w = eventFileWords(store.language);
   const description = [
     event.about,
     "",
-    `Join from the event page: ${page}`,
-    `The way in shows there ${JOIN_EARLY_MINUTES} minutes before the start.`,
+    w.joinFrom(page),
+    w.wayIn(JOIN_EARLY_MINUTES),
   ].join("\n").trim();
   const lines = [
     "BEGIN:VCALENDAR",
@@ -827,22 +969,25 @@ export function eventIcs(store: Pick<Store, "handle" | "name">, event: Community
     `STATUS:${event.cancelled ? "CANCELLED" : "CONFIRMED"}`,
     ...(event.cancelled
       ? []
-      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:${icsText(`${event.title} in 15 minutes`)}`, "END:VALARM"]),
+      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:${icsText(w.alarm(event.title, 15))}`, "END:VALARM"]),
     "END:VEVENT",
     "END:VCALENDAR",
   ];
   return `${lines.map(fold).join("\r\n")}\r\n`;
 }
 
-/** The words for the feed post that announces an event, with the link to it. */
-export function announcementText(store: Pick<Store, "handle">, event: CommunityEvent): { title: string; text: string } {
+/** The words for the feed post that announces an event, with the link to it, in the store's language. */
+export function announcementText(store: Pick<Store, "handle" | "language">, event: CommunityEvent): { title: string; text: string } {
   const about = event.about.length > 600 ? `${event.about.slice(0, 600).replace(/\s+\S*$/, "")}…` : event.about;
+  const w = eventFileWords(store.language);
+  // A length that already ends in a period ("1 Std. 30 Min.") takes no second one.
+  const length = lengthIn(store, event.minutes);
   return {
-    title: cleanLine(`Live: ${event.title}`, 120),
+    title: cleanLine(w.liveTitle(event.title), 120),
     text: [
-      `${eventTime(event)}, ${lengthWords(event.minutes)}.`,
+      `${eventTimeIn(store, event)}, ${length}${length.endsWith(".") ? "" : "."}`,
       about,
-      `RSVP, add it to your calendar and join here: ${eventAddress(store, event.id)}`,
+      w.rsvpJoin(eventAddress(store, event.id)),
     ].filter(Boolean).join("\n\n"),
   };
 }
@@ -852,28 +997,57 @@ export function announcementText(store: Pick<Store, "handle">, event: CommunityE
  * were coming to, and forgets each event's answer about whether they may
  * come in (lib/community-erasure.ts).
  */
-export async function forgetRsvpsPerson(id: string, who: string, email: string): Promise<number> {
+export async function forgetRsvpsPerson(id: string, who: string, email: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
-  const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
+  // Each reply in its own exact shape (CX-123 rule 24): an unknown event list
+  // is not "no events", and an unknown HDEL or DEL is not "nothing removed",
+  // so the member's deletion is never reported done on it.
+  const what = "a member's RSVPs forgotten";
+  // At most one more than the cap is read (a bounded read; Claude 5 on #3845). Past MAX_KEPT_EVENTS (two events made at
+  // once, each counting before its ZADD; Claude 5 on #2957), a cut would leave out the newest events with the member's
+  // answers still kept; eventCount pays for MAX_KEPT_EVENTS at most, so the deletion is never reported done on it.
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "LIMIT", 0, MAX_KEPT_EVENTS + 1]]), 1)?.[0]);
+  if (!listed) throw new UnknownReplyError(what);
+  if (listed.length > MAX_KEPT_EVENTS) throw new UnknownReplyError(what);
+  const events = listed;
   if (!events.length) return 0;
-  const replies = await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]);
-  return replies.slice(0, events.length).reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const replies = repliesFor(await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]), events.length + 1);
+  if (!replies) throw new UnknownReplyError(what);
+  const counts = replies.map(countOf);
+  if (counts.some((n) => n === null)) throw new UnknownReplyError(what);
+  // Each place's room comes back only where this deletion removed it (an exact 1), as cancelRsvp gives it.
+  const gone = events.filter((_, i) => counts[i] === 1);
+  if (room && gone.length) await giveData(room, gone.map((e) => ({ slot: EVENT_SLOT(e), bytes: RSVP_BYTES })));
+  return (counts.slice(0, events.length) as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 /** The live events one member said they are coming to, and when they said it, for the copy of their data (619 [SZ3]). Only reads. */
 export async function rsvpsOf(id: string, who: string): Promise<{ event: string; at: number }[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
-  const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
+  // Read exactly (CX-123 rule 24, Claude 6 on #2957): a reply in another shape is not "no RSVPs" or "at 0", so the
+  // copy of their data says it could not be read instead of coming out without them.
+  const what = "a member's RSVPs";
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
+  if (!listed) throw new UnknownReplyError(what);
+  // Past MAX_KEPT_EVENTS, a cut would leave the newest events out of the copy (Claude 5 on #2957): it says it could
+  // not be read instead.
+  if (listed.length > MAX_KEPT_EVENTS) throw new UnknownReplyError(what);
+  const events = listed;
   if (!events.length) return [];
-  const replies = await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who]));
-  return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: Number(replies[i]) || 0 }]));
+  const replies = repliesFor(await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who])), events.length);
+  if (!replies) throw new UnknownReplyError(what);
+  return events.flatMap((event, i) => {
+    const reply = replies[i];
+    if (reply === null) return [];
+    // Written as whole seconds (HSETNX above), with the attempt mark since #2992 ("seconds:attempt", RELEASE_RSVP).
+    if (typeof reply !== "string" || !/^\d{1,15}(:[0-9a-f]{16})?$/.test(reply)) throw new UnknownReplyError(what);
+    return [{ event, at: rsvpSeconds(reply) }];
+  });
 }
 
 /** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */
 export async function eventCount(id: string): Promise<number> {
-  if (!isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["ZCARD", indexKey(id)]]);
-  return Math.min(Number(n) || 0, MAX_KEPT_EVENTS);
+  // Read exactly (rule 24; Claude 4 nuvem R): an unknown count throws, and the erasure answers "unavailable" instead
+  // of paying for fewer units than it goes through.
+  return eventCountExact(id);
 }

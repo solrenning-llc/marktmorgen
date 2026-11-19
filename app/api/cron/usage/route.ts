@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmail, sendEmailOutcome } from "@/lib/email";
 import {
   DELIVERY_ALLOWANCE_BYTES,
   FREE_PAUSE_ABOVE_BYTES,
@@ -16,15 +17,15 @@ import { largerPlanFor } from "@/lib/larger-plan";
 import { SITE_URL } from "@/lib/site-url";
 import { SETUP_VIDEO_SECONDS, costsPaused, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
-import { firstWord, settleAll, storeOf } from "@/lib/watch-billing";
+import { giveVideoWordBack, settleAll, storeOf, takeVideoWord } from "@/lib/watch-billing";
 import { allowanceWindow, calendarWindow, resetWords } from "@/lib/allowance-window";
 
 import { centsWords } from "@/lib/watch-rules";
 import { videoUsageNotice } from "@/lib/video-usage-notice";
 import { visitedFolders, visitsIn } from "@/lib/traffic";
-import { firstWordOnVisits } from "@/lib/traffic-billing";
+import { giveVisitsWordBack, takeVisitsWord } from "@/lib/traffic-billing";
 import { SETUP_VISITS, countWords, publicVisitLimit, visitLimitFor, visitsWords } from "@/lib/traffic-rules";
-import { firstWordOnOrders } from "@/lib/orders-billing";
+import { giveOrdersWordBack, takeOrdersWord } from "@/lib/orders-billing";
 import { orderedFolders, ordersIn } from "@/lib/orders";
 import { ORDERS_INCLUDED, ordersWords, paidOrdersLimitFor } from "@/lib/order-rules";
 
@@ -71,6 +72,9 @@ async function foldersOfTwoMonths(read: (month: string) => Promise<string[]>): P
 export const maxDuration = 60;
 
 const TOLD = "nl:usage-watch:told";
+/** One run at a time; kept past the function's time limit (maxDuration) and let go at the end. */
+const LOCK = "nl:usage-watch:lock";
+const LOCK_SECONDS = 120;
 
 type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
 
@@ -121,19 +125,23 @@ async function videoRun(): Promise<VideoRun> {
       // A renewal Stripe could not collect pauses video for its own reason, and the
       // creator is told that one (232 [CA1] unit 4): not a plan's hours used up.
       if (costsPaused(store)) continue;
-      if (!isSenderConfigured() || !(await firstWord(folder, month))) continue;
+      if (!isSenderConfigured()) continue;
+      // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
+      const word = await takeVideoWord(folder, month);
+      if (word === null) continue;
       const notice = videoUsageNotice({ seconds, limit, standing: standingOf(store),
         studioUrl: `${SITE_URL}/studio`, supportEmail: SUPPORT_EMAIL });
-      const sent = await sendEmail({ meter: { by: "company" },
+      const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
         replyTo: SUPPORT_EMAIL,
         ...notice,
       }).catch((error) => {
         console.error("sending the video hours notice failed", error);
-        return false;
+        return "uncertain" as const;
       });
-      if (sent !== false) out.told += 1;
+      if (outcome === "refused") await giveVideoWordBack(folder, month, word);
+      if (outcome === "sent") out.told += 1;
     } catch (error) {
       console.error("writing to a creator about video hours failed", error);
     }
@@ -174,9 +182,12 @@ async function visitsRun(): Promise<VisitsRun> {
       if (visits < shown) continue;
       out.stores += 1;
       out.resting += 1;
-      if (!isSenderConfigured() || !(await firstWordOnVisits(folder, month))) continue;
+      if (!isSenderConfigured()) continue;
+      // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
+      const word = await takeVisitsWord(folder, month);
+      if (word === null) continue;
       const standing = standingOf(store);
-      const sent = await sendEmail({ meter: { by: "company" },
+      const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
         replyTo: SUPPORT_EMAIL,
@@ -207,9 +218,10 @@ async function visitsRun(): Promise<VisitsRun> {
         ].join("\n"),
       }).catch((error) => {
         console.error("sending the visits notice failed", error);
-        return false;
+        return "uncertain" as const;
       });
-      if (sent !== false) out.told += 1;
+      if (outcome === "refused") await giveVisitsWordBack(folder, month, word);
+      if (outcome === "sent") out.told += 1;
     } catch (error) {
       out.failed += 1;
       console.error("writing to a creator about visits failed", error);
@@ -230,7 +242,22 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24), as the other scheduled jobs (Claude 7's
+  // cron hunt): two runs at once (a retried invocation, a manual run beside the scheduled one) both read nobody told
+  // and both wrote to every owner past the allowance. Held by another run is busy; an unknown answer runs nothing.
+  // The lock outlives the function's time limit and is let go only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark(LOCK, LOCK_SECONDS, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true }, { headers: { "Cache-Control": "no-store" } });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  try {
+    return await watchUsage();
+  } finally {
+    await releaseMark(LOCK, lock);
+  }
+}
 
+async function watchUsage(): Promise<Response> {
   const video = await videoRun();
   const visits = await visitsRun();
   const orders = await ordersRun();
@@ -277,9 +304,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". Then nobody is
-  // written to about the allowance, support is told nothing, the told list is left as it was, and the part is unknown.
-  let owners: (string | null)[];
+  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". A read unknown as
+  // a whole: nobody is written to about the allowance, support is told nothing, the told list is left as it was, and
+  // the part is unknown. One store's owner unknown (undefined): that store only is postponed, below.
+  let owners: (string | null | undefined)[];
   try {
     owners = await ownersOf(fresh.map((s) => s.folder));
   } catch (error) {
@@ -291,16 +319,45 @@ export async function GET(request: NextRequest) {
   }
   let told = 0;
   const unknown: string[] = [];
+  // Stores whose owner could not be read today: not written to, support not told, not recorded; tried next run.
+  let unreadOwners = 0;
+  // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
+  // or an ownerless store support could not be told about stays off the told list and is tried again next run.
+  const given: string[] = [];
+  // Kept as each notice goes out, not only at the end (Claude 7's cron hunt): a run stopped partway (the function's
+  // time limit, a crash) wrote to some owners and recorded none, so the next day wrote to them again. Under the lock.
+  // True only on exactly "OK" (CX-123 rule 24).
+  const record = async (): Promise<boolean> => {
+    const replies = await redisPipeline([["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400]]).catch(() => null);
+    return repliesFor(replies, 1)?.[0] === "OK";
+  };
+  // Stores not written to today because their place on the told list could not be written first: tried next run.
+  let unrecorded = 0;
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
     const email = owners[i];
+    if (email === undefined) {
+      unreadOwners += 1;
+      continue;
+    }
     if (!email) {
       unknown.push(store.folder);
       continue;
     }
     if (!isSenderConfigured()) break;
-    const sent = await sendEmail({ meter: { by: "company" },
+    // The store goes on the told list before its notice, for the list's own period, and comes off only on a certain
+    // refusal (Codex L on #4529): a notice the provider may have accepted with its answer lost, or a run stopped
+    // right after the send, never writes to the same owner again. A list not written exactly sends nothing to this
+    // store today; the list is put back as it was, and the store is tried next run.
+    given.push(store.folder);
+    if (!(await record())) {
+      given.pop();
+      unrecorded += 1;
+      if (!(await record())) console.error("usage-watch: the told list could not be put back after an unconfirmed write; a store may wait a period for its notice");
+      continue;
+    }
+    const outcome = await sendEmailOutcome({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: email,
       replyTo: SUPPORT_EMAIL,
@@ -333,9 +390,15 @@ export async function GET(request: NextRequest) {
       ].join("\n"),
     }).catch((error) => {
       console.error("sending the allowance notice failed", error);
-      return false;
+      return "uncertain" as const;
     });
-    if (sent !== false) told += 1;
+    if (outcome === "sent") told += 1;
+    if (outcome === "refused") {
+      given.pop();
+      // Off the list again, so the next run writes to the owner. Not confirmed, it may stay held: a notice that was
+      // certainly not sent then waits for the list's period, never a second notice.
+      if (!(await record())) console.error("usage-watch: a refused allowance notice could not be taken off the told list; it may wait a period");
+    }
   }
 
   /*
@@ -345,7 +408,7 @@ export async function GET(request: NextRequest) {
     It is said out loud rather than passed over in silence.
   */
   if (unknown.length > 0 && isSenderConfigured()) {
-    await sendEmail({ meter: { by: "company" },
+    const supportTold = await sendEmail({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
       subject: `${unknown.length} store(s) over the allowance could not be written to`,
@@ -356,15 +419,25 @@ export async function GET(request: NextRequest) {
         "",
         ...unknown.map((f) => `  ${f}`),
       ].join("\n"),
-    }).catch((error) => console.error("sending the unknown-owner notice failed", error));
+    }).catch((error) => {
+      console.error("sending the unknown-owner notice failed", error);
+      return false;
+    });
+    if (supportTold === true) given.push(...unknown);
   }
 
-  await redisPipeline([
-    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...over.map((s) => s.folder)])]), "EX", 40 * 86_400],
-  ]);
+
+  await record();
+
+  if (unrecorded > 0) {
+    console.error(`usage-watch: ${unrecorded} store(s) over the delivery allowance could not be put on the told list before their notice; they were not written to and are tried again next run`);
+  }
+  if (unreadOwners > 0) {
+    console.error(`usage-watch: ${unreadOwners} store(s) over the delivery allowance have an owner that could not be read today; they were not written to and are tried again next run`);
+  }
 
   return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, video, visits, orders },
+    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, unrecorded, video, visits, orders },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -413,8 +486,11 @@ async function ordersRun(): Promise<OrdersRun> {
       const limit = paidOrdersLimitFor(store);
       if (limit === null || orders < limit) continue;
       out.stores += 1;
-      if (!isSenderConfigured() || !(await firstWordOnOrders(folder, month))) continue;
-      const sent = await sendEmail({ meter: { by: "company" },
+      if (!isSenderConfigured()) continue;
+      // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
+      const word = await takeOrdersWord(folder, month);
+      if (word === null) continue;
+      const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
         replyTo: SUPPORT_EMAIL,
@@ -439,9 +515,10 @@ async function ordersRun(): Promise<OrdersRun> {
         ].join("\n"),
       }).catch((error) => {
         console.error("sending the orders notice failed", error);
-        return false;
+        return "uncertain" as const;
       });
-      if (sent !== false) out.told += 1;
+      if (outcome === "refused") await giveOrdersWordBack(folder, month, word);
+      if (outcome === "sent") out.told += 1;
     } catch (error) {
       out.failed += 1;
       console.error("writing to a creator about orders failed", error);

@@ -154,6 +154,10 @@ export const es: BuyerWords = {
   unitSaving: (percent) => `ahorras un ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Elige una opción de ${title}`,
   chooseOne: "Elige una",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "País desde el que compras",
+  chooseCountry: "Elige tu país",
+  optionFromLink: (label) => `Llegaste aquí por ${label}, así que está elegida abajo. Puedes elegir otra.`,
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Cómo pagar ${title}`,
@@ -193,18 +197,26 @@ export const es: BuyerWords = {
   whoAnswers: (store) =>
     `${store} es quien vende y responde de lo que compras, de los reembolsos y de cualquier derecho de desistimiento que tengas. Marktmorgen aloja las páginas de la tienda y no es parte en la venta.`,
   noPaymentsTitle: "Esta tienda todavía no puede aceptar pagos.",
-  noPaymentsBody: (store) => `Los precios de arriba son reales, pero aquí nada puede cobrar una tarjeta. Para comprar, escribe directamente a ${store}.`,
-  noPaymentsBodyOne: (store) => `El precio de arriba es real, pero aquí nada puede cobrar una tarjeta. Para comprar, escribe directamente a ${store}.`,
+  noPaymentsBody: "Los precios de arriba son reales, pero aquí nada puede cobrar una tarjeta.",
+  noPaymentsBodyOne: "El precio de arriba es real, pero aquí nada puede cobrar una tarjeta.",
+  noPaymentsWrite: (store) => `Escribir a ${store}`,
 
   notices: {
     soldout: { title: "Se acaba de agotar", body: "El último se vendió justo antes de que pulsaras comprar. No se ha cobrado nada." },
     busy: { title: "Alguien lo está comprando ahora mismo", body: "No se ha cobrado nada. Vuelve a pulsar comprar en un momento." },
+    abroad: { title: "Aún no se puede comprar desde la UE ni el Reino Unido", body: "Todavía no podemos cobrar el IVA que la Unión Europea y el Reino Unido exigen para este producto, así que no se ha cobrado nada. Si estás fuera de ellos, elige tu país y vuelve a intentarlo." },
+    country: { title: "Elige el país desde el que compras", body: "No se ha cobrado nada. Elige tu país junto al botón de compra y vuelve a pulsar comprar." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a pulsar comprar." },
     error: { title: "No se pudo abrir la página de pago", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
+    nocharges: { title: "Esta tienda no puede aceptar pagos con tarjeta ahora mismo", body: "No se ha cobrado nada. Volver a intentarlo no funcionará hasta que la tienda lo solucione." },
     paused: { title: "Esta tienda no acepta pedidos nuevos ahora mismo", body: "No se ha cobrado nada. Los pedidos nuevos vuelven a abrirse a principios del mes que viene, o antes." },
     "paypal-declined": {
       title: "PayPal no aceptó el pago",
       body: "No se ha cobrado nada. Prueba con otra tarjeta o cuenta en PayPal, o paga aquí con tarjeta.",
+    },
+    "paypal-confirming": {
+      title: "Este pago de PayPal se está confirmando",
+      body: "Otra pestaña o una segunda pulsación lo está terminando ahora. Revisa tu correo por si llega el recibo antes de volver a pagar. Si PayPal muestra un cargo y no llega ningún recibo, escribe a la tienda respondiendo al recibo de PayPal.",
     },
     "paypal-error": {
       title: "No se pudo asociar ese pago de PayPal a esta tienda",
@@ -290,6 +302,8 @@ export const es: BuyerWords = {
   openFullSize: "Abrir esta imagen a tamaño completo",
   countdownUnits: { days: "días", hours: "horas", min: "min", sec: "seg" },
   until: (when) => `Hasta ${when}`,
+  countdownPause: "Pausar la cuenta atrás",
+  countdownResume: "Reanudar la cuenta atrás",
 
   restingTitle: "Esta página está en pausa por ahora",
   restingBody: (store) =>

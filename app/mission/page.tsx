@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Icon, iconFor, type IconName } from "@/components/icons";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { isBillingConfigured } from "@/lib/billing";
 import { PUBLISHED_PLAN_PRICES as PLAN_PRICES, PUBLISHED_PRICE_CENTS as PRICE_CENTS, REFUND_DAYS, TRIAL_DAYS, PUBLISHED_YEAR_PRICE_CENTS as YEAR_PRICE_CENTS } from "@/lib/plan";
 import { isConnectConfigured } from "@/lib/stripe-connect";
@@ -97,7 +97,6 @@ const BUILT = [
   "Links to everywhere else you are — the channel, the podcast, the booking page — with no price and no checkout on them",
   "Discount codes a buyer types at checkout, made as coupons on your own Stripe account",
   "Free products given for an email address, each address confirmed by its owner, and the list downloadable from your studio at any time",
-  "Email to your list, on Studio: one-off emails now or at a time you choose, and sequences that send themselves after someone joins or buys — only to people who agreed, with a one-click unsubscribe in every one",
   "Every store installs to the home screen on iPhone and Android as an app of its own, with its name, its icon and its color",
   "A community for your buyers, open only to the buyers of the products you choose: up to 20 spaces, each for the whole community or for the buyers of some products, posts with a picture that can be edited, polls, comments, likes, @mentions, pinned posts, an opt-in member directory, reports and moderation — with announcements emailed to members who asked, on Studio",
   "A live room in the community, with a cooldown, links on or off and a creator-only mode, and private messages to you, and between members if you allow it, with first messages that wait to be accepted if you choose",
@@ -148,6 +147,14 @@ const STRIPE_LINE =
 const CHECKOUT_LINE =
   "Selling: the buyer pays on your account and the file is handed over the moment Stripe confirms it";
 
+/**
+ * Selling from a creator's store needs a paid plan (canSell, lib/store-checkout.ts),
+ * and no plan can be started while plans are not on sale (lib/opening.ts): the
+ * code is there and no store can sell, which this page counts as not built.
+ */
+const CHECKOUT_CLOSED_LINE =
+  "Selling from your own store: the checkout is written and runs in test mode on the demo store, and it is not open until Marktmorgen's plans are on sale";
+
 const ORDERS_LINE =
   "A list of what you have sold, read from your own Stripe account, with the buyer's email address so you can answer them";
 
@@ -173,9 +180,18 @@ const BILLING_CLOSED_LINE = `Starting a paid plan: the subscription is written, 
 const ASSISTANT_LINE = `The ${ASSISTANT_NAME}, an add-on at $${ASSISTANT_PRICE_CENTS / 100} a month for one store: an AI chat on every page of the store that answers only from what you published, labels every reply as AI and hands what it cannot answer to your inbox, ${ASSISTANT_MESSAGES_MONTHLY.toLocaleString("en-US")} replies a month`;
 const ASSISTANT_CLOSED_LINE = `The ${ASSISTANT_NAME}: an AI chat on every page of a store that answers only from what the creator published, labels every reply as AI and hands what it cannot answer to the inbox, ${ASSISTANT_MESSAGES_MONTHLY.toLocaleString("en-US")} replies a month at $${ASSISTANT_PRICE_CENTS / 100} a month for one store; the code is written, and it is not on sale until Marktmorgen opens`;
 
-/** The store on its own domain: built, and live where this deployment can add domains. */
+/**
+ * What only Studio has: built, and counted as built only while Studio can be
+ * bought (plans on sale), and the domain only where this deployment can add domains.
+ */
 const DOMAIN_LINE =
   "Your store on your own domain, on Studio: type it in the studio, add the one record we show you, and the certificate is handled for you";
+const DOMAIN_CLOSED_LINE =
+  "Your store on your own domain, on Studio: the code is written, and Studio is not on sale until Marktmorgen opens";
+const EMAIL_LINE =
+  "Email to your list, on Studio: one-off emails now or at a time you choose, and sequences that send themselves after someone joins or buys — only to people who agreed, with a one-click unsubscribe in every one";
+const EMAIL_CLOSED_LINE =
+  "Email to your list, on Studio: one-off emails and sequences that send themselves, only to people who agreed; the code is written, and Studio is not on sale until Marktmorgen opens";
 
 /*
  * PayPal at checkout (paypalCheckoutLine, by the PayPal client) and writing
@@ -225,20 +241,25 @@ export default function MissionPage() {
   const ready = isConnectConfigured();
   const billingReached = isBillingConfigured();
   const billing = billingReached && PLANS_ON_SALE;
+  // A store sells only on a paid plan (canSell), and Studio is a paid plan:
+  // both wait for a plan that can be started.
+  const selling = ready && billing;
   const domains = isDomainsConfigured();
   const paypal = paypalAtCheckout();
   const calendarSync = hostSyncOn();
   const built = [
     ...BUILT,
     ...(paypal ? [paypalCheckoutLine(true)] : []),
-    ...(domains ? [DOMAIN_LINE] : []),
-    ...(ready ? [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE] : []),
+    ...(billing ? [EMAIL_LINE] : []),
+    ...(domains && billing ? [DOMAIN_LINE] : []),
+    ...(ready ? [STRIPE_LINE, ...(selling ? [CHECKOUT_LINE] : []), ORDERS_LINE] : []),
     ...(billing ? [BILLING_LINE] : []),
     ...(billing && ASSISTANT_ON_SALE ? [ASSISTANT_LINE] : []),
   ];
   const notBuilt = [
-    ...(domains ? [] : ["Your own domain for your store"]),
-    ...(ready ? [] : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
+    ...(domains ? (billing ? [] : [DOMAIN_CLOSED_LINE]) : ["Your own domain for your store"]),
+    ...(ready ? (selling ? [] : [CHECKOUT_CLOSED_LINE]) : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
+    ...(billing ? [] : [EMAIL_CLOSED_LINE]),
     ...(billing ? [] : [billingReached ? BILLING_CLOSED_LINE : BILLING_LINE]),
     ...(billing && ASSISTANT_ON_SALE ? [] : [ASSISTANT_CLOSED_LINE]),
     ...(paypal ? [] : [paypalCheckoutLine(false)]),
@@ -260,7 +281,7 @@ export default function MissionPage() {
                 Nobody should need a platform&apos;s permission{" "}
                 <span className="serif font-normal text-[#cfc4ff]">to be paid for their work</span>
               </h1>
-              <p className="t-lead mt-6 max-w-2xl text-white/80">
+              <p className="t-lead mt-6 max-w-[46ch] text-white/80">
                 What you pay us, and what we take from a sale, should both be clear before you choose. That is the whole idea, and
                 everything we build is judged against it.
               </p>
@@ -313,7 +334,7 @@ export default function MissionPage() {
 
           <figure className="mt-12 rounded-[var(--r-lg)] border border-line bg-white p-7 sm:p-8">
             <p className="font-semibold text-ink">A note on how we write</p>
-            <blockquote className="mt-3 text-ink-soft">
+            <blockquote className="mt-3 max-w-[46ch] text-ink-soft">
               We do not publish invented reviews, invented customers or screenshots of money we never made. If a page shows
               a person, the photograph is licensed stock, and the page says so. When we compare ourselves with anyone, we name the
               page on their own site that each line comes from, and the date we read it, so you can check it. It is a slower way to sell, and it is the only one we are willing to use.
@@ -370,7 +391,7 @@ export default function MissionPage() {
                 <span className="tag tag-live">{`Built and working · ${built.length}`}</span>
                 <ul className="mt-6 space-y-3">
                   {built.slice(0, 10).map((item) => (
-                    <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft">
+                    <li key={item} className="flex max-w-[46ch] gap-3 text-[0.9375rem] text-ink-soft">
                       <Icon name="check" size={18} strokeWidth={2.2} className="mt-0.5 shrink-0 text-mint-brand" />
                       <span>{item}</span>
                     </li>
@@ -389,7 +410,7 @@ export default function MissionPage() {
                     </summary>
                     <ul className="mt-4 space-y-3">
                       {built.slice(10).map((item) => (
-                        <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft">
+                        <li key={item} className="flex max-w-[46ch] gap-3 text-[0.9375rem] text-ink-soft">
                           <Icon name="check" size={18} strokeWidth={2.2} className="mt-0.5 shrink-0 text-mint-brand" />
                           <span>{item}</span>
                         </li>
@@ -406,13 +427,13 @@ export default function MissionPage() {
                 <span className="tag tag-next">{`Not built yet · ${notBuilt.length}`}</span>
                 <ul className="mt-6 space-y-3">
                   {notBuilt.map((item) => (
-                    <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft">
+                    <li key={item} className="flex max-w-[46ch] gap-3 text-[0.9375rem] text-ink-soft">
                       <Icon name="minus" size={18} className="mt-0.5 shrink-0 text-ink-mute" />
                       <span>{item}</span>
                     </li>
                   ))}
                 </ul>
-                <p className="mt-7 border-t border-line pt-5 text-sm text-ink-soft">
+                <p className="mt-7 max-w-[46ch] border-t border-line pt-5 text-sm text-ink-soft">
                   Other platforms have many of these today. If you need them now, they are the better choice now, and{" "}
                   <Link href="/proof/compare" className="link">
                     our comparison page
@@ -466,7 +487,7 @@ export default function MissionPage() {
                 <li key={r.date} className="reveal relative">
                   <span className="absolute -left-[2.3rem] top-1.5 h-3 w-3 rounded-full border-2 border-paper bg-violet-brand" aria-hidden="true" />
                   <p className="text-sm font-semibold text-violet-deep">{r.date}</p>
-                  <p className="mt-1.5 leading-relaxed text-ink-soft">{r.items}</p>
+                  <p className="mt-1.5 max-w-[46ch] leading-relaxed text-ink-soft">{r.items}</p>
                 </li>
               ))}
             </ol>

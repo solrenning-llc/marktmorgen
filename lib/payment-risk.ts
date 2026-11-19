@@ -46,12 +46,12 @@ export function riskLevelOf(charge: unknown): RiskLevel {
   // A charge a Radar rule of the creator's sent to manual review often still says "normal": while the review is open,
   // it decides, not the level. Stripe keeps outcome.type and charge.review after the creator closes the review, so
   // only the review itself, read expanded, says it is still open (Claude 7 on #3647). Closed: the level Stripe gave.
-  // A review that cannot be read (not expanded, another shape, or sent to review with no review given) is not
+  // A review that cannot be read (not expanded, another shape, no non-empty id (Codex G on #3647), or sent to review with no review given) is not
   // available, never "in review" for good and never "normal".
   const review = c.review;
   const reviewRead = record(review);
   if (reviewRead) {
-    if (reviewRead.object !== "review" || typeof reviewRead.open !== "boolean") return "not_available";
+    if (reviewRead.object !== "review" || typeof reviewRead.id !== "string" || !reviewRead.id || typeof reviewRead.open !== "boolean") return "not_available";
     if (reviewRead.open) return "in_review";
   } else if (review !== null && review !== undefined) {
     return "not_available";

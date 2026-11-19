@@ -294,8 +294,11 @@ export async function sendReviewRequests(
   // (Redis rounds TTL to seconds, so its last fraction reads 0), and the order waits for it, never dropped while the run
   // that holds it can still finish without sending. Longer, or no expiry (-1): stretched just before a batch went, so
   // the email may have gone, and it is done. Gone (-2) or anything else: left in line for the next run.
-  const byClaimTtl = async (member: string, ttl: unknown) => {
+  const byClaimTtl = async (member: string, ttl: unknown, firstHasReminder = false) => {
     if (typeof ttl !== "number" || !Number.isSafeInteger(ttl)) return;
+    // The first sender still needs this same member for its ZADD XX. Give a recent stretch time to finish
+    // without deleting either an in-flight first or the reminder it just scheduled. Older stretches still clear.
+    if (firstHasReminder && ttl > SENT_MARK_SECONDS - CLAIM_SECONDS && ttl <= SENT_MARK_SECONDS) return;
     if (ttl > CLAIM_SECONDS || ttl === -1) await drop(member);
     else if (ttl >= 0) await later(member, nowSeconds + ttl + 1);
   };
@@ -343,7 +346,7 @@ export async function sendReviewRequests(
     // A first being sent, or a claim a run could not let go of (Codex T on #4360): still short, it lapses on its own
     // and the order waits for it; stretched (taken just before a batch went), the email may have gone and it is done.
     if (typeof mark === "string" && mark.startsWith("sending:")) {
-      await byClaimTtl(member, read[1]);
+      await byClaimTtl(member, read[1], Boolean(store.reviewAsk.again));
       continue;
     }
     const stage = askStage(mark, store.reviewAsk.again);
@@ -407,7 +410,7 @@ export async function sendReviewRequests(
       if (claimed === "taken") {
         // Another run's: it may still let go without sending (a failed preparation, a refused allowance), so the order
         // stays in line and waits for that claim, as a reminder's does (Codex X5 and U on #4360).
-        await byClaimTtl(member, repliesFor(await redisPipeline([["TTL", sentKey(entry.reference)]]), 1)?.[0]);
+        await byClaimTtl(member, repliesFor(await redisPipeline([["TTL", sentKey(entry.reference)]]), 1)?.[0], Boolean(store.reviewAsk.again));
         continue;
       }
       if (claimed === "unknown") {

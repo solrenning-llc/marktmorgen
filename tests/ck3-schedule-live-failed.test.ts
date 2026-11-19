@@ -149,6 +149,38 @@ async function main() {
     const plain = failureNotice({ sid: SID }, { code: "TESTCODE", start, end }, start + HOUR);
     is("control: a plain failure keeps its own words", [/did not switch on/.test(plain.subject), /still off/.test(plain.text)], [true, true]);
 
+    part("An interrupted terminal write cannot leave the creator with no warning pending");
+    await reset();
+    await redis.pipeline([["DEL", "nl:dsched:tell"]]);
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    notices.length = 0;
+    const realRun = redis.run.bind(redis);
+    let interrupted = false;
+    redis.run = (command) => {
+      if (!interrupted && command[0] === "ZADD" && command[1] === sched.TELL_KEY) {
+        interrupted = true;
+        throw new Error("synthetic write interruption before the notice was queued");
+      }
+      return realRun(command);
+    };
+    stopFails = true;
+    clock = start;
+    try {
+      while (clock < start + HOUR && !interrupted) {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, telling as typeof deps);
+        clock += RETRY_SECONDS;
+      }
+      is("an interrupted transition keeps the failed decision and leaves its notice recoverable", [interrupted, await isDue(), await failedFlag()], [true, true, true]);
+      const tried = stops;
+      await sched.activateScheduledCodes(Date.now() + 10_000, clock, telling as typeof deps);
+      await sched.activateScheduledCodes(Date.now() + 10_000, clock + RETRY_SECONDS, telling as typeof deps);
+      is("after recovery the creator receives one warning", notices.map((n) => [n.code, n.stopUnconfirmed === true]), [["TESTCODE", true]]);
+      is("recovering the warning does not spend another paid stop attempt", stops, tried);
+    } finally {
+      stopFails = false;
+      redis.run = realRun;
+    }
+
     // Claude 4 cloud U on #4522 (6894719098, MEDIUM): activateCode answers false for a refusal and for a 5xx, a
     // timeout or a lost reply alike; in the last three the switch-on may have landed. The last try then kept the
     // schedule as failed with the code possibly live, and a code link still applied it.

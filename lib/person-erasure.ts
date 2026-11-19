@@ -240,8 +240,12 @@ async function droppedCoursesOf(statsId: string, learner: string, skip: Readonly
   const probes = dropped.flatMap((c) => [...learnerProbes(c.courseId, learner), passedProbe(c.courseId, learner), certificateProbe(c.courseId, learner), ...finishMarkProbes(c.courseId, learner)]);
   if (probes.length !== dropped.length * DROPPED_PROBES) throw new Error("a dropped course's probes are not DROPPED_PROBES");
   const replies = repliesFor(await redisPipeline(probes), probes.length);
-  if (!replies || !replies.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's records in a store's dropped courses");
-  const hit = dropped.filter((_, i) => replies.slice(i * DROPPED_PROBES, (i + 1) * DROPPED_PROBES).some((r) => r === 1));
+  if (!replies || !replies.every((reply, i) => {
+    const probe = probes[i];
+    const max = probe[0] === "EXISTS" ? probe.length - 1 : 1;
+    return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 && reply <= max;
+  })) throw new UnknownReplyError("a person's records in a store's dropped courses");
+  const hit = dropped.filter((_, i) => replies.slice(i * DROPPED_PROBES, (i + 1) * DROPPED_PROBES).some((r) => typeof r === "number" && r > 0));
   return { courses: await droppedCourseRecords(statsId, hit), probed: dropped.length };
 }
 

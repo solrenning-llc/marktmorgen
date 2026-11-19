@@ -2748,8 +2748,14 @@ export class MemoryRedis {
         }
         return gone;
       }
-      case "EXISTS":
-        return this.data.has(key) && !MemoryRedis.empty(this.data.get(key)) ? 1 : 0;
+      case "EXISTS": {
+        let count = 0;
+        for (const name of rest.map(String)) {
+          this.live(name);
+          if (this.data.has(name) && !MemoryRedis.empty(this.data.get(name))) count += 1;
+        }
+        return count;
+      }
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.

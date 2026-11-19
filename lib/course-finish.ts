@@ -43,14 +43,18 @@ export { FINISH_KEEP_SECONDS };
 
 const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
 const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;
+const reachedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:reach:${learner}`;
 const finishedKey = (courseId: string, email: string) => finishedKeyOf(courseId, emailKey(email));
 const openedKey = (courseId: string, email: string) => openedKeyOf(courseId, emailKey(email));
+const reachedKey = (courseId: string, email: string) => reachedKeyOf(courseId, emailKey(email));
 /**
- * The commands answering 1 when this learner (lib/learn.ts emailKey) has a start or a finish mark in a course: two of a
- * dropped course's probes (lib/person-erasure.ts), since both marks are written with no student row (#4542 review).
+ * Two of a dropped course's probes (lib/person-erasure.ts). A start, finish, or progress mark can outlive the
+ * student row. One EXISTS counts both the finish and progress keys to preserve the fixed command count.
  */
-export const finishMarkProbes = (courseId: string, learner: string): (string | number)[][] => [["EXISTS", openedKeyOf(courseId, learner)], ["EXISTS", finishedKeyOf(courseId, learner)]];
-const reachedKey = (courseId: string, email: string) => `nl:course:${courseId}:reach:${emailKey(email)}`;
+export const finishMarkProbes = (courseId: string, learner: string): (string | number)[][] => [
+  ["EXISTS", openedKeyOf(courseId, learner)],
+  ["EXISTS", finishedKeyOf(courseId, learner), reachedKeyOf(courseId, learner)],
+];
 
 /**
  * Starts what a share of the course starts, when the student has passed a step they had not passed before: the

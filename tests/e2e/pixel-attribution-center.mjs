@@ -17,7 +17,23 @@ export async function checkPixelAttributionCenter({browser,LOCAL,fixture,axeSour
  await panel.getByRole("button",{name:"Save pixels",exact:true}).click();await panel.getByRole("alert").waitFor();
  is("HT10 truthy save refused "+width,await meta.inputValue(),"999999999999999");
  is("HT10 refusal retains form "+width,await panel.getByRole("button",{name:"Save pixels",exact:true}).isEnabled(),true);
- await panel.scrollIntoViewIfNeeded();await page.addScriptTag({content:axeSource});const audit=await page.evaluate(async()=>await window.axe.run(document.querySelector('section[aria-labelledby="pixels-title"]'),{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}}));is("HT10 center accessibility "+width,audit.violations.map(v=>v.id),[]);
+ // The panel is audited where a person reading it sees it: its top just under the sticky header and section bar
+ // (scroll-padding-top), scrolled at once. "If needed" left each engine its own position (Firefox centered the
+ // tall panel, so a target could sit half under the bar, and axe counts only its uncovered part; #3757).
+ await panel.evaluate(node=>node.scrollIntoView({block:"start",behavior:"instant"}));await page.addScriptTag({content:axeSource});const audit=await page.evaluate(async()=>await window.axe.run(document.querySelector('section[aria-labelledby="pixels-title"]'),{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}}));
+ if(audit.violations.length)console.log("HT10 center accessibility "+width+" nodes: "+JSON.stringify(audit.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))}))));
+ is("HT10 center accessibility "+width,audit.violations.map(v=>v.id),[]);
+ // What a person who left the panel centred meets (the position "if needed" gave Firefox): each control, reached from
+ // that position, comes clear of the sticky header and section bar when focused (WCAG 2.4.11/2.4.12). The panel is
+ // centred again before each one, so a control sitting under the bars there is focused from under them; with the
+ // old scroll-padding-top (5.5rem, under the 124px of bars) one is left covered, with 8.5rem none is.
+ // Measured where each focus scroll ends: the page's smooth scrolling is set to instant only for this check.
+ await panel.evaluate(node=>node.scrollIntoView({block:"center",behavior:"instant"}));
+ const obscured=await page.evaluate(()=>{const panel=document.querySelector('section[aria-labelledby="pixels-title"]'),root=document.documentElement,was=root.style.scrollBehavior;root.style.scrollBehavior="auto";const bars=[...document.querySelectorAll("header,[data-studio-nav]")].filter(n=>getComputedStyle(n).position==="sticky");const hidden=[];
+  for(const node of panel.querySelectorAll(':is(a[href],button,input,select,textarea,summary)')){if(node.disabled||!node.getClientRects().length)continue;
+   panel.scrollIntoView({block:"center",behavior:"instant"});node.focus();const top=Math.max(0,...bars.map(b=>b.getBoundingClientRect().bottom));const r=node.getBoundingClientRect();if(r.top<top-1)hidden.push((node.getAttribute("aria-label")||node.textContent||node.name||node.tagName).trim().slice(0,40));}
+  document.activeElement?.blur();root.style.scrollBehavior=was;return hidden;});
+ is("HT10 focus clear of the sticky bars "+width,obscured,[]);
  is("HT10 center fits "+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  for(const error of ["__proto__","constructor"]){
  reply={status:400,body:{error}};

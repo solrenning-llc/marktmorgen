@@ -172,7 +172,7 @@ async function main(): Promise<void> {
 
   part("Paying for a cart that cannot ship together");
   const pay = async (ids: string[]) => {
-    const form = new URLSearchParams({ handle: "paper" });
+    const form = new URLSearchParams({ handle: "paper", billing_country: "US" });
     for (const id of ids) form.append("id", id);
     const answer = await payCart(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", "x-vercel-ip-country": "US" }, body: form.toString() }));
     const where = new URL(answer.headers.get("location") ?? "https://x/");

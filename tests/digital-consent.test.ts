@@ -284,6 +284,7 @@ async function main(): Promise<void> {
   const buy = (extra: (f: FormData) => FormData = (f) => f) => {
     const f = new FormData();
     f.set("handle", store.handle);
+    f.set("billing_country", "US");
     f.set("product", digital.id);
     return extra(f);
   };
@@ -309,6 +310,7 @@ async function main(): Promise<void> {
   const cartForm = () => {
     const f = new FormData();
     f.set("handle", store.handle);
+    f.set("billing_country", "US");
     f.append("id", digital.id);
     f.append("id", second.id);
     return f;

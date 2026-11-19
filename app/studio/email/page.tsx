@@ -9,17 +9,18 @@ import { WHO, type Who } from "@/lib/contacts";
 import { lookColours } from "@/lib/store-look";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import { productLink } from "@/lib/checkout-recovery";
 import { idsOfKind, readTitles } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
-import { listBroadcastsStrict } from "@/lib/broadcasts";
+import { type BroadcastHeads, readBroadcastHeads } from "@/lib/broadcasts";
 import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
@@ -28,8 +29,9 @@ import { readFlowListStrict } from "@/lib/flow-list";
 import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
-import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
+import { PLAN_TITLES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
+import { AutomationDraftBox } from "@/components/automation-draft";
 import { emailEquivalence } from "@/lib/email-equivalence";
 import { readForms } from "@/lib/form-store";
 import { readFields, readPipelines } from "@/lib/crm";
@@ -63,12 +65,19 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
-  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
+  // The emails are read without their bodies, which this page never shows: the list first, inside this page's own
+  // studio requests; then what asking each one's size comes to is taken before it is asked, and what reading them
+  // comes to before any is read (lib/broadcasts.ts, readBroadcastHeads).
+  const payStudio = async (units: number) => {
+    const counted = await countStudio(store, null, units);
+    return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
+  };
+  const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     // A garbled month counter is unknown (rule 24), and only that card says so: never the whole page down (#3727).
     usedThisMonth(store.listId, windowId(store)).catch(() => null),
-    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
-    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
+    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever (main's 57ca6e5a3).
+    readBroadcastHeads(store.listId, payStudio, 30, { expired: "skip" }).catch((): BroadcastHeads | null => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
@@ -85,6 +94,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   ]);
   const levels = health ? healthLevels(health) : null;
   const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;
+  const loadedBroadcasts = listedBroadcasts?.ok ? listedBroadcasts.heads : null;
+  // Not read because the studio requests reading them comes to are not left: said in words, with why.
+  const emailsRefused = listedBroadcasts && !listedBroadcasts.ok ? listedBroadcasts.refused : null;
   const broadcasts = loadedBroadcasts ?? [];
   const flows = loadedFlows ?? [];
   const drafts = loadedDrafts ?? [];
@@ -119,6 +131,10 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;
   };
   const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;
+
+  // The writing help, read once for the Email Studio and the workflow drafted from a goal (20 [E3]).
+  // An allowance that could not be read is said in words by the AI boxes, never shown as "0 left" (rule 24, VR item 2).
+  const ai = aiAvailableFor(store) && can(role, "draft") ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -161,7 +177,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
         ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Part of the ${PLAN_TITLES.pro} plan`}</h2>
               <span className="tag tag-brand">{priceWords("pro", "month")}</span>
             </div>
             <ul className="mt-4 space-y-2 text-ink-soft">
@@ -173,24 +189,24 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <li>Import the list you already have, and take it with you as a file whenever you like.</li>
             </ul>
             <p className="mt-4 text-sm text-ink-soft">
-              {`${PLANS_ON_SALE ? "" : "When plans open, Pro is "}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
+              {`${PLANS_ON_SALE ? "" : `When plans open, the ${PLAN_TITLES.pro} plan is `}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
             </p>
             {!can(role, "billing") ? (
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-                The store&apos;s owner chooses its plan. When they move it to Pro, email opens here for you too.
+                {`The store's owner chooses its plan. When they move it to the ${PLAN_TITLES.pro} plan, email opens here for you too.`}
               </p>
             ) : !PLANS_ON_SALE || !isBillingConfigured() ? (
               // The checkout and the switch both refuse then (app/api/billing/checkout, app/api/billing/switch),
               // so no button offers either.
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-                Paid plans are not on sale yet, so this store cannot move to Pro for now.
+                {`Paid plans are not on sale yet, so this store cannot move to the ${PLAN_TITLES.pro} plan for now.`}
               </p>
             ) : store.subscriptionActive ? (
               store.subscriptionId ? (
                 <form action={`/api/billing/switch?store=${store.sid}`} method="post" className="mt-5">
                   <input type="hidden" name="tier" value="pro" />
                   <input type="hidden" name="cycle" value={store.cycle} />
-                  <button type="submit" className="btn btn-primary">Move up to Pro</button>
+                  <button type="submit" className="btn btn-primary">{`Move up to the ${PLAN_TITLES.pro} plan`}</button>
                 </form>
               ) : null
             ) : (
@@ -198,11 +214,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
                 <input type="hidden" name="tier" value="pro" />
                 <button type="submit" name="cycle" value="month" className="btn btn-primary btn-wrap">
                   {trialOffered(store)
-                    ? `Start the ${TRIAL_DAYS}-day trial on Pro — ${priceWords("pro", "month")} after that`
-                    : `Start Pro — ${priceWords("pro", "month")}, from today`}
+                    ? `Start the ${TRIAL_DAYS}-day trial on the ${PLAN_TITLES.pro} plan — ${priceWords("pro", "month")} after that`
+                    : `Start the ${PLAN_TITLES.pro} plan — ${priceWords("pro", "month")}, from today`}
                 </button>
                 <button type="submit" name="cycle" value="year" className="btn btn-secondary btn-wrap">
-                  {`Or Pro yearly: ${priceWords("pro", "year")}`}
+                  {`Or the ${PLAN_TITLES.pro} plan yearly: ${priceWords("pro", "year")}`}
                 </button>
               </form>
             )}
@@ -241,6 +257,16 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm">{advice.text}</p>
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
+          ) : null}
+          {emailsRefused !== null ? (
+            <p role="status" className="mt-6 max-w-2xl">
+              Your sent and scheduled emails could not be shown: reading them counts as studio requests, and there are not enough left. {emailsRefused}
+            </p>
+          ) : null}
+          {can(role, "send") && broadcasts.some((b) => b.sent > 0) ? (
+            <p className="mt-6">
+              <a href={studioPath(store, "", "email/links")} className="underline">Change where a link goes in an email you already sent</a>
+            </p>
           ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio
@@ -303,7 +329,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
-            ai={aiAvailableFor(store) && can(role, "draft") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}
+            ai={ai}
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}
@@ -328,6 +354,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             switchedOff={Boolean(store.suspended)}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
+          {can(role, "send") ? (
+            <AutomationDraftBox ai={ai} />
+          ) : null}
           </>
         )}
       </main>

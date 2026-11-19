@@ -30,6 +30,11 @@
  * is asked for only when Stripe lists none still in flight and not enough
  * returned, under a key that follows what Stripe listed, so two looks at
  * once ask for the same one and money is never returned twice.
+ *
+ * What the service delivered is read only from its answer in its own shape
+ * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
+ * never "nothing delivered", and nothing is refunded on it (deliveredIn,
+ * unknownLook).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -61,6 +66,11 @@ const REFUND_KEEP_SECONDS = 400 * 86_400;
 export const ORDER_SETTLE_MS = 15 * 60_000;
 /** An order Stripe's invoices cannot settle is looked at, further apart each time, for this long; then kept for a person. */
 const ORDER_LOOKS_MS = 14 * 86_400_000;
+/**
+ * Past GIVE_UP_HOURS, a request whose answer from the service stays unknown is looked at, further apart each time,
+ * for this long; then kept for a person, never refunded on an unknown answer and never dropped.
+ */
+const DELIVERY_LOOKS_MS = 14 * 86_400_000;
 /** The API version chargeNow writes its invoices with (lib/billing.ts, CHARGE_VERSION), where an invoice names its payment. */
 const CHARGE_READ_VERSION = "2024-06-20";
 
@@ -128,7 +138,8 @@ type Pending = {
 function parseOwed(raw: unknown): Owed | undefined {
   const value = raw as Partial<Owed> | null | undefined;
   if (!value || typeof value !== "object") return undefined;
-  const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) > 0 ? (value.cents as number) : undefined;
+  // 0 is a settlement that gives nothing back (every language delivered) whose close did not land: collectRefund closes it.
+  const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) >= 0 ? (value.cents as number) : undefined;
   if (cents === undefined || typeof value.key !== "string" || !value.key || typeof value.since !== "number" || !Number.isSafeInteger(value.looks)) return undefined;
   return { cents, key: value.key, since: value.since, looks: value.looks as number, ...(value.stuck === true ? { stuck: true as const } : {}) };
 }
@@ -285,7 +296,11 @@ async function heldBy(id: string, now: number): Promise<AutoAnswer> {
   const held = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
   if (!held) return { ok: false, reason: "unavailable" };
   const order = parseOrder(held[0]);
-  if (!order) return { ok: false, reason: parsePending(held[0])?.owed ? "owed" : "busy" };
+  if (!order) {
+    const owed = parsePending(held[0])?.owed;
+    // Nothing owed (cents 0) is a request about to be closed, never a refund waiting on Stripe.
+    return { ok: false, reason: owed && owed.cents !== 0 ? "owed" : "busy" };
+  }
   if (now - order.at < ORDER_SETTLE_MS) return { ok: false, reason: "checking" };
   const settled = await settleOrder(id, held[0] as string, order, now);
   return { ok: false, reason: settled === "refund" ? "owed" : settled === "gone" ? "unavailable" : "checking" };
@@ -373,20 +388,30 @@ async function settleOrder(id: string, raw: string, order: Order, now: number): 
   return "kept";
 }
 
-/** The languages the service lists captions in, from its answer about a video. */
-function deliveredIn(data: unknown): string[] {
-  const list = (data as { captions?: unknown } | null)?.captions;
-  if (!Array.isArray(list)) return [];
-  return list.flatMap((c) => {
-    const lang = (c as { srclang?: unknown } | null)?.srclang;
-    return typeof lang === "string" ? [lang.toLowerCase().slice(0, 2)] : [];
-  });
+/**
+ * The languages the service lists captions in, from its answer about a video: its `captions` list, every entry with
+ * its language. Null when the answer is in any other shape (no list, a list of another type, an entry without a
+ * language): what was delivered is then unknown, never "none", since captions it may have written must never be
+ * refunded. A list the service answers empty is none delivered.
+ */
+function deliveredIn(data: unknown): string[] | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const list = (data as { captions?: unknown }).captions;
+  if (!Array.isArray(list)) return null;
+  const langs: string[] = [];
+  for (const entry of list) {
+    const lang = entry && typeof entry === "object" ? (entry as { srclang?: unknown }).srclang : undefined;
+    if (typeof lang !== "string" || !lang) return null;
+    langs.push(lang.toLowerCase().slice(0, 2));
+  }
+  return langs;
 }
 
 /**
  * Asks the service what it has written for one video, lists each language as
  * it arrives, and settles the request once it is all there, or refunds what
- * is not after GIVE_UP_HOURS.
+ * is not after GIVE_UP_HOURS, only on an answer that says what was delivered
+ * (unknownLook has the rest).
  */
 export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"done" | "waiting" | "none"> {
   if (!STREAM_ID_PATTERN.test(id) || !isRedisConfigured()) return "none";
@@ -408,29 +433,71 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
     if (raw !== "charging") await unqueue(id, raw, now);
     return "none";
   }
-  if (pending.owed) return collectRefund(id, pending, pending.owed, now);
+  if (pending.owed) return collectRefund(id, raw as string, pending, pending.owed, now);
   const answer = await askStream("GET", `/videos/${id}`);
   if (answer.status === 404) {
     // The video is gone, deleted with its lesson: what was not written is given back.
-    return (await settle(id, pending, pending.got, now)) ? "done" : "waiting";
+    return (await settle(id, raw as string, pending, pending.got, now)) ? "done" : "waiting";
   }
-  if (answer.status !== 200) {
-    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
-    return "waiting";
-  }
-  const there = deliveredIn(answer.data);
+  const there = answer.status === 200 ? deliveredIn(answer.data) : null;
+  if (!there) return unknownLook(id, pending, answer.status, now);
   const got = pending.langs.filter((lang) => there.includes(lang));
   const fresh = got.filter((lang) => !pending.got.includes(lang));
   if (fresh.length) await noteCaptionLanguages(id, fresh);
   // A language delivered at an earlier look stays delivered (R47): captions taken off since are not refunded.
   const delivered = pending.langs.filter((lang) => got.includes(lang) || pending.got.includes(lang));
   if (delivered.length === pending.langs.length || now - pending.at > GIVE_UP_HOURS * 3_600_000) {
-    return (await settle(id, pending, delivered, now)) ? "done" : "waiting";
+    return (await settle(id, raw as string, pending, delivered, now)) ? "done" : "waiting";
   }
-  await redisPipeline([
-    ["SET", key, JSON.stringify({ ...pending, got: delivered }), "EX", KEEP_SECONDS],
-    ["ZADD", QUEUE, now + LOOK_AGAIN_MS, id],
-  ]);
+  // Progress is written only over the record this look read, as settle is: a slow look must never bring back a
+  // request another look settled and closed, or overwrite a refund owed (it would then refund a delivered language).
+  // When the record changed, it looks again and reads what the other look decided.
+  await swapRecord(id, raw as string, JSON.stringify({ ...pending, got: delivered }), KEEP_SECONDS);
+  await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
+  return "waiting";
+}
+
+/**
+ * The service's answer did not say what it delivered: not a 200, or a 200 in a
+ * shape that is not its own. Nothing is listed or refunded on it, and the
+ * languages already listed stay listed. Before GIVE_UP_HOURS the video is
+ * asked about again as usual. Past it, a refund may be owed and captions may
+ * have been delivered, so neither is decided: the record is kept as long as a
+ * refund owed is (it would otherwise run out with what is owed), looked at
+ * further apart, and settled by the first answer that says what was
+ * delivered. After DELIVERY_LOOKS_MS it is kept for a person, said so, and no
+ * longer queued; never refunded on an unknown answer, never dropped.
+ *
+ * Only the life of the record there now is extended (EXPIRE), never the copy
+ * read before asking the service written back: the hook may have settled and
+ * deleted it, or written a refund owed or a language listed, meanwhile. The
+ * reply is read exactly (rule 24): 1 is kept, 0 is gone (settled elsewhere:
+ * nothing is queued again), anything else is unknown and nothing else is
+ * written.
+ */
+async function unknownLook(id: string, pending: Pending, status: number, now: number): Promise<"waiting"> {
+  const past = now - pending.at - GIVE_UP_HOURS * 3_600_000;
+  if (status === 200) console.error("the video service answered about a video in a shape that does not say which captions it delivered; nothing is refunded on it", id);
+  if (past <= 0) {
+    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
+    return "waiting";
+  }
+  const kept = repliesFor(await redisPipeline([["EXPIRE", pendingKey(id), REFUND_KEEP_SECONDS]]), 1)?.[0];
+  if (kept === 0) return "waiting";
+  if (kept !== 1) throw new UnknownReplyError("keeping an AI captions request whose delivery is unknown");
+  if (past > DELIVERY_LOOKS_MS) {
+    console.error("which AI captions were delivered is still unknown after every automatic look; nothing refunded, the request kept for a person", id, status);
+    // The hook may have written a refund owed and queued it since this look began: the queue entry then stays.
+    await redisPipeline([["ZREM", QUEUE, id]]);
+    // Read again after the ZREM: gone (settled) stays out; a refund owed, a record that does not read, or a read that
+    // does not read exactly (rule 24) goes back in (NX: an entry already back keeps its time).
+    const back = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
+    const left = back && back[0] !== null ? parsePending(back[0]) : null;
+    if (!back || (back[0] !== null && (left === null || left.owed))) await redisPipeline([["ZADD", QUEUE, "NX", now, id]]);
+    return "waiting";
+  }
+  console.error("which AI captions were delivered is unknown past the give-up; nothing refunded, the request kept and looked at again", id, status);
+  await redisPipeline([["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, past / 4)), id]]);
   return "waiting";
 }
 
@@ -439,21 +506,41 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
  * record goes only once Stripe confirms the refund succeeded; otherwise what
  * is owed is kept and looked at again (collectRefund).
  */
-async function settle(id: string, pending: Pending, got: string[], now: number): Promise<boolean> {
+async function settle(id: string, raw: string, pending: Pending, got: string[], now: number): Promise<boolean> {
   const missing = pending.langs.length - got.length;
-  if (missing > 0) {
-    const cents = got.length === 0 ? null : Math.floor((pending.cents * missing) / pending.langs.length);
-    if (cents === null || cents > 0) {
-      const key = `nl-captions:${id}:${pending.at}:refund`;
-      if (!(await giveBack(pending, cents, key))) {
-        await owe(id, { ...pending, got }, cents, key, now);
-        return false;
-      }
-    }
+  const cents = missing <= 0 ? 0 : got.length === 0 ? null : Math.floor((pending.cents * missing) / pending.langs.length);
+  const key = `nl-captions:${id}:${pending.at}:refund`;
+  // Decided once, before any refund: the record this look read becomes the refund owed, in one script, only while it
+  // is still what this look read. Two looks at once (the announcement and the sweep) may have read the service a moment
+  // apart; the one that read less would otherwise refund a language the other saw delivered, or the whole payment once
+  // the other had settled and deleted the record (Stripe refuses a key reused with another amount, and the refusal was
+  // kept as the whole payment owed). The look that loses looks again, and reads what the first one decided.
+  const owed: Owed = { cents, key, since: now, looks: 0 };
+  const closing = JSON.stringify({ ...pending, got, owed });
+  if (!(await swapRecord(id, raw, closing))) {
+    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
+    return false;
   }
-  await redisPipeline([["DEL", pendingKey(id)]]);
-  await unqueue(id, null, now);
-  return true;
+  if (cents !== 0 && !(await giveBack(pending, cents, key))) {
+    console.error("a captions refund was not confirmed; it is kept and looked at again", id);
+    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id], ...keepListed(pending)]);
+    return false;
+  }
+  return closeOwed(id, closing, pending);
+}
+
+/** A captions record replaced only while it is still `from`, with its expiry, in one script (the local stand-in, lib/redis-memory.ts, models it by name). */
+const RECORD_SWAP = '-- marktmorgen:captions-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+
+/** True only when the record was `from` and is now `to`; any other answer, or none, is false and nothing is assumed written. */
+async function swapRecord(id: string, from: string, to: string, seconds = REFUND_KEEP_SECONDS): Promise<boolean> {
+  try {
+    const replies = repliesFor(await redisPipeline([["EVAL", RECORD_SWAP, 1, pendingKey(id), from, to, seconds]]), 1);
+    return replies?.[0] === 1;
+  } catch (error) {
+    console.error("a captions record could not be changed; looked at again", id, error);
+    return false;
+  }
 }
 
 /** Gives back `cents` (null: all of it) of a charge: to the card it was paid with, or to the credit balance that paid it. True only when confirmed. */
@@ -559,11 +646,21 @@ function keepListed(pending: Pending): (string | number)[][] {
   return parts ? [["SADD", owedKey(parts.folder), parts.id], ["EXPIRE", owedKey(parts.folder), REFUND_KEEP_SECONDS]] : [];
 }
 
-/** A refund owed is settled: the record and its listings go. */
-async function closeOwed(id: string, pending: Pending, now: number): Promise<void> {
+/** Close only the record this worker settled, together with its listings. */
+const CLOSE_OWED = [
+  "-- marktmorgen:captions-close-owed:v1",
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end',
+  'if KEYS[3] then redis.call("SREM", KEYS[3], ARGV[2]) end',
+  'redis.call("ZREM", KEYS[2], ARGV[2])',
+  'redis.call("DEL", KEYS[1])',
+  "return 1",
+].join("\n");
+
+async function closeOwed(id: string, raw: string, pending: Pending): Promise<boolean> {
   const folder = readStreamPath(pending.path)?.folder;
-  await redisPipeline([["DEL", pendingKey(id)], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
-  await unqueue(id, null, now);
+  const keys = [pendingKey(id), QUEUE, ...(folder ? [owedKey(folder)] : [])];
+  const replies = repliesFor(await redisPipeline([["EVAL", CLOSE_OWED, keys.length, ...keys, raw, id]]), 1);
+  return replies?.[0] === 1;
 }
 
 /**
@@ -587,14 +684,14 @@ async function unqueue(id: string, left: unknown, now: number): Promise<void> {
  * Unreadable, unconfirmed or still waiting: looked at again, at most
  * REFUND_LOOKS_MAX times; then kept, marked stuck, and no longer queued.
  */
-async function collectRefund(id: string, pending: Pending, owed: Owed, now: number): Promise<"done" | "waiting"> {
+async function collectRefund(id: string, raw: string, pending: Pending, owed: Owed, now: number): Promise<"done" | "waiting"> {
   if (owed.stuck) {
     await redisPipeline([["ZREM", QUEUE, id]]);
     return "waiting";
   }
-  if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
-    await closeOwed(id, pending, now);
-    return "done";
+  // A settlement that gives nothing back (every language delivered) only closes.
+  if (owed.cents === 0 || await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
+    return await closeOwed(id, raw, pending) ? "done" : "waiting";
   }
   const looks = owed.looks + 1;
   if (looks >= REFUND_LOOKS_MAX) {
@@ -630,15 +727,32 @@ async function cardRefundSettled(id: string, pending: Pending, owed: Owed): Prom
   return refundCharge(pending.pi, fresh ? owed.cents : left, fresh ? owed.key : `${owed.key}:${listed.failed}:${listed.returned}`);
 }
 
-/** The five-minute job's part: every video whose captions are due a look, until `deadline`. */
-export async function sweepAutoCaptions(deadline: number, now = Date.now()): Promise<{ looked: number; done: number }> {
-  const counts = { looked: 0, done: 0 };
+/**
+ * The five-minute job's part: every video whose captions are due a look, until `deadline`. Each look is on its own:
+ * one that fails is counted and said, stays due for the next run, moved behind the videos due before it (only if
+ * still queued: XX), so a look that keeps failing never holds the head of the queue, and the rest are looked at. A
+ * list of due videos that does not read is unknown (UnknownReplyError), never an empty queue.
+ */
+export async function sweepAutoCaptions(deadline: number, now = Date.now()): Promise<{ looked: number; done: number; failed: number }> {
+  const counts = { looked: 0, done: 0, failed: 0 };
   if (!isRedisConfigured() || !streamConfig()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 30]]);
-  for (const id of Array.isArray(due) ? due : []) {
-    if (Date.now() > deadline || typeof id !== "string") break;
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 30]]), 1);
+  const due = replies ? stringList(replies[0]) : null;
+  if (!due) throw new UnknownReplyError("the AI captions due a look");
+  for (const id of due) {
+    if (Date.now() > deadline) break;
     counts.looked += 1;
-    if ((await syncAutoCaptions(id, now)) === "done") counts.done += 1;
+    try {
+      if ((await syncAutoCaptions(id, now)) === "done") counts.done += 1;
+    } catch (error) {
+      counts.failed += 1;
+      console.error("a look at a video's AI captions failed; it stays due for the next run", id, error);
+      try {
+        await redisPipeline([["ZADD", QUEUE, "XX", now, id]]);
+      } catch (moveError) {
+        console.error("a failed look at a video's AI captions keeps its place in the queue", id, moveError);
+      }
+    }
   }
   return counts;
 }
@@ -650,34 +764,54 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
     return parts ? [{ path, id: parts.id }] : [];
   });
   if (!wanted.length || !isRedisConfigured()) return {};
-  const rows = await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)]));
+  // Rule 24: a record that is there but does not read is unknown, never "not being written".
+  const rows = repliesFor(await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)])), wanted.length);
+  if (!rows) throw new UnknownReplyError("captions being written");
   const out: Record<string, string[]> = {};
   wanted.forEach(({ path }, i) => {
+    if (rows[i] === null) return;
     const pending = parsePending(rows[i]);
+    if (!pending) throw new UnknownReplyError("captions being written");
     // A request whose refund is owed is no longer being written.
-    const left = pending && !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
+    const left = !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
     if (left.length) out[path] = left;
   });
   return out;
 }
 
+/** The most owed refunds one studio read takes; more are said to be unknown, never cut to the first ones. */
+const OWED_READ_MAX = 100;
+
+/** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
 /**
- * Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and
- * whether automatic looks have stopped. A reply in an unknown shape throws UnknownReplyError, never "none owed"
- * (CX-123 rules 24 and 30): money owed is never hidden by a read that failed. A record gone (expired) is not owed.
+ * Rule 24: a set or a record that does not read is unknown, never "nothing owed". A member whose record is gone
+ * (null) is no longer owed; one whose record is there but does not read throws UnknownReplyError, so the studio
+ * says it could not check instead of hiding a refund the creator may need to write to support about.
  */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return [];
-  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1)?.[0]);
-  if (!members || !members.every((m) => STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the caption refunds owed to a store");
-  const ids = members.sort().slice(0, 100);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the owed captions refunds");
+  // A member this version does not read, or more members than one read takes, is unknown, never "not owed":
+  // dropping or cutting them would hide a refund the creator may need to write to support about.
+  if (members.length > OWED_READ_MAX || new Set(members).size !== members.length || members.some((m) => !STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the owed captions refunds");
+  const ids = [...members].sort();
   if (!ids.length) return [];
   const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
-  if (!rows) throw new UnknownReplyError("the caption refunds owed to a store");
+  if (!rows) throw new UnknownReplyError("the owed captions refunds");
   return ids.flatMap((id, i) => {
     if (rows[i] === null) return [];
     const pending = parsePending(rows[i]);
     if (!pending) throw new UnknownReplyError("a caption refund owed to a store");
-    return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    // The row read under this video's key names this folder and this very video: a path that does not read, names
+    // another folder (Codex T) or another video of the same folder (Codex X8, after #3881) is unknown, never "none owed".
+    const path = readStreamPath(pending.path);
+    if (!path || path.folder !== folder || path.id !== id) throw new UnknownReplyError("a caption refund owed to a store");
+    if (!pending.owed || pending.owed.cents === 0) return [];
+    // An amount owed is a whole number of cents above zero; anything else is unknown, never "a refund of $0.00" (Codex g).
+    const cents = pending.owed.cents ?? pending.cents;
+    if (!Number.isSafeInteger(cents) || cents <= 0) throw new UnknownReplyError("a caption refund owed to a store");
+    return [{ id, cents, stuck: pending.owed.stuck === true }];
   });
 }

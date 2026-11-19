@@ -162,7 +162,7 @@ async function castVote(id: string, post: string, who: string, picked: string[],
   const traceIn = picked.length > 0 && before.length === 0;
   const traceOut = picked.length === 0 && before.length > 0;
   if (grown > 0 || traceIn) await needData(room, [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])]);
-  await redisPipeline([
+  const replies = await redisPipeline([
     ...gone.map((one) => ["HINCRBY", tallyKey(id, post), one, -1]),
     ...added.map((one) => ["HINCRBY", tallyKey(id, post), one, 1]),
     picked.length
@@ -171,7 +171,9 @@ async function castVote(id: string, post: string, who: string, picked: string[],
     ...(traceIn ? [["SADD", traceKey(id, who), `v:${post}`]] : []),
     ...(traceOut ? [["SREM", traceKey(id, who), `v:${post}`]] : []),
   ]);
-  if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
+  // The trace's entry comes back only when this took it out (a deletion of the member takes the whole trace).
+  const untraced = traceOut && Number(replies[replies.length - 1]) === 1;
+  if (grown < 0 || untraced) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(untraced ? [TRACE_ENTRY] : [])]);
   return true;
 }
 
@@ -257,10 +259,15 @@ export async function votesOf(id: string, who: string, postIds: string[]): Promi
   const out: { post: string; picked: string[] }[] = [];
   for (let i = 0; i < postIds.length; i += 500) {
     const batch = postIds.slice(i, i + 500);
-    const replies = await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who]));
+    // Read exactly (rule 24): only null is no vote. A vote is kept with at least one choice (vote() deletes the field
+    // otherwise), so any other reply, an empty one or a pipeline of another length is unknown, never "did not vote".
+    const replies = repliesFor(await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who])), batch.length);
+    if (!replies) throw new UnknownReplyError("a member's poll votes");
     batch.forEach((post, k) => {
       const raw = replies[k];
-      if (typeof raw === "string" && raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
+      if (raw === null) return;
+      if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a member's poll votes");
+      out.push({ post, picked: raw.split(",").filter(Boolean) });
     });
   }
   return out;

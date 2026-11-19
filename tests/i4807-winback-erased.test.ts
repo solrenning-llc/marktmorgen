@@ -110,6 +110,9 @@ async function main(): Promise<void> {
     is("no email reached the erased person", handed.filter((m) => m.to.includes(email)).length, 0);
     is("no once-mark was made again", winbackKeys().filter((k) => k.startsWith("nl:wb:once:")).length, 0);
     is("no come-back key keeps the address", holdingAddress(email), []);
+    // Codex X7 on #4877 (MEDIUM, privacy): the membership's mark, a pseudonymous id of the erased person's
+    // subscription, is let go too when the claim answers "erased", never kept for its 90 days.
+    is("no come-back key keeps their subscription's id", winbackKeys().filter((k) => k.includes("sub_AnnErased00001")), []);
   }
 
   part("The erasure completes after the once-mark and grant, before the email");

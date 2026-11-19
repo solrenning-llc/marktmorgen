@@ -115,15 +115,15 @@ test("checkout recovery: the request keeps the saved address both ways, and is n
   assert.equal(on.on, false);
   assert.equal(on.to, true);
   assert.equal(on.route, "/api/store/recovery");
-  assert.deepEqual(on.body, { enabled: true, address: ADDRESS });
-  assert.deepEqual(on.undoBody, { enabled: false, address: ADDRESS });
+  assert.deepEqual(on.body, { enabled: true, address: ADDRESS, expect: { enabled: false, address: ADDRESS } });
+  assert.deepEqual(on.undoBody, { enabled: false, address: ADDRESS, expect: { enabled: true, address: ADDRESS } });
   assert.match(on.buyerSees, /reminder/i);
   assert.match(on.before, /consent|ask/i);
   const off = leverToggle("recovery", facts({}, { recovery: { enabled: true, address: ADDRESS, asks: true } }));
   assert.equal(off.kind, "toggle");
   if (off.kind === "toggle") {
-    assert.deepEqual(off.body, { enabled: false, address: ADDRESS });
-    assert.deepEqual(off.undoBody, { enabled: true, address: ADDRESS });
+    assert.deepEqual(off.body, { enabled: false, address: ADDRESS, expect: { enabled: true, address: ADDRESS } });
+    assert.deepEqual(off.undoBody, { enabled: true, address: ADDRESS, expect: { enabled: false, address: ADDRESS } });
   }
   const noAddress = leverToggle("recovery", facts({}, { recovery: { enabled: false, address: "", asks: true } }));
   assert.equal(noAddress.kind, "settings");
@@ -140,8 +140,8 @@ test("next offer: switched on only while the add-on is active, keeping the email
   assert.equal(on.kind, "toggle");
   if (on.kind === "toggle") {
     assert.equal(on.route, "/api/store/assistant-settings");
-    assert.deepEqual(on.body, { next: { on: true, email: false } });
-    assert.deepEqual(on.undoBody, { next: { on: false, email: false } });
+    assert.deepEqual(on.body, { next: { on: true, email: false }, expect: { on: false, email: false } });
+    assert.deepEqual(on.undoBody, { next: { on: false, email: false }, expect: { on: true, email: false } });
     assert.match(on.buyerSees, /More from Synthetic levers/);
     assert.match(on.buyerSees, /AI suggestion/);
   }
@@ -151,8 +151,8 @@ test("next offer: switched on only while the add-on is active, keeping the email
   const off = leverToggle("next", facts({ addOn: false }, { nextOffer: { on: true, email: true } }));
   assert.equal(off.kind, "toggle");
   if (off.kind === "toggle") {
-    assert.deepEqual(off.body, { next: { on: false, email: false } });
-    assert.deepEqual(off.undoBody, { next: { on: true, email: true } });
+    assert.deepEqual(off.body, { next: { on: false, email: false }, expect: { on: true, email: true } });
+    assert.deepEqual(off.undoBody, { next: { on: true, email: true }, expect: { on: false, email: false } });
     assert.match(off.before, /not see|do not see|doesn't show|not shown/i);
   }
 });

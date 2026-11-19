@@ -28,6 +28,7 @@ import { BENEFIT_PAGE_UNITS } from "@/lib/tier-benefit-rules";
 import { personKey } from "@/lib/person-key";
 import { ERASERS } from "@/lib/person-erasure";
 import { PERSON_DATA } from "@/lib/person-data";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -247,6 +248,25 @@ async function main(): Promise<void> {
 
   part("A deleted person's marks go with them");
   await giveBenefit(store, by, print.benefit.id, [{ sub: "sub_active00001", period: "once" }], NOW * 1000);
+  const benefitMarksKey = `nl:tben:given:${store.statsId}:${annKey}`;
+  const benefitWhoKey = `nl:tben:who:${store.statsId}`;
+  const erasePipeline = redis.pipeline.bind(redis);
+  const impossibleEraseReply = async (answer: [number, number]) => {
+    let error: unknown = null;
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.length === 2 && commands[0]?.[0] === "DEL" && commands[1]?.[0] === "SREM" ? answer : erasePipeline(commands)) as typeof redis.pipeline;
+    try {
+      await forgetBenefitPerson(store, annKey);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      redis.pipeline = erasePipeline;
+    }
+    const [marks, listed] = await erasePipeline([["HGETALL", benefitMarksKey], ["SMEMBERS", benefitWhoKey]]);
+    return [error instanceof UnknownReplyError, Array.isArray(marks) && marks.length > 0, Array.isArray(listed) && listed.includes(annKey)];
+  };
+  is("an impossible DEL count is unknown, and the marks stay retryable", await impossibleEraseReply([2, 1]), [true, true, true]);
+  is("an impossible SREM count is unknown, and the marks stay retryable", await impossibleEraseReply([1, 2]), [true, true, true]);
   is("forgotten", (await forgetBenefitPerson(store, annKey)) > 0, true);
   const gone = await benefitsDue(store, NOW * 1000);
   is("no mark left", gone.state === "ok" ? gone.rows.find((r) => r.benefit === print.benefit.id && r.sub === "sub_active00001")?.given : "x", null);

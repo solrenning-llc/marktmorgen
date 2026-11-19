@@ -236,6 +236,18 @@ async function tellFirst(order: string, at: number, now: number): Promise<number
 }
 
 /**
+ * The refund's first durable observation, already kept with HSETNX before its notice is tried. Used only to end an
+ * unreadable notice retry, never to authorize another telling. An unreadable date, one before this payment or in
+ * the future proves no deadline (Codex N1 on #3499).
+ */
+async function refundObservedFirst(statsId: string, paid: Pick<Paid, "capture" | "at">, now: number): Promise<number | null> {
+  const read = repliesFor(await redisPipeline([["HGET", backKey(statsId), paypalPaymentId(paid.capture)]]).catch(() => null), 1);
+  if (!read || typeof read[0] !== "string" || !REDIS_SCORE.test(read[0])) return null;
+  const first = Number(read[0]);
+  return first >= paid.at && first <= now ? first : null;
+}
+
+/**
  * A member of refundedKey that is a partial refund's mark rather than an order refunded in full: "part:" and the
  * order (the partial refund's unit builds on this). Readers of refunds in full pass over it, never as a cut.
  */
@@ -1769,24 +1781,32 @@ export async function watchPayPal(
     // past that the store's webhook log says it was not sent (notTold) and the order leaves the watch. Only the first
     // look at a refund (its refund mark newly added, a ZADD answering 1) tells without the first failure's time; every
     // later look tells only once that time is known, read back exactly, not ahead of the clock and inside the bound. A
-    // time that is not known on a later look is never "inside the bound" nor "past it" (CX-123 rule 24): the order is
-    // looked at again in an hour and nothing is told or said not sent (what the payment gave was taken back on its
+    // notice time not known on a later look never authorizes a telling (CX-123 rule 24). The independent durable
+    // refund date can still prove its existing window elapsed: then it is said not sent without another telling.
+    // If that date is unknown too, it is looked at again in an hour (what the payment gave was taken back on its
     // first look). The event's own id makes a later try find one already told (emitEvent).
     let owed = false;
     if (on.refunded && status === "REFUNDED") {
       let first: number | null = null;
+      let unknownWindowEnded = false;
       if (marked[0] === 0) {
         // A later look. When no failure's time was kept (its write got no answer), the try that failed is taken to
         // have been an hour ago, the earliest a look comes back, so the tries in all still fit the bound.
         first = await tellFirst(order, now - 3600, now);
         if (first === null) {
-          console.error("when telling of a PayPal refund first failed is unknown; looked at again in an hour", order);
-          await redisPipeline([["ZADD", watchKey(statsId), String(now + REFUND_TELL_AGAIN_SECONDS), order]]).catch(() => undefined);
-          continue;
+          const observed = await refundObservedFirst(statsId, paid, now);
+          if (observed === null || now - observed < REFUND_TELL_RETRY_SECONDS) {
+            console.error("when telling of a PayPal refund first failed is unknown; looked at again in an hour", order);
+            await redisPipeline([["ZADD", watchKey(statsId), String(now + REFUND_TELL_AGAIN_SECONDS), order]]).catch(() => undefined);
+            continue;
+          }
+          // The independent durable date proves the existing window elapsed. It never makes the unknown notice
+          // mark permission to send: go straight to the existing Not sent path, then finish the refund's cleanup.
+          unknownWindowEnded = true;
         }
       }
       let told = false;
-      if (first === null || now - first <= REFUND_TELL_RETRY_SECONDS) {
+      if (!unknownWindowEnded && (first === null || now - first <= REFUND_TELL_RETRY_SECONDS)) {
         try {
           await on.refunded(paid);
           told = true;
@@ -1795,10 +1815,10 @@ export async function watchPayPal(
         }
       }
       if (!told) {
-        if (first === null) first = await tellFirst(order, now, now);
-        // Owed while inside the bound, or while its first failure's time is not known (never "past it"): the order stays
-        // on the watch. Past the bound, said not sent, once, and the order leaves.
-        if (first === null || now - first < REFUND_TELL_RETRY_SECONDS) owed = true;
+        if (first === null && !unknownWindowEnded) first = await tellFirst(order, now, now);
+        // Owed while inside the bound, or while neither date proves its end: the order stays on the watch.
+        // Past the known bound, said not sent, once, and the order leaves.
+        if (!unknownWindowEnded && (first === null || now - first < REFUND_TELL_RETRY_SECONDS)) owed = true;
         else if (on.notTold) await on.notTold(paid).catch((lost) => console.error("WEBHOOK EVENT LOST: a PayPal refund could not be told nor said not sent", order, lost));
       }
     }

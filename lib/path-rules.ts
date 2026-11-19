@@ -345,13 +345,13 @@ export function dayMissions(facts: PathFacts, answers: Pick<PathAnswers, "minute
       id: "lead",
       day: 6,
       title: "Capture your first lead",
-      why: "Somebody not ready to buy today can still leave an address and hear from you later.",
+      why: "Somebody not ready to buy today can still sign up and hear from you later.",
       steps: [
         "Turn on the sign-up box on your store, or make something free that is given for an email address.",
         "Mention it in your next post with one of your post links.",
         ...(long ? ["Say in one line what they get by signing up."] : []),
       ],
-      closesOn: "Closes when somebody leaves their address on your store.",
+      closesOn: "Closes when somebody confirms their address from the email we send them. An address that was only typed in does not count. Path counts only confirmations made since it started counting them, so earlier sign-ups are not in this count, even confirmed ones. A store may show no leads until someone confirms.",
       place: { label: "Sign-up box", hash: "#signup" },
       state: facts.leads > 0 ? "done" : "open",
     },
@@ -408,9 +408,9 @@ export function trafficMissions(facts: PathFacts): Mission[] {
       },
       leads: {
         title: `${count} people on your list`,
-        why: "People who left an address are the ones most likely to buy later.",
+        why: "People who signed up and confirmed their address are the ones most likely to buy later.",
         steps: ["Offer something free for an email address, or mention your sign-up box in a post.", "Write to them when you have something new."],
-        closesOn: `Closes when ${count} people have left their address on your store.`,
+        closesOn: `Closes when ${count} people have confirmed their address from the email we send them. An address that was only typed in does not count. Path counts only confirmations made since it started counting them, so earlier sign-ups are not in this count, even confirmed ones. A store may show fewer than it did before.`,
         place: { label: "Sign-up box", hash: "#signup" } as Place,
       },
       visitors: {

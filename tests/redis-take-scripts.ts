@@ -52,6 +52,11 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set, ...plain]);
     return [members, values, gone];
   },
+  "card-open-live:v1": (run, [storeId, erasing, open], [erasingField, session, seconds]) => {
+    if (run(["EXISTS", storeId]) !== 1 || run(["HEXISTS", erasing, erasingField]) === 1) return "gone";
+    run(["SET", open, session, "EX", seconds]);
+    return 1;
+  },
 };
 
 /** Makes `store` run the named scripts above, and everything else as before. */

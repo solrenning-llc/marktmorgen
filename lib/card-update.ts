@@ -27,7 +27,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type Store, saleHandles } from "@/lib/store";
+import { ERASING_KEY, erasingField, saleHandles, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 
@@ -64,6 +64,13 @@ export function waitingCardPage(kept: string | null): string | null {
 }
 /** Swaps a key from one value to another only while it still holds the first (the same script as lib/calls.ts LOCK_SWAP). */
 const SWAP_IF_SAME = '-- marktmorgen:call-lock-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+
+/** Keep a newly made setup page only while its store is still live and not being erased. */
+export const KEEP_CARD_OPEN_IF_LIVE = `-- marktmorgen:card-open-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 then return "gone" end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 
 export type CardGrant = { a: string; c: string; s: string };
 
@@ -233,7 +240,11 @@ export async function openCardUpdate(store: Store, token: string, origin: string
     const id = typeof made.id === "string" ? made.id : "";
     const url = typeof made.url === "string" ? made.url : "";
     if (!SESSION_PATTERN.test(id) || !url.startsWith("https://")) return { ok: false, reason: "error" };
-    await redisPipeline([["SET", openKey(grant.a, grant.s), id, "EX", OPEN_SECONDS]]);
+    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_CARD_OPEN_IF_LIVE, 3,
+      storeIdCommand(store.sid)[1], ERASING_KEY, openKey(grant.a, grant.s),
+      await erasingField(storeRef(store)), id, OPEN_SECONDS]]), 1)?.[0];
+    if (kept === "gone") return { ok: false, reason: "expired" };
+    if (kept !== 1) return { ok: false, reason: "error" };
     return { ok: true, url };
   } catch (error) {
     console.error("opening a card update failed", store.handle, error);

@@ -21,7 +21,7 @@
  */
 import { cardLapsesBefore, cardNoticeDue, parseDunning, reminderDue } from "@/lib/dunning-rules";
 import { cardNoticeEmail, failedPaymentEmail, recoverFailedPayments } from "@/lib/payment-recovery";
-import { cardGrant, cardView, finishCardUpdate, openCardUpdate } from "@/lib/card-update";
+import { KEEP_CARD_OPEN_IF_LIVE, cardGrant, cardLink, cardView, finishCardUpdate, openCardUpdate, openKey } from "@/lib/card-update";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -37,6 +37,7 @@ Date.now = () => realNow() + shift;
 type Mail = { to: string[] | string; subject: string; text: string };
 const mails: Mail[] = [];
 const posts: { path: string; body: URLSearchParams }[] = [];
+let eraseStoreDuringSetup: { liveKey: string; openKey: string } | null = null;
 
 /** What Stripe holds, changed as the test goes. */
 const state = {
@@ -78,6 +79,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/checkout/sessions" && method === "POST") {
     const id = `cs_test_${"c".repeat(20)}${state.sessions.size}`;
     state.sessions.set(id, { id, mode: "setup", status: "open", customer: "cus_Member000001", metadata: Object.fromEntries([...new URLSearchParams(String(init?.body))].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) });
+    if (eraseStoreDuringSetup) await redis.pipeline([["DEL", eraseStoreDuringSetup.liveKey, eraseStoreDuringSetup.openKey]]);
     return answer({ id, url: `https://checkout.stripe.com/c/setup/${id}` });
   }
   const session = path.match(/^\/checkout\/sessions\/(cs_test_\w+)$/);
@@ -97,6 +99,7 @@ async function main(): Promise<void> {
   redis.clear();
 
   part("The setting");
+  is("keeping a setup page has three billed Redis calls at worst", [...KEEP_CARD_OPEN_IF_LIVE.matchAll(/redis\.call\(/g)].length, 3);
   is("a store that never chose: one email, and the card notice", parseDunning(undefined), { reminders: 1, cardNotice: true });
   is("only what is offered", [parseDunning({ reminders: 3, cardNotice: false }), parseDunning({ reminders: 5, cardNotice: "yes" })], [{ reminders: 3, cardNotice: false }, { reminders: 1, cardNotice: true }]);
 
@@ -272,6 +275,21 @@ async function main(): Promise<void> {
   state.sessions.set(sessionId, saved);
   const mark = posts.length;
   is("control: its own page and membership still set the card", [await finishCardUpdate(store, sessionId), touched(mark)], ["updated", ["/subscriptions/sub_Running000001"]]);
+
+  part("A setup page cannot recreate its pointer after store erasure");
+  const erasedToken = await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001");
+  eraseStoreDuringSetup = {
+    liveKey: `nl:store:id:${store.sid}`,
+    openKey: openKey("acct_1TestHarbor0001", "sub_Running000001"),
+  };
+  const erasedOpen = await openCardUpdate(store, erasedToken, "https://marktmorgen.com");
+  eraseStoreDuringSetup = null;
+  const [recreatedOpen] = await redis.pipeline([["GET", openKey("acct_1TestHarbor0001", "sub_Running000001")]]);
+  is("the erased store gets no URL and no recreated open pointer", [erasedOpen.ok, recreatedOpen], [false, null]);
+  await redis.pipeline([
+    ["SET", `nl:store:id:${store.sid}`, OWNER],
+    ["SET", openKey("acct_1TestHarbor0001", "sub_Running000001"), sessionId, "EX", 3600],
+  ]);
 
   part("Rule 24: a membership whose status Stripe has no name for is unknown, never \"not ended\"");
   for (const [label, status] of [["a status Stripe never named", "a_status_stripe_never_named"], ["a status that is a number", 7], ["no status", undefined]] as const) {

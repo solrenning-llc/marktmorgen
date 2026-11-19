@@ -41,7 +41,7 @@ import { readListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { type StockAlertWords, stockAlertWords } from "@/lib/buyer-words/stock-alert";
 import { type BatchMessage, sendBatch, sendEmail } from "@/lib/email";
-import { type Door, fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
+import { type Door, fromLine, mailDay, releaseDay, render, reserveDay } from "@/lib/mail";
 import { productSegment } from "@/lib/product-slug";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSesConfigured, notYetTaken } from "@/lib/ses";
@@ -272,7 +272,8 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
   // An outcome unknown long enough is taken as sent: the service may have written to them, so nobody is written to again.
   const settled = job.unknownSince !== undefined && Date.now() - job.unknownSince >= UNKNOWN_SETTLED_MS;
   if (going.length && !settled) {
-    if (!(await reserveDay(going.length))) return { sent: 0, next: "later" };
+    const day = mailDay();
+    if (!(await reserveDay(going.length, day))) return { sent: 0, next: "later" };
     const messages: BatchMessage[] = going.map(({ email, leave }) => {
       const mail = backEmail(store, product, leave);
       return { from: fromLine(store), to: email, subject: mail.subject, text: mail.text, html: mail.html, replyTo: store.email, headers: mail.headers };
@@ -281,7 +282,7 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
     const batchKey = `stock-alert:${sid}:${product.id}:${job.at}`;
     const outcome = await deps.send(messages, batchKey, { by: "store", store, kind: "email" }, undefined, { fetch: watching(written) });
     if (outcome !== "sent") {
-      await releaseDay(going.length);
+      await releaseDay(going.length, day);
       // "retry" also means known not sent (a 429, no sender, unreadable state): that keeps everything and waits, however
       // long. Only a batch the service may really have taken is written down, with when: its answer lost through the
       // fetch handed over (Resend), or any address of it Amazon already took, by Amazon's own markers under this key

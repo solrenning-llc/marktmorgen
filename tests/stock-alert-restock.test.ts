@@ -167,7 +167,25 @@ async function main(): Promise<void> {
   is("waits", Number(due()) > Date.now(), true);
   makeDue();
   const refused = sender("refused");
-  is("a refusal (a spent figure) sends nothing either", await runRestocks(Date.now() + 30_000, { ...real, send: refused.send }), 0);
+  const cap = process.env.MARKETING_DAILY_CAP;
+  const dayCommands: (string | number)[][] = [];
+  const runBeforeRefund = redis.run;
+  redis.run = (command: (string | number)[]) => {
+    if ((command[0] === "INCRBY" || command[0] === "DECRBY") && String(command[1]).startsWith("nl:mail:day:")) dayCommands.push(command);
+    return runBeforeRefund.call(redis, command);
+  };
+  process.env.MARKETING_DAILY_CAP = "10"; // Synthetic nonzero cap so the real reservation and refund both write.
+  try {
+    is("a refusal (a spent figure) sends nothing either", await runRestocks(Date.now() + 30_000, { ...real, send: refused.send }), 0);
+  } finally {
+    redis.run = runBeforeRefund;
+    if (cap === undefined) delete process.env.MARKETING_DAILY_CAP;
+    else process.env.MARKETING_DAILY_CAP = cap;
+  }
+  is("the refused batch gives back exactly what it reserved on the same day", dayCommands, [
+    ["INCRBY", dayCommands[0]?.[1], 2],
+    ["DECRBY", dayCommands[0]?.[1], 2],
+  ]);
   is("the same batch, under the same key", [refused.calls[0]?.key, refused.calls[0]?.messages.map((m) => m.to).sort()], [failing.calls[0].key, ["dee@example.com", "eli@example.com"]]);
   is("still kept", redis.run(["HEXISTS", listKey, "dee@example.com"]), 1);
 

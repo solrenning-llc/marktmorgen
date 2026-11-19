@@ -68,6 +68,7 @@ import {
   type DraftProduct,
   type Store,
   MAX_PRODUCTS,
+  MAX_STORE_BYTES,
   MAX_SUMMARY_LENGTH,
   MAX_TITLE_LENGTH,
   addDraftProducts,
@@ -91,7 +92,7 @@ import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
-import { costsPaused } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import { healthTags, moveTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
@@ -244,6 +245,37 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
 const KEEP_SECONDS = 14 * 86_400;
 /** How long an import's records are kept, as the store is told (lib/person-data.ts): read by tests/import-mail-putback-retention.test.ts. */
 export const IMPORT_KEEP_SECONDS = KEEP_SECONDS;
+/** The five-minute job's interval (vercel.json, /api/cron/imports). */
+const IMPORT_PASS_SECONDS = 5 * 60;
+/**
+ * The five-minute job's passes over an import paused by its plan (newCostCode in runImport) until its keeping runs
+ * out, the one that ends it included (Codex L on #3980). Priced in tests/plan-cost-registry.ts (imports).
+ */
+export const PAUSED_IMPORT_PASSES = Math.floor(KEEP_SECONDS / IMPORT_PASS_SECONDS) + 1;
+/**
+ * The most of those passes a billing month (31 days) can hold: one import holds the store's one slot at a time, and a
+ * new one starts only on a plan running, so paused passes in a month never pass the job's passes in it.
+ */
+export const PAUSED_IMPORT_PASSES_MONTH = (31 * 86_400) / IMPORT_PASS_SECONDS;
+/**
+ * How often the five-minute job works on a paused import: every two hours, which keeps a refunded Store year under its
+ * ceiling (tests/plan-margin.test.ts). In between, a pass only reads its record and goes on (PAUSED_IMPORT_SKIP_COMMANDS);
+ * the creator's own step still runs at once once the plan runs again.
+ */
+export const PAUSED_IMPORT_CHECK_SECONDS = 2 * 60 * 60;
+/** The passes that work on a paused import, the first and the one that ends it included, and the most a billing month holds. */
+export const PAUSED_IMPORT_CHECKS = Math.floor(KEEP_SECONDS / PAUSED_IMPORT_CHECK_SECONDS) + 2;
+export const PAUSED_IMPORT_CHECKS_MONTH = (31 * 86_400) / PAUSED_IMPORT_CHECK_SECONDS + 1;
+/**
+ * The commands of a pass that works on one at the most: the job's list and record read, then runImport's lock, record,
+ * store, write and key renewals (12, measured in tests/import-paused.test.ts), and the one that ends it (14).
+ */
+export const PAUSED_IMPORT_PASS_COMMANDS = 14;
+/** The bytes such a pass moves at the most: the store's record at its ceiling, and the import's own (3 × 4 KB). */
+export const PAUSED_IMPORT_PASS_BYTES = MAX_STORE_BYTES + 3 * 4_096;
+/** A pass that only reads the paused import's record and goes on: the job's list and the record (measured there too). */
+export const PAUSED_IMPORT_SKIP_COMMANDS = 2;
+export const PAUSED_IMPORT_SKIP_BYTES = 2 * 4_096;
 /**
  * How long the rows themselves are kept while they wait to be brought in
  * (since 18 October 2026): what they weigh is counted in the database's
@@ -375,6 +407,11 @@ export type ImportJob = {
     statusColumn?: boolean;
   };
   finishedAt: number;
+  /**
+   * While its plan pauses its work (newCostCode), when the five-minute job next works on it: every two hours, not every
+   * pass (PAUSED_IMPORT_CHECK_SECONDS), so a store nobody pays costs one such pass in 24, not each (Codex L on #3980).
+   */
+  pausedUntil?: number;
   /**
    * Members: the emails to people brought over still held for this import, taken for the whole file when it started
    * (startImport), with the window and the counter they came from (the plan's monthly emails, or Store's own figure).
@@ -1984,7 +2021,20 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     // Rows not yet brought in are kept RAW_DAYS from their upload, as always;
     // the job and the addresses still to be emailed are kept alive meanwhile
     // (one write each, every five minutes), so a long pause loses neither.
-    if (costsPaused(store, Date.now() / 1000)) {
+    // The same once the plan has ended (the original 4c, newCostCode): the
+    // store is closing, and its records go with it on the closing day.
+    if (newCostCode(store, Date.now() / 1000)) {
+      // Never longer than the record's own keeping (Claude 7 on #3980): past it, the paused import ends, says so, and
+      // leaves the five-minute job's line, so a store nobody pays costs no pass after that. What was brought in stays.
+      if (Date.now() - job.at > KEEP_SECONDS * 1000) {
+        await note(job, [{ line: 0, column: "", problem: `This import waited ${KEEP_SECONDS / 86_400} days while the store's plan was not running, so it stopped. What was already brought in stays. Start the import again once the plan is running.`, value: "" }], "errors");
+        job.state = "failed";
+        job.finishedAt = Date.now();
+        await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, heldLeft(job), store);
+        await releaseBusy(job);
+        return job;
+      }
+      job.pausedUntil = Date.now() + PAUSED_IMPORT_CHECK_SECONDS * 1000;
       const [, , , holder] = await redisPipeline([saveJob(job), ["EXPIRE", mailKey(id), KEEP_SECONDS], ["EXPIRE", errorsKey(id), KEEP_SECONDS], ["GET", busyKey(job.sid)]]);
       // The store's one-import slot only while this import holds it.
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);
@@ -2115,6 +2165,8 @@ export async function advanceImports(deadline: number): Promise<{ worked: number
     // An upload that holds the month's emails is on the list from its start: left alone while it may still be under
     // way, given up by runImport once it is past RECEIVING_MS, which saves it without the hold and then gives it back.
     if (job.state === "receiving" && Date.now() - job.at <= RECEIVING_MS) continue;
+    // Paused by its plan and worked on less than PAUSED_IMPORT_CHECK_SECONDS ago: its record was read, nothing more.
+    if (job.pausedUntil && Date.now() < job.pausedUntil) continue;
     try {
       const after = await runImport(job.id, deadline);
       counts.worked += 1;

@@ -235,6 +235,29 @@ async function main(): Promise<void> {
     is("another store's link does nothing here", [await confirmMoveLink({ store: fern, token: fromLink }), await moveLinkView(fern, fromLink)], ["link", { kind: "link" }]);
   }
 
+
+  part("Neutral answers also when the email allowance is unavailable");
+  {
+    const token = await signIn("privacy.allowance@example.com");
+    const blocked = "privacy.allowance.gone@example.com";
+    await redis.pipeline([suppressCommand(moss.listId!, blocked, Math.floor(Date.now() / 1000))]);
+    const m = mails.length;
+    odd = { command: "INCRBY", prefix: "nl:allow:transactional:",
+      reply: "not a count", times: 1, skip: 0 };
+    const eligible = await askToMovePurchases({
+      store: moss, token, to: "privacy.allowance.fresh@example.com", origin: ORIGIN,
+    });
+    odd = null;
+    const suppressed = await askToMovePurchases({
+      store: moss, token, to: blocked, origin: ORIGIN,
+    });
+    is("no email was sent in either case", mails.length - m, 0);
+    is("public results reveal no suppression membership under an email failure", eligible, suppressed);
+    is("both use the neutral receipt, not an assertion of delivery", [eligible, suppressed], ["received", "received"]);
+    is("the neutral notice makes no delivery promise",
+      moveWords.asked[suppressed].title, "Check your inboxes if this move is available");
+  }
+
   part("An address the store deleted");
   {
     const fresh = await signIn("fresh.buyer@example.com");

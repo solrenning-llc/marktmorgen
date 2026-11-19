@@ -1561,17 +1561,17 @@ export type RenewalPayment = {
  * read 2 November 2026), so a refund of a membership's or a payment plan's
  * payment can be matched whatever API version the account answers in. At
  * most `pages` pages of a hundred, stopping at `deadline`; `partial` when
- * there was more (270 [GR1], unit 3a). A paid row that names a payment but no
- * readable invoice cannot prove the payment's full allocation in bulk.
+ * there was more (270 [GR1], unit 3a). A row that names a payment but has
+ * an unreadable status, or is paid with no readable invoice, leaves that intent unconfirmed.
  */
 export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{
   byInvoice: Map<string, string[]>;
-  unreadableInvoiceIntents: Set<string>;
+  unconfirmedIntents: Set<string>;
   partial: boolean;
 }> {
   // Every paid payment of an invoice (one paid in parts has several); a paid one with no payment intent (a charge) is kept as "", a miss.
   const byInvoice = new Map<string, string[]>();
-  const unreadableInvoiceIntents = new Set<string>();
+  const unconfirmedIntents = new Set<string>();
   let after = "";
   const seen = new Set<string>();
   let partial = false;
@@ -1583,11 +1583,11 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (row.status !== "paid") continue;
+      if (row.status === "open" || row.status === "canceled") continue;
       const invoice = typeof row.invoice === "string" ? row.invoice : "";
       const intent = (row.payment as { payment_intent?: unknown } | null | undefined)?.payment_intent;
-      if (!invoice) {
-        if (typeof intent === "string" && intent) unreadableInvoiceIntents.add(intent);
+      if (row.status !== "paid" || !invoice) {
+        if (typeof intent === "string" && intent) unconfirmedIntents.add(intent);
         continue;
       }
       byInvoice.set(invoice, [...(byInvoice.get(invoice) ?? []), typeof intent === "string" ? intent : ""]);
@@ -1598,7 +1598,7 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     if (!after) { partial = true; break; }
     if (page === pages - 1 || Date.now() > deadline) { partial = true; break; }
   }
-  return { byInvoice, unreadableInvoiceIntents, partial };
+  return { byInvoice, unconfirmedIntents, partial };
 }
 
 /**
@@ -2083,7 +2083,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       if (paid && !paid.partial) {
         for (const [invoice, intents] of paid.byInvoice) {
           for (const intent of intents) {
-            if (intent && !paid.unreadableInvoiceIntents.has(intent)) {
+            if (intent && !paid.unconfirmedIntents.has(intent)) {
               invoicesOf.set(intent, (invoicesOf.get(intent) ?? new Set<string>()).add(invoice));
             }
           }

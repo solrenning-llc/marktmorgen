@@ -1307,7 +1307,7 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
   // A listener's private feed: the token it opens by.
   "nl:pod:by:": {
     match: () => true,
-    find: async (keys) => (await stringsOf(keys)).filter((raw) => raw !== null && raw !== "").map(feedTokenKey),
+    find: async (keys) => (await stringsOf(keys)).filter((raw): raw is string => raw !== null && raw !== "").map(feedTokenKey),
   },
   // The records made for one address: every link the store emailed them.
   "nl:erase:ix:": {

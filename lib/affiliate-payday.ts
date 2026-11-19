@@ -27,7 +27,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { batchTotal } from "@/lib/affiliate-payouts";
-import { onTheirWay, payableLines, payWithPayPal, paysAutomatically } from "@/lib/paypal-payouts";
+import { onTheirWay, payableLines, payWithPayPal, paypalLeftOut, paypalLeftOutText, paysAutomatically } from "@/lib/paypal-payouts";
 import { ordinal } from "@/lib/affiliate-setting";
 import { formatMoney } from "@/lib/money";
 
@@ -120,6 +120,8 @@ export function paydayEmail(input: {
   refundsChecked: boolean;
   /** Of what is waiting, the leads in hold or waiting for the creator's approval (lib/affiliate-leads.ts). */
   leadsCents?: number;
+  /** The creator's PayPal connection could not be read on payday, so nothing was paid by itself. */
+  linkUnread?: boolean;
 }): { subject: string; text: string } {
   // What can be paid today, not what is owed in all: when a wait is set the
   // two differ, and a subject line that calls the smaller number "owed" tells
@@ -150,6 +152,12 @@ export function paydayEmail(input: {
       `${formatMoney(leads, input.currency)} more is for leads still in their hold or waiting for your approval on the same page, so it is not in this batch either. A lead joins a batch once you approve it.`,
     );
   }
+  if (input.linkUnread) {
+    lines.push(
+      "",
+      "We could not read your PayPal connection just now, so we did not pay anyone by ourselves today. Nothing left your PayPal. Pay them from the page above when you are ready.",
+    );
+  }
   if (!input.refundsChecked) {
     lines.push(
       "",
@@ -161,8 +169,25 @@ export function paydayEmail(input: {
 }
 
 /** The payday email of a store that pays by itself: what PayPal was asked to send, or why not. */
-export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string): { subject: string; text: string } {
+export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string, leftOut = 0): { subject: string; text: string } {
   const studio = `${SITE_URL}/studio/affiliates`;
+  // Anyone owed whose address PayPal cannot take (Claude 7 on #4318) is named, so the creator is never told that
+  // nobody is owed, nor left to think everyone was paid.
+  const outside = leftOut > 0 ? ["", paypalLeftOutText(leftOut)] : [];
+  if (!paid.ok && paid.reason === "nothing" && leftOut > 0) {
+    return {
+      subject: "Your affiliates were not paid today",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and nothing was sent through PayPal. Nothing left your PayPal.",
+        ...outside,
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
   if (paid.ok) {
     const amount = formatMoney(paid.cents, currency);
     const who = `${paid.people} ${paid.people === 1 ? "affiliate" : "affiliates"}`;
@@ -174,6 +199,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
         `It is your affiliate payday, and you asked us to pay by ourselves. ${amount} went to ${who} from your own PayPal, in PayPal batch ${paid.batch}.`,
         "",
         "Each payment shows as paid on your affiliate page, and on the affiliate's own page, as soon as PayPal confirms it. Anyone PayPal cannot pay stays owed, to be paid again. The money went from your PayPal to theirs; it never passed through us.",
+        ...outside,
         studio,
         "",
         "— Marktmorgen",
@@ -247,23 +273,41 @@ export function paydayDue(payday: number, dayOfMonth: number): boolean {
   return payday >= 1 && dayOfMonth >= payday && dayOfMonth - payday <= PAYDAY_CATCH_UP_DAYS;
 }
 
-/** One store, if its payday is due (paydayDue) and anybody is owed. True when sent. */
-async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean> {
+/** One store, if its payday is due (paydayDue) and anybody is owed. True when sent; "failed" when its auto-pay paid nobody by an error. */
+async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean | "failed"> {
   if (!affiliatesOn(store) || !paydayDue(store.affiliates.payday, dayOfMonth)) return false;
   if (!store.statsId || !store.email) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
-  const lines = payableLines(book, await onTheirWay(store));
+  const away = await onTheirWay(store);
+  const lines = payableLines(book, away);
   // Nobody to pay is not a message worth sending, and it must not spend the
   // month's claim either: a sale that lands later today should still be able
   // to bring the email.
   if (lines.length === 0) return false;
+  // Whether it pays by itself is read before the claim. A link that cannot be
+  // read is never permission to pay, and it cannot wait for "the next run"
+  // either: the job runs once a day and looks at a store only on its payday, so
+  // tomorrow's run would skip it and the month would go by with neither a batch
+  // nor an email (Claude 5's MEDIUM on 91815567). It is read as "not by itself":
+  // the month is claimed below and the manual reminder goes, saying the
+  // connection could not be read. Nothing is sent to PayPal.
+  let auto = false;
+  let linkUnread = false;
+  if (book.refundsChecked) {
+    try {
+      auto = await paysAutomatically(store);
+    } catch (error) {
+      linkUnread = true;
+      console.error("reading the PayPal link on payday failed; sending the manual reminder", error);
+    }
+  }
   // Claimed last, so that whichever run gets here first is the only one that
   // sends. A second run reads the same book and stops here.
   if (!(await claimMonth(store.statsId, month))) return false;
   // Paying by itself, from the creator's own PayPal (lib/paypal-payouts.ts):
   // the email then says what was sent, or why it could not be.
-  if (book.refundsChecked && (await paysAutomatically(store))) {
+  if (auto) {
     // The press is the month's work and the email only its report, and the press takes no integration unit: it is
     // priced once a month (PAYPAL_PRESSES_UNTAKEN, Claude 6 on #4488). So the month is kept for good BEFORE the press,
     // and only once Redis confirms it: an email refused at the store's figure, a press whose outcome is not known, or
@@ -272,8 +316,14 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     // batch and on the studio's own press, never dropped.
     if (!(await keepMonth(store.statsId, month))) throw new UnknownReplyError("a store's payday month, kept before its auto-pay");
     const paid = await payWithPayPal(store);
-    const { subject, text } = autoPayEmail(paid, book.currency);
+    const { subject, text } = autoPayEmail(paid, book.currency, paypalLeftOut(book, away));
     const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
+    // A press that answered "error" paid nobody because something was not known (a link read inside the press, the
+    // lock, Redis or PayPal before the batch was written): not a business reason like "not connected" or "nothing".
+    // Its email still goes, once (the month is kept above), but the run counts the store as failed, not as sent, so
+    // the owner's report shows that a payday paid nothing by an error (the author's decision on #2844, after HOLD
+    // 6922548572: the press's own catch stays, and its unknown is a failure of the run).
+    if (!paid.ok && paid.reason === "error") return "failed";
     return outcome === "sent";
   }
   const { subject, text } = paydayEmail({
@@ -286,6 +336,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     hold: store.affiliates.hold,
     refundsChecked: book.refundsChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
+    linkUnread,
   });
   return sendAndKeep({ ...store, statsId: store.statsId }, month, { meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
@@ -325,7 +376,9 @@ export async function sendPaydayEmails(deadline: number, now = new Date()): Prom
       if (!paydayDue(store.affiliates.payday, dayOfMonth)) continue;
       counts.due += 1;
       try {
-        if (await payday(store, month, dayOfMonth)) counts.sent += 1;
+        const done = await payday(store, month, dayOfMonth);
+        if (done === "failed") counts.failed += 1;
+        else if (done) counts.sent += 1;
       } catch (error) {
         counts.failed += 1;
         console.error("sending an affiliate payday email failed", error);

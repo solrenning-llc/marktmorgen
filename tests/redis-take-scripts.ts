@@ -57,6 +57,12 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set, ...plain]);
     return [members, values, gone];
   },
+  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while its key exists and it is not erasing.
+  "store-cache-live:v1": (run, [live, erasing, key], [field, value, seconds]) => {
+    if (Number(run(["EXISTS", live])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
+    run(["SET", key, value, "EX", seconds]);
+    return 1;
+  },
 };
 
 /** Makes `store` run the named scripts above, and everything else as before. */

@@ -28,6 +28,7 @@
  *   nl:recent:feed:<statsId>   what the pages show, worked out at most every FEED_SECONDS
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { KIND, readListings } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -185,5 +186,8 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
 /** Everything kept here for a store that is being deleted. */
 export async function forgetRecentSales(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", listKey(statsId), feedKey(statsId)]]);
+  // Two keys: only 0, 1 or 2 is a possible answer; anything else leaves the step unconfirmed (the closing walk,
+  // which erases both families by the store's ids, still runs: lib/data-families.ts).
+  const removed = countOf(repliesFor(await redisPipeline([["DEL", listKey(statsId), feedKey(statsId)]]), 1)?.[0]);
+  if (removed === null || removed > 2) throw new UnknownReplyError("the deletion of a store's recent purchases");
 }

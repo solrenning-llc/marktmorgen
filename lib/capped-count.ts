@@ -15,7 +15,9 @@
  * "~" at the most.
  *
  *   KEYS        the hashes
- *   ARGV[1..n]  each hash's most fields, n = #KEYS
+ *   ARGV[1..n]  each hash's most fields, n = #KEYS, as "most", or "most:ttl"
+ *               for a hash that gets an expiry of ttl seconds when this
+ *               script creates it
  *   then        (hash number, field, by) three at a time
  *
  * Answers each field's new value in order, or 0 for one left out. Nothing
@@ -39,6 +41,17 @@
  * twice in KEYS is refused before anything is written (version 1 counted
  * each name against a length the other copy did not see; no caller does it).
  *
+ * Version 3 (11 November 2026, Codex C2's review of #3649 and Claude 1's
+ * of #3676). A hash named with "most:ttl" that is not there before the
+ * count gets its expiry inside the script, after its counts: the count and
+ * the expiry are written together or not at all. An EXPIRE sent beside the
+ * script, in the same pipeline or a later one, could be lost after the count
+ * (an Upstash pipeline is not atomic, upstash.com/docs/redis/features/restapi,
+ * read 11 November 2026), and the day's record (lib/stats.ts) was then kept
+ * for good. Billed one command more (the EXPIRE), only on the write that
+ * creates the hash; a hash already there keeps its expiry as it was. A
+ * "most" with no ttl runs exactly as version 2.
+ *
  * scripts/test_capped_count_redis.py runs it on a real Redis.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -46,7 +59,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 /** The field what did not fit is counted under. */
 export const OVER_FIELD = "~";
 
-export const CAPPED_COUNT = `-- marktmorgen:capped-count:v2
+export const CAPPED_COUNT = `-- marktmorgen:capped-count:v3
 local n = #KEYS
 if n < 1 or #ARGV < n or (#ARGV - n) % 3 ~= 0 then return redis.error_reply('capped-count: arguments') end
 for i = 1, n do
@@ -54,9 +67,15 @@ for i = 1, n do
     if KEYS[i] == KEYS[j] then return redis.error_reply('capped-count: arguments') end
   end
 end
-local caps = {}
+local caps, ttls = {}, {}
 for i = 1, n do
   local cap = tonumber(ARGV[i])
+  if not cap then
+    local most, ttl = string.match(ARGV[i], '^(%d+):(%d+)$')
+    cap = tonumber(most)
+    ttls[i] = tonumber(ttl)
+    if not ttls[i] or ttls[i] < 1 then return redis.error_reply('capped-count: most') end
+  end
   if not cap or cap < 1 or cap ~= math.floor(cap) then return redis.error_reply('capped-count: most') end
   caps[i] = cap
 end
@@ -67,10 +86,11 @@ for i = n + 1, #ARGV, 3 do
   if not k or k < 1 or k > n or k ~= math.floor(k) or not by or by ~= math.floor(by) or ARGV[i + 1] == '' or ARGV[i + 1] == '~' then return redis.error_reply('capped-count: count') end
   left[k] = (left[k] or 0) + 1
 end
-local len, there = {}, {}
+local len, there, fresh = {}, {}, {}
 for k = 1, n do
   if left[k] then
     len[k] = redis.call('HLEN', KEYS[k])
+    fresh[k] = len[k] == 0
     if len[k] + left[k] > caps[k] then
       local names = {}
       for i = n + 1, #ARGV, 3 do
@@ -108,20 +128,27 @@ for i = n + 1, #ARGV, 3 do
     out[#out + 1] = 0
   end
 end
+for k = 1, n do
+  if ttls[k] and fresh[k] then redis.call('EXPIRE', KEYS[k], ttls[k]) end
+end
 return out`;
 
 export type CappedCount = { hash: number; field: string; by: number };
 
+/** A hash counted into: its most fields, and the expiry, in seconds, it gets when the count creates it. */
+export type CappedHash = { key: string; most: number; ttl?: number };
+
 /** The EVAL that counts these, for a pipeline of its own or one shared with other commands. */
-export function cappedCountCommand(hashes: { key: string; most: number }[], counts: CappedCount[]): (string | number)[] {
-  return ["EVAL", CAPPED_COUNT, hashes.length, ...hashes.map((h) => h.key), ...hashes.map((h) => h.most), ...counts.flatMap((c) => [c.hash + 1, c.field, c.by])];
+export function cappedCountCommand(hashes: CappedHash[], counts: CappedCount[]): (string | number)[] {
+  const most = (h: CappedHash) => (h.ttl === undefined ? h.most : `${h.most}:${h.ttl}`);
+  return ["EVAL", CAPPED_COUNT, hashes.length, ...hashes.map((h) => h.key), ...hashes.map(most), ...counts.flatMap((c) => [c.hash + 1, c.field, c.by])];
 }
 
 /** Counts into one hash; each field's new value, or 0 where it was left out. Never throws. */
-export async function cappedCount(key: string, most: number, counts: { field: string; by: number }[]): Promise<number[]> {
+export async function cappedCount(key: string, most: number, counts: { field: string; by: number }[], ttl?: number): Promise<number[]> {
   if (!isRedisConfigured() || !counts.length) return counts.map(() => 0);
   try {
-    const [reply] = await redisPipeline([cappedCountCommand([{ key, most }], counts.map((c) => ({ hash: 0, ...c })))]);
+    const [reply] = await redisPipeline([cappedCountCommand([{ key, most, ttl }], counts.map((c) => ({ hash: 0, ...c })))]);
     return Array.isArray(reply) ? reply.map((v) => Number(v) || 0) : counts.map(() => 0);
   } catch {
     return counts.map(() => 0);

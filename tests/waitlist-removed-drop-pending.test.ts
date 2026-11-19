@@ -23,6 +23,8 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { erasePerson, erasureScope, erasureSize } from "@/lib/person-erasure";
 import { ERASE_PER, UNIT_BYTES, UNIT_COMMANDS, erasureWork } from "@/lib/erasure-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { allowanceUsedExact, takeAllowance } from "@/lib/store-allowance";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import { dataKey } from "@/lib/store-data";
 import * as waitlist from "@/lib/waitlist";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Listing } from "@/lib/store";
@@ -70,6 +72,61 @@ async function quiet<T>(run: () => Promise<T>): Promise<T> {
   console.error = () => {};
   try { return await run(); } finally { globalThis.fetch = oldFetch; console.error = oldLog; }
 }
+
+test("a removal that needs two fixed studio units never consumes the last one before refusing", async () => {
+  await quiet(async () => {
+    const { shop, sid, pid } = await world({ soon: true });
+    const at = Date.now();
+    const limit = allowanceFor(shop, "studio", at / 1000);
+    const used = await allowanceUsedExact(shop, "studio", at);
+    assert.notEqual(used, null, "the fixture's studio count reads exactly");
+    const fill = limit - 1 - (used ?? 0);
+    assert.ok(fill > 0, "the fixture has room to leave one request");
+    assert.equal((await takeAllowance(shop, "studio", fill, at)).ok, true);
+
+    const refused = await remove(pid);
+    assert.equal(refused.status, 429, "one unit cannot admit two fixed units");
+    assert.equal(await allowanceUsedExact(shop, "studio", at), limit - 1, "the refused compound admission consumes none of the last unit");
+    assert.equal(redis.run(["EXISTS", `nl:wl:${sid}:${pid}`]), 1, "the waitlist stays reachable while the product stays");
+    assert.equal(redis.run(["SISMEMBER", `nl:wl:${sid}:soon`, pid]), 1);
+  });
+});
+
+async function leaveStudio(shop: Awaited<ReturnType<typeof world>>["shop"], left: number, at: number): Promise<number> {
+  const limit = allowanceFor(shop, "studio", at / 1000);
+  const used = await allowanceUsedExact(shop, "studio", at);
+  assert.notEqual(used, null, "the fixture's studio count reads exactly");
+  const fill = limit - left - (used ?? 0);
+  assert.ok(fill > 0, `the fixture has room to leave ${left} requests`);
+  assert.equal((await takeAllowance(shop, "studio", fill, at)).ok, true);
+  return limit;
+}
+
+test("a removal never spends the request, the waitlist's unit or the invitations' first unit before one of them refuses (Codex P on #4462)", async () => {
+  await quiet(async () => {
+    // Two left: the request and the waitlist's unit fit, the invitations' first page (lib/move-members.ts
+    // notePendingInvites) does not. Nothing may be spent, and nothing may go.
+    const { shop, sid, pid } = await world({ soon: true });
+    const at = Date.now();
+    const limit = await leaveStudio(shop, 2, at);
+    const refused = await remove(pid);
+    assert.equal(refused.status, 429, "two units cannot admit the removal's three fixed units");
+    assert.equal(await allowanceUsedExact(shop, "studio", at), limit - 2, "the refused removal spends none of the two");
+    assert.equal(redis.run(["EXISTS", `nl:wl:${sid}:${pid}`]), 1, "the waitlist stays while the product stays");
+  });
+});
+
+test("three studio requests left are enough for a whole removal: the product, its waitlist and its invitations' first page", async () => {
+  await quiet(async () => {
+    const { shop, sid, pid } = await world({ soon: true });
+    const at = Date.now();
+    const limit = await leaveStudio(shop, 3, at);
+    const answer = await remove(pid);
+    assert.equal(answer.status, 200, JSON.stringify(answer.body));
+    assert.equal(redis.run(["EXISTS", `nl:wl:${sid}:${pid}`]), 0, "the addresses are gone");
+    assert.equal(await allowanceUsedExact(shop, "studio", at), limit, "exactly the three fixed units, taken once");
+  });
+});
 
 test("a product off coming soon whose drop fails is still reached by an erasure, said pending, and finished when asked again", async () => {
   await quiet(async () => {

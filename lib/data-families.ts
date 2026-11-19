@@ -102,7 +102,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
-  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:soldbefore:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop", "nl:stamp:noroom:",
   "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
@@ -453,6 +453,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(36), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
+  // A store whose earlier sales were not all read: one mark, erased with it (lib/yearly-offer.ts, soldBeforeUnknownKey).
+  "nl:soldbefore:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
   "nl:stamp:drop": C,
   // A store found without room for a new stamped copy or preview: one mark a store, kept NO_ROOM_NOTE_SECONDS (an hour), erased with it.

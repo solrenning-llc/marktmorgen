@@ -24,8 +24,12 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 export const MOVE_CONFIRM_SECONDS = 24 * 60 * 60;
 /** Requests one address may start in a day. */
 export const MAX_MOVES_PER_ADDRESS_DAY = 3;
-/** The emails one request sends: one link to each address. */
-export const MOVE_EMAILS_PER_REQUEST = 2;
+/**
+ * The emails one request sends: one with no link to the current address when it is asked, the new address's link,
+ * and the current address's link once the new address confirmed (Codex L on #3621, decision (C)). Each is one of the
+ * store's access emails, taken from its figure before it goes; one sent again after a lost answer is taken again.
+ */
+export const MOVE_EMAILS_PER_REQUEST = 3;
 
 /** A store's id (lib/store.ts sid), as lib/api-keys.ts reads it. */
 const SID_PATTERN = /^[0-9a-f]{32}$/;

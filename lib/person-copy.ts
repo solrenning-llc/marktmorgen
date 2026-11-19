@@ -44,7 +44,7 @@ import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
-import { inviteField, inviteForCopy } from "@/lib/move-members";
+import { inviteField, inviteForCopy, withPendingInvites } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
@@ -436,7 +436,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/purchase-move-index.ts": (s) => copyMovedPerson(s.store, s.email),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
-    for (const productId of s.productIds) {
+    // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).
+    for (const productId of await withPendingInvites(s.statsId, s.productIds)) {
       const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
       if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
       if (!invite) continue;

@@ -10,20 +10,24 @@
  * request first holds a public request of the store's buyers' side
  * (lib/traffic.ts), before anything is read, so nobody can make the store
  * read more than it was paid for; it is refused, with nothing read, when the
- * store has no room. Then: an address the store deleted, the current one or
- * the new one, is refused (lib/suppression.ts: what the person-data registry
- * promises for an `expires` module, "never acted on for a deleted address");
- * at most three requests an address a day (lib/purchase-moves.ts); and the
- * two emails, one link to each address, the current one first. Each is
- * taken from the store's access emails before it goes (lib/email.ts,
- * EmailMeter "store", "transactional"; the new address, typed by the buyer,
- * as `asked`, so a stranger's inbox only ever gets a share of them). The
- * sender answers false both when it refused and when the provider's answer
- * was lost after it took the email, so a false is never said as "not sent":
- * the page says the first email is not confirmed ("unconfirmed"), or that the
- * second is not ("half"), and asks the buyer to look in the inbox before
- * asking again (Codex V on #3621). Nothing is said to have been sent, or not
- * sent, that is not known.
+ * store has no room. Then: at most three attempts an address a day
+ * (lib/purchase-moves.ts); an address the store deleted, the current one or
+ * the new one, is never contacted and its deletion is not disclosed
+ * (lib/suppression.ts: what the person-data registry promises for an
+ * `expires` module, "never acted on for a deleted address"). The current
+ * address then gets one email with no link, the same words whether or not the
+ * new address can be moved to; the new address, unless the store deleted it,
+ * gets its link after the answer is sent; and the current address gets its
+ * own link only once the new address confirmed. So neither the answer, nor
+ * the current inbox, nor the day's count, nor the answer's timing tells the
+ * buyer that the new address asked this store to delete it (Codex L on #3621;
+ * coordinator's decision (C), 19 November 2026). Each email is taken from the
+ * store's access emails before it goes (lib/email.ts, EmailMeter "store",
+ * "transactional"; the new address, typed by the buyer, as `asked`, so a
+ * stranger's inbox only ever gets a share of them). The sender may answer
+ * false after an unknown delivery: every admitted request gets the same
+ * neutral notice ("received"), and the new address's Confirm says that the
+ * next link is not confirmed ("resend"), never that it did not go.
  *
  * A link opens a page that says what would move, from where to where, and
  * asks for Confirm: opening it confirms nothing (mail scanners open links).
@@ -41,7 +45,7 @@
  * keys are priced with its two emails (tests/store-data-registry.ts,
  * MAIL("purchase-move")).
  */
-import type { NextRequest } from "next/server";
+import { type NextRequest, after } from "next/server";
 import { normaliseEmail } from "@/lib/auth";
 import { type Store, normaliseHandle, storeForHandle } from "@/lib/store";
 import { displayName, ordersGrant, senderAddress } from "@/lib/buyer-orders";
@@ -49,7 +53,7 @@ import { sendEmail } from "@/lib/email";
 import { suppressedAmong } from "@/lib/suppression";
 import { takePublicRequest } from "@/lib/traffic";
 import { type MoveSide, type MoveState, moveState, readMoveAddresses } from "@/lib/purchase-move-rules";
-import { askPurchaseMove, confirmPurchaseMove, readMoveLink, takeMoveDay } from "@/lib/purchase-moves";
+import { type MoveAskTo, askPurchaseMove, confirmPurchaseMove, issueMoveLink, readMoveLink, takePurchaseMoveDay } from "@/lib/purchase-moves";
 import { type MoveApplied, applyPurchaseMove } from "@/lib/purchase-move-index";
 import { PURCHASE_MOVE_DELIVERED, purchaseMoveOpen } from "@/lib/purchase-move-open";
 import { type AskState, type ConfirmState, moveWords } from "@/lib/purchase-move-words";
@@ -62,8 +66,8 @@ export const MOVE_ASK_UNITS = 1;
 export const MOVE_LINK_UNITS = 1;
 /** Public requests a Confirm holds before it reads: its own reads, and the move written into the index when it is the second. */
 export const MOVE_CONFIRM_UNITS = 2;
-/** Commands an ask makes besides the hold and its two emails: the purchases link, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT), the deleted people and the request with its two links (3). */
-export const MOVE_ASK_COMMANDS = 8;
+/** Commands an ask makes besides the hold and its emails: the purchases link, the deleted people, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT) and the request with the new address's link (2). */
+export const MOVE_ASK_COMMANDS = 7;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
 /** Commands a Confirm makes: the page's reads, then the link, the request, the mark (with its read-back) and the request again. */
@@ -77,6 +81,13 @@ export const MOVE_CONFIRM_COMMANDS = MOVE_LINK_COMMANDS + 1 + 4 + 2 + 4;
  * most, so a later try of the same move is inside it too (Claude 3 on #3625, LOW 3).
  */
 export const MOVE_APPLY_COMMANDS = 4 + 2 + 4 + 2 + 1 + 4 + 4 + 3;
+/**
+ * Commands the new address's Confirm adds when it makes the current address's link (issueMoveLink): the sent mark with
+ * its read-back (2), the link (1), and, when its email may not have gone, the link deleted (1) and the mark let go in
+ * one script billed as three (lib/redis-lock.ts RELEASE: the EVAL, GET and DEL). Its email is one of the store's
+ * access emails, taken from its figure.
+ */
+export const MOVE_ISSUE_COMMANDS = 2 + 1 + 1 + 3;
 
 const MAX_BODY_BYTES = 2_000;
 const sec = (ms: number) => Math.floor(ms / 1000);
@@ -122,26 +133,21 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
   if (!current) return "signed-out";
   const addresses = readMoveAddresses(current, input.to);
   if (addresses === "email" || addresses === "same") return addresses;
-  // The day's count before the deleted people are read (Codex N4 on #3625): past the three, a deleted address is
-  // answered "over" like any other, so asking cannot sort the people who asked to be deleted from the rest.
-  let day: Awaited<ReturnType<typeof takeMoveDay>>;
+  let day: Awaited<ReturnType<typeof takePurchaseMoveDay>>;
   try {
-    day = await takeMoveDay(addresses.from, now);
+    day = await takePurchaseMoveDay(addresses.from, now);
   } catch {
     return "error";
   }
-  if (day !== "within") return day === "over" ? "over" : "error";
-  const deleted = await deletedAmong(store, [addresses.from, addresses.to]);
-  if (deleted === "unknown") return "error";
-  if (deleted) return "deleted";
-
-  let asked: Awaited<ReturnType<typeof askPurchaseMove>>;
+  if (!day.ok) return day.reason === "over" || day.reason === "email" ? day.reason : "error";
+  let deleted: Set<string>;
   try {
-    asked = await askPurchaseMove({ from: addresses.from, to: addresses.to, scope: store.sid, now, dayTaken: true });
+    deleted = await suppressedAmong(store.listId, [addresses.from, addresses.to]);
   } catch {
     return "error";
   }
-  if (!asked.ok) return asked.reason === "over" || asked.reason === "email" || asked.reason === "same" ? asked.reason : "error";
+  // An erased current address is never contacted, and its deletion is not said either.
+  if (deleted.has(addresses.from)) return "received";
 
   const words = moveWords;
   const from = `"${words.mailFrom(displayName(store.name))}" <${senderAddress()}>`;
@@ -154,23 +160,45 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
       return false;
     }
   };
-  // The current address first: it is told before anything else, and without it the request is worth nothing.
-  const toCurrent = await send({
+  // The current address hears the same words, in the same step, whether or not the new address can be moved to, and
+  // gets no link yet: its link goes only once the new address confirmed (confirmMoveLink). So neither the answer, nor
+  // that inbox, nor the day's count, nor the answer's timing tells the buyer that the new address asked this store to
+  // delete it (Codex L on #3621, MEDIUM privacy; coordinator's decision (C), 19 November 2026). For an erased new
+  // address nothing holding it is written and nothing is sent to it. No delivery is claimed: always "received".
+  await send({
     meter: { by: "store", store, kind: "transactional" },
     from,
     to: addresses.from,
-    subject: words.oldSubject(store.name),
-    text: words.oldText(store.name, addresses.to, link(asked.fromToken)),
+    subject: words.heldSubject(store.name),
+    text: words.heldText(store.name),
   });
-  if (!toCurrent) return "unconfirmed";
-  const toNew = await send({
-    meter: { by: "store", store, kind: "transactional", asked: true },
-    from,
-    to: addresses.to,
-    subject: words.newSubject(store.name),
-    text: words.newText(store.name, addresses.from, link(asked.toToken)),
-  });
-  return toNew ? "sent" : "half";
+  // For a new address that can be moved to, the request and its link after the answer is sent: the answer waits for
+  // the same work either way.
+  if (!deleted.has(addresses.to)) {
+    await afterAnswer(async () => {
+      const asked: MoveAskTo = await askPurchaseMove({ from: addresses.from, to: addresses.to, scope: store.sid, now, day, links: "to" });
+      if (!asked.ok) return;
+      await send({
+        meter: { by: "store", store, kind: "transactional", asked: true },
+        from,
+        to: addresses.to,
+        subject: words.newSubject(store.name),
+        text: words.newText(store.name, addresses.from, link(asked.toToken)),
+      });
+    });
+  }
+  return "received";
+}
+
+/** Runs after the answer is sent when there is a request to wait for (next/server `after`); otherwise now, awaited. */
+function afterAnswer(task: () => Promise<void>): Promise<void> {
+  const run = () => task().catch((error) => console.error("a purchase move request could not be made", error));
+  try {
+    after(run);
+    return Promise.resolve();
+  } catch {
+    return run();
+  }
 }
 
 export type MoveLinkView =
@@ -204,7 +232,7 @@ export async function moveLinkView(store: Store, token: string, now = Date.now()
 }
 
 /** Confirm pressed on a link's page: that address's confirmation, recorded once. */
-export async function confirmMoveLink(input: { store: Store; token: string; now?: number }): Promise<ConfirmState> {
+export async function confirmMoveLink(input: { store: Store; token: string; origin?: string; now?: number }): Promise<ConfirmState> {
   const { store, token } = input;
   const now = input.now ?? Date.now();
   if (!(await takePublicRequest(store, "buyer", now, MOVE_CONFIRM_UNITS))) return "busy";
@@ -222,9 +250,36 @@ export async function confirmMoveLink(input: { store: Store; token: string; now?
   if (!confirmed.ok) return confirmed.reason === "unknown" ? "error" : confirmed.reason;
   if (confirmed.state === "ready") return movedAs(await applyPurchaseMove(store, confirmed.id, now), "both");
   if (confirmed.state === "done" || confirmed.state === "expired") return confirmed.state;
+  // The new address confirmed: now, and only now, the current address gets its link (Codex L on #3621, decision (C)).
+  if (confirmed.state === "waiting-from" && confirmed.side === "to") return sendCurrentLink(store, confirmed.id, found, input.origin ?? "", now);
   if (confirmed.state === "waiting-from" || confirmed.state === "waiting-to") return "waiting";
   // "waiting-both" after a confirmation that was kept cannot be read as either: said as an error, never as done.
   return "error";
+}
+
+/**
+ * The current address's link, made and emailed once the new address confirmed. Pressing Confirm again sends nothing
+ * more ("waiting"); an email that may not have gone lets its link go, so the next Confirm sends a new one ("resend").
+ */
+async function sendCurrentLink(store: Store, id: string, found: Extract<MoveLinkView, { kind: "open" }>, origin: string, now: number): Promise<ConfirmState> {
+  const issued = await issueMoveLink(id, "from", now);
+  if (!issued.ok) return issued.reason === "sent" ? "waiting" : "error";
+  const words = moveWords;
+  let sent = false;
+  try {
+    sent = await sendEmail({
+      meter: { by: "store", store, kind: "transactional" },
+      from: `"${words.mailFrom(displayName(store.name))}" <${senderAddress()}>`,
+      to: found.from,
+      subject: words.oldSubject(store.name),
+      text: words.oldText(store.name, found.to, `${origin}/@${store.handle}/orders/move/confirm?${new URLSearchParams({ t: issued.token })}`),
+    });
+  } catch (error) {
+    console.error("a purchase move email could not be sent", error);
+  }
+  if (sent) return "waiting";
+  await issued.undo();
+  return "resend";
 }
 
 /** A form's fields, at most MAX_BODY_BYTES; null when it cannot be read. */
@@ -289,7 +344,7 @@ export async function confirmMoveRoute(request: NextRequest, delivered = PURCHAS
   const store = await storeOf(form.handle, delivered);
   if (store instanceof Response) return store;
   const token = form.t.slice(0, 100);
-  const answer = await confirmMoveLink({ store, token });
+  const answer = await confirmMoveLink({ store, token, origin: linkOrigin(request, store) });
   return away(`${originFrom(request)}/@${store.handle}/orders/move/confirm?${new URLSearchParams({ t: token, c: answer })}`);
 }
 

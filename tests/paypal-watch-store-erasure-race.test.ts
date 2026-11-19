@@ -100,6 +100,24 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("the erasure began during the paid record's read", erased, true);
   is("the erased store's watch list is not made again", (await real([["EXISTS", watchKey]]))[0], 0);
+
+  // Claude 6 on #4892 (LOW): the store's erasure marks it as being erased first and deletes its id key only at its
+  // end, so between the two only the erasing half of the fence refuses the write. With the id key still in place.
+  part("The erasure has begun but the store's id key is still there: the list is never made again");
+  await real([["HDEL", ERASING_KEY, field], ["SET", storeIdKey, "owner@example.com"], ["ZADD", watchKey, String(clock), sale.order]]);
+  let marked = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!marked && commands.length === 1 && commands[0]?.[0] === "GET" && String(commands[0]?.[1]) === `nl:ppsell:paid:${sale.order}`) {
+      marked = true;
+      await real([["HSET", ERASING_KEY, field, String(clock)], ["DEL", watchKey]]);
+      return [42];
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  await watchPayPal(store, Date.now() + 10_000, on);
+  redis.pipeline = real;
+  is("the erasure was marked during the paid record's read, the store's id key kept", [marked, (await real([["EXISTS", storeIdKey]]))[0]], [true, 1]);
+  is("the store being erased does not get its watch list made again", (await real([["EXISTS", watchKey]]))[0], 0);
   Date.now = realNow;
   done();
 }

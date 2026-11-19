@@ -66,8 +66,8 @@
      "monthCents": 900,
      "roomMonth": -49,
      "roomYear": 288,
-     "netAtOnes": -73,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": -74,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 1.91485421551,
@@ -80,8 +80,8 @@
      "monthCents": 1900,
      "roomMonth": 2,
      "roomYear": 799,
-     "netAtOnes": 584,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 583,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 1.31789305532,
@@ -94,8 +94,8 @@
      "monthCents": 2900,
      "roomMonth": 55,
      "roomYear": 1307,
-     "netAtOnes": 1222,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 1221,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 1.06673850333,
@@ -109,7 +109,7 @@
      "roomMonth": 105,
      "roomYear": 1817,
      "netAtOnes": 1858,
-     "usageMonthAtOnes": 799,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.919866211008,
@@ -123,7 +123,7 @@
      "roomMonth": 154,
      "roomYear": 2325,
      "netAtOnes": 2494,
-     "usageMonthAtOnes": 799,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.820651806648,
@@ -137,7 +137,7 @@
      "roomMonth": 207,
      "roomYear": 2835,
      "netAtOnes": 3132,
-     "usageMonthAtOnes": 799,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.747878355014,
@@ -150,8 +150,8 @@
      "monthCents": 6900,
      "roomMonth": 257,
      "roomYear": 3342,
-     "netAtOnes": 3769,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 3768,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.691564074808,
@@ -165,7 +165,7 @@
      "roomMonth": 308,
      "roomYear": 3852,
      "netAtOnes": 4405,
-     "usageMonthAtOnes": 799,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.646313792973,
@@ -178,8 +178,8 @@
      "monthCents": 8900,
      "roomMonth": 358,
      "roomYear": 4360,
-     "netAtOnes": 5042,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 5041,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.608922422689,
@@ -192,8 +192,8 @@
      "monthCents": 9900,
      "roomMonth": 410,
      "roomYear": 4869,
-     "netAtOnes": 5680,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 5679,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.57735026919,
@@ -207,7 +207,7 @@
      "roomMonth": 461,
      "roomYear": 5378,
      "netAtOnes": 6316,
-     "usageMonthAtOnes": 799,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.550229309995,
@@ -220,8 +220,8 @@
      "monthCents": 11900,
      "roomMonth": 511,
      "roomYear": 5889,
-     "netAtOnes": 6953,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 6952,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.526603194417,
@@ -234,8 +234,8 @@
      "monthCents": 12900,
      "roomMonth": 564,
      "roomYear": 6396,
-     "netAtOnes": 7591,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 7590,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.505780538859,
@@ -248,8 +248,8 @@
      "monthCents": 13900,
      "roomMonth": 614,
      "roomYear": 6906,
-     "netAtOnes": 8228,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 8227,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.487247444265,
@@ -262,8 +262,8 @@
      "monthCents": 14900,
      "roomMonth": 664,
      "roomYear": 7414,
-     "netAtOnes": 8864,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 8863,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.470612908947,
@@ -276,8 +276,8 @@
      "monthCents": 15900,
      "roomMonth": 717,
      "roomYear": 7924,
-     "netAtOnes": 9502,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 9501,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.455573451609,
@@ -290,8 +290,8 @@
      "monthCents": 16900,
      "roomMonth": 766,
      "roomYear": 8431,
-     "netAtOnes": 10138,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 10137,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.441889434349,
@@ -305,7 +305,7 @@
      "roomMonth": 817,
      "roomYear": 8942,
      "netAtOnes": 10774,
-     "usageMonthAtOnes": 799,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.429368771453,
@@ -318,8 +318,8 @@
      "monthCents": 18900,
      "roomMonth": 865,
      "roomYear": 9450,
-     "netAtOnes": 11410,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 11409,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.417855447019,
@@ -332,8 +332,8 @@
      "monthCents": 19900,
      "roomMonth": 920,
      "roomYear": 9959,
-     "netAtOnes": 12049,
-     "usageMonthAtOnes": 799,
+     "netAtOnes": 12048,
+     "usageMonthAtOnes": 800,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.407221249112,
@@ -2288,14 +2288,14 @@
     "store-email": 27,
     "transactional-email": 37,
     "list-email": 630,
-    "visits": 261
+    "visits": 262
    },
    "coefYear": {
     "ai": 4024,
     "video": 553,
     "storage": 1217,
     "orders": 1135,
-    "store-email": 326,
+    "store-email": 327,
     "transactional-email": 450,
     "list-email": 7560,
     "visits": 3142
@@ -6523,17 +6523,17 @@
      }
     }
    ],
-   "baseMonth": 2428,
+   "baseMonth": 2429,
    "baseYear": 28607,
    "coefMonth": {
-    "ai": 637,
-    "video": 93,
-    "storage": 411,
-    "orders": 316,
-    "store-email": 73,
-    "transactional-email": 94,
+    "ai": 636,
+    "video": 92,
+    "storage": 410,
+    "orders": 315,
+    "store-email": 72,
+    "transactional-email": 93,
     "list-email": 900,
-    "visits": 1048
+    "visits": 1047
    },
    "coefYear": {
     "ai": 7643,
@@ -6543,7 +6543,7 @@
     "store-email": 871,
     "transactional-email": 1125,
     "list-email": 10800,
-    "visits": 12569
+    "visits": 12570
    }
   }
  }

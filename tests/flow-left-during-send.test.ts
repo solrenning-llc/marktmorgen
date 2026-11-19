@@ -5,7 +5,7 @@
  * with an open attempt for good (Claude 2 (nuvem D) bug hunt, lib/flows.ts). Synthetic: the memory Redis and the SES
  * stand-in.
  */
-import { personOf, readRun } from "@/lib/flow-runs";
+import { personOf, readRun, runPeople } from "@/lib/flow-runs";
 import { enroll, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
 import { forgetContactPerson, upsertContact } from "@/lib/contacts";
 import { forgetWorkflowPerson } from "@/lib/flows";
@@ -123,12 +123,36 @@ async function main(): Promise<void> {
   await enroll(store, "longrun@example.com", { joined: false, tag: "welcome" });
   const long = personOf("longrun@example.com");
   const opened = Math.floor(Date.now() / 1000) - 399 * 86_400;
-  await real([["EXPIRE", `nl:wf:run:${flowId}:${long}`, 60], ["EXPIRE", `nl:wf:log:${flowId}:${long}`, 60], ["ZADD", `nl:wf:runs:${flowId}`, opened, long]]);
+  const index = `nl:wf:runs:${flowId}`;
+  const expired = personOf("expired-run@example.com");
+  await real([
+    ["EXPIRE", `nl:wf:run:${flowId}:${long}`, 60],
+    ["EXPIRE", `nl:wf:log:${flowId}:${long}`, 60],
+    ["ZADD", index, opened, long],
+    ["ZADD", index, opened - 2 * 86_400, expired],
+    ["EXPIRE", index, 60],
+  ]);
   await run();
   is("the step was sent to them", sentTo("longrun@example.com"), 1);
-  const [runTtl, logTtl, listed] = await real([["TTL", `nl:wf:run:${flowId}:${long}`], ["TTL", `nl:wf:log:${flowId}:${long}`], ["ZSCORE", `nl:wf:runs:${flowId}`, long]]);
+  const [runTtl, logTtl, listed, indexTtl, oldScore] = await real([
+    ["TTL", `nl:wf:run:${flowId}:${long}`],
+    ["TTL", `nl:wf:log:${flowId}:${long}`],
+    ["ZSCORE", index, long],
+    ["TTL", index],
+    ["ZSCORE", index, expired],
+  ]);
   is("their record and history are kept again for the full time", [Number(runTtl) > 300 * 86_400, Number(logTtl) > 300 * 86_400], [true, true]);
   is("and their place in the list of runs is renewed with them", Number(listed) > opened, true);
+  is("the index lives as long as the renewed run", Number(indexTtl) > 300 * 86_400, true);
+  is("renewing the shared index removes entries past their retention", oldScore, null);
+  // Advance only the synthetic Redis hot clock past the old 60-second index TTL.
+  const restoreClock = Date.now;
+  Date.now = () => restoreClock() + 61_000;
+  try {
+    is("workflow erasure can still enumerate the renewed run", (await runPeople(flowId)).some((r) => r.person === long), true);
+  } finally {
+    Date.now = restoreClock;
+  }
 
   part("Refused by the email service, address by address: failed with the service's words, never also 'left' (Claude 1 on #4307)");
   // On main since #3489, sendTo answers a fourth list, `refused`, in neither done nor rest. The PR's rule (whoever is

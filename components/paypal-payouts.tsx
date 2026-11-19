@@ -43,6 +43,7 @@ export function PayPalPayouts({
   initial,
   people,
   cents,
+  leftOutNote = "",
   currency,
   onTheirWay,
   checking = 0,
@@ -53,6 +54,11 @@ export function PayPalPayouts({
   /** Who can be paid right now, and how much in all. */
   people: number;
   cents: number;
+  /**
+   * Said when anyone owed is left out of every PayPal batch because PayPal cannot take their address (Claude 7 on
+   * #4318); empty when nobody is. Written by the server (paypalLeftOutText).
+   */
+  leftOutNote?: string;
   currency: string;
   /** Payments sent through PayPal and not yet confirmed. */
   onTheirWay: number;
@@ -170,9 +176,10 @@ export function PayPalPayouts({
                 </>
               )}
             </div>
-          ) : (
+          ) : leftOutNote ? null : (
             <p className="mt-3 text-sm text-ink-soft">Nobody is owed anything that has cleared right now.</p>
           )}
+          {leftOutNote ? <p className="notice notice-warn mt-3 text-sm">{leftOutNote}</p> : null}
           {onTheirWay > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-soft">
               <span>{`${onTheirWay} ${onTheirWay === 1 ? "payment is" : "payments are"} on the way through PayPal. Each shows as paid once PayPal confirms it; anyone PayPal cannot pay stays owed.`}</span>
@@ -240,6 +247,49 @@ export function PayPalPayouts({
           </button>
         </>
       )}
+      {error ? (
+        <p className="notice notice-error mt-3 text-sm" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Shown instead of the panel when the creator's PayPal connection could not be read (lib/paypal-payouts.ts readLink,
+ * rule 24): paying from PayPal is unavailable, and Disconnect is the way out of a connection in an unknown shape, so
+ * the creator is never stuck. Disconnecting deletes the connection whatever it holds; nothing is paid.
+ */
+export function PayPalUnread() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="notice notice-warn mt-5">
+      <p role="alert">
+        Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed.
+        Reload the page to try again. If this keeps happening, disconnect PayPal and connect it again.
+      </p>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm mt-2"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          const data = await send({ op: "disconnect" });
+          setBusy(false);
+          if (!data.ok) {
+            setError(MESSAGES[String(data.error)] ?? MESSAGES.error);
+            return;
+          }
+          toast("PayPal disconnected. Its Secret is deleted.");
+          router.refresh();
+        }}
+      >
+        Disconnect PayPal
+      </button>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">
           {error}

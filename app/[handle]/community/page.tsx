@@ -5,7 +5,10 @@ import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { feed, postNumbers, readMembers, readPosts } from "@/lib/community";
-import { accessProducts, visibleSpaces } from "@/lib/community-access";
+import { accessProducts, answeredSpaces } from "@/lib/community-access";
+import { lockedSpaces } from "@/lib/community-locked";
+import { takePublicRequest } from "@/lib/traffic";
+import { LockedSpaces } from "@/components/community-locked";
 import { communityVisitor } from "@/lib/community-page";
 import { requestCount } from "@/lib/community-dm";
 import { unreadCount } from "@/lib/community-notify";
@@ -23,6 +26,7 @@ import {
   ticketKind,
 } from "@/components/community-parts";
 import { communityWords, composerWords } from "@/lib/buyer-words/community";
+import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
 import { MAX_POLL_OPTIONS } from "@/lib/community-polls";
 import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
@@ -83,9 +87,12 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   // Spaces kept for the buyers of some products are not in this list for
   // anybody else, and neither are their posts: the gate is asked here, once,
   // and everything below reads only what came back.
-  const spaces = await visibleSpaces(store, config, { owner, email: viewer.email });
+  // A kept space whose answer could not be read just now is shut, as a no is, but never said to be kept for other
+  // buyers (review of #3007, M1): the member may hold its product.
+  const { spaces, unchecked } = await answeredSpaces(store, config, { owner, email: viewer.email });
   const mineIds = new Set(spaces.map((s) => s.id));
   const askedSpace = typeof query.space === "string" && ITEM_ID.test(query.space) ? query.space : "";
+  if (askedSpace && unchecked.has(askedSpace)) throw new Error("a community space's access could not be checked just now");
   // A space they may not see answers the same as one that is not there.
   if (askedSpace && !mineIds.has(askedSpace)) redirect(`${`/@${store.handle}/community`}?n=spacelocked`);
   const space = askedSpace ? spaces.find((s) => s.id === askedSpace) ?? null : null;
@@ -114,13 +121,19 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const levels = new Map([...points].map(([k, n]) => [k, levelOf(n)]));
   const myLevel = levels.get(key) ?? 1;
   const locked = (s: { level: number }) => !owner && s.level >= 2 && myLevel < s.level;
-  const reach = owner ? await announcementReach(id) : 0;
+  // Who asked for announcement emails, for the owner's composer: a list that could not be read (rule 24) is
+  // unknown, and the composer turns its email box off and says so, never counting fewer members or none.
+  const reach = owner ? await announcementReach(id).catch(() => null) : 0;
   // The badge on the Messages link: nothing to read, nothing shown.
   const waiting = config.dm.on ? await requestCount(id, key) : 0;
   const news = await unreadCount(id, key);
   const home = `/@${store.handle}/community`;
   const from = space ? "space" : "feed";
   const openTo = await accessProducts(store, config);
+  // The kept spaces shown locked that this member was not let into (542 [CM1]): their names, lines and the way in,
+  // on the first page of every space only, with what they read paid for first; nothing from inside them is read.
+  const lockedList = !owner && !space && !before ? await lockedSpaces(store, config, mineIds, (units) => takePublicRequest(store, "buyer", undefined, units), unchecked) : [];
+  if (lockedList === null) redirect(`/@${store.handle}/resting`);
   // A member's own posts waiting for the creator's approval (543 [CM2]): only
   // theirs, read under their own key, on the first page; null when they could not be read.
   const held = owner || before ? [] : await heldOf(id, key).then((items) => items.filter((h) => h.kind === "post" && (!space || h.sp === space.id)), () => null);
@@ -219,12 +232,14 @@ export default async function CommunityPage({ params, searchParams }: Params) {
                 from={from}
                 canEmail={owner && canAnnounceByEmail(store)}
                 reach={reach}
+                reachUnknown={communityUnreadWords(store.language).reachUnknown}
                 named={Boolean(member?.n)}
-                words={composerWords(store.language, MAX_POLL_OPTIONS, reach)}
+                words={composerWords(store.language, MAX_POLL_OPTIONS, reach ?? 0)}
               />
             </div>
           ) : null}
 
+          <LockedSpaces spaces={lockedList} language={store.language} />
           <HeldList store={store} items={held} kind="post" from={from} space={space?.id ?? null} />
 
           {shown.length === 0 ? (

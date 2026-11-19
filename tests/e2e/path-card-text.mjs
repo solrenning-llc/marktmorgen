@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {waitForReactHandler} from "./react-hydration.mjs";
 /** Clipboard is a local stand-in; no post, message or provider request is made. */
 export async function checkPathCardText({owner,axeSource}){
  const url=owner.url(),errors=[];
@@ -14,6 +15,9 @@ export async function checkPathCardText({owner,axeSource}){
    const copy=region.getByRole("button",{name:"Copy card text",exact:true});
    const money=region.getByRole("checkbox",{name:"Include sales kept after refunds",exact:true});
    await field.waitFor();
+   // The card is server-rendered: an Enter on Copy before hydration copies nothing and no status ever comes (seen on
+   // CI in Firefox at 1280). Its own onClick proves the button is live; no sleep and no second press.
+   await waitForReactHandler(page,copy,"onClick");
    await page.evaluate(()=>{
     window.__cardCopies=[];window.__cardCopyMode="success";
     Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{

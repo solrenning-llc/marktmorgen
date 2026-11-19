@@ -145,6 +145,21 @@ const mail = installSesMailFixture({
 const realNow = Date.now.bind(Date);
 let ahead = 0;
 Date.now = () => realNow() + ahead;
+/**
+ * lib/email.ts makes a sender asked to slow down (a 429) wait before it tries again: Resend 1 s then 2 s, Amazon 400 ms
+ * then 800 ms (its `pause`). Those two pauses, and no other timer (a request's cutoff stays on the real clock), are
+ * skipped here, with the test clock moved on by each, as if it had passed: the same tries, the same order and the same
+ * deadlines, without sitting through them.
+ */
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+  const stack = typeof ms === "number" && ms > 0 ? new Error().stack ?? "" : "";
+  if (/\bat pause\d* \(/.test(stack) && /\bat (?:async )?(?:resendOutcome|viaAmazon)\d* \(/.test(stack)) {
+    ahead += ms!;
+    return realSetTimeout(fn, 0, ...args);
+  }
+  return realSetTimeout(fn, ms, ...args);
+}) as typeof setTimeout;
 /** Moves the clock to a minute after the next UTC midnight, so a probe's day of tries stays inside one synthetic Resend account day. */
 const startOfNextDay = () => {
   const now = Date.now();
@@ -1089,7 +1104,9 @@ async function main(): Promise<void> {
     is("the deletion completes while the try is held after its purchase write", erased.ok, true);
   });
   undoN3();
-  is("the reply not read: the bond stays for now, and the order is still owed", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), (await listed()).includes(n3)], [1, true]);
+  // rememberBuyer never ties a buyer deleted at or after the sale to an affiliate (lib/affiliate-bond.ts, #3927), so no
+  // bond is written here for the take-back to leave; what its unread reply still decides is that the order stays owed.
+  is("the reply not read: no bond is written for the deleted buyer, and the order is still owed", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), (await listed()).includes(n3)], [0, true]);
   is("nothing was sent to them", copies(buyerN3).length, 0);
   await sweep(11 / 60);
   is("the next try, its purchase already gone, takes the bond and the course back and the order leaves the list", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), redis.run(["HEXISTS", await ledgerOf(buyerN3), addedN.product.id]), (await listed()).includes(n3), purchasesOf(buyerN3)], [0, 0, false, 0]);

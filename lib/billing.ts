@@ -1,4 +1,5 @@
 import {activateRestartContract,type RestartContractActivation} from "@/lib/contract-restart-activation";
+import { stripeJson } from "@/lib/stripe-http-error";
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
 import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
@@ -18,6 +19,7 @@ import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRest
  * we promised not to take, or us billing ourselves.
  */
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { withLock } from "@/lib/redis-lock";
 import {
   type Cycle,
   type Tier,
@@ -130,7 +132,8 @@ export async function onPlatform(
       cache: "no-store",
       signal,
     });
-    return { response, data: (await response.json()) as Record<string, unknown> };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts).
+    return { response, data: await stripeJson(response) };
   });
   if (!response.ok) {
     const error = data.error as
@@ -497,6 +500,8 @@ export type StartedSubscription = {
   shared: boolean;
   /** The period paid for, which the store's allowances follow (lib/allowance-window.ts); null when Stripe did not say. */
   period: BillingPeriod | null;
+  /** Stripe could not be asked about the subscription: `active` is false because nothing is known, never because it stopped. */
+  unknown?: true;
 };
 
 /**
@@ -582,7 +587,7 @@ export async function readStartedSubscription(
     try{subscription=await subscriptionRecord(subscriptionId);}
     catch(error){
       console.error("reading the subscription failed",error);
-      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null};
+      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null,unknown:true};
     }
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;
@@ -804,6 +809,8 @@ export function periodOf(subscription: Record<string, unknown>, trialing: boolea
 export async function readSubscription(
   subscriptionId: string,
   fundingStore?:Store,
+  /** Told why Stripe could not be asked, for a caller that must tell no answer from an unknown one (lib/stripe-silence.ts). */
+  failed?: (error: unknown) => void,
 ): Promise<SubscriptionState> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
@@ -820,6 +827,7 @@ export async function readSubscription(
       return { state: "inactive", reason: "missing" };
     }
     console.error("reading the subscription failed", error);
+    failed?.(error);
     return { state: "unknown" };
   }
 
@@ -854,6 +862,28 @@ export async function subscriptionRecord(subscriptionId: string): Promise<Record
   }
 }
 
+/** The id an expanded Stripe field names: the string itself, or the object's own `id`; "" otherwise. */
+function namedId(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string") return (raw as { id: string }).id;
+  return "";
+}
+
+/**
+ * Whether a subscription's expanded latest invoice is that subscription's and its customer's own (#4449): it names
+ * the subscription (at the top level in older API versions, or under parent.subscription_details) and the same
+ * customer. An invoice of another subscription or customer, or one naming neither, is never used for a pay link or
+ * an email: its link and amount would be someone else's.
+ */
+export function ownLatestInvoice(subscription: Record<string, unknown>, invoice: Record<string, unknown>): boolean {
+  const subscriptionId = namedId(subscription.id);
+  const customerId = namedId(subscription.customer);
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const named = [namedId(invoice.subscription), namedId(parent?.subscription_details?.subscription)].filter(Boolean);
+  if (!subscriptionId || !customerId || named.length === 0 || named.some((id) => id !== subscriptionId)) return false;
+  return namedId(invoice.customer) === customerId;
+}
+
 /**
  * Stripe's own page where an unpaid renewal is paid (232 [CA1] unit 4): the
  * hosted page of the subscription's latest invoice, while the subscription
@@ -871,6 +901,7 @@ export async function renewalInvoicePage(subscriptionId: string): Promise<string
     if (subscription?.id !== subscriptionId || subscription.status !== "past_due") return null;
     const invoice = subscription.latest_invoice as { status?: unknown; amount_due?: unknown; hosted_invoice_url?: unknown } | string | null;
     if (!invoice || typeof invoice !== "object" || invoice.status !== "open") return null;
+    if (!ownLatestInvoice(subscription, invoice as Record<string, unknown>)) return null;
     if (typeof invoice.amount_due !== "number" || invoice.amount_due <= 0) return null;
     const url = typeof invoice.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
     return INVOICE_PAGE.test(url) ? url : null;
@@ -1280,6 +1311,27 @@ export function observeRestartedPlan(
  * Errors are thrown, not swallowed: the caller has to tell the creator that
  * nothing changed, and "Stripe did not answer" is not "cancelled".
  */
+/**
+ * The mark a plan refund leaves on a subscription whose stop it set (lib/plan-refund-flow.ts): only a stop that still
+ * carries it is ever taken back by that flow. Every other write of the stop, here, clears it in the same call, so a
+ * stop the creator sets or takes back themselves is theirs from then on (Claude 1 on #3740).
+ */
+export const PLAN_REFUND_STOP_MARK = "plan_refund_stop";
+
+/**
+ * One lock per subscription for every change of its stop (Codex U on #3740): the plan refund's read-then-take-back
+ * and the creator's own cancel or resume never interleave, so a change the creator was told is done is never undone.
+ * What it covers: every change made through this code, which is the only way a creator changes their plan (the
+ * studio's billing route, plan breaks; there is no Stripe portal for a creator's plan). Stripe offers no conditional
+ * update, so a change written straight into the platform's own Stripe account (by its owner, in the Dashboard) takes
+ * no lock: one landing inside a take-back's GET and POST, a window of one request, is not fenced.
+ */
+export const planStopLockKey = (subscriptionId: string) => `nl:lock:plan-stop:${subscriptionId}`;
+// Longer than the work it guards, so it cannot lapse in the middle (Claude 7 on #3740): a GET and a POST, each up to
+// STRIPE_TIMEOUT_MS (20 s), with room to spare; the take-back also checks the lock is still held before its POST.
+export const PLAN_STOP_LOCK_SECONDS = 60;
+export const PLAN_STOP_LOCK_WAIT_MS = 3_000;
+
 export async function setCancelAtPeriodEnd(
   subscriptionId: string,
   cancel: boolean,
@@ -1287,10 +1339,13 @@ export async function setCancelAtPeriodEnd(
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
   }
-  const subscription = await onPlatform(
-    "POST",
-    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" }),
+  // A lock that cannot be taken throws (LockBusyError): the caller says nothing changed, and the creator tries again.
+  const subscription = await withLock(planStopLockKey(subscriptionId), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, () =>
+    onPlatform(
+      "POST",
+      `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false", [`metadata[${PLAN_REFUND_STOP_MARK}]`]: "" }),
+    ),
   );
   // Only an identified, explicit provider observation can confirm this change.
   // Unknown replies must throw so callers retain paid access and pause evidence.
@@ -2112,8 +2167,13 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
     const listed = await onPlatform("GET", `/refunds?${query}`, undefined, { version: CHARGE_VERSION });
     if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.has_more !== false) return null;
     const out = { returned: 0, inFlight: 0, failed: 0, paid: intent.amount_received as number };
+    // Each refund counts once, by its own id: a list that repeats an id cannot
+    // prove its rows are distinct, so it is unreadable, never a doubled sum
+    // that would close a debt only partly returned (issue #4452).
+    const seen = new Set<string>();
     for (const row of listed.data as Record<string, unknown>[]) {
-      if (!row || row.object !== "refund" || typeof row.id !== "string") return null;
+      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
+      seen.add(row.id);
       const intent = typeof row.payment_intent === "string" ? row.payment_intent : (row.payment_intent as { id?: unknown } | null | undefined)?.id;
       if (intent !== paymentIntent) return null;
       if (row.status === "succeeded") {

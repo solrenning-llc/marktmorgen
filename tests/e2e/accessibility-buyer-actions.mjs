@@ -140,6 +140,15 @@ try{
    const extras=buyForm.locator('input[name="bump"]');
    if(await extras.evaluateAll(nodes=>nodes.some(n=>n.checked)))throw Error("An extra was selected for the buyer");
    if(mode==="baseline"){await page.keyboard.press("Tab");if(!await page.evaluate(()=>document.activeElement!==document.body))throw Error("Native keyboard focus missing");}
+   // The billing country (components/billing-country-field.tsx, EU VAT art. 9a gate): a required, labelled native select,
+   // with no country chosen for the buyer. A buyer outside the EU and the UK (the United States here) chooses it and can buy;
+   // the refusal of EU and UK places is held in tests/eu-vat-consumer-gate.test.ts and tests/eu-vat-checkout-routes.test.ts.
+   const country=buyForm.locator('select[name="billing_country"]');
+   if(await country.count()!==1)throw Error("Billing country field missing");
+   const field=await country.evaluate(n=>({value:n.value,required:n.required,labelled:Boolean(n.labels&&n.labels.length&&n.labels[0].innerText.trim()),us:[...n.options].some(o=>o.value==="US")}));
+   if(field.value!==""||!field.required||!field.labelled||!field.us)throw Error("Billing country is not an empty, required, labelled select offering the United States "+JSON.stringify(field));
+   await country.focus();await country.selectOption("US");
+   if(await country.inputValue()!=="US")throw Error("The billing country could not be chosen");
    // The box to start during the cancellation period (lib/digital-consent.ts): a real, labelled, required checkbox, never checked for the buyer.
    const consent=buyForm.locator('input[name="dc"]');
    if(await consent.count()!==1)throw Error("Immediate-access consent box missing");
@@ -230,6 +239,11 @@ try{
    for(const n of [0,1]){await adds.nth(n).focus();await page.keyboard.press("Enter");}
    const opener=page.locator("#cart .st-cart-open"),panel=page.locator("#cart .st-cart-panel"),lines=panel.locator("li");
    const openByKeyboard=async()=>{await opener.focus();await page.keyboard.press("Enter");await panel.waitFor();};
+   // At the top of the page nothing scrolls a control out from under the cart's button: no part of any control there may
+   // lie under it (2.4.12; the store's line of news did on a phone, found walking the buyer path, tests/store-fixed-focus-room.test.ts).
+   await opener.waitFor();await page.evaluate(()=>scrollTo(0,0));
+   const underCart=await page.evaluate(()=>{const c=document.querySelector("#cart .st-cart-open").getBoundingClientRect();return [...document.querySelectorAll("a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex='-1'])")].filter(n=>!n.closest("#cart")&&!n.matches(".sr-only")&&[...n.getClientRects()].some(r=>r.width&&r.height&&r.left<c.right&&r.right>c.left&&r.top<c.bottom&&r.bottom>c.top)).map(n=>(n.getAttribute("aria-label")||n.textContent||n.tagName).trim().slice(0,60));});
+   if(underCart.length)throw Error("Part of a control at the top of the page lies under the cart's button at "+width+" px: "+JSON.stringify(underCart));
    const focus=()=>page.evaluate(()=>{const a=document.activeElement;return {inCart:Boolean(a?.closest("#cart")),inPanel:Boolean(a?.closest(".st-cart-panel")),opener:Boolean(a?.matches(".st-cart-open")),tag:a?.tagName??"",name:(a?.getAttribute("aria-label")||a?.textContent||"").trim().slice(0,60)};});
    await openByKeyboard();await lines.nth(1).waitFor({timeout:15_000});await panel.locator("form[data-checkout]").waitFor({timeout:15_000});
    const small=await targetsUnder44(page,"#cart .st-cart-panel");

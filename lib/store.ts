@@ -50,6 +50,7 @@ import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { writeAbout } from "@/lib/product-about";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -92,7 +93,6 @@ import { type AffiliateSetting, parseAffiliateSetting } from "@/lib/affiliate-se
 import { type ReviewAsk, parseReviewAsk } from "@/lib/review-ask";
 import { type PwywProblem, pwywProblem } from "@/lib/pay-what-you-want";
 import { type CheckoutField } from "@/lib/checkout-fields";
-import { writeAbout } from "@/lib/product-about";
 import { type Currency, DEFAULT_CURRENCY, currencyRule, parseCurrency, priceBounds, priceInRange, readMoney } from "@/lib/money";
 import { type Intro, type IntroProblem, introProblem } from "@/lib/intro-price";
 import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-price";
@@ -2681,14 +2681,14 @@ function refused<R extends string>(value: unknown): value is Refusal<R> {
 async function onProduct<R extends string>(
   email: string,
   id: string,
-  change: (product: Product, store: Store) => Product | Refusal<R> | Promise<Product | Refusal<R>>,
+  change: (product: Product, store: Store, held: Held, save: Save) => Product | Refusal<R> | Promise<Product | Refusal<R>>,
   extra: (store: Store, product: Product) => Partial<Store> = () => ({}),
   after?: (store: Store, product: Product) => Promise<void>,
 ): Promise<{ ok: true; store: Store; product: Product; before: Product } | Refusal<R | "none" | "unknown">> {
-  const result = await withStore(email, async (store, save) => {
+  const result = await withStore(email, async (store, save, held) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
-    const changed = await change(product, store);
+    const changed = await change(product, store, held, save);
     if (refused<R>(changed)) return changed;
     const saved = await save({ ...store, ...extra(store, changed) }, { put: [changed] });
     // Still under the lock: what has to be written with the record, so no other write of the product comes between.
@@ -3560,16 +3560,14 @@ export async function addProduct(
   return result ?? { ok: false, reason: "none" };
 }
 
-/** Changes something already on the store, keeping its place in the list. */
-export type StudioProductParts = {
-  /** Absent means an older form did not send this field. */
-  intro?: Intro | null;
-  /** Absent means an older form did not send this field. */
-  yearly?: Yearly | null;
-  /** Null means an older form did not send the long description. */
-  about?: string | null;
-};
+/** Parts submitted with the studio form: omitted fields keep their saved values. */
+export type StudioProductParts = { intro?: Intro | null; yearly?: Yearly | null; about?: string | null };
 
+export type ProductEditResult =
+  | Extract<ProductResult, { ok: true }>
+  | { ok: false; reason: Extract<ProductResult, { ok: false }>["reason"] | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`; limit?: number; pwyw?: PwywProblem };
+
+/** Changes something already on the store, keeping its place in the list. */
 export async function editProduct(
   email: string,
   id: string,
@@ -3579,21 +3577,18 @@ export async function editProduct(
   recurring: Recurring | null = null,
   rawSuggested: string | null = null,
   baseRev?: number,
-  parts: StudioProductParts = {},
-): Promise<ProductResult | { ok: false; reason: "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}` }> {
+  parts?: StudioProductParts,
+): Promise<ProductEditResult> {
   let pwywWhy: PwywProblem | undefined;
   let refusal: "title" | "price" | null = null;
-  // Set by the accepted change callback and consumed before this same store
-  // lock is released. A stale form can therefore see either the save before
-  // it began or all of it, never its product fields without its description.
-  let aboutText: string | null = null;
   // Written only when the product is changed, so the store's own list id is
   // what a free product gets (below) whatever the price turned out to be.
   let freeNow = false;
+  let descriptionId: string | null = null;
   const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`>(
     email,
     id,
-    (product, store) => {
+    async (product, store, held, save) => {
       // A form opened before another save of this product would put the older words back over the newer ones: refused,
       // here under the store's lock, so two saves from the same revision can never both be taken.
       if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) return { ok: false, reason: "stale" };
@@ -3640,32 +3635,32 @@ export async function editProduct(
         }
         next.pwyw = { suggestedCents: pwywCents };
       }
-      // The studio's one Save includes these fields. Validate their final
-      // combination against the product read under this lock, then keep them
-      // in the same product write and the same revision as the title/price.
-      if (parts.intro !== undefined) next.intro = parts.intro;
-      if (parts.yearly !== undefined) next.yearly = parts.yearly;
-      if (next.intro) {
-        const problem = introProblem(next, next.intro, priceBounds(store.currency).min, store.tiers);
-        if (problem) return { ok: false, reason: `intro_${problem}` as const };
+      // The revision covers the whole form, not just its first write. Validate the final pair together, so replacing
+      // an intro with a yearly price (or the reverse) needs no visible intermediate product or second store lock.
+      if (parts?.intro !== undefined) next.intro = parts.intro ? { cents: parts.intro.cents, count: parts.intro.count } : null;
+      if (parts?.yearly !== undefined) next.yearly = parts.yearly ? { cents: parts.yearly.cents } : null;
+      if (parts && (parts.intro !== undefined || parts.yearly !== undefined)) {
+        if (next.intro) {
+          const problem = introProblem(next, next.intro, priceBounds(store.currency).min, store.tiers);
+          if (problem) return { ok: false, reason: `intro_${problem}` };
+        }
+        if (next.yearly) {
+          const problem = yearlyProblem(next, next.yearly, priceBounds(store.currency).min, store.tiers);
+          if (problem) return { ok: false, reason: `yearly_${problem}` };
+        }
       }
-      if (next.yearly) {
-        const problem = yearlyProblem(next, next.yearly, priceBounds(store.currency).min, store.tiers);
-        if (problem) return { ok: false, reason: `yearly_${problem}` as const };
-      }
-      if (parts.about !== undefined && parts.about !== null && (parts.about !== "" || product.about)) {
+      if (typeof parts?.about === "string" && (parts.about !== "" || next.about)) {
+        // A legacy store's namespace must be durable before text is put under it; a refused catalog commit must
+        // never leave text in a newly allocated namespace that the store's erasure cannot find.
+        const room = store.statsId ? store : await save({ ...store, statsId: newListId() });
+        descriptionId = room.statsId;
+        if (!descriptionId || !(await holdLock(held))) throw new StoreBusyError();
+        await writeAbout(descriptionId, id, parts.about, room);
         next.about = parts.about !== "";
-        aboutText = parts.about;
       }
       return next;
     },
-    (store) => ({
-      listId: store.listId ?? (freeNow ? newListId() : null),
-      ...(aboutText !== null && !store.statsId ? { statsId: newListId() } : {}),
-    }),
-    async (store, product) => {
-      if (aboutText !== null && store.statsId) await writeAbout(store.statsId, product.id, aboutText, store);
-    },
+    (store) => ({ listId: store.listId ?? (freeNow ? newListId() : null), ...(descriptionId ? { statsId: descriptionId } : {}) }),
   );
   if (!result.ok) {
     if (result.reason === "pwyw") return { ok: false, reason: "pwyw", pwyw: pwywWhy };

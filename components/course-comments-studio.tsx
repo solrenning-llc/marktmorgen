@@ -92,7 +92,7 @@ export function CourseCommentsStudio({
     <section id="comments" className="card mt-8 p-6 sm:p-8" aria-labelledby="comments-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="comments-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Comments under lessons</h2>
-        <span className={`tag ${on ? "tag-live" : ""}`}>{on === null ? "Not read" : on ? "On" : "Off"}</span>
+        <span className={`tag ${on ? "tag-live" : ""}`}>{on === null ? "Unknown" : on ? "On" : "Off"}</span>
       </div>
       <p className="mt-2 max-w-2xl text-ink-soft">
         Students ask questions and share what they made under each lesson, under a name they choose; their email address

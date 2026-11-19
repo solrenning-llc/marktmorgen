@@ -617,6 +617,13 @@ export async function POST(request: NextRequest) {
           if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
         }
         result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
+        // Published: the draft's link is ended once more, now that the product is public. A publish slowed past
+        // PREVIEW_LOCK_SECONDS loses the lock, and a link asked for then is made legitimately under it while the product
+        // still reads as a draft; this second end closes it, and any later request is refused as not a draft (Claude 4's
+        // LOW on #3597). The product is already public, so one that cannot be confirmed is only logged.
+        if (done.ok && body.hidden === false && guarded.store.statsId) {
+          await revokeDraftPreview(guarded.store, id).catch((error: unknown) => console.error("a draft's preview link could not be ended after publishing", error));
+        }
         // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
         // that fails keeps the mark, which only refuses preview links: never a wrong opening.
         // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).

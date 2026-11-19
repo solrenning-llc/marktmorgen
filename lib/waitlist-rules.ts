@@ -36,6 +36,13 @@ export const CONFIRM_SECONDS = 7 * 86_400;
 export const WAIT_SECONDS = 365 * 86_400;
 /** Emails in one request to the sender, and one piece of the five-minute job's work. */
 export const LAUNCH_BATCH = 100;
+/**
+ * How long a launch may wait, from its start, while its store is switched off
+ * after notices (lib/waitlist.ts runLaunches): each held run keeps its record
+ * and send list alive, and past this the launch stops, keeping whoever was not
+ * emailed yet on the waitlist so it can be started again.
+ */
+export const LAUNCH_HOLD_SECONDS = 120 * 86_400;
 
 export type WaitEntry = {
   /** When they typed their address, in seconds. */
@@ -48,6 +55,12 @@ export type WaitEntry = {
   k?: boolean;
   /** The token behind their link to leave. */
   t: string;
+  /**
+   * Its link to leave was counted as if the store had the longest handle
+   * (#2576). A place without it was written before and counted with the
+   * store's real handle, so it gives its link back at the shortest one.
+   */
+  w?: 1;
 };
 
 export function parseEntry(raw: unknown): WaitEntry | null {
@@ -55,7 +68,7 @@ export function parseEntry(raw: unknown): WaitEntry | null {
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
     if (typeof v.t !== "string") return null;
-    return { at: Number(v.at) || 0, ok: Number(v.ok) || 0, c: v.c === true, ...(v.c === true && v.k === true ? { k: true } : {}), t: v.t };
+    return { at: Number(v.at) || 0, ok: Number(v.ok) || 0, c: v.c === true, ...(v.c === true && v.k === true ? { k: true } : {}), t: v.t, ...(v.w === 1 ? { w: 1 as const } : {}) };
   } catch {
     return null;
   }
@@ -72,6 +85,8 @@ export type LaunchJob = {
   sent: number;
   started: number;
   finished: number;
+  /** When it stopped unfinished because its store stayed switched off (LAUNCH_HOLD_SECONDS); 0 otherwise. */
+  stopped: number;
 };
 
 export function parseJob(raw: unknown): LaunchJob | null {
@@ -88,6 +103,7 @@ export function parseJob(raw: unknown): LaunchJob | null {
       sent: Number(v.sent) || 0,
       started: Number(v.started) || 0,
       finished: Number(v.finished) || 0,
+      stopped: Number(v.stopped) || 0,
     };
   } catch {
     return null;

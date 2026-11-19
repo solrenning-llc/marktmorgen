@@ -13,6 +13,14 @@ export type StartStep = {
   href: string;
 };
 
+/** A span of whole minutes in plain English: "less than a minute", "1 minute", "12 minutes" (never "1 minutes"). */
+export function minutesWords(minutes: number | null): string {
+  const n = minutes ?? 0;
+  if (n < 1) return "less than a minute";
+  return n === 1 ? "1 minute" : `${n.toLocaleString("en-US")} minutes`;
+}
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 /**
  * The first steps of a new store, in order, with what is already done ticked
  * (484 [IT1]): at most five steps to the first sale, then the rest
@@ -47,7 +55,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
         ) : null}
       </div>
       {activation ? <p className="mt-3 text-sm text-ink-soft" data-activation-timing>
-        {activation.state === "published" ? `First offer published ${activation.minutes} minutes after this store was registered.` : activation.state === "waiting" ? `${activation.minutes} minutes since this store was registered. Your first offer is still in preparation.` : "The original first-publication time is not recorded for this store."}
+        {activation.state === "published" ? `First offer published ${minutesWords(activation.minutes)} after this store was registered.` : activation.state === "waiting" ? `${upperFirst(minutesWords(activation.minutes))} since this store was registered. Your first offer is still in preparation.` : "The original first-publication time is not recorded for this store."}
         {" "}This measures store registration, not an earlier sign-in or a sale. Drafts do not count as published offers.
       </p> : null}
       <div

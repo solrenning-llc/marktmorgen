@@ -135,6 +135,28 @@ async function main(): Promise<void> {
   globalThis.fetch = realFetch;
   is("control: the door's own reading failing is not known, never open", downAnswer, "unknown");
 
+  part("X4: an unread membership must not erase another paid door's own refund reading");
+  {
+    const d = await made("Membership D", "15");
+    const mixedConfig: CommunityConfig = { ...three, access: [a, b, c, d] };
+    const email = "mixed-unknown@example.com";
+    sessions[email] = [
+      paid(601, d, { mode: "subscription", payment_intent: null, subscription: [] }),
+      plan(602, a), plan(603, b), plan(604, c),
+    ];
+    const shop = await fresh();
+    const mixed = await access.holdingsOf(shop, mixedConfig, email);
+    is("the unread membership stays a transient unknown", [access.heldAnswer(mixed, [d]), mixed.lasting], ["unknown", false]);
+    is("the known A and B payments still open their doors", [access.heldAnswer(mixed, [a]), access.heldAnswer(mixed, [b])], [true, true]);
+    is("C, unasked only because the shared refund questions ran out, keeps its own reading", mixed.short?.has(c) ?? false, true);
+    stripeCalls = 0;
+    is("the paid C space opens despite the unrelated unread membership", await access.spaceAnswer(shop, mixedConfig, spaceC, { owner: false, email, holdings: mixed }), true);
+    is("C's own reading actually ran", stripeCalls > 0, true);
+    stripeCalls = 0;
+    is("a second C space in the same view reuses that one reading", await access.spaceAnswer(shop, mixedConfig, { ...spaceC, id: newItemId() }, { owner: false, email, holdings: mixed }), true);
+    is("without a second Stripe reading", stripeCalls, 0);
+  }
+
   part("B2 [MEDIUM] the ticket held, a second access product not: the reading is kept five minutes");
   const ticket = a;
   const second = b;

@@ -275,11 +275,11 @@ async function settle(store: Store, who: { email: string; role: Role }, chargeId
   // same form sent again (Stripe answers the first refund) writes it then (Codex G and Claude 1 on #3678).
   const value = claimValue();
   const claimed = await claimMark(toldKey(toldFor), TOLD_DAYS * 86_400, value);
-  if (claimed !== "taken" && store.sid) {
-    const logged = await logTeam(store.sid, { who: who.email, role: who.role, what });
-    // "ours" or "unknown": releaseMark compares the value first, so it never lets go another run's mark (Claude 5 on #3678).
-    if (!logged) await releaseMark(toldKey(toldFor), value).catch((error) => console.error("letting a refund's told mark go failed", error));
-  }
+  // The line is written only on a mark known ours (lib/claim-mark.ts: nothing is done on an unknown claim; Codex N1 on
+  // #3678). A mark not known ours, or a line not known written, lets this run's own value go: releaseMark compares the
+  // value first, so it never lets go another run's mark (Claude 5 on #3678), and the same form sent again writes the line.
+  const logged = claimed === "ours" && store.sid ? await logTeam(store.sid, { who: who.email, role: who.role, what }) : false;
+  if (claimed !== "taken" && !logged) await releaseMark(toldKey(toldFor), value).catch((error) => console.error("letting a refund's told mark go failed", error));
   if (state === "unknown") return fail("unknown");
   if (state === "failed") return fail("refund_failed");
   return { ok: true, state, cents, currency };

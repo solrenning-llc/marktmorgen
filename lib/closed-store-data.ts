@@ -967,7 +967,10 @@ async function ownsAnother(email: string, sid: string): Promise<boolean> {
   if (!ids) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
   if (ids.some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
   const others = ids.filter((id) => id !== sid);
-  if (others.length > MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError(`the owner's other stores, more than an account may have (SMEMBERS),`);
+  // The set holds only the stores after the account's first one, so at most MAX_STORES_PER_ACCOUNT - 1 members can
+  // remain after the closing store itself is left out. Exactly MAX_STORES_PER_ACCOUNT is already an impossible set,
+  // never proof that the owner has no other live store.
+  if (others.length >= MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError(`the owner's other stores, more than an account may have (SMEMBERS),`);
   for (const id of others) {
     const other = await storeUnder(`#${id}`, "whether the owner of a closing store keeps another store (GET)");
     if (other && other.email.toLowerCase() === email.toLowerCase()) return true;
@@ -984,6 +987,9 @@ async function accountHeld(email: string, account: string): Promise<boolean> {
   if (!replies || !Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
   // An id that is not a store's does not prove that no store holds the account: unknown, as in ownsAnother.
   if ((ids as string[]).some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("the owner's other stores (an id that is not a store's)");
+  // The set holds only stores after the account's first one. Five members already exceed the four-extra-store bound;
+  // an impossible set is not proof that no live store keeps this shared account.
+  if (ids.length >= MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError("the owner's other stores, more than an account may have (SMEMBERS)");
   for (const id of ids as string[]) {
     const other = await storeUnder(`#${id}`, "whether the owner's other store sells through a closing store's account (GET)");
     if (other && other.email.toLowerCase() === email.toLowerCase() && other.stripeAccountId === account) return true;

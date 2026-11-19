@@ -301,7 +301,7 @@ export async function POST(request: NextRequest) {
       const done =
         action === "add"
           ? await addProduct(ref, title, summary, price, recurring, suggested)
-          : await editProduct(ref, id, title, summary, price, recurring, suggested, baseRev);
+          : await editProduct(ref, id, title, summary, price, recurring, suggested, baseRev, { intro, yearly, about });
       if (!done.ok && done.reason === "stale") {
         // Nothing was written. What is saved now goes back with the refusal, so the studio can show it beside the
         // creator's unsaved words and let them choose: one read of the product and, when it has one, its description.
@@ -316,7 +316,7 @@ export async function POST(request: NextRequest) {
       result = done.ok ? { ok: true, product: done.product } : done;
       // What is taken off goes first, so the one put on in its place is never refused for the other.
       const steps: (() => Promise<{ ok: true; product: Product } | { ok: false; reason: string }>)[] = [];
-      if (done.ok) {
+      if (done.ok && action === "add") {
         const productId = done.product.id;
         const introStep = intro !== undefined && (intro !== null || done.product.intro) ? () => setProductIntro(ref, productId, intro ?? null) : null;
         const yearlyStep = yearly !== undefined && (yearly !== null || done.product.yearly) ? () => setProductYearly(ref, productId, yearly ?? null) : null;
@@ -330,7 +330,7 @@ export async function POST(request: NextRequest) {
         const priced = await step();
         result = priced.ok ? { ok: true, product: priced.product } : { ok: false, reason: priced.reason };
       }
-      if (result.ok && result.product && about !== null) {
+      if (action === "add" && result.ok && result.product && about !== null) {
         const saved = result.product;
         if (about !== "" || saved.about) {
           const marked = await setProductAbout(ref, saved.id, about !== "");

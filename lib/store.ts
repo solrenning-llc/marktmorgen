@@ -92,6 +92,7 @@ import { type AffiliateSetting, parseAffiliateSetting } from "@/lib/affiliate-se
 import { type ReviewAsk, parseReviewAsk } from "@/lib/review-ask";
 import { type PwywProblem, pwywProblem } from "@/lib/pay-what-you-want";
 import { type CheckoutField } from "@/lib/checkout-fields";
+import { writeAbout } from "@/lib/product-about";
 import { type Currency, DEFAULT_CURRENCY, currencyRule, parseCurrency, priceBounds, priceInRange, readMoney } from "@/lib/money";
 import { type Intro, type IntroProblem, introProblem } from "@/lib/intro-price";
 import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-price";
@@ -3560,6 +3561,15 @@ export async function addProduct(
 }
 
 /** Changes something already on the store, keeping its place in the list. */
+export type StudioProductParts = {
+  /** Absent means an older form did not send this field. */
+  intro?: Intro | null;
+  /** Absent means an older form did not send this field. */
+  yearly?: Yearly | null;
+  /** Null means an older form did not send the long description. */
+  about?: string | null;
+};
+
 export async function editProduct(
   email: string,
   id: string,
@@ -3569,13 +3579,18 @@ export async function editProduct(
   recurring: Recurring | null = null,
   rawSuggested: string | null = null,
   baseRev?: number,
-): Promise<ProductResult | { ok: false; reason: "stale" }> {
+  parts: StudioProductParts = {},
+): Promise<ProductResult | { ok: false; reason: "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}` }> {
   let pwywWhy: PwywProblem | undefined;
   let refusal: "title" | "price" | null = null;
+  // Set by the accepted change callback and consumed before this same store
+  // lock is released. A stale form can therefore see either the save before
+  // it began or all of it, never its product fields without its description.
+  let aboutText: string | null = null;
   // Written only when the product is changed, so the store's own list id is
   // what a free product gets (below) whatever the price turned out to be.
   let freeNow = false;
-  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale">(
+  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale" | `intro_${IntroProblem}` | `yearly_${YearlyProblem}`>(
     email,
     id,
     (product, store) => {
@@ -3625,9 +3640,32 @@ export async function editProduct(
         }
         next.pwyw = { suggestedCents: pwywCents };
       }
+      // The studio's one Save includes these fields. Validate their final
+      // combination against the product read under this lock, then keep them
+      // in the same product write and the same revision as the title/price.
+      if (parts.intro !== undefined) next.intro = parts.intro;
+      if (parts.yearly !== undefined) next.yearly = parts.yearly;
+      if (next.intro) {
+        const problem = introProblem(next, next.intro, priceBounds(store.currency).min, store.tiers);
+        if (problem) return { ok: false, reason: `intro_${problem}` as const };
+      }
+      if (next.yearly) {
+        const problem = yearlyProblem(next, next.yearly, priceBounds(store.currency).min, store.tiers);
+        if (problem) return { ok: false, reason: `yearly_${problem}` as const };
+      }
+      if (parts.about !== undefined && parts.about !== null && (parts.about !== "" || product.about)) {
+        next.about = parts.about !== "";
+        aboutText = parts.about;
+      }
       return next;
     },
-    (store) => ({ listId: store.listId ?? (freeNow ? newListId() : null) }),
+    (store) => ({
+      listId: store.listId ?? (freeNow ? newListId() : null),
+      ...(aboutText !== null && !store.statsId ? { statsId: newListId() } : {}),
+    }),
+    async (store, product) => {
+      if (aboutText !== null && store.statsId) await writeAbout(store.statsId, product.id, aboutText, store);
+    },
   );
   if (!result.ok) {
     if (result.reason === "pwyw") return { ok: false, reason: "pwyw", pwyw: pwywWhy };

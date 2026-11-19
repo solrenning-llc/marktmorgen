@@ -95,6 +95,20 @@ export function draftToRestore(raw: string | null, shown: string, tries: number,
   return hasAnswers(draft) ? draft : null;
 }
 
+/**
+ * This tab's draft written over the one kept on the device by another tab (review of #4324, MEDIUM 11): the kept
+ * answers stay, and only the questions answered in this tab (`touched`) take this tab's, so one tab never wipes what
+ * the student answered in another. A kept draft that could not be put back on this try (other questions, another
+ * count, another version of the quiz, too old, unreadable) is not merged in.
+ */
+export function mergeDrafts(stored: string | null, mine: QuizDraft, touched: readonly string[], now: number): QuizDraft {
+  const kept = draftToRestore(stored, mine.shown, mine.tries, now, mine.version);
+  if (!kept) return mine;
+  const answers: Record<string, number[]> = { ...mine.answers };
+  for (const [name, picked] of Object.entries(kept.answers)) if (!touched.includes(name)) answers[name] = picked;
+  return { ...mine, answers };
+}
+
 /** Whether one choice input is checked once a draft is put back; inputs of questions the draft does not name keep their state. */
 export function checkedAfter(input: ChoiceInput, draft: QuizDraft): boolean {
   const picked = draft.answers[input.name];

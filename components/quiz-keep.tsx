@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useHydrated } from "@/components/use-hydrated";
-import { type ChoiceInput, type QuizDraft, checkedAfter, draftOf, draftToRestore, forgetClosedDraft, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
+import { type ChoiceInput, type QuizDraft, checkedAfter, draftOf, draftToRestore, forgetClosedDraft, hasAnswers, mergeDrafts, quizKeepKey } from "@/lib/quiz-keep-rules";
 
 /**
  * Keeps a quiz's answers in the student's own browser while they answer
@@ -58,6 +58,8 @@ export function QuizKeep({
   // The choices "Clear my answers" took, for Undo until the next change, with no time limit (review of #4324, MEDIUM 10).
   const [cleared, setCleared] = useState<ChoiceInput[] | null>(null);
   const clearedText = useRef<HTMLSpanElement>(null);
+  // The questions answered in this tab since the lesson opened: only these are written over another tab's (MEDIUM 11).
+  const answeredHere = useRef(new Set<string>());
   // Kept in this tab's session storage by default; on the device only once the student chooses it (review of #4324).
   const [onDevice, setOnDevice] = useState(false);
   const device = useRef(false);
@@ -91,14 +93,20 @@ export function QuizKeep({
       forget(key);
       device.current = false;
     }
-    const save = () => {
+    const touched = answeredHere.current;
+    touched.clear();
+    const save = (event?: Event) => {
+      const name = event?.target instanceof HTMLInputElement ? event.target.name : "";
+      if (name.startsWith("q_")) touched.add(name);
       // The first change after a draft was put back or offered: the status line is cleared, and an offer not taken goes,
       // since these answers now replace it.
       setSaid("");
       setOffer(null);
       setCleared(null);
-      const now = draftOf(snapshot(), shown, tries, Date.now(), version);
+      const mine = draftOf(snapshot(), shown, tries, Date.now(), version);
       const [here, other] = device.current ? [local, session] : [session, local];
+      // On the device another tab may have written since: its answers to questions not answered here stay.
+      const now = device.current ? mergeDrafts(read(local), mine, [...touched], Date.now()) : mine;
       try {
         if (hasAnswers(now)) here?.setItem(key, JSON.stringify(now));
         else here?.removeItem(key);
@@ -107,10 +115,18 @@ export function QuizKeep({
         // Storage closed (a private window): the answers simply are not kept.
       }
     };
-    saveNow.current = save;
+    saveNow.current = () => save();
+    // Another tab wrote the device's draft: an offer not yet taken here shows what is kept now, or goes with it.
+    const fromOtherTab = (event: StorageEvent) => {
+      if (event.key !== key || event.storageArea !== local) return;
+      const fresh = draftToRestore(event.newValue, shown, tries, Date.now(), version);
+      setOffer((waiting) => (waiting ? fresh : waiting));
+    };
     form.addEventListener("change", save);
+    window.addEventListener("storage", fromOtherTab);
     return () => {
       form.removeEventListener("change", save);
+      window.removeEventListener("storage", fromOtherTab);
     };
   }, [key, shown, tries, version]);
 
@@ -190,6 +206,8 @@ export function QuizKeep({
                   onClick={() => {
                     for (const input of choiceInputs()) {
                       input.checked = cleared.some((was) => was.name === input.name && was.value === input.value && was.checked);
+                      // Put back here: this tab's answers, written over another tab's.
+                      answeredHere.current.add(input.name);
                     }
                     saveNow.current();
                     setCleared(null);

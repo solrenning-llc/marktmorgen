@@ -2729,6 +2729,37 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
+        // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
+        // is gone or lists everyone but them; a team record that does not read keeps the id (Codex U on #3660).
+        if (key.startsWith("-- marktmorgen:team-index-off-team:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isInteger(count) || count < 2 || argv.length !== count) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
+          const [index, ...teams] = keys;
+          const [address, ...sids] = argv;
+          let removed = 0;
+          teams.forEach((team, i) => {
+            this.scriptCalls += 1;
+            const raw = this.run(["GET", team]);
+            let off = raw === null;
+            if (typeof raw === "string") {
+              try {
+                const parsed = JSON.parse(raw) as { members?: unknown; invites?: unknown };
+                if (Array.isArray(parsed.members) && Array.isArray(parsed.invites)) {
+                  off = !parsed.members.some((m) => !!m && typeof m === "object" && typeof (m as { email?: unknown }).email === "string" && (m as { email: string }).email.trim().toLowerCase() === address);
+                }
+              } catch {
+                off = false;
+              }
+            }
+            if (off) {
+              this.scriptCalls += 1;
+              removed += Number(this.run(["SREM", index, sids[i]]));
+            }
+          });
+          return removed;
+        }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];

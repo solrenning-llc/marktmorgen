@@ -102,27 +102,33 @@ async function addedSince(folder: string, from: number, to: number): Promise<num
  */
 export async function blobHeldToday(folder: string, list: (folder: string) => Promise<number>): Promise<number> {
   if (!FOLDER.test(folder) || !isRedisConfigured()) throw new Error("storage_unknown");
-  const now = Date.now();
-  const day = Math.floor(now / DAY_MS);
-  const read = async () => readKept((await redisPipeline([["GET", blobTallyKeys.kept(folder)]]))[0], day, Date.now());
-  let kept = await read();
-  if (kept === null) {
-    const [claimed] = await redisPipeline([["SET", blobTallyKeys.day(folder, day), "1", "NX", "EX", BLOB_TALLY_KEEP_SECONDS]]);
-    if (claimed === "OK") {
-      const at = Date.now();
-      const bytes = await list(folder);
-      if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("storage_unknown");
-      const [written] = await redisPipeline([["SET", blobTallyKeys.kept(folder), JSON.stringify({ day, at, bytes }), "EX", BLOB_TALLY_KEEP_SECONDS]]);
-      if (written !== "OK") throw new Error("storage_unknown");
-      kept = { day, at, bytes };
-    } else if (claimed === null) {
-      kept = await read();
-      if (kept === null) throw new Error("storage_daily");
-    } else {
-      throw new Error("storage_unknown");
+  // Twice at most: a day's mark whose OK came back after midnight is yesterday's, so it never starts a listing (Codex N1
+  // on #2848, MEDIUM: that listing and the new day's would be two); the new day is claimed instead. A second midnight
+  // in one call is refused as the day's listing spent, never a listing on a guess.
+  for (let rollover = 0; rollover < 2; rollover += 1) {
+    const day = Math.floor(Date.now() / DAY_MS);
+    const read = async () => readKept((await redisPipeline([["GET", blobTallyKeys.kept(folder)]]))[0], day, Date.now());
+    let kept = await read();
+    if (kept === null) {
+      const [claimed] = await redisPipeline([["SET", blobTallyKeys.day(folder, day), "1", "NX", "EX", BLOB_TALLY_KEEP_SECONDS]]);
+      if (claimed === "OK") {
+        if (Math.floor(Date.now() / DAY_MS) !== day) continue;
+        const at = Date.now();
+        const bytes = await list(folder);
+        if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("storage_unknown");
+        const [written] = await redisPipeline([["SET", blobTallyKeys.kept(folder), JSON.stringify({ day, at, bytes }), "EX", BLOB_TALLY_KEEP_SECONDS]]);
+        if (written !== "OK") throw new Error("storage_unknown");
+        kept = { day, at, bytes };
+      } else if (claimed === null) {
+        kept = await read();
+        if (kept === null) throw new Error("storage_daily");
+      } else {
+        throw new Error("storage_unknown");
+      }
     }
+    const total = kept.bytes + (await addedSince(folder, kept.at - BLOB_TALLY_WINDOW_MS, Date.now()));
+    if (!Number.isSafeInteger(total)) throw new Error("storage_unknown");
+    return total;
   }
-  const total = kept.bytes + (await addedSince(folder, kept.at - BLOB_TALLY_WINDOW_MS, Date.now()));
-  if (!Number.isSafeInteger(total)) throw new Error("storage_unknown");
-  return total;
+  throw new Error("storage_daily");
 }

@@ -59,7 +59,7 @@ const RATE = `\\d[\\d.,\\s]*k?\\s*(?:${[
 /**
  * What keeps an idea from being shown, in the languages a store sells in: a
  * currency sign (any of Unicode's), the code of every currency a store may
- * sell in (lib/money.ts) and currency words, a percentage, a rate per month
+ * sell in (lib/money.ts) and currency words, price, cost, fee and fortune words, a percentage, a rate per month
  * or week after a number, earnings, income, revenue, profit, money, wealth
  * and sales words with their stems ("sales" and "paid" only where they speak
  * of earning: a sales page or a paid newsletter is a product), a guarantee,
@@ -80,6 +80,8 @@ export const IDEA_REFUSED = new RegExp(
     `\\d{3,}[\\d.,]*\\s*[- ]?months?(?![\\p{L}\\p{N}])|\\d[\\d.,]*\\s*k[- ]?(?:months?|years?)(?![\\p{L}\\p{N}])`,
     // Currency words, in the store languages
     word("dollars?|d[oó]lar(?:es)?|dollar[oi]|bucks|quid|euros?|yen|francs?|franken|kronor|kroner|krona|krone|kronen|zlot(?:y|ys|ych)|złot\\p{L}*|reais|cents?|centavos?|c[ée]ntimos?|centimes?|make bank"),
+    // Prices, costs, fees and fortunes, in the store languages (Codex X6, LOW on #3441): the box says ideas that mention prices are left out
+    word("pric(?:e|es|ed|ing)|low[- ]cost|costs?|costing|fees?|fortunes?|pre[cç]ios?|preços?|prix|preis(?:e|en)?|prezz[oi]|prijs|prijzen|fortunas?|verm[öo]gen"),
     // Wealth, income and sales, with stems, in the store languages
     word(
       "(?:get|getting|grow|become|be) rich|riches|wealthy|lucr\\p{L}*|rentab\\p{L}*|financial(?:ly)? (?:freedom|independence|security)|quit your (?:day )?job|side (?:business|income|gig)|pays|paying|payouts?|paychecks?|payday|get(?:s|ting)? paid|paid (?:to|gigs?|work)|(?:more|boost\\p{L}*|doubl\\p{L}*|tripl\\p{L}*|increas\\p{L}*|grow\\p{L}*|higher|bigger)\\s+(?:your\\s+|in\\s+)?sales|sales (?:boost|growth)|sell(?:s|ing)? more|best[- ]?sell\\p{L}*",

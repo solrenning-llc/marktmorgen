@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { makeKey } from "@/lib/api-keys";
 import { importedFor } from "@/lib/imported-purchases";
+import { erasePerson } from "@/lib/person-erasure";
 import { POST as postLead } from "@/app/api/v1/leads/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
 import { IDEMPOTENCY_COMMANDS, IDEMPOTENCY_SECONDS } from "@/lib/api-idempotency-rules";
@@ -153,6 +154,29 @@ async function main(): Promise<void> {
     is("the retry with the same key runs, once", [retry.status, retry.json.data?.status, retry.replayed, (await owner()).length], [200, "given", null, 1]);
     const repeat = await call(postAccess, a.key, body, lostKey);
     is("and a repeat after it is its answer, replayed", [repeat.status, repeat.replayed, (await owner()).length], [200, "true", 1]);
+  }
+
+  part("A person deleted after the answer was kept: a repeat never gives their address back (Codex X7 on #3537)");
+  {
+    // The kept answer names the person. Once they are deleted from the store, a repeat with the same key is not given
+    // that answer, runs nothing (no grant, no list entry again), and the kept record no longer holds the address.
+    const holds = (address: string) => records().some((k) => String(redis.run(["GET", k]) ?? "").includes(address));
+    for (const [label, handler, body, idem] of [
+      ["access", postAccess, { email: "buyer-erased@example.test", product: a.product, notify: false }, "erase-key-access-1"],
+      ["list", postLead, { email: "reader-erased@example.test", name: "Reader", agreed: true }, "erase-key-lead-0001"],
+    ] as const) {
+      const address = body.email;
+      const kept = await call(handler, a.key, body, idem);
+      is(`${label}: written, and its answer kept with the address`, [kept.status, holds(address)], [200, true]);
+      const erased = await erasePerson((await storeForEmail("idem-owner-a@example.test"))!, address, { kind: "person" });
+      is(`${label}: the person is deleted`, erased.ok, true);
+      const repeat = await call(handler, a.key, body, idem);
+      is(`${label}: the repeat is not the kept answer and names nobody`, [repeat.status, repeat.replayed, JSON.stringify(repeat.json).includes(address)], [409, null, false]);
+      is(`${label}: the kept record no longer holds the address`, holds(address), false);
+      const again = await call(handler, a.key, body, idem);
+      is(`${label}: and a repeat after that still runs nothing`, [again.status, JSON.stringify(again.json).includes(address)], [409, false]);
+    }
+    is("nothing given again to the deleted buyer", (await importedFor((await storeForEmail("idem-owner-a@example.test"))!, "buyer-erased@example.test")).length, 0);
   }
 
   part("Gone after 24 hours from when the write began");

@@ -47,7 +47,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
-  "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
+  "nl:backup:files:day:", "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:period-read:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
@@ -121,7 +121,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
-  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:", "nl:ppsell:try:",
+  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:", "nl:ppsell:start:", "nl:ppsell:try:",
   // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
   "nl:tip:co:",
 ];
@@ -214,6 +214,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:api:idem:": X(1), "nl:api:idem:p:": X(3),
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,
   "nl:assist:c:": X(1), "nl:assist:missed:": E, "nl:assist:next:": X(3), "nl:assist:nextlock:": X(1), "nl:assist:pool:": E, "nl:assist:remind:": X(3), "nl:assist:remindq": I, "nl:assist:remindwho:": X(3),
+  "nl:backup:files:day:": C, // the backup files route's day count (lib/backup-files-source.ts), no store's
   "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
   "nl:billing:period-read:": C, "nl:billing:sync:after": C, "nl:billing:sync:cursor": C,
@@ -397,6 +398,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
   // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
   "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),
+  // A PayPal connect started from the studio (lib/paypal-sales.ts, markOnboarding): one a store, holding "1", gone within a day.
+  "nl:ppsell:start:": X(1),
   // A PayPal order's count of capture tries (lib/paypal-sales.ts, watchFirst): a number named by the order, gone
   // within the thirty days from its opening that its record keeps at most.
   "nl:ppsell:try:": X(30),

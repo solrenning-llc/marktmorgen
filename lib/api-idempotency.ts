@@ -12,11 +12,17 @@
  *
  * Wired, for now, only on POST /api/v1/access and POST /api/v1/leads. Without the header nothing changes. Since unit 3 an
  * answer about an address is listed under that address, and deleting the person deletes it at once.
+ *
+ * A person deleted from the store after a write was answered is never named again by a repeat of it (Codex X7 on
+ * #3537): the repeat carries the same request, so the same address, which is read against the store's deletion prints
+ * (lib/suppression.ts) before an answer is given back. Deleted since: the kept answer is written over with one that
+ * names nobody, and the repeat is told so, running nothing.
  */
 import { createHash, createHmac } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
+import { suppressedAtCommand } from "@/lib/suppression";
 import {
   IDEMPOTENCY_HEADER, IDEMPOTENCY_SECONDS, MAX_KEPT_ANSWER_BYTES, TOO_LARGE_WORDS, UNKNOWN_WORDS, type Effect, afterWrite, decide,
   readIdempotencyKey, requestFingerprint, takesKey,
@@ -77,7 +83,7 @@ export type KeyedWrite = { response: Response; effect: Effect };
  * Without the header, `run` runs as it always has. A repeat of a finished write gets its answer back, marked
  * `Idempotent-Replayed: true`, and runs nothing; anything unknown runs nothing.
  */
-export async function onceForKey(request: Request, sid: string, path: string, body: unknown, largest: number, run: () => Promise<KeyedWrite>, person?: string, now = Date.now()): Promise<Response> {
+export async function onceForKey(request: Request, sid: string, path: string, body: unknown, largest: number, run: () => Promise<KeyedWrite>, person?: string, now = Date.now(), listId: string | null | undefined = undefined): Promise<Response> {
   const read = readIdempotencyKey(request.headers.get(IDEMPOTENCY_HEADER));
   if (read.kind === "none") return (await run()).response;
   if (read.kind === "invalid") return answer(400, "idempotency_key", read.message);
@@ -86,7 +92,8 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
   const hash = keyHash(read.key);
   const rk = recordName(sid, hash);
   const fp = keptFingerprint(requestFingerprint(request.method, path, JSON.stringify(body ?? null)));
-  let decision = decide(await getRecord(rk), fp, now);
+  let found = await getRecord(rk);
+  let decision = decide(found, fp, now);
   if (decision.kind === "run" && decision.replaces !== undefined) {
     // Past its 24 hours yet still held: the database drops it within a second (it is kept exactly 24 hours from when
     // the write began), so this try runs nothing and is told to send the same key again.
@@ -98,11 +105,22 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
     if (claimed === "unknown") return answer(503, "unavailable", UNKNOWN_WORDS);
     if (claimed === "taken") {
       // Another try claimed it first: what it holds now decides, and this one runs nothing.
-      decision = decide(await getRecord(rk), fp, now);
+      found = await getRecord(rk);
+      decision = decide(found, fp, now);
       if (decision.kind === "run") return answer(409, "idempotency_key", "A request with this Idempotency-Key is being processed. Nothing was done this time.");
     }
   }
-  if (decision.kind === "replay") return new Response(decision.body, { status: decision.status, headers: { ...headers, "Idempotent-Replayed": "true" } });
+  if (decision.kind === "replay") {
+    const gone = await deletedSinceWrite(listId, body, found);
+    if (gone === "unknown") return answer(503, "unavailable", UNKNOWN_WORDS);
+    if (gone) {
+      // The kept answer named somebody deleted since: written over with one that names nobody, for what is left of
+      // its 24 hours, so the address is not kept here either, and nothing runs again under this key.
+      await withhold(rk, found);
+      return answer(409, "idempotency_key", DELETED_WORDS);
+    }
+    return new Response(decision.body, { status: decision.status, headers: { ...headers, "Idempotent-Replayed": "true" } });
+  }
   if (decision.kind !== "run") return answer(decision.status, decision.kind === "unknown" ? "unavailable" : "idempotency_key", decision.message);
   // A write that throws may have acted: the claim stays, and a repeat is told 409, never run twice.
   const done = await run();
@@ -191,6 +209,41 @@ export async function idempotentLines(sid: string, email: string): Promise<numbe
   const read = repliesFor(await redisPipeline([["ZCARD", pk]]), 1);
   if (!read || typeof read[0] !== "number" || !Number.isSafeInteger(read[0]) || read[0] < 0) throw new Error("the kept API answers of a person could not be counted");
   return read[0];
+}
+
+/** What a repeat is told when the person its write named was deleted from the store after it was answered. */
+export const DELETED_WORDS = "The person this request named was deleted from the store after it was answered, so the answer is not given back. Nothing was done this time.";
+
+/**
+ * Whether the address the request names (`email`) was deleted from this store at or after the second its kept write
+ * began: "unknown" when the deletion print or the record does not read (rule 24), never "not deleted". A store with
+ * no list, or a request with no address, names nobody to check.
+ */
+async function deletedSinceWrite(listId: string | null | undefined, body: unknown, found: unknown): Promise<boolean | "unknown"> {
+  const email = body && typeof body === "object" && typeof (body as { email?: unknown }).email === "string" ? (body as { email: string }).email : "";
+  if (!listId || !email) return false;
+  let at: number;
+  try {
+    at = Number((JSON.parse(String(found)) as { at?: unknown }).at);
+  } catch {
+    return "unknown";
+  }
+  if (!Number.isSafeInteger(at)) return "unknown";
+  const replies = repliesFor(await redisPipeline([suppressedAtCommand(listId, email)]).catch(() => null), 1);
+  if (!replies) return "unknown";
+  const raw = replies[0];
+  if (raw === null) return false;
+  const text = typeof raw === "number" ? String(raw) : raw;
+  if (typeof text !== "string" || !/^\d{1,12}$/.test(text)) return "unknown";
+  return Number(text) >= Math.floor(at / 1_000);
+}
+
+/** The kept record, its answer replaced by one that names nobody, until 24 hours after its write began. */
+async function withhold(rk: string, found: unknown): Promise<void> {
+  const record = JSON.parse(String(found)) as { fp: string; at: number };
+  const left = Math.max(1, Math.ceil((record.at + IDEMPOTENCY_SECONDS * 1_000 - Date.now()) / 1_000));
+  const body = JSON.stringify({ error: "idempotency_key", message: DELETED_WORDS });
+  await redisPipeline([["SET", rk, JSON.stringify({ state: "done", fp: record.fp, at: record.at, status: 409, body }), "XX", "EX", left]]).catch(() => {});
 }
 
 /** The record's exact reply: null when Redis says there is none, the string otherwise; any other shape is passed on as unknown. */

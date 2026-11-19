@@ -419,7 +419,9 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       if (once !== "ours") {
         // Heard one lately, erased, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the
         // next run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
-        if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
+        // Erased too (Codex X7 on #4877): the membership's mark is a pseudonymous id of the person's subscription, let go
+        // with the erasure, never kept for its 90 days.
+        if (once === "unknown" || once === "erased") await releaseMark(sentKey(account, subId), claim);
         continue;
       }
 

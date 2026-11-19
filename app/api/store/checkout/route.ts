@@ -11,9 +11,9 @@ import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemRetu
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { giveBackHold, holdAdmission, refusedBeforeStripe, releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan, limitedStock } from "@/lib/product-extras";
+import { activePlan, bumpTargets, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
@@ -335,11 +335,14 @@ export async function POST(request: NextRequest) {
     const inPlan = !gift && !group && !preorder && plan && activePlan(product) !== null;
     const upsell = !gift && !group && !preorder && !inPlan && !store.tax.enabled && activeFunnel(await readListings(store, funnelProductIds(product.funnel)), product) ? newUpsellKey() : null;
     // Sent by an affiliate within the store's window: credited to them. A
-    // lookup that fails never stops the sale; it is only not credited.
-    const via = await attributionFor(store, product.id, {
+    // lookup that does not answer never stops the sale: the click rides on the
+    // order as pending and is credited once a later read answers (owner's
+    // decision 6, lib/affiliates.ts notePendingLinks).
+    const credit = await attributionOrPending(store, product.id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    }).catch(() => null);
+    }, [product.id, ...bumpTargets(product)]);
+    const via = credit.known ? credit.via : null;
     // A course opens right away in the browser that paid for it.
     // So does a course in a bundle.
     const buyer = !gift && !group && !preorder && (product.course || product.bundle) ? newBuyerKey() : null;
@@ -418,6 +421,7 @@ export async function POST(request: NextRequest) {
         channel: {
           ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays),
           ...ads,
+          ...pendingChannel(credit),
           ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
         },
         // A code that came in a link to this store (lib/code-link.ts), applied

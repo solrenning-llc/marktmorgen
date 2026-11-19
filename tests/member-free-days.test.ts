@@ -255,6 +255,19 @@ async function main(): Promise<void> {
   is("a labeled whole number with its bounds and a hint", component.includes('type="number"') && component.includes("min={1}") && component.includes("max={FREE_DAYS_MAX}") && component.includes("aria-describedby"), true);
   is("a review step that shows the new date before anything changes", component.includes("Review") && component.includes("movedCharge(") && component.includes("Go back"), true);
   is("the result announced and errors said", component.includes('role="status"') && component.includes('role="alert"'), true);
+
+  part("A membership sold to end before Stripe has set its cancellation date");
+  const fixed = subscription("sub_fixed00001", {
+    metadata: { store: "daysstore", product: "prod000001", ends_after: "12", ends_interval: "month" },
+  });
+  subs.push(fixed);
+  const writesBeforeFixed = posted.length;
+  const emailsBeforeFixed = emails.length;
+  const shownFixed = await freeDaysSubs(store, "member@example.com", NOW);
+  is("the studio shows the sold end even without cancel_at", shownFixed?.find((row) => row.id === fixed.id)?.blocked, "ending");
+  is("the write is refused while the sold end is being set", await giveFreeDays(store, "member@example.com", String(fixed.id), 7, PERIOD_END, by, NOW), { ok: false, reason: "blocked", blocked: "ending" });
+  is("no subscription update or email is sent", [posted.length - writesBeforeFixed, emails.length - emailsBeforeFixed], [0, 0]);
+
   done();
 }
 

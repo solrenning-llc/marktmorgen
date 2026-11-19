@@ -1921,15 +1921,15 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "winback-commands",
-    feature: "A come-back offer's sending, in Redis commands: the membership's claim, the list token, the once-mark taken only while the address was not erased, then the offer's link and its erasure notes, the print read again before the email (#4807), the count (15 November 2026)",
+    feature: "A come-back offer's sending, in Redis commands: the membership's mark, taken only while the address was not erased and noted for erasure (C5-20261119-1050-wb), the list token, the once-mark taken only while the address was not erased, then the offer's link and its erasure notes, the print read again before the email (#4807), the count (15 November 2026)",
     // Every store email of the plan sent as a come-back offer from a run of its own (the dearest way).
     monthlyUsd: (tier) => STORE_ALLOWANCES[tier].email * WINBACK_OFFER_COMMANDS * COMMAND,
     sources: [
       { file: "lib/winback.ts", names: ["WINBACK_OFFER_COMMANDS"] },
-      { file: "lib/winback-send.ts", names: ["WINBACK_CLAIM", "claimOffer", "stillFree"] },
+      { file: "lib/winback-send.ts", names: ["WINBACK_CLAIM", "WINBACK_MARK", "claimOffer", "markMembership", "stillFree"] },
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
     ],
-    basis: "Each offer takes one of the store's emails before it goes (lib/email.ts EmailMeter), so the plan's store emails bound them; each is priced at WINBACK_OFFER_COMMANDS, a store's run that sends one at its dearest (the list token's contact write lost twice and read back, both claims read back), every script's own command counted (tests/i4807-winback-erased.test.ts). Offers that send nothing (came back, no consent, heard one lately, erased, or a token not handed out after three lost writes) take no email: their reads are a store's daily run, bounded by its ended memberships of the window and OFFERS_PER_RUN, each membership claimed once; one erased at its claim also lets its membership's mark go (a RELEASE script, three commands, Codex X7 on #4877), tried once more when not confirmed (six at most), and a release still not confirmed stops the store's run there (Codex L on #4877).",
+    basis: "Each offer takes one of the store's emails before it goes (lib/email.ts EmailMeter), so the plan's store emails bound them; each is priced at WINBACK_OFFER_COMMANDS, a store's run that sends one at its dearest (the list token's contact write lost twice and read back, both claims read back), every script's own command counted (tests/i4807-winback-erased.test.ts). Offers that send nothing (came back, no consent, heard one lately, erased, or a token not handed out after three lost writes) take no email: their reads are a store's daily run, bounded by its ended memberships of the window and OFFERS_PER_RUN, each membership marked once, an EXISTS read first so a membership already marked is skipped before its customer is read. The mark is taken only while the address has no deletion print and noted for erasure in the same script (WINBACK_MARK, C5-20261119-1050-wb), so an erased person never gets one and the erasure deletes one made before it: nothing is released for an erasure (Codex X7 and L on #4877).",
   },
   {
     id: "transactional-email",

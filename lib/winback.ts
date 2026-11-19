@@ -60,11 +60,12 @@ export const ONCE_PER_DAYS = 180;
  * Redis commands one come-back offer that is sent costs at the most (lib/winback-send.ts, sweepStore), every script's
  * own counted: a store's run that sends one offer (24 when nothing is contested), with the list token's contact write
  * lost twice to a row that changed (tokensFor's rounds: the most that still hand out a token, a third lost hands out
- * none and sends nothing), the third's answer lost and read back, and the membership's claim and the offer's claim
- * (WINBACK_CLAIM, #4807) each read back: 39. Measured by tests/i4807-winback-erased.test.ts; priced on every store
+ * none and sends nothing), the third's answer lost and read back, and the membership's mark (WINBACK_MARK: the EXISTS
+ * read first, then the mark taken and noted for erasure in one script, C5-20261119-1050-wb) and the offer's claim
+ * (WINBACK_CLAIM, #4807) each read back: 46. Measured by tests/i4807-winback-erased.test.ts; priced on every store
  * email of a plan (line winback-commands in tests/plan-cost-registry.ts).
  */
-export const WINBACK_OFFER_COMMANDS = 39;
+export const WINBACK_OFFER_COMMANDS = 46;
 export const MAX_WINBACK_ADDRESS = 200;
 /**
  * Calls to the creator's Stripe account one opening of a come-back link makes at the most, to read whether the person

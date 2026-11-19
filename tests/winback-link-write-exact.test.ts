@@ -8,7 +8,7 @@
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
-import { UNWRITTEN_LINK_COMMANDS, WINBACK_CLAIM, readWinBack, sendWinBacks } from "@/lib/winback-send";
+import { UNWRITTEN_LINK_COMMANDS, WINBACK_CLAIM, WINBACK_MARK, readWinBack, sendWinBacks } from "@/lib/winback-send";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   const stated = UNWRITTEN_LINK_COMMANDS;
   // A script is billed as one command and each redis.call it runs; each here runs each of its calls at most once (one
   // key, one member), so its calls are counted from its own text. A script not one of these is not known: priced high.
-  const scriptCalls = (source: string) => (source === RELEASE || source === WINBACK_CLAIM || source.startsWith("-- marktmorgen:contact-cas-hset:v1") ? (source.match(/redis\.call\(/g) ?? []).length : 1000);
+  const scriptCalls = (source: string) => (source === RELEASE || source === WINBACK_CLAIM || source === WINBACK_MARK || source.startsWith("-- marktmorgen:contact-cas-hset:v1") ? (source.match(/redis\.call\(/g) ?? []).length : 1000);
   const billed = (cmds: Cmd[][]) => cmds.flat().reduce((sum, cmd) => sum + (cmd[0] === "EVAL" ? 1 + scriptCalls(String(cmd[1])) : 1), 0);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   part("The failure path's commands are stated and priced");
@@ -177,7 +177,7 @@ async function main(): Promise<void> {
 
   // Claude 5 on #3889 @c3db0ed78f (cost MÉDIO): a come-back offer whose link is not written as asked is looked at again
   // on every run, from its first mark to the end, with no email, so nothing of it is inside the store's email figure.
-  // Every step at its worst: each mark answered in another shape and read back (lib/claim-mark.ts), the unsubscribe
+  // Every step at its worst: each mark's script answered in another shape and read back, the unsubscribe
   // token lost twice to a change and written the third time with its answer read back (lib/contacts.ts tokensFor), the
   // link and its three erasure notes, the link taken back and the two marks let go.
   part("A failing offer, every step at its worst, bills exactly the UNWRITTEN_LINK_COMMANDS stated");
@@ -192,8 +192,8 @@ async function main(): Promise<void> {
     seen.length = 0;
     const first = await answering(async (commands, real) => {
       const [cmd] = commands;
-      // A mark's SET NX answered in another shape: read back.
-      if (commands.length === 1 && cmd[0] === "SET" && cmd.includes("NX") && (cmd[1] === sentMark || String(cmd[1]).startsWith("nl:wb:once:"))) {
+      // The membership's mark (WINBACK_MARK, C5-20261119-1050-wb) answered in another shape: read back.
+      if (commands.length === 1 && cmd[0] === "EVAL" && cmd[1] === WINBACK_MARK && cmd[4] === sentMark) {
         await real();
         return ["QUEUED"];
       }
@@ -214,7 +214,8 @@ async function main(): Promise<void> {
     }, run);
     is("fay's offer is not sent", [first.sent, to("fay@example.com").length], [0, 0]);
     is("the token was lost twice and written the third time", cas, 3);
-    const start = seen.findIndex((cmds) => cmds.length === 1 && cmds[0][0] === "SET" && cmds[0][1] === sentMark);
+    // From the mark's EXISTS, read before the customer (C5-20261119-1050-wb), to the mark let go.
+    const start = seen.findIndex((cmds) => cmds.length === 1 && cmds[0][0] === "EXISTS" && cmds[0][1] === sentMark);
     const end = seen.findIndex((cmds) => cmds.length === 1 && cmds[0][0] === "EVAL" && cmds[0][1] === RELEASE && cmds[0][3] === sentMark);
     const offer = start >= 0 && end > start ? seen.slice(start, end + 1) : [];
     is("the offer runs from its own mark to that mark let go", offer.length > 0, true);

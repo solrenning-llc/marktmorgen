@@ -182,6 +182,24 @@ async function main(): Promise<void> {
     is("no key keeps the subscription's id", keysWith("sub_GilMarkWrong01"), []);
     is("the notes key was left as it was", data().get(notesKey(store.statsId as string, email)), "not a sorted set");
   }
+  part("6. Redis stopping the mark's script at its note: no mark without its note, nothing sent; the next run sends once, noted");
+  {
+    const email = "hal@example.com";
+    const { store } = await world("stopped at the note", email, "sub_HalMarkHalf001", "cus_HalMark0001", true);
+    const run = redis.run.bind(redis);
+    let stopped = 0;
+    redis.run = ((c: (string | number)[]) => {
+      if (c[0] === "ZADD" && String(c[3]).includes("sub_HalMarkHalf001")) { stopped += 1; throw new Error("synthetic Redis error inside the mark's script"); }
+      return run(c);
+    }) as typeof redis.run;
+    const first = await sendWinBacks(Date.now() + 30_000, now).finally(() => { redis.run = run; });
+    is("the script was stopped at the note, and nothing was sent", [stopped, first.sent, handed.length], [1, 0, 0]);
+    is("no mark was left without its note", keysWith("sub_HalMarkHalf001"), []);
+    const second = await sendWinBacks(Date.now() + 30_000, now);
+    const notes = data().get(notesKey(store.statsId as string, email));
+    const noted = Array.isArray(notes) ? (notes as { member?: unknown }[]).map((n) => n.member) : [];
+    is("the next run sends once, and its mark is noted", [second.sent, handed.length, noted.some((k) => String(k).includes("sub_HalMarkHalf001"))], [1, 1, true]);
+  }
   done();
 }
 void main().catch((error) => { console.error(error); process.exit(1); });

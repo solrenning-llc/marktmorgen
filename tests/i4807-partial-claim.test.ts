@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   await world("partial claim",email,"sub_PartialIndex0001","cus_PartialIndex01");
   const run=redis.run.bind(redis);let interrupted=0;
   redis.run=((c:(string|number)[])=>{
-    if(c[0]==="ZADD"&&String(c[1]).startsWith("nl:erase:ix:")){interrupted+=1;throw Error("synthetic Redis WRONGTYPE at erasure index");}
+    if(c[0]==="ZADD"&&String(c[1]).startsWith("nl:erase:ix:")&&String(c[3]).startsWith("nl:wb:link:")){interrupted+=1;throw Error("synthetic Redis WRONGTYPE at erasure index");}
     return run(c);
   }) as typeof redis.run;
   await sendWinBacks(Date.now()+30_000,now).finally(()=>{redis.run=run;});

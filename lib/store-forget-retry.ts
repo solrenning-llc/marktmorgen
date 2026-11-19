@@ -250,7 +250,11 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
       const tries = (entry?.tries ?? FORGET_TRIES - 1) + 1;
       const gaveUp = !known || tries >= FORGET_TRIES;
       console.error(gaveUp ? "forgetting a deleted store's webhooks, keys and assistant notes was given up" : "forgetting a deleted store's webhooks, keys and assistant notes failed again", error);
-      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now, ...carried, ...(entry?.late ? { late: entry.late } : {}) });
+      // The line keeps the community while it may still walk the files; the given-up record does not (Codex N1,
+      // N1-20261119-1017, LOW 2 on #4348): a kept field puts the store back in line with files: false, so the id of a
+      // deleted community there would only be kept for good with no use.
+      const keptCarried = gaveUp ? (entry?.files === false ? { files: false as const } : {}) : carried;
+      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now, ...keptCarried, ...(entry?.late ? { late: entry.late } : {}) });
       // Given up: out of the daily line, into the kept ones, counted for the month.
       await redisPipeline(
         gaveUp

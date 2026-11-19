@@ -142,12 +142,17 @@ export async function refundLatePayments(account: string, subscription: string, 
       throw new Error("a plan's late payment's charge did not read");
     }
     if (typeof charge.currency !== "string" || !CURRENCY.test(charge.currency)) throw new Error("a plan's late payment's currency did not read");
-    if (typeof row.currency !== "string" || !CURRENCY.test(row.currency) || row.currency !== charge.currency) {
-      throw new Error("a plan's late invoice and charge do not prove the same currency");
+    if (typeof row.currency !== "string" || !CURRENCY.test(row.currency)) throw new Error("a plan's late invoice's currency did not read");
+    // This reader knows one charge only: a charge in another currency, or whose total is not the invoice's paid amount,
+    // needs allocation evidence, never its whole refund (Codex X8, X8-20261118-2310): an invoice paid at $10 never
+    // authorizes a $50 refund. It stays owed, so the plan is tried again, and refunds nothing; the plan's other late
+    // payments are still given back (Claude 3's LOW on #4867). Not on `short`: the creator's email names a balance
+    // short or a refund Stripe refused, which this is not.
+    if (row.currency !== charge.currency || charge.amount !== row.amount_paid) {
+      console.error("a plan's late invoice and its charge do not prove the same currency and paid amount; left owed", row.id);
+      left = true;
+      continue;
     }
-    // This reader knows one charge only: a charge whose total is not the invoice's paid amount needs allocation evidence,
-    // never its whole refund (Codex X8, X8-20261118-2310): an invoice paid at $10 never authorizes a $50 refund.
-    if (charge.amount !== row.amount_paid) throw new Error("a plan's late invoice and charge do not prove the same paid amount");
     // Disputed (Codex X5's MEDIUM at 52e9c7a1ed): `disputed` stays true after the dispute closes. Lost, the bank gave it
     // back: never a second time from here. Still open: tried again, never settled as given back. Won by the creator (or
     // closed without a chargeback, or prevented), the creator kept a payment taken after the end: refunded as any other.

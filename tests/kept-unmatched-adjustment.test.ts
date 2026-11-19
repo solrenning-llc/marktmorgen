@@ -17,9 +17,14 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const list = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }), { status: 200 });
   if (url.pathname.endsWith("/checkout/sessions")) return list(sessions);
   if (url.pathname.endsWith("/invoices")) return list(url.searchParams.get("status") === "paid" ? invoices : []);
-  if (url.pathname.endsWith("/invoice_payments")) return list(invoices.some((raw) => (raw as { id?: string }).id === "in_renew_1") ? [{
-    id: "inpay_renew_1", object: "invoice_payment", invoice: "in_renew_1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_renewal" },
-  }] : []);
+  if (url.pathname.endsWith("/invoice_payments")) {
+    const renewal = (invoices as { id?: string }[]).find((raw) => raw.id === "in_renew_1");
+    // The lookup by one payment (#4549) asks for its invoice expanded, as Stripe answers it; the bulk read does not.
+    const expand = url.searchParams.has("payment[payment_intent]");
+    return list(renewal ? [{
+      id: "inpay_renew_1", object: "invoice_payment", invoice: expand ? renewal : "in_renew_1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_renewal" },
+    }] : []);
+  }
   if (url.pathname.endsWith("/refunds")) return list(refunds);
   if (url.pathname.endsWith("/disputes")) return list(disputes);
   return list([]);

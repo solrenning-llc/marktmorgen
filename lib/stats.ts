@@ -2082,10 +2082,10 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
         console.error("reading invoice payments failed", error);
         return null;
       });
-      // A payment is confirmed here only when the answer was read whole and every invoice it lists that payment paying
-      // is the store's (Claude 5 on #4549): one that also paid another invoice does not say which one a refund gives
-      // back (Codex X7), and a cut answer may hold its other invoices among those not read. Anything else is left to
-      // the one-by-one lookup below, which refuses it the same way.
+      // The bulk read only places a payment's channel: it is filtered by created[gte], so it cannot list an allocation
+      // made before its window, and never proves a payment the store's alone (Codex N1 on #4549). A read whole whose
+      // invoices for that payment are all the store's lets its single checkout name the channel; the proof is left to
+      // the one-by-one lookup below, which lists every allocation of the payment, at most OLD_PAYMENT_LOOKUPS_PER_READING.
       const invoicesOf = new Map<string, Set<string>>();
       if (paid && !paid.partial) {
         for (const [invoice, intents] of paid.byInvoice) {
@@ -2101,7 +2101,6 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
         const [only] = paidInvoices;
         const sale = paidInvoices.size === 1 ? checkoutInvoices.get(only) : undefined;
         if (sale) byPayment.set(intent, sale);
-        confirmedPayments.add(intent);
       }
     }
     // A payment still unconfirmed (a membership payment older than the invoices read above) is looked up by its own

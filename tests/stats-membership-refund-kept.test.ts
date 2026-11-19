@@ -20,10 +20,20 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const list = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }), { status: 200 });
   if (url.pathname.endsWith("/checkout/sessions")) return list(sessions);
   if (url.pathname.endsWith("/invoices")) return list(url.searchParams.get("status") === "paid" ? invoices : []);
-  if (url.pathname.endsWith("/invoice_payments")) return list(invoicePayments);
+  if (url.pathname.endsWith("/invoice_payments")) {
+    const intent = url.searchParams.get("payment[payment_intent]");
+    if (!intent) return list(invoicePayments);
+    // The lookup by one payment (#4549) lists that payment's allocations with each invoice expanded, as Stripe does.
+    const rows = (invoicePayments as { invoice?: unknown; payment?: { payment_intent?: string } }[]).filter((row) => row.payment?.payment_intent === intent);
+    return list(rows.map((row) => ({ ...row, invoice: invoiceOf(String(row.invoice)) })));
+  }
   if (url.pathname.endsWith("/refunds")) return list(refunds);
   return list([]);
 }) as typeof fetch;
+/** A store invoice by id: a listed renewal, or the first invoice a membership's checkout opened. */
+const invoiceOf = (id: string): unknown => (invoices as { id?: string }[]).find((invoice) => invoice.id === id) ?? (id === "in_first_member" ? {
+  id, object: "invoice", status: "paid", billing_reason: "subscription_create", amount_paid: 5000, currency: "usd", created: NOW / 1000 - 3600,
+  parent: { subscription_details: { metadata: { store: "cashflow", product: "club", channel: "instagram" } } } } : id);
 const refund = (pi: string, cents: number) => ({ id: `re_${pi}`, object: "refund", status: "succeeded", amount: cents, currency: "usd", created: NOW / 1000, payment_intent: pi });
 
 async function main() {

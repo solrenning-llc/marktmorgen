@@ -32,9 +32,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     const intent = url.searchParams.get("payment[payment_intent]");
     if (intent) {
       if (filteredReply) return new Response(JSON.stringify(filteredReply), { status: 200 });
-      // The one-by-one lookup answers honestly: every invoice payment of that intent, one at a time.
+      // The one-by-one lookup answers honestly: every invoice payment of that intent, one at a time, with its invoice
+      // expanded as asked (expand[]=data.invoice), as Stripe does.
       const rows = [...invoicePayments, ...olderPayments].filter((row) => (row.payment as { payment_intent?: string }).payment_intent === intent);
-      return list(rows.slice(0, 1), endless || rows.length > 1);
+      return list(rows.slice(0, 1).map(expanded), endless || rows.length > 1);
     }
     if (!endless) return list(invoicePayments);
     page += 1;
@@ -43,6 +44,15 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (url.pathname.endsWith("/refunds")) return list(refunds);
   return list([]);
 }) as typeof fetch;
+/** The store's own invoices, by id: its renewals as listed, and a membership's first invoice its checkout opened. */
+const firstInvoice = (id: string) => ({ id, object: "invoice", status: "paid", billing_reason: "subscription_create", amount_paid: 5000, currency: "usd",
+  created: NOW / 1000 - 3600, parent: { subscription_details: { metadata: { store: "cashflow", product: "club", channel: "instagram" } } } });
+function expanded(row: Record<string, unknown>): Record<string, unknown> {
+  const id = row.invoice;
+  if (typeof id !== "string") return row;
+  const own = (invoices as { id?: string }[]).find((invoice) => invoice.id === id) ?? (id === "in_first_member" ? firstInvoice(id) : null);
+  return own ? { ...row, invoice: own } : row;
+}
 const refund = (pi: string, cents: number) => ({ id: `re_${pi}`, object: "refund", status: "succeeded", amount: cents, currency: "usd", created: NOW / 1000, payment_intent: pi });
 const pay = (id: string, invoice: string, pi: string) => ({ id, object: "invoice_payment", invoice, status: "paid", payment: { type: "payment_intent", payment_intent: pi } });
 
@@ -85,7 +95,10 @@ async function main() {
       { ...pay("inpay_2", "in_other_invoice", "pi_sharedintent01"), status },
     ];
     const line = usd((await readSales(store, NOW))!);
-    is(`a same-intent allocation with status ${String(status)}`, line?.keptCents, status === null ? null : 4000);
+    // Since Codex N1's fix only the lookup by the payment proves it the store's alone, and Stripe lists every
+    // allocation of the payment there, an open or canceled one included: two rows prove nothing, so the kept total is
+    // unknown, never reduced on a guess. (The bulk read used to skip open and canceled rows and confirm the rest.)
+    is(`a same-intent allocation with status ${String(status)}: kept unknown`, line?.keptCents ?? null, null);
   }
 
   part("A paid allocation without a readable payment identity cannot complete the bulk proof");

@@ -581,6 +581,22 @@ async function main(): Promise<void> {
   malform(on("HGETALL", "nl:forget:q"), { 0: "x" });
   is("a line read in another shape: the run fails, it never reads as an empty line", await rejects(() => retryStoreForgets(Date.now() + 10_000)), "Error");
   restore();
+  // Codex G's MEDIUM on main (G-20261119-0610): the try's work is done, then the line's own end (out of the line and
+  // the month's done) answers cut short, without being applied. That end is unknown: never counted done, never another
+  // failed try, and the store's line is left exactly as it was, for the next run.
+  const UNSURE_STATS = "f".repeat(32);
+  const UNSURE_SID = "9".repeat(32);
+  const unsureField = `${UNSURE_STATS}|${UNSURE_SID}`;
+  await queueStoreForget(UNSURE_STATS, UNSURE_SID);
+  const [unsureBefore] = await real([["HGET", "nl:forget:q", unsureField]]);
+  const completionBatch = (commands: (string | number)[][]) =>
+    commands.some((c) => (c[0] === "HDEL" && c[1] === "nl:forget:q") || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-forget-complete:")));
+  redis.pipeline = (async (commands: (string | number)[][]) => (completionBatch(commands) ? [] : real(commands))) as typeof redis.pipeline;
+  const unsureAnswer = await rejects(() => retryStoreForgets(Date.now() + 10_000, Date.now(), async () => {}));
+  restore();
+  const [unsureAfter] = await real([["HGET", "nl:forget:q", unsureField]]);
+  is("a cut-short end of a try is unknown: never done nor another failed try; its line is left as it was", [unsureAnswer, unsureAfter], ["UnknownReplyError", unsureBefore]);
+  await real([["HDEL", "nl:forget:q", unsureField]]);
   const storesRoute = readFileSync("app/api/store/stores/route.ts", "utf8");
   const closingCron = readFileSync("app/api/cron/closing/route.ts", "utf8");
   is(

@@ -2139,11 +2139,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
-      // A product's removal pays WAITLIST_DROP_UNITS more studio requests before anything goes, for its waitlist's hold
-      // and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and WAITLIST_DROP_BYTES
-      // bytes, inside those units (#4462, 16 November 2026; tests/waitlist-removed-drop-pending.test.ts).
+      // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
+      // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and
+      // WAITLIST_DROP_BYTES bytes inside the additional unit (#4462; tests/waitlist-removed-drop-pending.test.ts).
       { file: "lib/waitlist.ts", names: ["WAITLIST_DROP_UNITS", "WAITLIST_DROP_COMMANDS", "WAITLIST_DROP_BYTES", "holdWaitlistDrop", "finishWaitlistDrop"] },
-      { file: "app/api/store/product/route.ts", names: ["takeAllowance(guarded.store, \"studio\", WAITLIST_DROP_UNITS)"] },
+      { file: "app/api/store/product/route.ts", names: ["1 + WAITLIST_DROP_UNITS"] },
       // A person's erasure reads the store's waitlist marks (two SCARD and two SMEMBERS, in ERASE_FIXED_COMMANDS) and
       // counts each mark read (ERASE_PER.waitlists), capped at MAX_WAITLIST_MARKS; paid with the rest of the erasure.
       { file: "lib/erasure-rules.ts", names: ["ERASE_FIXED_COMMANDS = 563", "waitlists: [3, 1_000]"] },

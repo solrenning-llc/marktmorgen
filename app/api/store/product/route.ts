@@ -42,10 +42,12 @@ import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 
 /** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
 const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
+/** The studio request a removal's invitations' first page takes (lib/move-members.ts notePendingInvites, or
+ * dropProductInvites when the removal is asked again), admitted with the removal itself (#4462). */
+const REMOVE_INVITES_FIRST_UNITS = 1;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { WAITLIST_DROP_UNITS, dropWaitlist, finishWaitlistDrop, holdWaitlistDrop } from "@/lib/waitlist";
-import { takeAllowance } from "@/lib/store-allowance";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
@@ -173,7 +175,11 @@ export async function GET(request: NextRequest) {
 /** Adds, changes, reorders or removes one thing on the creator's store. */
 export async function POST(request: NextRequest) {
   // Room for the long description, which is the one big thing sent here.
-  const guarded = await guardStoreWrite(request, "products", 40_000);
+  // A removal's fixed studio units are admitted together: its ordinary request, its waitlist's (WAITLIST_DROP_UNITS)
+  // and its invitations' first page (REMOVE_INVITES_FIRST_UNITS). With room for fewer, none is consumed (Codex U and P
+  // on #4462). Other product writes keep their one ordinary request.
+  const guarded = await guardStoreWrite(request, "products", 40_000, undefined,
+    (body) => (text(body.action, 10) === "remove" ? 1 + WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS : 1));
   if (!guarded.ok) return guarded.response;
 
   const { ref, body } = guarded;
@@ -364,9 +370,7 @@ export async function POST(request: NextRequest) {
         if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
         if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
       }
-      // Its waitlist's hold and drop are paid for before anything goes (WAITLIST_DROP_UNITS, lib/waitlist.ts; #4462).
-      const paid = await takeAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS);
-      if (!paid.ok) return paid.reason === "used" ? refusedJson("used", paid.message) : Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      // guardStoreWrite admitted this request and its WAITLIST_DROP_UNITS together before anything went (#4462).
       // Noted as dropping its waitlist before the product goes (lib/waitlist.ts holdWaitlistDrop): whatever its coming-soon
       // mark, a person's deletion reaches the addresses until their drop is confirmed. Not noted, nothing is removed.
       if (before) {
@@ -385,7 +389,14 @@ export async function POST(request: NextRequest) {
       // for in studio requests first; not finished (a reply not known, the studio's requests used up): nothing is
       // removed, and the same removal asked again goes on where this stopped.
       const refusal: { reason?: string; message?: string } = {};
-      const pay = async (units: number): Promise<boolean> => {
+      // The invitations' first page was admitted with the request (REMOVE_INVITES_FIRST_UNITS, above): notePendingInvites,
+      // or dropProductInvites when asked again for a product already removed, spends it first; only more is counted here.
+      let prepaid = REMOVE_INVITES_FIRST_UNITS;
+      const pay = async (asked: number): Promise<boolean> => {
+        const fromPrepaid = Math.min(prepaid, asked);
+        prepaid -= fromPrepaid;
+        const units = asked - fromPrepaid;
+        if (units === 0) return true;
         const counted = await countStudio(guarded.store, null, units);
         if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
         return counted.ok;

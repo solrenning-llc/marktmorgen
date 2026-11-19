@@ -32,7 +32,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { doneLessons, emailKey } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
-import { enroll } from "@/lib/flows";
+import { enroll, enrollOrThrow } from "@/lib/flows";
 import { MIN_REACHED_SHARE, REACHED_SHARE_STEP, reachedShare } from "@/lib/flow-rules";
 import { takeBuyerAction } from "@/lib/buyer-actions";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
@@ -68,8 +68,10 @@ async function noteReached(store: Store, productId: string, courseId: string, em
   const before = kept === null ? 0 : typeof kept === "string" && /^\d{1,3}$/.test(kept) ? Number(kept) : NaN;
   if (!Number.isFinite(before) || step <= before) return;
   if (!(await takeBuyerAction(store))) return;
+  // Started first, and the share written down only once that is known (Codex X5's MEDIUM on #3989): a start that
+  // failed leaves the mark where it was, so the next lesson view tries again (each start is still claimed once).
+  await enrollOrThrow(store, email, { joined: false, reached: { productId, share } });
   await redisPipeline([["SET", reachedKey(courseId, email), String(step), "EX", FINISH_KEEP_SECONDS]]);
-  await enroll(store, email, { joined: false, reached: { productId, share } });
 }
 
 /** Only a complete, own acknowledgement confirms this invocation took the claim. */
@@ -118,7 +120,14 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", FINISH_KEEP_SECONDS]]);
     if (!confirmedClaim(claim)) return false;
     // Finishing is also every share reached, for a student who got here without one starting (one read of the sequences for both).
-    await enroll(store, email, { joined: false, finished: productId, reached: { productId, share } });
+    try {
+      await enrollOrThrow(store, email, { joined: false, finished: productId, reached: { productId, share } });
+    } catch (error) {
+      // Not known to have started: the claim is let go so the next view tries again (Codex X5 on #3989); a start that
+      // did land is not made twice, each being claimed once per sequence.
+      await redisPipeline([["DEL", finishedKey(courseId, email)]]).catch(() => {});
+      throw error;
+    }
     return true;
   } catch (error) {
     console.error("noting a finished course failed", error);

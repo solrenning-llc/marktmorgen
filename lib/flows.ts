@@ -790,41 +790,52 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * Starts whichever sequences this event begins, for this person. Never
  * throws: the list must never cost anyone what they asked for.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; reached?: { productId: string; share: number } }): Promise<void> {
+export type EnrollEvent = { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; reached?: { productId: string; share: number } };
+
+export async function enroll(store: Store, email: string, event: EnrollEvent): Promise<void> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
-    // Whether what they just got is sold for money: the store's own index
-    // knows, so "bought" costs no read.
-    const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
-    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
-    // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
-    const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
-      (f) =>
-        f.active &&
-        f.steps.length > 0 &&
-        ((f.trigger === "joined" && event.joined) ||
-          (f.trigger === "product" && event.productId && f.productId === event.productId) ||
-          (f.trigger === "bought" && paid) ||
-          (f.trigger === "tagged" && event.tag && f.tag && sameLabel(f.tag, event.tag)) ||
-          (f.trigger === "finished" && event.finished && f.productId === event.finished) ||
-          (f.trigger === "started" && event.started && f.productId === event.started) ||
-          // Every share at or below what they have now: a student who went from 20% to 60% at once has reached 25% and 50%.
-          (f.trigger === "reached" && event.reached && f.productId === event.reached.productId && isReachedShare(f.share) && event.reached.share >= f.share) ||
-          (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
-          (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
-          (f.trigger === "signed" && event.signed) ||
-          (f.trigger === "paid_request" && event.paidRequest) ||
-          (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
-    );
-    if (!flows.length) return;
-    const address = normaliseEmail(email);
-    // Only someone who may be written to starts one; their one start is not
-    // spent on a moment they could not have received it.
-    if (!(await isMailable(store.listId, address))) return;
-    await startFlows(store, flows, [address]);
+    await enrollOrThrow(store, email, event);
   } catch (error) {
     console.error("starting a sequence failed", error);
   }
+}
+
+/**
+ * enroll, but a failure (the sequences or a claim not read, rule 24) throws instead of being logged, so a caller
+ * that keeps a mark of what it started writes that mark only once the start is known (Codex X5's MEDIUM on #3989).
+ * Starting again after a failure starts nobody twice: each start is claimed once per sequence (startFlows).
+ */
+export async function enrollOrThrow(store: Store, email: string, event: EnrollEvent): Promise<void> {
+  if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
+  // Whether what they just got is sold for money: the store's own index
+  // knows, so "bought" costs no read.
+  const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
+  // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
+  // not exactly nil or a list of sequences throws (enroll logs it), never read as "no sequences" (rule 24).
+  const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
+    (f) =>
+      f.active &&
+      f.steps.length > 0 &&
+      ((f.trigger === "joined" && event.joined) ||
+        (f.trigger === "product" && event.productId && f.productId === event.productId) ||
+        (f.trigger === "bought" && paid) ||
+        (f.trigger === "tagged" && event.tag && f.tag && sameLabel(f.tag, event.tag)) ||
+        (f.trigger === "finished" && event.finished && f.productId === event.finished) ||
+        (f.trigger === "started" && event.started && f.productId === event.started) ||
+        // Every share at or below what they have now: a student who went from 20% to 60% at once has reached 25% and 50%.
+        (f.trigger === "reached" && event.reached && f.productId === event.reached.productId && isReachedShare(f.share) && event.reached.share >= f.share) ||
+        (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
+        (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
+        (f.trigger === "signed" && event.signed) ||
+        (f.trigger === "paid_request" && event.paidRequest) ||
+        (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
+  );
+  if (!flows.length) return;
+  const address = normaliseEmail(email);
+  // Only someone who may be written to starts one; their one start is not
+  // spent on a moment they could not have received it.
+  if (!(await isMailable(store.listId, address))) return;
+  await startFlows(store, flows, [address]);
 }
 
 /**

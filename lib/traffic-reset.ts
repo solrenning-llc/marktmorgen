@@ -35,6 +35,9 @@ import { PARTS_PER_VISIT } from "@/lib/traffic-rules";
 /** How many resets are kept in the record, the newest first. */
 export const TRAFFIC_LOG_KEEP = 1_000;
 
+/** How long the record lasts after its last reset: it names stores, and a handle is often a person's name. */
+export const TRAFFIC_LOG_DAYS = 400;
+
 const LOG_KEY = "nl:operator:traffic-log";
 const LOCK_KEY = "nl:operator:traffic-reset:lock";
 const LOCK_SECONDS = 30;
@@ -43,7 +46,8 @@ const LOCK_SECONDS = 30;
  * Under this reset's own lock token only (KEYS[3], ARGV[4]): a people count or a live room in another shape writes
  * nothing; a people count lower than the one read (another reset got in) writes nothing; otherwise the record first,
  * then the people lowered by the delta, so visits counted meanwhile stay counted, and the live room's parts as they
- * are now (KEYS[4]) for the total admission reads. Both or neither.
+ * are now (KEYS[4]) for the total admission reads. Both or neither. The record expires ARGV[6] seconds after its last
+ * reset (TRAFFIC_LOG_DAYS).
  */
 const RESET_SCRIPT = `-- marktmorgen:traffic-reset:v2
 if redis.call('GET', KEYS[3]) ~= ARGV[4] then return {-2} end
@@ -56,6 +60,7 @@ if not string.match(parts, '^%d+$') then return {-3} end
 if tonumber(current) < tonumber(ARGV[1]) then return {-1, tonumber(current)} end
 redis.call('LPUSH', KEYS[2], ARGV[3])
 redis.call('LTRIM', KEYS[2], 0, tonumber(ARGV[5]) - 1)
+redis.call('EXPIRE', KEYS[2], ARGV[6])
 return {1, redis.call('DECRBY', KEYS[1], ARGV[2]), tonumber(parts)}`;
 
 /** The lock let go only by the token that took it. */
@@ -117,7 +122,7 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
     const entry: TrafficReset = { at: now, sid: store.sid, handle: store.handle, window: window.id, before, after: to };
     const replies = repliesFor(
       await redisPipeline([
-        ["EVAL", RESET_SCRIPT, 4, key, LOG_KEY, LOCK_KEY, room, String(people), String(delta), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP],
+        ["EVAL", RESET_SCRIPT, 4, key, LOG_KEY, LOCK_KEY, room, String(people), String(delta), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP, TRAFFIC_LOG_DAYS * 86_400],
       ]),
       1,
     );

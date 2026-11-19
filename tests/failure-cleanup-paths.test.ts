@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     "ai-file deleteFile(pathname)": "only the PDF this request just drew and wrote under a fresh random name (lib/ai-file.ts saveAiFile), when it could not be kept on the draft; never a name the browser sent",
     'course deleteOrSweep(files, "handed-in work")': "handed-in work of a removed assignment, read from its own records",
     'course deleteOrSweep(file.pathname, "a lesson file")': "lesson files the course no longer holds, after it was written",
-    "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
+    "course/task deleteFile(path, \"site_cleanup\")": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
     "lib/takedown.ts del(path)": "the own picture of the link the takedown removed, read from the record it wrote (path = done.removed.path; a failed delete goes to the daily job); link-image attach admits only a fresh or own name",

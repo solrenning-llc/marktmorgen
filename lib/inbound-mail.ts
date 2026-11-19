@@ -215,8 +215,14 @@ type Received = {
 
 type FileEntry = { filename?: unknown; size?: unknown; download_url?: unknown };
 
+/**
+ * How many announced recipients are read at the most (list). Past it, the flag that forces the support path is raised
+ * (recipientsTruncated): one number for both, so they can never drift apart (Codex X6's LOW on #3481).
+ */
+export const ANNOUNCED_RECIPIENTS_READ = 50;
+
 const list = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string").slice(0, 50) : [];
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string").slice(0, ANNOUNCED_RECIPIENTS_READ) : [];
 
 /** "Jane Doe <jane@example.com>" taken apart; a bare address has no name. */
 export function parseSender(from: string): { name: string; address: string | null } {
@@ -543,7 +549,7 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
   const creatorsDomain = creatorDomain(NIMBUS_FROM);
   // list() bounds the recipient work. Beyond that bound, an omitted recipient may be support@, so the
   // announcement cannot prove a store-only delivery or earn a store-address exemption (Codex X4/X6, HIGH).
-  const recipientsTruncated = Array.isArray(announcedTo) && announcedTo.length > 50;
+  const recipientsTruncated = Array.isArray(announcedTo) && announcedTo.length > ANNOUNCED_RECIPIENTS_READ;
   const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
   const announcedAddresses = announced.map((one) => (parseSender(one).address ?? "").toLowerCase());
   const showsSupport = recipientsTruncated || announcedAddresses.some((address) => address.endsWith(`@${platformDomain()}`));

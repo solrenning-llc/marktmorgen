@@ -31,7 +31,7 @@
  * product, the student's purchases and the "No thanks" is the next unit, and
  * takes its own units before it reads.
  */
-import { DEAL_WORDS } from "@/lib/store-assistant-rules";
+import { DEAL_WORDS, writesAFigure } from "@/lib/store-assistant-rules";
 import { PRESSURE } from "@/lib/assistant-reminder-rules";
 
 /** The most characters the creator's line may have: one short sentence or two. */
@@ -126,7 +126,9 @@ export function lineProblem(line: string): NextStepProblem | null {
   // Pressure first: the assistant's deal words also hold scarcity ("before it's gone"), which on a line here is pressure.
   if (any(PRESSURE)) return "pressure";
   if (any(DEAL_WORDS)) return "deal";
-  if (any(/\p{N}/u)) return "number";
+  // A figure in digits (any numeric character) or written in words or Roman numerals in any store language, read by the
+  // assistant's own reader (Codex N1, G and T on #3530): "Ten students completed it" is a count too.
+  if (any(/\p{N}/u) || read.some(writesAFigure)) return "number";
   if (any(/["“”«»„‟]/)) return "quote";
   if (any(/[!¡]/)) return "exclaim";
   return null;

@@ -73,6 +73,16 @@ function retryScheduled(sub: object): boolean {
 }
 
 /**
+ * Every state Stripe gives a subscription (its API reference, Subscription.status). A kept state outside them is read
+ * from Stripe again, never trusted (Codex L on #3889). memberState itself keeps main's reading of other text (ended,
+ * tests/money-e2e-buyer-subscriptions.test.ts).
+ */
+const STRIPE_SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+
+/** What memberState can answer, and so the only states membershipStatus keeps and reads back. */
+const KEPT_STATES = new Set([...STRIPE_SUB_STATUSES, PAST_DUE_NO_RETRY]);
+
+/**
  * The state a membership's doors go by: Stripe's own, or "paused" while a
  * pause its member chose is running (lib/membership-pause-rules.ts). Stripe
  * keeps calling a paused membership active, because it is not cancelled;
@@ -90,6 +100,20 @@ export function memberState(sub: unknown): string | null {
 /** Whether a membership, as Stripe sent it, opens its doors now. */
 export function isLiveSub(sub: unknown): boolean {
   return isLive(memberState(sub));
+}
+
+/**
+ * Whether the membership on a paid subscription checkout, read with its
+ * subscription expanded, opens its doors now (rule 30: every door that reads
+ * one). A checkout in subscription mode always has its subscription, so one
+ * that is still its id (not expanded), null, a list or anything but a
+ * subscription is an answer not understood: it throws UnknownReplyError,
+ * never "ended" (lib/learn.ts, lib/community-access.ts, lib/buyer-orders.ts).
+ */
+export function liveExpanded(sub: unknown): boolean {
+  const state = Array.isArray(sub) ? null : memberState(sub);
+  if (state === null) throw new UnknownReplyError("a checkout's membership");
+  return isLive(state);
 }
 
 /**
@@ -128,10 +152,13 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
     const reply = await redisPipeline([["GET", statusKey(account, subscription)]]);
     if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) throw new UnknownReplyError("a membership status cache");
     const [cached] = reply;
-    if (typeof cached === "string" && cached) return cached;
-    // Only an explicit missing key permits the provider lookup. A partial
-    // read does not prove either a live membership or an absent cache.
-    if (cached !== null) throw new UnknownReplyError("a membership status cache value");
+    // A kept state obeys the same closed set as Stripe's own (Codex L on #3889): one of Stripe's states, or the doors'
+    // own PAST_DUE_NO_RETRY and "paused". Other text (kept by an earlier version, or damaged) certifies nothing:
+    // Stripe is asked again, and the state read is kept over it.
+    if (typeof cached === "string" && KEPT_STATES.has(cached)) return cached;
+    // Only an explicit missing key or such a non-empty text permits the provider lookup. A reply of another shape,
+    // or an empty text, does not prove either a live membership or an absent cache.
+    if (cached !== null && (typeof cached !== "string" || cached === "")) throw new UnknownReplyError("a membership status cache value");
   }
   const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`);
   // A status from a different or unidentified subscription cannot authorize

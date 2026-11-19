@@ -5,7 +5,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const now = Date.UTC(2026, 10, 5, 1);
-const store = { handle: "recovery-evidence", previousHandles: [], releasedHandles: [], stripeAccountId: "acct_test_recovery_evidence", statsId: "f".repeat(32), currency: "usd" } as unknown as Store;
+const store = { sid: "c0dec0dec0dec0dec0dec0dec0dec0e1", email: "owner-recovery-evidence@example.com", handle: "recovery-evidence", previousHandles: [], releasedHandles: [], stripeAccountId: "acct_test_recovery_evidence", statsId: "f".repeat(32), currency: "usd" } as unknown as Store;
 const cache = `nl:dun:report:${store.statsId}:v2`;
 const invoice = (id = "in_confirmed", extra: Record<string, unknown> = {}) => ({ id, currency: "usd", amount_paid: 1234, attempt_count: 2, paid_out_of_band: false, billing_reason: "subscription_cycle", status_transitions: { paid_at: now / 1000 - 60 }, parent: { subscription_details: { metadata: { store: store.handle } } }, ...extra });
 const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
@@ -14,6 +14,7 @@ let replies: unknown[] = [];
 let reads = 0;
 let writes = 0;
 let fault: { command: string; reply: unknown[] } | null = null;
+let eraseStoreDuringInvoiceRead = false;
 redis.pipeline = async commands => {
   if (commands.some(c => c[0] === "SET" && c[1] === cache)) writes += 1;
   if (fault && commands[0]?.[0] === fault.command) return fault.reply;
@@ -22,11 +23,15 @@ redis.pipeline = async commands => {
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if ((init?.method ?? "GET") !== "GET" || url.pathname !== "/v1/invoices") throw new Error("Unexpected provider operation");
+  if (eraseStoreDuringInvoiceRead) {
+    await original([["DEL", `nl:store:id:${store.sid}`], ["DEL", cache]]);
+    eraseStoreDuringInvoiceRead = false;
+  }
   const body = replies[Math.min(reads, replies.length - 1)];
   reads += 1;
   return new Response(JSON.stringify(body), { status: 200 });
 }) as typeof fetch;
-const reset = (pages: unknown[] = [page([invoice()])]) => { redis.clear(); replies = pages; reads = 0; writes = 0; fault = null; };
+const reset = (pages: unknown[] = [page([invoice()])]) => { redis.clear(); redis.run(["SET", `nl:store:id:${store.sid}`, store.email]); replies = pages; reads = 0; writes = 0; fault = null; eraseStoreDuringInvoiceRead = false; };
 async function refuses(name: string, fresh = true) {
   let refused = false;
   try { await recoveryReport(store, fresh, now); } catch { refused = true; }
@@ -104,6 +109,13 @@ async function main() {
   let overflow = false;
   try { recoveredFrom([invoice("in_large", { amount_paid: Number.MAX_SAFE_INTEGER }), invoice("in_next")], new Set([store.handle]), "usd", new Set(), now); } catch { overflow = true; }
   is("an unrepresentable total is not rounded into a known amount", overflow, true);
+  part("A Stripe report that returns after store erasure cannot recreate the studio's recovery cache");
+  reset([page([])]);
+  await original([["SET", `nl:store:id:${store.sid}`, "owner@example.com"]]);
+  eraseStoreDuringInvoiceRead = true;
+  is("the report still finishes from the already-started synthetic Stripe read", (await recoveryReport(store, true, now))?.complete, true);
+  is("the eraser removed the live-id fence", Number(redis.run(["EXISTS", `nl:store:id:${store.sid}`])), 0);
+  is("RED: the late report does not recreate deleted store data", Number(redis.run(["EXISTS", cache])), 0);
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

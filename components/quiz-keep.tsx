@@ -44,6 +44,8 @@ export function QuizKeep({
     quizKeptAsk: string;
     quizKeptRestore: string;
     quizKeptStartOver: string;
+    quizKeptUndo: string;
+    quizKeptUndone: string;
   };
 }) {
   const mark = useRef<HTMLSpanElement>(null);
@@ -53,6 +55,9 @@ export function QuizKeep({
   const [said, setSaid] = useState("");
   // A draft found when the lesson opened, offered and never put back on its own (review of #4324, MEDIUM 9).
   const [offer, setOffer] = useState<QuizDraft | null>(null);
+  // The choices "Clear my answers" took, for Undo until the next change, with no time limit (review of #4324, MEDIUM 10).
+  const [cleared, setCleared] = useState<ChoiceInput[] | null>(null);
+  const clearedText = useRef<HTMLSpanElement>(null);
   // Kept in this tab's session storage by default; on the device only once the student chooses it (review of #4324).
   const [onDevice, setOnDevice] = useState(false);
   const device = useRef(false);
@@ -91,6 +96,7 @@ export function QuizKeep({
       // since these answers now replace it.
       setSaid("");
       setOffer(null);
+      setCleared(null);
       const now = draftOf(snapshot(), shown, tries, Date.now(), version);
       const [here, other] = device.current ? [local, session] : [session, local];
       try {
@@ -109,6 +115,11 @@ export function QuizKeep({
   }, [key, shown, tries, version]);
 
   const firstChoice = () => mark.current?.closest("form")?.querySelector<HTMLInputElement>('input[name^="q_"]');
+  const choiceInputs = () => [...(mark.current?.closest("form")?.querySelectorAll<HTMLInputElement>('input[name^="q_"]') ?? [])];
+  // Once the answers are cleared, the focus goes to the text that says so, never nowhere (2.4.3).
+  useEffect(() => {
+    if (cleared) clearedText.current?.focus();
+  }, [cleared]);
 
   return (
     <span ref={mark} className="block" data-quiz-keep>
@@ -155,19 +166,41 @@ export function QuizKeep({
                 type="button"
                 className="st-footer-link inline-flex min-h-11 items-center font-semibold"
                 onClick={() => {
-                  const form = mark.current?.closest("form");
-                  form?.querySelectorAll<HTMLInputElement>('input[name^="q_"]').forEach((input) => {
+                  const taken = choiceInputs().map((i) => ({ name: i.name, value: i.value, checked: i.checked }));
+                  choiceInputs().forEach((input) => {
                     input.checked = false;
                   });
                   forget(key);
                   setBack(false);
-                  setSaid(words.quizKeptCleared);
-                  // The button goes with the draft: the focus moves to the quiz's first choice, never to nowhere (2.4.3).
-                  form?.querySelector<HTMLInputElement>('input[name^="q_"]')?.focus();
+                  setSaid("");
+                  setCleared(taken);
                 }}
               >
                 {words.quizKeptClear}
               </button>
+            ) : null}
+            {cleared ? (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span ref={clearedText} tabIndex={-1}>
+                  {words.quizKeptCleared}
+                </span>
+                <button
+                  type="button"
+                  className="st-footer-link inline-flex min-h-11 items-center font-semibold"
+                  onClick={() => {
+                    for (const input of choiceInputs()) {
+                      input.checked = cleared.some((was) => was.name === input.name && was.value === input.value && was.checked);
+                    }
+                    saveNow.current();
+                    setCleared(null);
+                    setBack(true);
+                    setSaid(words.quizKeptUndone);
+                    firstChoice()?.focus();
+                  }}
+                >
+                  {words.quizKeptUndo}
+                </button>
+              </span>
             ) : null}
           </span>
           {/* Off by default: the answers stay in this tab only. No name, so the quiz never sends it. */}

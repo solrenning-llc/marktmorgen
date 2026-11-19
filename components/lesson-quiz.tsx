@@ -151,6 +151,8 @@ export function LessonQuiz({
               quizKeptAsk: w.quizKeptAsk,
               quizKeptRestore: w.quizKeptRestore,
               quizKeptStartOver: w.quizKeptStartOver,
+              quizKeptUndo: w.quizKeptUndo,
+              quizKeptUndone: w.quizKeptUndone,
             }}
           />
         ) : null}

@@ -725,7 +725,8 @@ export default function PrivacyPage() {
           answers as before. Coming back to the lesson asks whether to put the
           choices back, and puts nothing back unless the student presses
           &quot;Restore&quot;; &quot;Start over&quot; and
-          &quot;Clear my answers&quot; remove them at once. Once a try is
+          &quot;Clear my answers&quot; remove them at once (after the latter,
+          &quot;Undo&quot; puts them back until the next answer). Once a try is
           recorded, or for a quiz that draws its questions again, what was kept
           is never put back and is removed the next time that lesson opens in
           that browser.

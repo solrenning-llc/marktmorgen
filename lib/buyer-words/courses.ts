@@ -246,6 +246,9 @@ const en = {
   quizKeptAsk: "Restore your answers from {when}?",
   quizKeptRestore: "Restore",
   quizKeptStartOver: "Start over",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Undo",
+  quizKeptUndone: "Your answers are back.",
   quizKeepDeviceHint: "Off: they stay only in this tab and go when you close it. Leave it off on a shared computer.",
   check: "Check my answers",
   triesLeft: (left: number) => `${left} ${plural(left, "try", "tries")} left`,
@@ -591,6 +594,9 @@ const es: CoursesWords = {
   quizKeptAsk: "¿Recuperar tus respuestas del {when}?",
   quizKeptRestore: "Recuperar",
   quizKeptStartOver: "Empezar de nuevo",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Deshacer",
+  quizKeptUndone: "Tus respuestas han vuelto.",
   quizKeepDeviceHint: "Desactivado: solo se quedan en esta pestaña y se borran al cerrarla. Déjalo desactivado en un ordenador compartido.",
   check: "Comprobar mis respuestas",
   triesLeft: (left) => `${plural(left, "Queda", "Quedan")} ${left} ${plural(left, "intento", "intentos")}`,
@@ -926,6 +932,9 @@ const fr: CoursesWords = {
   quizKeptAsk: `Récupérer vos réponses du {when}${S}?`,
   quizKeptRestore: "Récupérer",
   quizKeptStartOver: "Recommencer",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Annuler",
+  quizKeptUndone: "Vos réponses sont revenues.",
   quizKeepDeviceHint: `Désactivé${S}: elles restent seulement dans cet onglet et disparaissent quand vous le fermez. Laissez désactivé sur un ordinateur partagé.`,
   check: "Vérifier mes réponses",
   triesLeft: (left) => `${left}${S}${frPlural(left, "tentative restante", "tentatives restantes")}`,
@@ -1255,6 +1264,9 @@ const de: CoursesWords = {
   quizKeptAsk: "Ihre Antworten vom {when} wiederherstellen?",
   quizKeptRestore: "Wiederherstellen",
   quizKeptStartOver: "Neu beginnen",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Rückgängig machen",
+  quizKeptUndone: "Ihre Antworten sind wieder da.",
   quizKeepDeviceHint: "Aus: Sie bleiben nur in diesem Tab und verschwinden, wenn Sie ihn schließen. Auf einem gemeinsam genutzten Computer ausgeschaltet lassen.",
   check: "Meine Antworten prüfen",
   triesLeft: (left) => `Noch ${left} ${plural(left, "Versuch", "Versuche")}`,
@@ -1586,6 +1598,9 @@ const it: CoursesWords = {
   quizKeptAsk: "Ripristinare le tue risposte del {when}?",
   quizKeptRestore: "Ripristina",
   quizKeptStartOver: "Ricomincia",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Annulla",
+  quizKeptUndone: "Le tue risposte sono tornate.",
   quizKeepDeviceHint: "Disattivato: restano solo in questa scheda e spariscono quando la chiudi. Lascialo disattivato su un computer condiviso.",
   check: "Controlla le mie risposte",
   triesLeft: (left) => `${plural(left, "Resta", "Restano")} ${left} ${plural(left, "tentativo", "tentativi")}`,
@@ -1918,6 +1933,9 @@ const nl: CoursesWords = {
   quizKeptAsk: "Je antwoorden van {when} terugzetten?",
   quizKeptRestore: "Terugzetten",
   quizKeptStartOver: "Opnieuw beginnen",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Ongedaan maken",
+  quizKeptUndone: "Je antwoorden zijn terug.",
   quizKeepDeviceHint: "Uit: ze blijven alleen in dit tabblad en verdwijnen als je het sluit. Laat het uit op een gedeelde computer.",
   check: "Controleer mijn antwoorden",
   triesLeft: (left) => `Nog ${left} ${plural(left, "poging", "pogingen")} over`,
@@ -2250,6 +2268,9 @@ const pt: CoursesWords = {
   quizKeptAsk: "Recuperar as suas respostas de {when}?",
   quizKeptRestore: "Recuperar",
   quizKeptStartOver: "Recomeçar",
+  /** Review of #4324: clearing the answers can be undone until the next change. */
+  quizKeptUndo: "Anular",
+  quizKeptUndone: "As suas respostas voltaram.",
   quizKeepDeviceHint: "Desligado: ficam só neste separador e desaparecem quando o fechar. Deixe desligado num computador partilhado.",
   check: "Verificar as minhas respostas",
   triesLeft: (left) => `${plural(left, "Resta", "Restam")} ${left} ${plural(left, "tentativa", "tentativas")}`,

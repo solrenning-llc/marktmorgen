@@ -35,6 +35,7 @@ export function CommunityComposer({
   from,
   canEmail,
   reach,
+  reachUnknown,
   named,
   words,
 }: {
@@ -47,7 +48,10 @@ export function CommunityComposer({
   owner: boolean;
   from: "feed" | "space";
   canEmail: boolean;
-  reach: number;
+  /** How many members asked for announcement emails; null when that could not be read, and the box is off. */
+  reach: number | null;
+  /** Said in place of the count when it could not be read (lib/buyer-words/community-unread.ts). */
+  reachUnknown: string;
   named: boolean;
 }) {
   const MESSAGES = words.errors;
@@ -290,10 +294,10 @@ export function CommunityComposer({
             <span>{words.markAnnouncement}</span>
           </label>
           {announce ? (
-            <label className={`flex min-h-11 items-start gap-2 text-sm ${canEmail && reach > 0 ? "" : "st-muted"}`}>
-              <input type="checkbox" name="email" value="1" disabled={!canEmail || reach === 0} className="mt-0.5 h-5 w-5 shrink-0" />
+            <label className={`flex min-h-11 items-start gap-2 text-sm ${canEmail && reach !== null && reach > 0 ? "" : "st-muted"}`}>
+              <input type="checkbox" name="email" value="1" disabled={!canEmail || reach === null || reach === 0} className="mt-0.5 h-5 w-5 shrink-0" />
               <span>
-                {!canEmail ? words.emailNeedsPro : reach === 0 ? words.nobodyAskedEmails : words.alsoEmail}
+                {!canEmail ? words.emailNeedsPro : reach === null ? reachUnknown : reach === 0 ? words.nobodyAskedEmails : words.alsoEmail}
               </span>
             </label>
           ) : null}

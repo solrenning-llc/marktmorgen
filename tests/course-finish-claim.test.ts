@@ -55,7 +55,16 @@ async function main() {
         return email;
       }
       const email = await person();
-      is(`${kind}: an actual confirmed claim starts the event`, await note(store, product.id, course.id, email), true);
+      const actualRun = redis.run.bind(redis);
+      let countedCommands = 0;
+      redis.run = (command) => { countedCommands++; return actualRun(command); };
+      try {
+        is(`${kind}: an actual confirmed claim starts the event`, await note(store, product.id, course.id, email), true);
+      } finally { redis.run = actualRun; }
+      if (kind === "fin") {
+        console.log(`Course finish including Lua-internal commands: ${countedCommands}`);
+        is("the single-flow finish stays within the existing 100-command buyer action envelope", countedCommands <= 100, true);
+      }
       const queued = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
       is(`${kind}: the real enrollment queued one step for that student`, (queued[0] as string[]).filter(item => item.endsWith(`|${email}`)).length, 1);
       is(`${kind}: an ordinary repeated event does not start again`, await note(store, product.id, course.id, email), false);
@@ -98,7 +107,10 @@ async function main() {
         redis.pipeline = original;
         is(`${kind}/${variant.name}: no confirmed course event`, result, false);
         is(`${kind}/${variant.name}: one claim, no enrollment IO or queue`, [claims, readsAfterClaim, queued], [1, 0, 0]);
-        if (variant.apply) is(`${kind}/${variant.name}: an applied unknown claim is retained`, await original([["GET", key]]), ["1"]);
+        if (variant.apply) {
+          const [kept] = await original([["GET", key]]);
+          is(`${kind}/${variant.name}: an applied unknown claim is retained`, kind === "open" ? kept === "1" : typeof kept === "string" && /^\d+\.\d{9}$/.test(kept), true);
+        }
       }
 
     }

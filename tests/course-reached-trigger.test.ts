@@ -18,11 +18,11 @@ import { type Flow, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { parseFlowList } from "@/lib/flow-list";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import { upsertContact } from "@/lib/contacts";
-import { markLesson } from "@/lib/learn";
+import { emailKey, markLesson } from "@/lib/learn";
 import { noteIfFinished } from "@/lib/course-finish";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
@@ -40,9 +40,19 @@ let flowReads = 0;
 let unknownMark = false;
 /** The store's sequences cannot be read (a passing Redis failure while a workflow would start). */
 let flowsDown = false;
+let finishReleaseDown = false;
+let beforeNextFlowRead: (() => Promise<void>) | undefined;
+let finishConfirmUnknown = false;
 const real = redis.pipeline.bind(redis);
-(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
+(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
+  if (beforeNextFlowRead && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) {
+    const work = beforeNextFlowRead; beforeNextFlowRead = undefined; await work();
+  }
+  if (finishConfirmUnknown && list.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-finish-confirm:v1\n"))) {
+    await real(list); return [] as never;
+  }
   flowReads += list.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:")).length;
+  if (finishReleaseDown && list.some((c) => (c[0] === "DEL" && String(c[1]).includes(":fin:")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1\n") && String(c[3]).includes(":fin:")))) return Promise.reject(new Error("synthetic release timeout")) as ReturnType<typeof redis.pipeline>;
   if (flowsDown && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) return Promise.reject(new Error("synthetic Redis timeout")) as ReturnType<typeof redis.pipeline>;
   if (unknownMark && list.length === 1 && list[0][0] === "GET" && String(list[0][1]).includes(":reach:")) return Promise.resolve(["half"]) as ReturnType<typeof redis.pipeline>;
   return real(list);
@@ -174,6 +184,62 @@ async function main(): Promise<void> {
   is("and the next view finishes it", await noteIfFinished(store, courseId, course.id, "dee@example.com"), true);
   await run();
   is("starting what finishing starts, once", to("You finished it").filter((a) => a === "dee@example.com").length, 1);
+
+  part("A failed course start remains retryable when releasing its finish mark also fails");
+  await upsertContact(store.listId as string, "ellie@example.test", { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+  for (const lesson of [one, two, three, four]) await markLesson(course.id, "ellie@example.test", lesson, true, ROOM);
+  flowsDown = true;
+  finishReleaseDown = true;
+  is("the outage starts nothing", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), false);
+  flowsDown = false;
+  finishReleaseDown = false;
+  is("a pending finish does not allow a concurrent view to start", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), false);
+  advance(61_000);
+  is("after recovery the same completed course can start its workflow", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), true);
+  await run();
+  is("the recovered finish workflow goes exactly once", to("You finished it").filter((a) => a === "ellie@example.test").length, 1);
+  is("a later completed view does not start it again", await noteIfFinished(store, courseId, course.id, "ellie@example.test"), false);
+
+  part("A late course attempt cannot replace or erase another attempt's mark");
+  async function completed(email: string) {
+    await upsertContact(store.listId as string, email, { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+    for (const lesson of [one, two, three, four]) await markLesson(course.id, email, lesson, true, ROOM);
+    return `nl:course:${course.id}:fin:${emailKey(email)}`;
+  }
+  let key = await completed("late-success@example.test");
+  beforeNextFlowRead = async () => { await real([["SET", key, "successor", "EX", 60]]); };
+  is("a stale successful attempt cannot confirm a newer owner", await noteIfFinished(store, courseId, course.id, "late-success@example.test"), false);
+  is("its successor is kept", await real([["GET", key]]), ["successor"]);
+  key = await completed("late-failure@example.test");
+  beforeNextFlowRead = async () => { await real([["SET", key, "successor", "EX", 60]]); throw new Error("synthetic stale failure"); };
+  is("a stale failed attempt is not a completed event", await noteIfFinished(store, courseId, course.id, "late-failure@example.test"), false);
+  is("its cleanup does not delete the successor", await real([["GET", key]]), ["successor"]);
+  key = await completed("removed-mark@example.test");
+  beforeNextFlowRead = async () => { await real([["DEL", key]]); };
+  is("an attempt whose mark was removed cannot confirm it", await noteIfFinished(store, courseId, course.id, "removed-mark@example.test"), false);
+  is("confirming does not recreate the removed mark", await real([["GET", key]]), [null]);
+
+  part("A course finish deferred by the daily run allowance can retry next day");
+  key = await completed("daily-deferred@example.test");
+  is("the existing daily allowance defers completion", await noteIfFinished(store, courseId, course.id, "daily-deferred@example.test"), false);
+  is("a deferred finish is not a permanent mark", await real([["GET", key]]), [null]);
+
+  part("An applied finish confirmation with a lost acknowledgement is not repeated");
+  const oldDateNow = Date.now, oldRedisNow = redis.now;
+  const tomorrow = Math.max(Date.now(), redis.now()) + 86_400_000;
+  Date.now = () => tomorrow;
+  redis.now = Date.now;
+  try {
+    is("next day the same completed course can start", await noteIfFinished(store, courseId, course.id, "daily-deferred@example.test"), true);
+    key = await completed("lost-confirmation@example.test");
+    finishConfirmUnknown = true;
+    is("a lost confirmation is not called a confirmed event", await noteIfFinished(store, courseId, course.id, "lost-confirmation@example.test"), false);
+    finishConfirmUnknown = false;
+    is("cleanup leaves the confirmed durable mark", await real([["GET", key]]), ["1"]);
+    is("a later view cannot start a confirmed event twice", await noteIfFinished(store, courseId, course.id, "lost-confirmation@example.test"), false);
+    const [waiting] = await real([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+    is("the confirmed finish workflow has exactly one queued first step", (waiting as string[]).filter((m) => m.endsWith("|lost-confirmation@example.test") && m.includes(`|${end.ok ? end.flows.find((f) => f.trigger === "finished")?.id : "missing"}|`)).length, 1);
+  } finally { finishConfirmUnknown = false; Date.now = oldDateNow; redis.now = oldRedisNow; }
 
   part("Only who agreed");
   for (const lesson of [one, two]) await markLesson(course.id, "cy@example.com", lesson, true, ROOM);

@@ -20,7 +20,7 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { readLogWhole } from "@/lib/team";
 import { TOLD_DAYS, giveRefund } from "@/lib/creator-refund";
 import * as refundLib from "@/lib/creator-refund";
-import { allowanceUsedExact, forceAllowance } from "@/lib/store-allowance";
+import { allowanceUsedExact, forceAllowance, giveAllowance } from "@/lib/store-allowance";
 import { PLATFORM_SUBSCRIPTION_SEARCH, UNIT_COST } from "./plan-cost-registry";
 import { POST } from "@/app/api/store/person-refund/route";
 import { store as redis } from "./redis-stub";
@@ -342,6 +342,36 @@ async function main(): Promise<void> {
   is("its line was not written", (await logLines(store)).length, toldBefore);
   await post({ charge: CHARGE, token: TL, amount: "1.00" });
   is("the same form again writes it now", (await logLines(store)).length, toldBefore + 1);
+
+  part("Codex N1 on #3678 (MEDIUM): a told mark whose claim is unknown writes no line; the same form again writes it once");
+  reset();
+  const TU = "f".repeat(32);
+  const studioBeforeUnknown = await allowanceUsedExact(store, "studio");
+  const unknownBefore = (await logLines(store)).length;
+  const plainUnknown = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const [name, key] = [String(commands[0]?.[0] ?? ""), String(commands[0]?.[1] ?? "")];
+    // The SET NX lands, but its answer comes back in another shape and the read back fails: the claim is "unknown".
+    // The team log itself would write fine, so only the claim decides.
+    if (name === "SET" && key.startsWith("nl:crefund:told:") && commands[0].includes("NX")) {
+      await plainUnknown(commands);
+      return ["??"];
+    }
+    if (name === "GET" && key.startsWith("nl:crefund:told:")) throw new Error("synthetic: the read back failed");
+    return plainUnknown(commands);
+  }) as typeof redis.pipeline;
+  await post({ charge: CHARGE, token: TU, amount: "1.00" });
+  redis.pipeline = plainUnknown;
+  is("no line is written on a mark not known ours", (await logLines(store)).length, unknownBefore);
+  await post({ charge: CHARGE, token: TU, amount: "1.00" });
+  is("the same form again writes it, once", (await logLines(store)).length, unknownBefore + 1);
+  await post({ charge: CHARGE, token: TU, amount: "1.00" });
+  is("and a third time adds nothing", (await logLines(store)).length, unknownBefore + 1);
+  // The three forms took studio requests; give them back so the parts below start where they did.
+  const studioAfterUnknown = await allowanceUsedExact(store, "studio");
+  if (studioBeforeUnknown !== null && studioAfterUnknown !== null && studioAfterUnknown > studioBeforeUnknown) {
+    await giveAllowance(store, "studio", studioAfterUnknown - studioBeforeUnknown);
+  }
 
   part("Codex U on #3678 (MEDIUM, money): the charge read must be the charge asked for, before any refund is listed or sent");
   // A well-formed answer for another charge, with this store's metadata (a swapped response, a cache or gateway fault):

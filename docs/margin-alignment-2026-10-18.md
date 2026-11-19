@@ -20,7 +20,7 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $8.00 | $31.80 | $5.39 | 9.92% | $0.25 | positive | no |
 | Store yearly ($690) | $690.00 | $543.30 | $85.65 | $92.52 | $312.63 | $52.50 | 9.66% | $1.00 | positive | no |
 | Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $29.59 | $227.19 | $40.79 | 11.53% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $339.18 | $2,242.51 | $399.76 | 11.30% | $1.00 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $339.19 | $2,242.50 | $399.76 | 11.30% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $59.98 | $510.67 | $92.20 | 11.72% | $0.25 | positive | no |
 | Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $689.44 | $5,041.02 | $903.86 | 11.49% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |

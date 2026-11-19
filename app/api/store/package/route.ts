@@ -7,7 +7,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSellProduct } from "@/lib/store-checkout";
 import { isCallProduct } from "@/lib/calls";
 import { countHit } from "@/lib/visit";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 import { isComingSoon } from "@/lib/preorders";
 import { packageCheckout } from "@/lib/call-packages";
@@ -31,6 +31,10 @@ export async function POST(request: NextRequest) {
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: `${origin}${path}`, "Cache-Control": "no-store" } });
   if (!product || !isCallProduct(product) || product.call.kind !== "weekly" || !product.callPackage) return away(`/@${store.handle}`);
   if (!canSellProduct(store, product)) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);
+  // Each try opens a Checkout Session on the creator's Stripe account and holds one of the store's order places
+  // (lib/call-packages.ts packageCheckout): limited per connection and store first, in the same count as every
+  // other checkout (app/api/store/checkout, cart, paypal/checkout), so a script fills neither (audit of 11 Nov 2026).
+  if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}/book/${product.id}?status=slow`);
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}/book/${product.id}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);

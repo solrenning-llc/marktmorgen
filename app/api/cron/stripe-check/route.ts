@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isDemoCheckoutConfigured } from "@/lib/demo-store";
@@ -29,8 +30,14 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isDemoCheckoutConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:stripe-check:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock. It is held longer than maxDuration (180 s) with room, so it
+  // cannot run out while this run still works and let a second run start beside it.
+  const lock = claimValue();
+  const got = await claimMark("nl:stripe-check:lock", 210, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     let checks: Check[];
     try {
@@ -70,6 +77,6 @@ export async function GET(request: NextRequest) {
     await redisPipeline(statusRunCommands(STATUS_CHECKS[1].key, at, ok)).catch((error) => console.error("keeping the Stripe check's run for the status page failed", error));
     return Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } });
   } finally {
-    await redisPipeline([["DEL", "nl:stripe-check:lock"]]).catch(() => {});
+    await releaseMark("nl:stripe-check:lock", lock);
   }
 }

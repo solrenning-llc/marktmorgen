@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import type { MouseEvent } from "react";
+import { FunnelIssueExplain } from "@/components/funnel-issue-explain";
 import type { FunnelLaunchIssue } from "@/lib/funnel-launch-review";
 import type { FunnelStepEditorLink } from "@/lib/funnel-editor-links";
 
 export type FunnelPaymentReview = { available: boolean; paymentsHref: string | null; billingHref: string | null };
 
 /** A read-only checklist, with navigation controlled by the editor's existing save guards. */
-export function FunnelSharingReview({ issues, editors, paymentReview, formsHref, locked, settingsDisabled, onSettings, onNavigate }: {
+export function FunnelSharingReview({ issues, editors, paymentReview, formsHref, locked, settingsDisabled, onSettings, onNavigate, explain }: {
   issues: readonly FunnelLaunchIssue[];
   editors: readonly (FunnelStepEditorLink | null | undefined)[];
   paymentReview?: FunnelPaymentReview;
@@ -18,6 +19,8 @@ export function FunnelSharingReview({ issues, editors, paymentReview, formsHref,
   settingsDisabled: boolean;
   onSettings: () => void;
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void;
+  /** AI explanations of each check (26 [E9]), only where the plan has AI writing and the role may edit pages; null hides them. */
+  explain?: { funnelId: string; left: number | null; onLeft: (left: number) => void } | null;
 }) {
   return (
               <details className="group mt-4 rounded-xl border border-line p-3">
@@ -51,6 +54,7 @@ export function FunnelSharingReview({ issues, editors, paymentReview, formsHref,
                               ) : null)}
                             </div>
                           ) : null}
+                          {explain ? <FunnelIssueExplain funnelId={explain.funnelId} issue={issue} left={explain.left} onLeft={explain.onLeft} /> : null}
                         </li>
                       );
                     })}

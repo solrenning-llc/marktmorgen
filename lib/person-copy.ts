@@ -44,7 +44,7 @@ import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
-import { inviteField, inviteForCopy } from "@/lib/move-members";
+import { inviteField, inviteForCopy, withPendingInvites } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
@@ -60,6 +60,7 @@ import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
 import { pointsRecordOf } from "@/lib/community-points";
 import { allNoticesOf } from "@/lib/community-notify";
+import { benefitMarksOf } from "@/lib/tier-benefits";
 import { deviceCount } from "@/lib/community-push";
 import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
@@ -68,6 +69,7 @@ import { challengesOf } from "@/lib/community-challenges";
 import { votesOf } from "@/lib/community-polls";
 import { heldCopy, heldOf } from "@/lib/community-approval";
 import { keysOf } from "@/lib/licence-keys";
+import { activationsOf } from "@/lib/licence-activations";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
@@ -87,6 +89,7 @@ import { recoveryStopMarkKey } from "@/lib/checkout-recovery";
 import { importTracesOf } from "@/lib/imports";
 import { deliveriesAbout } from "@/lib/webhooks";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import { companiesOfPerson } from "@/lib/crm-companies";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
@@ -110,6 +113,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
+  "lib/backup-deletions.ts": { how: "marks", what: "Built but off: notes that the backup must delete its copy of a file already deleted, naming only the file (a hand-in's name holds a one-way fingerprint of your address, never the address)" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
@@ -141,6 +145,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
   "lib/paypal-sales.ts": { how: "copied", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
   "lib/licence-keys.ts": { how: "copied", what: "License keys you bought, and the sale each came from" },
+  "lib/licence-activations.ts": { how: "copied", what: "The devices your license keys run on, as the codes kept for them, and when you freed one" },
   "lib/gifts.ts": { how: "copied", what: "Gifts you bought or were given" },
   "lib/group-buy.ts": { how: "copied", what: "Places bought for a group that you bought or were given" },
   "lib/preorders.ts": { how: "copied", what: "Your pre-orders and what became of them" },
@@ -151,6 +156,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/closing-holds.ts": { how: "copied", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
   "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
+  "lib/tier-benefits.ts": { how: "copied", what: "Which membership benefits the store marked as handed to you, and for which month or year" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
 };
 
@@ -178,6 +184,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/product-updates.ts": { how: "passing", days: 60, what: "If a product update email from the store is going out to you now, its sending list holds your address until it finishes. If you pressed stop on update emails, that is in your no" },
   "lib/broadcasts.ts": { how: "passing", days: 60, what: "If one of the store's emails to its list is going out to you now, its sending list holds your address until it finishes" },
   "lib/community-event-mail.ts": { how: "passing", days: 30, what: "If an email about a community event is going out to you now, its sending list holds your address until it finishes" },
+  "lib/ad-events.ts": { how: "passing", days: 4, what: "What a checkout you opened with your yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known" },
   "lib/checkout-ask.ts": { how: "passing", days: 4, what: "A reminder you asked for on a product's page or at checkout waits in a queue with your address until it is sent: in an hour, a day or three days, as you chose, and a few hours more if a try fails" },
   "lib/imports.ts": { how: "copied", what: "Rows of a file the store imported from another platform that name you, kept 14 days from the import, and whether an email to you from that import still waits" },
   "lib/webhooks.ts": { how: "copied", what: "What the store's own systems were sent about you by its webhooks, kept for a week as they received it" },
@@ -192,6 +199,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/next-offer.ts": { how: "passing", days: 3, what: "The product the store's assistant suggested after an order, under the order's reference with no name or address, deleted three days later" },
   "lib/community.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your community posts, comments, likes and reports are in your community part" },
   "lib/community-polls.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your votes in community polls are in your community part" },
+  "lib/plan-late-notice.ts": { how: "passing", days: 400, what: "If a payment of your payment plan was taken after the plan ended and then refunded: whether you were emailed about that refund and how many times it was tried, kept under the payment's Stripe invoice only, so you are never emailed about it twice. Your address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
 };
@@ -426,7 +434,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
-    for (const productId of s.productIds) {
+    // The catalog's products and the memberships whose removal has not confirmed their invitations gone (Claude 3 on #3473).
+    for (const productId of await withPendingInvites(s.statsId, s.productIds)) {
       const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
       if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
       if (!invite) continue;
@@ -470,6 +479,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/tier-benefits.ts": async (s) => (await benefitMarksOf(s.store, s.person)).map((m) => ({ benefit: m.benefit, period: m.period, markedGiven: iso(m.at) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
@@ -516,6 +526,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {
@@ -598,6 +609,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
 };
 
+/** What the copy says is kept only as marks; the backup's deletion records only once their reviews are filled (VR item 2). */
+export function copyMarks(): string[] {
+  return Object.entries(COPY_PLAN)
+    .filter(([module, p]) => p.how === "marks" && (module !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null)))
+    .map(([, p]) => p.what);
+}
+
 /** One mark read in its exact shape: nothing (not held), or text or a number (held, with what it says). */
 function markOf(reply: unknown, what: string): string | null {
   if (reply === null) return null;
@@ -650,7 +668,7 @@ export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise
     if (records.length) sections.push({ module, what: plan.what, records });
     notComplete.push(...unread);
   }
-  const marks = Object.values(COPY_PLAN).filter((p) => p.how === "marks").map((p) => p.what);
+  const marks = copyMarks();
   const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
   const passing = Object.values(COPY_ALSO).flatMap((p) => (p.how === "passing" ? [`${p.what} (at most ${p.days} ${p.days === 1 ? "day" : "days"}).`] : []));
   return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere, passing, complete: notComplete.length === 0, notComplete };

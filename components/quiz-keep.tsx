@@ -88,7 +88,6 @@ export function QuizKeep({
     const draft = pickedEarly.length ? null : draftToRestore(raw, shown, tries, Date.now(), version);
     if (draft) {
       // Offered, not put back: the student chooses Restore or Start over (WCAG 3.3.6), and nothing is said before that.
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- the draft was read from storage outside React.
       setOffer(draft);
       setOnDevice(device.current);
     } else if (raw !== null && !pickedEarly.length) {

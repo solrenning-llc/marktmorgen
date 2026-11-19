@@ -581,7 +581,15 @@ export async function forgetDmPerson(id: string, who: string, room?: DataStore):
   const mine = stringList(lists?.[0]);
   const asked = stringList(lists?.[1]);
   if (!mine || !asked) throw new UnknownReplyError(what);
-  const pairs = [...new Set([...mine, ...asked])].filter((p) => p.split(".").includes(who));
+  // Every reference must be a conversation of this person by its canonical name (pairOf; #4806, Codex X5). One that is
+  // not cannot be attributed: the scope is unknown and nothing is deleted, the indexes included, since they are the
+  // only way back to a conversation the erasure would otherwise lose.
+  const pairs = [...new Set([...mine, ...asked])];
+  const ours = (p: string) => {
+    const other = otherIn(p, who);
+    return other !== "" && p.split(".").length === 2 && pairOf(who, other) === p;
+  };
+  if (!pairs.every(ours)) throw new UnknownReplyError(what);
   const commands: (string | number)[][] = [];
   const at: number[] = [];
   for (const pair of pairs) {

@@ -77,7 +77,7 @@ import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
-import { MAX_TEAM, LOG_LINES } from "@/lib/team";
+import { MAX_TEAM, LOG_LINES, LOG_LINE_BYTES } from "@/lib/team";
 import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
@@ -219,7 +219,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:courses:lock@app/api/cron/courses/route.ts": lock("The courses job"),
   "nl:dc:lock@app/api/cron/discord/route.ts": lock("The Discord job"),
   "nl:imports:lock@app/api/cron/imports/route.ts": lock("The imports job"),
-  "nl:backup:files:day:@lib/backup-files-source.ts": company("The count of a UTC day's pages of one source answered by the backup files route, taken before any provider is asked (273 [BK1] files part 1)", "One key a day for each of the three sources, holding a small count, made with its expiry only if absent and kept 2 days, so at most 9 at once for the company. Off: the route answers 404 while its review is null, and nothing calls it."),
+  "nl:backup:del:@lib/backup-deletions.ts": company("The deletion records the backup files route hands the Worker (273 [BK1] files part 3): one list a UTC day of { source, key, recordedAt, reason }, written by deleteFile after a deletion that happened", "The company's: a day's list, each write setting its expiry BACKUP_DELETION_RECORD_DAYS (14) days on, so at most 15 lists; each record at most RECORD_BYTES_MOST bytes and each store at most BACKUP_DELETION_RECORDS_PER_MONTH a month (lib/backup-deletions.ts), counted before it is written. A record holds an object's key and nothing else, but a key can point to a person: a hand-in's key carries a one-way fingerprint of the student's address (lib/learn.ts emailKey), a sold file's the creator's original file name. Its one purpose is to delete the backup's copy of a deleted file, a privacy erasure's included; said in lib/person-data.ts. Off: nothing is written while the route's review or the records' own review (BACKUP_DELETION_RECORDS_REVIEW) is null."),
+  "nl:backup:delcount:@lib/backup-deletions.ts": company("One store's deletion records in a UTC month, counted before each is written (273 [BK1] files part 3)", "One key a store a month holding a small count, made with its expiry only if absent and kept BACKUP_DELETION_COUNT_SECONDS (35 days), so at most two a store at once, the company's backup bookkeeping. Off: nothing is written while the route's review or the records' own review is null."),
+  "nl:store:owner:*@lib/backup-stores.ts": company("The pattern the backup files route walks every store by, for its stores page (273 [BK1] files part 3)", "Not a key: a pattern."),
+  "nl:backup:files:day:@lib/backup-files-source.ts": company("The count of a UTC day's pages of one source answered by the backup files route, taken before any provider is asked (273 [BK1] files part 1)", "One key a day for each of the three sources and for the stores and deletions pages, holding a small count, made with its expiry only if absent and kept 2 days, so at most 15 at once for the company. Off: the route answers 404 while its review is null, and nothing calls it."),
   "nl:backup:ran:@lib/backup-run.ts": company("The count of a day's calls to the backup run, taken before any cost: at most a run and one new try after a failure (273 [BK1], inbox C4-49)", "One key a day holding a small count, made with its expiry only if absent and kept 2 days, so at most 3 at once for the company. Built and off: nothing calls the run."),
   "nl:backup:last-ok@lib/backup-run.ts": company("When the last backup copy was verified, and its manifest's id, the copy never deleted to make room (273 [BK1], inbox C4-53)", "One key for the company: a short JSON of a time in ms and a manifest id, kept for good (replaced by each verified copy; its absence would be a loss), never more than one. Built and off: nothing calls the run."),
   "nl:backup:lock@lib/backup-run.ts": company("The lock that keeps backup runs one at a time (273 [BK1], inbox C4-53)", "One key for the company holding the run's random token, made only if absent, kept at most 15 minutes and let go, only by its own run, when the run ends. Built and off: nothing calls the run."),
@@ -570,6 +573,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },
   "nl:crm:pacc:@lib/pipeline-access.ts": { what: "What each teammate may do with each pipeline, only where restricted", room: ["lib/pipeline-access.ts"] },
+  "nl:crm:pacc:lock:@lib/pipeline-access.ts": short("One change to a teammate's pipeline access at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:v:@lib/crm.ts": { what: "People's values of the store's fields", room: ["lib/crm.ts"] },
   "nl:vcard:@lib/creator-card.ts": { what: "The creator's business card, as they typed it", room: ["lib/creator-card.ts"] },
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
@@ -859,6 +863,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pp:@lib/paypal-payouts.ts": { what: "The creator's PayPal app, and its lock", parts: [capped(4 * KB, "One a store.")] },
   "nl:pp:item:@lib/paypal-payouts.ts": short("A PayPal payout item written into the book: up to three partners a sale", "order", 400, 3 * MARK),
   "nl:pp:open:@lib/paypal-payouts.ts": { what: "Payout batches not yet settled", parts: [capped((MAX_AFFILIATES + 1) * 512, "A line per affiliate in an open batch.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"))] },
+  "nl:pp:press:@lib/paypal-payouts.ts": { what: "The pace of the studio's \"Check with PayPal\" press: one reading a minute", parts: [capped(KEY, "One mark a store, kept one minute.", src("lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"))] },
+  "nl:pp:pace:@lib/paypal-payouts.ts": { what: "The pace of reading a store's open PayPal batches from the studio: one read every five minutes", parts: [capped(KEY, "One mark a store, kept five minutes.", src("lib/paypal-payouts.ts", "SETTLE_PACE_SECONDS"))] },
   "nl:pp:settle:after@lib/paypal-payouts.ts": company("Where the daily PayPal settling stopped", "One store id for the whole company, kept seven days."),
   "nl:pp:stores@lib/paypal-payouts.ts": company("Stores with a batch open", "One set for every store."),
   "nl:pp:unk:month:@lib/paypal-payouts.ts": company("Monthly counts of PayPal payout batches whose answer was not known", "Three counts a month (unknown, settled, manual), no store or person; at most 14 monthly keys alive for 400 days."),
@@ -1139,7 +1145,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:team:@lib/team.ts": { what: "The team and its invites", parts: [capped((MAX_TEAM + 10) * KB, "MAX_TEAM members and their invites.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:team:invite:@lib/team.ts": short("An invite's link, seven days", "studio", 7, 512),
   "nl:team:lock:@lib/team.ts": short("The team's lock", "studio", 1, 128),
-  "nl:team:log:@lib/team.ts": { what: "What the team did", parts: [capped(LOG_LINES * 512, "The newest LOG_LINES.", src("lib/team.ts", "LOG_LINES"))] },
+  // Each line at most LOG_LINE_BYTES (logTeam drops a pipeline-access line's details, then shortens it, past that), and 64 for its list entry.
+  "nl:team:log:@lib/team.ts": { what: "What the team did", parts: [capped(LOG_LINES * (LOG_LINE_BYTES + 64), "The newest LOG_LINES, each at most LOG_LINE_BYTES.", src("lib/team.ts", "LOG_LINES", "LOG_LINE_BYTES"))] },
   "nl:team:of:@lib/team.ts": company("The stores a person is on", "A person's, not a store's: at most the stores they are on."),
   "nl:product:note:@lib/thanks-note-store.ts": { what: "Notes after paying", room: ["lib/thanks-note-store.ts"] },
   // 422 [PT2]: each benefit at most MAX_BENEFIT_TEXT characters (4 bytes each in UTF-8), its membership's id and a few numbers.

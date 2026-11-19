@@ -554,11 +554,13 @@ export function studioBlobMonthly(studio: number): number {
   return studio * Math.max(STUDIO_DOOR_BLOB, page) + Math.min(studio, PICTURE_DOOR_MAX) * check;
 }
 /**
- * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
- * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
- * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
+ * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes): US$ 0.400 per million on
+ * demand in iad1, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing,
+ * read by Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a
+ * free quota. Priced at the dearest regional rate, BLOB_SIMPLE_OP (gru1, US$ 0.56 a million), because the store's Blob
+ * region is not reviewed, as the listing line does (Codex N1's LOW on #2848).
  */
-export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
+export const BLOB_SIMPLE_OPERATION = BLOB_SIMPLE_OP;
 /**
  * One "Advanced Operation" of Vercel Blob (a put, a copy, a list; a delete is taken as one too), as a review
  * ceiling: twice the US$ 5.00 per million on demand of Vercel's published price, the same doubling as

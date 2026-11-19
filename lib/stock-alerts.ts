@@ -306,8 +306,11 @@ export async function clearStockAlerts(store: DataStore, productId: string, emai
   const read = repliesFor(await redisPipeline(addresses.map((email) => ["HGET", key, email])), addresses.length);
   if (!read) throw new UnknownReplyError("a back-in-stock list");
   const places = addresses.flatMap((email, i) => {
-    const entry = parseEntry(read[i]);
-    return entry ? [{ email, entry }] : [];
+    const raw = read[i];
+    if (raw === null) return [];
+    const entry = parseEntry(raw);
+    if (!entry) throw new UnknownReplyError("a back-in-stock place being cleared");
+    return [{ email, entry }];
   });
   if (!places.length) return 0;
   const gone = repliesFor(

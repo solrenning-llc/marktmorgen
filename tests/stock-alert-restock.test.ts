@@ -211,6 +211,29 @@ async function main(): Promise<void> {
   is("tried again as the same batch under the same key, which the email service sends to nobody twice", second.calls[0]?.key, first.calls[0].key);
   is("then cleaned up", [redis.run(["HEXISTS", listKey, "fay@example.com"]), redis.run(["EXISTS", `${listKey}:job`])], [0, 0]);
 
+  part("An unreadable address during cleanup keeps the same batch");
+  const cleanupEmail = "restock-cleanup@example.test";
+  await place(cleanupEmail);
+  makeDue();
+  const sentBeforeCleanup = sender("sent");
+  redis.run = (c) => (c[0] === "HGET" && c[1] === listKey && c[2] === cleanupEmail ? "{unreadable" : run(c));
+  try {
+    await runRestocks(Date.now() + 30_000, { ...real, send: sentBeforeCleanup.send });
+  } finally {
+    redis.run = run;
+  }
+  is("the provider got one batch", sentBeforeCleanup.calls.length, 1);
+  is("an unreadable cleanup keeps the batch and its address for retry", [
+    redis.run(["EXISTS", `${listKey}:job`]), redis.run(["HEXISTS", listKey, cleanupEmail]),
+  ], [1, 1]);
+  makeDue();
+  const finishCleanup = sender("sent");
+  await runRestocks(Date.now() + 30_000, { ...real, send: finishCleanup.send });
+  is("cleanup is retried under the same provider key", finishCleanup.calls[0]?.key, sentBeforeCleanup.calls[0]?.key);
+  is("the address and batch are cleaned up when the reply is readable", [
+    redis.run(["EXISTS", `${listKey}:job`]), redis.run(["HEXISTS", listKey, cleanupEmail]),
+  ], [0, 0]);
+
   part("The Portuguese words are Portugal's (the store's pt locale is pt-PT; Codex U on #3620)");
   const pt = STOCK_ALERT_WORDS.pt;
   const ptText = Object.values(pt).flatMap((v): string[] =>

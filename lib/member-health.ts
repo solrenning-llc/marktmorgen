@@ -261,7 +261,7 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
 /**
  * The members of `members` this store has deleted (lib/suppression.ts prints, written first by a person's erasure),
  * by address, read in one HMGET; null when the reply does not read as one slot a member, each nil or text (rule 24).
- * A store with no list has deleted nobody.
+ * A snapshot without a list id cannot certify no erasures; keepCopy refuses member-bearing copies from it.
  */
 async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string> | null> {
   const listId = store.listId;
@@ -282,6 +282,9 @@ async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string>
  * read before the write keep no copy at all.
  */
 async function keepCopy(store: Store, health: Health): Promise<void> {
+  // A legacy snapshot can predate the namespace created by an erasure already completed in another request.
+  // Without its id no print can be checked, so no copy containing a person may be kept from this snapshot.
+  if (!store.listId && health.members.length) return;
   const erased = await erasedOf(store, health.members);
   if (!erased) return;
   const copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;

@@ -1,6 +1,6 @@
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
 import { countKey, monthOf, sentKey } from "@/lib/dunning-keys";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, type Store, erasingField, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -15,8 +15,10 @@ let reads = 0;
 let writes = 0;
 let fault: { command: string; reply: unknown[] } | null = null;
 let eraseStoreDuringInvoiceRead = false;
+let markErasingDuringInvoiceRead = false;
 redis.pipeline = async commands => {
-  if (commands.some(c => c[0] === "SET" && c[1] === cache)) writes += 1;
+  // The cache is written by an EVAL since L-1159 (#4887); count it, so the refusal guards below still watch every write.
+  if (commands.some(c => (c[0] === "SET" && c[1] === cache) || (c[0] === "EVAL" && c.includes(cache)))) writes += 1;
   if (fault && commands[0]?.[0] === fault.command) return fault.reply;
   return original(commands);
 };
@@ -26,6 +28,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (eraseStoreDuringInvoiceRead) {
     await original([["DEL", `nl:store:id:${store.sid}`], ["DEL", cache]]);
     eraseStoreDuringInvoiceRead = false;
+  }
+  if (markErasingDuringInvoiceRead) {
+    // The erasure walk's first step: the store's field in the erasing hash, while its live id still exists.
+    await original([["HSET", ERASING_KEY, await erasingField(storeRef(store)), String(Date.now())]]);
+    markErasingDuringInvoiceRead = false;
   }
   const body = replies[Math.min(reads, replies.length - 1)];
   reads += 1;
@@ -116,6 +123,18 @@ async function main() {
   is("the report still finishes from the already-started synthetic Stripe read", (await recoveryReport(store, true, now))?.complete, true);
   is("the eraser removed the live-id fence", Number(redis.run(["EXISTS", `nl:store:id:${store.sid}`])), 0);
   is("RED: the late report does not recreate deleted store data", Number(redis.run(["EXISTS", cache])), 0);
+
+  part("A report that returns once erasure has begun, its live id still there, writes no cache either");
+  reset([page([])]);
+  markErasingDuringInvoiceRead = true;
+  is("the report still finishes", (await recoveryReport(store, true, now))?.complete, true);
+  is("the live id is still there, so only the erasure field refuses the write", Number(redis.run(["EXISTS", `nl:store:id:${store.sid}`])), 1);
+  is("no cache is written once erasure has begun", Number(redis.run(["EXISTS", cache])), 0);
+
+  part("Control: a live store that is not being erased still gets its cache");
+  reset([page([])]);
+  is("the report finishes", (await recoveryReport(store, true, now))?.complete, true);
+  is("its cache is written", Number(redis.run(["EXISTS", cache])), 1);
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

@@ -155,11 +155,16 @@ test("condition 2: no reviewed rate for the sale's currency, or an expired one, 
 });
 
 test("condition 3: an unconfirmed reservation refuses; every refusal after reserving releases", async () => {
-  for (const reserve of ["refused", "unknown"] as const) {
-    const counter = fake({ reserve });
-    assert.deepEqual(await thresholdCheckoutDecisionUnder(REVIEWS, at("CA"), SALE, counter.port, RECORDS, NOW), refused());
-    assert.deepEqual(counter.names(), ["reserve"]);
-  }
+  // "refused": nothing was reserved under this ref, and releasing it could free another sale's reservation.
+  const refusing = fake({ reserve: "refused" });
+  assert.deepEqual(await thresholdCheckoutDecisionUnder(REVIEWS, at("CA"), SALE, refusing.port, RECORDS, NOW), refused());
+  assert.deepEqual(refusing.names(), ["reserve"]);
+  // "unknown": the counter could not say whether it reserved, so it may exist: released, idempotently, and refused
+  // (Claude 4's and Claude 3's LOW on #4908).
+  const unsure = fake({ reserve: "unknown" });
+  assert.deepEqual(await thresholdCheckoutDecisionUnder(REVIEWS, at("CA"), SALE, unsure.port, RECORDS, NOW), refused());
+  assert.deepEqual(unsure.names(), ["reserve", "release"]);
+  assert.deepEqual(unsure.calls[1], ["release", "store-sales", "cs_synthetic_1"]);
   // A reservation that threw may or may not exist: released, idempotently, and refused.
   const threw = fake({ reserve: "throw" });
   assert.deepEqual(await thresholdCheckoutDecisionUnder(REVIEWS, at("CA"), SALE, threw.port, RECORDS, NOW), refused());

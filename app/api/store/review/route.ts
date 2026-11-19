@@ -7,7 +7,7 @@ import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/requ
 import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
-import { costsPaused } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import { forgetReviewWords, forgetVoicePerson } from "@/lib/customer-voice";
 
 /** The words, and a photo shrunk by the buyer's browser (lib/review-photo.ts) sent as text. */
@@ -123,9 +123,11 @@ export async function POST(request: NextRequest) {
     if (rating === null) return answer("rating");
     // A photo is checked first, with no network, so a photo that cannot be used changes nothing.
     // While the store's plan renewal is unpaid or its plan payment disputed
-    // (232 [CA1] 4b), a new photo is new storage nobody is paying for: the
-    // words are still saved, the photo is not kept, and the buyer is told.
-    const photoPaused = Boolean(read("photo")) && costsPaused(store);
+    // (232 [CA1] 4b), or once its plan has ended (232 [CA1], the original 4c,
+    // lib/plan-standing.ts newCostCode), a new photo is new storage nobody is
+    // paying for: the words are still saved, the photo is not kept, and the
+    // buyer is told.
+    const photoPaused = Boolean(read("photo")) && newCostCode(store) !== null;
     const sentPhoto = photoPaused ? "" : read("photo");
     const checked = sentPhoto ? checkReviewPhoto(sentPhoto) : null;
     if (checked === "photo") return answer("photo");

@@ -9,7 +9,7 @@ import {ASSISTANT_PRICE_CENTS,addOnFeeCents,assistantMeetsFloor,assistantMonthWo
 import * as Receiving from '@/lib/receiving-costs';
 import {MOST_CORRECT_READING,providerFeeCents,receivingOf} from '@/lib/receiving-costs';
 import {MOST_TAX_READING,SIZING_READING,unitUnder as archivedUnitUnder} from './historical-receiving-model';
-import {allUnits,evaluate,floorPriceCents,renderMarginAlignment,roomKept,currentPriceMarginRows,HISTORICAL_TAX_NOTICE} from './margin-alignment-table';
+import {allUnits,evaluate,floorPriceCents,renderMarginAlignment,roomKept,HISTORICAL_TAX_NOTICE} from './margin-alignment-table';
 import {reviewedUnitUnder} from '@/lib/reviewed-receiving';
 import {gateReading} from '@/lib/tax-gate';
 import {reviewedReceivingTaxInput} from './reviewed-receiving-fixture';
@@ -76,10 +76,9 @@ test('archived thresholds preserve historical figures without proposing current 
  }
  for(const tier of TIERS)assert.equal(PRICES_WITH_COMMISSION[tier].year,PRICES_WITH_COMMISSION[tier].month*10);
 });
-test('the value presentation retains owner quotations and its dated tax-model rows',()=>{
+test('the value presentation retains owner quotations; its current rows live only in the generated table',()=>{
  const doc=readFileSync('docs/value-presentation-2026-10-18.md','utf8');
- // Whole lines, not substrings: a prefix before a row shifts every column of the table.
- const lines=new Set(doc.split('\n'));
- for(const row of currentPriceMarginRows(PLANS_ON_SALE,ASSISTANT_ON_SALE))assert.ok(lines.has(row),row);
+ // The current-price rows are no longer copied here (BROADCAST-282): tests/value-presentation-pointer.test.ts holds the
+ // pointer, that no row is copied, and that docs/margin-alignment-2026-10-18.md has every one.
  assert.match(doc,/preço: o que maximiza o meu lucro/);assert.doesNotMatch(doc,/\bsmall\b|unlimited (visits|orders|emails|storage) on (Store|Studio|Scale)/i);
 });

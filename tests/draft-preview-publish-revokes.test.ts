@@ -96,6 +96,44 @@ async function main(): Promise<void> {
   is("unpublished after the race", [racedHidden.status, racedHidden.body.ok], [200, true]);
   is("the draft has no link after the race", await hasDraftPreview(await store(), made.product.id), false);
   if (answer.body.code) is("the code made in between never opens the draft", await readDraftPreview(answer.body.code), null);
+
+  // Claude 4's LOW on #3597 @312543e765 (7022345363): a publish slowed past PREVIEW_LOCK_SECONDS loses the lock, so a
+  // link asked for then is taken under the lock legitimately, still sees a draft and is made. Publication now ends the
+  // draft's link once more after the product is public, before it lets go of the lock, so that link never opens later.
+  part("A link made after a slow publish lost its lock is ended by the publish");
+  const slow = await makeDraftPreview(await store(), made.product.id);
+  const statsId = (await store()).statsId!;
+  let late: Awaited<ReturnType<typeof preview>> | null = null;
+  let held = false;
+  const steady = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await steady(commands);
+    if (!held && commands.some((c) => c[0] === "DEL" && String(c[1] ?? "").startsWith("nl:dpv:p:"))) {
+      held = true;
+      // The publish has ended the old link and is held past the lock's life: its lock runs out, as Redis would let it.
+      await steady([["DEL", `nl:dpv:lock:${statsId}:${made.product.id}`]]);
+      // The studio asks for a link now: it takes the lock, still sees a draft and is answered with a new link.
+      late = await preview(made.product.id);
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  let slowPublish: Awaited<ReturnType<typeof visibility>>;
+  try {
+    slowPublish = await visibility(made.product.id, false);
+  } finally {
+    redis.pipeline = steady;
+  }
+  const lateAnswer = late as Awaited<ReturnType<typeof preview>> | null;
+  is("published after the slow step", [slowPublish.status, slowPublish.body.ok], [200, true]);
+  is("the old link is ended", await readDraftPreview(slow.code), null);
+  is("a link was made while the lock had run out", [lateAnswer?.status, typeof lateAnswer?.body.code], [200, "string"]);
+  is("the publish ends the link made in that window", lateAnswer?.body.code ? await readDraftPreview(lateAnswer.body.code) : "no code", null);
+  const slowHidden = await visibility(made.product.id, true);
+  is("unpublished after the slow publish", [slowHidden.status, slowHidden.body.ok], [200, true]);
+  is("the draft has no link after the slow publish", await hasDraftPreview(await store(), made.product.id), false);
+  if (lateAnswer?.body.code) is("the link made in that window never opens the draft again", await readDraftPreview(lateAnswer.body.code), null);
+  const after = await preview(made.product.id);
+  is("a new link for the draft can be made again", [after.status, typeof after.body.code], [200, "string"]);
   done();
 }
 

@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { UPDATE_END_NOTICE_TRIES, UPDATE_HELD_LOOK_SECONDS, advanceUpdate, advanceUpdates, startUpdate } from "@/lib/product-updates";
+import { UPDATE_END_NOTICE_TRIES, UPDATE_HELD_LOOK_SECONDS, advanceUpdate, advanceUpdates, readUpdateJob, startUpdate } from "@/lib/product-updates";
 import { sendCallReminders } from "@/lib/call-reminders";
 import { REMINDER_QUEUE, reminderMember } from "@/lib/call-records";
 import { type CallListing, holdAndCheckout } from "@/lib/calls";
@@ -52,6 +52,7 @@ const heldMeta = new Map<string, Record<string, string>>();
 let sessions = 0;
 let refuseOwner = false;
 let ownerRefused = 0;
+let ownerReplyLost = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -65,6 +66,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return Response.json({ name: "validation_error", message: "refused by the stand-in" }, { status: 422 });
     }
     for (const m of list) mailed.push({ to: Array.isArray(m.to) ? m.to.join(",") : String(m.to), subject: String(m.subject ?? ""), text: String(m.text ?? "") });
+    if (ownerReplyLost && list.some((m: { to?: unknown }) => String(m.to).includes("offmail-owner@"))) {
+      throw new Error("Synthetic sender took the notice but its confirmation was lost");
+    }
     return Response.json(Array.isArray(body) ? { data: list.map((_: unknown, i: number) => ({ id: `synthetic_${i}` })) } : { id: "synthetic" });
   }
   if (url.hostname !== "api.stripe.com") throw new Error("No real provider call allowed");
@@ -87,6 +91,7 @@ function reset() {
   rows.length = 0;
   refuseOwner = false;
   ownerRefused = 0;
+  ownerReplyLost = false;
   heldMeta.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_switched_off_mail";
   // A literal the synthetic email fixture knows (tests/resend-fixture-credentials.ts).
@@ -339,6 +344,24 @@ test("product update: a send waiting for a plan with email also ends after its 6
   // Told too (Claude 7's LEVE 2 on #3403), with its own reason.
   assert.equal(toOwner().length, 1);
   assert.match(toOwner()[0].text, /did not include email/);
+});
+
+test("product update: a creator's notice with a lost confirmation is not scheduled to send again", async () => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok);
+  const id = started.job.id;
+  await noteTakedown(owner, null, true);
+  await advanceUpdate(id, storeForHandle, Date.now() + 20_000);
+  ageJob(id, 61);
+  redis.run(["ZADD", "nl:updheld", nowSeconds() - 1, id]);
+  ownerReplyLost = true;
+  await advanceUpdates(storeForHandle, Date.now() + 20_000);
+  ownerReplyLost = false;
+
+  const first = await readUpdateJob(id);
+  assert.deepEqual([first?.status, queued(id), heldAt(id), toOwner().length, toBuyer().length],
+    ["failed", 0, null, 1, 0], "uncertain is terminal for the notification; the buyer send has expired");
 });
 
 test("product update: a creator's notice the email service refuses is tried again the next day, at most UPDATE_END_NOTICE_TRIES times", async () => {

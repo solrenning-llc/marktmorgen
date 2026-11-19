@@ -340,6 +340,25 @@ async function drop(member: string, key = DUE_KEY): Promise<void> {
   await counted([["ZREM", key, member]]);
 }
 
+/** Keep the failed decision before queuing its warning. If the enqueue errors, the due entry is still available. */
+const FAIL_AND_TELL = `-- marktmorgen:dsched-fail-and-tell:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[2] ~= ARGV[3] then redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+redis.call('ZADD', KEYS[2], 'NX', ARGV[4], ARGV[5])
+redis.call('ZREM', KEYS[3], ARGV[5])
+return 1`;
+
+async function failAndTell(statsId: string, id: string, read: string, next: string, nowSeconds: number, member: string): Promise<boolean> {
+  try {
+    const replies = repliesFor(await redisPipeline([
+      ["EVAL", FAIL_AND_TELL, 3, scheduleKey(statsId), TELL_KEY, DUE_KEY, id, read, next, nowSeconds, member],
+    ]), 1);
+    return replies?.[0] === 1;
+  } catch {
+    return false;
+  }
+}
+
 /** A try that did not confirm: counted, and the next one set, or the code kept as failed. */
 async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: number, last = false): Promise<Outcome> {
   const tries = entry.tries + 1;
@@ -373,7 +392,7 @@ async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: numb
  * the creator is emailed so (Codex X6 on #4522). Stripe's own expiry still
  * stops it at its end.
  */
-async function offThenFailed(shop: Shop, account: string, statsId: string, entry: Kept, nowSeconds: number): Promise<Outcome> {
+async function offThenFailed(shop: Shop, account: string, statsId: string, raw: string, entry: Kept, nowSeconds: number): Promise<Outcome> {
   // Asked twice, as in scheduleCode: a stop Stripe answers in an unclear way is tried once more at once.
   if ((await stopCode(account, entry.id)) || (await stopCode(account, entry.id))) return missed(shop, statsId, entry, nowSeconds, true);
   const tries = entry.tries + 1;
@@ -382,11 +401,8 @@ async function offThenFailed(shop: Shop, account: string, statsId: string, entry
     // the worst state for money, a code Stripe may still apply, is never left for the creator to find in the studio.
     // The email says the stop was not confirmed (failureNotice, stopUnconfirmed); tellOne still sends it once.
     const member = memberOf(shop.sid, statsId, entry.id);
-    const kept = await counted([
-      ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries, failed: true, stopUnconfirmed: true })],
-      ["ZREM", DUE_KEY, member],
-      ["ZADD", TELL_KEY, nowSeconds, member],
-    ]);
+    const next = writeRecord({ ...entry, tries, failed: true, stopUnconfirmed: true });
+    const kept = await failAndTell(statsId, entry.id, raw, next, nowSeconds, member);
     return kept ? "failed" : "unknown";
   }
   await counted([
@@ -422,6 +438,10 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
       return "failed";
     }
     if (entry.failed) {
+      // A failed enqueue can leave the decision saved but its warning unqueued. Repair it without another stop.
+      if (entry.stopUnconfirmed && !entry.mailed && entry.notices < NOTICE_TRIES) {
+        return (await failAndTell(statsId, id, raw, raw, nowSeconds, member)) ? "dropped" : "unknown";
+      }
       await drop(member);
       return "dropped";
     }
@@ -431,14 +451,14 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     if (!shop.stripeAccountId) return missed(shop, statsId, entry, nowSeconds);
     // Every try used and not yet failed: only a stop that was not confirmed leaves it so. The code may be
     // live, so it is switched off before the failure is final, never switched on again.
-    if (entry.tries >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
+    if (entry.tries >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, raw, entry, nowSeconds);
     // One key a try: a repeat of the same try is answered, not done again; the next try is a new request.
     const live = await activateCode(shop.stripeAccountId, id, `dsched:${id}:${entry.start}:${entry.tries}`);
     // Not confirmed live is not confirmed off: a 5xx, a timeout or a lost reply may follow a switch-on that landed
     // (Claude 4 on #4522). Tried again while tries remain; the last one switches it off before the failure is final,
     // as a code box never confirmed on does, which is harmless when the switch-on never landed.
     if (!live) {
-      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
+      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, raw, entry, nowSeconds);
       return missed(shop, statsId, entry, nowSeconds);
     }
     // Live on Stripe. The checkout's code box goes on first, confirmed by the store it answers with; a box
@@ -452,7 +472,7 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     }
     if (!boxOn(box)) {
       // The last try: the code is live on Stripe, so it is switched off before it is kept as failed.
-      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
+      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, raw, entry, nowSeconds);
       await missed(shop, statsId, entry, nowSeconds);
       return "unknown";
     }

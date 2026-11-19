@@ -2159,6 +2159,15 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, hash, tell, due, field, read, next, score, member] = args;
+          if (this.run(["HGET", hash, field]) !== read) return 0;
+          if (read !== next) this.run(["HSET", hash, field, next]);
+          this.run(["ZADD", tell, "NX", score, member]);
+          this.run(["ZREM", due, member]);
+          return 1;
+        }
         // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
         // lib/discount-schedule.ts TELL_STEP: a failed code's record written over only while it is the one read, and its
         // member taken off or put back on the line in the same step.

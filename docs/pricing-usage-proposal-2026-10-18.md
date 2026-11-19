@@ -19,7 +19,7 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $98.28 | $963.75 | $69 / $690 |
+| Store | $98.28 | $964.40 | $69 / $690 |
 | Studio | $236.20 | $2,594.30 | $449 / $4,490 |
 | Scale | $453.93 | $5,165.15 | $999 / $9,990 |
 

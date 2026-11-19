@@ -30,6 +30,7 @@ export default async function StudioPrivacyPage({ searchParams }: Params) {
     if (found.reason === "signed_out") redirect("/signin");
     redirect(found.store ? studioPath(found.store) : "/studio");
   }
+  if (found.fellBack) redirect(studioPath(found.view.store, "team=gone"));
   const { view } = found;
   const { store } = view;
   return (

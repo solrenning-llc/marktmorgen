@@ -62,8 +62,10 @@ const money = (value: unknown): value is number =>
  * other nexus tests, tax rules, filings, costs and all release gates still apply.
  * Reaching a boundary requires implemented treatment before completing the sale;
  * this helper never claims a registration exists or submits one.
+ * `expectedRuleId`, when given, must be the rule this one capture names: a caller that chose a rule (a country's)
+ * never has the evidence assessed under another (Codex X5 on #4890).
  */
-export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresholdAssessment {
+export function assessTaxThreshold(value: unknown, now = Date.now(), expectedRuleId?: TaxThresholdRuleId): TaxThresholdAssessment {
   if (!Number.isSafeInteger(now) || now < 0 || now > 253_402_300_799_999) return stop("invalid");
   let data: Record<string, unknown>;
   try {
@@ -82,6 +84,7 @@ export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresho
     }
   } catch { return stop("unknown"); }
   if (typeof data.ruleId !== "string" || !Object.hasOwn(TAX_THRESHOLD_RULES, data.ruleId)) return stop("unknown");
+  if (expectedRuleId !== undefined && data.ruleId !== expectedRuleId) return stop("unknown");
   const rule = TAX_THRESHOLD_RULES[data.ruleId as TaxThresholdRuleId];
   const today = new Date(now).toISOString().slice(0, 10);
   if (today < rule.checkedOn || data.recordedOn !== today || data.currency !== rule.currency
@@ -107,8 +110,8 @@ export type TaxSalesThresholdEvidence = {
 };
 /** Derive threshold amounts from the complete supplied ledger instead of
  * accepting caller-provided totals. This is still an assessment of evidence,
- * never a nexus decision, registration or permission to complete a sale. */
-export function assessTaxSalesThreshold(value: unknown, now = Date.now()): TaxThresholdAssessment {
+ * never a nexus decision, registration or permission to complete a sale. `expectedRuleId` as in assessTaxThreshold. */
+export function assessTaxSalesThreshold(value: unknown, now = Date.now(), expectedRuleId?: TaxThresholdRuleId): TaxThresholdAssessment {
   try {
     if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
     if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return stop("unknown");
@@ -124,6 +127,7 @@ export function assessTaxSalesThreshold(value: unknown, now = Date.now()): TaxTh
     }
     if (typeof evidence.ruleId !== "string" || !Object.hasOwn(TAX_THRESHOLD_RULES, evidence.ruleId)
       || evidence.completeRollingCoverage !== true || evidence.applicableScopeReviewed !== true) return stop("unknown");
+    if (expectedRuleId !== undefined && evidence.ruleId !== expectedRuleId) return stop("unknown");
     const totals = countTaxSales(evidence.ledger);
     if (totals.status !== "known") return stop(totals.status);
     // A worldwide rule (Switzerland) counts more than any one country's ledger can hold.

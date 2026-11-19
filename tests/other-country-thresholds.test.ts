@@ -108,7 +108,9 @@ test("the rules cannot be changed at run time, and each names its official sourc
     assert.match(threshold.source, /^https:\/\/www\.(canada\.ca|skatteetaten\.no|estv\.admin\.ch)\//, country);
     assert.match(threshold.checkedOn, /^\d{4}-\d{2}-\d{2}$/, country);
   }
-  assert.throws(() => { (OTHER_COUNTRY_RULES as Record<string, unknown>).LI = { ruleId: "ch-worldwide-turnover" }; });
+  // Reflect.set answers false on a frozen object in strict and sloppy code alike (Codex X5's LOW on #4890).
+  assert.equal(Reflect.set(OTHER_COUNTRY_RULES, "LI", { ruleId: "ch-worldwide-turnover" }), false);
+  assert.equal(Object.hasOwn(OTHER_COUNTRY_RULES, "LI"), false);
   assert.equal(otherCountryRule("LI"), null);
 });
 

@@ -21,7 +21,9 @@ import { TAX_THRESHOLD_RULES, assessTaxSalesThreshold, assessTaxThreshold, type 
  *
  * What this is not: no counter (the per-place counters are built once, by Claude 4, C5-20261119-1335-tx2), no
  * registration, no tax collected, no checkout wiring and no record in DEEMED_SUPPLIER_RECORDS. "below-threshold" is
- * never permission to sell: every other gate still applies. Pure: no IO; reads its evidence's own data once.
+ * never permission to sell: every other gate still applies. Pure: no IO. The evidence is captured once, by the
+ * assessor, which is told the country's rule and refuses evidence that names another in that same capture (Codex X5
+ * on #4890: a separate read of the rule here could see one rule, and the assessor's capture another).
  */
 export type OtherCountryRule = Readonly<{ ruleId: TaxThresholdRuleId }>;
 
@@ -40,26 +42,16 @@ export function otherCountryRule(country: unknown): OtherCountryRule | null {
   return Object.hasOwn(OTHER_COUNTRY_RULES, country) ? OTHER_COUNTRY_RULES[country as keyof typeof OTHER_COUNTRY_RULES] : null;
 }
 
-/** The evidence's own rule id, read once as data; null for anything else, so no accessor ever runs. */
-function ownRuleId(evidence: unknown): unknown {
-  try {
-    if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return null;
-    if (![Object.prototype, null].includes(Object.getPrototypeOf(evidence))) return null;
-    const field = Object.getOwnPropertyDescriptor(evidence, "ruleId");
-    return field && Object.hasOwn(field, "value") ? field.value : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * One country's assessment under its own rule, from evidence made for that very rule: a country's ledger
  * (assessTaxSalesThreshold) for a "country" rule, the worldwide snapshot (assessTaxThreshold) for a "worldwide" one.
- * Unknown when the country has no rule, or the evidence names another rule; every check of those two assessors
- * applies in full after that.
+ * Unknown when the country has no rule, or the evidence names another rule in the assessor's own capture; every
+ * check of those two assessors applies in full.
  */
 export function assessOtherCountry(country: unknown, evidence: unknown, now = Date.now()): TaxThresholdAssessment {
   const rule = otherCountryRule(country);
-  if (!rule || ownRuleId(evidence) !== rule.ruleId) return unknown();
-  return TAX_THRESHOLD_RULES[rule.ruleId].scope === "worldwide" ? assessTaxThreshold(evidence, now) : assessTaxSalesThreshold(evidence, now);
+  if (!rule) return unknown();
+  return TAX_THRESHOLD_RULES[rule.ruleId].scope === "worldwide"
+    ? assessTaxThreshold(evidence, now, rule.ruleId)
+    : assessTaxSalesThreshold(evidence, now, rule.ruleId);
 }

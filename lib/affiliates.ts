@@ -4911,14 +4911,27 @@ async function takeInvoice(store: Store, invoice: InvoiceLike, handles: Set<stri
   if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) return { kind: "skip" };
   const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
   const plan = meta.kind === "plan";
-  const months = Number(meta.via_months) || 0;
-  const soldAt = Number(meta.via_at) || 0;
-  if (!plan && (months < 1 || !soldAt || !withinMonths(soldAt, paidAt, months))) return { kind: "skip" };
+  if (!plan) {
+    // These are the terms saved at checkout, not a new choice of commission. Unknown terms never mean "none".
+    const months = typeof meta.via_months === "string" && /^\d{1,4}$/.test(meta.via_months) ? Number(meta.via_months) : NaN;
+    if (!safeInt(months) || months < 0 || months > RECURRING_ALWAYS) return { kind: "unknown" };
+    if (months === 0) return { kind: "skip" };
+    const soldAt = typeof meta.via_at === "string" && /^\d{1,12}$/.test(meta.via_at) ? Number(meta.via_at) : NaN;
+    if (!safeInt(soldAt) || soldAt <= 0) return { kind: "unknown" };
+    if (!withinMonths(soldAt, paidAt, months)) return { kind: "skip" };
+  }
   const total = knownCents(invoice.amount_paid);
   const created = invoice.created;
+  const currency = invoice.currency;
   if (typeof invoice.id !== "string" || !invoice.id || invoice.id.length > KEPT_TEXT_MAX || (meta.product ?? "").length > KEPT_TEXT_MAX) return { kind: "unknown" };
-  if (invoice.status !== "paid" || total === null || !safeInt(created)) return { kind: "unknown" };
+  if (invoice.status !== "paid" || total === null || !safeInt(created) || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return { kind: "unknown" };
   if (total === 0) return { kind: "skip" };
+  let rate: number;
+  try {
+    rate = linkShare(meta.via_rate);
+  } catch {
+    return { kind: "unknown" };
+  }
   const tax = invoiceTaxOf(invoice.total_taxes);
   // A tax that does not read leaves the invoice out before any more of its payments is asked for.
   if (tax === null) return { kind: "unknown" };
@@ -4933,7 +4946,7 @@ async function takeInvoice(store: Store, invoice: InvoiceLike, handles: Set<stri
   const self = Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer);
   return {
     kind: "line",
-    line: [invoice.id, pi, meta.via, paidAt, created, meta.product ?? "", Math.max(0, total - tax), total, readCurrencyCode(invoice.currency), Number(meta.via_rate) || 0, self ? 1 : 0, affiliatePromotionFrom(meta)],
+    line: [invoice.id, pi, meta.via, paidAt, created, meta.product ?? "", Math.max(0, total - tax), total, currency, rate, self ? 1 : 0, affiliatePromotionFrom(meta)],
   };
 }
 
@@ -5216,7 +5229,7 @@ function exactPairs(reply: unknown, what: string): [string, string][] {
 /** Whole cents from `least` up, held exactly (`1e999` parses to Infinity, `2 ** 53` is past exact). */
 const wholeCents = (value: unknown, least: number): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= least;
 
-/** A share as its writers store it: 0 (`Number(meta.via_rate) || 0`) to MAX_COMMISSION, two decimals when blended. */
+/** A share as its writers store it: 0 to MAX_COMMISSION, two decimals when blended. */
 const exactShare = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_COMMISSION;
 
 /** How a sale found its affiliate, as writeReferral writes it; absent on older records (then `byCode`, or a click). */

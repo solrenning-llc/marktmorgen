@@ -204,6 +204,30 @@ async function main(): Promise<void> {
   is("still watched, about an hour on", score >= NOW + 3000 && score <= NOW + 4000, true);
   is("meanwhile the set's mark takes the refunded sale back", (await offered()).to.get(AFF), 1470);
 
+  part("Retrying the refund watch keeps the refund in the day it was first seen");
+  await setup();
+  captures.set(CAPTURE, "REFUNDED");
+  const dayStart = Math.floor(NOW / 86_400) * 86_400 + 86_400;
+  const firstSeen = dayStart - 60;
+  const nextTry = dayStart + 3600;
+  const realNow = Date.now;
+  try {
+    Date.now = () => firstSeen * 1000;
+    await answering("EVAL", `nl:ppsell:back:${SID}`, "garbled", () => watch());
+    const initial = await readPayPalRefundsWithCoverage(SID, 0);
+    is("the first attempt records the time the refund was seen", initial.rows[0]?.at, firstSeen);
+
+    Date.now = () => nextTry * 1000;
+    await watch();
+    is("the follow-up finishes checking the order", redis.run(["ZSCORE", `nl:ppsell:watch:${SID}`, ORDER]), null);
+    const reading = await readPayPalRefundsWithCoverage(SID, 0);
+    is("the original refund time stays put", reading.rows[0]?.at, firstSeen);
+    const nextDay = await readPayPalRefundsWithCoverage(SID, dayStart);
+    is("the next day does not include the previous day's refund", nextDay.rows.length, 0);
+  } finally {
+    Date.now = realNow;
+  }
+
   part("Unknown: the book's read of the lasting refunds not exact leaves it unchecked");
   await setup();
   captures.set(CAPTURE, "REFUNDED");

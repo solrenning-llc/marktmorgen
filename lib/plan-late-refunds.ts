@@ -242,6 +242,13 @@ export async function refundLatePayments(account: string, subscription: string, 
     const made = await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: one.intent, limit: "100" })}`, undefined, AT);
     const prior = priorRefund(made, one.intent, one.invoice, one.currency, LATE_MARK);
     if (prior === "unknown") throw new Error("the refunds already made for a plan's late payment could not be read whole");
+    // V-20261117-1158: an external pending part also keeps this payment owed,
+    // even when none of its refunds carries this routine's own invoice mark.
+    const progress = partialRefundProgress(made, one.intent, one.currency, one.paid.amount);
+    if (progress.pending) {
+      left = true;
+      continue;
+    }
     // A successful mark for a partial refund proves only that part. Another refund can have failed since this
     // partial one was made. Reconcile the whole list already read, and give back only the confirmed remainder.
     let completed: number | null = null;
@@ -252,11 +259,6 @@ export async function refundLatePayments(account: string, subscription: string, 
       }
       if (prior.amount === one.paid.amount) {
         given.push(one.paid);
-        continue;
-      }
-      const progress = partialRefundProgress(made, one.intent, one.currency, one.paid.amount);
-      if (progress.pending) {
-        left = true;
         continue;
       }
       if (progress.amount === one.paid.amount) {

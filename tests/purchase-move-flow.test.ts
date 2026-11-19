@@ -28,6 +28,7 @@ import {
   MOVE_ASK_COMMANDS,
   MOVE_ASK_UNITS,
   MOVE_CONFIRM_COMMANDS,
+  MOVE_ISSUE_COMMANDS,
   MOVE_LINK_COMMANDS,
   MOVE_LINK_UNITS,
   askMoveRoute,
@@ -97,6 +98,8 @@ const post = (url: string, fields: Record<string, string>, headers: Record<strin
 
 const linkIn = (text: string) => /\/@moss\/orders\/move\/confirm\?t=([0-9a-f]{48})/.exec(text)?.[1] ?? null;
 const moveKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:"));
+/** The link in the last email to `to` since `from` (an index into mails). */
+const linkTo = (to: string, from = 0) => linkIn(mails.slice(from).filter((x) => x.to === to).at(-1)?.text ?? "") ?? "";
 
 async function main(): Promise<void> {
   redis.clear();
@@ -167,7 +170,7 @@ async function main(): Promise<void> {
     odd = null;
   }
 
-  part("Asking: two links, one to each address, each a store email taken before it goes");
+  part("Asking: the current address told with no link, the new address's link, each a store email taken before it goes");
   let fromLink = "";
   let toLink = "";
   {
@@ -187,36 +190,42 @@ async function main(): Promise<void> {
     const sent = mails.slice(m);
     is("one email to each address, the current one first", sent.map((s) => s.to), ["ana.buyer@example.com", "ana.new@example.com"]);
     is("two store access emails taken", (await used()) - q, 2);
-    fromLink = linkIn(sent[0]?.text ?? "") ?? "";
     toLink = linkIn(sent[1]?.text ?? "") ?? "";
-    is("each carries its own link", [Boolean(fromLink), Boolean(toLink), fromLink !== toLink], [true, true, true]);
-    is("each names the other address", [sent[0]?.text.includes("ana.new@example.com"), sent[1]?.text.includes("ana.buyer@example.com")], [true, true]);
-    is("the subjects say what to do", [sent[0]?.subject, sent[1]?.subject], ["Confirm moving your purchases from Moss Notes", "Confirm this address for your purchases from Moss Notes"]);
+    is("only the new address gets a link now", [linkIn(sent[0]?.text ?? ""), Boolean(toLink)], [null, true]);
+    is("the current address's email names neither the new address nor a link", sent[0]?.text.includes("ana.new@example.com"), false);
+    is("the new address's email names the current one", sent[1]?.text.includes("ana.buyer@example.com"), true);
+    is("the subjects say what happened and what to do", [sent[0]?.subject, sent[1]?.subject], ["You asked to move your purchases from Moss Notes", "Confirm this address for your purchases from Moss Notes"]);
     is(`what the ask reads and writes is MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS})`, commands, MOVE_ASK_COMMANDS);
   }
 
-  part("Opening a link confirms nothing; Confirm records that address once");
+  part("Opening a link confirms nothing; Confirm records that address once; the current address's link goes after the new one confirms");
   {
-    const before = await moveLinkView(moss, fromLink);
-    is("the old address's link opens on the request", before.kind === "open" ? [before.side, before.from, before.to, before.state, before.confirmed] : before, [
-      "from",
+    const before = await moveLinkView(moss, toLink);
+    is("the new address's link opens on the request", before.kind === "open" ? [before.side, before.from, before.to, before.state, before.confirmed] : before, [
+      "to",
       "ana.buyer@example.com",
       "ana.new@example.com",
       "waiting-both",
       false,
     ]);
     const id = moveKeys().find((k) => k.startsWith("nl:pm:r:"))?.slice("nl:pm:r:".length) ?? "";
-    is("opening it twice changed nothing", [(await moveLinkView(moss, fromLink)).kind, (await readPurchaseMove(id))?.fromConfirmedAt], ["open", null]);
+    is("opening it twice changed nothing", [(await moveLinkView(moss, toLink)).kind, (await readPurchaseMove(id))?.toConfirmedAt], ["open", null]);
 
     const viaRoute = async (t: string) =>
       (await confirmMoveRoute(post(`${ORIGIN}/api/store/purchase-move/confirm`, { handle: "moss", t }), true)).headers.get("location");
-    is("Confirm on the old address: waiting for the other", await viaRoute(fromLink), `${ORIGIN}/@moss/orders/move/confirm?${new URLSearchParams({ t: fromLink, c: "waiting" })}`);
-    const once = (await readPurchaseMove(id))?.fromConfirmedAt;
+    const [m, q] = [mails.length, await used()];
+    is("Confirm on the new address: waiting for the other", await viaRoute(toLink), `${ORIGIN}/@moss/orders/move/confirm?${new URLSearchParams({ t: toLink, c: "waiting" })}`);
+    const once = (await readPurchaseMove(id))?.toConfirmedAt;
     is("its confirmation is kept", typeof once, "number");
-    is("pressing again changes nothing", [await confirmMoveLink({ store: moss, token: fromLink }), (await readPurchaseMove(id))?.fromConfirmedAt], ["waiting", once]);
-    const after = await moveLinkView(moss, fromLink);
-    is("the old address's page says it confirmed", after.kind === "open" ? [after.confirmed, after.state] : after, [true, "waiting-to"]);
-    is("Confirm on the new address: both", await viaRoute(toLink), `${ORIGIN}/@moss/orders/move/confirm?${new URLSearchParams({ t: toLink, c: "both" })}`);
+    is("then, and only then, the current address gets its link, a store email taken", [mails.slice(m).map((x) => x.to), (await used()) - q], [["ana.buyer@example.com"], 1]);
+    fromLink = linkTo("ana.buyer@example.com", m);
+    is("its own link, naming the new address", [Boolean(fromLink), fromLink !== toLink, mails[m]?.text.includes("ana.new@example.com")], [true, true, true]);
+    is("its subject says what to do", mails[m]?.subject, "Confirm moving your purchases from Moss Notes");
+    const m2 = mails.length;
+    is("pressing again changes nothing and sends nothing more", [await confirmMoveLink({ store: moss, token: toLink, origin: ORIGIN }), (await readPurchaseMove(id))?.toConfirmedAt, mails.length - m2], ["waiting", once, 0]);
+    const after = await moveLinkView(moss, toLink);
+    is("the new address's page says it confirmed", after.kind === "open" ? [after.confirmed, after.state] : after, [true, "waiting-from"]);
+    is("Confirm on the current address: both", await viaRoute(fromLink), `${ORIGIN}/@moss/orders/move/confirm?${new URLSearchParams({ t: fromLink, c: "both" })}`);
     const request = await readPurchaseMove(id);
     is("both kept, nothing moved yet (a later unit)", [typeof request?.fromConfirmedAt, typeof request?.toConfirmedAt, request?.appliedAt], ["number", "number", null]);
   }
@@ -251,11 +260,12 @@ async function main(): Promise<void> {
     const suppressed = await askToMovePurchases({
       store: moss, token, to: blocked, origin: ORIGIN,
     });
-    is("no email was sent in either case", mails.length - m, 0);
+    // Decision (C): the asking buyer gets the same neutral email in both cases; the erased address never gets one.
+    is("nothing went to the erased address", mails.slice(m).some((x) => x.to === blocked), false);
     is("public results reveal no suppression membership under an email failure", eligible, suppressed);
     is("both use the neutral receipt, not an assertion of delivery", [eligible, suppressed], ["received", "received"]);
     is("the neutral notice makes no delivery promise",
-      moveWords.asked[suppressed].title, "Check your inboxes if this move is available");
+      moveWords.asked[suppressed].title, "Check the new address if this move is available");
   }
 
   part("An address the store deleted");
@@ -279,13 +289,18 @@ async function main(): Promise<void> {
     }
     is("suppressed probes use the same daily bound", answers, ["received", "received", "received", "over"]);
     const kept = moveKeys().filter((key) => !key.startsWith("nl:pm:day:")).length;
-    is("no request, link, email or store email is made for erased addresses", [kept - k, mails.length - m, (await used()) - q], [0, 0, 0]);
+    // Decision (C): the asking buyers get only the neutral email with no link, one store email each, and nothing goes to
+    // an erased address.
+    const told = mails.slice(m);
+    is("no request or link is made for erased addresses", kept - k, 0);
+    is("nothing goes to an erased address", told.some((x) => /gone\.|bounded\.new/.test(x.to)), false);
+    is("the asking buyers get only the neutral email, one store email each", [told.every((x) => x.subject === "You asked to move your purchases from Moss Notes" && linkIn(x.text) === null), (await used()) - q], [true, told.length]);
 
     // Asked first, then deleted before confirming.
     const late = await signIn("late.buyer@example.com");
     const m2 = mails.length;
     is("asked", await askToMovePurchases({ store: moss, token: late, to: "late.new@example.com", origin: ORIGIN }), "received");
-    const lateLink = linkIn(mails[m2]?.text ?? "") ?? "";
+    const lateLink = linkTo("late.new@example.com", m2);
     await redis.pipeline([suppressCommand(moss.listId!, "late.new@example.com", Math.floor(Date.now() / 1000))]);
     const marks = () => moveKeys().filter((key) => key.startsWith("nl:pm:c:")).length;
     const c0 = marks();
@@ -329,6 +344,27 @@ async function main(): Promise<void> {
     is("nothing is written or sent for the erased address", [gone.written, gone.elsewhere], [0, 0]);
   }
 
+  part("The current address's link that may not have gone is made again on the next Confirm, and never sent twice");
+  {
+    const token = await signIn("resend.buyer@example.com");
+    const m = mails.length;
+    is("asked", await askToMovePurchases({ store: moss, token, to: "resend.new@example.com", origin: ORIGIN }), "received");
+    const toLink = linkTo("resend.new@example.com", m);
+    const m1 = mails.length;
+    ackLost = { skip: 0, times: 1 };
+    const first = await confirmMoveLink({ store: moss, token: toLink, origin: ORIGIN });
+    ackLost = { skip: 0, times: 0 };
+    is("its answer lost: said as not confirmed, never as not sent", [first, /press confirm again/i.test(moveWords.confirmed[first].body)], ["resend", true]);
+    const lost = linkTo("resend.buyer@example.com", m1);
+    is("the link in that email no longer works, so only one link of the current address ever works", await confirmMoveLink({ store: moss, token: lost, origin: ORIGIN }), "link");
+    const m2 = mails.length;
+    is("Confirm again: a new link goes", [await confirmMoveLink({ store: moss, token: toLink, origin: ORIGIN }), mails.slice(m2).map((x) => x.to)], ["waiting", ["resend.buyer@example.com"]]);
+    const fresh = linkTo("resend.buyer@example.com", m2);
+    const m3 = mails.length;
+    is("and pressing once more sends nothing", [await confirmMoveLink({ store: moss, token: toLink, origin: ORIGIN }), mails.length - m3], ["waiting", 0]);
+    is("the new link confirms the current address: both", await confirmMoveLink({ store: moss, token: fresh, origin: ORIGIN }), "both");
+  }
+
   part("Three a day");
   {
     const token = await signIn("tri.buyer@example.com");
@@ -344,7 +380,7 @@ async function main(): Promise<void> {
     odd = { command: "INCRBY", prefix: "nl:allow:transactional:", reply: "not a count", times: 1, skip: 0 };
     is("none taken: no email, and the page cannot say more than that it is not confirmed", await askToMovePurchases({ store: moss, token: one, to: "spent.new@example.com", origin: ORIGIN }), "received");
     odd = null;
-    is("nothing went out", mails.length - m, 0);
+    is("nothing went to the current address", mails.slice(m).filter((x) => x.to === "spent.buyer@example.com").length, 0);
     const two = await signIn("half.buyer@example.com");
     const m2 = mails.length;
     odd = { command: "INCRBY", prefix: "nl:allow:transactional:", reply: "not a count", times: 1, skip: 1 };
@@ -361,7 +397,7 @@ async function main(): Promise<void> {
     ackLost = { skip: 0, times: 1 };
     const first = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
     ackLost = { skip: 0, times: 0 };
-    is("the current address's email taken, its answer lost: the page does not say no link was sent", [mails.length - m, first, moveWords.asked[first].title], [1, "received", "Check your inboxes if this move is available"]);
+    is("the current address's email taken, its answer lost: the page does not say it was not sent", [mails.slice(m).filter((x) => x.to === "lost.buyer@example.com").length, first, moveWords.asked[first].title], [1, "received", "Check the new address if this move is available"]);
     const two = await signIn("lost2.buyer@example.com");
     const m2 = mails.length;
     ackLost = { skip: 1, times: 1 };
@@ -386,20 +422,21 @@ async function main(): Promise<void> {
     is("the ask", request("light", MOVE_ASK_COMMANDS, 4_096) <= MOVE_ASK_UNITS * laterPageCost(), true);
     is("a link's page", request("light", MOVE_LINK_COMMANDS, 4_096) <= MOVE_LINK_UNITS * laterPageCost(), true);
     is("a confirmation", request("light", MOVE_CONFIRM_COMMANDS, 8_192) <= MOVE_LINK_UNITS * laterPageCost(), true);
+    is("the new address's confirmation, with the current address's link it makes", request("light", MOVE_CONFIRM_COMMANDS + MOVE_ISSUE_COMMANDS, 8_192) <= MOVE_LINK_UNITS * laterPageCost(), true);
     const token = await signIn("count.buyer@example.com");
     const m = mails.length;
     await askToMovePurchases({ store: moss, token, to: "count.new@example.com", origin: ORIGIN });
-    const link = linkIn(mails[m]?.text ?? "") ?? "";
+    const link = linkTo("count.new@example.com", m);
     const reads = (c: string[]) => c.filter((x) => /nl:(orders:link|erased|pm):/.test(x)).length;
     seen = [];
     await moveLinkView(moss, link);
     const viewed = reads(seen);
     seen = [];
-    await confirmMoveLink({ store: moss, token: link });
+    await confirmMoveLink({ store: moss, token: link, origin: ORIGIN });
     const confirmed = reads(seen);
     seen = null;
     is(`a link's page reads MOVE_LINK_COMMANDS (${MOVE_LINK_COMMANDS})`, viewed, MOVE_LINK_COMMANDS);
-    is(`a confirmation at most MOVE_CONFIRM_COMMANDS (${MOVE_CONFIRM_COMMANDS})`, confirmed <= MOVE_CONFIRM_COMMANDS, true);
+    is(`the new address's confirmation at most MOVE_CONFIRM_COMMANDS + MOVE_ISSUE_COMMANDS (${MOVE_CONFIRM_COMMANDS + MOVE_ISSUE_COMMANDS})`, confirmed <= MOVE_CONFIRM_COMMANDS + MOVE_ISSUE_COMMANDS, true);
   }
 
   done();

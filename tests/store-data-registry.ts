@@ -361,7 +361,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lib:link:@lib/buyer-library.ts": short("A library link, a day", "access", 1, LINK_BYTES, MAIL("library")),
   "nl:pm:r:@lib/purchase-moves.ts": short("A buyer's request to move their purchases to another address (611 [WP10]), a day, at most MAX_MOVE_RECORD_BYTES", "access", 1, LINK_BYTES, MAIL("purchase-move")),
   "nl:pm:t:@lib/purchase-moves.ts": short("A purchase move's two links, a day", "access", 1, 2 * LINK_BYTES, MAIL("purchase-move")),
-  "nl:pm:c:@lib/purchase-moves.ts": short("A purchase move's two confirmations, a day", "access", 1, 2 * MARK, MAIL("purchase-move")),
+  "nl:pm:c:@lib/purchase-moves.ts": short("A purchase move's two confirmations and the mark that the current address's link went once, a day", "access", 1, 3 * MARK, MAIL("purchase-move")),
   "nl:pm:done:@lib/purchase-moves.ts": short("A purchase move claimed once, two days", "access", 2, MARK, MAIL("purchase-move")),
   "nl:pm:day:@lib/purchase-moves.ts": short("An address's purchase moves of the day, under a one-way fingerprint, two days", "access", 2, MARK, MAIL("purchase-move")),
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),

@@ -18,13 +18,13 @@ export const moveWords = {
     `Your purchases from ${store} are on ${from}. You can move them to another email address that you use.`,
   steps: [
     "Type the new email address and send.",
-    "We email a link to each address: the one you use now and the new one.",
-    "Open both links and press Confirm on each, within 24 hours.",
+    "Open the link we send to the new address and press Confirm.",
+    "Then open the link we send to the address you use now and press Confirm. Do both within 24 hours.",
   ],
   stepsLabel: "How it works",
   toLabel: "New email address",
   toHint: (from: string) => `It must be different from ${from}. Check it before you send: the link goes there.`,
-  send: "Send the two links",
+  send: "Send the link",
   backToList: "Back to your purchases",
   limitNote: "You can ask 3 times a day. Refunds stay with the order you paid for.",
 
@@ -34,10 +34,14 @@ export const moveWords = {
   confirmButton: "Confirm",
   confirmIgnore: "If you did not ask for this, close this page. Nothing moves without both confirmations.",
   confirmedHere: "This address has confirmed.",
+  resendHint: "If the other address did not get its link, press Confirm again to send it.",
 
   /** What an ask answers, by the state the route sends back. */
   asked: {
-    received: { title: "Check your inboxes if this move is available", body: "If this move is eligible, check both inboxes and spam for confirmation links. Nothing moves until both addresses confirm. Check before asking again; delivery is not confirmed here." },
+    received: {
+      title: "Check the new address if this move is available",
+      body: "If this move can be made, the new address gets a link. Open it and press Confirm. Then we email your current address a link to confirm too. Check spam before asking again; delivery is not confirmed here. Nothing moves until both addresses confirm.",
+    },
     sent: { title: "Check both inboxes", body: "We sent a link to your current address and one to the new address. Open each one and press Confirm within 24 hours." },
     half: {
       title: "We could not confirm the second link",
@@ -59,6 +63,10 @@ export const moveWords = {
   /** What a confirmation answers, and what an opened link finds. */
   confirmed: {
     waiting: { title: "Thank you, this address is confirmed", body: "Now open the link we sent to the other address and press Confirm there, within 24 hours." },
+    resend: {
+      title: "This address is confirmed, but we could not confirm the next link went",
+      body: "We could not confirm that the link to the other address went. Press Confirm again in a few minutes to send it again.",
+    },
     both: { title: "Both addresses are confirmed", body: "Your purchases from this store move to the new address." },
     expired: { title: "This link has expired", body: "The 24 hours are over and nothing moved. You can ask again from your purchases page." },
     done: { title: "Already moved", body: "These purchases were already moved. Nothing else changes." },
@@ -69,16 +77,28 @@ export const moveWords = {
   } satisfies Record<string, Notice>,
 
   mailFrom: (store: string) => `${store} via Marktmorgen`,
+  /** The first email to the current address: the same words whatever the new address is, and no link yet. */
+  heldSubject: (store: string) => `You asked to move your purchases from ${store}`,
+  heldText: (store: string) =>
+    [
+      `You asked to move your purchases from ${store} to another email address.`,
+      "",
+      "If the move can be made, the new address gets a link first. Once someone presses Confirm there, we email this address a link to confirm too.",
+      "",
+      "Nothing moves until both addresses confirm, within 24 hours. Refunds stay with the order you paid for.",
+      "",
+      "If you did not ask for this, ignore this email: nothing moves without your confirmation.",
+    ].join("\n"),
   oldSubject: (store: string) => `Confirm moving your purchases from ${store}`,
   oldText: (store: string, to: string, link: string) =>
     [
-      `You asked to move your purchases from ${store} from this address to ${to}.`,
+      `You asked to move your purchases from ${store} from this address to ${to}, and ${to} has confirmed.`,
       "",
-      "To confirm, open this link and press Confirm:",
+      "To finish, open this link and press Confirm:",
       "",
       link,
       "",
-      `We are also sending a link to ${to}. Nothing moves until both addresses confirm, within 24 hours. Refunds stay with the order you paid for.`,
+      "Nothing moves until you confirm, within 24 hours of asking. Refunds stay with the order you paid for.",
       "",
       "If you did not ask for this, ignore this email: nothing moves without your confirmation.",
     ].join("\n"),
@@ -91,7 +111,7 @@ export const moveWords = {
       "",
       link,
       "",
-      "Nothing moves until both addresses confirm, within 24 hours.",
+      `Then we email ${from} a link to confirm too. Nothing moves until both addresses confirm, within 24 hours.`,
       "",
       "If you did not ask for this, ignore this email: nothing moves without your confirmation.",
     ].join("\n"),

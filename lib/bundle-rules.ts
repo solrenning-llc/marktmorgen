@@ -139,6 +139,17 @@ export function deliverableItems(bundle: Pick<Listing, "bundle">, listings: List
   return (bundle.bundle ?? []).map((id) => byId.get(id)).filter((p): p is Listing => Boolean(p && canBeInBundle(p)));
 }
 
+/**
+ * The products among these that a bundle also among them already hands over
+ * (deliverableItems), in their order. A cart or a checkout box holding both
+ * would charge the buyer twice for one copy of the product, so neither may
+ * (found by Claude 7's checkout hunt, 12 November 2026).
+ */
+export function heldByABundle(products: Listing[]): Listing[] {
+  const inside = new Set(products.flatMap((p) => (p.bundle ? deliverableItems(p, products).map((item) => item.id) : [])));
+  return products.filter((p) => inside.has(p.id));
+}
+
 // ---- Chosen by the buyer -------------------------------------------------------
 
 /**
@@ -287,6 +298,13 @@ export function extraFromMeta(meta: Record<string, string | undefined> | null | 
   if (typeof raw !== "string" || !raw) return [];
   return [...new Set(raw.split(",").filter((id) => SAFE_ID.test(id)))].slice(0, MAX_AFFILIATE_EXTRAS);
 }
+
+/**
+ * The most products deliveredIds can hand over for one checkout: the product, each bump, a bundle's items for the
+ * product and for each bump, and the affiliate's extras. What a payment's list of reviews is kept whole up to
+ * (lib/reviews.ts).
+ */
+export const MAX_DELIVERED = 1 + BUMP_KEYS.length + MAX_BUNDLE_ITEMS * (1 + BUMP_KEYS.length) + MAX_AFFILIATE_EXTRAS;
 
 /**
  * Every product a checkout hands over, by id: the product bought, the one

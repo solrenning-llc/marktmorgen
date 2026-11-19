@@ -30,6 +30,8 @@ import {
   storeWhen,
 } from "@/components/community-parts";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { heldOf } from "@/lib/community-approval";
+import { HeldList } from "@/components/community-held";
 
 type Params = { params: Promise<{ handle: string; post: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -40,7 +42,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: `${communityWords(store?.language).postPageTitle} — Marktmorgen`, robots: { index: false, follow: false } };
 }
 
-type Who = { key: string; owner: boolean; canWrite: boolean };
+/** `canReport`: a member, muted or not (a muted member writes nothing, but may still report). */
+type Who = { key: string; owner: boolean; canWrite: boolean; canReport: boolean };
 
 function CommentItem({
   store,
@@ -127,7 +130,7 @@ function CommentItem({
             {who.canWrite && mine && !editing ? (
               <Link href={`${here}?edit=${comment.id}#comment-${comment.id}`} className="cm-quiet-link cm-mini">{w.edit}</Link>
             ) : null}
-            {who.canWrite && !who.owner && !mine ? (
+            {who.canReport && !who.owner && !mine ? (
               <ActButton store={store} action="report" post={post} from="post" extra={extra} className="cm-quiet-link cm-mini">{w.report}</ActButton>
             ) : null}
             {who.owner ? (
@@ -197,7 +200,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
     pointsOf(id, [post.a, ...all.map((c) => c.a)]),
   ]);
   const levels = new Map([...points].map(([k, n]) => [k, levelOf(n)]));
-  const who: Who = { key, owner, canWrite };
+  const who: Who = { key, owner, canWrite, canReport: Boolean(viewer.member) };
   // The badge on the Messages link: nothing to read, nothing shown.
   const waiting = config.dm.on ? await requestCount(id, key) : 0;
   const news = await unreadCount(id, key);
@@ -212,6 +215,8 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   const asked = typeof query.edit === "string" ? query.edit : "";
   const editingPost = asked === "post" && canWrite && post.a === key;
   const editingComment = asked && asked !== "post" && canWrite ? (all.find((c) => c.id === asked && c.a === key && !c.hid)?.id ?? "") : "";
+  // The member's own comments here that wait for the creator's approval (543 [CM2]); null when they could not be read.
+  const held = owner ? [] : await heldOf(id, key).then((items) => items.filter((h) => h.kind === "comment" && h.post === post.id), () => null);
 
   return (
     <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -303,6 +308,10 @@ export default async function CommunityPostPage({ params, searchParams }: Params
               })}
             </ul>
           )}
+
+          <div className="mt-6">
+            <HeldList store={store} items={held} kind="comment" from="post" post={post.id} heading={3} />
+          </div>
 
           {canWrite ? (
             <form id="reply" action="/api/store/community" method="post" className="mt-6 scroll-mt-28">

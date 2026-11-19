@@ -207,7 +207,7 @@ part("The key in the browser says nothing about the course (review of #4324, MED
     ["mm:quiz:shop:prod:lesson1:" + "a".repeat(32), JSON.stringify(draftOf(inputs, shown, 0, NOW - 60_000))],
     ["mm:quiz:" + "b".repeat(32), JSON.stringify(draftOf(inputs, shown, 0, NOW - 60_000))],
   ]);
-  const storage = { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, getItem: (k: string) => kept.get(k) ?? null, removeItem: (k: string) => void kept.delete(k) };
+  const storage = { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, getItem: (k: string) => kept.get(k) ?? null, removeItem: (k: string) => void kept.delete(k), setItem: (k: string, v: string) => void kept.set(k, v) };
   keepRules.sweepQuizDrafts(storage, NOW);
   is("the sweep removes a key in the old, readable shape, however fresh, and keeps an opaque one", [...kept.keys()], ["mm:quiz:" + "b".repeat(32)]);
   const lessonPage = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");

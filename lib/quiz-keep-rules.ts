@@ -67,7 +67,8 @@ export const hasAnswers = (draft: QuizDraft) => Object.values(draft.answers).som
 
 /**
  * The draft kept under a key, when it can be put back on this try: readable,
- * not older than QUIZ_KEEP_DAYS, for exactly these questions, made before
+ * not older than QUIZ_KEEP_DAYS (a date ahead of the clock counts as now),
+ * for exactly these questions, made before
  * the same number of recorded tries (a try recorded since means it was sent
  * and counted), for the same version of the quiz's words and choices, with
  * at least one answer. Anything else is null, and the
@@ -83,7 +84,8 @@ export function draftToRestore(raw: string | null, shown: string, tries: number,
   }
   if (!kept || typeof kept !== "object") return null;
   const { at, shown: keptShown, tries: keptTries, version: keptVersion, answers } = kept as Partial<QuizDraft>;
-  if (typeof at !== "number" || !Number.isFinite(at) || at > now || now - at > KEEP_MS) return null;
+  // A date ahead of the device's clock means the clock is wrong, not the draft: it counts as now (LOW 12).
+  if (typeof at !== "number" || !Number.isFinite(at) || now - at > KEEP_MS) return null;
   if (keptShown !== shown || keptTries !== tries || keptVersion !== version || !answers || typeof answers !== "object") return null;
   const clean: Record<string, number[]> = {};
   for (const [name, picked] of Object.entries(answers)) {
@@ -140,7 +142,7 @@ export function forgetClosedDraft(storage: DraftStorage, key: string, tries: num
         kept = null;
       }
       const { at, tries: keptTries } = (kept && typeof kept === "object" ? kept : {}) as Partial<QuizDraft>;
-      if (keptTries === tries && typeof at === "number" && Number.isFinite(at) && at <= now && now - at <= KEEP_MS) return;
+      if (keptTries === tries && typeof at === "number" && Number.isFinite(at) && now - at <= KEEP_MS) return;
     }
     storage.removeItem(key);
   } catch {
@@ -149,7 +151,7 @@ export function forgetClosedDraft(storage: DraftStorage, key: string, tries: num
 }
 
 /** The part of the browser's storage the sweep needs: its keys, so a test can hand in a synthetic one. */
-export type SweepStorage = DraftStorage & { readonly length: number; key(index: number): string | null };
+export type SweepStorage = DraftStorage & { readonly length: number; key(index: number): string | null; setItem(key: string, value: string): void };
 
 /** Every quiz draft's key in this browser's storage, read before any is removed. */
 function quizKeys(storage: SweepStorage): string[] {
@@ -162,9 +164,10 @@ function quizKeys(storage: SweepStorage): string[] {
 }
 
 /**
- * Removes every quiz draft in this browser that is unreadable, from the
- * future, older than QUIZ_KEEP_DAYS or under a key in the older readable
- * shape, whichever lesson or student it is for
+ * Removes every quiz draft in this browser that is unreadable, older than
+ * QUIZ_KEEP_DAYS or under a key in the older readable shape, whichever lesson
+ * or student it is for; one dated ahead of the device's clock is kept, dated
+ * now
  * (review of #4324): run each time a lesson or the library opens, so a draft
  * for a lesson never opened again does not stay. Answers how many went.
  * Storage that cannot be read or written is left alone, without an error.
@@ -186,7 +189,12 @@ export function sweepQuizDrafts(storage: SweepStorage, now: number): number {
         kept = null;
       }
       const at = kept && typeof kept === "object" && !Array.isArray(kept) ? (kept as Partial<QuizDraft>).at : undefined;
-      if (typeof at === "number" && Number.isFinite(at) && at <= now && now - at <= KEEP_MS) continue;
+      // Dated ahead of the device's clock: the clock was wrong, so the draft stays, dated now, and still goes 7 days on (LOW 12).
+      if (typeof at === "number" && Number.isFinite(at) && at > now) {
+        storage.setItem(name, JSON.stringify({ ...(kept as QuizDraft), at: now }));
+        continue;
+      }
+      if (typeof at === "number" && Number.isFinite(at) && now - at <= KEEP_MS) continue;
       storage.removeItem(name);
       removed += 1;
     }

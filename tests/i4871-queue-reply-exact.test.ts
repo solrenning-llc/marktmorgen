@@ -5,7 +5,7 @@
  * 1, is queued; anything else throws UnknownReplyError, so the path stays kept and the erasure is incomplete for the
  * repeat. Synthetic Redis and a synthetic fetch only (the file store never answers); fictional addresses.
  */
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { makeWorld, seedPerson } from "./erasure-world";
 import { erasePerson } from "@/lib/person-erasure";
@@ -69,6 +69,24 @@ async function main(): Promise<void> {
   is("with the queue back, the repeat finishes", again.ok, true);
   const doors = (await real([["ZRANGEBYSCORE", "nl:tasks:doors", "-inf", "+inf"]]))[0] as string[];
   is("and the file is queued for deletion", doors.some((p) => String(p).startsWith("tasks/") || String(p).startsWith("stores/")), true);
+
+  // Codex L on #4871 @68949841c3 (MEDIUM): the kept paths are the last reference to the files once the records that
+  // named them are gone, so they must not expire while neither the deletion nor the cleanup queue confirmed taking them.
+  part("Kept paths outlive any wait: a repeat a month later still finds the file and queues it before saying done");
+  redis.clear();
+  const late = await makeWorld();
+  const bea = normaliseEmail("bea-4871@example.com");
+  await seedPerson(late, bea, null);
+  redis.pipeline = (async (c: Commands) => (isDoors(c) ? [null] : real(c))) as typeof redis.pipeline;
+  const before = await erasePerson(late.store, bea, { kind: "person" }).then((r) => (r.ok ? "ok" : "incomplete"), () => "threw");
+  redis.pipeline = real;
+  is("first: incomplete, the path kept", before, "incomplete");
+  advance(31 * 86_400 * 1000);
+  const kept31 = redis.keys().filter((k) => k.startsWith("nl:erase:files:") && (redis.run(["SMEMBERS", k]) as string[]).length > 0);
+  is("a month later the path is still kept", kept31.length, 1);
+  const repeat = await erasePerson(late.store, bea, { kind: "person" });
+  const queuedNow = ((await real([["ZRANGEBYSCORE", "nl:tasks:doors", "-inf", "+inf"]]))[0] as string[]).some((p) => String(p).startsWith("tasks/") || String(p).startsWith("stores/"));
+  is("the repeat finishes only with the file queued for deletion", [repeat.ok, queuedNow], [true, true]);
   done();
 }
 

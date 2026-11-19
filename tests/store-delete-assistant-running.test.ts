@@ -97,6 +97,10 @@ async function main(): Promise<void> {
     const notice = /\n\s+assistant_due: \{\n\s+title: "([^"]+)",\n\s+body: "([^"]+)",/.exec(page);
     is("the studio has a notice for it", Boolean(notice), true);
     is("which names no button the assistant's card does not show while its payment is failing", /press|Stop at the end/i.test(notice?.[2] ?? "press"), false);
+    // Claude 4's MEDIUM on #4202 (Codex X4's fix): the add-on holds the store until it is ended, whatever the date.
+    is("the notice does not promise deletion when the month ends", /month ends|month is over/i.test(notice?.[2] ?? ""), false);
+    is("it explains that Stripe must end the assistant first", notice?.[2]?.includes("once Stripe has ended the assistant") ?? false, true);
+    is("it confirms that nothing was deleted", notice?.[2]?.endsWith("Nothing was deleted.") ?? false, true);
   }
 
   part("An add-on not known to have ended holds the store, its period unreadable or over (Codex X6 and T on #4202)");

@@ -190,7 +190,17 @@ export function PayPalPayouts({
                 onClick={async () => {
                   const data = await act("settle");
                   if (data) {
-                    toast(Number(data.paid) ? `${data.paid} confirmed as paid.` : "Nothing new from PayPal yet.");
+                    toast(
+                      data.unavailable
+                        ? data.retryNow
+                          ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
+                          : "We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute."
+                        : data.asked === false
+                          ? "PayPal was asked less than a minute ago. Try again in a minute."
+                          : Number(data.paid)
+                            ? `${data.paid} confirmed as paid.`
+                            : "Nothing new from PayPal yet.",
+                    );
                     router.refresh();
                   }
                 }}
@@ -247,6 +257,49 @@ export function PayPalPayouts({
           </button>
         </>
       )}
+      {error ? (
+        <p className="notice notice-error mt-3 text-sm" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Shown instead of the panel when the creator's PayPal connection could not be read (lib/paypal-payouts.ts readLink,
+ * rule 24): paying from PayPal is unavailable, and Disconnect is the way out of a connection in an unknown shape, so
+ * the creator is never stuck. Disconnecting deletes the connection whatever it holds; nothing is paid.
+ */
+export function PayPalUnread() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="notice notice-warn mt-5">
+      <p role="alert">
+        Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed.
+        Reload the page to try again. If this keeps happening, disconnect PayPal and connect it again.
+      </p>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm mt-2"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          const data = await send({ op: "disconnect" });
+          setBusy(false);
+          if (!data.ok) {
+            setError(MESSAGES[String(data.error)] ?? MESSAGES.error);
+            return;
+          }
+          toast("PayPal disconnected. Its Secret is deleted.");
+          router.refresh();
+        }}
+      >
+        Disconnect PayPal
+      </button>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">
           {error}

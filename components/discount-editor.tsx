@@ -331,7 +331,11 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                       {state === "starting" ? (
                         <p className="mt-1 text-sm text-ink-soft">Its start has come. It switches on within a few minutes; refresh to check.</p>
                       ) : null}
-                      {state === "failed" ? (
+                      {state === "failed" && plan.stopUnconfirmed ? (
+                        <p role="alert" className="mt-2 rounded-xl bg-danger-soft px-3 py-2 text-sm font-semibold text-ink">
+                          We could not finish switching this code on, and Stripe did not confirm that we switched it off. Buyers may still be able to use it. Check it in your Stripe dashboard and switch it off there if you do not want it used.
+                        </p>
+                      ) : state === "failed" ? (
                         <p role="alert" className="mt-2 rounded-xl bg-danger-soft px-3 py-2 text-sm font-semibold text-ink">
                           {FAILED_NOTE}
                         </p>

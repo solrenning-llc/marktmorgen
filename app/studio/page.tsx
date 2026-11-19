@@ -7,6 +7,8 @@ import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pa
 import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { RenewalUnpaidNotice } from "@/components/renewal-unpaid-notice";
+import { ShortLinksOffNotice } from "@/components/short-links-off-notice";
+import { shortLinksOffNotice } from "@/lib/short-link-rest";
 import { funnelLaunchChecklist } from "@/lib/funnel-launch-checklist";
 import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
@@ -1039,6 +1041,8 @@ export default async function StudioPage({
   const planReads = {
     // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
     renewalPage: current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? early(renewalInvoicePage(store.subscriptionId)) : null,
+    // The notice that the store's short links were turned off and work again (the owner's decision 14 on #3330): one GET.
+    linksOff: current && paid && store?.sid ? early(shortLinksOffNotice(store.sid).catch(() => null)) : null,
     firstSale: PLANS_ON_SALE && store && paid && !billedYearly ? early(firstSaleAt(store)) : null,
     domainNow: domainsOn && store?.domain && !store.domain.liveAt && paid && hasPro(tier) ? early(domainStatus(store.domain.name, store).catch(() => null)) : null,
     sold: current && current.stripeAccountId && may("orders") ? early(listSales(current)) : null,
@@ -1100,6 +1104,7 @@ export default async function StudioPage({
       ]))
     : null;
   const renewalPage = planReads.renewalPage ? await planReads.renewalPage : null;
+  const linksOff = planReads.linksOff ? await planReads.linksOff : null;
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
   // button, that it pays from today — the same rule the checkout opens with.
@@ -1484,6 +1489,7 @@ export default async function StudioPage({
         {store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
+        {linksOff ? <ShortLinksOffNotice offAt={linksOff.offAt} backAt={linksOff.backAt} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
         {actionNotice ? (
@@ -1713,7 +1719,7 @@ export default async function StudioPage({
               </div>
 
               <details className="mt-5 rounded-2xl bg-paper p-4 ring-1 ring-line">
-                <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
+                <summary className="cursor-pointer py-3 text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {

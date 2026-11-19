@@ -12,12 +12,14 @@ import { done, is, part } from "./check";
 
 const run = spawnSync(process.execPath, ["tests/e2e/sales-lever-switch-focus.mjs"], {
   encoding: "utf8",
-  timeout: 120_000,
+  // CI runs several test files at once, so the bundle, the browser and its nine checks get room (cd3 on #3563: one
+  // CI run was stopped at 120 s, mid-check, with nothing on stderr).
+  timeout: 300_000,
   maxBuffer: 2_000_000,
   env: { ...process.env, E2E_BROWSER: "chromium" },
 });
 const lines = `${run.stdout ?? ""}`.split("\n").filter(Boolean);
-if (run.status !== 0) console.log(`${run.stdout ?? ""}${run.stderr ?? ""}`);
+if (run.status !== 0) console.log(`${run.stdout ?? ""}${run.stderr ?? ""}\nexit ${run.status}, signal ${run.signal}, ${run.error ? String(run.error) : "no spawn error"}`);
 
 part("The switch's focus and its saved state, in a real browser");
 const passed = (name: string) => is(name, lines.some((line) => line === `ok    ${name}`), true);

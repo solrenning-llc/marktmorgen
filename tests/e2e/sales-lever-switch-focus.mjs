@@ -51,6 +51,8 @@ const browser = await launch();
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
   const page = await context.newPage();
+  // A wait that never ends fails here, named, well inside the test's own limit, instead of the whole run being stopped.
+  page.setDefaultTimeout(30_000);
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.route("http://switch.test/**", (route) => {
@@ -106,10 +108,12 @@ try {
   await undo.focus();
   // The answer waits long enough that the focus is surely moved before it comes, on any machine.
   await page.evaluate(() => { window.harness.next.push({ ok: true }); window.harness.delay = 1500; });
-  const sent = page.evaluate(() => new Promise((done) => { const before = window.harness.writes.length; const t = setInterval(() => { if (window.harness.writes.length > before) { clearInterval(t); done(); } }, 5); }));
+  // The count is read before the press, and the wait for the press's write has its own limit: a count read in the page
+  // after the press had already landed waited for ever (one CI run on #3563 was stopped at 120 s here).
+  const before = await page.evaluate(() => window.harness.writes.length);
   await page.keyboard.press("Enter");
   await page.getByRole("button", { name: "Elsewhere" }).focus();
-  await sent;
+  await page.waitForFunction((before) => window.harness.writes.length > before, before);
   await page.getByRole("button", { name: "Reload the page" }).waitFor();
   is("the person moved the focus while it was saved: it stays where they put it", await active(), "Elsewhere");
 

@@ -2662,9 +2662,10 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports and list downloads after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "dueForErasure", "CLOSING_UNHELD", "fencedBy"] },
+      { file: "lib/redis-lock.ts", names: ["applyIfHeld", "CLOSING_FENCED", "FENCED_KEYS"] },
       { file: "lib/closed-store-data.ts", names: ["queueDeleted", "admitDeleted", "BATCH_SWAP", "DELETE_SETTLES_MS", "if (!entry.deleted) await finish(entry, now)", "settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] })", "await forgetBoth(entry.statsId ?? null, entry.sid)", "await queueStoreForget(entry.statsId ?? null, entry.sid)"] },
-      { file: "lib/store.ts", names: ["await queue(store)", "deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner)])", "storeExactly", "settleDeletedStore", "DELETED_HOLD"] },
+      { file: "lib/store.ts", names: ["await queue(store)", "applyIfHeld(held, changes)", "storeExactly", "settleDeletedStore", "DELETED_HOLD"] },
       { file: "lib/store-forget-retry.ts", names: ["FORGET_TRY_COMMANDS", "forgetBoth"] },
       { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
       { file: "app/api/store/stores/route.ts", names: ["deleteStore(ref, queueDeleted)"] },
@@ -2718,7 +2719,31 @@ export const WALK_START_READ_COMMANDS = 1;
  * the record closeStoreRecord already reads and the ZREM's own answer: no command more.
  */
 export const PLAN_RUNS_READ_COMMANDS = 1;
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS;
+/**
+ * Whether a store in line is still due, read right before it is prepared (lib/closed-store-data.ts dueForErasure, #3156):
+ * its place in the final closing line and the closing job's record, in one pipeline of two commands.
+ */
+export const DUE_READ_COMMANDS = 2;
+/**
+ * What the erasing mark adds to a store's preparation (Codex N1's HIGH on #3156, lib/closed-store-data.ts forgetLive and
+ * prepareStore, lib/store.ts erasingSince and closeStoreRecord; Claude 5's LOW): the lock made to last before it
+ * (holdLock: EVAL, GET, EXPIRE); its own fenced step (the EVAL, its read of the lock and the HSET); the mark read under
+ * the lock before the record goes (one HGET); the mark read before anything is touched, for a store whose plan reads
+ * running and whose closing day is out of the final line (one HGET, counted always); and its HDEL in the record's own
+ * fenced step.
+ */
+export const ERASING_MARK_COMMANDS = 3 + 3 + 1 + 1 + 1;
+/**
+ * What fencing the live store's deletes by the store's lock adds (#3156 on #3643: lib/closed-store-data.ts forgetLive,
+ * fencedBy; lib/redis-lock.ts applyIfHeld, CLOSING_FENCED): the lock made to last again (holdLock: EVAL, GET, EXPIRE)
+ * once before each host's claims and before the team and the last keys; each fenced step's EVAL and its read of the
+ * lock (two commands beside its deletes) for each page of a host's claims and for the ten other steps (team, the two
+ * steps of its keys for the API, webhooks, email platform, phones, Path, hosts' calendars and address, and the
+ * record's closing); and the record's closing made as one fenced step with the record and its copy from before a move
+ * deleted one DEL each (one DEL more than the fenced-del it replaces).
+ */
+export const FENCED_PREPARE_COMMANDS = (1 + MAX_TEAM) * 3 + 2 * 3 + 2 * ((1 + MAX_TEAM) * 50 + 10) + 1;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS + DUE_READ_COMMANDS + ERASING_MARK_COMMANDS + FENCED_PREPARE_COMMANDS;
 
 /**
  * Commands one daily visit of a closing store sends at the most (lib/plan-closing.ts, closeOne), outside what a

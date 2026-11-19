@@ -189,6 +189,23 @@ async function main(): Promise<void> {
   refund(three.pi, PRICE);
   is("the refunded gift is not handed over", await deliverGift(giftArgs(store, giftable, three)), "already");
   is("the PayPal purchase stays theirs", await holds(store, three.to, giftable.id), 1);
+  part("#4408 merge: a missing payment reference is unknown, then retry can deliver");
+  const four = await giveGift(store, giftable, 4);
+  const args = giftArgs(store, giftable, four);
+  let missing = "accepted";
+  try {
+    await deliverGift({ ...args, session: { ...(args.session as Record<string, unknown>), payment_intent: undefined } as never });
+  } catch (error) {
+    missing = (error as Error).name;
+  }
+  is("a positive gift without its payment cannot grant or retain its work mark", [missing, await holds(store, four.to, giftable.id), Boolean((await readGift(four.id))?.given), (await redis.pipeline([["GET", `nl:gift:${four.id}:giving`]]))[0]], ["UnknownReplyError", 0, false, null]);
+  let retried: string;
+  try {
+    retried = await deliverGift({ ...args, session: { ...(args.session as Record<string, unknown>), payment_intent: { id: four.pi } } as never });
+  } catch (error) {
+    retried = (error as Error).name;
+  }
+  is("the same gift retries immediately with its expanded payment reference", [retried, await holds(store, four.to, giftable.id)], ["given", 1]);
   done();
 }
 

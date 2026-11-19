@@ -163,6 +163,9 @@ async function main(): Promise<void> {
   const once = emails.filter((e) => e.to === "buyer4@example.com" && e.subject.startsWith("It is out")).map((e) => e.once);
   is("the retry marks it given; each email of the way in carries the same idempotency key, so the buyer gets one", [await confirmPreorder(store, session(4), product, deps), Boolean((await readPreorder(store, product.id, session(4).id))?.given), new Set([...once, ...emails.filter((e) => e.to === "buyer4@example.com" && e.subject.startsWith("It is out")).map((e) => e.once)]).size], ["given", true, 1]);
 
+  part("#4408 merge: a missing payment reference is unknown before any pre-order is recorded");
+  is("positive paid pre-order missing payment stays unconfirmed and unrecorded", [await outcome(() => confirmPreorder(store, { ...session(5), payment_intent: undefined }, product, deps)), await granted(5), await readPreorder(store, product.id, session(5).id)], ["unconfirmed", false, null]);
+  is("the same pre-order retries with its expanded payment reference", [await confirmPreorder(store, { ...session(5), payment_intent: { id: session(5).payment_intent } }, product, deps), await granted(5)], ["given", true]);
   done();
 }
 

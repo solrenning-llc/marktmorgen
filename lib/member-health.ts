@@ -12,7 +12,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
-import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { keepUnlessErased, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -285,7 +285,12 @@ async function keepCopy(store: Store, health: Health): Promise<void> {
   const erased = await erasedOf(store, health.members);
   if (!erased) return;
   const copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;
-  await redisPipeline([["SET", cacheKey(store), JSON.stringify(copy), "EX", CACHE_SECONDS]]);
+  if (store.listId && copy.members.length) {
+    // The pre-read and a later deletion cannot protect the gap after SET. Check and write in one Redis step.
+    await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(copy), CACHE_SECONDS, copy.members.map((m) => m.email));
+  } else {
+    await redisPipeline([["SET", cacheKey(store), JSON.stringify(copy), "EX", CACHE_SECONDS]]);
+  }
   const after = await erasedOf(store, copy.members).catch(() => null);
   if (after === null || after.size) await redisPipeline([["DEL", cacheKey(store)]]);
 }

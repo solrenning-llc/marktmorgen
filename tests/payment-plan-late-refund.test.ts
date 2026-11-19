@@ -328,6 +328,25 @@ async function main(): Promise<void> {
   refundStatus = "succeeded";
   is("pending, then failed, the key still kept: made again and settled", [await finishPlan(ACCOUNT, q.session), madeFor(q.invoices[2]).map((one) => one.status)], ["done", ["failed", "succeeded"]]);
 
+  part("A previous partial late refund never drops the still-owed remainder from the retry line");
+  reset();
+  redis.clear();
+  const remainder = plan(2, 70, 3);
+  const late = remainder.invoices[2];
+  const priorPart: Refund = { id: "re_vpriorpart", object: "refund", payment_intent: late.charge.payment_intent, amount: 3500, currency: "usd", status: "succeeded", metadata: { plan_late_refund: late.id } };
+  const failedOther: Refund = { id: "re_vfailedother", object: "refund", payment_intent: late.charge.payment_intent, amount: 1500, currency: "usd", status: "failed", metadata: {} };
+  refunds[late.charge.payment_intent] = [priorPart, failedOther];
+  late.charge.amount_refunded = 3500;
+  refundStatus = "pending";
+  await rememberPlan(ACCOUNT, remainder.session);
+  const partialRun = await settlePlans();
+  is("only the remaining amount is requested", posts.map((one) => Number(one.body.get("amount"))), [1500]);
+  is("the plan is not reported done and remains reachable while its remainder is pending", [partialRun.done, await inALine(remainder.session)], [0, true]);
+  const finalPart = madeFor(late).find((one) => one !== priorPart && one !== failedOther);
+  if (finalPart) finalPart.status = "succeeded";
+  posts.length = 0;
+  is("only a confirmed whole return settles the plan, with no second refund", [await finishPlan(ACCOUNT, remainder.session), posts.length], ["done", 0]);
+
   part("A try stays within the registry's Stripe calls");
   reset();
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

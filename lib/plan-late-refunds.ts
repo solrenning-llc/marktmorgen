@@ -92,6 +92,26 @@ export function refundsSettled(list: unknown, intent: string): "done" | "pending
   return pending ? "pending" : "done";
 }
 
+/** A prior refund of only part of the late payment needs the whole list's confirmed amounts, not its mark alone. */
+function partialRefundProgress(list: unknown, intent: string, currency: string, total: number): { amount: number; pending: boolean } {
+  const read = objectOf(list);
+  if (!read || read.object !== "list" || !Array.isArray(read.data) || read.has_more !== false) throw new Error("a late payment's partial refunds could not be read whole");
+  let amount = 0;
+  let pending = false;
+  const seen = new Set<string>();
+  for (const item of read.data) {
+    const row = objectOf(item);
+    if (!row || typeof row.id !== "string" || seen.has(row.id) || !whole(row.amount) || row.amount === 0) throw new Error("a late payment's partial refund did not read");
+    seen.add(row.id);
+    const state = refundState(row, intent, row.amount, currency);
+    if (state === "unknown") throw new Error("a late payment's partial refund did not name this payment and currency");
+    if (state === "done") amount += row.amount;
+    else if (state === "pending") pending = true;
+    if (!Number.isSafeInteger(amount) || amount > total) throw new Error("a late payment's confirmed refunds exceed its paid amount");
+  }
+  return { amount, pending };
+}
+
 /** A refusal of the refund itself, for good: a 4xx that is not the account's (401, 403) nor too many requests (429). */
 const refusedForGood = (error: unknown): error is StripeError =>
   error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 403 && error.status !== 429;
@@ -201,11 +221,29 @@ export async function refundLatePayments(account: string, subscription: string, 
     const made = await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: one.intent, limit: "100" })}`, undefined, AT);
     const prior = priorRefund(made, one.intent, one.invoice, one.currency, LATE_MARK);
     if (prior === "unknown") throw new Error("the refunds already made for a plan's late payment could not be read whole");
-    // Made here before: never a second. Given back once it reads succeeded; while pending at Stripe, read again.
+    // A successful mark for a partial refund proves only that part. Another refund can have failed since this
+    // partial one was made. Reconcile the whole list already read, and give back only the confirmed remainder.
+    let completed: number | null = null;
     if (prior) {
-      if (prior.state === "done") given.push(one.paid);
-      else left = true;
-      continue;
+      if (prior.state === "pending") {
+        left = true;
+        continue;
+      }
+      if (prior.amount === one.paid.amount) {
+        given.push(one.paid);
+        continue;
+      }
+      const progress = partialRefundProgress(made, one.intent, one.currency, one.paid.amount);
+      if (progress.pending) {
+        left = true;
+        continue;
+      }
+      if (progress.amount === one.paid.amount) {
+        given.push(one.paid);
+        continue;
+      }
+      completed = progress.amount;
+      one.give = one.paid.amount - completed;
     }
     // Confirmed failures under this invoice move the key on; with none it is the key used before.
     const failures = failedRefunds(made, one.intent, one.invoice, one.currency, LATE_MARK);
@@ -223,7 +261,9 @@ export async function refundLatePayments(account: string, subscription: string, 
         "/refunds",
         new URLSearchParams({ payment_intent: one.intent, amount: String(one.give), [`metadata[${LATE_MARK}]`]: one.invoice, "metadata[plan_subscription]": subscription }),
         AT,
-        lateRefundKey(one.invoice, failures),
+        // Keep every existing key. A remainder gets its own stable key; retrying it cannot replay the older
+        // partial refund, and a confirmed failure advances the existing failure count as before.
+        `${lateRefundKey(one.invoice, failures)}${completed === null ? "" : `:remaining:${completed}`}`,
       );
     } catch (error) {
       if (error instanceof StripeError && error.code === "balance_insufficient") {

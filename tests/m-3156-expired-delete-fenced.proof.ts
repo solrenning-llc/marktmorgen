@@ -3,7 +3,12 @@
  * kept frozen beside this file), with one change only: the team's delete is also found when it is sent inside the
  * closing walk's fenced step (lib/closed-store-data.ts, CLOSING_FENCED), which names its keys in KEYS. Once every delete
  * of the preparation is fenced there is no bare DEL of the team left for the frozen probe to pause at, and its first
- * check ("the actual plan reactivation was reached") fails for that reason alone. Assertions, writers and clock unchanged.
+ * check ("the actual plan reactivation was reached") fails for that reason alone. Writers and clock unchanged.
+ *
+ * One assertion follows the erasing mark (Codex N1's HIGH on #3156, coordinator's decision C5-20261119-0235): the mark is
+ * the preparation's first fenced change, so at the team's delete it is already there and the plan is refused (a payment
+ * for it is returned, tests/erasing-mark.test.ts). Before the walk the plan still starts; at either point the store's
+ * team is kept, which is what this probe was written for.
  */
 import {eraseClosed,markDue,WALK_KEY}from'@/lib/closed-store-data';
 import {claimHandle,storeForEmail,storeRef}from'@/lib/store';
@@ -35,7 +40,7 @@ async function main(){
    if(!reached&&team){
     renewedBeforeDelete=renewed;reached=true;
     redis.advance(120001);
-    await reactivate(owner);
+    await reactivate(owner).catch(()=>{});
    }
    return original(commands);
   })as typeof redis.pipeline;
@@ -44,7 +49,7 @@ async function main(){
   console.log('M_LEASE_OBSERVATION',JSON.stringify({at,reached,reads,renewedBeforeDelete,outcome,record:!!current,running:current?.subscriptionActive,members:team.members.map(m=>m.email)}));
   part(at);
   is('the actual plan reactivation was reached',reached,true);
-  is('the real reactivated store remains active',!!current&&current.subscriptionActive,true);
+  is(at==='before-walk'?'the real reactivated store remains active':'past the erasing mark the plan is refused, the store kept as it is',!!current&&current.subscriptionActive,at==='before-walk');
   is('the active store keeps its existing team',team.members.map(m=>m.email),[member]);
  }
  done();

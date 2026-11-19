@@ -29,7 +29,7 @@
  * from the store's calendar month, at most mailGapCheckLimit(tier, trial):
  * MAIL_GAP_CHECKS_PER_EMAIL for each monthly email of the plan, or of the
  * free trial while the store is in it (MAIL_GAP_TRIAL_CHECKS). Each send
- * refused at the ceiling still costs its count's three commands; the
+ * refused at the ceiling still costs its count's three commands (INCRBY, EXPIRE NX, DECRBY); the
  * wiring's caller bounds its attempts (runs, studio requests) and counts them. A plan with
  * no list email (Store) checks nobody. A send that would pass the ceiling
  * reads nothing, gives its checks back and says it was refused; an
@@ -45,15 +45,16 @@ import { claimValue } from "@/lib/claim-mark";
 import { MAIL_GAP_KEEP_MS, markValue, planSend, readLastSent, type LastSent, type MailGapSetting, type MailKind, type SendPlan } from "@/lib/mail-frequency-rules";
 import { TRIAL_MONTHLY_EMAILS, monthlyEmails, type Tier } from "@/lib/plan";
 import { redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { personKey } from "@/lib/person-key";
+import { windowCountBy, windowCountOf } from "@/lib/window-count";
 
 /** Checks a store may make in a calendar month for each monthly email of its plan. */
 export const MAIL_GAP_CHECKS_PER_EMAIL = 2;
 
 /**
- * The most commands one person checked can cost: the month's count (SET NX
- * and INCRBY, and a DECRBY when refused) for a send of one person, its read,
+ * The most commands one person checked can cost: the month's count (INCRBY
+ * and EXPIRE NX, and a DECRBY when refused) for a send of one person, its read,
  * the claim, the claim's read-back and the record of the send.
  */
 export const MAIL_GAP_COMMANDS_PER_CHECK = 7;
@@ -93,11 +94,9 @@ async function takeChecks(store: string, tier: Tier, trial: boolean, count: numb
   const limit = mailGapCheckLimit(tier, trial);
   if (count > limit) return false;
   const key = `nl:mgap:checks:${store}:${new Date(now).toISOString().slice(0, 7)}`;
-  const replies = await pipeline([
-    ["SET", key, "0", "EX", MAIL_GAP_CHECK_WINDOW_SECONDS, "NX"],
-    ["INCRBY", key, count],
-  ]);
-  const total = replies ? countOf(replies[1]) : null;
+  // The INCRBY first and the window's expiry set only when the key has none (lib/window-count.ts): a SET NX then INCRBY
+  // pair could leave the month's count with no expiry if the key ended between the two (tests/window-count-expiry.test.ts).
+  const total = windowCountOf(await pipeline(windowCountBy(key, MAIL_GAP_CHECK_WINDOW_SECONDS, count)));
   if (total === null) return false;
   if (total > limit) {
     // Given back so a smaller send can still go; if the give-back fails, the count stays higher, never lower.

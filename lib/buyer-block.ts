@@ -107,8 +107,9 @@ export async function blockedState(store: Pick<Store, "sid">, email: string): Pr
   }
   if (!replies) return "unknown";
   const exists = countOf(replies[0]);
-  if (exists === 0) return { blocked: false };
-  if (exists !== 1 || !mark) return "unknown";
+  if (exists !== 0 && exists !== 1) return "unknown";
+  if (!mark) return exists === 0 ? { blocked: false } : "unknown";
+  // With a mark, the row read is authoritative even if the list did not exist at the earlier EXISTS.
   if (replies[1] === null) return { blocked: false };
   const entry = parseEntry(replies[1]);
   return entry ? { blocked: true, ...entry } : "unknown";

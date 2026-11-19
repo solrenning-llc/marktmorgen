@@ -1002,10 +1002,16 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's deals");
   const pairs: [string, string][] = [];
   for (let i = 0; i < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
-  const theirs = pairs.filter(([, value]) => {
-    const deal = json(value) as { email?: unknown } | null;
-    return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
-  }).map(([id]) => id);
+  // Only a whole HGETALL of distinct fields, each a deal that reads as an object, may decide whose deals these are: a
+  // deal that does not read may be the person's (a truncated value still names them), so the step is unknown before
+  // anything is deleted, never "somebody else's" (#4810, Codex G; coordinator's note on #2287).
+  if (new Set(pairs.map(([id]) => id)).size !== pairs.length) throw new UnknownReplyError("a store's deals (a deal named twice)");
+  const deals = pairs.map(([id, value]) => {
+    const deal = json(value);
+    if (!deal || typeof deal !== "object" || Array.isArray(deal)) throw new UnknownReplyError("a store's deals (a deal that does not read)");
+    return [id, deal as { email?: unknown }] as const;
+  });
+  const theirs = deals.filter(([, deal]) => typeof deal.email === "string" && deal.email.trim().toLowerCase() === address).map(([id]) => id);
   // Each value taken out in one script that answers what it deleted, each deal
   // deleted on its own: what goes back to the store's data room is exactly
   // what was removed, even with a change of the same value at the same time.

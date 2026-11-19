@@ -103,8 +103,8 @@ export function countOf(reply: unknown): number | null {
 
 /**
  * A deletion's or write's count read exactly, and only when the command sent could give it (CX-123 rule 24; #4795,
- * #4796, #4798, Codex V): DEL and UNLINK at most their distinct keys; ZREM, SREM and HDEL at most their distinct
- * members or fields; HSET at most its distinct fields. A larger count cannot come from that command, so it does not
+ * #4796, #4798, #4794, Codex V): DEL and UNLINK at most their distinct keys; ZREM, SREM and HDEL at most their distinct
+ * members or fields; HSET at most its distinct fields; SADD and ZADD at most their distinct members. A larger count cannot come from that command, so it does not
  * prove what was removed or written, and it is null (unknown), as any other shape is. Other commands: countOf alone.
  */
 export function countWithin(reply: unknown, command: readonly (string | number)[]): number | null {
@@ -116,7 +116,14 @@ export function countWithin(reply: unknown, command: readonly (string | number)[
   if (op === "DEL" || op === "UNLINK") most = new Set(args).size;
   else if (op === "ZREM" || op === "SREM" || op === "HDEL") most = new Set(args.slice(1)).size;
   else if (op === "HSET") most = new Set(args.slice(1).filter((_, i) => i % 2 === 0)).size;
-  else return count;
+  else if (op === "SADD") most = new Set(args.slice(1)).size;
+  else if (op === "ZADD") {
+    // Its options first (NX, XX, GT, LT, CH), then score and member pairs; INCR answers a score, not a count.
+    let at = 1;
+    while (at < args.length && ["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[at].toUpperCase())) at += 1;
+    if (args.slice(1, at).some((a) => a.toUpperCase() === "INCR")) return count;
+    most = new Set(args.slice(at).filter((_, i) => i % 2 === 1)).size;
+  } else return count;
   return count <= most ? count : null;
 }
 

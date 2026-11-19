@@ -419,6 +419,13 @@ export class MemoryRedis {
           return n;
         }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
+        if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, pitches, id, before, after] = args;
+          if (this.run(["HGET", pitches, id]) !== before) return 0;
+          this.run(["HSET", pitches, id, after]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);
@@ -2540,11 +2547,19 @@ export class MemoryRedis {
           return 1;
         }
         // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
-        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, hash, tell, due, field, read, next, score, member] = args;
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, hash, tell, due, field, read, next, score, member, attempt] = args;
+          this.scriptCalls += 1;
           if (this.run(["HGET", hash, field]) !== read) return 0;
-          if (read !== next) this.run(["HSET", hash, field, next]);
-          this.run(["ZADD", tell, "NX", score, member]);
+          if (attempt !== "") {
+            this.scriptCalls += 1;
+            this.run(["HSET", hash, field, attempt]);
+            this.scriptCalls += 1;
+            this.run(["ZADD", tell, "NX", score, member]);
+          }
+          this.scriptCalls += 1;
+          this.run(["HSET", hash, field, next]);
+          this.scriptCalls += 1;
           this.run(["ZREM", due, member]);
           return 1;
         }
@@ -2724,6 +2739,37 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
+        // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
+        // is gone or lists everyone but them; a team record that does not read keeps the id (Codex U on #3660).
+        if (key.startsWith("-- marktmorgen:team-index-off-team:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isInteger(count) || count < 2 || argv.length !== count) throw new Error("ERR team-index-off-team: wrong number of keys or arguments");
+          const [index, ...teams] = keys;
+          const [address, ...sids] = argv;
+          let removed = 0;
+          teams.forEach((team, i) => {
+            this.scriptCalls += 1;
+            const raw = this.run(["GET", team]);
+            let off = raw === null;
+            if (typeof raw === "string") {
+              try {
+                const parsed = JSON.parse(raw) as { members?: unknown; invites?: unknown };
+                if (Array.isArray(parsed.members) && Array.isArray(parsed.invites)) {
+                  off = !parsed.members.some((m) => !!m && typeof m === "object" && typeof (m as { email?: unknown }).email === "string" && (m as { email: string }).email.trim().toLowerCase() === address);
+                }
+              } catch {
+                off = false;
+              }
+            }
+            if (off) {
+              this.scriptCalls += 1;
+              removed += Number(this.run(["SREM", index, sids[i]]));
+            }
+          });
+          return removed;
+        }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];

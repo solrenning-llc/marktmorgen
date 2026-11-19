@@ -44,7 +44,7 @@ import { flowsBytes, readFlows } from "@/lib/flows";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
-import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
+import { type Charge, type Hold, chargeBook, invoicesSettled } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_HEADS_WORK, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsSizesWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
@@ -496,7 +496,8 @@ export async function affiliatesTool(store: Store, charge: Charge) {
   if (!affiliatesOn(store)) return { program: null, note: "The affiliate program is off." };
   const refused = await chargeBook(store, charge);
   if (refused) return refused;
-  const book = await readBook(store);
+  // Counted ahead, the kept invoices with it (chargeBook, bookWork).
+  const book = await readBook(store, undefined, { keptPaid: true });
   return {
     currency: book.currency,
     program: { percent: store.affiliates.percent, days: store.affiliates.days, rule: store.affiliates.rule, memberships_months: store.affiliates.recurring, bonuses: store.affiliates.bonuses },
@@ -513,6 +514,10 @@ export async function affiliatesTool(store: Store, charge: Charge) {
       held_because: r.flags,
     })),
     refunds_checked: book.refundsChecked,
+    // Every membership and plan payment read and none left out unlinked (audit A1); false, the amounts may be low
+    // (lib/api-read.ts, affiliates and invoicesSettled).
+    invoices_checked: invoicesSettled(book),
+    unlinked_invoices: book.unlinkedInvoices ?? 0,
   };
 }
 

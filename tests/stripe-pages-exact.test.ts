@@ -97,6 +97,8 @@ async function main(): Promise<void> {
     amount_paid: 4900,
     currency: "usd",
     created: SEC - 300,
+    // As Stripe gives it: lib/ad-events.ts sends a renewal only for an address it asked is not deleted (#3324, audit 12).
+    customer_email: "renewing@example.com",
     parent: { subscription_details: { subscription: subId, metadata: { store: "pages", product: "club000001", ads } } },
   });
   pages.set("/invoices", [{ object: "list", data: [invoice("in_Renew0001", "sub_Renew0001")], has_more: false }]);

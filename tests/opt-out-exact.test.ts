@@ -76,11 +76,20 @@ const MALFORMED: [string, () => unknown[]][] = [
   ["two replies", () => ["OK", "OK"]],
 ];
 
+// The payday under test: today, or the 28th when today is the 29th to 31st. A payday is a day of the month that
+// exists in every month (MAX_PAYDAY, lib/affiliate-setting.ts), so "today" on those days is not a payday a store can
+// set, and the run would find none: the test failed on every 29th, 30th and 31st.
+const PAYNOW = (() => {
+  const at = new Date();
+  if (at.getUTCDate() > 28) at.setUTCDate(28);
+  return at;
+})();
+
 async function payday(): Promise<void> {
   await claimHandle(OWNER, "crumb", "Crumb Bakery", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestOptOut0001", true);
-  const today = new Date().getUTCDate();
+  const today = PAYNOW.getUTCDate();
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: today }));
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
@@ -89,21 +98,23 @@ async function payday(): Promise<void> {
     ["HSET", `nl:aff:${statsId}:people`, aff, JSON.stringify({ id: aff, email: `${aff}@example.com`, code: "a1a1a", status: "approved", appliedAt: T0 * 1000, decidedAt: T0 * 1000, note: "" })],
     ["HSET", `nl:aff:${statsId}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff, at: T0 + 10 * DAY, product: "prod01", title: "Bread course", base: 1000, total: 1000, currency: "usd", rate: 20, self: false, how: "click" })],
   ]);
-  const month = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+  const month = `${PAYNOW.getUTCFullYear()}-${String(PAYNOW.getUTCMonth() + 1).padStart(2, "0")}`;
   const claim = `nl:aff:payday:${statsId}:${month}`;
   const isClaim = (c: (string | number)[]) => c[0] === "SET" && c[1] === claim;
-  // What a run did for the store: the emails it counts as sent, and whether it went past the claim (the next
-  // step reads whether the creator pays from their PayPal by itself, then writes the email).
+  // What a run did for the store: the emails it counts as sent, and whether it went past the claim, that is took
+  // it (its SET NX answered "OK"). The PayPal link is read before the claim since Claude 5's MEDIUM on 91815567,
+  // so a read of it no longer tells.
   const run = async () => {
-    const seen: string[] = [];
+    let took = false;
     const watch = redis.pipeline;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      for (const c of commands) seen.push(`${c[0]} ${c[1]}`);
-      return watch(commands);
+      const replies = await watch(commands);
+      if (commands.length === 1 && isClaim(commands[0]) && Array.isArray(replies) && replies.length === 1 && replies[0] === "OK") took = true;
+      return replies;
     }) as typeof redis.pipeline;
     try {
-      const counts = await sendPaydayEmails(Date.now() + 20_000);
-      return { sent: counts.sent, pastTheClaim: seen.includes(`GET nl:pp:${statsId}`) };
+      const counts = await sendPaydayEmails(Date.now() + 20_000, PAYNOW);
+      return { sent: counts.sent, pastTheClaim: took };
     } finally {
       redis.pipeline = watch;
     }

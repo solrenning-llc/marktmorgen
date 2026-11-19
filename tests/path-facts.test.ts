@@ -92,7 +92,7 @@ async function main() {
     await setStripeAccount(OWNER, ACCOUNT, true);
     store = (await storeForEmail(OWNER))!;
     const life = `nl:stats:${store.statsId}:life`;
-    await redisPipeline([["HSET", life, "r:instagram", "1", "r:google", "40", "fs:instagram", "1", "u", "41"]]);
+    await redisPipeline([["HSET", life, "r:instagram", "1", "r:google", "40", "fs:instagram", "1", "lc", "1", "u", "41"]]);
     await redisPipeline([["HSET", `nl:slink:store:${store.statsId}`, "a1", "{}", "a2", "{}", "a3", "{}"]]);
     sessions = [checkout()];
     const money = await readPathMoney(store);

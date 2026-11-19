@@ -38,9 +38,12 @@ const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 
 /** How many times the store's sequences were read: the list's key, by GET. */
 let flowReads = 0;
 let unknownMark = false;
+/** The store's sequences cannot be read (a passing Redis failure while a workflow would start). */
+let flowsDown = false;
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   flowReads += list.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:")).length;
+  if (flowsDown && list.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) return Promise.reject(new Error("synthetic Redis timeout")) as ReturnType<typeof redis.pipeline>;
   if (unknownMark && list.length === 1 && list[0][0] === "GET" && String(list[0][1]).includes(":reach:")) return Promise.resolve(["half"]) as ReturnType<typeof redis.pipeline>;
   return real(list);
 }) as typeof redis.pipeline;
@@ -152,6 +155,25 @@ async function main(): Promise<void> {
   is("the last lesson finishes it", await noteIfFinished(store, courseId, course.id, "ana@example.com"), true);
   await run();
   is("and starts what finishing starts and the share not started yet, still once each", [to("You finished it"), to("Almost done"), to("Quarter")], [["ana@example.com"], ["ana@example.com", "ben@example.com"], ["ana@example.com", "ben@example.com"]]);
+
+  part("A start that failed is tried again (Codex X5's MEDIUM on #3989)");
+  await upsertContact(store.listId as string, "dee@example.com", { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+  for (const lesson of [one, two]) await markLesson(course.id, "dee@example.com", lesson, true, ROOM);
+  flowsDown = true;
+  await noteIfFinished(store, courseId, course.id, "dee@example.com");
+  flowsDown = false;
+  await run();
+  is("the sequences could not be read: nothing started", to("Halfway there").includes("dee@example.com"), false);
+  await noteIfFinished(store, courseId, course.id, "dee@example.com");
+  await run();
+  is("the next lesson view starts the half one, its share not spent by the failed try", to("Halfway there").includes("dee@example.com"), true);
+  for (const lesson of [three, four]) await markLesson(course.id, "dee@example.com", lesson, true, ROOM);
+  flowsDown = true;
+  is("finishing while the sequences cannot be read starts nothing", await noteIfFinished(store, courseId, course.id, "dee@example.com"), false);
+  flowsDown = false;
+  is("and the next view finishes it", await noteIfFinished(store, courseId, course.id, "dee@example.com"), true);
+  await run();
+  is("starting what finishing starts, once", to("You finished it").filter((a) => a === "dee@example.com").length, 1);
 
   part("Only who agreed");
   for (const lesson of [one, two]) await markLesson(course.id, "cy@example.com", lesson, true, ROOM);

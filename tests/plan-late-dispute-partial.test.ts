@@ -10,6 +10,8 @@ const intent = "pi_x5lostpartial01";
 const subscription = "sub_x5lostpartial01";
 let dispute: Record<string, unknown>;
 let another = false;
+let refunded = 0;
+let refundRows: Record<string, unknown>[] = [];
 let calls = 0;
 const posts: string[] = [];
 const fullDispute = (): Record<string, unknown> => ({ id: "du_x5lostpartial01", object: "dispute", charge, status: "lost", amount: 5_000, currency: "usd" });
@@ -17,7 +19,7 @@ const paid = (other = false) => ({
   object: "invoice", id: other ? "in_x5unaffected01" : invoice, subscription, status: "paid", created: 200,
   currency: "usd", amount_paid: 5_000, paid_out_of_band: false,
   charge: { object: "charge", id: other ? "ch_x5unaffected01" : charge, invoice: other ? "in_x5unaffected01" : invoice,
-    payment_intent: other ? "pi_x5unaffected01" : intent, amount: 5_000, amount_refunded: 0, currency: "usd",
+    payment_intent: other ? "pi_x5unaffected01" : intent, amount: 5_000, amount_refunded: other ? 0 : refunded, currency: "usd",
     disputed: !other, dispute: other ? null : dispute, balance_transaction: { amount: 5_000, currency: "usd" } },
 });
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -27,7 +29,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/invoices") return Response.json({ object: "list", data: another ? [paid(), paid(true)] : [paid()], has_more: false });
   if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
-  if (path === "/refunds" && init?.method !== "POST") return Response.json({ object: "list", data: [], has_more: false });
+  if (path === "/refunds" && init?.method !== "POST") return Response.json({ object: "list", data: url.searchParams.get("payment_intent") === intent ? refundRows : [], has_more: false });
   if (path === "/refunds") {
     const body = new URLSearchParams(String(init?.body));
     const payment = body.get("payment_intent") ?? "";
@@ -37,7 +39,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   throw new Error("unexpected synthetic route");
 }) as typeof fetch;
-function seed(): void { dispute = fullDispute(); another = false; calls = 0; posts.length = 0; }
+function seed(): void { dispute = fullDispute(); another = false; refunded = 0; refundRows = []; calls = 0; posts.length = 0; }
 async function run() {
   const out = await refundLatePayments("acct_x5synthetic", subscription, 100);
   assert.ok(calls <= LATE_REFUND_CALLS);
@@ -53,6 +55,30 @@ test("the disputed remainder never blocks refunding a different late payment", a
   const out = await run();
   assert.deepEqual([out.state, out.disputed, out.short, out.refunded, out.given.map(row => row.invoice), posts],
     ["owed", 0, [invoice], 1, ["in_x5unaffected01"], ["pi_x5unaffected01"]]);
+});
+// Claude 3's MEDIUM on #4893: a buyer refunded in part who then disputes the rest. The dispute covers only what was
+// left on the charge, so a lost dispute plus the refunds Stripe confirmed (never `amount_refunded`, which counts
+// pending ones) settles the whole late payment; a pending part keeps it owed, off `short`; too little stays short.
+const refundRow = (id: string, amount: number, status: string): Record<string, unknown> => ({ object: "refund", id, payment_intent: intent, amount, currency: "usd", status, metadata: {} });
+test("a lost dispute of what was left after a confirmed partial refund settles without a refund", async () => {
+  seed(); dispute.amount = 1_000; refunded = 4_000; refundRows = [refundRow("re_x5partsucceed1", 4_000, "succeeded")];
+  const out = await run();
+  assert.deepEqual([out.state, out.disputed, out.short, posts], ["done", 1, [], []]);
+});
+test("the same with the partial refund still pending stays owed, never named short", async () => {
+  seed(); dispute.amount = 1_000; refunded = 4_000; refundRows = [refundRow("re_x5partpending1", 4_000, "pending")];
+  const out = await run();
+  assert.deepEqual([out.state, out.disputed, out.short, posts], ["owed", 0, [], []]);
+});
+test("a lost dispute and a confirmed partial refund that still fall short stay owed and short", async () => {
+  seed(); dispute.amount = 1_000; refunded = 3_000; refundRows = [refundRow("re_x5partshort001", 3_000, "succeeded")];
+  const out = await run();
+  assert.deepEqual([out.state, out.disputed, out.short, posts], ["owed", 0, [invoice], []]);
+});
+test("a refund list that does not read never settles a lost partial dispute", async () => {
+  seed(); dispute.amount = 1_000; refunded = 4_000; refundRows = [{ object: "refund", id: "re_x5partodd00001", payment_intent: intent, amount: "4000", currency: "usd", status: "succeeded" }];
+  await assert.rejects(run);
+  assert.deepEqual(posts, []);
 });
 for (const amount of [5_000, 5_100]) test(`a readable lost dispute covering ${amount} settles without a refund`, async () => {
   seed(); dispute.amount = amount;

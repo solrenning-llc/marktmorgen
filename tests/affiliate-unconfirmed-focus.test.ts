@@ -50,7 +50,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 async function main(): Promise<void> {
   const line: WaitingLine = { ref: "s:cs_test_focus0001", at: 1_794_200_000, title: "Course 1", aff: "a1", base: 4900, rate: 5, commission: 245, currency: "usd" };
-  const view = await mount(AffiliateUnconfirmed as never, { lines: [line], total: 1, who: { a1: "Ana" }, days: 7 } as never, { beforeEffects: attach });
+  const view = await mount(AffiliateUnconfirmed as never, { lines: [line], total: 1, who: { a1: "Ana" }, days: 7 } as never, undefined, { beforeEffects: attach });
 
   part("MEDIUM 2: Cancel gives the focus back to the button that opened the confirmation");
   const opener = button(view.tree(), "Review and approve");

@@ -45,6 +45,11 @@ const SCRIPTS: Record<string, Script> = {
     run(listed === "1" ? ["ZADD", dir, at, member] : ["ZREM", dir, member]);
     return 1;
   },
+  "recovery-report-live:v1": (run, [storeId, erasing, report], [field, value, seconds]) => {
+    if (Number(run(["EXISTS", storeId])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
+    run(["SET", report, value, "EX", seconds]);
+    return 1;
+  },
   "set-and-values-take:v1": (run, [set, ...plain]) => {
     const members = Number(run(["SCARD", set])) > 0 ? (run(["SMEMBERS", set]) as string[]) : [];
     const values = plain.map((k) => run(["GET", k]) ?? null);

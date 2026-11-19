@@ -14,13 +14,15 @@ import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
 import { rememberPlan } from "@/lib/plan-remember";
 import { currentMeta } from "@/lib/tier-rules";
-import { saleOff } from "@/lib/store-sale";
+import { saleOff, saleable } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
-import { fairCoupon } from "@/lib/fair-coupon";
+import { fairCoupon, memberCoupon, memberCustomer } from "@/lib/fair-coupon";
+import { isMemberPercent, memberKeepsFloor } from "@/lib/member-price-rules";
+import { currencyRule } from "@/lib/money";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
@@ -61,6 +63,7 @@ import { imageUrl } from "@/lib/product-image";
 import { readMoves } from "@/lib/call-records";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { isLive, membershipStatus, soldAMembership } from "@/lib/membership-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { purchaseRefunded } from "@/lib/refunds";
 import { BUMP_KEYS, type BumpKey, MIN_BUNDLE_ITEMS, bumpsFromMeta, bundleFromMeta, bundleMeta, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf } from "@/lib/bundles";
@@ -258,6 +261,13 @@ export async function createCheckout(
      * the route from the request; "" when it is not known.
      */
     country?: string;
+    /**
+     * A member price (lib/member-price.ts, 620 [SZ4]): the percentage the page
+     * showed and the address it was proved for, proved again by the route
+     * (memberClaim) before they are passed here. Taken off like a fair price,
+     * when it takes off the most, with that address fixed on Stripe's page.
+     */
+    member?: { percent: number; email: string };
     /** No free trial: somebody coming back has had theirs. */
     noTrial?: boolean;
     /**
@@ -545,6 +555,19 @@ export async function createCheckout(
   // the page used to show the price, and taken off the same way as a sale,
   // when it takes off more than the sale does. Never both.
   const fairOffNow = !extras.coupon && !plan && !membership ? fairOff(store.fair, product, extras.country ?? "") : 0;
+  // A member price (lib/member-price.ts), already proved by the route: on
+  // what a sale covers, the same way, when it takes off more than a sale or
+  // a fair price does. Never two. Only on the member's own purchase of that
+  // product alone: a coupon comes off every line, so not with a box ticked
+  // (a product no rule may cover), nor a gift, places for others or a
+  // pre-order, which hand nothing to the member (lib/bundle-rules.ts).
+  const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;
+  // Never below the currency's smallest charge, as a sale and a fair price (DISC-S-1): memberClaim already
+  // refuses such a claim; this holds the floor for any other caller too.
+  const memberOffNow =
+    !extras.coupon && !plan && !membership && memberAlone && saleable(product) && extras.member && isMemberPercent(extras.member.percent) && memberKeepsFloor(product, extras.member.percent, currencyRule(store.currency).minCharge)
+      ? extras.member.percent
+      : 0;
   // A membership's introductory price (lib/intro-price.ts), unless a
   // come-back offer replaces it: one discount at a time, as everywhere here.
   const intro = membership && !extras.coupon ? activeIntro(product, store.tiers) : null;
@@ -569,6 +592,15 @@ export async function createCheckout(
     body.set("metadata[intro_cents]", String(intro.cents));
     body.set("metadata[regular_cents]", String(product.priceCents));
     body.set("subscription_data[metadata][intro]", String(intro.count));
+  } else if (memberOffNow > saleOffNow && memberOffNow > fairOffNow) {
+    // The member's own purchase: the checkout belongs to a customer of the creator's made with the proved
+    // address, which Stripe's page shows and the buyer cannot change. customer_email would be only a prefill,
+    // typed over for somebody else (Codex X4 on #2999). No address proved, no member price: refused.
+    if (!extras.member?.email) throw new Error("The payment page could not be opened");
+    body.set("customer", await memberCustomer(store.stripeAccountId, extras.member.email));
+    body.set("discounts[0][coupon]", await memberCoupon(store.stripeAccountId, memberOffNow));
+    body.set("metadata[member]", String(memberOffNow));
+    mayComeOff.push({ kind: "percent", percent: memberOffNow });
   } else if (fairOffNow > saleOffNow) {
     body.set("discounts[0][coupon]", await fairCoupon(store.stripeAccountId, fairOffNow));
     body.set("metadata[fair]", `${extras.country}:${fairOffNow}`);
@@ -607,7 +639,8 @@ export async function createCheckout(
   // applies, or the buyer names the price): never opened without the code
   // the buyer asked for, and never two discounts.
   if (extras.returning && body.get("discounts[0][coupon]") !== extras.returning.coupon) throw new ReturningCodeRefused("other");
-  if (extras.email) body.set("customer_email", extras.email);
+  // Never over a member's own customer (above): Stripe takes one or the other, and the member's address is the one proved.
+  if (extras.email && !body.has("customer")) body.set("customer_email", extras.email);
 
   if (extras.gift) {
     body.set("metadata[gift]", extras.gift);
@@ -798,6 +831,17 @@ export async function createCheckout(
     else body.set(`subscription_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
   }
 
+  // A member's own customer (above): Stripe makes no other for the checkout (an offer after paying or a tax
+  // number box asked for one) and takes no prefill beside it; what the buyer types on its page (their name, a
+  // billing or a delivery address, which a tax number box and the tax on top need) is saved to that customer.
+  if (body.has("customer")) {
+    body.delete("customer_creation");
+    body.delete("customer_email");
+    body.set("customer_update[address]", "auto");
+    body.set("customer_update[name]", "auto");
+    if (shipping) body.set("customer_update[shipping]", "auto");
+  }
+
   // Until the durable lifecycle is activated, the existing single-file sale
   // keeps its legacy checkout, independently of optional newsletter consent.
   // An activated durable producer still needs original-file access proof;
@@ -808,7 +852,8 @@ export async function createCheckout(
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
     !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
-    !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
+    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.
+    !body.has("discounts[0][promotion_code]") && !(body.has("discounts[0][coupon]") && !body.has("metadata[member]")));
   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
     throw new Error("The payment page could not be opened");
   }
@@ -940,6 +985,8 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
+  // Our record that this checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+  await holdCheckout(store, session.id, admitted);
   // A payment plan, or a membership that ends after a set number of payments, is written down before the buyer
   // leaves, so the plans job gives it its end whether or not they come back from paying: here, whichever door opened
   // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
@@ -1185,6 +1232,8 @@ export async function readOrder(
   let membership: "live" | "ended" | null = null;
   if (soldAMembership(product, { mode: session.mode, metadata })) {
     try {
+      // A paid subscription checkout always has its subscription: none at all is an answer not understood (rule 24).
+      if (session.subscription === null || session.subscription === undefined) throw new UnknownReplyError("a checkout's membership");
       membership = isLive(await membershipStatus(store, session.subscription)) ? "live" : "ended";
     } catch (error) {
       console.error("reading a membership failed", error);

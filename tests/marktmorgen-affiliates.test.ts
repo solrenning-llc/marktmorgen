@@ -50,7 +50,7 @@ for (const row of rows) {
 is("a dispute after the commission was paid is named as a cost not yet covered (review of #3756)", /dispute[^.]*after[^.]*paid[^.]*unknown|unknown[^.]*dispute[^.]*after[^.]*paid/i.test(shown), true);
 // Claude 7 on #3764 (MEDIUM): a yearly plan pays ahead, so its dispute window runs from the end of the year it paid
 // for, not from the charge (lib/refund-reserve-rules.ts, DISPUTE_DAYS, Stripe's "Dispute timing").
-is("the dispute window is DISPUTE_DAYS after the later of the payment and the end of the period it paid for, with its source", shown.includes(`${DISPUTE_DAYS} days after the later of the payment and the end of the period it paid for`) && shown.includes("lib/refund-reserve-rules.ts"), true);
+is("the annual dispute example is a model assumption with no certified expiry date", shown.includes(`${DISPUTE_DAYS} days after the later of the payment and the end of the period it paid for`) && shown.includes(`${DISPUTE_DAYS + 365} days in the yearly example`) && shown.includes("Some card network rules allow more time") && shown.includes("the maximum dispute window has not been confirmed"), true);
 is("never only 'after the charge', which would release a yearly commission about a year early", /about 120 days after the charge/.test(shown), false);
 
 part("Nothing is in force");
@@ -92,7 +92,7 @@ part("Paying an affiliate: what was read, with its date and source (unit 2)");
 is("Stripe's own pages are cited, with the day they were read", ["https://stripe.com/connect/pricing", "https://docs.stripe.com/connect/cross-border-payouts", "https://docs.stripe.com/global-payouts", "https://docs.stripe.com/global-payouts/recipient-requirements"].every((url) => doc.includes(url)) && doc.includes("read on 11 November 2026"), true);
 is("Connect's published payout fees are quoted as read", ["$2 per monthly active account", "0.25% + 25¢ per payout sent", "Starting at 0.25% of payout volume"].every((quote) => doc.includes(quote)), true);
 is("a fee that only says where it starts is no ceiling, so it stays unknown", /starting at[^.]*is not a ceiling/i.test(doc), true);
-is("Brazil is not among Global Payouts' recipient countries for a US sender, as read", doc.includes("Brazil is not in the list"), true);
+is("Brazil is marked as private preview, with no assumption that the programme can use it", doc.includes("Brazil (BRL) is listed in private preview") && doc.includes("coverage for a US sender and an individual recipient remains unconfirmed"), true);
 is("PayPal, Wise and the IRS forms could not be read here and stay unknown", ["PayPal", "Wise", "W-8BEN", "W-9"].every((name) => new RegExp(`${name}[^\n]*(could not be read|unknown)`).test(doc)), true);
 
 part("The record is what the renderer writes");

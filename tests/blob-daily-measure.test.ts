@@ -124,6 +124,33 @@ part("Unknown is never zero");
   is("and nothing is listed for it", calls.list, 4);
 }
 
+part("A day's claim answered after midnight never lists under yesterday's mark (Codex N1 on #2848, MEDIUM)");
+{
+  // A clean day for F: the claim of 23:59:59.900 lands, and its OK comes back at 00:00:00.100 of the next UTC day.
+  clock = Date.UTC(2026, 10, 21, 23, 59, 59, 900);
+  await redis.pipeline([["DEL", blobTallyKeys.kept(F)]]);
+  const original = redis.pipeline;
+  let delayed = false;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const reply = await original.call(redis, commands);
+    const [name, key, , nx] = commands[0] ?? [];
+    if (!delayed && commands.length === 1 && name === "SET" && nx === "NX" && typeof key === "string" && key === blobTallyKeys.day(F, Math.floor(Date.UTC(2026, 10, 21) / DAY))) {
+      delayed = true;
+      clock += 200;
+    }
+    return reply;
+  };
+  const before = calls.list;
+  try {
+    await used();
+    is("the late OK started no listing under the old day; the one listing is the new day's", calls.list - before, 1);
+    await used();
+    is("a second open that new day lists nothing more", calls.list - before, 1);
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 part("The vault open measures through the daily total, and its refusal is said");
 {
   const vault = readFileSync("lib/vault-storage.ts", "utf8");

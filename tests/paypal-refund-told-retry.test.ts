@@ -40,6 +40,7 @@ const hour = () => {
 
 let made = 0;
 const captures = new Map<string, string>();
+const captureReads = new Map<string, number>();
 const payers = new Map<string, string>();
 const orderId = (n: number) => `5O190127TN36481${String(n).padStart(2, "0")}`;
 let payer = "";
@@ -69,7 +70,10 @@ const paypal = async (input: string | URL | Request, init?: RequestInit) => {
     }, 201);
   }
   const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
-  if (cap) return json({ id: cap, status: captures.get(cap) ?? "COMPLETED" });
+  if (cap) {
+    captureReads.set(cap, (captureReads.get(cap) ?? 0) + 1);
+    return json({ id: cap, status: captures.get(cap) ?? "COMPLETED" });
+  }
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
 };
 const mail = installSesMailFixture({ fallback: paypal });
@@ -79,6 +83,8 @@ setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", fa
 let failing = false;
 /** Replies the first-failure mark's GET gives instead of the stand-in's, while set (rule 24). */
 let oddMark: unknown = undefined;
+/** An independently unreadable durable first-refund date: never interpreted as an expired notice deadline. */
+let oddRefundFirst: unknown = undefined;
 /**
  * How the first-failure mark's write goes, while set (Codex C2's M1 on #3499): "lost" answers "QUEUED" and writes
  * nothing, so its GET finds no mark; "throwOnce" gives the next pipeline that writes it no answer at all, once.
@@ -98,7 +104,7 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   const lostWrites = markWrites === "lost";
   const replies = await pipeline(lostWrites ? commands.map((c) => (isMarkWrite(c) ? ["GET", "nl:synthetic:nothing"] : c)) : commands);
   return commands.map((c, i) =>
-    oddMark !== undefined && c[0] === "GET" && String(c[1]).startsWith("nl:ppsell:tell:") ? oddMark : lostWrites && isMarkWrite(c) ? "QUEUED" : replies[i]);
+    oddMark !== undefined && c[0] === "GET" && String(c[1]).startsWith("nl:ppsell:tell:") ? oddMark : oddRefundFirst !== undefined && c[0] === "HGET" && String(c[1]).startsWith("nl:ppsell:back:") ? oddRefundFirst : lostWrites && isMarkWrite(c) ? "QUEUED" : replies[i]);
 }) as typeof redis.pipeline;
 const logged = console.error;
 console.error = (...args: unknown[]) => {
@@ -277,7 +283,7 @@ async function main(): Promise<void> {
       await sweep();
       const pass = sent.slice(before);
       if (pass.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) n += 1;
-      ownLooks.push(pass.filter((c) => String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "ZADD" && String(c[1]) === watch && c[3] === order && Number(c[2]) > 0)).length);
+      ownLooks.push(pass.filter((c) => String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "HGET" && String(c[1]) === sales.backKey(statsId)) || (c[0] === "ZADD" && String(c[1]) === watch && c[3] === order && Number(c[2]) > 0)).length);
       hour();
     }
     return n;
@@ -294,13 +300,39 @@ async function main(): Promise<void> {
     set();
     const unsure = await triesOver(12, odd.order);
     is(`${name}: twelve hourly looks try the telling at most REFUND_TELL_TRIES_AT_MOST times`, unsure <= (triesAtMost as number), true);
-    is(`${name}: a look while unknown sends the own commands the registry prices for a failed try, and tells nothing`, [unsure, ownLooks.every((n) => n === PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry)], [1, true]);
-    is(`${name}: unknown, so still watched, not told, nothing said not sent, the purchase taken back at once`, [(await watchedAt(odd.order)) !== null, await told(odd.capture), (await notSent()).length, await holds(odd.email)], [true, 0, linesBefore, 0]);
+    is(`${name}: an unknown look has at most one durable-date read besides the existing three commands, and tells nothing`, [unsure, ownLooks.every((n) => n <= PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry + PAYPAL_REFUND_TELL_RETRY.unknownNoticeDateReadCommands)], [1, true]);
+    is(`${name}: the durable refund date ends the unreadable notice retry, without sending or restoring access`, [await watchedAt(odd.order), await told(odd.capture), (await notSent()).length, await holds(odd.email)], [null, 0, linesBefore + 1, 0]);
+    const readsBefore = captureReads.get(odd.capture) ?? 0;
+    const commandsBefore = sent.length;
+    hour();
+    await sweep();
+    is(`${name}: a later hour neither reads this capture nor touches this order again`, [(captureReads.get(odd.capture) ?? 0) - readsBefore, sent.slice(commandsBefore).some((c) => c.includes(odd.order) || String(c[1]) === `nl:ppsell:tell:${odd.order}`)], [0, false]);
+    is(`${name}: the final Not sent line is written exactly once`, (await notSent()).length, linesBefore + 1);
     oddMark = undefined;
     markWrites = undefined;
     const after = await triesOver(48, odd.order);
     is(`${name}: once the mark reads, still failing: the tries in all stay inside REFUND_TELL_TRIES_AT_MOST`, unsure + after <= (triesAtMost as number), true);
     is(`${name}: then said not sent once, the purchase taken back, the order out of the watch`, [(await notSent()).length, await holds(odd.email), await watchedAt(odd.order)], [linesBefore + 1, 0, null]);
+    failing = false;
+  }
+  part("An unreadable durable refund date never proves the notice deadline elapsed (N1)");
+  is("the extra exact durable-date read is named in the cost registry", PAYPAL_REFUND_TELL_RETRY.unknownNoticeDateReadCommands, 1);
+  for (const [label, value] of [["missing", null], ["malformed", "soon"], ["wrong type", 17], ["future", String(Math.floor(Date.now() / 1000) + 10 * 86_400)], ["before payment", String(Math.floor(Date.now() / 1000) - 100 * 86_400)], ["an envelope", { result: String(Math.floor(Date.now() / 1000)) }]] as const) {
+    const odd = await paidThenRefunded(`pp-two-unknown-${label.replace(/ /g, "")}@example.com`);
+    const linesBefore = (await notSent()).length;
+    failing = true;
+    oddMark = "soon";
+    oddRefundFirst = value;
+    await triesOver(9, odd.order);
+    is(`${label}: two unknown dates keep the watch and never announce final failure`, [(await watchedAt(odd.order)) !== null, (await notSent()).length, await told(odd.capture)], [true, linesBefore, 0]);
+    oddRefundFirst = undefined;
+    await sweep();
+    hour();
+    await sweep();
+    is(`${label}: recovering the original durable date ends the old retry once`, [await watchedAt(odd.order), (await notSent()).length, await holds(odd.email)], [null, linesBefore + 1, 0]);
+    // Isolate a failing case from the next one when this regression is run against the former implementation.
+    await redis.pipeline([["ZREM", watch, odd.order]]);
+    oddMark = undefined;
     failing = false;
   }
   {

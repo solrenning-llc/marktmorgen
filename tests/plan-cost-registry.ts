@@ -1092,8 +1092,10 @@ export const COMMUNITY_DEVICES_READ = {
  *   (nl:ppsell:tell:; after the try at the first look, before it at every later one, which tells only once that time
  *   reads back known, not ahead of the clock and inside the bound: Codex C2's M1 on #3499) and the ZADD that keeps the
  *   order watched an hour (none at the last try, which goes on). A later look whose time is not known tells nothing
- *   and sends these same three commands, besides the look's own below: the watch's hourly look again at an unknown
- *   read (CX-123 rule 24), as for its paid record, capture or refund mark, inside the job's 25 orders a store a run;
+ *   and sends these same three commands, plus unknownNoticeDateReadCommands below. The independent durable refund
+ *   date ends this retry once its existing window elapsed (N1 on #3499), without authorizing a telling while the
+ *   notice mark is unknown. If both dates are unreadable, the look remains unknown like the paid record or capture,
+ *   inside the job's 25 orders a store a run; that storage-failure reconciliation is not certified as a bounded retry;
  * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and the
  *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
  *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);
@@ -1109,6 +1111,8 @@ export const COMMUNITY_DEVICES_READ = {
 export const PAYPAL_REFUND_TELL_RETRY = {
   triesAtMost: REFUND_TELL_TRIES_AT_MOST,
   ownCommandsPerFailedTry: 3,
+  /** One HGET of the immutable backKey observation, only when the notice's date cannot be read. */
+  unknownNoticeDateReadCommands: 1,
   lookCommandsPerFailedTry: 3,
   notSentCommandsAtMost: 2 + 2 * MAX_ENDPOINTS + 2 + 1,
 } as const;

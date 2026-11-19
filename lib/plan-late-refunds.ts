@@ -142,6 +142,9 @@ export async function refundLatePayments(account: string, subscription: string, 
       throw new Error("a plan's late payment's charge did not read");
     }
     if (typeof charge.currency !== "string" || !CURRENCY.test(charge.currency)) throw new Error("a plan's late payment's currency did not read");
+    if (typeof row.currency !== "string" || !CURRENCY.test(row.currency) || row.currency !== charge.currency) {
+      throw new Error("a plan's late invoice and charge do not prove the same currency");
+    }
     // This reader knows one charge only: a charge whose total is not the invoice's paid amount needs allocation evidence,
     // never its whole refund (Codex X8, X8-20261118-2310): an invoice paid at $10 never authorizes a $50 refund.
     if (charge.amount !== row.amount_paid) throw new Error("a plan's late invoice and charge do not prove the same paid amount");

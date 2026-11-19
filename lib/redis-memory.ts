@@ -2467,6 +2467,15 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, hash, tell, due, field, read, next, score, member] = args;
+          if (this.run(["HGET", hash, field]) !== read) return 0;
+          if (read !== next) this.run(["HSET", hash, field, next]);
+          this.run(["ZADD", tell, "NX", score, member]);
+          this.run(["ZREM", due, member]);
+          return 1;
+        }
         // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
         // lib/discount-schedule.ts TELL_STEP: a failed code's record written over only while it is the one read, and its
         // member taken off or put back on the line in the same step.
@@ -2636,7 +2645,7 @@ export class MemoryRedis {
           this.run(["SADD", user, statsId]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
+        if (key.startsWith("-- marktmorgen:capped-count:v3\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);
         if (key.startsWith("-- marktmorgen:studio-demo-refuse:v1\n")) return this.studioDemo("refuse", args);
@@ -3663,14 +3672,19 @@ export class MemoryRedis {
     return 1;
   }
 
-  /** lib/capped-count.ts: counts that never grow a hash past its most fields, the way version 2 runs them. */
+  /** lib/capped-count.ts: counts that never grow a hash past its most fields, the way version 3 runs them. */
   private cappedCount(args: string[]): unknown {
     const n = Number(args[0]);
     const keys = args.slice(1, 1 + n);
     const argv = args.slice(1 + n);
     if (!Number.isInteger(n) || n < 1 || argv.length < n || (argv.length - n) % 3 !== 0 || new Set(keys).size !== keys.length) throw new Error("ERR capped-count: arguments");
-    const caps = argv.slice(0, n).map(Number);
-    if (caps.some((cap) => !Number.isInteger(cap) || cap < 1)) throw new Error("ERR capped-count: most");
+    // "most", or "most:ttl" for a hash given an expiry when the count creates it.
+    const ttls = argv.slice(0, n).map((most) => {
+      const pair = /^(\d+):(\d+)$/.exec(most);
+      return pair ? Number(pair[2]) : undefined;
+    });
+    const caps = argv.slice(0, n).map((most) => Number(/^(\d+):(\d+)$/.test(most) ? most.split(":")[0] : most));
+    if (caps.some((cap) => !Number.isInteger(cap) || cap < 1) || ttls.some((t) => t !== undefined && t < 1)) throw new Error("ERR capped-count: most");
     const rest = argv.slice(n);
     const left = new Map<number, number>();
     for (let i = 0; i < rest.length; i += 3) {
@@ -3682,12 +3696,14 @@ export class MemoryRedis {
     // Each hash's length once (HLEN), and which names are there (one HMGET) only for a hash a new name may not fit in.
     const len = new Map<number, number>();
     const there = new Map<number, Set<string>>();
+    const fresh = new Set<number>();
     for (let k = 1; k <= n; k += 1) {
       if (!left.has(k)) continue;
       this.live(keys[k - 1]);
       const hash = this.hash(keys[k - 1]);
       this.scriptCalls += 1;
       len.set(k, hash.size);
+      if (hash.size === 0) fresh.add(k);
       if (hash.size + left.get(k)! > caps[k - 1]) {
         this.scriptCalls += 1;
         const names = [...rest.filter((_, i) => i % 3 === 1 && Number(rest[i - 1]) === k), "~"];
@@ -3717,6 +3733,13 @@ export class MemoryRedis {
         }
         hash.set("~", String((Number(hash.get("~")) || 0) + by));
         out.push(0);
+      }
+    }
+    for (let k = 1; k <= n; k += 1) {
+      const ttl = ttls[k - 1];
+      if (ttl !== undefined && fresh.has(k)) {
+        this.scriptCalls += 1;
+        this.run(["EXPIRE", keys[k - 1], ttl]);
       }
     }
     return out;

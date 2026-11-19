@@ -304,8 +304,9 @@ async function main(): Promise<void> {
   is("a store read failing every time: 5 visits walk the listed set once", seen.SSCAN, 1);
   // Codex N1 on #2921 (MEDIUM): the one store is left out and counted; the other two programs stay on the page.
   is("all ten reads answer, none is \"unavailable\"", outcomes.every((o) => o === "answered"), true);
-  // SET: the build's SET NX and its page; the nine reads after it are the kept page's GET alone.
-  is("one build: its SET NX and the page it keeps, nothing more", seen.SET, 2);
+  // The build's SET NX, then its page kept by one script that also lets its own mark go (Codex N1 on #2921); the nine
+  // reads after it are the kept page's GET alone.
+  is("one build: its SET NX and the page it keeps, nothing more", [seen.SET, seen.EVAL], [1, 1]);
   is("the build drops its mark, no \"failed\" hold", await mark(), [null, -2]);
   is("the page kept lists the two it read and says one could not be", keptPage(await kept()), { rows: 2, omitted: 1 });
   advance(300_000);
@@ -364,7 +365,8 @@ async function main(): Promise<void> {
   seen = await counted(async () => void (await readDirectory()));
   is("after a save drops the kept page, the next read builds at once (no mark held)", [seen.SSCAN, typeof (await kept()), (await mark())[0]], [1, "string", null]);
   await original([["DEL", DIRECTORY_CACHE]]);
-  await original([["SET", DIRECTORY_BUILD, "building", "EX", 60]]);
+  // Another build's own mark, "building:" and its token (Codex N1 on #2921).
+  await original([["SET", DIRECTORY_BUILD, "building:00112233445566778899aabb", "EX", 60]]);
   seen = await counted(async () => void (outcomes = await visits(1)));
   is("a build mark held (another build running): reads build nothing", [seen.SSCAN ?? 0, outcomes], [0, ["UnknownReplyError", "UnknownReplyError"]]);
   is("and each held read looks for the other build's page a bounded number of times", seen.GET ?? 0, 2 * (1 + 2 * 5));

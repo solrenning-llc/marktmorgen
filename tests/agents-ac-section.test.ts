@@ -66,4 +66,14 @@ is("(j) merges only on a conflict or a check failing for the base's age", [j.inc
 is("(j) does not merge a clean base (MV (c))", j.includes("com `git merge-tree` limpo e verificações verdes, não junta (MV (c))"), true);
 is("(j) changes the base to main without merging when it is in or closed", j.includes("muda a base para `main`, sem juntar"), true);
 
+part("(bb): the cost-PR window, until option D (coordinator C5-20261119-0150-bb)");
+{
+  const bb = rule("bb");
+  is("the rule is there, after (aa)", [bb.length > 0, ac.indexOf("\n(bb) **") > ac.indexOf("\n(aa) **")], [true, true]);
+  is("cost PRs enter only at the start of a 2-hour window", bb.includes("janela de 2 horas"), true);
+  is("one merge of the generated documents a window, not one an entry", bb.includes("uma vez, depois que a janela fecha"), true);
+  is("the red-main fix and GRAVE or ALTO fixes are never held", [bb.includes("MV (a)"), bb.includes("GRAVE ou ALTO")], [true, true]);
+  is("the window's Store year stays under US$66, measured on the merge", [bb.includes("US$66"), bb.includes("plan-margin")], [true, true]);
+  is("it lasts until option D, which the owner left for Claude 1's return", bb.includes("opção D"), true);
+}
 done();

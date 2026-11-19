@@ -145,8 +145,21 @@ export async function joinWaitlist(input: {
   // The links go before the place, noted for a deletion of the person: one
   // that runs in between deletes them too, and never leaves a link with the
   // address on it or a link to leave nobody counted.
-  const links = (leave: string) =>
-    redisPipeline([grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))]);
+  // Every reply read exactly (Codex G, MEDIUM): a link is never emailed unless both grants and their deletion notes are
+  // there. False is not known to be unwritten: the caller deletes the tokens it made and gives back what it took.
+  const links = async (leave: string): Promise<boolean> => {
+    const commands = [grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))];
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    if (!replies) return false;
+    return commands.every((command, i) => {
+      if (command[0] === "SET") return replies[i] === "OK";
+      const count = countOf(replies[i]);
+      if (count === null) return false;
+      if (command[0] === "ZADD") return count <= 1;
+      if (command[0] === "EXPIRE") return count === 1;
+      return command[0] === "ZREMRANGEBYSCORE";
+    });
+  };
 
   // A place written by another request between the read and the write (a
   // double click) is read again and asked again; one deleted in between is
@@ -180,7 +193,12 @@ export async function joinWaitlist(input: {
       // (kept as long as the list); with no room the list is full for it.
       const taken = placeBytes(sid, product.id, email, value);
       if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
-      await links(t);
+      if (!(await links(t))) {
+        // Not proved: this request's two tokens go (best effort), and so does the room it took for the place.
+        await redisPipeline([["DEL", tokenKey(confirm), tokenKey(t)]]).catch(() => {});
+        await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
+        return "error";
+      }
       const [added] = await redisPipeline([["HSETNX", listKey(sid, product.id), email, value]]);
       if (added === 1) {
         leave = t;
@@ -220,7 +238,13 @@ export async function joinWaitlist(input: {
       if (mustExist) await redisPipeline([["DEL", tokenKey(confirm)]]);
       return "error";
     }
-    await links(t);
+    if (!(await links(t))) {
+      // Not proved: the new link to confirm goes; the place's own link to leave stays, and nothing was written over it,
+      // so what was counted for its growth goes back.
+      await redisPipeline([["DEL", tokenKey(confirm)]]).catch(() => {});
+      await settleEntryWrite(store, product.id, grown, 0);
+      return "error";
+    }
     lastLink = t;
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
     await settleEntryWrite(store, product.id, grown, swapped);

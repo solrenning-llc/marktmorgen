@@ -107,6 +107,8 @@ function invoice(over: Record<string, unknown> = {}): Record<string, unknown> {
     currency: "usd",
     created: NOW,
     status_transitions: { paid_at: NOW },
+    // A buyer who is somebody else: an invoice paid with no address waits for its buyer (rule 30 on #3485).
+    customer_email: "renewal-buyer@example.com",
     total_taxes: [],
     parent: { subscription_details: { metadata: META } },
     payments: payments([paid("pi_inv_1")]),

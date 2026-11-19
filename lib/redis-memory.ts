@@ -2645,6 +2645,19 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
+        // lib/order-data.ts ORDER_WRITE_IF_STORE_LIVE: the ordinary measured write, only while the store id still
+        // exists and the closing walk has not installed its erasure field. The final two keys and final argument are
+        // the fence and are removed before the ordinary write is modelled.
+        if (key.startsWith("-- marktmorgen:order-write-if-store-live:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          if (!Number.isSafeInteger(count) || count < 3 || argv.length < 2 || argv.at(-1) === "") return [-1];
+          const [storeId, erasing] = keys.slice(-2);
+          const field = argv.at(-1) as string;
+          if (this.run(["EXISTS", storeId]) !== 1 || this.run(["HEXISTS", erasing, field]) === 1) return [-3];
+          return this.orderWrite([String(count - 2), ...keys.slice(0, -2), ...argv.slice(0, -1)]);
+        }
         // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.
         if (key.startsWith("-- marktmorgen:license-sale-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, sales, reference, expected, next] = args;

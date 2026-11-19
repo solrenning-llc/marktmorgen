@@ -23,8 +23,15 @@ export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmoun
 /**
  * Renders `component(props)`, runs its effects, and re-renders on every state change.
  * `contexts` gives a context the value a provider above would; any other reads its default.
+ * `beforeEffects`, when given, is called with each render's tree before its effects run, as React attaches refs before
+ * it runs effects.
  */
-export async function mount<P>(component: (props: P) => unknown, props: P, contexts?: Map<unknown, unknown>): Promise<Mounted> {
+export async function mount<P>(
+  component: (props: P) => unknown,
+  props: P,
+  contexts?: Map<unknown, unknown>,
+  options: { beforeEffects?: (tree: unknown) => void } = {},
+): Promise<Mounted> {
   const slots: Slot[] = [];
   let index = 0;
   let dirty = false;
@@ -92,6 +99,7 @@ export async function mount<P>(component: (props: P) => unknown, props: P, conte
     } finally {
       internals.H = before;
     }
+    options.beforeEffects?.(last);
     while (pending.length) pending.shift()!();
   };
   const settle = async () => {

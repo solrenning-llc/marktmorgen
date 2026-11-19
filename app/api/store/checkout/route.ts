@@ -423,6 +423,7 @@ export async function POST(request: NextRequest) {
           ...ads,
           ...pendingChannel(credit),
           ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
+          ...pendingChannel(credit),
         },
         // A code that came in a link to this store (lib/code-link.ts), applied
         // by Stripe only if it is one of the creator's live codes.

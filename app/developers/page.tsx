@@ -195,6 +195,7 @@ export default function DevelopersPage() {
       "currency": "usd",
       "kind": "one_time",
       "interval": null,
+      "interval_count": null,
       "hidden": false,
       "url": "https://marktmorgen.com/@harbor/p/k3j9x2p1ab"
     }
@@ -205,7 +206,9 @@ export default function DevelopersPage() {
           <code className="font-mono">kind</code> is one of <code className="font-mono">one_time</code>,{" "}
           <code className="font-mono">free</code>, <code className="font-mono">membership</code>,{" "}
           <code className="font-mono">course</code> or <code className="font-mono">call</code>.{" "}
-          <code className="font-mono">interval</code> is set for a membership.
+          <code className="font-mono">interval</code> is set for a membership, and{" "}
+          <code className="font-mono">interval_count</code> says how many of them one charge covers: 3 with{" "}
+          <code className="font-mono">month</code> is every 3 months.
         </p>
       </LegalSection>
 
@@ -477,6 +480,8 @@ export default function DevelopersPage() {
         <Code>{`{
   "currency": "usd",
   "refunds_checked": true,
+  "invoices_checked": true,
+  "unlinked_invoices": 0,
   "data": [
     {
       "id": "0123456789ab",
@@ -501,7 +506,12 @@ export default function DevelopersPage() {
           <code className="font-mono">payable</code> is what can be paid today; <code className="font-mono">waiting</code>{" "}
           is still inside the wait you set before a sale can be paid. When <code className="font-mono">refunds_checked</code>{" "}
           is <code className="font-mono">false</code>, Stripe could not be asked about refunds just now and the amounts may
-          be high: read again before paying anyone from them.
+          be high: read again before paying anyone from them. When <code className="font-mono">invoices_checked</code> is{" "}
+          <code className="font-mono">false</code>, not every membership and plan payment could be read and the amounts may
+          be low: do not pay from them either. <code className="font-mono">unlinked_invoices</code> counts paid membership
+          and plan payments that could not be matched to one card payment, so their commission is not in the amounts;
+          while it is above 0, <code className="font-mono">invoices_checked</code> is <code className="font-mono">false</code>{" "}
+          too: check those payments in Stripe and pay the affiliates they belong to by hand.
         </p>
       </LegalSection>
 

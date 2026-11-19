@@ -142,6 +142,7 @@ const MESSAGES: Record<string, string> = {
   members_email: "Moving members needs your store's plan to be active: each member is emailed their own link.",
   stripe: "Members keep their membership by paying on your own Stripe account. Connect Stripe first.",
   stopped: "Check the box to confirm you will stop these memberships renewing where they are now.",
+  address: "Each member's email shows your postal address, as your other emails do. Save it under Email in your studio, then start this import again.",
   date_order: "Choose how this file writes dates, from the list above the first rows.",
   list: "Your store's list could not be set up. Try again in a moment.",
   store: "Open the studio once, then come back here.",
@@ -161,6 +162,7 @@ const MESSAGES: Record<string, string> = {
   // 232 [CA1] unit 4b2: in place of the studio's words about uploads.
   renewal_unpaid: IMPORTS_PAUSED.renewal_unpaid,
   plan_disputed: IMPORTS_PAUSED.plan_disputed,
+  plan_ended: IMPORTS_PAUSED.plan_ended,
 };
 
 /**
@@ -345,13 +347,13 @@ export function ImportTool({
         if (data.ok && data.import) {
           moved = true;
           // Paid again: the pause words go.
-          setError((e) => (e === MESSAGES.renewal_unpaid || e === MESSAGES.plan_disputed ? null : e));
+          setError((e) => (e === MESSAGES.renewal_unpaid || e === MESSAGES.plan_disputed || e === MESSAGES.plan_ended ? null : e));
           setJob(data.import);
           if (!running(data.import.state)) {
             toast(data.import.state === "done" ? "Import finished." : "Import stopped.");
             router.refresh();
           }
-        } else if (data.error === "renewal_unpaid" || data.error === "plan_disputed") {
+        } else if (data.error === "renewal_unpaid" || data.error === "plan_disputed" || data.error === "plan_ended") {
           // Said beside the import; it is tried again below and goes on once paid (232 [CA1] unit 4b2).
           setError(MESSAGES[data.error]);
         }
@@ -442,6 +444,8 @@ export function ImportTool({
     consentColumn: kind === "contacts" ? (mapping.consent ?? -1) >= 0 : undefined,
     tags: kind === "contacts" ? tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
     email: kind === "purchases" ? email : undefined,
+    // Whether the file has a status column: with one, an empty status gives nothing (lib/clickfunnels-csv.ts).
+    statusColumn: kind === "purchases" ? (mapping.status ?? -1) >= 0 : undefined,
     stopped: kind === "members" ? stopped : undefined,
     dateOrder: kind === "members" ? dateOrder : undefined,
   });
@@ -683,7 +687,7 @@ export function ImportTool({
                 </div>
               </fieldset>
 
-              <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-line">
+              <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-line" tabIndex={0} role="region" aria-label="The first rows, as a table">
                 <table className="w-full min-w-[28rem] text-left text-sm">
                   <caption className="px-4 pt-3 text-left text-xs font-bold text-ink-soft">The first rows, as they will be read</caption>
                   <thead>
@@ -964,7 +968,7 @@ function DryRunReport({ kind, dry }: { kind: ImportKind; dry: DryRun }) {
         ))}
       </dl>
       {notable.length ? (
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Rows worth a look, as a table">
           <table className="w-full min-w-[28rem] text-left text-sm">
             <caption className="text-left text-xs font-bold text-ink-soft">
               {notable.length > 50 ? `The first 50 of ${notable.length.toLocaleString("en-US")} rows worth a look` : "Rows worth a look"}

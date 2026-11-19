@@ -19,7 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -186,17 +186,31 @@ export async function forgetAssistReminderPerson(statsId: string | null, email: 
 }
 
 /**
+ * The checkouts one address said yes on, for the person's copy (remindersOf), read exactly (rule 24): only a list of
+ * strings is the note. A reply out of shape throws UnknownReplyError, never "none", so the copy never says there was
+ * none. The erasure reads the note itself (forgetAssistReminderPerson, above), refusing a member that is not a session.
+ */
+async function sessionsOf(who: string): Promise<string[]> {
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the note of a person's checkout reminders");
+  return members.filter((s) => SESSION.test(s));
+}
+
+/**
  * The checkout reminders a person asked for with the assistant's box, for the
  * copy of their data (619 [SZ3], lib/person-copy.ts): the address they typed,
  * the sentence they checked, its version and when. Only reads.
  */
 export async function remindersOf(statsId: string | null, email: string): Promise<{ address: string; sentence: string; version: string; at: number }[]> {
   if (!statsId || !email || !isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", whoKey(statsId, email)]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
+  const sessions = await sessionsOf(whoKey(statsId, email));
   if (!sessions.length) return [];
-  const raws = await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)]));
+  const raws = repliesFor(await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)])), sessions.length);
+  if (!raws) throw new UnknownReplyError("a person's checkout reminders");
   return raws.flatMap((raw) => {
+    // Gone by itself (Redis's null): not listed. Anything but a string is not known, never left out of the copy.
+    if (raw === null) return [];
+    if (typeof raw !== "string") throw new UnknownReplyError("a person's checkout reminder");
     try {
       const v = JSON.parse(String(raw)) as Partial<Consent>;
       return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];

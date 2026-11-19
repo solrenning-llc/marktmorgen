@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { formatMoney } from "@/lib/money";
+import { PLAN_TITLES } from "@/lib/plan";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -141,6 +143,8 @@ export function LookEditor({
   const adjusted = colours.accent !== accent;
   // Emails need 7:1 for every word, links included (369 [SU2]); when that moves the color, the creator is told which.
   const emailNotice = useMemo(() => emailColourNotice({ theme, accent, font }), [theme, accent, font]);
+  // Picks wait for "Save look": leaving the page asks first, so they are not lost by accident (AX274, WCAG 3.3.6).
+  useLeaveGuard(changed && status.kind !== "working");
 
   async function post(path: string, body: unknown): Promise<{ ok?: boolean; error?: string }> {
     const response = await fetch(path, {
@@ -433,7 +437,7 @@ export function LookEditor({
           */}
           <fieldset disabled={working} className="mt-2">
             <legend className="field-label">Our name on your page</legend>
-            <label className="mt-2 flex items-start gap-3">
+            <label className="mt-2 flex min-h-11 items-start gap-3">
               <input
                 type="checkbox"
                 checked={!badge}
@@ -447,8 +451,8 @@ export function LookEditor({
                 </span>
                 <span className="field-hint mt-1 block">
                   {canHideBadge
-                    ? "Your page carries your name and nothing of ours. Leaving Pro puts it back, and your choice here is kept for if you return."
-                    : "On Pro. Every page keeps the line until then — it is how a store brings us the next creator, which is part of what the lower price is."}
+                    ? `Your page carries your name and nothing of ours. Leaving the ${PLAN_TITLES.pro} plan puts it back, and your choice here is kept for if you return.`
+                    : `On the ${PLAN_TITLES.pro} plan. Every page keeps the line until then — it is how a store brings us the next creator, which is part of what the lower price is.`}
                 </span>
               </span>
             </label>
@@ -461,7 +465,7 @@ export function LookEditor({
           */}
           <fieldset disabled={working} className="mt-2">
             <legend className="field-label">How many times each product was bought</legend>
-            <label className="mt-2 flex items-start gap-3">
+            <label className="mt-2 flex min-h-11 items-start gap-3">
               <input
                 type="checkbox"
                 checked={sold}

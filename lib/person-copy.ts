@@ -90,6 +90,7 @@ import { recoveryStopMarkKey } from "@/lib/checkout-recovery";
 import { importTracesOf } from "@/lib/imports";
 import { deliveriesAbout } from "@/lib/webhooks";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import { companiesOfPerson } from "@/lib/crm-companies";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
@@ -114,6 +115,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/submission-store.ts": { how: "copied", what: "Files you sent the store for review, your note, its reply, and any upload still open" },
+  "lib/backup-deletions.ts": { how: "marks", what: "Built but off: notes that the backup must delete its copy of a file already deleted, naming only the file (a hand-in's name holds a one-way fingerprint of your address, never the address)" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
@@ -609,6 +611,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
 };
 
+/** What the copy says is kept only as marks; the backup's deletion records only once their reviews are filled (VR item 2). */
+export function copyMarks(): string[] {
+  return Object.entries(COPY_PLAN)
+    .filter(([module, p]) => p.how === "marks" && (module !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null)))
+    .map(([, p]) => p.what);
+}
+
 /** One mark read in its exact shape: nothing (not held), or text or a number (held, with what it says). */
 function markOf(reply: unknown, what: string): string | null {
   if (reply === null) return null;
@@ -661,7 +670,7 @@ export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise
     if (records.length) sections.push({ module, what: plan.what, records });
     notComplete.push(...unread);
   }
-  const marks = Object.values(COPY_PLAN).filter((p) => p.how === "marks").map((p) => p.what);
+  const marks = copyMarks();
   const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
   const passing = Object.values(COPY_ALSO).flatMap((p) => (p.how === "passing" ? [`${p.what} (at most ${p.days} ${p.days === 1 ? "day" : "days"}).`] : []));
   return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere, passing, complete: notComplete.length === 0, notComplete };

@@ -322,23 +322,23 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
 /** The part an erasure names when the person's files could be neither deleted nor queued, or their kept paths read. */
 const FILES_PART = "lib/person-erasure.ts#files";
 /**
- * How long the paths of a person's files not yet deleted are kept for a repeat (#4808): a person's own deletion is
- * answered within a month, and a file queued for the daily cleanup goes within a day. Gone by itself past that.
+ * Where the paths of a person's files not yet deleted are kept for a repeat (#4808): under the person's deletion print
+ * for the store, never the address. With no expiry (Codex L on #4871): once the records that named the files are gone,
+ * these paths are the last reference to them, so each stays until its file is deleted or queued for the daily cleanup,
+ * and only then is it let go (SREM). The person's copy reads them (lib/person-copy.ts).
  */
-export const ERASE_FILES_KEEP_SECONDS = 30 * 86_400;
-/** Where they are kept: under the person's deletion print for the store, never the address. */
-const filesKeyOf = (listId: string, email: string) => `nl:erase:files:${listId}:${suppressionPrint(listId, email)}`;
+export const filesKeyOf = (listId: string, email: string) => `nl:erase:files:${listId}:${suppressionPrint(listId, email)}`;
 
 /**
- * Keeps these paths for a repeat erasure, confirmed exactly (an SADD of at most their count and its EXPIRE set), before
- * anything that leads to them is deleted (#4808): false when that is not confirmed, and then nothing is deleted.
+ * Keeps these paths for a repeat erasure, confirmed exactly (an SADD of at most their count), before anything that leads
+ * to them is deleted (#4808): false when that is not confirmed, and then nothing is deleted. No expiry (filesKeyOf).
  */
 async function keepFiles(listId: string, email: string, paths: string[]): Promise<boolean> {
   if (!paths.length) return true;
   const key = filesKeyOf(listId, email);
-  const replies = await redisPipeline([["SADD", key, ...paths], ["EXPIRE", key, ERASE_FILES_KEEP_SECONDS]]).then((r) => repliesFor(r, 2), () => null);
+  const replies = await redisPipeline([["SADD", key, ...paths]]).then((r) => repliesFor(r, 1), () => null);
   const added = replies ? countOf(replies[0]) : null;
-  return added !== null && added <= paths.length && replies?.[1] === 1;
+  return added !== null && added <= paths.length;
 }
 
 /**
@@ -407,9 +407,6 @@ export async function erasePerson(
   const keptReply = await redisPipeline([["SMEMBERS", pendingKey]]).then((replies) => repliesFor(replies, 1), () => null);
   const kept = keptReply ? stringList(keptReply[0]) : null;
   if (!kept) failed.push(FILES_PART);
-  // Paths still kept from an earlier try: their time is renewed, so a repeat never finds them gone by themselves (3rjdf).
-  const renew = () => redisPipeline([["EXPIRE", pendingKey, ERASE_FILES_KEEP_SECONDS]]).catch(() => undefined);
-  if (kept?.length) await renew();
   const unique = [...new Set([...files, ...(kept ?? [])])];
   if (unique.length) {
     // Paths found this run and not kept yet (a review's photo, a file a record did not say): kept before the file store
@@ -426,7 +423,6 @@ export async function erasePerson(
       lost = again.filter((_, i) => second[i].status === "rejected").length;
     });
     if (lost) {
-      await renew();
       console.error(`deleting a person: ${lost} of their files could be neither deleted nor queued for deletion${keptNow ? "; kept for a repeat" : ""}`);
       if (!failed.includes(FILES_PART)) failed.push(FILES_PART);
     } else {

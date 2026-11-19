@@ -83,6 +83,7 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { filesKeyOf } from "@/lib/person-erasure";
 import { updatesStopMarkKey } from "@/lib/product-updates";
 import { reviewStopMarkKey } from "@/lib/review-requests";
 import { recoveryStopMarkKey } from "@/lib/checkout-recovery";
@@ -287,7 +288,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   // about the person, so read exactly (#4871, Codex L). A reply that does not read is unknown, never a copy without it.
   "lib/person-erasure.ts": async (s) => {
     if (!s.listId) return [];
-    const reply = repliesFor(await redisPipeline([["SMEMBERS", `nl:erase:files:${s.listId}:${suppressionPrint(s.listId, s.email)}`]]), 1);
+    const reply = repliesFor(await redisPipeline([["SMEMBERS", filesKeyOf(s.listId, s.email)]]), 1);
     const paths = reply ? stringList(reply[0]) : null;
     if (!paths) throw new UnknownReplyError("the names of the person's files still to be deleted");
     return paths;

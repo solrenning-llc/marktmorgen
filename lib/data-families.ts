@@ -267,7 +267,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:dir:listed": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,
-  "nl:erase:files:": Cr(30), "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:transparency:": C, "nl:transparency:acted:": C, "nl:transparency:since": C, "nl:erased:": E,
+  "nl:erase:files:": C, "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:transparency:": C, "nl:transparency:acted:": C, "nl:transparency:since": C, "nl:erased:": E,
   "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:fly:": X(1), "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
   "nl:esync:seen:": X(30), "nl:esync:tags:": E,
   "nl:exposure:v1:": C, "nl:exposure:v1:YYYY-MM": C,

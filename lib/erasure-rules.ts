@@ -91,6 +91,7 @@ export type ErasureSize = {
  * And (since #4808, 15 November 2026) the paths of the person's files kept for a repeat: one SMEMBERS, an SADD and an
  * EXPIRE, and an SREM, four more: 563; and (3rjdf's review) their review photos' paths kept before the reviews go (an
  * SADD and an EXPIRE) and the kept paths' time renewed on a repeat and when one is lost (two EXPIREs), four more: 567.
+ * Since Codex L on #4871 the kept paths have no expiry, so their four EXPIREs are no longer sent; 567 stays the bound.
  */
 export const ERASE_FIXED_COMMANDS = 567;
 /**

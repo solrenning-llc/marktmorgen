@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { SWITCH_START, type LeverRoute, type LeverSwitch, type SwitchView, pressLever, shownSwitch } from "@/lib/sales-lever-toggle-rules";
+import { SWITCH_START, type LeverRoute, type LeverSwitch, type SwitchView, pressLever, refreshedView, shownSwitch } from "@/lib/sales-lever-toggle-rules";
 
 /** The card's request to the setting's own route (the studio's store pin adds which store). */
 async function post(route: LeverRoute, body: Record<string, unknown>): Promise<unknown> {
@@ -18,7 +18,9 @@ async function post(route: LeverRoute, body: Record<string, unknown>): Promise<u
  *
  * What it draws is the saved state of the last confirmed reply, not a flip of
  * the control, which the page re-renders from the store on every refresh
- * (shownSwitch). When the focused button goes away, the focus goes on rather
+ * (shownSwitch); a refresh that draws another saved state than its own
+ * (another tab) puts the card back to the control as drawn (refreshedView).
+ * When the focused button goes away, the focus goes on rather
  * than to the page's body (WCAG 2.4.3; Claude 1's and Claude 7's MÉDIO on
  * #3563): a confirmed Undo hands it to the switch, an unconfirmed reply to
  * "Reload the page".
@@ -26,6 +28,13 @@ async function post(route: LeverRoute, body: Record<string, unknown>): Promise<u
 export function SalesLeverSwitch({ control, states }: { control: LeverSwitch; states: { on: string; off: string } }) {
   const id = useId();
   const [view, setView] = useState<SwitchView>(SWITCH_START);
+  // The saved state the page last drew. When a refresh draws another one, the card's own view is read against it
+  // during this render (refreshedView), so the card never shows a state another tab has since changed.
+  const [drawnOn, setDrawnOn] = useState(control.on);
+  if (drawnOn !== control.on) {
+    setDrawnOn(control.on);
+    setView(refreshedView(view, control.on));
+  }
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
   const switchRef = useRef<HTMLButtonElement>(null);

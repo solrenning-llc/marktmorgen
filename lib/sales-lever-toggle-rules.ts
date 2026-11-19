@@ -419,6 +419,17 @@ export async function pressLever(
   return { saved: "unknown", undo: false, outcome, back: null };
 }
 
+/**
+ * The card's view once the page drew the control again from the saved store (a refresh). When the saved state it
+ * draws is not the one the card's last confirmed reply gave, someone else changed it meanwhile (another tab): the
+ * card goes back to the control as drawn, and its Undo goes, since it would put back a setting that is no longer the
+ * one saved (Codex X6's LOW on #3563). The same state keeps the card's view and its Undo; an unknown view stays
+ * unknown until the page is reloaded (rule 24).
+ */
+export function refreshedView(view: SwitchView, savedOn: boolean): SwitchView {
+  return typeof view.saved === "boolean" && view.saved !== savedOn ? SWITCH_START : view;
+}
+
 /** The switch the card draws, from the server's control as the page was last rendered and the card's own view. */
 export function shownSwitch(control: LeverSwitch, view: SwitchView): LeverSwitch {
   return view.saved === null || view.saved === "unknown" ? control : switchAt(control, view.saved);

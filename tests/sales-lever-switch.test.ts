@@ -22,6 +22,7 @@ import {
   type LeverSwitch,
   leverToggle,
   pressLever,
+  refreshedView,
   shownSwitch,
   switchBack,
 } from "@/lib/sales-lever-toggle-rules";
@@ -322,3 +323,23 @@ test("after a saved switch, a refresh of the page draws the saved state, never i
   assert.equal(shownSwitch(toggle(await read(), "next", true), undone).on, true);
 });
 
+
+test("a refresh that draws another saved state than the card's own (another tab) is what the card shows, with no Undo of the old one (Codex X6's LOW on #3563)", async () => {
+  const { session, read } = await world();
+  assert.ok(await setNextOffer(OWNER, { on: true, email: true }));
+  const before = toggle(await read(), "next", true);
+  const off = await pressLever(before, SWITCH_START, "switch", poster(session));
+  assert.equal(off.outcome?.state, "saved");
+  // The same saved state drawn again keeps the card's view and its Undo.
+  assert.equal(refreshedView(off, false), off);
+  // Another tab turned it back on: the card goes back to the control as drawn, without the old Undo.
+  assert.ok(await setNextOffer(OWNER, { on: true, email: true }));
+  const drawn = toggle(await read(), "next", true);
+  const view = refreshedView(off, drawn.on);
+  assert.deepEqual(view, SWITCH_START);
+  assert.equal(shownSwitch(drawn, view).on, true);
+  // Nothing pressed yet, or a reply that did not confirm: unchanged (an unknown view still asks for a reload).
+  assert.equal(refreshedView(SWITCH_START, true), SWITCH_START);
+  const unknown = { saved: "unknown" as const, undo: false, outcome: null, back: null };
+  assert.equal(refreshedView(unknown, true), unknown);
+});

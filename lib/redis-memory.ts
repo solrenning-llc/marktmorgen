@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
@@ -139,6 +140,25 @@ export class MemoryRedis {
           this.run(["ZADD", index, at, member]);
           this.run(["EXPIRE", index, ttl]);
           return added;
+        }
+        // lib/checkout-ask.ts ASK_FORGET: validate, then remove the current own index and its global members atomically.
+        if (key.startsWith("-- marktmorgen:ask-forget:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, index, statsId, email, rawMost] = args;
+          const most = Number(rawMost);
+          if (!Number.isSafeInteger(most) || most < 0) return [-1, -1];
+          const members = this.run(["ZRANGEBYSCORE", index, "-inf", "+inf"]) as string[];
+          if (members.length > most) return [-1, -1];
+          for (const member of members) {
+            let ask: unknown;
+            try { ask = JSON.parse(member); } catch { return [-1, -1]; }
+            if (!Array.isArray(ask) || ask[0] !== statsId || typeof ask[1] !== "string" || !ask[1]
+              || typeof ask[2] !== "string" || !ask[2] || ask[3] !== email || typeof ask[4] !== "number" || !Number.isFinite(ask[4])) return [-1, -1];
+          }
+          if (!members.length) return [0, 0];
+          let taken = 0;
+          for (let i = 0; i < members.length; i += ASK_ERASE_BATCH) taken += Number(this.run(["ZREM", queue, ...members.slice(i, i + ASK_ERASE_BATCH)]));
+          this.run(["DEL", index]);
+          return [taken, members.length];
         }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

@@ -63,6 +63,7 @@ import type { Listing, Store } from "@/lib/store";
 import { ASK_WHENS, type AskWhen } from "@/lib/ask-when";
 import { cartable } from "@/lib/cart-rules";
 import { cartAskKey } from "@/lib/checkout-ask-cart";
+import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
 
 /** How long after asking the reminder goes: the same hour the other one waits. */
 export const ASK_AFTER_SECONDS = 60 * 60;
@@ -148,6 +149,41 @@ export async function askCartReminder(input: { store: Store; items: Listing[]; e
   return keep(store, cartAskKey(items.map((p) => p.id)), input.email, input.ip, "checkout", ASK_AFTER_SECONDS);
 }
 
+/** The own index's count, before its erasure is paid for. Unknown never means empty. */
+export async function checkoutAskCount(statsId: string | null, rawEmail: string): Promise<number> {
+  const email = normaliseEmail(rawEmail);
+  if (!statsId || !email || !isRedisConfigured()) return 0;
+  const count = countOf(repliesFor(await redisPipeline([["ZCARD", askIndexKey(statsId, email)]]), 1)?.[0]);
+  if (count === null) throw new UnknownReplyError("a person's checkout reminder ask count");
+  return count;
+}
+
+/**
+ * The read and both removals are one operation: ASK_AGAIN either finishes before it and its new member is removed,
+ * or runs after it and finds no original member. All members are checked before any write. More than the paid count
+ * is unknown, never a larger unpaid erasure. Only the own index is read; no scan of the global queue.
+ * Billed: EVAL + ZRANGEBYSCORE + DEL, and one ZREM per ASK_ERASE_BATCH members (lib/erasure-rules.ts).
+ */
+export const ASK_FORGET = `-- marktmorgen:ask-forget:v1
+local most = tonumber(ARGV[3])
+if not most or most < 0 or most > 9007199254740991 or most % 1 ~= 0 then return {-1, -1} end
+local members = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', '+inf')
+if #members > most then return {-1, -1} end
+for _, member in ipairs(members) do
+  local ok, ask = pcall(cjson.decode, member)
+  if not ok or type(ask) ~= 'table' or type(ask[1]) ~= 'string' or ask[1] ~= ARGV[1]
+    or type(ask[2]) ~= 'string' or ask[2] == '' or type(ask[3]) ~= 'string' or ask[3] == ''
+    or type(ask[4]) ~= 'string' or ask[4] ~= ARGV[2] or type(ask[5]) ~= 'number'
+    or ask[5] ~= ask[5] or ask[5] == math.huge or ask[5] == -math.huge then return {-1, -1} end
+end
+if #members == 0 then return {0, 0} end
+local taken = 0
+for first = 1, #members, ${ASK_ERASE_BATCH} do
+  taken = taken + redis.call('ZREM', KEYS[1], unpack(members, first, math.min(first + ${ASK_ERASE_BATCH} - 1, #members)))
+end
+redis.call('DEL', KEYS[2])
+return {taken, #members}`;
+
 /**
  * Takes one person's asks at one store off the queue (lib/person-erasure.ts): each member holds their address in
  * plain text and waits up to three days for its time (ASK_WHENS), more with the send's retries, so it is deleted
@@ -156,18 +192,16 @@ export async function askCartReminder(input: { store: Store; items: Listing[]; e
  * 24): the read, or the removal's counts, in another shape throws, so the erasure says this part did not finish and is
  * tried again, never "nothing here". Counts what it took off the queue.
  */
-export async function forgetAskPerson(statsId: string | null, rawEmail: string): Promise<number> {
-  const theirs = await askMembersOf(statsId, rawEmail);
-  if (!theirs.length) return 0;
-  // The index is the only way back to these members, which hold the address in plain text: it is taken out only once
-  // the queue's removal answered exactly (Codex L and U on #4290). A lost answer to the index's removal after it was
-  // applied leaves nothing behind: the queue is already clean, and a retry finds the index empty.
-  const global = repliesFor(await redisPipeline([["ZREM", QUEUE, ...theirs]]), 1);
-  const taken = countOf(global?.[0]);
-  if (taken === null || taken > theirs.length) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
-  const index = repliesFor(await redisPipeline([["ZREM", askIndexKey(statsId as string, rawEmail), ...theirs]]), 1);
-  const fromIndex = countOf(index?.[0]);
-  if (fromIndex === null || fromIndex > theirs.length) throw new UnknownReplyError("the removal of a person's checkout reminder ask index");
+/** The optional count is the ceiling already paid for by erasePerson. Direct helpers count before running. */
+export async function forgetAskPerson(statsId: string | null, rawEmail: string, paidCount?: number): Promise<number> {
+  const email = normaliseEmail(rawEmail);
+  if (!statsId || !email || !isRedisConfigured()) return 0;
+  const most = paidCount === undefined ? await checkoutAskCount(statsId, email) : paidCount;
+  if (!Number.isSafeInteger(most) || most < 0) throw new UnknownReplyError("a person's checkout reminder ask count");
+  const reply = repliesFor(await redisPipeline([["EVAL", ASK_FORGET, 2, QUEUE, askIndexKey(statsId, email), statsId, email, most]]), 1);
+  const pair = repliesFor(reply?.[0], 2);
+  const taken = countOf(pair?.[0]), indexed = countOf(pair?.[1]);
+  if (taken === null || indexed === null || taken > indexed || indexed > most) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
   return taken;
 }
 

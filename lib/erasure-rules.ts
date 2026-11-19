@@ -35,6 +35,8 @@ export type ErasureScope = {
   productIds: string[];
   /** The store's community, when it has one. */
   communityId: string | null;
+  /** The checkout-ask count paid for before the erasers run. */
+  checkoutAsks?: number;
 };
 
 /** Who asked: the store's team in the studio, or the person, by their emailed link. */
@@ -62,6 +64,7 @@ export type ErasureSize = {
   roomMessages: number;
   events: number;
   certificates: number;
+  checkoutAsks: number;
 };
 
 /**
@@ -70,9 +73,12 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them.
  */
-export const ERASE_FIXED_COMMANDS = 550;
+// The previous allowance is kept whole; four more cover the own ask count and the atomic eraser's fixed work.
+export const ERASE_FIXED_COMMANDS = 554;
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+export const ERASE_FIXED_BYTES = 315_000;
+/** Members removed per command in the atomic checkout-ask eraser; not a cap on a person's erasure. */
+export const ASK_ERASE_BATCH = 512;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],
@@ -84,6 +90,8 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   roomMessages: [0, 1_200],
   events: [1, 150],
   certificates: [0, 500],
+  // Members stay inside Redis; only two counts return. Their commands are counted by batches below.
+  checkoutAsks: [0, 0],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;
@@ -104,6 +112,9 @@ export function erasureWork(size: Partial<ErasureSize>): { commands: number; byt
     commands = nextCommands;
     bytes = nextBytes;
   }
+  const asks = size.checkoutAsks ?? 0;
+  commands += Math.ceil(asks / ASK_ERASE_BATCH);
+  if (!Number.isSafeInteger(commands)) throw new RangeError("Unknown erasure size");
   return { commands, bytes };
 }
 

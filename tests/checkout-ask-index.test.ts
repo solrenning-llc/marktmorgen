@@ -112,10 +112,10 @@ test("a failed global removal keeps the person's index for the erasure's retry (
   const real = redis.pipeline.bind(redis);
   let injected = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!injected && commands.some((c) => c[0] === "ZREM" && c[1] === QUEUE)) {
+    if (!injected && commands.some((c) => (c[0] === "ZREM" && c[1] === QUEUE) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:ask-forget:")))) {
       injected = true;
       // The global removal fails, and every other command of the same batch is applied.
-      const later = commands.filter((c) => !(c[0] === "ZREM" && c[1] === QUEUE));
+      const later = commands.filter((c) => !((c[0] === "ZREM" && c[1] === QUEUE) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:ask-forget:"))));
       if (later.length) await real(later);
       throw new Error("synthetic: global ZREM unavailable");
     }

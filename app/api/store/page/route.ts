@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       },
       write: async (written) => {
         if (!written.statsId) throw new Error("a product page has nowhere to be kept");
-        await writePage(written.statsId, id, saved, written);
+        await writePage(written.statsId, id, saved, written, false, claimed);
       },
     }).catch(async (error: unknown) => {
       await letGo();

@@ -328,7 +328,7 @@ export async function POST(request: NextRequest) {
         // first as a studio request (lib/picture-check.ts, pictureChecker).
         if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => paidFromStudio(await countStudio(store, "page", units))), claimed))) return refuse("pictures");
       }
-      await writePage(statsId, key, page, store).catch(async (error: unknown) => {
+      await writePage(statsId, key, page, store, false, claimed).catch(async (error: unknown) => {
         await letGoUnlessShown(statsId, key, claimed).catch(() => {});
         throw error;
       });

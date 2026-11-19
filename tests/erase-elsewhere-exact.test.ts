@@ -46,7 +46,13 @@ const teamKey = (sid: string) => `nl:team:${sid}`;
  * `reply` answers for the command when it is a function.
  */
 let replaced: { word: string; key: string; reply: unknown }[] = [];
+/** One write refused before the database runs it (Codex U on #3660): the next command `word` on `key` throws. */
+let rejectBefore: { word: string; key: string } | null = null;
 redis.pipeline = (async (commands: Command[]) => {
+  if (rejectBefore && commands.some((command) => command[0] === rejectBefore?.word && String(command[1]) === rejectBefore?.key)) {
+    rejectBefore = null;
+    throw new Error("synthetic write refused before it ran");
+  }
   const real = await realPipeline(commands);
   if (!replaced.length) return real;
   return real.map((reply: unknown, i: number) => {
@@ -501,7 +507,7 @@ async function main(): Promise<void> {
     is("control: no record (nil): out of line, nothing prepared", [stores, line(OWNER, at)], [0, "out"]);
   }
 
-  part("LEVE (Claude 1 C3 on #3660 at 0c057f2cb8): a join landing between the read past's team read and its SREM is never lost");
+  part("LEVE (Claude 1 C3 on #3660 at 0c057f2cb8) and MEDIUM (Codex U on #3660): a join landing between the read past's team read and its removal is never lost, even when a repair write would be refused");
   {
     fresh();
     const S_OWNER = "owner-s@example.com";
@@ -520,6 +526,8 @@ async function main(): Promise<void> {
           joined = true;
           redis.run(["SET", teamKey(s.sid), JSON.stringify({ members: [{ email: X, role: "admin", joinedAt: new Date().toISOString() }], invites: [] })]);
           redis.run(["SADD", teamIndexKey(X), s.sid]);
+          // MEDIUM (Codex U on #3660, U-20261117-0534): a repair write that is refused must not lose the live id.
+          rejectBefore = { word: "SADD", key: teamIndexKey(X) };
           return null;
         }
         return redis.run(["GET", teamKey(s.sid)]);
@@ -527,6 +535,7 @@ async function main(): Promise<void> {
     }];
     const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
     replaced = [];
+    rejectBefore = null;
     is("the read past read S's team and stayed unknown", [joined, read], [true, "UnknownReplyError"]);
     is("X is on S's team", (await readTeam(s.sid)).members.some((m) => m.email === X), true);
     is("and S is still in X's index", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);

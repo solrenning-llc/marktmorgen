@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $133.70 | $1,393.60 | $69 / $690 |
-| Studio | $261.90 | $2,900.60 | $449 / $4,490 |
-| Scale | $445.40 | $5,061.33 | $999 / $9,990 |
+| Store | $133.70 | $1,394.40 | $69 / $690 |
+| Studio | $261.90 | $2,901.30 | $449 / $4,490 |
+| Scale | $445.40 | $5,062.38 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -45,7 +45,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 **(recommended)** | 21.5% | 60.28% | 60.04% | $89.82 | 0.42 |
 | $169 / $1,690 | 75.0% | 60.29% | 60.04% | $101.90 | 0.37 |
-| $199 / $1,990 | 100.0% | 60.63% | 60.39% | $120.66 | 0.31 |
+| $199 / $1,990 | 100.0% | 60.62% | 60.39% | $120.65 | 0.31 |
 
 ### Studio
 
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$149 / $1,490** | **$449 / $4,490** | **$999 / $9,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **730** · 3,400 · 3,000 | **4,200** · 10,000 · 10,000 | **24,000** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **720** · 3,400 · 3,000 | **4,200** · 10,000 · 10,000 | **24,000** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **42** · 200 · 200 | **190** · 450 · 450 | **920** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **2,900** · 7,000 · 5,000 | **6,100** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **17 + 100** · 40 + 250 · 40 + 250 | **49 + 240** · 80 + 400 · 80 + 400 |
@@ -123,7 +123,7 @@ Each plan at its recommended price with every included figure used, plus one of 
 | --- | --- | --- |
 | Store | $295.00, 60.40% | $3,242.00, 60.30% |
 | Studio | $707.00, 60.43% | $7,586.00, 60.20% |
-| Scale | $1,257.00, 60.45% | $13,086.00, 60.12% |
+| Scale | $1,257.00, 60.45% | $13,086.00, 60.11% |
 
 ## How it would be enforced, and what is not built
 

@@ -133,11 +133,14 @@ async function holding<T>(statsId: string, work: () => Promise<T>): Promise<T | 
   }
 }
 
-/** Whether every reply of a pipeline is a count: the writes landed as asked. */
+/**
+ * Whether every write landed as asked. Each one sent here touches one field or one member (HSET, HDEL, ZADD, ZREM), so
+ * only 0 or 1 is a real answer (Codex X8): 2 or more is unknown, never a cancellation or an activation confirmed.
+ */
 async function counted(commands: (string | number)[][]): Promise<boolean> {
   try {
     const replies = repliesFor(await redisPipeline(commands), commands.length);
-    return Boolean(replies && replies.every((reply) => countOf(reply) !== null));
+    return Boolean(replies && replies.every((reply) => reply === 0 || reply === 1));
   } catch {
     return false;
   }

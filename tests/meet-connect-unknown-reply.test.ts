@@ -259,7 +259,8 @@ async function main(): Promise<void> {
   outbound = [];
   zoomAnswers = true;
   answering(42);
-  const consent = { statsId: SID, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: "meetshop" } };
+  // When the consent flow began (main's finishConsent keeps only a fresh flow, c7d9a3938c): just now.
+  const consent = { statsId: SID, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: "meetshop" }, startedAt: Date.now() };
   is("finishConsent throws unknown", await outcome(() => finishConsent("zoom", consent)), "unknown");
   restore();
   zoomAnswers = false;

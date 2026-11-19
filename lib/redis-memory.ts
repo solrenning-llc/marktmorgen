@@ -2655,7 +2655,10 @@ export class MemoryRedis {
           if (!Number.isSafeInteger(count) || count < 3 || argv.length < 2 || argv.at(-1) === "") return [-1];
           const [storeId, erasing] = keys.slice(-2);
           const field = argv.at(-1) as string;
-          if (this.run(["EXISTS", storeId]) !== 1 || this.run(["HEXISTS", erasing, field]) === 1) return [-3];
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", storeId]) !== 1) return [-3];
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return [-3];
           return this.orderWrite([String(count - 2), ...keys.slice(0, -2), ...argv.slice(0, -1)]);
         }
         // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.

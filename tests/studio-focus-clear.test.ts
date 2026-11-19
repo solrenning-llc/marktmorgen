@@ -6,7 +6,7 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { FOCUS_CLEAR_ROOM, focusScrollBy } from "@/lib/studio-focus-clear";
+import { FOCUS_CLEAR_ROOM, focusScrollBy, visibleTop } from "@/lib/studio-focus-clear";
 
 const base = { barsBottom: 124, inDialog: false, inBars: false, fromPointer: false };
 
@@ -43,4 +43,19 @@ test("never during a pointer press: a mouse or touch focus is the click's own, a
   assert.equal(focusScrollBy({ ...base, controlTop: 10, fromPointer: true }), 0);
   assert.equal(focusScrollBy({ ...base, controlTop: -400, fromPointer: true }), 0);
   assert.equal(focusScrollBy({ ...base, controlTop: 10, fromPointer: false }), 10 - 124 - FOCUS_CLEAR_ROOM, "keyboard and script focus still come clear");
+});
+
+test("a visually hidden control is measured by its visible label, never by its clipped 1 px box", () => {
+  // The look editor's theme radios are sr-only inside their label (components/look-editor.tsx): on keyboard focus the
+  // label is what must come clear of the bars, and the radio's 1 px box may sit anywhere (Grid coordinator on #3757).
+  assert.equal(visibleTop({ top: 40, width: 1, height: 1 }, { top: 300 }), 300);
+  assert.equal(visibleTop({ top: 40, width: 0, height: 0 }, { top: 90 }), 90);
+  assert.equal(focusScrollBy({ ...base, controlTop: visibleTop({ top: 400, width: 1, height: 1 }, { top: 100 }) }), 100 - 124 - FOCUS_CLEAR_ROOM);
+  assert.equal(focusScrollBy({ ...base, controlTop: visibleTop({ top: 10, width: 1, height: 1 }, { top: 500 }) }), 0, "label clear: nothing moves");
+  // A control with its own size is measured by itself, label or not.
+  assert.equal(visibleTop({ top: 40, width: 200, height: 44 }, { top: 300 }), 40);
+  assert.equal(visibleTop({ top: 40, width: 200, height: 44 }, null), 40);
+  // A hidden control with no label: nothing to bring clear, so no reading (NaN), and the rule answers 0.
+  assert.ok(Number.isNaN(visibleTop({ top: 40, width: 1, height: 1 }, null)));
+  assert.equal(focusScrollBy({ ...base, controlTop: visibleTop({ top: 40, width: 1, height: 1 }, null) }), 0);
 });

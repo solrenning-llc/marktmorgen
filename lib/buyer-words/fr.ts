@@ -157,6 +157,10 @@ export const fr: BuyerWords = {
   unitSaving: (percent) => `soit ${percent}\u00a0% d’économie`,
   chooseOptionFor: (title) => `Choisissez une option pour ${title}`,
   chooseOne: "Choisissez-en une",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "Pays depuis lequel vous achetez",
+  chooseCountry: "Choisissez votre pays",
+  optionFromLink: (label) => `Vous venez pour ${label}, cette option est donc choisie ci-dessous. Vous pouvez en choisir une autre.`,
   recommended: "Recommandé",
   recommendedAfter: " (recommandé)",
   howToPayFor: (title) => `Comment payer ${title}`,
@@ -196,12 +200,15 @@ export const fr: BuyerWords = {
   whoAnswers: (store) =>
     `${store} est le vendeur et répond de ce que vous achetez, des remboursements et de tout droit de rétractation dont vous disposez. Marktmorgen héberge les pages de la boutique et n'est pas partie à la vente.`,
   noPaymentsTitle: "Cette boutique ne peut pas encore accepter de paiements.",
-  noPaymentsBody: (store) => `Les prix ci-dessus sont réels, mais rien ici ne peut débiter une carte. Pour acheter, écrivez directement à ${store}.`,
-  noPaymentsBodyOne: (store) => `Le prix ci-dessus est réel, mais rien ici ne peut débiter une carte. Pour acheter, écrivez directement à ${store}.`,
+  noPaymentsBody: "Les prix ci-dessus sont réels, mais rien ici ne peut débiter une carte.",
+  noPaymentsBodyOne: "Le prix ci-dessus est réel, mais rien ici ne peut débiter une carte.",
+  noPaymentsWrite: (store) => `Écrire à ${store}`,
 
   notices: {
     soldout: { title: "Il vient d'être épuisé", body: "Le dernier est parti juste avant que vous cliquiez sur acheter. Rien n'a été débité." },
     busy: { title: "Quelqu'un est en train de l'acheter", body: "Rien n'a été débité. Cliquez de nouveau sur acheter dans un instant." },
+    abroad: { title: "Pas encore disponible depuis l'UE ni le Royaume-Uni", body: "Nous ne pouvons pas encore facturer la TVA que l'Union européenne et le Royaume-Uni exigent pour ce produit, donc rien n'a été débité. Si vous êtes en dehors de ces pays, choisissez votre pays et réessayez." },
+    country: { title: "Choisissez le pays depuis lequel vous achetez", body: "Rien n'a été débité. Choisissez votre pays à côté du bouton d'achat, puis cliquez de nouveau sur acheter." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis cliquez de nouveau sur acheter." },
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans un instant." },
     nocharges: { title: "Cette boutique ne peut pas accepter de paiements par carte pour le moment", body: "Rien n'a été débité. Réessayer ne fonctionnera pas tant que la boutique n'aura pas réglé le problème." },
@@ -209,6 +216,10 @@ export const fr: BuyerWords = {
     "paypal-declined": {
       title: "PayPal n'a pas accepté le paiement",
       body: "Rien n'a été débité. Réessayez avec une autre carte ou un autre compte dans PayPal, ou payez par carte ici.",
+    },
+    "paypal-confirming": {
+      title: "Ce paiement PayPal est en cours de confirmation",
+      body: "Un autre onglet ou un deuxième clic est en train de le terminer. Vérifiez vos e-mails pour le reçu avant de payer à nouveau. Si PayPal indique un prélèvement et qu'aucun reçu n'arrive, écrivez à la boutique en répondant au reçu de PayPal.",
     },
     "paypal-error": {
       title: "Ce paiement PayPal n'a pas pu être associé à cette boutique",
@@ -294,6 +305,8 @@ export const fr: BuyerWords = {
   openFullSize: "Ouvrir cette image en taille réelle",
   countdownUnits: { days: "jours", hours: "heures", min: "min", sec: "s" },
   until: (when) => `Fin${S}: ${when}`,
+  countdownPause: "Mettre le compte à rebours en pause",
+  countdownResume: "Reprendre le compte à rebours",
 
   restingTitle: "Cette page est en pause pour le moment",
   restingBody: (store) =>

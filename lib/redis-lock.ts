@@ -34,7 +34,10 @@
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
-const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+/** Deletes KEYS[1] only while it holds ARGV[1]; also used by lib/domains.ts to let a domain's key go. */
+export const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+/** RELEASE for any text one writer put under a key: deleted only while the key still holds exactly that text (1), else 0. */
+export const DELETE_IF_SAME = RELEASE;
 const EXTEND = '-- marktmorgen:extend:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("EXPIRE", KEYS[1], ARGV[2]) else return 0 end';
 
 export type Held = { key: string; token: string; ttlSeconds: number };
@@ -81,10 +84,12 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
 
 /**
  * Lets go of a lock, only if it is still ours, in one script. When the script cannot run, the lock is left to run
- * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws.
+ * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws. True only when the
+ * script confirmed it deleted this holder's lock; false when it was not ours or the answer is not known, so a caller
+ * that tells someone to try again at once can say so only on true (Codex L on #4212).
  */
-export async function releaseLock(held: Held): Promise<void> {
-  await script(RELEASE, [held.key], [held.token]).catch(() => 0);
+export async function releaseLock(held: Held): Promise<boolean> {
+  return (await script(RELEASE, [held.key], [held.token]).catch(() => 0)) === 1;
 }
 
 /**

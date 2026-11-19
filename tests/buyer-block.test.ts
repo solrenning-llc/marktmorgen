@@ -111,6 +111,20 @@ async function main(): Promise<void> {
   is("the studio is told it is not known", (await route(OWNER, { action: "blocked", id: conversation.id })).status, 503);
   (redis as { pipeline: typeof redis.pipeline }).pipeline = realPipeline;
 
+  part("The person's row determines the state when both reads are valid");
+  try {
+    const key = blockKey(store.sid!);
+    redis.pipeline = async (commands) => {
+      if (commands[0]?.[0] !== "EXISTS" || commands[0][1] !== key) return realPipeline(commands);
+      return [0, JSON.stringify({ r: "Synthetic first entry", at: 1 })];
+    };
+    is("a present row takes precedence over an earlier empty list", await blockedState(store, RUDE), {
+      blocked: true, reason: "Synthetic first entry", at: 1,
+    });
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+
   part("Unblocking");
   const beforeUnblock = (await dataUsed(store))?.used ?? 0;
   is("unblocked", (await route(OWNER, { action: "unblock", id: conversation.id })).body, { ok: true, blocked: false });

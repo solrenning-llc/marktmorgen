@@ -101,7 +101,7 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
     const where = shipping.region === "custom" ? shipping.countries.join(", ") : SHIP_REGIONS[shipping.region].label;
     return `It is a physical product the creator ships themselves, to: ${where}. Shipping is ${shipping.cents > 0 ? `${formatMoney(shipping.cents, currency)} per order` : "free"}, added on the payment page.${shipping.note ? ` ${shipping.note}.` : ""} The buyer gives the address on the payment page and gets an email when it ships.`;
   }
-  if (product.file || product.options.some((o) => o.file)) return "It is a download: after paying, the buyer downloads the file from the page they land on, and the link comes by email too.";
+  if (product.file || sellableOptions(product).some((o) => o.file)) return "It is a download: after paying, the buyer downloads the file from the page they land on, and the link comes by email too.";
   return "After paying, the buyer gets the link on the page they land on, and by email.";
 }
 

@@ -52,6 +52,11 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set, ...plain]);
     return [members, values, gone];
   },
+  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
+    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+    run(["SET", feed, json, "EX", seconds]);
+    return 1;
+  },
 };
 
 /** Makes `store` run the named scripts above, and everything else as before. */

@@ -53,6 +53,7 @@ let stripe: Record<ListPath, Row[]>;
 let broken: Partial<Record<ListPath, "garbled" | "error" | "shuffled">> = {};
 let replacedField: { path: ListPath; field: string; value: string } | null = null;
 const log: string[] = [];
+let lastRefundsQuery = "";
 const pagesOf: Record<string, number> = {};
 let versions = new Set<string>();
 // The clock the reading sees: each Stripe page moves it on by `tick` ms (0 unless a check sets it).
@@ -79,6 +80,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const rows = (stripe[path] ?? []).filter((r) => r.created >= gte && (!status || r.status === status)).sort((a, b) => b.created - a.created);
   if (broken[path] === "shuffled" && rows.length > 2) [rows[0], rows[rows.length - 1]] = [rows[rows.length - 1], rows[0]];
   const start = after ? rows.findIndex((r) => r.id === after) + 1 : 0;
+  if (path === "/refunds") lastRefundsQuery = url.search;
   const data = rows.slice(start, start + limit).map(row => replacedField?.path === path ? { ...row, [replacedField.field]: replacedField.value } : row);
   return json({ object: "list", data, has_more: start + limit < rows.length });
 }) as typeof fetch;
@@ -137,7 +139,9 @@ const invoice = (id: string, made: number, paid: number, cents: number, extra: R
   status_transitions: { paid_at: sec(paid), finalized_at: sec(made) }, parent: { type: "subscription_details", subscription_details: { metadata: { store: "shop" } } }, ...extra,
 });
 const refund = (id: string, at: number, cents: number, extra: Record<string, unknown> = {}): Row => ({
-  id: `re_${id}`, object: "refund", created: sec(at), status: "succeeded", amount: cents, currency: "usd", payment_intent: "pi_x", ...extra,
+  // Listed with expand[]=data.payment_intent (Codex T on #3022): its payment, whose metadata names the store that sold it.
+  id: `re_${id}`, object: "refund", created: sec(at), status: "succeeded", amount: cents, currency: "usd",
+  payment_intent: { id: `pi_${id}`, object: "payment_intent", metadata: { store: "shop" } }, ...extra,
 });
 const dispute = (id: string, at: number, cents: number, status = "lost"): Row => ({
   id: `dp_${id}`, object: "dispute", created: sec(at), status, amount: cents, currency: "usd", payment_intent: "pi_x",
@@ -510,6 +514,30 @@ async function main(): Promise<void> {
     stripe["/refunds"] = [refund("cancel01", Date.UTC(2031, 3, 10), 1000, { status: "canceled" })];
     const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
     is("a canceled refund (only one waiting on the buyer can be, so no money left): nothing taken off, every month read", [states(e, "stripe"), of(e, "2031-04", "stripe")?.state === "read" && !(of(e, "2031-04", "stripe") as { lines?: unknown[] }).lines?.length], [Array(12).fill("read"), true]);
+  }
+
+  part("Codex T's LEVE (#3022 at 2799d3e41b): another store's refund on the same Stripe account is never taken off this store's money");
+  reset();
+  {
+    const shop = makeStore(false);
+    const elsewhere = { id: "pi_elsewhere", object: "payment_intent", metadata: { store: "elsewhere" } };
+    stripe["/refunds"] = [refund("ours001", Date.UTC(2031, 5, 5), 1000), refund("theirs01", Date.UTC(2031, 5, 5, 1), 9900, { payment_intent: elsewhere })];
+    const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+    const june = of(e, "2031-06", "stripe") as { state?: string; lines?: { refundCents: number }[] };
+    is("only this store's refund is taken off: 10.00, not 109.00", [june?.state, june?.lines?.[0]?.refundCents], ["read", 1000]);
+    is("the refunds are listed with their payment expanded", log.some((l) => l === "stripe /refunds") && lastRefundsQuery.includes("expand[]=data.payment_intent"), true);
+  }
+  for (const [label, intent] of [
+    ["a payment not expanded (an id only)", "pi_plain"],
+    ["a payment with no store in its metadata (a membership's renewal)", { id: "pi_renewal", object: "payment_intent", metadata: {} }],
+    ["a payment of another kind of object", { id: "ch_x", object: "charge", metadata: { store: "shop" } }],
+    ["no payment at all", null],
+  ] as const) {
+    reset();
+    const shop = makeStore(false);
+    stripe["/refunds"] = [refund("newer02", Date.UTC(2031, 5, 5), 300), refund("unproved", Date.UTC(2031, 3, 10), 1000, { payment_intent: intent })];
+    const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+    is(`${label}: whose refund it is is unknown, so its month and before are unknown, never a smaller exact net`, states(e, "stripe").slice(0, 4), ["read", "read", "not_reached", "not_reached"]);
   }
 
   part("An unknown provider status is never a proved exclusion from the store's money");

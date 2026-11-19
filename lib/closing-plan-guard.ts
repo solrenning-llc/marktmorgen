@@ -44,7 +44,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
+import { CUSTOMER_PATTERN, erasingSince, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
@@ -287,7 +287,17 @@ export async function shutSince(handle: string): Promise<number | null> {
  * the caller does not adopt a plan it could not check.
  */
 export async function closingSince(store: Store): Promise<ClosingTimes | null> {
-  if (!store.planEndedAt || !isRedisConfigured()) return null;
+  if (!isRedisConfigured()) return null;
+  // A store whose erasure has begun is closing whatever its record says (Codex N1's HIGH on #3156): the walk takes it
+  // out of the final line before it deletes, and its plan may read running if its closing day began under one. A plan
+  // paid for it is returned in full, as on its closing day. Read exactly (erasingSince): a reply that does not read
+  // throws, and the caller does not adopt the plan.
+  const began = await erasingSince(storeRef(store));
+  if (began !== null) {
+    const ended = Date.parse(store.planEndedAt);
+    return { since: began, ended: Number.isFinite(ended) ? ended : began };
+  }
+  if (!store.planEndedAt) return null;
   // Read exactly (finalScoreOf, rule 24): a score that is missing or not a number throws, never "not closing".
   const ended = finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]));
   if (ended === null) return null;

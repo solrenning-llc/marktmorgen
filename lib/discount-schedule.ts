@@ -340,18 +340,25 @@ async function drop(member: string, key = DUE_KEY): Promise<void> {
   await counted([["ZREM", key, member]]);
 }
 
-/** Keep the failed decision before queuing its warning. If the enqueue errors, the due entry is still available. */
-const FAIL_AND_TELL = `-- marktmorgen:dsched-fail-and-tell:v1
+/**
+ * A failed notice enqueue spends one of the existing notice attempts before it can fail. A successful enqueue
+ * restores that reservation: tellOne counts its actual send later. No extra field, attempt or allowance is added.
+ * If enqueueing errors, the saved decision and spent attempt remain due, until the existing notice budget is gone.
+ */
+const FAIL_AND_TELL = `-- marktmorgen:dsched-fail-and-tell:v2
 if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
-if ARGV[2] ~= ARGV[3] then redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
-redis.call('ZADD', KEYS[2], 'NX', ARGV[4], ARGV[5])
+if ARGV[6] ~= '' then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[6])
+  redis.call('ZADD', KEYS[2], 'NX', ARGV[4], ARGV[5])
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
 redis.call('ZREM', KEYS[3], ARGV[5])
 return 1`;
 
-async function failAndTell(statsId: string, id: string, read: string, next: string, nowSeconds: number, member: string): Promise<boolean> {
+async function failAndTell(statsId: string, id: string, read: string, next: string, nowSeconds: number, member: string, attempt: string | null): Promise<boolean> {
   try {
     const replies = repliesFor(await redisPipeline([
-      ["EVAL", FAIL_AND_TELL, 3, scheduleKey(statsId), TELL_KEY, DUE_KEY, id, read, next, nowSeconds, member],
+      ["EVAL", FAIL_AND_TELL, 3, scheduleKey(statsId), TELL_KEY, DUE_KEY, id, read, next, nowSeconds, member, attempt ?? ""],
     ]), 1);
     return replies?.[0] === 1;
   } catch {
@@ -401,8 +408,10 @@ async function offThenFailed(shop: Shop, account: string, statsId: string, raw: 
     // the worst state for money, a code Stripe may still apply, is never left for the creator to find in the studio.
     // The email says the stop was not confirmed (failureNotice, stopUnconfirmed); tellOne still sends it once.
     const member = memberOf(shop.sid, statsId, entry.id);
-    const next = writeRecord({ ...entry, tries, failed: true, stopUnconfirmed: true });
-    const kept = await failAndTell(statsId, entry.id, raw, next, nowSeconds, member);
+    const failed = { ...entry, tries, failed: true, stopUnconfirmed: true };
+    const next = writeRecord(failed);
+    const attempt = entry.notices < NOTICE_TRIES ? writeRecord({ ...failed, notices: entry.notices + 1 }) : null;
+    const kept = await failAndTell(statsId, entry.id, raw, next, nowSeconds, member, attempt);
     return kept ? "failed" : "unknown";
   }
   await counted([
@@ -440,7 +449,8 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     if (entry.failed) {
       // A failed enqueue can leave the decision saved but its warning unqueued. Repair it without another stop.
       if (entry.stopUnconfirmed && !entry.mailed && entry.notices < NOTICE_TRIES) {
-        return (await failAndTell(statsId, id, raw, raw, nowSeconds, member)) ? "dropped" : "unknown";
+        const attempt = writeRecord({ ...entry, notices: entry.notices + 1 });
+        return (await failAndTell(statsId, id, raw, raw, nowSeconds, member, attempt)) ? "dropped" : "unknown";
       }
       await drop(member);
       return "dropped";

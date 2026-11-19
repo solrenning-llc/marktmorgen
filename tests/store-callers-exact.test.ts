@@ -34,6 +34,14 @@ function getAnswers(key: string, value: unknown) {
   }) as typeof redis.pipeline;
 }
 
+/** Every request that GETs `key` fails, as a dropped connection does, until healed. */
+function throwOn(key: string) {
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "GET" && c[1] === key)) throw new Error("connection dropped");
+    return original(commands);
+  }) as typeof redis.pipeline;
+}
+
 async function firstStore(email: string, handle: string) {
   const made = await claimHandle(email, handle, "Shop", "");
   if (!made.ok) throw new Error(`could not make ${handle}: ${made.reason}`);
@@ -113,6 +121,24 @@ async function main() {
     is(`invitee record read as ${label}: no offer left in a studio`, (await waitingFor(other)).length, 0);
   }
   is("the invitee's own store is untouched", (await storeForEmail(other))?.handle, "othershop");
+
+  // Claude 6's LOW on #3073: a request that fails, and a record under the invitee's key that belongs to another owner,
+  // are unknown too: 503, no email, no offer waiting.
+  const herRecord = (await original([["GET", ownerKey(here)]]))[0];
+  const cases: [string, () => void][] = [
+    ["a failed request", () => throwOn(ownerKey(other))],
+    ["another owner's record", () => getAnswers(ownerKey(other), herRecord)],
+  ];
+  for (const [label, arm] of cases) {
+    mails = 0;
+    arm();
+    const unread = await invite(other);
+    heal();
+    is(`invitee read as ${label}: 503, try again`, [unread.status, unread.body.ok], [503, false]);
+    is(`invitee read as ${label}: no email sent`, mails, 0);
+    is(`invitee read as ${label}: no offer left in a studio`, (await waitingFor(other)).length, 0);
+  }
+  is("the invitee's own store is still untouched", (await storeForEmail(other))?.handle, "othershop");
 
   mails = 0;
   const outside = await invite("nobody@example.com");

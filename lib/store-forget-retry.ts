@@ -168,10 +168,16 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
 export type ForgetWork = (statsId: string | null, sid: string, community: string | null, until: number, files: boolean) => Promise<void>;
 /** The Redis forgets alone: what the closing walk's admission does again (lib/closed-store-data.ts, admitDeleted). */
 export const forgetBoth = async (statsId: string | null, sid: string): Promise<void> => {
-  await forgetStoreWebhooks(statsId);
-  await revokeAllKeys(sid);
-  // A deleted store has no plan: its room is given back as a store without one.
-  await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
+  // Independent families must all be attempted, even while one cannot be read.
+  // A failed family keeps the overall attempt incomplete and retryable.
+  const results = await Promise.allSettled([
+    forgetStoreWebhooks(statsId),
+    revokeAllKeys(sid),
+    // A deleted store has no plan: its room is given back as a store without one.
+    forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" }),
+  ]);
+  const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length) throw new AggregateError(failures, "a deleted store's forgetting is incomplete");
 };
 /**
  * One try from the line: the Redis forgets, and, while its files are not seen to (`files`), its files: pictures, community

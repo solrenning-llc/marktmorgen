@@ -15,13 +15,12 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const SELLER = "7KNGBPH2U58GQ";
-const DAY = 86_400;
 const START = Math.floor(Date.now() / 1000);
 let clock = START;
 const realNow = Date.now.bind(Date);
 Date.now = () => clock * 1000;
 
-let captureStatus = "COMPLETED";
+const captureStatus = "COMPLETED";
 let made = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));

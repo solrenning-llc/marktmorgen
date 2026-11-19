@@ -113,7 +113,7 @@ type SubRow = {
   status?: unknown;
   customer?: unknown;
   metadata?: Record<string, string> | null;
-  latest_invoice?: { id?: unknown; status?: unknown; amount_due?: unknown } | string | null;
+  latest_invoice?: { id?: unknown; status?: unknown; amount_due?: unknown; customer?: unknown; subscription?: unknown; parent?: unknown } | string | null;
 };
 
 const customerOf = (sub: SubRow) =>
@@ -145,6 +145,22 @@ const owes = (sub: SubRow) => {
     ? invoice
     : null;
 };
+
+/** An expanded invoice must name this customer and membership before its id can authorize a payment (rules 24/30). */
+function invoiceBelongsTo(invoice: NonNullable<ReturnType<typeof owes>>, customer: string, subscription: string): boolean {
+  const idOf = (value: unknown): unknown => typeof value === "string" ? value
+    : value !== null && typeof value === "object" && Object.hasOwn(value, "id") ? (value as { id: unknown }).id : undefined;
+  if (!Object.hasOwn(invoice, "customer") || idOf(invoice.customer) !== customer) return false;
+  // Accounts can return the older top-level relation or Basil's parent. Every relation present must agree;
+  // missing, manual or contradictory ownership is unknown, not permission to charge another membership.
+  const legacy = Object.hasOwn(invoice, "subscription");
+  if (legacy && idOf(invoice.subscription) !== subscription) return false;
+  if (!Object.hasOwn(invoice, "parent")) return legacy;
+  const parent = invoice.parent;
+  if (!parent || typeof parent !== "object" || !Object.hasOwn(parent, "type") || (parent as { type?: unknown }).type !== "subscription_details" || !Object.hasOwn(parent, "subscription_details")) return false;
+  const details = (parent as { subscription_details?: unknown }).subscription_details;
+  return details !== null && typeof details === "object" && Object.hasOwn(details, "subscription") && idOf((details as { subscription: unknown }).subscription) === subscription;
+}
 
 export type CardView = { title: string | null; ended: boolean; owes: boolean };
 
@@ -288,7 +304,7 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
 
     const invoice = owes(sub);
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
-    if (!invoiceId) return "updated";
+    if (!invoiceId || !invoice || !invoiceBelongsTo(invoice, customer, subscription)) return "updated";
     try {
       const paid = await onAccount("POST", account, `/invoices/${invoiceId}/pay`, new URLSearchParams({ payment_method: method }), undefined, `nimbus-card-pay:${invoiceId}:${method}`);
       // "Paid" only from this invoice's own reply saying so; any other answer leaves the card set and says no more.

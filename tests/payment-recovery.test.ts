@@ -236,7 +236,7 @@ async function main(): Promise<void> {
   is("saved: the card is set on that membership", await finishCardUpdate(store, sessionId), "updated");
   is("on the membership itself", posts.filter((p) => p.path === "/subscriptions/sub_Running000001").map((p) => p.body.get("default_payment_method")), ["pm_NewCard0000001"]);
 
-  state.subs.set("sub_Running000001", { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } });
+  state.subs.set("sub_Running000001", { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900, customer: "cus_Member000001", parent: { type: "subscription_details", subscription_details: { subscription: "sub_Running000001" } } } });
   is("a payment already failed is paid with it", await finishCardUpdate(store, sessionId), "paid");
   state.payDeclines = true;
   is("declined: the card is still set, and it says so", await finishCardUpdate(store, sessionId), "declined");
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
   part("Rules 24 and 30: what Stripe answers the card's setting and the payment decides only when it is read");
   // The card is set, but Stripe's answer to it is not its own membership with that card: the page never says it is
   // set, nothing is paid with it, and the page stays open for the daily job to finish it.
-  const owedHere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } };
+  const owedHere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900, customer: "cus_Member000001", parent: { type: "subscription_details", subscription_details: { subscription: "sub_Running000001" } } } };
   state.subs.set("sub_Running000001", owedHere);
   for (const [label, reply] of [
     ["another membership's id", { id: "sub_Another0000001", default_payment_method: "pm_NewCard0000001" }],

@@ -12,7 +12,7 @@ import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { MAX_FORMS } from "@/lib/forms";
 import { exactReplies } from "@/lib/redis-exact";
-import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, dropPage, letGoUnlessShown, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { deleteOrSweep } from "@/lib/file-drop";
 import { ownsImagePath } from "@/lib/product-image";
 import { pictureChecker } from "@/lib/picture-check";
@@ -317,15 +317,20 @@ export async function POST(request: NextRequest) {
       if (lock instanceof Response) return lock;
       if (lock) return refusedJson("locked");
       const fresh = shown.filter((path) => !before.includes(path));
+      // What this save claims from the door, let go of if the page is then not written (Codex N1 on #2843, MEDIUM).
+      const claimed = new Map<string, number>();
       if (fresh.length) {
         const folder = await imageFolder(ref);
         if (fresh.some((path) => !ownsImagePath(path, folder))) return refuse("pictures");
         // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
         // from the shared folder (lib/sales-page-store.ts, claimNewPictures). Only those this save takes from the door
         // are checked in the file store, and once (MR audit gap 1).
-        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => (await countStudio(store, "page", units)).ok)))) return refuse("pictures");
+        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => (await countStudio(store, "page", units)).ok), claimed))) return refuse("pictures");
       }
-      await writePage(statsId, key, page, store);
+      await writePage(statsId, key, page, store).catch(async (error: unknown) => {
+        await letGoUnlessShown(statsId, key, claimed).catch(() => {});
+        throw error;
+      });
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).
       const from = outFrom(page);
       // Only this page's moment is changed, on the latest list; a page removed meanwhile stays removed.

@@ -125,6 +125,7 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  */
 export async function claimNewPictures(
   statsId: string, pageId: string, paths: string[], check?: (taken: ReadonlyMap<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
+  claimed?: Map<string, number>,
 ): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
@@ -163,7 +164,12 @@ export async function claimNewPictures(
   if (fresh.length === 0) return true;
   await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
   const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
-  if (Array.isArray(after) && after.length === fresh.length && fresh.every((_, i) => after[i] === pageId)) return true;
+  if (Array.isArray(after) && after.length === fresh.length && fresh.every((_, i) => after[i] === pageId)) {
+    // What this save claimed, with each one's door note, so a page that is then not kept can let go of them
+    // (letGoUnlessShown; Codex N1 on #2843, MEDIUM).
+    for (const path of fresh) claimed?.set(path, taken.get(path) as number);
+    return true;
+  }
   // Not all written down as this page's (another page's first, or a reply not known): only this attempt's own are let
   // go of, each only while it still names this page (HDEL_IF_EQUAL), and those go back on the door; none was this
   // page's before (unclaimed), so a field naming it now was written by this save.
@@ -172,6 +178,26 @@ export async function claimNewPictures(
   if (!counts || counts.some((c) => c !== 0 && c !== 1)) throw new UnknownReplyError("page pictures: letting go of a refused claim");
   await backChecked(fresh.filter((_, i) => counts[i] === 1));
   return false;
+}
+
+/**
+ * Lets go of the pictures a save just claimed (claimNewPictures' `claimed`) when the page that was to show them was not
+ * kept (Codex N1 on #2843, MEDIUM): the page is read as it is now, and each claimed picture it does not show is let go
+ * of while it still names this page (HDEL_IF_EQUAL) and goes back on the door, checked, as a refused claim does. One
+ * the page shows (a write that landed and then answered with an error) stays the page's, so a picture a page shows is
+ * never let go of; a page that does not read, or a reply not known, keeps every claim (a picture held, never one lost).
+ */
+export async function letGoUnlessShown(statsId: string, pageId: string, claimed: ReadonlyMap<string, number>): Promise<void> {
+  if (claimed.size === 0 || !isRedisConfigured()) return;
+  const now = await readPageExact(statsId, pageId).catch(() => undefined);
+  if (now === undefined) return;
+  const shown = new Set(now.page ? picturePaths(now.page) : []);
+  const unused = [...claimed.keys()].filter((path) => !shown.has(path));
+  if (unused.length === 0) return;
+  const undone = repliesFor(await redisPipeline(unused.map((path) => ["EVAL", HDEL_IF_EQUAL, 1, picsKey(statsId), path, pageId])), unused.length);
+  const counts = undone ? undone.map(countOf) : null;
+  if (!counts || counts.some((c) => c !== 0 && c !== 1)) return;
+  await returnToDoor(unused.filter((_, i) => counts[i] === 1).map((path) => [path, Math.floor(claimed.get(path) as number) + 0.5]));
 }
 
 /**

@@ -32,7 +32,11 @@ const REVIEWS: OtherCountryReviews = {
     { ruleId: "no-remote-services", evidence: "synthetic review", reviewedOn: "2026-11-01" },
   ],
 };
-const totals = (settledMinor: number, reservedMinor = 0, currency = "USD") => ({ currency, settledMinor, reservedMinor });
+// placeTotals("store-sales", place, since) as Claude 4's lib/place-sales.ts answers it (7020577795).
+const totals = (settledMinor: number, reservedMinor = 0, currency = "USD", country = "CA") => ({
+  place: { country, state: null }, fromMonth: "2025-11", toMonth: "2026-11", countingSince: "2025-01", complete: true,
+  currencies: { [currency]: { settledMinor, reservedMinor } },
+});
 const sale = (amountMinor: number, currency = "USD") => ({ currency, amountMinor });
 
 test("while the reviewed lists are empty, every country is unknown, which refuses", () => {
@@ -40,9 +44,9 @@ test("while the reviewed lists are empty, every country is unknown, which refuse
   assert.deepEqual(REVIEWED_COUNTRY_SCOPES, []);
   assert.ok(Object.isFrozen(REVIEWED_FX_CEILINGS) && Object.isFrozen(REVIEWED_COUNTRY_SCOPES));
   for (const country of ["CA", "NO", "CH", "LI", "AU"]) {
-    const snapshot = otherCountrySnapshot(country, totals(1), sale(1), NOW);
+    const snapshot = otherCountrySnapshot(country, totals(1, 0, "USD", country), sale(1), NOW);
     assert.equal(assessOtherCountry(country, snapshot, NOW).status, "unknown", country);
-    assert.equal(assessPlaceCountedCountry(country, totals(1), sale(1), NOW).status, "unknown", country);
+    assert.equal(assessPlaceCountedCountry(country, totals(1, 0, "USD", country), sale(1), NOW).status, "unknown", country);
   }
   // Even with the counter in the threshold's own currency (no rate needed), the scope is not reviewed.
   const cad = otherCountrySnapshot("CA", totals(1, 0, "CAD"), sale(1, "CAD"), NOW);
@@ -60,8 +64,8 @@ test("USD is converted at the reviewed ceiling, rounded up, and assessed at the 
   // One more cent, 1.5 CAD cents, rounded up to 2: above it.
   assert.equal(assessOtherCountry("CA", otherCountrySnapshotUnder(REVIEWS, "CA", totals(1_999_900), sale(101), NOW), NOW).status, "treatment-required");
   // Norway is reached AT NOK 50,000: USD 4,166.67 × 12 = NOK 50,000.04.
-  assert.equal(assessOtherCountry("NO", otherCountrySnapshotUnder(REVIEWS, "NO", totals(416_666), sale(0), NOW), NOW).status, "below-threshold");
-  assert.equal(assessOtherCountry("NO", otherCountrySnapshotUnder(REVIEWS, "NO", totals(416_666, 1), sale(0), NOW), NOW).status, "treatment-required");
+  assert.equal(assessOtherCountry("NO", otherCountrySnapshotUnder(REVIEWS, "NO", totals(416_666, 0, "USD", "NO"), sale(0), NOW), NOW).status, "below-threshold");
+  assert.equal(assessOtherCountry("NO", otherCountrySnapshotUnder(REVIEWS, "NO", totals(416_666, 1, "USD", "NO"), sale(0), NOW), NOW).status, "treatment-required");
 });
 
 test("an odd cent is rounded up, never down", () => {
@@ -93,18 +97,50 @@ test("no rate valid today, a cheaper rate, or another currency is unknown, or th
 test("the counter's 'could not say', mixed currencies and malformed figures never become a number", () => {
   const unknown = { status: "unknown" };
   assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", null, sale(1), NOW), unknown);
-  assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", totals(1, 0, "CAD"), sale(1, "USD"), NOW), unknown);
+  assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", totals(1, 0, "EUR"), sale(1, "USD"), NOW), unknown);
+  assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", totals(1), sale(1, "EUR"), NOW), unknown);
   assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", { ...totals(1), extra: 1 }, sale(1), NOW), unknown);
   assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", totals(1), { ...sale(1), extra: 1 }, NOW), unknown);
   assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", Object.create(totals(1)), sale(1), NOW), unknown);
   let ran = false;
-  const accessor = { currency: "USD", reservedMinor: 0, get settledMinor() { ran = true; return 1; } };
+  const accessor = { ...totals(1), currencies: { USD: { reservedMinor: 0, get settledMinor() { ran = true; return 1; } } } };
   assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", accessor, sale(1), NOW), unknown);
   assert.equal(ran, false);
   for (const bad of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1, "1"]) {
     assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", totals(bad as number), sale(1), NOW), { status: "invalid" }, String(bad));
   }
   assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", totals(1), sale(1), Number.NaN), { status: "invalid" });
+});
+
+test("the counted window, place and currencies must be exactly this country's, over the rule's whole window", () => {
+  const unknown = { status: "unknown" };
+  const base = totals(1);
+  for (const change of [
+    { fromMonth: "2025-12" }, { toMonth: "2026-10" }, { fromMonth: "2025-13" }, { toMonth: "202611" },
+    { place: { country: "CA", state: "ON" } }, { place: { country: "NO", state: null } }, { place: { country: "CA" } },
+    { complete: "yes" }, { currencies: [] }, { currencies: { usd: { settledMinor: 1, reservedMinor: 0 } } },
+    { currencies: { USD: { settledMinor: 1 } } },
+    { currencies: Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`U${String.fromCharCode(65 + i)}D`, { settledMinor: 0, reservedMinor: 0 }])) },
+  ]) {
+    assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "CA", { ...base, ...change }, sale(1), NOW), unknown, JSON.stringify(change));
+  }
+  // A window counted from an earlier month is wider, never narrower: it stands.
+  assert.equal(assessOtherCountry("CA", otherCountrySnapshotUnder(REVIEWS, "CA", { ...base, fromMonth: "2025-01" }, sale(1), NOW), NOW).status, "below-threshold");
+  // A ledger that did not count all of it: the coverage is false and the assessment refuses.
+  const partial = otherCountrySnapshotUnder(REVIEWS, "CA", { ...base, complete: false }, sale(1), NOW);
+  assert.ok("ruleId" in partial && partial.completeRollingCoverage === false && partial.applicableScopeReviewed === true);
+  assert.equal(assessOtherCountry("CA", partial, NOW).status, "unknown");
+});
+
+test("every currency the place was sold in is converted on its own, rounded up, and added", () => {
+  const mixed = { ...totals(1), currencies: { USD: { settledMinor: 1, reservedMinor: 1 }, CAD: { settledMinor: 5, reservedMinor: 0 } } };
+  const snapshot = otherCountrySnapshotUnder(REVIEWS, "CA", mixed, sale(1, "CAD"), NOW);
+  // USD 0.01 → CAD 0.015 → 2 cents each; CAD 0.05 as it is.
+  assert.ok("ruleId" in snapshot);
+  assert.deepEqual([snapshot.settledApplicableMinor, snapshot.reservedApplicableMinor, snapshot.proposedApplicableMinor], [7, 2, 1]);
+  // No sales counted at all, over a complete window: zero is known, and below the threshold.
+  const none = otherCountrySnapshotUnder(REVIEWS, "CA", { ...totals(0), currencies: {} }, sale(1), NOW);
+  assert.equal(assessOtherCountry("CA", none, NOW).status, "below-threshold");
 });
 
 test("without a reviewed scope the snapshot says so, and the assessment refuses", () => {

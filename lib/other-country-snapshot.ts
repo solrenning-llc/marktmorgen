@@ -4,7 +4,7 @@ import { TAX_THRESHOLD_RULES, assessTaxThreshold, type TaxThresholdAssessment, t
 /**
  * Art. 9a lock 3, jurisdiction "other", unit 2 (owner's order of 19 November 2026, front 1; coordinator's answer
  * C5-20261119-1625-9a-other): the threshold snapshot of one country, built from what the per-place counter of
- * C5-20261119-1335-tx2 reports for it (`placeTotals`: settled and reserved, in the sales' own currency) and the sale
+ * C5-20261119-1335-tx2 reports for it (`placeTotals`: settled and reserved, per currency) and the sale
  * being proposed, and that country's assessment from it (assessPlaceCountedCountry). The counter gives totals, not a
  * ledger of entries, so the snapshot goes to assessTaxThreshold bound to the country's own rule (expectedRuleId), not
  * to assessOtherCountry's ledger path.
@@ -113,10 +113,22 @@ function convert(amountMinor: number, from: string, to: "CAD" | "NOK" | "CHF", d
   return minor > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(minor);
 }
 
+/** "YYYY-MM" of a UTC millisecond. */
+const monthOf = (at: number) => new Date(at).toISOString().slice(0, 7);
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+const CODE = /^[A-Z]{3}$/;
+/** More currencies than this in one place's totals is not read (an evidence bound, never a sales limit). */
+export const MAX_PLACE_CURRENCIES = 16;
+
 /**
- * The snapshot of `country` from its place totals (`placeTotals(place, otherCountryWindowStart(...))`: null when the
- * counter could not say) and the proposed sale, under the given reviews. Production uses otherCountrySnapshot, which
- * takes only the reviewed records of this file; this form exists so the arithmetic can be tested with synthetic ones.
+ * The snapshot of `country` from its place totals and the proposed sale, under the given reviews. `totals` is what
+ * Claude 4's `placeTotals("store-sales", { country, state: null }, otherCountryWindowStart(...), now)` answers
+ * (lib/place-sales.ts, shape of 7020577795): `{ place, fromMonth, toMonth, countingSince, complete, currencies }`, or
+ * null when the counter could not say. Each currency's settled and reserved totals are converted on their own, rounded
+ * up, and added. The counted window must reach back to the rule's window and up to this month, for this very place;
+ * a ledger that did not count all of it (`complete` false) makes the coverage false, so the assessment refuses.
+ * Production uses otherCountrySnapshot, which takes only the reviewed records of this file; this form exists so the
+ * arithmetic can be tested with synthetic ones.
  */
 export function otherCountrySnapshotUnder(
   reviews: OtherCountryReviews,
@@ -130,27 +142,56 @@ export function otherCountrySnapshotUnder(
   if (!rule) return UNKNOWN;
   const ruleId = rule.ruleId;
   // A worldwide rule (Switzerland) is not one place's count.
-  if (TAX_THRESHOLD_RULES[ruleId].scope !== "country") return UNKNOWN;
-  const counted = totals === null ? null : own(totals, ["currency", "settledMinor", "reservedMinor"]);
+  if (ruleId !== "ca-specified-supplies" && ruleId !== "no-remote-services") return UNKNOWN;
+  const counted = totals === null ? null : own(totals, ["place", "fromMonth", "toMonth", "countingSince", "complete", "currencies"]);
   if (!counted) return UNKNOWN;
+  const place = own(counted.place, ["country", "state"]);
+  if (!place || place.country !== country || place.state !== null) return UNKNOWN;
+  if (typeof counted.fromMonth !== "string" || !MONTH.test(counted.fromMonth) || typeof counted.toMonth !== "string" || !MONTH.test(counted.toMonth)) return UNKNOWN;
+  // The counted months must cover the rule's whole window, up to this month.
+  if (counted.fromMonth > monthOf(otherCountryWindowStart(ruleId, now)) || counted.toMonth !== monthOf(now)) return UNKNOWN;
+  if (typeof counted.complete !== "boolean") return UNKNOWN;
   const sale = own(proposed, ["currency", "amountMinor"]);
-  if (!sale) return UNKNOWN;
-  if (!money(counted.settledMinor) || !money(counted.reservedMinor) || !money(sale.amountMinor)) return INVALID;
-  if (typeof counted.currency !== "string" || counted.currency !== sale.currency) return UNKNOWN;
+  if (!sale || typeof sale.currency !== "string") return UNKNOWN;
+  if (!money(sale.amountMinor)) return INVALID;
+  let codes: string[];
+  try {
+    if (!counted.currencies || typeof counted.currencies !== "object" || Array.isArray(counted.currencies)) return UNKNOWN;
+    const keys = Reflect.ownKeys(counted.currencies);
+    if (keys.length > MAX_PLACE_CURRENCIES || !keys.every((key) => typeof key === "string" && CODE.test(key))) return UNKNOWN;
+    codes = keys as string[];
+  } catch {
+    return UNKNOWN;
+  }
+  const byCurrency = own(counted.currencies, codes);
+  if (!byCurrency) return UNKNOWN;
   const day = today(now);
   const to = TAX_THRESHOLD_RULES[ruleId].currency;
-  const amounts = [counted.settledMinor, counted.reservedMinor, sale.amountMinor].map((amount) => convert(amount as number, counted.currency as string, to, day, reviews.fx));
-  if (amounts.some((amount) => amount === null)) return UNKNOWN;
+  let settled = 0;
+  let reserved = 0;
+  for (const code of codes) {
+    const line = own(byCurrency[code], ["settledMinor", "reservedMinor"]);
+    if (!line) return UNKNOWN;
+    if (!money(line.settledMinor) || !money(line.reservedMinor)) return INVALID;
+    const a = convert(line.settledMinor, code, to, day, reviews.fx);
+    const b = convert(line.reservedMinor, code, to, day, reviews.fx);
+    if (a === null || b === null) return UNKNOWN;
+    settled += a;
+    reserved += b;
+    if (!Number.isSafeInteger(settled) || !Number.isSafeInteger(reserved)) return INVALID;
+  }
+  const proposedMinor = convert(sale.amountMinor, sale.currency, to, day, reviews.fx);
+  if (proposedMinor === null) return UNKNOWN;
   const reviewed = reviews.scopes.some((scope) => scope.ruleId === ruleId && typeof scope.reviewedOn === "string" && DAY.test(scope.reviewedOn) && scope.reviewedOn <= day && typeof scope.evidence === "string" && scope.evidence.length > 0);
   return {
     ruleId,
     currency: to,
     recordedOn: day,
-    completeRollingCoverage: reviewed,
+    completeRollingCoverage: reviewed && counted.complete,
     applicableScopeReviewed: reviewed,
-    settledApplicableMinor: amounts[0],
-    reservedApplicableMinor: amounts[1],
-    proposedApplicableMinor: amounts[2],
+    settledApplicableMinor: settled,
+    reservedApplicableMinor: reserved,
+    proposedApplicableMinor: proposedMinor,
   };
 }
 

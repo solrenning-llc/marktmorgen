@@ -373,7 +373,6 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    const ads = await adsCheckout(request, store);
     // A member price the page showed: charged only when it is exactly what
     // this address is proved to get now, for the member's own purchase of
     // this product alone (not a payment plan, a box ticked, a gift, places
@@ -386,6 +385,9 @@ export async function POST(request: NextRequest) {
       if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
       member = { percent: claim.member, email: claim.email };
     }
+    // The buyer's request is kept for advertising only once nothing above can refuse the checkout: a member claim
+    // that no longer holds keeps nothing of it (Codex P's MEDIUM on #3021).
+    const ads = await adsCheckout(request, store);
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
     const held = await withStockHold(store, product, (holding) =>

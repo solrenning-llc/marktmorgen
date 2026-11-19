@@ -247,6 +247,37 @@ const EVENT_PAGES = 10;
  */
 const OFFERS_PER_RUN = 100;
 
+/**
+ * At most this many come-back links not written as asked a store a run (Claude 5 on #3889): a link write answered in
+ * another shape says Redis is not answering as asked, so the store's run stops there, nothing more is sent on it, and
+ * the offers after it wait for the next run, as those past OFFERS_PER_RUN do. Without it every offer a run looks at
+ * could fail the same way, each spending UNWRITTEN_LINK_COMMANDS with no email, on every run.
+ */
+export const UNWRITTEN_LINKS_PER_RUN = 1;
+
+/** A mark taken (lib/claim-mark.ts claimMark): its SET NX and, answered in another shape, the GET that reads it back. */
+const MARK_COMMANDS = 2;
+/**
+ * One address's unsubscribe token (lib/contacts.ts tokensFor) at its worst: its three rounds, each the contact's
+ * HMGET, the deleted-addresses HMGET, the token record's SET, the compare-and-set script (one, and its HGET and HSET,
+ * as Upstash bills a script) and either the read-back HMGET of a write answered in another shape or the DEL of a
+ * token lost to a change made meanwhile.
+ */
+const TOKEN_COMMANDS = 3 * (1 + 1 + 1 + 3 + 1);
+/** The link's SET and its three erasure notes (lib/erasure-index.ts noteForErasure: ZADD, ZREMRANGEBYSCORE, EXPIRE). */
+const LINK_WRITE_COMMANDS = 1 + 3;
+/** The link taken back (DEL) and this run's two marks let go (releaseMark: lib/redis-lock.ts RELEASE, one EVAL and its GET and DEL). */
+const TAKE_BACK_COMMANDS = 1 + 2 * 3;
+
+/**
+ * The most commands a come-back offer whose link was not written as asked costs, with nothing sent, from its first
+ * mark to the end (Claude 7 and Claude 5 on #3889): the membership's mark and the once-mark, the unsubscribe token,
+ * the link and its notes, and the take-back. The whole offer is looked at again on the next run, so all of it repeats
+ * outside the store's email figure. At most UNWRITTEN_LINKS_PER_RUN a store a run; priced in tests/plan-cost-registry.ts
+ * (come-back-unwritten-links) and held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.
+ */
+export const UNWRITTEN_LINK_COMMANDS = 2 * MARK_COMMANDS + TOKEN_COMMANDS + LINK_WRITE_COMMANDS + TAKE_BACK_COMMANDS;
+
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;
   const statsId = store.statsId as string;
@@ -271,6 +302,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
   }
   let sent = 0;
   let lookedAt = 0;
+  let unwritten = 0;
 
   // Oldest first (Claude 4 on #2714): Stripe lists events newest first, and the window is two days wide with one run
   // a day, so the offers a run can look at go to the ended memberships about to leave the window, not the newest.
@@ -328,7 +360,24 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
-      await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
+      // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts writes its stop link): the link written
+      // ("OK") and each erasure note a count. Anything else is unknown: the email does not go with a link that may lead
+      // to "this offer has ended" or that an erasure could not find; the link that may have landed is taken back (its
+      // reply read as nothing) and this run's marks are let go, so the next run sends the offer once.
+      const notes = noteForErasure(statsId, email, linkKey(token));
+      const written = repliesFor(
+        await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...notes]).catch(() => null),
+        1 + notes.length,
+      );
+      if (!written || written[0] !== "OK" || !notedExactly(written.slice(1), notes.length)) {
+        await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        await releaseMark(sentKey(account, subId), claim);
+        console.error("a come-back link was not written as asked; nothing sent", store.handle);
+        unwritten += 1;
+        if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;
+        continue;
+      }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,
@@ -373,6 +422,16 @@ export async function winbacksSent(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
   return Number(n) || 0;
+}
+
+/**
+ * noteForErasure's replies in their exact shape (Codex X8 on #3889, as lib/product-updates.ts noted() reads the same
+ * three notes): ZADD of one member 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1 (the set was just written). Anything
+ * else, such as an EXPIRE 0 that says no index was there to keep, means an erasure may not find the link.
+ */
+function notedExactly(replies: unknown[], count: number): boolean {
+  if (count === 0) return replies.length === 0;
+  return count === 3 && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
 }
 
 /** The daily run: every store with the offer on, from where the last run stopped. */

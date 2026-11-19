@@ -818,6 +818,13 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           return this.run(["HDEL", purchases, field]);
         }
+        // lib/paypal-payouts.ts AUTOPAY_IF: the auto-payout switch written only onto the exact app record read.
+        if (key.startsWith("-- marktmorgen:paypal-autopay-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, record, was, next] = args;
+          if (this.run(["GET", record]) !== was) return 0;
+          this.run(["SET", record, next]);
+          return 1;
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;
@@ -1492,18 +1499,37 @@ export class MemoryRedis {
           });
         }
         // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
-        // deleted people (-1, nothing written).
-        if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {
-          const [, erased, invites, ...rest] = args;
-          const n = rest.length / 3;
+        // deleted people (-1, nothing written) and its membership is not marked removed (-2, nothing written); a new one's
+        // link SET with it, and the reminders in one ZADD.
+        if (key.startsWith("-- marktmorgen:invite-unless-erased:v2\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const n = argv.length / 7;
+          if (!Number.isInteger(n) || n < 1 || keys.length !== 3 + 2 * n) throw new Error("ERR invite-unless-erased: wrong number of keys or arguments");
+          const [erased, invites, due] = keys;
           if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
-          this.scriptCalls += 1;
-          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => rest[3 * i])]) as unknown[];
-          return Array.from({ length: n }, (_, i) => {
+          this.scriptCalls += 2;
+          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => argv[7 * i])]) as unknown[];
+          const gone = this.run(["MGET", ...Array.from({ length: n }, (_, i) => keys[4 + 2 * i])]) as unknown[];
+          const queued: (string | number)[] = [];
+          const out = Array.from({ length: n }, (_, i) => {
             if (found[i] !== null) return -1;
+            if (gone[i] !== null) return -2;
             this.scriptCalls += 1;
-            return this.run(["HSETNX", invites, rest[3 * i + 1], rest[3 * i + 2]]);
+            const made = this.run(["HSETNX", invites, argv[7 * i + 1], argv[7 * i + 2]]);
+            if (made === 1) {
+              this.scriptCalls += 1;
+              this.run(["SET", keys[3 + 2 * i], argv[7 * i + 3], "EX", argv[7 * i + 4]]);
+              if (argv[7 * i + 5] !== "") queued.push(argv[7 * i + 5], argv[7 * i + 6]);
+            }
+            return made;
           });
+          if (queued.length) {
+            this.scriptCalls += 1;
+            this.run(["ZADD", due, ...queued]);
+          }
+          return out;
         }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
@@ -2433,6 +2459,15 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, hash, tell, due, field, read, next, score, member] = args;
+          if (this.run(["HGET", hash, field]) !== read) return 0;
+          if (read !== next) this.run(["HSET", hash, field, next]);
+          this.run(["ZADD", tell, "NX", score, member]);
+          this.run(["ZREM", due, member]);
+          return 1;
+        }
         // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
         // lib/discount-schedule.ts TELL_STEP: a failed code's record written over only while it is the one read, and its
         // member taken off or put back on the line in the same step.
@@ -2466,6 +2501,50 @@ export class MemoryRedis {
           if (this.run(["HGET", work, "of"]) === ending) return 0;
           this.run(["DEL", work]);
           this.run(["HSET", work, "calls", calls, "of", ending]);
+          return 1;
+        }
+        // lib/plan-closing.ts CLOSING_START: a closing's told marks, email credit and call budget, started once per ending, the endings compared as numbers, step for step (Codex G on #3299, G112).
+        if (key.startsWith("-- marktmorgen:closing-start:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, told, credit, work, emails, calls, ending] = args;
+          for (const one of [told, credit, work]) {
+            this.live(one);
+            const held = this.data.get(one);
+            if (held instanceof Map && held.size === 0) this.data.delete(one);
+          }
+          const [t, c, w] = [told, credit, work].map((one) => this.run(["TYPE", one]));
+          if ((t !== "hash" && t !== "none") || (c !== "string" && c !== "none") || (w !== "hash" && w !== "none")) return -1;
+          // The script's ms(): a whole number of ms in decimal digits, no sign or leading zero, at most 15, else nil.
+          const ms = (text: unknown): number | null => (typeof text === "string" && (text === "0" || (text.length <= 15 && /^[1-9][0-9]*$/.test(text))) ? Number(text) : null);
+          const end = ms(ending);
+          if (end === null) return -1;
+          const of = this.run(["HGET", work, "of"]);
+          if (of !== null) {
+            const was = ms(of);
+            if (was === null) return -1;
+            if (was === end) return 0;
+            if (was > end) return 2;
+          }
+          this.run(["DEL", told]);
+          this.run(["SET", credit, emails]);
+          this.run(["DEL", work]);
+          this.run(["HSET", work, "calls", calls, "of", ending]);
+          return 1;
+        }
+        // lib/plan-closing.ts CLOSING_STATE_SAVE: a store's closing state written only over the state the run read, step for step.
+        if (key.startsWith("-- marktmorgen:closing-state-save:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, state, mode, expected, next] = args;
+          this.live(state);
+          const type = this.run(["TYPE", state]);
+          if (type !== "string" && type !== "none") return -1;
+          const was = this.run(["GET", state]);
+          if (mode === "none") {
+            if (was !== null) return 0;
+          } else if (mode === "is") {
+            if (was !== expected) return 0;
+          } else {
+            return -1;
+          }
+          this.run(["SET", state, next]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
@@ -2558,7 +2637,7 @@ export class MemoryRedis {
           this.run(["SADD", user, statsId]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
+        if (key.startsWith("-- marktmorgen:capped-count:v3\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);
         if (key.startsWith("-- marktmorgen:studio-demo-refuse:v1\n")) return this.studioDemo("refuse", args);
@@ -3585,14 +3664,19 @@ export class MemoryRedis {
     return 1;
   }
 
-  /** lib/capped-count.ts: counts that never grow a hash past its most fields, the way version 2 runs them. */
+  /** lib/capped-count.ts: counts that never grow a hash past its most fields, the way version 3 runs them. */
   private cappedCount(args: string[]): unknown {
     const n = Number(args[0]);
     const keys = args.slice(1, 1 + n);
     const argv = args.slice(1 + n);
     if (!Number.isInteger(n) || n < 1 || argv.length < n || (argv.length - n) % 3 !== 0 || new Set(keys).size !== keys.length) throw new Error("ERR capped-count: arguments");
-    const caps = argv.slice(0, n).map(Number);
-    if (caps.some((cap) => !Number.isInteger(cap) || cap < 1)) throw new Error("ERR capped-count: most");
+    // "most", or "most:ttl" for a hash given an expiry when the count creates it.
+    const ttls = argv.slice(0, n).map((most) => {
+      const pair = /^(\d+):(\d+)$/.exec(most);
+      return pair ? Number(pair[2]) : undefined;
+    });
+    const caps = argv.slice(0, n).map((most) => Number(/^(\d+):(\d+)$/.test(most) ? most.split(":")[0] : most));
+    if (caps.some((cap) => !Number.isInteger(cap) || cap < 1) || ttls.some((t) => t !== undefined && t < 1)) throw new Error("ERR capped-count: most");
     const rest = argv.slice(n);
     const left = new Map<number, number>();
     for (let i = 0; i < rest.length; i += 3) {
@@ -3604,12 +3688,14 @@ export class MemoryRedis {
     // Each hash's length once (HLEN), and which names are there (one HMGET) only for a hash a new name may not fit in.
     const len = new Map<number, number>();
     const there = new Map<number, Set<string>>();
+    const fresh = new Set<number>();
     for (let k = 1; k <= n; k += 1) {
       if (!left.has(k)) continue;
       this.live(keys[k - 1]);
       const hash = this.hash(keys[k - 1]);
       this.scriptCalls += 1;
       len.set(k, hash.size);
+      if (hash.size === 0) fresh.add(k);
       if (hash.size + left.get(k)! > caps[k - 1]) {
         this.scriptCalls += 1;
         const names = [...rest.filter((_, i) => i % 3 === 1 && Number(rest[i - 1]) === k), "~"];
@@ -3639,6 +3725,13 @@ export class MemoryRedis {
         }
         hash.set("~", String((Number(hash.get("~")) || 0) + by));
         out.push(0);
+      }
+    }
+    for (let k = 1; k <= n; k += 1) {
+      const ttl = ttls[k - 1];
+      if (ttl !== undefined && fresh.has(k)) {
+        this.scriptCalls += 1;
+        this.run(["EXPIRE", keys[k - 1], ttl]);
       }
     }
     return out;

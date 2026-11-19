@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
-import { type Hands, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
+import { type Hands, CLOSING_STATE_SAVE, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import {
   BUYER_NOTICE_DAYS,
@@ -196,6 +196,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (status === "draft") return json({ object: "list", data: row.draft ? [{ id: row.draft.id, status: "draft", ...ownerOf(row), auto_advance: row.draft.auto_advance, metadata: row.draft.metadata }] : [], has_more: false });
     if (status === "open") return json({ object: "list", data: row.open?.status === "open" ? [{ id: row.open.id, status: "open", ...ownerOf(row) }] : [], has_more: false });
     return json({ object: "list", data: [], has_more: false });
+  }
+  // One paid invoice read alone, and its list of payments: read before every refund since #4428 (Codex P and X5). Each
+  // paid invoice here was paid by its own one payment.
+  const paidOne = (id: string | null) => [...world.subs.values()].flatMap(paidInvoicesOf).find((inv) => inv.id === id) as { id: string; payment_intent?: unknown } | undefined;
+  const readOne = path.match(/^\/invoices\/(in_\w+)$/);
+  if (readOne && method === "GET") {
+    const inv = paidOne(readOne[1]);
+    return inv ? json(inv) : json({ error: { message: `no such invoice ${readOne[1]}` } }, 404);
+  }
+  if (path === "/invoice_payments" && method === "GET") {
+    const inv = paidOne(url.searchParams.get("invoice"));
+    return json({ object: "list", has_more: false, data: inv ? [{ id: `inpay_${inv.id.slice(3)}`, object: "invoice_payment", invoice: inv.id, status: "paid", payment: { type: "payment_intent", payment_intent: inv.payment_intent } }] : [] });
   }
   const drafted = path.match(/^\/invoices\/(in_\w+)$/);
   if (drafted && method === "POST") {
@@ -450,7 +462,9 @@ async function main() {
     const healthy = redis.pipeline;
     let dropped = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      if (!dropped && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:plan:closing:") && /"day":/.test(String(commands[0][2])) && !/"renewals":/.test(String(commands[0][2]))) {
+      // closeOne writes its state as ["EVAL", CLOSING_STATE_SAVE, 1, key, mode, seen, text]; the body is c[6].
+      const c = commands[0];
+      if (!dropped && commands.length === 1 && c[0] === "EVAL" && c[1] === CLOSING_STATE_SAVE && String(c[3]).startsWith("nl:plan:closing:") && /"day":/.test(String(c[6])) && !/"renewals":/.test(String(c[6]))) {
         dropped += 1;
         throw new Error("stand-in Redis down for the closing day's own record");
       }

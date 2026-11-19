@@ -323,6 +323,44 @@ test("an approval applied whose reply was lost (a throw after the script ran) is
   assert.equal(base(["GET", `nl:apply:r:${shop.sid}:${two.id}`]), before);
 });
 
+test("an application kept whose reply was lost (a throw after the script ran) is read back, so a retry never keeps it twice", async () => {
+  // Codex N1's probe on #3564: APPLY_NEW runs, then the acknowledgment is lost as a thrown transport error.
+  fault = (command) => {
+    if (String(command[1]) !== APPLY_NEW) return undefined;
+    fault = null;
+    runScript(command);
+    throw new Error("synthetic: the reply to a kept application was lost");
+  };
+  const done = await submitApplication(shop, { offer, email: ann }, clock);
+  assert.equal(done.ok, true, JSON.stringify(done));
+  const one = (done as { ok: true; application: { id: string } }).application;
+  assert.equal(base(["EXISTS", `nl:apply:r:${shop.sid}:${one.id}`]), 1);
+  assert.deepEqual((await listApplications(shop, clock))?.map((app) => app.id), [one.id]);
+  // The script did not run and the call threw: nothing is said to be kept.
+  fault = (command) => {
+    if (String(command[1]) !== APPLY_NEW) return undefined;
+    fault = null;
+    throw new Error("synthetic: the request never reached the database");
+  };
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "unavailable" });
+  // The script ran, its reply was lost and the read back was lost too: unknown, never said to be kept.
+  let lost = false;
+  fault = (command) => {
+    if (String(command[1]) === APPLY_NEW) {
+      lost = true;
+      runScript(command);
+      throw new Error("synthetic: reply lost");
+    }
+    if (lost && command[0] === "GET") {
+      fault = null;
+      throw new Error("synthetic: read back lost");
+    }
+    return undefined;
+  };
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "unavailable" });
+  assert.equal((await listApplications(shop, clock))?.length, 2);
+});
+
 test("an approval applied whose reply and read back were both lost is unknown, and its retry with the same key answers a fresh link", async () => {
   const one = await submit();
   const record = `nl:apply:r:${shop.sid}:${one.id}`;

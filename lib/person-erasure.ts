@@ -52,7 +52,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { deleteFile } from "@/lib/file-store";
-import { isUnreadSubmission, noteTaskUpload, submissionsOf } from "@/lib/assignment";
+import { noteTaskUpload } from "@/lib/assignment";
 import { type ErasedPart, type ErasureBy, type ErasureScope, type ErasureSize, erasureUnits } from "@/lib/erasure-rules";
 import { idsOfKind } from "@/lib/catalog";
 import { dealCount } from "@/lib/crm";
@@ -147,12 +147,11 @@ export const ERASERS: Eraser[] = [
       let records = 0;
       for (const c of s.courses) {
         // The files handed in are kept for a repeat before their records go (#4808): once deleted, nothing else leads
-        // to them. Read exactly first; a record that does not read is taken from the assignment's files hash by
-        // forgetTasksPerson itself, and kept below with the rest. Not kept: nothing is deleted and this part fails.
-        const subs = await submissionsOf(c.courseId, c.lessonIds.map((lessonId) => ({ lessonId, who: s.learner })));
-        const paths = subs.flatMap((sub) => (sub && !isUnreadSubmission(sub) && sub.file ? [sub.file.path] : []));
-        if (!(await keepFiles(s.listId as string, s.email, paths))) throw new Error("the paths of a student's files could not be kept before their records are deleted");
-        const done = await forgetTasksPerson(c.courseId, c.lessonIds, s.learner, storeKey(s.store));
+        // to them. Kept from the eraser's own read, so a record that does not read, whose file only forgetTasksPerson
+        // finds in the assignment's files hash, is kept too (Codex X4). Not kept: nothing is deleted and this part fails.
+        const done = await forgetTasksPerson(c.courseId, c.lessonIds, s.learner, storeKey(s.store), async (paths) => {
+          if (!(await keepFiles(s.listId as string, s.email, paths))) throw new Error("the paths of a student's files could not be kept before their records are deleted");
+        });
         records += done.records;
         files.push(...done.files);
       }

@@ -864,7 +864,13 @@ export class TaskRecordUnreadError extends Error {
  * read too: a batch that does not answer a count for every command throws
  * UnknownReplyError, its files left to the daily job (Codex P on #2847).
  */
-export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
+export async function forgetTasksPerson(
+  courseId: string,
+  lessonIds: string[],
+  who: string,
+  room: string | null,
+  beforeDeleteFiles?: (paths: string[]) => Promise<void>,
+): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
   const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
@@ -883,6 +889,10 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
       for (const f of handedFilesOf(hashes[i])) if (inStudentFolder(f.path, courseId, lessonId, who)) files.push({ lessonId, ...f });
     });
   }
+  // The erasure keeps the exact paths this read will remove, those taken from an unread record's own folder included,
+  // before any record, index or file reference that leads to them is deleted (#4808, Codex X4). A separate earlier read
+  // of the records never sees those paths. Not kept: the callback throws and nothing is deleted.
+  if (beforeDeleteFiles) await beforeDeleteFiles([...new Set(files.map((file) => file.path))]);
   const members = handed.map((h) => `${h.lessonId}|${who}`);
   const batch: (string | number)[][] = [
     ["DEL", ...handed.map((h) => subKey(courseId, h.lessonId, who))],

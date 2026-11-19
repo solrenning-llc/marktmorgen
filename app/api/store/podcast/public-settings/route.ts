@@ -188,10 +188,10 @@ export async function POST(request: NextRequest) {
         next = { ...current, episodes: kept };
         if (JSON.stringify(next.episodes) === JSON.stringify(current.episodes)) return answer(now, still, current, moved);
       }
-      // Written at its full size: counted before the write, so a write that fails part way is paid for too.
-      moved.bytes += Buffer.byteLength(JSON.stringify(next), "utf8");
+      // Count the Redis record actually written. An unknown write keeps the full hold through paid().
       const written = await writePublicShow(now, podcastId, next, show);
       if (!written.ok) return refused(written);
+      moved.bytes += written.bytes;
       return answer(now, still, next, moved);
     }));
   } catch (error) {

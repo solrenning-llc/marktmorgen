@@ -297,7 +297,7 @@ export function showRecord(settings: PublicShowSettings): string {
   return JSON.stringify({ category: settings.category, explicit: settings.explicit, episodes });
 }
 
-export type ShowWrite = { ok: true } | { ok: false; reason: "full" | "too_big"; message?: string };
+export type ShowWrite = { ok: true; bytes: number } | { ok: false; reason: "full" | "too_big"; message?: string };
 
 /**
  * Writes a show's public settings. The store's data room is taken first at the larger of what the record was
@@ -309,7 +309,8 @@ export async function writePublicShow(store: DataStore, podcastId: string, setti
   if (!PODCAST_ID.test(podcastId)) throw new UnknownReplyError("a podcast's public settings (no such podcast)");
   if (!isRedisConfigured()) throw new UnknownReplyError("a podcast's public settings (no database)");
   const raw = showRecord(settings);
-  if (Buffer.byteLength(raw, "utf8") > PUBLIC_SHOW_MAX_BYTES) return { ok: false, reason: "too_big" };
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes > PUBLIC_SHOW_MAX_BYTES) return { ok: false, reason: "too_big" };
   const key = showKey(podcastId);
   const slot = publicShowSlot(podcastId);
   const after = dataBytes([key, raw], 1);
@@ -322,7 +323,7 @@ export async function writePublicShow(store: DataStore, podcastId: string, setti
   const replies = repliesFor(await redisPipeline([["SET", key, raw]]), 1);
   if (!replies || replies[0] !== "OK") throw new UnknownReplyError("the write of a podcast's public settings");
   if (after < was) await giveData(store, [{ slot, bytes: after, set: true }]);
-  return { ok: true };
+  return { ok: true, bytes };
 }
 
 /**

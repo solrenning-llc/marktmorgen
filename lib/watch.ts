@@ -279,7 +279,8 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
     if (typeof folder !== "string") continue;
     const measured = await measureOne(folder, now);
     if (measured === null) {
-      await redisPipeline([["ZADD", DUE, now + AGAIN_MS, folder]]);
+      // A retry updates only a member still queued; an erasure may have removed it during the read (Codex P on #4888).
+      await redisPipeline([["ZADD", DUE, "XX", now + AGAIN_MS, folder]]);
       continue;
     }
     if (!measured.live) {
@@ -298,7 +299,8 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
     const still = openedAt === null || (openedAt !== "absent" && now - openedAt < WATCHING_FOR_MS);
     // Read once more after the last token has run out, and then left alone
     // until a lesson is opened again.
-    await redisPipeline([still ? ["ZADD", DUE, now + MEASURE_EVERY_MS, folder] : ["ZREM", DUE, folder]]);
+    // XX: only a member still queued is moved on, so an erasure during this pass is never undone (Codex P on #4888).
+    await redisPipeline([still ? ["ZADD", DUE, "XX", now + MEASURE_EVERY_MS, folder] : ["ZREM", DUE, folder]]);
   }
   return counts;
 }

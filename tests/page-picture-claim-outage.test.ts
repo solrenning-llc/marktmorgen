@@ -14,6 +14,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
 import { readPageExact } from "@/lib/sales-page-store";
 import { picturePaths } from "@/lib/sales-page";
+import { siteKey } from "@/lib/site-page-rules";
 import { store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
 import { done, is, part } from "./check";
@@ -36,9 +37,13 @@ function outageFromPageWrite(landed: boolean): { end: () => void } {
   const original = redis.pipeline;
   let down = false;
   redis.pipeline = async (commands: (string | number)[][]) => {
-    if (!down && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:product:page:"))) {
+    // The page's own write: a plain SET, or the one script that writes the page and its new pictures' owner together.
+    const pageWrite = commands.findIndex((c) => (c[0] === "SET" && String(c[1]).startsWith("nl:product:page:")) || (c[0] === "EVAL" && String(c[3]).startsWith("nl:product:page:")));
+    if (!down && pageWrite >= 0) {
       down = true;
-      if (landed) await original.call(redis, commands);
+      // A pipeline is not a transaction (Codex N1 on #2843, lot 60): when it "landed", only the commands up to and
+      // including the page's own write are applied before the outage, never the ones after it.
+      if (landed) await original.call(redis, commands.slice(0, pageWrite + 1));
       throw new Error("stand-in: Redis went away during the page write");
     }
     if (down) throw new Error("stand-in: Redis is still away");
@@ -81,9 +86,9 @@ async function main(): Promise<void> {
 
   for (const [where, pageId, save] of [
     ["a product's page", id, (paths: string[], block: string) => pageRoute(post("/api/store/page", session, { id, page: pictures(block, paths) }))],
-    ["a store page", "site:pagepage03", (paths: string[], block: string) => sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage03", page: pictures(block, paths) }))],
+    ["a store page", siteKey("pagepage03"), (paths: string[], block: string) => sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage03", page: pictures(block, paths) }))],
   ] as const) {
-    const key = pageId.startsWith("site:") ? null : pageId;
+    const key = pageId === id ? pageId : null;
     part(`On ${where}: the page write and the read after it both lost (an outage), the write never landed`);
     {
       const picture = await upload(key ? { productId: id } : { pageId: "pagepage03" });
@@ -105,8 +110,9 @@ async function main(): Promise<void> {
         outage.end();
       }
       const ownedBy = await owner(picture);
-      is("the kept page shows the picture", await shows(key ?? String(ownedBy ?? ""), picture), true);
-      is("and the picture it shows is held, never let go of", typeof ownedBy === "string" && ownedBy.length > 0, true);
+      const kept = await shows(pageId, picture);
+      is("the page write landed: the kept page shows the picture", kept, true);
+      is("[CORRETO] and the picture it shows is held by that same page, never by nobody", ownedBy, pageId);
     }
   }
   done();

@@ -871,6 +871,14 @@ export class MemoryRedis {
           this.run(["EXPIRE", hash, keep]);
           return 0;
         }
+        // lib/sales-page-store.ts PAGE_WITH_CLAIMS: a page and its new pictures' owner written in one step.
+        if (key.startsWith("-- marktmorgen:page-with-claims:v1\n") && args[0] === "2" && args.length >= 6) {
+          const [, page, pics, mode, json, owner, ...paths] = args;
+          if (mode === "SET") this.run(["SET", page, json]);
+          else this.run(["DEL", page]);
+          for (const path of paths) this.run(["HSET", pics, path, owner]);
+          return 1 + paths.length;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;
@@ -2547,11 +2555,19 @@ export class MemoryRedis {
           return 1;
         }
         // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
-        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, hash, tell, due, field, read, next, score, member] = args;
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, hash, tell, due, field, read, next, score, member, attempt] = args;
+          this.scriptCalls += 1;
           if (this.run(["HGET", hash, field]) !== read) return 0;
-          if (read !== next) this.run(["HSET", hash, field, next]);
-          this.run(["ZADD", tell, "NX", score, member]);
+          if (attempt !== "") {
+            this.scriptCalls += 1;
+            this.run(["HSET", hash, field, attempt]);
+            this.scriptCalls += 1;
+            this.run(["ZADD", tell, "NX", score, member]);
+          }
+          this.scriptCalls += 1;
+          this.run(["HSET", hash, field, next]);
+          this.scriptCalls += 1;
           this.run(["ZREM", due, member]);
           return 1;
         }

@@ -33,7 +33,9 @@ function failNextPageWrite(landed: boolean): () => void {
   const original = redis.pipeline;
   let done = false;
   redis.pipeline = async (commands: (string | number)[][]) => {
-    if (!done && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:product:page:"))) {
+    // The page's own write: a plain SET, or, since Codex N1's lot 60 on #2843, the one script that writes the page and
+    // its new pictures' owner together (PAGE_WITH_CLAIMS). What is checked below is unchanged.
+    if (!done && commands.some((c) => (c[0] === "SET" && String(c[1]).startsWith("nl:product:page:")) || (c[0] === "EVAL" && String(c[3]).startsWith("nl:product:page:")))) {
       done = true;
       if (landed) await original.call(redis, commands);
       throw new Error("stand-in: the page write's answer was lost");

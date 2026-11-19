@@ -541,12 +541,15 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
   // held unread past the day. The names are looked up in one MGET (anyStoreNamed), no store record read; a lookup that
   // cannot be read is tried again, unread.
   const creatorsDomain = creatorDomain(NIMBUS_FROM);
+  // list() bounds the recipient work. Beyond that bound, an omitted recipient may be support@, so the
+  // announcement cannot prove a store-only delivery or earn a store-address exemption (Codex X4/X6, HIGH).
+  const recipientsTruncated = Array.isArray(announcedTo) && announcedTo.length > 50;
   const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
   const announcedAddresses = announced.map((one) => (parseSender(one).address ?? "").toLowerCase());
-  const showsSupport = announcedAddresses.some((address) => address.endsWith(`@${platformDomain()}`));
+  const showsSupport = recipientsTruncated || announcedAddresses.some((address) => address.endsWith(`@${platformDomain()}`));
   const shownStores = creatorsDomain ? announcedAddresses.filter((address) => address.endsWith(`@${creatorsDomain}`)).map((address) => address.slice(0, address.lastIndexOf("@"))) : [];
   let showsStore = false;
-  if (showsSupport && shownStores.length > 0) {
+  if (!recipientsTruncated && showsSupport && shownStores.length > 0) {
     try {
       showsStore = await anyStoreNamed(shownStores);
     } catch (error) {

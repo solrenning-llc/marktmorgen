@@ -162,10 +162,11 @@ async function main(): Promise<void> {
     const failedAt = Date.now();
     const stopped = await outcome(walk);
     is("a run fails in prepareStore, before the record is closed: the store waits a walk, in line with its record", [stopped, (await state()).record, (await state()).due, await movedBack(failedAt)], ["done:true begun:0 finished:0", true, true, true]);
-    await reactivate(OWNER);
-    dyingAt("ZREM", isDue);
-    await outcome(() => unmarkDue(OWNER));
-    is("then it re-subscribes and unmarkDue fails: the walk a walk later does not prepare it again, nothing more erased, out of line", [await outcome(aWalkLater), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: false }]);
+    // It stopped at the record's own going, after the live store's data had gone: half erased, it is never opened again
+    // (Codex N1's HIGH on #3156, coordinator's decision C5-20261119-0235). Its erasing mark refuses the plan (a payment
+    // for it is returned, tests/erasing-mark.test.ts), and the walk a walk later erases it to the end.
+    is("then it tries to re-subscribe: refused, its erasure has begun", await outcome(() => reactivate(OWNER)), "threw");
+    is("the walk a walk later erases it to the end: no record, not running, out of line", [await outcome(aWalkLater), await state()], ["done:true begun:1 finished:1", { record: false, running: false, leads: false, due: false }]);
   }
 
   part("A store that re-subscribed and ended again is not erased on its old closing");

@@ -74,7 +74,7 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
-import { MAX_STORES_PER_ACCOUNT, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef } from "@/lib/store";
+import { MAX_STORES_PER_ACCOUNT, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, ERASING_KEY, erasingField, erasingSince, handleLeadsToStore, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForEmailSeen, storeForRefExact, storeHandleKey, storeRecordAt, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStoresExact, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -417,7 +417,10 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // otherwise a running plan throws PlanRunsAgainError. The place in the final line read exactly (finalScoreOf): one that
   // does not read throws UnknownReplyError, neither ended nor running (rule 24), and the store waits a walk untouched.
   // One command, and only for a store whose plan reads running (PLAN_RUNS_READ_COMMANDS, tests/plan-cost-registry.ts).
-  if (planRuns(store, now) && finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) === null) {
+  // A store whose erasure began on an earlier walk (its erasing mark there, read exactly) is erased to the end whatever
+  // its plan says: part of it is already gone (Codex N1's HIGH on #3156). One more command, again only for a store whose
+  // plan reads running and whose closing day is not in the final line any more.
+  if (planRuns(store, now) && finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) === null && (await erasingSince(ref)) === null) {
     throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
   }
   const { marks } = await marksOf(store);
@@ -459,6 +462,11 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     const keep = async () => {
       if (!(await holdLock(held))) throw new LockBusyError("a closing store's lock ran out while its live data was deleted");
     };
+    // The erasing mark first (Codex N1's HIGH on #3156): written through the same fence as the deletes, before any of
+    // them, so from the first delete on no plan starts on this store (lib/store.ts, setSubscription) and a payment for it
+    // is returned (closingSince). Its write not proved throws here, with nothing deleted. It goes with the record.
+    await keep();
+    await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
     // Its calendar hosts' claims, which are kept by the host, across the stores they serve: each page read exactly, each
     // HDEL made through the lock (fencedBy), the lock made to last before a host's first, and where a walk stopped kept
     // for the next (clearClaims, Claude 4 on #3660). The key of that place goes with the store's other keys below.
@@ -525,7 +533,10 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // the line; its entry, still pending, is never walked and is taken out by the idle pass (withdrawPending). That
     // ZREM's answer not known is neither (rule 24): the record stays and the store waits a walk. No command is added:
     // the record is the one closeStoreRecord read again.
-    if (fresh && planRuns(fresh, now) && finalGone !== 1) {
+    // A store whose erasure began on an earlier walk (its mark there, read exactly under the lock) is erased to the end:
+    // part of it is already gone, and it is never left open half erased (Codex N1's HIGH on #3156).
+    const began = (await erasingSince(ref)) !== null;
+    if (fresh && planRuns(fresh, now) && finalGone !== 1 && !began) {
       if (finalGone === 0) throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
       throw new UnknownReplyError("a closing store's place in the final closing line (ZREM)");
     }

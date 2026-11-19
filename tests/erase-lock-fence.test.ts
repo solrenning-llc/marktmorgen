@@ -20,7 +20,8 @@
  * walk goes on, and the store waits a walk. No lock key is deleted by hand, no reply is forged.
  */
 import { readFileSync } from "node:fs";
-import { eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
+import { eraseClosed, markDue, WALK_GAP_MS, WALK_KEY } from "@/lib/closed-store-data";
+import { ERASING_KEY } from "@/lib/store";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail, storeRef } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
@@ -98,7 +99,7 @@ async function seed(): Promise<void> {
 }
 
 /** Runs the walk, calling `at` before each pipeline the preparation sends that changes the database, while the walk holds the store's lock. */
-async function walk(at: (index: number, commands: Command[]) => Promise<void>): Promise<string> {
+async function walk(at: (index: number, commands: Command[]) => Promise<void>, now = Date.now()): Promise<string> {
   let holding = false;
   let index = 0;
   let inside = false;
@@ -121,7 +122,7 @@ async function walk(at: (index: number, commands: Command[]) => Promise<void>): 
     return reply;
   }) as typeof redis.pipeline;
   try {
-    await eraseClosed(Date.now() + 60_000, async () => {});
+    await eraseClosed(Date.now() + 60_000, async () => {}, now);
     return "completed";
   } catch (error) {
     return error instanceof Error ? error.name : "threw";
@@ -167,26 +168,43 @@ async function main() {
   }, { claims: true, team: true, apiKeys: true, webhooks: true, emailPlatform: true, phones: true, path: true, calendar: true, record: true });
 
   for (let n = 0; n < census.length; n += 1) {
-    part(`The lock runs out just before step ${n} (${census[n]}), and the plan starts again`);
+    part(`The lock runs out just before step ${n} (${census[n]}), and the plan tries to start again`);
     await seed();
+    const seeded = await everything();
     let reached = false;
+    let restarted = false;
+    let marked = false;
     let running: Map<string, string> = new Map();
     const outcome = await walk(async (index) => {
       if (index !== n) return;
       reached = true;
       // The stand-in's own clock: the walk's lock runs out by its expiry, never deleted by hand.
       redis.advance(120_001);
-      await reactivate(owner);
+      marked = Boolean(((await original([["HLEN", ERASING_KEY]])) as number[])[0]);
+      restarted = await reactivate(owner).then(() => true, () => false);
       running = await everything();
     });
     const now = await everything();
     const current = await storeForEmail(owner);
-    is("the plan started again at that step", reached, true);
-    // On #3643's design the preparation stops there (LockBusyError, or StoreBusyError at the record's fenced delete), the
-    // walk moves the store back a walk and goes on; the next walk sees the plan running and leaves it alone.
-    is("the walk goes on, and the store's record is still there", [outcome, Boolean(current)], ["completed", true]);
-    is("the store runs", Boolean(current?.subscriptionActive), true);
-    is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => !ours(key) && now.get(key) !== running.get(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);
+    is("the lock ran out at that step", reached, true);
+    is("the walk goes on", outcome, "completed");
+    // Codex N1's HIGH on #3156 (7000625742): an earlier fenced step's deletes are never given back, so the store is never
+    // opened again once one of them is made. The erasing mark is the walk's very first fenced change (step 0): before
+    // it, the plan starts and the store keeps everything; from it on, the plan is refused (setSubscription), and the
+    // store is erased to the end by the next walk, its mark going with its record.
+    is("the plan starts again only before the erasing mark", [restarted, marked], [n === 0, n > 0]);
+    if (restarted) {
+      is("the store runs, its record there", [Boolean(current), Boolean(current?.subscriptionActive)], [true, true]);
+      is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => !ours(key) && now.get(key) !== running.get(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);
+      is("and it lost nothing", [...seeded.keys()].filter((key) => !ours(key) && !key.startsWith("nl:plan:closing:") && key !== "nl:plan:ended" && !now.has(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);
+    } else {
+      is("the store does not run", Boolean(current?.subscriptionActive), false);
+      redis.advance(120_001);
+      // A walk later (moveBack puts it WALK_GAP_MS on).
+      const next = await walk(async () => {}, Date.now() + WALK_GAP_MS + 60_000);
+      const left = (await original([["HLEN", ERASING_KEY]])) as number[];
+      is("the next walk erases it to the end, and its mark goes with its record", [next, Boolean(await storeForEmail(owner)), left[0]], ["completed", false, 0]);
+    }
   }
   // The record's last step needs no check of its own here any more: on #3643's design the walk closes the record with
   // lib/store.ts's closeStoreRecord itself, so it closes it exactly as closeStoreRecord does.

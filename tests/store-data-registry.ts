@@ -283,7 +283,7 @@ export const FAMILIES: Record<string, Family> = {
     room: ["lib/affiliates.ts"],
     parts: [
       capped(MAX_AFFILIATES * (1_536 + 4 * ENTRY_BYTES), "MAX_AFFILIATES records (an address, a note of MAX_NOTE_LENGTH in any script, the rest), each with its address, code and click counts.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"), src("lib/affiliates.ts", "MAX_NOTE_LENGTH")),
-      kept(512, "A sale credited and up to two partners' shares of it."),
+      kept(512, "A sale credited and up to two partners' shares of it; while its buyer is not confirmed, also its place on the store's list the five-minute job reads again (a reference and a time), taken from the same room in the same write."),
       // Audit A1 (9 November 2026): the paid invoices the book read whole, kept for the next reading.
       capped(BOOK_INVOICES_KEPT_BYTES + KEY, "One record a store of the membership and plan payments the book read whole (an invoice's line, never the buyer's address), INVOICES_KEPT_MAX_BYTES at the most, INVOICE_KEEP_SECONDS after the last reading that wrote it.", src("lib/affiliates.ts", "INVOICES_KEPT_MAX_BYTES", "INVOICE_KEEP_SECONDS")),
       kept(3 * REFUND_MARK_MAX_BYTES, "The refund kept on the sale and on each partner's share when read on the account it was paid into (lib/affiliates.ts AFFILIATE_REFUND_MARK): one field, `rf`, in base 36, the account being the record's own `acct`."),
@@ -297,6 +297,7 @@ export const FAMILIES: Record<string, Family> = {
   // order once its link is decided ("credited", "none" or "told"), two days, past the sweep's day of reading it.
   "nl:aff:pend:@lib/affiliates.ts": short("A pending affiliate link's mark, once an order, two days", "order", 2, KEY),
   "nl:aff:pend:due@lib/affiliates.ts": company("Every store's pending Stripe orders not decided yet, read by the sweep by itself", "One list for the company: a member a pending order (its store's id and its checkout, under 120 bytes), taken out once the order is decided or its two-day mark has expired, the list itself expiring two days after its last write; only an order whose affiliate read did not answer at checkout is on it."),
+  "nl:aff:unc:month:@lib/affiliates.ts": company("Monthly counts of the sales whose second tier waited for their buyer", "Five counts a month (waited, decided, approved, failed, reads), no store or person; at most 14 monthly keys alive for 400 days."),
   // The PayPal orders among them still due a read or a notice: one member an order, the list kept two days from its last write.
   "nl:aff:pend:pp:@lib/affiliates.ts": short("A PayPal order whose affiliate link is still pending, two days", "order", 2, KEY),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
@@ -307,6 +308,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ai-spend:v2:{@lib/ai-spend-policy.ts": company("The company's AI spending ledger, a month", "One key a month with a field a store: the company's ledger, carried by its fixed costs."),
   "nl:ai-spend:v2:{YYYY-MM}@lib/ai-spend-policy.ts": company("The ledger's name, as the policy states it", "The same ledger."),
   "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window", "day", 40, 128),
+  // One a stop: each stop is a studio request, and the mark goes by itself after AI_STOP_KEEP_SECONDS (five minutes), held here at a day.
+  "nl:ai:stop:@lib/ai.ts": short("A stop asked for one run of a page drafted step by step (lib/ai-steps.ts)", "studio", 1),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
   "nl:assist:c:@lib/store-assistant.ts": { what: "A conversation with the Store assistant, a day after its last message", line: "store-assistant" },
   "nl:assist:missed:@lib/store-assistant.ts": { what: "Questions the Store assistant could not answer, for the creator", line: "store-assistant" },

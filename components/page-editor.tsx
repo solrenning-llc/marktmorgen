@@ -19,7 +19,9 @@ import { IMAGE_ACCEPT, MAX_ALT_LENGTH, MAX_SOURCE_BYTES, imagePath, imageUrl } f
 import { Icon } from "@/components/icons";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { toast } from "@/components/toast";
-import { AiAssist, AiOn } from "@/components/ai-assist";
+import { AiOn } from "@/components/ai-assist";
+import { AiStepsAssist } from "@/components/ai-steps-assist";
+import { pageSteps } from "@/lib/ai-steps";
 import { TranslatePage } from "@/components/translate-page";
 import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
@@ -2390,22 +2392,37 @@ export function PageEditor({
           */}
           {site ? null : (
           <div className="mt-6">
-            <AiAssist<DraftCopy>
+            <AiStepsAssist<DraftCopy>
               title="Write the whole page with AI"
               hint={`A full draft — headline, what the buyer gets, what is inside, questions and buttons — from ${product.title}'s name, price and description. Add anything else it should know below, or leave the box empty. It replaces the blocks here; nothing is saved until you press Save.`}
               placeholder="Who it is for, what makes it different, what buyers ask you most. Your refund promise, if you have one."
               allowEmpty
               payload={() => ({ kind: "page", product: product.id, readFile: product.pdf === true && readFile })}
+              steps={pageSteps(product.pdf === true && readFile)}
               extra={
-                product.pdf ? (
-                  <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-ink">
-                    <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-violet-brand" checked={readFile} onChange={(e) => setReadFile(e.target.checked)} />
-                    <span>
-                      <span className="font-semibold">{`Read the first ${READ_PDF_PAGES} pages of ${product.title}'s PDF too`}</span>
-                      <span className="block text-ink-soft">{`So \u201cWhat's inside\u201d lists its real contents. Takes ${1 + READ_PDF_JOBS} of your writing jobs instead of 1. Only those pages are read, and nothing is kept.`}</span>
-                    </span>
-                  </label>
-                ) : undefined
+                product.pdf
+                  ? (busy: boolean) => (
+                      // Unavailable while a draft is being written: the run was sent with this choice, and its steps and Stop
+                      // follow it (Claude 5 on #3435, MEDIUM). aria-disabled, not disabled, so focus is never dropped; the
+                      // words keep their colors and nothing moves.
+                      <label className={`flex min-h-11 items-start gap-3 text-sm text-ink ${busy ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-violet-brand"
+                          checked={readFile}
+                          aria-disabled={busy}
+                          onChange={(e) => {
+                            if (!busy) setReadFile(e.target.checked);
+                          }}
+                        />
+                        <span>
+                          <span className="font-semibold">{`Read the first ${READ_PDF_PAGES} pages of ${product.title}'s PDF too`}</span>
+                          <span className="block text-ink-soft">{`So \u201cWhat's inside\u201d lists its real contents. Takes ${1 + READ_PDF_JOBS} of your writing jobs instead of 1. Only those pages are read, and nothing is kept.`}</span>
+                          {busy ? <span className="sr-only"> This cannot be changed while the draft is being written.</span> : null}
+                        </span>
+                      </label>
+                    )
+                  : undefined
               }
               onResult={(draft) => {
                 const page = blocksFromDraft(draft, Boolean(product.picture));

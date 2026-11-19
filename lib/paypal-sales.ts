@@ -1487,6 +1487,15 @@ export const REFUND_WATCH_BATCH = PAYPAL_WATCH_BATCH;
 export const PENDING_SWEEP_BATCH = PAYPAL_WATCH_BATCH;
 
 /**
+ * A refund or taken-back mark is known written only when its ZADD answers 0 or 1 (the order added, or already there)
+ * and its EXPIRE answers 1 (the key's expiry set). An EXPIRE of 0 means the key went between the two commands, which
+ * one pipeline does not make atomic: nothing is kept, so it is never "written" (#4748; CX-123 rule 24).
+ */
+function markWritten(replies: unknown[] | null): boolean {
+  return replies !== null && (replies[0] === 0 || replies[0] === 1) && replies[1] === 1;
+}
+
+/**
  * What the sweep asks of PayPal for one store, a few orders at a time:
  *
  *   - a payment PayPal held as pending and has since completed is written
@@ -1696,7 +1705,7 @@ export async function watchPayPal(
         ]),
         2,
       );
-      if (!reversed || !reversed.every((reply) => reply === 0 || reply === 1)) {
+      if (!markWritten(reversed)) {
         console.error("a PayPal payment taken back could not be marked; looked at again in an hour", order);
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
         continue;
@@ -1709,7 +1718,7 @@ export async function watchPayPal(
       ]),
       2,
     );
-    if (!marked || !marked.every((reply) => reply === 0 || reply === 1)) {
+    if (!markWritten(marked)) {
       console.error("a PayPal refund could not be marked; looked at again in an hour", order);
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;

@@ -58,6 +58,7 @@ import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments }
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
 import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
 import { readMoves } from "@/lib/call-records";
@@ -908,7 +909,8 @@ export async function createCheckout(
       for (const key of [...body.keys()]) {
         if (key.startsWith("line_items[0][price_data]")) body.delete(key);
       }
-      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh));
+      // Kept only while the store is live (lib/store-live-cache.ts, Codex G-1346).
+      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh, (key, id, seconds) => setWhileStoreLive(store, key, id, seconds)));
       body.set("metadata[pwyw]", "yes");
     }
     // Set just before the request, because Stripe counts its minimum from then.

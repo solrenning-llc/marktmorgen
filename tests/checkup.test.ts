@@ -52,7 +52,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com") {
     if (world.stripe === "down") return new Response("{}", { status: 500 });
     if (world.stripe === "slow") return new Promise<Response>(() => {});
-    return new Response(JSON.stringify({ configuration: { merchant: { capabilities: { card_payments: { status: world.stripe === "on" ? "active" : "inactive" } } } }, requirements: { summary: { minimum_deadline: { status: "eventually_due" } } } }), { status: 200 });
+    // Stripe's account answer names the account asked about (rule 30, lib/stripe-connect.ts readAccount).
+    return new Response(JSON.stringify({ id: decodeURIComponent(url.pathname.split("/")[4] ?? ""), configuration: { merchant: { capabilities: { card_payments: { status: world.stripe === "on" ? "active" : "restricted" } } } }, requirements: { summary: { minimum_deadline: { status: "eventually_due" } } } }), { status: 200 });
   }
   if (url.hostname === "api.vercel.com") {
     if (/^\/v9\/projects\/[^/]+$/.test(url.pathname)) return new Response(JSON.stringify(world.self === 200 ? { id: "prj_1" } : { error: { code: "not_found" } }), { status: world.self });
@@ -62,7 +63,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
-const SHOP = { sid: "a".repeat(32), listId: "b".repeat(32), statsId: "c".repeat(32), stripeAccountId: "acct_1Checkupxxxxxxx", domain: { name: "harborkitchen.com", liveAt: 1 }, subscriptionActive: true, tier: "pro", renewalUnpaidSince: 0, planDisputes: [] } as never;
+const SHOP = { sid: "a".repeat(32), handle: "harborkitchen", previousHandles: [], listId: "b".repeat(32), statsId: "c".repeat(32), stripeAccountId: "acct_1Checkupxxxxxxx", domain: { name: "harborkitchen.com", liveAt: 1 }, subscriptionActive: true, tier: "pro", renewalUnpaidSince: 0, planDisputes: [] } as never;
 const with_ = (over: Record<string, unknown>) => ({ ...(SHOP as object), ...over }) as never;
 const OWNER = (permission: Parameters<typeof can>[1]) => can("owner", permission);
 // Plans on sale and billing set up, unless a check says otherwise; the closed state has its own check below.

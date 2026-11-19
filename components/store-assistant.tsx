@@ -3,11 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import { EmailInput } from "@/components/email-input";
 import { assistantWords } from "@/lib/buyer-words/assistant";
-import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/store-assistant-rules";
+import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/assistant-question-length";
 
 type Turn = { at: number; from: "buyer" | "ai"; text: string; status?: "answer" | "unknown" | "handoff" | "sent" };
 type Thread = { token: string; turns: Turn[] };
 type Notice = "short" | "slow" | "error" | "closed" | "email";
+/** Where the focus goes once a change is drawn: the panel's title, the first field of the form shown, or the button that opens it. */
+type FocusTo = "title" | "field" | "launcher";
+type FocusAsk = { to: FocusTo; n: number } | null;
+const focusRequest = (last: FocusAsk, to: FocusTo) => ({ to, n: (last?.n ?? 0) + 1 });
+
+/** Closes the panel, and takes the focus back to its button only when it was in the panel (or nowhere), never from elsewhere on the page (2.4.3, 3.2.5). */
+function closePanel(panel: HTMLElement | null, setOpen: (open: boolean) => void, setFocusAsk: (ask: (last: FocusAsk) => FocusAsk) => void): void {
+  const at = document.activeElement;
+  const inside = !at || at === document.body || Boolean(panel?.contains(at));
+  setOpen(false);
+  if (inside) setFocusAsk((last) => focusRequest(last, "launcher"));
+}
 
 const TOKEN = /^[A-Za-z0-9_-]{32}$/;
 const storageKey = (handle: string) => `mm-assist:${handle}`;
@@ -65,6 +77,21 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
   const [sent, setSent] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const list = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const launcher = useRef<HTMLButtonElement>(null);
+  const [focusAsk, setFocusAsk] = useState<FocusAsk>(null);
+  const focusNext = (to: FocusTo) => setFocusAsk((last) => focusRequest(last, to));
+
+  // Moved only after a change the person made, once it is drawn, so the focus never falls to the page (2.4.3).
+  useEffect(() => {
+    if (!focusAsk) return;
+    if (focusAsk.to === "launcher") launcher.current?.focus();
+    else if (focusAsk.to === "title") heading.current?.focus();
+    else panel.current?.querySelector<HTMLElement>("form input, form textarea")?.focus();
+  }, [focusAsk]);
+
+  const close = () => closePanel(panel.current, setOpen, setFocusAsk);
 
   // A conversation this browser had here in the last day: read once, when the chat is first opened.
   useEffect(() => {
@@ -84,7 +111,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closePanel(panel.current, setOpen, setFocusAsk);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -96,6 +123,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     setBusy(true);
     setNotice(null);
     setDeleted(false);
+    setSent(false);
     const asked = text;
     const result = await post({ handle, action: "ask", token: thread?.token, text });
     setBusy(false);
@@ -103,6 +131,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
       if (result.error === "spent") {
         setSpent(true);
         setHanding(true);
+        focusNext("field");
         return;
       }
       setNotice(noticeOf(result.error));
@@ -113,7 +142,10 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     const last = result.thread.turns[result.thread.turns.length - 1];
     // Handed over: the same question goes in the form, ready to send to the creator.
     setText(last?.status === "handoff" ? asked : "");
-    if (last?.status === "handoff") setHanding(true);
+    if (last?.status === "handoff") {
+      setHanding(true);
+      focusNext("field");
+    }
   }
 
   async function handOff(event: React.FormEvent) {
@@ -129,8 +161,10 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     }
     if (result.thread) setThread(result.thread);
     setSent(true);
+    setDeleted(false);
     setHanding(false);
     setText("");
+    focusNext("field");
   }
 
   async function forget() {
@@ -140,21 +174,30 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     setHanding(false);
     setSent(false);
     setDeleted(true);
+    // The Delete button goes with the conversation: the focus goes to the question.
+    focusNext("field");
   }
 
   const lastBuyer = [...(thread?.turns ?? [])].reverse().find((t) => t.from === "buyer")?.text ?? "";
   const startHandoff = () => {
     setText((typed) => typed || lastBuyer);
     setHanding(true);
+    focusNext("field");
+  };
+  const stopHandoff = () => {
+    setHanding(false);
+    focusNext("field");
   };
 
   return (
     <div className="st-chat fixed bottom-4 right-4 z-40 flex flex-col items-end gap-3 print:hidden" data-store-assistant>
       {open ? (
-        <div role="dialog" aria-label={w.title(storeName)} className="st-card st-chat-panel flex max-h-[min(38rem,80vh)] w-[min(23rem,calc(100vw-2rem))] flex-col p-4 shadow-lg">
+        <div ref={panel} role="dialog" aria-label={w.title(storeName)} className="st-card st-chat-panel flex max-h-[min(38rem,80vh)] w-[min(23rem,calc(100vw-2rem))] flex-col p-4 shadow-lg">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="font-display text-lg font-semibold leading-snug">{w.title(storeName)}</h2>
-            <button type="button" onClick={() => setOpen(false)} className="st-muted text-sm underline" aria-label={w.close}>
+            <h2 ref={heading} tabIndex={-1} className="font-display text-lg font-semibold leading-snug">
+              {w.title(storeName)}
+            </h2>
+            <button type="button" onClick={close} className="st-muted inline-flex min-h-11 min-w-11 items-center text-sm underline" aria-label={w.close}>
               {w.close}
             </button>
           </div>
@@ -168,7 +211,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                 {t.from === "ai" ? <p className="st-muted mb-0.5 text-xs font-semibold uppercase tracking-wide" data-ai-label>{w.label}</p> : null}
                 <p className={`inline-block whitespace-pre-line rounded-xl px-3 py-2 text-left text-sm ${t.from === "buyer" ? "st-chat-mine" : "st-chat-theirs"}`}>{t.text}</p>
                 {t.from === "ai" && (t.status === "unknown" || t.status === "handoff") && i === (thread?.turns.length ?? 0) - 1 && !handing ? (
-                  <button type="button" className="st-muted mt-1 block text-xs underline" onClick={startHandoff}>
+                  <button type="button" className="st-muted mt-1 flex min-h-11 min-w-11 items-center text-xs underline" onClick={startHandoff}>
                     {w.askCreator(storeName)}
                   </button>
                 ) : null}
@@ -176,9 +219,12 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
               </div>
             ))}
           </div>
-          {spent ? <p className="mt-2 text-sm">{w.spent(storeName)}</p> : null}
-          {sent ? <p className="st-muted mt-2 text-xs">{w.handoffDone(storeName)}</p> : null}
-          {deleted ? <p className="st-muted mt-2 text-xs">{w.deleted}</p> : null}
+          {/* There before anything is said in it, so a cleared or replaced conversation is announced (4.1.3). */}
+          <div role="status">
+            {spent ? <p className="mt-2 text-sm">{w.spent(storeName)}</p> : null}
+            {sent ? <p className="st-muted mt-2 text-xs">{w.handoffDone(storeName)}</p> : null}
+            {deleted ? <p className="st-muted mt-2 text-xs">{w.deleted}</p> : null}
+          </div>
           {notice ? (
             <p role="alert" className="mt-2 text-sm font-medium">
               {w.notices[notice]}
@@ -200,11 +246,11 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
               </label>
               <p className="st-muted text-xs">{w.handoffConsent(storeName)}</p>
               <div className="flex items-center justify-between gap-3">
-                <button type="submit" disabled={busy} className="btn st-btn">
+                <button type="submit" aria-disabled={busy} className="btn st-btn">
                   {w.handoffSend(storeName)}
                 </button>
                 {!spent ? (
-                  <button type="button" className="st-muted text-xs underline" onClick={() => setHanding(false)}>
+                  <button type="button" className="st-muted inline-flex min-h-11 min-w-11 items-center text-xs underline" onClick={stopHandoff}>
                     {w.close}
                   </button>
                 ) : null}
@@ -226,10 +272,11 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                 />
               </label>
               <div className="flex items-center justify-between gap-3">
-                <button type="submit" disabled={busy} aria-busy={busy} className="btn st-btn">
+                {/* aria-disabled, not disabled: a disabled button loses the keyboard focus to the page while the message is in flight (2.4.3); the handler refuses a second send while busy. */}
+                <button type="submit" aria-disabled={busy} aria-busy={busy} className="btn st-btn">
                   {w.send}
                 </button>
-                <button type="button" className="st-muted text-xs underline" onClick={startHandoff}>
+                <button type="button" className="st-muted inline-flex min-h-11 min-w-11 items-center text-xs underline" onClick={startHandoff}>
                   {w.askCreator(storeName)}
                 </button>
               </div>
@@ -245,7 +292,19 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
           </p>
         </div>
       ) : null}
-      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="btn st-btn shadow-lg">
+      <button
+        ref={launcher}
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) close();
+          else {
+            setOpen(true);
+            focusNext("title");
+          }
+        }}
+        className="btn st-btn shadow-lg"
+      >
         <svg aria-hidden="true" viewBox="0 0 24 24" className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />
         </svg>

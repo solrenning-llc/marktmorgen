@@ -9,13 +9,22 @@ import {ASSISTANT_PRICE_CENTS,addOnFeeCents,assistantMeetsFloor,assistantMonthWo
 import * as Receiving from '@/lib/receiving-costs';
 import {MOST_CORRECT_READING,providerFeeCents,receivingOf} from '@/lib/receiving-costs';
 import {MOST_TAX_READING,SIZING_READING,unitUnder as archivedUnitUnder} from './historical-receiving-model';
-import {allUnits,evaluate,floorPriceCents,renderMarginAlignment,roomKept,currentPriceMarginRows,HISTORICAL_TAX_NOTICE} from './margin-alignment-table';
+import {allUnits,evaluate,floorPriceCents,renderMarginAlignment,roomKept,HISTORICAL_TAX_NOTICE} from './margin-alignment-table';
 import {reviewedUnitUnder} from '@/lib/reviewed-receiving';
 import {gateReading} from '@/lib/tax-gate';
 import {reviewedReceivingTaxInput} from './reviewed-receiving-fixture';
 import {syntheticTaxContext} from './customer-tax-review-fixture';
 import {netOf} from './plan-cost-model';
+import {worstMonthKept} from './worst-month-kept';
 
+test('the dated report holds the worst month each plan keeps under the LC reading, exactly (Claude 4 LOW on #4854)',()=>{
+ const doc=readFileSync('docs/margin-alignment-2026-10-18.md','utf8');
+ for(const cycle of ['month','year'] as const){
+  const label=cycle==='month'?'Monthly plan':'A month of a yearly plan';
+  const row=['',label,...worstMonthKept(cycle).map((v)=>'US$'+v),''].join(' | ').trim();
+  assert.ok(doc.includes(row),'the document lists '+row);
+ }
+});
 test('the dated report remains explicitly historical and matches its reproducible figures',()=>{
  const generated=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE);
  assert.ok(generated.startsWith(HISTORICAL_TAX_NOTICE));
@@ -67,10 +76,9 @@ test('archived thresholds preserve historical figures without proposing current 
  }
  for(const tier of TIERS)assert.equal(PRICES_WITH_COMMISSION[tier].year,PRICES_WITH_COMMISSION[tier].month*10);
 });
-test('the value presentation retains owner quotations and its dated tax-model rows',()=>{
+test('the value presentation retains owner quotations; its current rows live only in the generated table',()=>{
  const doc=readFileSync('docs/value-presentation-2026-10-18.md','utf8');
- // Whole lines, not substrings: a prefix before a row shifts every column of the table.
- const lines=new Set(doc.split('\n'));
- for(const row of currentPriceMarginRows(PLANS_ON_SALE,ASSISTANT_ON_SALE))assert.ok(lines.has(row),row);
+ // The current-price rows are no longer copied here (BROADCAST-282): tests/value-presentation-pointer.test.ts holds the
+ // pointer, that no row is copied, and that docs/margin-alignment-2026-10-18.md has every one.
  assert.match(doc,/preço: o que maximiza o meu lucro/);assert.doesNotMatch(doc,/\bsmall\b|unlimited (visits|orders|emails|storage) on (Store|Studio|Scale)/i);
 });

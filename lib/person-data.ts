@@ -24,6 +24,7 @@
  *   account      a creator's or teammate's own sign-in and account, not a store's people
  *   none         found by the scan, and keeps nothing about a store's people
  */
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 
 export type PersonData =
   | { file: string; how: "erased"; what: string; via?: string; only?: ErasureBy }
@@ -56,7 +57,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/product-updates.ts", how: "expires", days: 60, what: "An update email already going out keeps its addresses until it finishes; a deleted address is passed over" },
   { file: "lib/product-updates.ts", how: "suppression", what: "If they had pressed stop on update emails, that one-way mark stays, as their own no" },
   { file: "lib/review-requests.ts", how: "suppression", what: "If they had pressed stop on review requests, that one-way mark stays, as their own no" },
-  { file: "lib/checkout-recovery.ts", how: "suppression", what: "If they had pressed stop on checkout reminders, that one-way mark stays, as their own no" },
+  { file: "lib/checkout-recovery.ts", how: "suppression", what: "If they had pressed stop on checkout reminders or on the emails about a moved membership, that one-way mark stays, as their own no" },
   { file: "lib/checkout-recovery.ts", how: "erased", what: "The marks that they heard a checkout reminder about a product this week" },
   { file: "lib/checkout-ask.ts", how: "expires", days: 1, what: "A checkout reminder they asked for in the last hour waits in its queue; it is not sent to a deleted address" },
   { file: "lib/review-ask.ts", how: "none", what: "Review requests wait for their day by the order's reference, never by address, and are not sent to a deleted address" },
@@ -113,6 +114,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
+  { file: "lib/backup-deletions.ts", how: "kept", what: "Built but off: once the file backup is turned on, deleting a file they handed in keeps a note of that file's name, which holds a one-way fingerprint of their address (never the address), as for every deleted file, whose name may hold your original file name. The note stays in our database for 14 days after the last deletion of that day, and in the backup for 92 days", why: "The note is how the backup finds the copy of the deleted file and deletes it too, a deletion they asked for included. It holds nothing else about them and is used for nothing else." },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
   { file: "lib/lesson-notes.ts", how: "erased", what: "Their private notes on lessons, which only they could see" },
@@ -200,6 +202,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/plan-late-notice.ts", how: "expires", days: 400, what: "A payment plan's payment taken after the plan's end and refunded: whether its buyer was emailed about the refund and how many times that was tried, under the payment's Stripe invoice only, so nobody is emailed twice. The buyer's address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   { file: "lib/plan-withdrawal.ts", how: "expires", days: 400, what: "A withdrawal from your own plan: when you first sent it, how many times its receipt and the note to our support team were tried, and why a refund was not made at once, under the store's id and its subscription. Your name and the email for the receipt are not kept here: they go in the receipt. Deleted 400 days after the withdrawal" },
   { file: "lib/closing-plan-guard.ts", how: "kept", what: "Only if a plan is paid for your store after its closing day began: your address, your Stripe customer and the store's name", why: "Needed to end that plan, return its payment in full and tell you so; deleted as soon as that is done (only the dates are kept 40 days, so it is never done twice and a refund your bank sends back is made again)" },
+  { file: "lib/plan-closing.ts", how: "none", what: "A closing store's letters to its members (Claude 1 cloud on #3463): it reads the members' addresses from the paid periods lib/closing-holds.ts keeps, to send each one letter, and writes its \"told\" marks on those same records; it keeps nothing of its own about anyone, so a person's erasure is the closing holds' line" },
   { file: "lib/closing-holds.ts", how: "kept", what: "Only while your store is closing: each member's address on Stripe and last payment (its amount and period), from the day your plan ended", why: "Needed to give back the time they paid for after the closing day, from your own Stripe account, and to tell them if it could not be; deleted the day the store closes or the day it stays open" },
   { file: "lib/assistant-reminder.ts", how: "erased", what: "A checkout reminder they asked for with your Store assistant's box at checkout: the address they typed, the sentence they checked, when and its version. Deleted by itself three days after that checkout opened, sent or not" },
   { file: "lib/returning-code.ts", how: "expires", days: 1, what: "A code only for buyers who bought from your store before: only when the email typed with it paid for an order here, a link that works once is emailed to it, kept with the code, the product and that email for 30 minutes, then deleted; whoever asked is told the same either way" },
@@ -207,8 +210,11 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
 ];
 
+/** Whether a line is said today: the backup's deletion records only once their reviews are filled (VR item 2). */
+const saidToday = (d: PersonData) => d.file !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null);
+
 /** Whether a line holds for this door. */
-const holdsFor = (d: PersonData, door?: ErasureBy) => !door || !("only" in d) || !d.only || d.only === door;
+const holdsFor = (d: PersonData, door?: ErasureBy) => saidToday(d) && (!door || !("only" in d) || !d.only || d.only === door);
 
 /** The lines of one kind, each said once, in the order above; for one door when given. */
 export function linesOf(how: PersonData["how"], door?: ErasureBy): string[] {

@@ -15,6 +15,8 @@ const DAY = 86_400;
 const NOW = Math.floor(Date.now() / 1000);
 const ERASED = "ana@example.com";
 type Command = (string | number)[];
+const writesCopy = (c: Command, key: string) => (c[0] === "SET" && String(c[1]) === key) ||
+  (c[0] === "EVAL" && String(c[1]).includes("marktmorgen:reading-copy:v1") && String(c[3]) === key);
 
 let subs: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -93,7 +95,7 @@ async function main(): Promise<void> {
   let raced = false;
   redis.pipeline = (async (commands: Command[]) => {
     // Right before the copy is written, the erasure runs in full: its print, then the copy deleted.
-    if (!raced && commands.some((c) => c[0] === "SET" && String(c[1]) === `nl:health:${store2.statsId}`)) {
+    if (!raced && commands.some((c) => writesCopy(c, `nl:health:${store2.statsId}`))) {
       raced = true;
       redis.pipeline = original;
       await erase(store2, ERASED);
@@ -122,7 +124,7 @@ async function main(): Promise<void> {
   redis.pipeline = (async (commands: Command[]) => {
     const answers = await original(commands);
     // Right after the copy is written, only the erasure's print lands; its deletion of the copy has not run yet.
-    if (!printed && commands.some((c) => c[0] === "SET" && String(c[1]) === `nl:health:${store3.statsId}`)) {
+    if (!printed && commands.some((c) => writesCopy(c, `nl:health:${store3.statsId}`))) {
       printed = true;
       await original([suppressCommand(store3.listId as string, ERASED)]);
     }

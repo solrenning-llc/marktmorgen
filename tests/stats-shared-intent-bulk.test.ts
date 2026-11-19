@@ -73,6 +73,16 @@ async function main() {
   invoicePayments = [pay("inpay_1", "in_renew_new", "pi_sharedintent01"), { ...pay("inpay_2", "in_unreadable", "pi_sharedintent01"), invoice: null }];
   is("unreadable invoice on the same payment: kept unknown", usd((await readSales(store, NOW))!)?.keptCents, null);
 
+  part("A row with an unreadable status may be another paid allocation on the same intent");
+  for (const status of [null, "open", "canceled"]) {
+    invoicePayments = [
+      pay("inpay_1", "in_renew_new", "pi_sharedintent01"),
+      { ...pay("inpay_2", "in_other_invoice", "pi_sharedintent01"), status },
+    ];
+    const line = usd((await readSales(store, NOW))!);
+    is(`a same-intent allocation with status ${String(status)}`, line?.keptCents, status === null ? null : 4000);
+  }
+
   part("An unreadable invoice on another payment does not taint this payment");
   invoicePayments = [pay("inpay_1", "in_renew_new", "pi_sharedintent01"), { ...pay("inpay_2", "in_unreadable", "pi_other00001"), invoice: null }];
   is("unreadable invoice on another payment: $40 kept, known", usd((await readSales(store, NOW))!)?.keptCents, 4000);

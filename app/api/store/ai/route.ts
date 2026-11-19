@@ -6,7 +6,7 @@ import { READ_PDF_PAGES } from "@/lib/ai-rules";
 import { firstPages } from "@/lib/pdf-preview";
 import { MAX_STAMP_BYTES, readableFile } from "@/lib/product-file";
 import { withinEssentialLimit } from "@/lib/request-guard";
-import { describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
+import { markAiStop, describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
 import { readTaskFor, submissionOf } from "@/lib/assignment";
 import { SOCIALS, type SocialNetwork, isSocialNetwork } from "@/lib/store-socials";
 import { isRewriteStyle } from "@/lib/block-rewrite-rules";
@@ -33,6 +33,7 @@ import { imageFolder } from "@/lib/store";
 import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
+import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
@@ -52,13 +53,26 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body, store } = guarded;
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // A stop for a page being drafted step by step (lib/ai-steps.ts): it starts
+  // nothing that costs money, so the per-minute limit on writing never holds
+  // it back; it needs the same permission as the page it stops.
+  if (body.kind === "stop") {
+    const run = text(body.run, 60);
+    if (!AI_RUN_ID.test(run)) return fail("invalid");
+    return (await markAiStop(store, run)) ? Response.json({ ok: true }) : fail("unconfirmed", 503);
+  }
+  // A page asked for step by step names its run, so it can be stopped; one that does not is refused before anything is asked.
+  const stepped = body.kind === "page" && body.steps === true;
+  if (stepped && !AI_RUN_ID.test(text(body.run, 60))) return fail("invalid");
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return fail("slow", 429);
   const notes = text(body.notes, MAX_AI_NOTES + 100);
 
   const answer = async <T,>(result: Promise<{ ok: true; value: T; left: number } | { ok: false; reason: string }>) => {
     const done = await result;
     if (!done.ok) return fail(done.reason, done.reason === "failed" ? 502 : 400);
-    return Response.json({ ok: true, value: done.value, left: done.left });
+    // The store's language, which drafts are written in (lib/ai.ts, storeLanguage), so the
+    // "AI draft" checks know whether they can read the draft's subjects (756 [STN3], unit 2).
+    return Response.json({ ok: true, value: done.value, left: done.left, language: store.language });
   };
 
   if (body.kind === "product") {
@@ -85,25 +99,65 @@ export async function POST(request: NextRequest) {
                 ? "download"
                 : "link";
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
-    let pdf: Uint8Array | null = null;
+    // Read only once the month's jobs are taken (lib/ai.ts, writePage): a store with no allowance left never spends a
+    // paid file-store read on a request it is then refused.
+    let pdf: (() => Promise<Uint8Array | null>) | null = null;
     if (body.readFile === true) {
       const file = readableFile(product);
       if (!file) return fail("file");
-      const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES).catch(() => null);
-      pdf = bytes ? await firstPages(bytes, READ_PDF_PAGES).catch(() => null) : null;
-      if (!pdf) return fail("file");
+      pdf = async () => {
+        const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES);
+        return bytes ? firstPages(bytes, READ_PDF_PAGES) : null;
+      };
     }
-    return answer(
-      writePage(store, {
-        title: product.title,
-        price: isFree(product) ? "" : formatMoney(product.priceCents, store.currency),
-        kind,
-        summary: product.summary,
-        about,
-        notes,
-        pdf,
-      }),
-    );
+    const input: Parameters<typeof writePage>[1] = {
+      title: product.title,
+      price: isFree(product) ? "" : formatMoney(product.priceCents, store.currency),
+      kind,
+      summary: product.summary,
+      about,
+      notes,
+      pdf,
+    };
+    if (!stepped) return answer(writePage(store, input));
+    // Step by step (758 [STN5]): one line as each step starts and ends, then
+    // the result, so the studio can say what is running and offer to stop.
+    const run = text(body.run, 60);
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (line: AiStepLine | { pad: string }) => {
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+          } catch {
+            // The page has gone; the job goes on to its end and keeps its count, as one without steps does.
+          }
+        };
+        send({ pad: " ".repeat(AI_STEP_PADDING_BYTES) });
+        let last: AiStepLine = { done: true, ok: false, error: "failed" };
+        try {
+          const done = await writePage(store, input, Date.now(), { run, onStep: (step, state) => send({ step, state }) });
+          last = done.ok
+            ? "returned" in done
+              ? { done: true, ok: true, value: done.value, left: done.left, returned: done.returned }
+              : { done: true, ok: true, value: done.value, left: done.left }
+            : "returned" in done
+              ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
+              : { done: true, ok: false, error: done.reason };
+        } catch (error) {
+          console.error("a page drafted step by step failed", error);
+        }
+        send(last);
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the page going away.
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" },
+    });
   }
   if (body.kind === "review") {
     // The page as it stands in the editor, saved or not, held to the same
@@ -186,10 +240,13 @@ export async function POST(request: NextRequest) {
     const path = text(body.path, 200);
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
-    const found = await get(path, { access: "private" }).catch(() => null);
-    if (!found || found.statusCode !== 200 || !found.stream) return fail("invalid");
-    const bytes = new Uint8Array(await new Response(found.stream).arrayBuffer());
-    return answer(describePicture(store, { bytes, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
+    // Read only once the month's job is taken (lib/ai.ts, describePicture): a store with no allowance left never
+    // spends a paid file-store read on a request it is then refused.
+    const read = async () => {
+      const found = await get(path, { access: "private" });
+      return found && found.statusCode === 200 && found.stream ? new Uint8Array(await new Response(found.stream).arrayBuffer()) : null;
+    };
+    return answer(describePicture(store, { bytes: read, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
   }
   if (body.kind === "translate") {
     // The page as it stands in the editor, every word of it into one of the

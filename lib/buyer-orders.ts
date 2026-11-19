@@ -22,8 +22,9 @@
  * Like cancelling a membership, this works whatever state the creator's own
  * Marktmorgen subscription is in: somebody paid for that file, and they get it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
-import { packageState, readBought } from "@/lib/call-packages";
+import { packageReadCommands, packageState, readBought } from "@/lib/call-packages";
 import { giftFrom } from "@/lib/gifts";
 import { readPreorder, soonOne } from "@/lib/preorders";
 import { readPreorderJob } from "@/lib/preorder-rules";
@@ -34,12 +35,12 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
-import { readStripePage } from "@/lib/stripe-list";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
-import { isLiveSub, soldAMembership } from "@/lib/membership-access";
+import { liveExpanded, soldAMembership } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
@@ -582,7 +583,19 @@ function waitsForCheck(store: Store, session: Row): boolean {
   return saleHandles(store).has(meta.store ?? "") && isSettled(session) && meta.kind !== "call" && !meta.gift && !meta.group;
 }
 
-/** The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first. */
+/**
+ * Pages of a hundred checkouts read under one spelling of the address (Stripe's most a page) before the list is no
+ * longer known. Past the first, which is one of ORDERS_STRIPE_LISTS, each page is a call taken from the ceiling
+ * (ORDERS_STRIPE_CALLS) before it is made.
+ */
+const CHECKOUT_PAGES_MOST = 10;
+
+/**
+ * The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first: every
+ * page Stripe has, each read in its exact shape (readStripePage). A list that goes on past what may be read, a page
+ * that is not one, or more pages after a last row that cannot be read throws StripeListUnreadable: the page says the
+ * purchases could not be read, never that the older ones were not bought (rule 24).
+ */
 async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Promise<Row[]> {
   const account = store.stripeAccountId;
   if (!account) return [];
@@ -590,16 +603,22 @@ async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Pr
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   const checkouts = new Map<string, Row>();
   for (const variant of variants) {
-    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-    query.append("expand[]", "data.subscription");
-    // Whether a past-due membership is still being retried is on its latest invoice (lib/membership-access.ts).
-    query.append("expand[]", "data.subscription.latest_invoice");
-    query.append("expand[]", "data.payment_intent.latest_charge");
-    meter?.alive();
-    const listed: unknown = await onAccount("GET", account, `/checkout/sessions?${query}`);
-    for (const session of rows(listed)) {
-      const id = typeof session.id === "string" ? session.id : "";
-      if (!checkouts.has(id)) checkouts.set(id, session);
+    let after = "";
+    for (let page = 0; ; page += 1) {
+      if (page >= CHECKOUT_PAGES_MOST || (page > 0 && meter && !meter.stripe(1))) throw new StripeListUnreadable("more checkouts than are read");
+      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+      if (after) query.set("starting_after", after);
+      query.append("expand[]", "data.subscription");
+      // Whether a past-due membership is still being retried is on its latest invoice (lib/membership-access.ts).
+      query.append("expand[]", "data.subscription.latest_invoice");
+      query.append("expand[]", "data.payment_intent.latest_charge");
+      meter?.alive();
+      const read = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`));
+      // A row with no id it can read is left out, as it always was: nothing can be handed over under it.
+      for (const session of read.rows) if (!checkouts.has(session.id)) checkouts.set(session.id, session);
+      if (!read.hasMore) break;
+      if (!read.lastId) throw new StripeListUnreadable("more checkouts and no readable last one");
+      after = read.lastId;
     }
   }
   const createdAt = (row: Row) => (typeof row.created === "number" ? row.created : 0);
@@ -681,7 +700,8 @@ async function purchaseFromSession(
     const product = bought ? await find(meta.product) : null;
     if (!bought || !product) return null;
     if ((await refundedFor(account, session, meter)) !== false) return null;
-    await meter?.take(bought.holds.length);
+    // One EXISTS a hold, the record of paid sessions and a seen session written down (packageReadCommands).
+    await meter?.take(packageReadCommands(bought));
     const state = await packageState(bought);
     return { customer: null, purchase: {
       reference: id,
@@ -710,8 +730,8 @@ async function purchaseFromSession(
   // A membership hands its thing over while it is being paid for.
   const member = soldAMembership(product, { mode: session.mode, metadata: meta });
   if (member) {
-    const sub = session.subscription as { status?: unknown } | null;
-    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+    // One that cannot be read throws (rule 24): never shown as ended, with the way to renew, to somebody who pays.
+    if (!liveExpanded(session.subscription)) {
       return { customer: null, purchase: {
         reference: id,
         kind: "sale",
@@ -997,8 +1017,10 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     if (meter) {
       // The whole record of the address is read at once: its entries are counted first, and paid for before it is read.
       await meter.take(ORDERS_IMPORTED_COMMANDS);
-      const [entries] = await redisPipeline([["HLEN", importedKey(store.statsId, email)]]);
-      await meter.take((Number(entries) || 0) * ORDERS_IMPORTED_ENTRY_COMMANDS);
+      // An unreadable count is unknown, never zero (rule 24): the record is not read unpaid.
+      const entries = countOf(repliesFor(await redisPipeline([["HLEN", importedKey(store.statsId, email)]]), 1)?.[0]);
+      if (entries === null) throw new UnknownReplyError("HLEN of an address's imported purchases");
+      await meter.take(entries * ORDERS_IMPORTED_ENTRY_COMMANDS);
     }
     for (const given of await importedFor(store, email)) {
       const purchase = await purchaseFromImported(store, store.statsId, email, given, find, meter, false);
@@ -1020,27 +1042,13 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   return kept.slice(0, MAX_LISTED);
 }
 
-/** A whole number from one up after INCR, or null when the reply is not exactly that. */
-function incremented(reply: unknown): number | null {
-  const count = countOf(reply);
-  return count !== null && count >= 1 ? count : null;
-}
-
 /**
  * Whether one more request fits in the hour: true or false on a count read in
  * its exact shape, null when the answer is missing, cut short or of another
  * shape, which is never taken as room (CX-123 rule 24).
  */
 async function within(key: string, limit: number): Promise<boolean | null> {
-  const both = repliesFor(
-    await redisPipeline([
-      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-      ["INCR", key],
-    ]),
-    2,
-  );
-  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
-  const count = incremented(both[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count === null ? null : count <= limit;
 }
 
@@ -1570,15 +1578,24 @@ async function lookUp(
     if (!store.pastBuyers || !store.statsId) return null;
     const key = importedKey(store.statsId, email);
     // Its ids are read to know which one the reference names (each id a command at the most), then that entry alone.
-    const [count] = await redisPipeline([["HLEN", key]]);
-    await meter.take(Number(count) || 0);
-    const [keys] = await redisPipeline([["HKEYS", key]]);
+    // Unreadable replies are unknown, never zero ids nor "no such purchase" (rule 24).
+    const count = countOf(repliesFor(await redisPipeline([["HLEN", key]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("HLEN of an address's imported purchases");
+    await meter.take(count);
+    const keys = stringList(repliesFor(await redisPipeline([["HKEYS", key]]), 1)?.[0]);
+    if (keys === null) throw new UnknownReplyError("HKEYS of an address's imported purchases");
     const statsId = store.statsId;
-    const productId = (Array.isArray(keys) ? keys.map(String) : []).find((id) => importedReference(statsId, email, id) === reference);
+    const productId = keys.find((id) => importedReference(statsId, email, id) === reference);
     if (!productId) return null;
-    const [raw] = await redisPipeline([["HGET", key, productId]]);
+    // Read exactly too: nil is an entry deleted since its id was read, text is the entry, anything else unknown.
+    const entry = repliesFor(await redisPipeline([["HGET", key, productId]]), 1);
+    const raw = entry?.[0];
+    if (raw === null) return null;
+    if (typeof raw !== "string") throw new UnknownReplyError("HGET of an address's imported purchase");
     const [given] = importedFrom([productId, raw]);
-    if (!given || !inList(given.items ?? [], want.pid)) return null;
+    // Text that does not read as an entry is unknown too, never "no such purchase" (Revisor 1 on #3714).
+    if (!given) throw new UnknownReplyError("an address's imported purchase");
+    if (!inList(given.items ?? [], want.pid)) return null;
     // What was brought over holds one bundle at the most: its own.
     if (want.bundle && (want.bundle !== "main" || !given.items?.length)) return null;
     allow(given.productId, want.pid, ...(want.bundle ? (given.items ?? []) : []));

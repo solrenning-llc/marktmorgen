@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { storeRoot } from "@/lib/store-sitemap";
+import { storeAddress, storeRoot } from "@/lib/store-sitemap";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
@@ -13,6 +13,7 @@ import { StoreTracking } from "@/components/store-tracking";
 import { JsonLd } from "@/components/structured-data";
 import { SITE_URL } from "@/lib/site-url";
 import { photoUrl } from "@/lib/photo-limits";
+import { BlogUnavailable } from "./blog-unavailable";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -48,7 +49,9 @@ export default async function BlogPage({ params, searchParams }: Params) {
   if (await isResting(store)) return <StoreResting store={store} />;
   const query = searchParams ? await searchParams : {};
   const page = typeof query.page === "string" && /^\d{1,3}$/.test(query.page) ? Math.max(1, Number(query.page)) : 1;
-  const { posts, total } = await publishedPosts(store.statsId, page);
+  const listing = await publishedPosts(store.statsId, page).catch(() => null);
+  if (listing === null) return <BlogUnavailable language={store.language} handle={store.handle} name={store.name} />;
+  const { posts, total } = listing;
   if (total === 0) notFound();
   const say = speech(store);
   const { w } = say;
@@ -62,11 +65,11 @@ export default async function BlogPage({ params, searchParams }: Params) {
           "@context": "https://schema.org",
           "@type": "Blog",
           name: w.blogOf(store.name),
-          url: `${SITE_URL}${base}`,
+          url: storeAddress(store, "/blog"),
           blogPost: posts.map((post) => ({
             "@type": "BlogPosting",
             headline: post.title,
-            url: `${SITE_URL}${base}/${postSegment(post)}`,
+            url: storeAddress(store, `/blog/${postSegment(post)}`),
             datePublished: new Date(post.publishedAt * 1000).toISOString(),
           })),
         }}

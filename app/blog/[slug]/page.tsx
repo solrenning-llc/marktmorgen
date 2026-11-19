@@ -6,7 +6,9 @@ import { notFound } from "next/navigation";
 import { BlogCard } from "@/components/blog-browser";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { StartQuiz } from "@/components/start-quiz";
+import { quizFacts } from "@/lib/start-quiz-facts";
+import { SiteNav } from "@/components/site-nav-server";
 import { PostCover } from "@/components/post-cover";
 import { ShareRow } from "@/components/share-row";
 import { ArticleData } from "@/components/structured-data";
@@ -18,6 +20,10 @@ import {
   postBySlug,
   postsSorted,
 } from "@/lib/blog";
+
+/** Only the listed pages exist: any other address is a plain 404, never rendered and stored in the ISR cache for that
+ * address (tests/c1-cost-unknown-slugs.test.ts). */
+export const dynamicParams = false;
 
 export function generateStaticParams() {
   return BLOG_POSTS.map((post) => ({ slug: post.slug }));
@@ -156,7 +162,7 @@ export default async function BlogPostPage({
               <span>{post.readMinutes} min read</span>
             </p>
             <h1 className="t-h1 balance mt-5">{post.title}</h1>
-            <p className="t-lead mt-5 text-ink-soft">{post.excerpt}</p>
+            <p className="t-lead mt-5 max-w-[46ch] text-ink-soft">{post.excerpt}</p>
             <p className="mt-8 text-sm text-ink-mute">Written by the Marktmorgen team.</p>
           </div>
         </header>
@@ -198,7 +204,7 @@ export default async function BlogPostPage({
 
           {post.faq?.length ? <section aria-labelledby="article-faq-title" className="mt-12" data-article-faq>
             <h2 id="article-faq-title" className="t-h3">Frequently asked questions</h2>
-            <dl className="mt-5 space-y-5">{post.faq.map(item=><div key={item.q}><dt className="font-semibold text-ink">{item.q}</dt><dd className="mt-2 leading-relaxed text-ink-soft">{item.a}</dd></div>)}</dl>
+            <dl className="mt-5 space-y-5">{post.faq.map(item=><div key={item.q}><dt className="font-semibold text-ink">{item.q}</dt><dd className="mt-2 max-w-[46ch] leading-relaxed text-ink-soft">{item.a}</dd></div>)}</dl>
           </section> : null}
 
           {CREATOR_GUIDE_SLUGS.some(slug=>slug===post.slug) ? <nav aria-label="More creator guides" className="mt-10"><h2 className="t-h3">Continue with the next kind of offer</h2><ul className="mt-4 space-y-2">{CREATOR_GUIDE_SLUGS.filter(slug=>slug!==post.slug).map(slug=><li key={slug}><Link href={"/blog/"+slug} prefetch={false} className="link inline-flex min-h-11 items-center">{postBySlug(slug)!.title}</Link></li>)}</ul></nav> : null}
@@ -209,7 +215,7 @@ export default async function BlogPostPage({
             <p className="mt-3 max-w-lg text-white/80">
               The demo store is a real Stripe checkout with a test card. Buy the file, watch it arrive, then decide.
             </p>
-            {!PLANS_ON_SALE ? <p className="mt-3 text-sm text-white/80">Paid plans and paid selling remain closed. Start by preparing your store; a login link does not begin a paid plan.</p> : null}
+            {!PLANS_ON_SALE ? <p className="mt-3 max-w-[46ch] text-sm text-white/80">Paid plans and paid selling remain closed. Start by preparing your store; a login link does not begin a paid plan.</p> : null}
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
               <Link href="/demo" className="btn btn-light">
                 Open the live demo store
@@ -224,6 +230,13 @@ export default async function BlogPostPage({
           </aside>
           </article>
         </div>
+
+        {/* "Where should I start?" (562 [QZ1], unit 2): the same three questions as /start-here, answered in the browser. */}
+        <section className="container-page py-14 sm:py-16" aria-labelledby="article-start-title" data-start-quiz>
+          <h2 id="article-start-title" className="t-h2">Where should I start?</h2>
+          <p className="mt-3 max-w-2xl text-ink-soft">Three short questions about what you sell. The answer shows the pages to read, the template to start from and the plan that has it. No email needed; your answers stay in this browser.</p>
+          <StartQuiz facts={quizFacts()} level={3} id="article-start" />
+        </section>
 
         {more.length > 0 ? (
           <section className="surface-sand">

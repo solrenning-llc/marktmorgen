@@ -4,6 +4,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import {
   HEALTH_ID,
   LIST_TAG,
+  MOVE_TAG,
   STORE_TAG,
   heardFromSender,
   MAIL_HEALTH_DAY_SECONDS,
@@ -112,7 +113,7 @@ export async function recordSesEvent(event: SesEvent): Promise<"paused" | "count
   const results: string[] = [];
   if ((event.kind === "bounced" || event.kind === "complained") && (event.kind === "complained" || event.permanent)) {
     for (const to of event.recipients) {
-      results.push(await heardFromSender({ kind: event.kind, permanent: event.permanent, to, store: event.tags[STORE_TAG] ?? "", list: event.tags[LIST_TAG] ?? "" }));
+      results.push(await heardFromSender({ kind: event.kind, permanent: event.permanent, to, store: event.tags[STORE_TAG] ?? "", list: event.tags[LIST_TAG] ?? "", move: event.tags[MOVE_TAG] ?? "" }));
     }
   }
   const reportEvent: MailReportEvent = event.kind === "delivered"

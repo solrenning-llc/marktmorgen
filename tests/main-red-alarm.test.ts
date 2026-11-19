@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
-  LABEL, TITLE, REQUIRED, decide, earlierNeeded, alarm as alarmRun, unreported, openBody, failureComment, greenComment, closable,
+  LABEL, TITLE, REQUIRED, NOT_FROM_QUEUE, decide, earlierNeeded, alarm as alarmRun, unreported, openBody, failureComment, greenComment, closable,
   type Run, type State, type Api,
 } from "../scripts/main_red_alarm.mjs";
 
@@ -257,6 +257,21 @@ part("a run stopped by its time limit is red: a job canceled with no newer run o
   is("stopped with no job evidence at all (not named): no evidence, as before", withStopped([...restGreen(), b], []).action, "none");
 }
 
+part("a job stopped before any newer run began is a time-out, even when a later push ended the rest of its run (Claude 6 on #3422, LOW)");
+{
+  // stoppedAt: when the first stopped job of a canceled run ended (its completed_at, from the jobs listing).
+  const withTimes = (runs: Run[], stoppedJobs: number[], stoppedAt: Record<number, string>, trigger: Run) =>
+    decide({ runs, trigger, head: HEAD, stoppedJobs, stoppedAt } as Parameters<typeof decide>[0]);
+  const a = run(PC, stopped, { head_sha: OLD, updated_at: "2026-11-06T23:00:00Z" });
+  const next = run(PC, null, { created_at: "2026-11-06T22:30:00Z" });
+  is("a job stopped at 22:00, the next push's run created at 22:30, the run ended at 23:00: a time-out, open",
+    withTimes([...restGreen(), a, next], [a.id], { [a.id]: "2026-11-06T22:00:00Z" }, restGreen()[0]).action, "open");
+  is("control: the job stopped at 22:45, after the next run began: superseded, nothing",
+    withTimes([...restGreen(), a, next], [a.id], { [a.id]: "2026-11-06T22:45:00Z" }, restGreen()[0]).action, "none");
+  is("control: no job time known: the run's end decides, as before (superseded)",
+    withTimes([...restGreen(), a, next], [a.id], {}, restGreen()[0]).action, "none");
+}
+
 part("a merge_group run that passed on main's very head is that workflow's result there (C1-0305-C4-28)");
 {
   // main only fast-forwards to the merge queue's commit, so the queue's merge_group runs are on main's
@@ -271,18 +286,30 @@ part("a merge_group run that passed on main's very head is that workflow's resul
   const withQueue = (queueRuns: Run[], runs: Run[], redJobs: number[] = [], trigger: Run = neutral) =>
     decide({ runs, trigger, head: HEAD, redJobs, queueRuns } as Parameters<typeof decide>[0]);
   const fromQueue = (d: ReturnType<typeof decide>) => (d as unknown as { queueGreen?: string[] }).queueGreen ?? null;
+  // CodeQL's merge-queue run skips the analysis on purpose (.github/workflows/codeql.yml), so its own push run on
+  // the head is its only result there: in these cases it passed; the cases right below show it is never taken.
+  const CQ = REQUIRED.findIndex((w) => w.file === ".github/workflows/codeql.yml");
+  const butCodeql = (runs: Run[]) => [...runs.filter((r) => r.path !== REQUIRED[CQ].file), allGreen()[CQ]];
   {
     const q = queueGreen();
-    const d = withQueue(q, REQUIRED.map((_, i) => run(i, stopped)));
-    is("(1) all nine passed in the merge queue on the head, its push runs canceled by the next push: close", [d.action, d.red], ["close", []]);
-    is("and the decision names the workflows whose green came from the merge queue", fromQueue(d), REQUIRED.map((w) => w.file));
+    const d = withQueue(q, butCodeql(REQUIRED.map((_, i) => run(i, stopped))));
+    is("(1) all nine passed in the merge queue on the head, its push runs canceled by the next push (CodeQL's passed): close", [d.action, d.red], ["close", []]);
+    is("and the decision names the workflows whose green came from the merge queue, never CodeQL", fromQueue(d), REQUIRED.map((w) => w.file).filter((_, i) => i !== CQ));
   }
-  is("(1) the push runs skipped: close", withQueue(queueGreen(), REQUIRED.map((_, i) => run(i, "skipped"))).action, "close");
-  is("(1) the push runs not there (yet or ever): close", withQueue(queueGreen(), []).action, "close");
+  is("(1) the push runs skipped (CodeQL's passed): close", withQueue(queueGreen(), butCodeql(REQUIRED.map((_, i) => run(i, "skipped")))).action, "close");
+  is("(1) the push runs not there (yet or ever), CodeQL's passed: close", withQueue(queueGreen(), butCodeql([])).action, "close");
+  is("CodeQL is the one workflow never taken from the merge queue", [...NOT_FROM_QUEUE], [".github/workflows/codeql.yml"]);
+  is("CodeQL's push run canceled, skipped or not there: its merge-queue green is never main's result, nothing closes",
+    [withQueue(queueGreen(), REQUIRED.map((_, i) => run(i, stopped))).action, withQueue(queueGreen(), REQUIRED.map((_, i) => run(i, "skipped"))).action,
+      withQueue(queueGreen(), []).action, withQueue(queueGreen(), [...allGreen().filter((_, i) => i !== CQ)]).action], ["none", "none", "none", "none"]);
+  is("an earlier head red on CodeQL stays red while only the merge queue passed it on the current head",
+    withQueue(queueGreen(), [...allGreen().filter((_, i) => i !== CQ), run(CQ, "failure", { head_sha: OLD })]).action, "open");
   is("(1) the push runs passed too (they reused the queue's proof): close, nothing from the queue needed",
     [withQueue(queueGreen(), allGreen()).action, fromQueue(withQueue(queueGreen(), allGreen()))], ["close", []]);
   is("(1) eight passed in the queue and one has no result anywhere on the head: nothing yet",
-    withQueue(queueGreen().slice(0, 8), REQUIRED.map((_, i) => run(i, stopped))).action, "none");
+    withQueue(queueGreen().slice(0, 8), butCodeql(REQUIRED.map((_, i) => run(i, stopped)))).action, "none");
+  is("control: the same with product-checks green in the queue too: close (so the case above is product-checks alone)",
+    withQueue(queueGreen(), butCodeql(REQUIRED.map((_, i) => run(i, stopped)))).action, "close");
   is("(1) an earlier head red, the current head's push canceled, the queue green on the current head: close (the current head decides)",
     [withQueue([], [...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action,
       withQueue(queueGreen(), [...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action], ["open", "close"]);
@@ -387,12 +414,13 @@ async function endToEnd() {
   part("the whole run, against a synthetic GitHub (no network)");
   // Jobs of a run, in the real API shape (GET actions/runs/{id}/jobs); by default a canceled run whose
   // jobs were canceled and whose aggregator "All checks (…)" failed, as every canceled run's does.
-  const job = (name: string, conclusion: string | null) => ({ id: 1, name, status: conclusion === null ? "in_progress" : "completed", conclusion });
+  const job = (name: string, conclusion: string | null, completed_at: string | null = null) => ({ id: 1, name, status: conclusion === null ? "in_progress" : "completed", conclusion, completed_at });
   const cleanJobs = { total_count: 2, jobs: [job("verify", stopped), job("All checks (product-checks)", "failure")] };
   const redJobsReply = { total_count: 3, jobs: [job("verify", "success"), job("Mobile render (candidate)", "failure"), job("All checks (product-checks)", "failure")] };
   const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown>, defaultJobs?: unknown,
-    queueRuns?: unknown[], queueReply?: unknown, failOn?: RegExp }) => {
+    queueRuns?: unknown[], queueReply?: unknown, failOn?: RegExp, movedTo?: string }) => {
     const reads: string[] = [];
+    let refReads = 0;
     const writes: { method: string, path: string, body: unknown }[] = [];
     const api: Api = async (method, path, body, absentIsNull) => {
       if (method !== "GET") {
@@ -401,7 +429,8 @@ async function endToEnd() {
       }
       reads.push(path);
       if (o.failOn?.test(path)) throw new Error("GET " + path + ": HTTP 403");
-      if (path === "git/ref/heads/main") return { object: { sha: o.head } };
+      // movedTo: main advances after the first read of its ref, as a push landing mid-run does.
+      if (path === "git/ref/heads/main") return { object: { sha: refReads++ > 0 && o.movedTo !== undefined ? o.movedTo : o.head } };
       if (path === `actions/runs?head_sha=${o.head}&event=merge_group&per_page=100`) {
         return o.queueReply !== undefined ? o.queueReply : { total_count: (o.queueRuns ?? []).length, workflow_runs: o.queueRuns ?? [] };
       }
@@ -431,6 +460,25 @@ async function endToEnd() {
     await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
     is("real-shaped greens: the bot's issue gets MAIN VERDE and is closed", gh.writes.map((w) => `${w.method} ${w.path}`), ["POST issues/7/comments", "PATCH issues/7"]);
     is("and no earlier head is read when all nine are green", gh.reads.filter((p) => p.startsWith("actions/workflows/")), []);
+  }
+  {
+    // #4334: main moved past the evaluated head while the run paged issues; MAIN VERDE is never said for it.
+    const moved = "b".repeat(40);
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], movedTo: moved });
+    await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
+    is("main moved past the green head before closing: no MAIN VERDE, the issue stays open", gh.writes.map((w) => `${w.method} ${w.path}`), []);
+    is("and the ref is read again just before closing", gh.reads.filter((p) => p === "git/ref/heads/main").length, 2);
+  }
+  {
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], movedTo: REAL.head_sha });
+    await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
+    is("main still at the green head when re-read: the issue is closed", gh.writes.map((w) => `${w.method} ${w.path}`), ["POST issues/7/comments", "PATCH issues/7"]);
+  }
+  {
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], movedTo: "main" });
+    let threw = false;
+    try { await alarmRun({ api: gh.api, trigger: REAL, log: quiet }); } catch { threw = true; }
+    is("an unreadable re-read of main before closing: it throws and closes nothing", [threw, gh.writes], [true, []]);
   }
   {
     const gh = github({ head: REAL.head_sha, headRuns: redReal });
@@ -484,6 +532,15 @@ async function endToEnd() {
     const gh = github({ head: HEAD, headRuns: [...restGreen(), b], jobs: { [b.id]: skipped }, older: { "product-checks.yml": [[]] } });
     await alarmRun({ api: gh.api, trigger: b, log: quiet });
     is("canceled with its jobs skipped, none stopped: nothing opens", gh.writes, []);
+  }
+  {
+    // Claude 6 on #3422 (LOW): a matrix job hit its time limit at 22:00; a push at 22:30 then canceled the rest of
+    // the run, which ended at 23:00. The run reads as superseded by its end, but the job stopped before any newer run.
+    const a = run(PC, stopped, { head_sha: OLD, id: 7_201, updated_at: "2026-11-06T23:00:00Z" });
+    const timedOut = { total_count: 3, jobs: [job("Mobile render (candidate)", stopped, "2026-11-06T22:00:00Z"), job("verify", stopped, "2026-11-06T22:59:00Z"), job("All checks (product-checks)", "failure", "2026-11-06T23:00:00Z")] };
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null, { id: 7_202, created_at: "2026-11-06T22:30:00Z" })], jobs: { [a.id]: timedOut }, older: { "product-checks.yml": [[a]] } });
+    const d = await alarmRun({ api: gh.api, trigger: restGreen()[0], log: quiet });
+    is("a job stopped before the next push's run began: the time-out opens, with that run", [d.action, d.red.map((r) => r.id)], ["open", [a.id]]);
   }
   {
     // Claude 6 on #3422 (MEDIUM): three quick merges. B's push run canceled A's and is itself still being canceled
@@ -552,15 +609,24 @@ async function endToEnd() {
       await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet });
       is("(1) and with no issue open, nothing is opened: no alarm", gh.writes, []);
     }
+    // CodeQL never takes the queue's run (NOT_FROM_QUEUE): its own push run on the head must have passed.
+    const cq = REQUIRED.findIndex((w) => w.file === ".github/workflows/codeql.yml");
+    const codeqlGreen = run(cq, "success", { id: 8_960 });
+    const stoppedButCodeql = [...stoppedHead.filter((_, i) => i !== cq), codeqlGreen];
     {
-      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: stoppedHead, issues: [botIssue], ...proven });
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: stoppedButCodeql, issues: [botIssue], ...proven });
       const d = await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet });
-      is("(1) head all canceled by later pushes, the queue green on the head: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
+      is("(1) head all canceled by later pushes but CodeQL's, which passed, the queue green on the head: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
     }
     {
-      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: [], issues: [botIssue], ...proven });
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: [codeqlGreen], issues: [botIssue], ...proven });
       const d = await alarmRun({ api: gh.api, trigger: queueGreen[0], log: quiet });
-      is("(1) no push run on the head yet, the queue green on the head: green", d.action, "close");
+      is("(1) no push run on the head yet but CodeQL's, which passed, the queue green on the head: green", d.action, "close");
+    }
+    for (const [what, headRuns] of [["canceled", stoppedHead], ["not there", []]] as const) {
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: [...headRuns], issues: [botIssue], ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: queueGreen[0], log: quiet });
+      is(`CodeQL's push run ${what}, only its merge-queue run green on the head: the bot's issue stays open`, [d.action, gh.writes], ["none", []]);
     }
     {
       const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: allGreen(), issues: [botIssue], ...proven });

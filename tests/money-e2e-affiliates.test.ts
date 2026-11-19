@@ -56,7 +56,7 @@ const captureStatus = new Map<string, string>();
 const capturesRead: string[] = [];
 let payoutPost: Reply | null = null;
 let itemStatus: Record<string, string> = {};
-const batches: { items: { sender_item_id: string; amount: unknown }[] }[] = [];
+const batches: { items: { sender_item_id: string; amount: unknown; receiver?: string }[] }[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -76,7 +76,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (capture) return answer({ id: capture, status: captureStatus.get(capture) ?? "COMPLETED" });
     if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
       if (payoutPost) return answer(payoutPost.body, payoutPost.status);
-      const body = JSON.parse(String(init.body)) as { items: { sender_item_id: string; amount: unknown }[] };
+      const body = JSON.parse(String(init.body)) as { items: { sender_item_id: string; amount: unknown; receiver?: string }[] };
       batches.push(body);
       return answer({ batch_header: { payout_batch_id: `BATCH${batches.length}ABC`, batch_status: "PENDING" } }, 201);
     }
@@ -89,7 +89,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
         items: sent.map((item, i) => ({
           payout_item_id: `ITEM${batch}${i}`,
           transaction_status: itemStatus[item.sender_item_id] ?? "PENDING",
-          payout_item: { sender_item_id: item.sender_item_id, amount: item.amount },
+          // The receiver it was sent to, as PayPal names it (main's #4657: another receiver keeps the line on its way).
+          payout_item: { sender_item_id: item.sender_item_id, amount: item.amount, receiver: item.receiver },
         })),
       });
     }

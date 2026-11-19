@@ -37,7 +37,7 @@
 import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { ADMITTED_FIELD, OPEN_HOURS, settleAdmitted } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OPEN_HOURS, settlePaidCheckout } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
@@ -76,6 +76,8 @@ import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
 import { pricePill } from "@/lib/product-pill";
 import { productSegment } from "@/lib/product-slug";
+import { readConfig } from "@/lib/community";
+import { thanksWords } from "@/lib/buyer-words/thanks";
 
 /** The fixed sentence as a receipt carries it, with the address of the Terms that explain its limit (queue item 307 EC1). */
 const closingAccessLine = () => `${CLOSING_ACCESS_SENTENCE} ${CLOSING_TERMS_WORDS}: ${SITE_URL}${CLOSING_TERMS_PATH}`;
@@ -139,6 +141,8 @@ export type SessionRecord = {
   customer_details?: { email?: unknown } | null;
   consent?: { promotions?: unknown } | null;
   after_expiration?: { recovery?: { enabled?: unknown } | null } | null;
+  /** The expired session this one was made from by Stripe's recovery link, or null (lib/order-admission.ts, settlePaidCheckout). */
+  recovered_from?: unknown;
 };
 
 /** A name that can sit inside the quotes of an email's From line. */
@@ -200,6 +204,9 @@ export type Confirmation = { to: string; subject: string; text: string };
 /** A license key the email carries, with the product it is for. */
 export type KeyLine = { title: string; key: SaleKey };
 
+/** The creator's members' community this order lets its buyer into, by its name (lib/community-access.ts). */
+export type OpensCommunity = { name: string };
+
 /**
  * The email for one checkout, or null when this checkout is not one to
  * confirm: not settled, not this store's, a booked call, or too old.
@@ -219,8 +226,13 @@ export function confirmationFor(
    * and the buyer agreed at checkout to hear from them. No email of its own.
    */
   next: NextOffer | null = null,
+  /**
+   * The members' community this order opens, read by the caller (communityFor): the page after paying says so with
+   * the way in, and so does the email, so a buyer who closed that page still knows (found walking the buyer path).
+   */
+  community: OpensCommunity | null = null,
 ): Confirmation | null {
-  const letter = renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true);
+  const letter = renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true, community);
   return letter === UNREAD_CHARGE ? null : letter;
 }
 
@@ -315,7 +327,7 @@ export function firstChargeSaid(store: Pick<Store, "language" | "tax">, session:
 }
 
 function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
-  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean): Confirmation | null | typeof UNREAD_CHARGE {
+  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean, community: OpensCommunity | null = null): Confirmation | null | typeof UNREAD_CHARGE {
   const id = typeof session.id === "string" ? session.id : "";
   if (!SESSION_ID_PATTERN.test(id)) return null;
   if (!isSettled(session)) return null;
@@ -420,6 +432,12 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
     lines.push("", words.bundleCourseNote(email));
   }
 
+  // The members' community it opens, in the words of the page after paying (lib/buyer-words/thanks.ts), with the way in.
+  if (community) {
+    const tw = thanksWords(store.language);
+    lines.push("", `${tw.alsoYours}: ${community.name}`, tw.communityOpens(name, email), `${tw.goCommunity}: ${base}/community`);
+  }
+
   for (const line of keys) {
     const label = keys.length > 1 ? words.yourKeyFor(line.title) : words.yourKey;
     lines.push("", line.key.state === "issued" ? words.keyIssued(label, line.key.key) : words.keyOnItsWay(label, name));
@@ -480,9 +498,24 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
 
   return {
     to: email,
-    subject: words.confirmSubject(name, product.title).slice(0, 200),
+    // Every product the order hands over is named, as the page after paying names them ("Sunday Baking and Pantry
+    // Checklist"): a cart or a box ticked at checkout is not filed under its first product only.
+    subject: words.confirmSubject(name, ticked.length ? listed([product.title, ...ticked.map((added) => added.listing.title)]) : product.title).slice(0, 200),
     text: lines.join("\n"),
   };
+}
+
+/**
+ * The members' community an order opens: the creator's community is switched on and lets in the product bought, one
+ * ticked at checkout or one inside a bundle bought (deliveredIds, as the page after paying and the community's door
+ * count them). Its setup that cannot be read just now is left out of the email, never said to be closed.
+ */
+export async function communityFor(store: Store, session: SessionRecord): Promise<OpensCommunity | null> {
+  if (!store.community?.on) return null;
+  const config = await readConfig(store.community.id).catch(() => null);
+  if (!config) return null;
+  const opens = deliveredIds(session.metadata).some((id) => config.access.includes(id));
+  return opens ? { name: config.name } : null;
 }
 
 /** The note after paying of the product an order is for, when it has one (lib/thanks-note.ts). */
@@ -580,9 +613,10 @@ export async function confirmPurchase(
     // if counted (lib/orders.ts, countOrder).
     if ((await countOrder(store, `checkout:${sessionId}`, paid, Date.now())) === "unknown") return outcome;
     // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts): once per
-    // checkout, however many runs answer "sent" for it.
+    // checkout, however many runs answer "sent" for it; a Stripe recovery copy only by taking its original's record,
+    // so a place given back at expiry is never given back twice.
     if (read.session?.metadata?.[ADMITTED_FIELD] !== undefined && (await firstToGiveRoomBack(sessionId))) {
-      await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
+      await settlePaidCheckout(store, read.session, read.items ?? 1);
     }
   }
   return outcome;
@@ -646,7 +680,7 @@ async function confirmOnce(
   if (first === UNREAD_CHARGE) return "failed";
   if (!first) return "skip";
   const next = await nextOfferForEmail(store, sessionId, session.metadata ?? {}).catch(() => null);
-  const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next);
+  const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next, await communityFor(store, session));
   if (!letter) return "skip";
 
   const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
@@ -962,7 +996,7 @@ export async function resendPurchase(store: Store, sessionId: string): Promise<R
   }
   // Read by id, so a sale of any product of a store of any size is found.
   const listings = await listingsNamed(store, session.metadata);
-  const letter = confirmationFor(store, session, created, await keysFor(store, session, listings), listings, await noteFor(store, session, listings));
+  const letter = confirmationFor(store, session, created, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), null, await communityFor(store, session));
   if (!letter) return "unknown";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: fromStore(store),

@@ -286,7 +286,9 @@ async function main(): Promise<void> {
   refundPages = [list([refund("re_Early", "pi_NotReadYet1", 1500)])];
   disputePages = [list([])];
   const early = await kept();
-  is("a refund whose sale was not read: still subtracted, and the cash flow not complete", [early.usd?.refunds, early.usd?.kept, early.got?.cashflowComplete], [1500, 8500, false]);
+  // Changed on the merge of main 7803efb18f (rule 23): main's rule (tests/kept-unmatched-adjustment.test.ts) is that a
+  // refund not matched to a sale read leaves the kept total uncertified (null), never the sales less it.
+  is("a refund whose sale was not read: still counted, the kept total not certified, and the cash flow not complete", [early.usd?.refunds, early.usd?.kept, early.got?.cashflowComplete], [1500, null, false]);
   // Every page the numbers may read (five) says there is more: the reading stops before the end.
   refundPages = Array.from({ length: 5 }, (_, i) => list([refund(`re_More${i}`, "pi_StatsA0001", 100)], true));
   disputePages = [list([])];

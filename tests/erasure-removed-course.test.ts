@@ -74,6 +74,27 @@ async function main(): Promise<void> {
   is("though all forty-one were looked at", stranger?.droppedCourses, 41);
   const hers = await erasureScope(store, una);
   is("she has a record in one: only that one", hers?.courses.map((c) => c.courseId), [world.courseId]);
+
+  part("A reached-share mark can be the only entry for a dropped course");
+  redis.clear();
+  const progressWorld = await makeWorld();
+  const progressStore = (await storeForEmail(OWNER))!;
+  const progressEmail = "reach-only@example.com";
+  const finishedEmail = "reach-and-finish@example.com";
+  const progressCourse = (await readCourse(progressWorld.courseId))!;
+  const mark = `nl:course:${progressWorld.courseId}:reach:${emailKey(progressEmail)}`;
+  const finishedLearner = emailKey(finishedEmail);
+  const finishedMark = `nl:course:${progressWorld.courseId}:fin:${finishedLearner}`;
+  const finishedProgressMark = `nl:course:${progressWorld.courseId}:reach:${finishedLearner}`;
+  await redis.pipeline([["SET", mark, "50"], ["SET", finishedMark, "1"], ["SET", finishedProgressMark, "100"]]);
+  await dropCourse(progressCourse, progressStore, "");
+  const progressScope = await erasureScope(progressStore, progressEmail);
+  is("the progress-only course is in the erasure scope", progressScope?.courses.map((c) => c.courseId), [progressWorld.courseId]);
+  const progressErased = await erasePerson(progressStore, progressEmail, { kind: "person" });
+  is("a successful erasure leaves no progress mark", [progressErased.ok, (await redis.pipeline([["GET", mark]]))[0]], [true, null]);
+  const finishedErased = await erasePerson(progressStore, finishedEmail, { kind: "person" });
+  const finishedMarks = await redis.pipeline([["GET", finishedMark], ["GET", finishedProgressMark]]);
+  is("erasure leaves neither mark when both were present", [finishedErased.ok, finishedMarks], [true, [null, null]]);
   done();
 }
 

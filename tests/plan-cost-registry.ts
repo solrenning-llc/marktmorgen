@@ -68,7 +68,7 @@ import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
-import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS } from "@/lib/imports";
+import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS, PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH, PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH, PAUSED_IMPORT_PASS_BYTES, PAUSED_IMPORT_PASS_COMMANDS, PAUSED_IMPORT_SKIP_BYTES, PAUSED_IMPORT_SKIP_COMMANDS } from "@/lib/imports";
 import { INVITE_GONE_READ_COMMANDS } from "@/lib/move-members";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
@@ -123,12 +123,15 @@ import { ALL_TIME_PAGES } from "@/lib/stats";
 import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
+import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST } from "@/lib/stats-report";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
   PROVIDER_CHARGES_BPS, R2_CLASS_A_MICRO_USD_PER_MILLION, R2_CLASS_B_MICRO_USD_PER_MILLION, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, readBeaconCost, readCeilingMarksCost, visitCost } from "./traffic-cost";
+import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_PAID_BURST_COMMANDS, SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
+import { MAX_LINKS } from "@/lib/short-link-rules";
 import { FLY_HOLD_SECONDS, FLY_SHARE_COMMANDS, MEASURE_LIST_PAGES } from "@/lib/stamp-cost-rules";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
@@ -149,6 +152,7 @@ import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POL
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { UNWRITTEN_LINKS_PER_RUN, UNWRITTEN_LINK_COMMANDS } from "@/lib/winback-send";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -298,6 +302,8 @@ export const TRANSACTIONAL: Record<Tier, number> = {
 const micro = (n: number) => n / 1_000_000;
 /** One database command, a byte moved through the database, a byte kept there a month. */
 export const COMMAND = micro(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1_000_000;
+/** The plans cron's runs in the longest month: one a day (vercel.json, /api/cron/plans at 09:00 UTC). */
+export const COME_BACK_RUNS_PER_MONTH = 31;
 export const DB_BYTE = micro(UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9;
 export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
@@ -520,6 +526,118 @@ export const COMMUNITY_DOOR_COST =
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
+/**
+ * One short link that opens (app/l/[code]/route.ts, lib/short-link-open.ts): its CDN request and the proxy's call, a
+ * heavy request's wait and CPU, its count in the hour, the link and the store's whole record read, the store's resting
+ * mark read and its DECR and EXPIRE off the hour, and its place in its store's own count of the hour taken and given back
+ * (SHORT_LINK_STORE_COUNT_COMMANDS and SHORT_LINK_STORE_REFUND_COMMANDS, since the owner's decision 14 on #3330, 9 November
+ * 2026), and for a paying store past its opens in flight its read reserved in the resting hour and given back
+ * (SHORT_LINK_PAID_BURST_COMMANDS, Claude 2's focal re-review); the store's own count is REQUEST_COMMANDS of the line. Taken as SHORT_LINK_OPEN_UNITS public requests,
+ * held above it in tests/plan-cost-registry.test.ts.
+ */
+export const SHORT_LINK_OPEN_READ = CDN_PER_REQUEST + CALL + request("heavy", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS + SHORT_LINK_STORE_COUNT_COMMANDS + SHORT_LINK_STORE_REFUND_COMMANDS + SHORT_LINK_PAID_BURST_COMMANDS, MAX_STORE_BYTES + 4_096) + 1_000 * ORIGIN_PER_BYTE;
+/**
+ * Short links opened that no store pays for (lib/short-link-open.ts): a company cost under MR item 2, in three parts.
+ * (1) At most SHORT_LINK_UNPAID_PER_HOUR an hour in the one count every server instance shares (a code nobody has,
+ * a store gone, a count that could not be made, a connection over its share, the first open of a store found
+ * resting once the resting hour is used), and at most SHORT_LINK_KNOWN_UNPAID_PER_HOUR more in the same count, only
+ * for links paid on that instance a moment ago while the hour is used (knownPerHour). (2) At most
+ * SHORT_LINK_REST_UNPAID_PER_HOUR an hour in a second count every instance shares, the resting hour (restPerHour):
+ * opens of stores over their own requests, the first open of a link whose store is found resting (moved there out of
+ * the shared count) or a store asked again whether it still rests (counted there before it is read), each one read
+ * and at most one SET of the store's resting mark (nl:slink:rest:<sid>, kept SHORT_LINK_TIRED_MS); every other open
+ * of that store is refused from the instance's memory with nothing sent. (3) On each instance, beyond those counts:
+ * one count a minute while the shared hour or the resting hour is used (SHORT_LINK_USED_UP_PAUSE_MS) or a count is
+ * unreadable (SHORT_LINK_UNKNOWN_PAUSE_MS). How many instances run is not known (instances: null), never zero, so (3)
+ * has no site-wide figure. Since 9 November 2026 (Claude 2's first cost review of #3330): (1) is kept in units
+ * (readUnits): an unpaid open that read a store takes SHORT_LINK_UNPAID_READ_UNITS, a code nobody has one, so the hour
+ * holds perHour store reads or readUnits times as many codes nobody has, each unit priced at the dearer of the two in
+ * tests/short-link-open-cap.test.ts, and one address looks up at most SHORT_LINK_MISSES_PER_ADDRESS codes nobody has on
+ * one instance in SHORT_LINK_MISS_WINDOW_MS. (2) no longer spills into (1): past the resting hour a resting store's open
+ * is refused, and what resting stores still read is (4), per resting store, their number unknown (restingStores: null):
+ * its record at most once a resting mark's time (storeReadsPerHour, counted at the shorter mark though it is kept
+ * SHORT_LINK_TIRED_MAX_MS once the resting hour is used), and on each instance each of its links looked up at most
+ * once while remembered (lookupsPerInstancePerHour, MAX_LINKS a SHORT_LINK_OWNER_MS). Since Claude 2's focal return
+ * (9 November 2026) the mark holds the moment the store rests until and lives SHORT_LINK_UNPAID_KEY_SECONDS, and once
+ * that moment is past only the open that takes nl:slink:rest:<sid>:check (SET NX, SHORT_LINK_TIRED_MS) reads the record,
+ * so storeReadsPerHour is a bound in code, site-wide; the opens in flight read it only while the store has no mark at
+ * all (its first resting burst, or its mark lapsed after SHORT_LINK_UNPAID_KEY_SECONDS without one open), at most every
+ * open each hour can hold at once (coldReadsPerLapse: the shared hour's units with the known figure, and the resting
+ * hour), once a mark's life (lapseEveryMs). Each open of (1) and (2) is priced at heaviestUnpaid's waits and commands (the heaviest
+ * one measured, with room, held there), every Redis wait at its timeout, in tests/short-link-open-cap.test.ts. The
+ * reviewed monthly ceiling is unknown (null), never zero, and the owner has not approved it. Kept here, not in
+ * lib/llc-fixed-costs.ts: a line there enters CURRENT_COMMERCIAL_TERMS, which only the owner changes.
+ *
+ * The owner's decision 14 on #3330 (9 November 2026) did not approve the US$81.49 a month (4) came to for one resting
+ * store (its record read once a mark's time, 60 an hour, and by every open in flight, 360, once a mark's life). Since
+ * then (4) is: its record read at most SHORT_LINK_STORE_READS_PER_HOUR times an hour (storeReadsPerHour) without the store
+ * paying, held by two counts of the store's own taken before each read, the first day and in a cold burst alike: its
+ * hour's unpaid reads, kept, and its opens in flight, each place lapsing SHORT_LINK_FLIGHT_MS after it was taken (a
+ * paying store with room is let past their sum, since it pays each read; past it any other store is refused from the
+ * instance's memory, Claude 2's focal on #3330); and on each instance each of its links looked up at most once a
+ * SHORT_LINK_RESTING_OWNER_MS (lookupsPerInstancePerHour), each at most restingLookup's waits and commands (an open
+ * refused on its mark, or answered as turned off with the one SISMEMBER that tells a store that pays again, measured
+ * with room). A store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS (offAfterDays) without a gap (its
+ * record read at least once a SHORT_LINK_OFF_KEEP_SECONDS, saying so each time) has its links turned off: answered
+ * with a static page the CDN keeps, its record read once a day at most, so from then on (4) is its lookups and that. Its
+ * worst month is its first: monthCeilingUsdCents for its record, site-wide, and instanceMonthCeilingUsdCents for its
+ * lookups on each instance, both priced in tests/short-link-open-cap.test.ts and held under these figures, which wait
+ * for the owner's approval (approvedByOwner: false).
+ */
+export const SHORT_LINK_UNPAID_COMPANY_COST = {
+  perHour: SHORT_LINK_UNPAID_PER_HOUR,
+  knownPerHour: SHORT_LINK_KNOWN_UNPAID_PER_HOUR,
+  readUnits: SHORT_LINK_UNPAID_READ_UNITS, missesPerAddress: SHORT_LINK_MISSES_PER_ADDRESS, missWindowMs: SHORT_LINK_MISS_WINDOW_MS,
+  restPerHour: SHORT_LINK_REST_UNPAID_PER_HOUR, restRefusalReads: 1, restMarkSets: 1, restMarkMs: SHORT_LINK_TIRED_MS, restUsedMarkMs: SHORT_LINK_TIRED_MAX_MS,
+  // Rule 23 (9 November 2026, the owner's decision 14): was storeReadsPerHour 3_600_000 / SHORT_LINK_TIRED_MS (60) with
+  // coldReadsPerLapse (360) every lapseEveryMs (two hours), US$81.49 a month, and lookupsPerInstancePerHour
+  // MAX_LINKS * (3_600_000 / SHORT_LINK_OWNER_MS) (100), US$17.09 a month an instance; not approved.
+  perRestingStore: {
+    storeReadsPerHour: SHORT_LINK_STORE_READS_PER_HOUR,
+    lookupsPerInstancePerHour: MAX_LINKS * (3_600_000 / SHORT_LINK_RESTING_OWNER_MS),
+    // Rule 23 (Claude 2's focal): was 17 commands; the open refused on its mark now sends 15 (its store's counts in the
+    // pipeline that reads its id, its place given back), the one answered off 16 (and one SISMEMBER): priced with room.
+    restingLookup: { waits: 6, commands: 19 },
+    offAfterDays: SHORT_LINK_OFF_AFTER_MS / 86_400_000,
+    monthCeilingUsdCents: 700,
+    instanceMonthCeilingUsdCents: 100,
+    // Added with Claude 2's focal re-review on #3330 @125a390e49: a store in the paying list, out of its own requests, may
+    // also read its record past its opens in flight, in a count of its own (SHORT_LINK_PAID_FLIGHT_PER_STORE at once,
+    // admitted only while its hour's unpaid reads are fewer than storeReadsPerHour), so it reads at most this many an
+    // hour without paying, priced under paidMonthCeilingUsdCents; never in a count another store fills.
+    paidStoreReadsPerHour: SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE,
+    paidMonthCeilingUsdCents: 2100,
+    // Added with Claude 2's focal on #3330 @39da7f44db (LEVE 2): a paying store's open refused past its paid reads in
+    // flight was counted in no hour. Each is now counted in a count of the store's own; at most this many an hour are
+    // refused one by one (paidRefusal's waits and commands, measured in tests/short-link-open-rest-cap5.test.ts with
+    // room), priced under paidRefusalMonthCeilingUsdCents. Changed with Claude 2's focal on #3330 @f6b792b9c3 (MEDIUM):
+    // past it the store pauses on its own (paidPauseMark), SHORT_LINK_TIRED_MS, never doubled, counted in no shared hour.
+    // The figure bounds refusals one by one only: within one burst at once, every open past the paid flight on an
+    // instance takes the refusal path before any mark exists (Claude 2's LEVE 2 on f6b792b9c3), as the resting paths do.
+    paidRefusalsPerHour: SHORT_LINK_PAID_REFUSALS_PER_HOUR,
+    paidRefusal: { waits: 8, commands: 25 },
+    paidRefusalMonthCeilingUsdCents: 500,
+    // An open of a paying store paused on its own, refused with nothing of its record read and counted in the store's
+    // own count of refusals (measured in tests/short-link-open-rest-cap6.test.ts, with room). Their number an hour is
+    // bounded on each instance by the minute's pause (each link once, then refused from memory) and one round trip's
+    // opens at once, not by a figure of its own across instances: the number of instances is unknown, never zero, so no
+    // month figure is claimed for it; awaiting the owner's approval with the rest.
+    paidPause: { waits: 6, commands: 19 },
+    approvedByOwner: false,
+  },
+  restingStores: null,
+  // Rule 23 (9 November 2026, the owner's decision 14): was 23 commands; the store's own count adds its INCR and EXPIRE to the
+  // pipeline that reads the store's id, and an open that does not read the record unpaid gives it back (DECR and EXPIRE).
+  // Rule 23 (Claude 2's focal on #3330 @99ac6f3858): was 24; the store's own counts are now five commands in that pipeline
+  // (its opens in flight, ZREMRANGEBYSCORE, ZADD, ZCARD, EXPIRE, and its hour's unpaid reads, GET), its place given back
+  // with a ZREM, and a read it could not pay for added to its hour (INCR, EXPIRE): 26 measured, priced with four more.
+  heaviestUnpaid: { waits: 12, commands: 30 },
+  perInstance: {
+    usedHourCountEveryMs: SHORT_LINK_USED_UP_PAUSE_MS, usedRestHourCountEveryMs: SHORT_LINK_USED_UP_PAUSE_MS, unknownCountEveryMs: SHORT_LINK_UNKNOWN_PAUSE_MS,
+  },
+  instances: null, reviewedMonthlyUsdCents: null, approvedCeiling: false,
+  model: "lib/short-link-open.ts", priced: "tests/short-link-open-cap.test.ts", checked: "2026-11-09",
+} as const;
 /**
  * The daily sweep's commands for one assignment door's file, on both its lists (lib/assignment.ts, sweepTaskUploads):
  * on each, its share of the list read, its ZREM, the doors' ZSCORE for a held name, the student's work read to keep a
@@ -1249,6 +1367,27 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 76, takeBackCommands: 22 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 /**
+ * The weekly and monthly numbers summary tried again (app/api/cron/weekly and monthly; lib/stats-report.ts sendPart,
+ * firstTried, tryPeriodAgain, firstTryOf; #3297, Claude 7's MEDIUM at 9c48904a3d). A summary that did not go in full
+ * (a post or the owner's email refused) lets its period go for a later run, at most SUMMARY_TRIES runs a store a
+ * period (a week or a month), and each try sends, for that store:
+ * - routeCommandsPerTry: the route's own Redis commands on its longest try, measured with a post and the owner's
+ *   email both refused (every part's mark taken, its first try's time kept with SET NX EX and GET, the mark let go,
+ *   the tries counted with INCR and EXPIRE, the claim let go with DEL, and on the week the GET of firstTryOf), on both
+ *   routes (tests/numbers-summary-retry-cost.test.ts: weekly 20, monthly 16): SUMMARY_TRY_COMMANDS_MOST;
+ * - emailsPerTry: at most one owner's email, through sendEmailPinned under `numbers-summary:<claim key>` (lib/email.ts),
+ *   a company email (EMAIL_SITES, meter company), let go for another try only while its first try is younger than
+ *   EMAIL_KEY_HOLDS_MS (23 h); the pinned sender's own commands (keepSender, moveToResend) and its one request a sender
+ *   attempt are the email's, measured for the same function in tests/paypal-receipt-once.test.ts (part H);
+ * - aiJobsPerPeriod: the weekly AI lead, one of the creator's own monthly AI writing jobs (lib/ai.ts, the plan's
+ *   priced AI line), is written only on a period's first try (firstTryOf), so a period tried again takes no more.
+ * NUMBERS_SUMMARY_RETRY_COMMANDS is the most one store's period sends in the route's own commands across its tries.
+ * A scheduled job, bounded by its schedule and SUMMARY_TRIES, a company cost like the other per-store cron work, not a
+ * plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
+ */
+export const NUMBERS_SUMMARY_RETRY = { triesPerPeriod: SUMMARY_TRIES, routeCommandsPerTry: SUMMARY_TRY_COMMANDS_MOST, emailsPerTry: 1, aiJobsPerPeriod: 1, emailKeyHoldsMs: EMAIL_KEY_HOLDS_MS } as const;
+export const NUMBERS_SUMMARY_RETRY_COMMANDS = NUMBERS_SUMMARY_RETRY.triesPerPeriod * NUMBERS_SUMMARY_RETRY.routeCommandsPerTry;
+/**
  * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
  * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts. First the
  * try is counted, in a step of its own: the INCR and EXPIREAT of the order's count of tries (countCommandsPerTry;
@@ -1718,6 +1857,16 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/purchase-email.ts", names: ["firstToGiveRoomBack"] },
       // A payment request's checkout is one order, admitted before Stripe's page opens and counted at its receipt (18 October 2026).
       { file: "lib/payment-requests.ts", names: ["admitOrders(store, 1, now, 1)"] },
+      // A checkout that holds a place is recorded as ours right after Stripe opens it, one SET with its expiry (holdCheckout, #3970),
+      // so only it can give the place back when it closes unpaid: inside that order's own work, which ORDER_COMPUTE prices.
+      { file: "lib/order-admission.ts", names: ["holdCheckout", "GETDEL"] },
+      { file: "lib/store-checkout.ts", names: ["holdCheckout(store, session.id, admitted)"] },
+      { file: "lib/cart-checkout.ts", names: ["holdCheckout(store, session.id, admitted)"] },
+      { file: "lib/payment-requests.ts", names: ["holdCheckout(store, session.id, admitted)"] },
+      // A paid Stripe recovery copy gives its original's place back only by taking that record, one GETDEL once, so a
+      // place given back at expiry is never given back twice (review of #4232, Claude 4 cloud X): inside that order's work.
+      { file: "lib/order-admission.ts", names: ["settlePaidCheckout", "recovered_from"] },
+      { file: "lib/purchase-email.ts", names: ["settlePaidCheckout(store, read.session, read.items ?? 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
@@ -1806,6 +1955,20 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
   },
   {
+    id: "come-back-unwritten-links",
+    feature: "A come-back offer whose link was not written as asked: the whole offer, from its first mark to the link taken back and the run's two marks let go, with nothing sent (Claude 7 and Claude 5 on #3889, 16 November 2026)",
+    monthlyUsd: () => COME_BACK_RUNS_PER_MONTH * UNWRITTEN_LINKS_PER_RUN * UNWRITTEN_LINK_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/winback-send.ts", names: ["UNWRITTEN_LINK_COMMANDS", "UNWRITTEN_LINKS_PER_RUN", "if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;", "releaseMark(onceKey(statsId, email, product.id), onceValue)", "releaseMark(sentKey(account, subId), claim)"] },
+      { file: "lib/claim-mark.ts", names: ["claimMark", "[\"GET\", key]"] },
+      { file: "lib/contacts.ts", names: ["round < 3", "CAS_HSET", "a contact write's read-back"] },
+      { file: "lib/erasure-index.ts", names: ["noteForErasure"] },
+      { file: "lib/redis-lock.ts", names: ["RELEASE"] },
+      { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
+    ],
+    basis: "At its worst a run's offer fails its link write after every step at its worst: UNWRITTEN_LINK_COMMANDS commands from its first mark to the end (both marks read back, the unsubscribe token lost twice and read back the third time, the link and its three erasure notes, the link's DEL and two RELEASE scripts at one plus their two calls). The first such failure stops the store's run (UNWRITTEN_LINKS_PER_RUN), and the offer is looked at again on the next run, one run a day (the plans cron at 09:00 UTC), COME_BACK_RUNS_PER_MONTH runs a month. A failure that sends nothing takes nothing from the store's email figure, so it is priced here, not in store-email. Held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.",
+  },
+  {
     id: "ai",
     feature: "AI: writing jobs and visitor answers, AI funnel drafts (#517) and every other AI route",
     monthlyUsd: (tier) => micro(AUTOMATIC_AI_STORE_MICRO_USD[tier]),
@@ -1857,11 +2020,17 @@ export const COST_LINES: CostLine[] = [
       // (MOVED_EMAIL_EXTRA_COMMANDS), and its invitation's reminder held for a missing postal address at most
       // MOVE_HELD_PASSES times (MOVED_EMAIL_COMMANDS_PRICED).
       const movedExtra = Math.max(a.movedEmails, monthlyEmails(tier)) * MOVED_EMAIL_COMMANDS_PRICED * COMMAND;
-      return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL + movedExtra;
+      // The five-minute job's passes over an import paused by its plan, every one its keeping allows for each start,
+      // never more than a billing month holds (Codex L on #3980): every PAUSED_IMPORT_CHECK_SECONDS one works on it, at its commands and
+      // bytes at the most, and every pass, that one included, reads its record.
+      const pausedChecks = Math.min(a.starts * PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH) * (PAUSED_IMPORT_PASS_COMMANDS * COMMAND + PAUSED_IMPORT_PASS_BYTES * DB_BYTE);
+      const pausedReads = Math.min(a.starts * PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH) * (PAUSED_IMPORT_SKIP_COMMANDS * COMMAND + PAUSED_IMPORT_SKIP_BYTES * DB_BYTE);
+      const paused = pausedChecks + pausedReads;
+      return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL + movedExtra + paused;
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
-      { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS", "MOVED_EMAIL_EXTRA_COMMANDS", "MOVE_HELD_PASSES", "MOVE_HELD_PASS_COMMANDS", "MOVE_HELD_RETRY_MS"] },
+      { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS", "MOVED_EMAIL_EXTRA_COMMANDS", "MOVE_HELD_PASSES", "MOVE_HELD_PASS_COMMANDS", "MOVE_HELD_RETRY_MS", "PAUSED_IMPORT_CHECK_SECONDS", "PAUSED_IMPORT_CHECKS", "PAUSED_IMPORT_CHECKS_MONTH", "PAUSED_IMPORT_PASSES", "PAUSED_IMPORT_PASSES_MONTH", "PAUSED_IMPORT_PASS_COMMANDS", "PAUSED_IMPORT_PASS_BYTES", "PAUSED_IMPORT_SKIP_COMMANDS", "PAUSED_IMPORT_SKIP_BYTES"] },
       // The store's deleted people, the list's rows, the stop mark and the stop link read and written before each email
       // to somebody brought over.
       { file: "lib/suppression.ts", names: ["suppressedAmong"] },
@@ -1873,7 +2042,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
       { file: "lib/move-members.ts", names: ["INVITE_UNLESS_ERASED", "INVITE_GONE_READ_COMMANDS = 1;", "local gone = redis.call(\"MGET\", unpack(marks))"] },
     ],
-    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). Before each email to somebody brought over, the store's deleted people and the creator's list's rows are read (one HMGET each a portion: suppressedAmong, leftListAmong), and before each member's email or reminder the stop mark is read and, once the day and the month have room for it, its stop link written with its three erasure notes (one link a store and address, the same on every email and every pass: lib/checkout-recovery.ts moveStopLink): MOVED_EMAIL_EXTRA_COMMANDS an email at the most, priced on every one of Store's own and, on Studio and Scale, on every monthly email (the most of those a month can be to people brought over); the mark a stop link may leave is taken in the store's data room with each invitation (RECOVER_TRACE_BYTES), and the link itself is a reminder email's key (tests/store-data-registry.ts). The same mark is written when a member's first email or reminder bounces for good or is marked as spam (lib/mail-health.ts heardFromSender, one SET in the sender's notice, a company cost, and the same room), so the reminder is not sent to them; the reminder reads it with the stop mark read already counted. Since 16 November 2026 (Claude 7, MEDIUM on #3473) the members script also reads, in one MGET, whether each row's membership was marked removed after the step read the catalog (INVITE_GONE_READ_COMMANDS, one command a step), and writes each new invitation's link and the chunk's reminders inside it, the same SETs and the one ZADD it wrote just after; the removal's mark is a studio request of its own (lib/move-members.ts dropProductInvites, the studio line).",
+    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). Before each email to somebody brought over, the store's deleted people and the creator's list's rows are read (one HMGET each a portion: suppressedAmong, leftListAmong), and before each member's email or reminder the stop mark is read and, once the day and the month have room for it, its stop link written with its three erasure notes (one link a store and address, the same on every email and every pass: lib/checkout-recovery.ts moveStopLink): MOVED_EMAIL_EXTRA_COMMANDS an email at the most, priced on every one of Store's own and, on Studio and Scale, on every monthly email (the most of those a month can be to people brought over); the mark a stop link may leave is taken in the store's data room with each invitation (RECOVER_TRACE_BYTES), and the link itself is a reminder email's key (tests/store-data-registry.ts). The same mark is written when a member's first email or reminder bounces for good or is marked as spam (lib/mail-health.ts heardFromSender, one SET in the sender's notice, a company cost, and the same room), so the reminder is not sent to them; the reminder reads it with the stop mark read already counted. Since 16 November 2026 (Claude 7, MEDIUM on #3473) the members script also reads, in one MGET, whether each row's membership was marked removed after the step read the catalog (INVITE_GONE_READ_COMMANDS, one command a step), and writes each new invitation's link and the chunk's reminders inside it, the same SETs and the one ZADD it wrote just after; the removal's mark is a studio request of its own (lib/move-members.ts dropProductInvites, the studio line). While the store's plan is not running or not paid, the five-minute job passes over an import that waits (newCostCode) until its keeping runs out (IMPORT_KEEP_SECONDS): every PAUSED_IMPORT_CHECK_SECONDS (two hours) one pass works on it (PAUSED_IMPORT_CHECKS for each start, never more than a billing month's PAUSED_IMPORT_CHECKS_MONTH), priced at PAUSED_IMPORT_PASS_COMMANDS and PAUSED_IMPORT_PASS_BYTES (the store's record at its ceiling), and every pass reads its record (PAUSED_IMPORT_PASSES for each start, never more than PAUSED_IMPORT_PASSES_MONTH), priced at PAUSED_IMPORT_SKIP_COMMANDS and PAUSED_IMPORT_SKIP_BYTES, as measured in tests/import-paused.test.ts.",
   },
   {
     id: "clickfunnels",
@@ -2074,6 +2243,14 @@ export const COST_LINES: CostLine[] = [
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
       { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
+      // A short link that opens takes one after its link and store are read, and comes off the site's hour of unpaid opens
+      // (Claude 5, 7 November 2026; SHORT_LINK_OPEN_READ in tests/plan-cost-registry.test.ts).
+      { file: "app/l/[code]/route.ts", names: ["admitShortLinkOpen(code,", "payShortLinkOpen(code, link, admission)"] },
+      { file: "lib/short-link-open.ts", names: ["takePublicRequestRefusal(store, \"public\", now, SHORT_LINK_OPEN_UNITS)", "[\"DECR\", admission.key], [\"EXPIRE\", admission.key, SHORT_LINK_UNPAID_KEY_SECONDS]"] },
+      { file: "lib/short-link-open-rules.ts", names: ["SHORT_LINK_OPEN_UNITS", "SHORT_LINK_COUNT_COMMANDS", "SHORT_LINK_READ_COMMANDS", "SHORT_LINK_REST_COMMANDS", "SHORT_LINK_REFUND_COMMANDS", "SHORT_LINK_OPENS_PER_ADDRESS", "SHORT_LINK_UNPAID_READ_UNITS", "SHORT_LINK_MISSES_PER_ADDRESS"] },
+      // A funnel's own address (no-store) takes one before its funnels are read and a collection's units before its product
+      // steps' listings (Claude 5, 7 November 2026); MAX_FUNNEL_PAGES held inside MAX_COLLECTION_PRODUCTS in tests/plan-cost-registry.test.ts.
+      { file: "app/[handle]/go/[funnel]/route.ts", names: ["takePublicRequest(store, \"public\", now)", "takePublicRequest(store, \"public\", now, collectionUnits(productSteps))"] },
       // The picture its shared link unfolds into is paid for the same way, CERTIFICATE_CARD_UNITS as many as the PDF and lighter than it
       // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).
       { file: "app/[handle]/certificate/[id]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_CARD_UNITS - 1)"] },
@@ -2360,7 +2537,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "head(pathname)", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
       // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
-      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path)", "releaseTaskHold(file.path)"] },
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path, \"site_cleanup\")", "releaseTaskHold(file.path)"] },
       // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
       // a listing it may take back), after its buyer action is taken (9 November 2026).
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
@@ -2872,6 +3049,12 @@ export const NOT_A_COST: Record<string, string> = {
   FORGET_TRIES: "lib/store-forget-retry.ts permits eight total attempts per deleted store in one round in its line, including the original deletion. Up to seven later company attempts can repeat assistant-note cleanup. The closing walk's admission of a deleted store (lib/closed-store-data.ts admitDeleted) makes one more attempt and, when it fails while the line no longer holds that store, starts another round; the number of rounds is bounded only by the walk's admissions, one a run while its replies are not confirmed. This bounded work count is not a funded global case/retention or read-byte ceiling; costs remain unknown, never zero.",
   FORGET_PER_RUN: "lib/store-forget-retry.ts limits work to twenty-five stores per daily closing run, but first reads the entire active queue with HGETALL. The synthetic 2,000-row expired-deadline control produces a 166,893-byte JSON-serialized stub reply (not RESP, wire or billed bytes) and does no cleanup work. Twenty-five is not a queue-read byte bound. Complete queue, Lua, runtime, retention and company funding remain unknown; no finite fixed-cost or plan margin certification follows from this classification.",
   STATUS_VIEWS_PER_HOUR: "Requests in an hour, for the whole site, that read the runs on the public status page (247 [SP4] unit 2, lib/status-page.ts): not a plan's cost, since the page belongs to no store; a company cost under MR item 2, every kind of request priced at the rates of lib/spend-cost-table.ts and tests/traffic-cost.ts, held by tests/status-page.test.ts.",
+  SHORT_LINK_UNPAID_PER_HOUR: "Short links opened in an hour that no store pays for and that read a found link's store (a store gone, a count that could not be made, a connection over its share; lib/short-link-open.ts), in one count every server instance shares, kept in units since 9 November 2026 (SHORT_LINK_UNPAID_READ_UNITS each, a code nobody has one unit, counted before it is looked up; a resting store's open never lands there): not a plan's cost, since no store is known or pays; a company cost under MR item 2, held as SHORT_LINK_UNPAID_COMPANY_COST with the resting hour beside it (SHORT_LINK_REST_UNPAID_PER_HOUR) and what each instance adds beyond them (a count a minute while either hour is used or a count is unreadable), the number of instances unknown, never zero (reviewed ceiling unknown, never zero; not a line of lib/llc-fixed-costs.ts, so CURRENT_COMMERCIAL_TERMS does not change), its worst month priced at every Redis wait's timeout in tests/short-link-open-cap.test.ts. A link that opens is its store's public request (public-requests, SHORT_LINK_OPEN_READ) and comes off the hour.",
+  SHORT_LINK_STORE_READS_PER_HOUR: "Opens of one store's links an hour that may read its record without the store paying for them (lib/short-link-open.ts, the owner's decision 14 on #3330, 9 November 2026), in two counts of that store's own every server instance shares, taken before the read, the first day and in a cold burst alike: its reads this hour it did not pay for, and its opens in flight, each place lapsing SHORT_LINK_FLIGHT_MS after it was taken; a store in the list of stores that pay with fewer unpaid reads than the figure this hour is let past their sum, each read past it taking first a place among that store's own paid reads in flight (SHORT_LINK_PAID_FLIGHT_PER_STORE, lapsing SHORT_LINK_FLIGHT_MS later) and giving it back once the store pays for it (Claude 2's focal on #3330 and its re-reviews), never in a count another store fills: a paying store out of its own requests reads at most paidStoreReadsPerHour an hour unpaid. Not a plan's cost, since the store did not pay for those reads; a company cost under MR item 2, per resting store, the number of resting stores unknown, never zero: SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore, priced in tests/short-link-open-cap.test.ts (worst month under monthCeilingUsdCents, awaiting the owner's approval).",
+  SHORT_LINK_PAID_FLIGHT_PER_STORE: "A paying store's reads of its record past its opens in flight that may be in flight at once (lib/short-link-open.ts, Claude 2's focal re-review on #3330 @125a390e49), in a count of that store's own every server instance shares, each place lapsing SHORT_LINK_FLIGHT_MS after it was taken and given back once the store pays for the read, so a paying store with room opens SHORT_LINK_STORE_READS_PER_HOUR + this many at once whatever other stores do. Admitted only while the store's hour holds fewer than SHORT_LINK_STORE_READS_PER_HOUR unpaid reads, so a paying store that has just run out of its own requests reads at most both figures an hour unpaid: not a plan's cost, since the store did not pay for those reads; a company cost under MR item 2, per such store, their number unknown, never zero: SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.paidStoreReadsPerHour, priced in tests/short-link-open-cap.test.ts under paidMonthCeilingUsdCents, awaiting the owner's approval.",
+  SHORT_LINK_PAID_REFUSALS_PER_HOUR: "A paying store's opens refused past its paid reads in flight (SHORT_LINK_PAID_FLIGHT_PER_STORE) that may be refused one by one in an hour (lib/short-link-open.ts, Claude 2's focal on #3330 @39da7f44db, LEVE 2): each counted in a count of that store's own every server instance shares, with the give-back of its places; past it, or a count that cannot be read, the store pauses on its own (paidPauseMark, Claude 2's focal on #3330 @f6b792b9c3, MEDIUM): SHORT_LINK_TIRED_MS, its mark written where none is and kept so in the instance's memory, never doubled and counted in no shared hour, each open refused on it counted in the store's own count (SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.paidPause, its number across instances unknown, never zero). The figure bounds refusals one by one: within one burst at once, every open past the paid flight on an instance takes the refusal path before any mark exists. Not a plan's cost, since the store did not pay for those refusals; a company cost under MR item 2, per such store, their number unknown, never zero: SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.paidRefusalsPerHour, priced in tests/short-link-open-cap.test.ts under paidRefusalMonthCeilingUsdCents, awaiting the owner's approval.",
+  SHORT_LINK_KNOWN_UNPAID_PER_HOUR: "Opens past SHORT_LINK_UNPAID_PER_HOUR, in the same shared count, that may still read while the hour is used, only for a link its store paid for on that instance a moment ago (lib/short-link-open.ts): one its store pays for is given back to the count, one that ends unpaid stays counted, so the shared count's unpaid reads are at most the two figures together an hour; not a plan's cost, since the store did not pay for it; a company cost under MR item 2, held in SHORT_LINK_UNPAID_COMPANY_COST.knownPerHour and priced in tests/short-link-open-cap.test.ts.",
+  SHORT_LINK_REST_UNPAID_PER_HOUR: "Opens in an hour of stores over their own requests, in a second count every server instance shares, apart from SHORT_LINK_UNPAID_PER_HOUR (lib/short-link-open.ts): the first open of a link whose store is found resting, moved there out of the shared count once its store is known, and a store asked again whether it still rests, counted there before it is read; each one read and at most one SET of the store's resting mark. Past it (since 9 November 2026, Claude 2's first cost review) a first one is refused, never counted in the shared hour, and the store's mark is kept SHORT_LINK_TIRED_MAX_MS; a store due to be asked again rests in the instance's memory a minute, nothing sent; so a store over its own requests never uses the hour every other store's links need. What resting stores read past it is held per resting store and per instance, their numbers unknown, never zero (SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore). Not a plan's cost, since the store did not pay; a company cost under MR item 2, site-wide, held in SHORT_LINK_UNPAID_COMPANY_COST.restPerHour and priced in tests/short-link-open-cap.test.ts (reviewed ceiling unknown, never zero, not approved).",
   STATUS_COUNTS_PER_ADDRESS_PER_HOUR: "Times one address may make one server instance count a request on the public status page in an hour (247 [SP4] unit 2, lib/status-page.ts, lib/local-limit.ts): a pace that only refuses, held in memory at no cost, so one client cannot use up the hour's reads; the page's cost is the company's, priced in tests/status-page.test.ts.",
   REPLY_FILE_LIMITS: "The kinds and the largest size of one file a creator may attach to a reply to a buyer's submission (750 [CD1] unit 1, lib/submission-rules.ts, pure rules with no I/O): not an allowance and not metered. The file's bytes are reserved against the plan's own storage before its upload is authorized (preauthorizeSubmission, the same arithmetic as lib/storage-reservations.ts), and its upload starts and requests come from the monthly upload allowance (lib/upload-budget-policy.ts), both already priced per plan. Nothing reads, stores or sends anything in unit 1; the routes, the email for each reply and the video transfer when a file is watched get their cost lines with the units that add them, and that transfer is unmeasured, unknown, never zero.",
   STORE_FORGET_MONTH_READ_COMMANDS: "The unwired monthly owner-report reader in lib/store-forget-retry.ts sends exactly four Redis commands per invocation. It has no production caller today; before it is wired, its frequency and non-zero command cost must be included in the reviewed company fixed-cost ceiling. Unknown funding stays unknown, never zero, and this is not a store plan allowance.",
@@ -2895,7 +3078,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_DOORS_PER_HOUR: "A pace on the studio's picture doors a store opens in an hour (lib/picture-door.ts, pictureDoorHour; rule 24 inventory A1), counted before the file store is asked or anything is signed: it only refuses, and each door it lets through has already taken a studio request (line studio). What a door writes is not priced by it: a picture never put on anything stays in the file store, at most PICTURE_DOOR_MAX fresh ones a store at a time, each at most MAX_IMAGE_BYTES (lib/product-image.ts), and is not deleted once its note is a day old. That retained storage and the file store's per-write charge have no line yet, so they are not certified, never zero.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   LAUNCH_HOLD_SECONDS: "How long a waitlist launch may wait, from its start, while its store is switched off after notices (lib/waitlist.ts, runLaunches and holdLaunch): a scheduled job, bounded by its schedule (a company fixed cost), adding no email (nothing is reserved or sent while held). Each held run takes, beyond the GET of the launch's record and the store read it already made, one pipeline of two EXPIRE (its send list and its record), read exactly; once the bound passes (or a renewal reads in another shape in the hold's last week), one LRANGE of the addresses already handled and one pipeline of SET, HDEL, DEL and SREM, once a launch. While a launch sends, every batch after a run's first reads the store again (storeForHandle, two GET), so a switch-off stops the rest of the run: at most one read per LAUNCH_BATCH emails, inside the same deadline; each batch's record write renews its send list in the same pipeline (one EXPIRE per LAUNCH_BATCH emails), so the list never lapses while the record lives. Like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
-  MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones on a store with reminders or a list, never the open ones. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
+  MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones (of the last OPEN_HOURS, 25 hours) on a store with reminders, a list or counted orders, never the open ones. On a store whose orders are counted, each page of expired checkouts also gives back the order place of each one that closed unpaid and that we recorded as holding one when it opened (lib/order-admission.ts, releaseExpiredHolds and holdCheckout, #3970): one MGET a page when any row names an hour still in the window, then one GETDEL and one EVAL (SETTLE_ADMITTED) once a checkout whose record matches, never again for it (the record, nl:orders:held:, is taken; tests/store-data-registry.ts); so at most 3 store commands a sweep for the pages plus 2 a checkout once, besides the walk keys below. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   PLANS_PER_RUN: "Payment plans the daily plans job tries in one run (lib/plans.ts, settlePlans; app/api/cron/plans/route.ts): two read commands a run and, for each plan tried, at most four Redis commands of its own and three calls to the creator's Stripe account (eleven for a plan past its own end with payments to give back: its paid invoices from the end on, the balance, and for at most three of them the refunds made and the refund, lib/plan-late-refunds.ts), inside a 25-second share of the run (PLAN_SETTLE_RUN, held by tests/payment-plan-stuck.test.ts). A plan its account refuses is tried at growing intervals for PLAN_GIVE_UP_DAYS, then once every PLAN_STUCK_RETRY_DAYS until the account answers (never let go), its creator emailed once (tellCommandsPerPlan; the email is the store's own, from its email figure); a payment after its end owed back for PLAN_OWED_TELL_DAYS tells its creator once the same way, and each buyer whose late payment was given back is emailed once from the store's transactional figure (lateTellCommandsPerPlan, at most lateTellsPerTry a try, lib/plan-late-notice.ts); a failure not its account's is tried at the next run, every try inside the limit. A scheduled job that keeps buyers from being charged past their last payment, bounded by its schedule and the limit: a company fixed cost, not a plan's allowance; Stripe bills no API call, and its Redis commands are not yet a line of lib/llc-fixed-costs.ts, so they are not certified, never zero.",
   REFUND_WATCH_BATCH: "Paid PayPal orders the refund watch looks at for a store in one run of the five-minute job (lib/paypal-sales.ts, watchPayPal; C4-13): one ZRANGEBYSCORE of the store's watch list a run, of PAYPAL_WATCH_BATCH orders (the one batch, priced as a read in NOT_A_COST.PAYPAL_WATCH_BATCH), then for each due order one GET of its capture at PayPal (no dated source here gives PayPal's price per API call: an open gap, never zero), the paid record's GET and one write of the list, each order no more often than nextLook (hourly the first week, then every six hours, then daily; daily until the paid record ends, 400 days, only for a status not known here) (PAYPAL_REFUND_WATCH, held by tests/paypal-reversed-access.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like HAND_OVER_BATCH, not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   PENDING_SWEEP_BATCH: "Pending PayPal orders the sweep asks PayPal about for a store in one run of the five-minute job (lib/paypal-sales.ts, watchPayPal; Claude 6's second money review of #3392): one ZRANGEBYSCORE of the store's pending list a run, of PAYPAL_WATCH_BATCH orders (the one batch, priced as a read in NOT_A_COST.PAYPAL_WATCH_BATCH), then for each order the opened record's and the paid record's GET, one GET of the order at PayPal (no dated source here gives PayPal's price per API call: an open gap, never zero) and at most one write of the list, ZREM or ZADD XX to its back; each order at most 30 days, its opened record's life (PAYPAL_PENDING_SWEEP, held by tests/paypal-reversed-access.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like REFUND_WATCH_BATCH, not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
@@ -2935,6 +3118,8 @@ export const NOT_A_COST: Record<string, string> = {
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   BACKUP_FILES_PAGES_PER_STORE: "The provider pages one complete listing of one source of one store may take in the backup files route (273 [BK1] files part 1, lib/backup-files-contract.ts, lib/backup-files-source.ts): a bound that only refuses (a store past it is answered over_bound, never complete), not a figure of its own. What the route spends is a company cost (the company's backup, 100% Marktmorgen under FX275), priced by backupFilesRouteWorstMonth (lib/backup-files-source.ts, held by tests/backup-files-cost.test.ts; Claude 7's MÉDIO on #3313): each admitted page, counted by takeDayPage against the review's maxPagesPerDay a source a UTC day before any provider call, at BACKUP_FILES_PAGE_MICRO_USD (1,548, the dated review's ceiling per call of docs/backup-costs-2026-11-08.md section 5b: the function held its whole maxDuration at 2 GB on CPU in the dearest region, a full page of answer as Fast Origin Transfer and Fast Data Transfer with its CDN Request, the two Upstash commands of the count and a page of Upstash bandwidth, one listing and one Blob signing token as Advanced Operations, no free quota), for each source on, and the one call a source a day the Worker may be refused past it (BACKUP_FILES_DAY_CEILING_REFUSALS, lib/backup-files-contract.ts: the Worker stops that source for the rest of the UTC day; priced at a whole page; Codex N1's LOW 1 on #3313), 32 UTC days a month, plus R2's rounding block and 10% room; 0 while BACKUP_FILES_ROUTE_REVIEW (lib/backup-files-review.ts) is null, since the route answers 404 before any command; unknown (null), never zero, if Bunny Stream, whose listing price is not read, is turned on. At a review of 40 pages a day that is 9,418,148 micro-dollars, $9.42 a month. It joins LLC_FIXED_COST_IDS (lib/llc-fixed-costs.ts) once #3481, which changes that same line, is in (rule 3: one pull request at a time on it); until then the owner's review of the route is what admits any of it, and nothing calls the route.",
   BACKUP_FILES_OBJECTS_PER_MONTH: "The objects the backup Worker may copy for one store in a month, all sources together (273 [BK1] files part 1, item 8, lib/backup-files-contract.ts): the Worker's own ceiling before each copy, at the 10,000 its R2 operations are priced at in docs/backup-costs-2026-11-08.md, section 5b. Nothing in this code spends them: the Worker that copies is not built (only its contract is), and its per-plan line comes with it, from that section; the route that lists for it is priced by backupFilesRouteWorstMonth (BACKUP_FILES_PAGES_PER_STORE).",
+  BACKUP_DELETION_RECORDS_PER_MONTH: "The deletion records one store may have written in a UTC month for the backup (273 [BK1] files part 3, lib/backup-deletions.ts): a ceiling counted before each record (SET NX EX and INCRBY), past which a deletion is still done with no record, never a figure of its own. Each record is one RPUSH entry of at most RECORD_BYTES_MOST bytes (enforced before it is written), kept at most 15 days and read once by the route; 4 commands a deleteFile call for each store it names, 2 past the ceiling. Off behind its own review, not the route's: nothing is written while BACKUP_FILES_ROUTE_REVIEW or BACKUP_DELETION_RECORDS_REVIEW (lib/backup-files-review.ts) is null, so turning the route on never turns these writes on. Their per-store line (these commands and bytes, and the calls past the ceiling, bounded only by the deletions a plan lets a store make, docs/backup-costs-2026-11-08.md 5b) must become a line of each plan's worst month before the owner fills that review; until then it is unknown, never zero.",
+  BACKUP_STORES_READS_PER_PAGE: "The records one stores page of the backup files route reads at the most (273 [BK1] files part 3, lib/backup-stores.ts): a bound that only refuses (a SCAN naming more fails the page, before any record is read), not a figure of its own. With BACKUP_STORES_PAGE_COMMANDS and BACKUP_STORES_PAGE_BYTES it prices the worst stores page at backupStoresPageWorstMicroUsd (Upstash's paid commands and transfer, lib/spend-cost-table.ts), a company cost of the backup counted against the review's own maxStoresPagesPerDay, never the listings' figure. Off: the route answers 404 while BACKUP_FILES_ROUTE_REVIEW is null; the month (at most 31 times that figure times that price) must be a line of the company's backup cost before the owner's review; until then it is unknown, never zero.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",
   UPDATE_END_NOTICE_TRIES: "Tries, a day apart, of the one company email that tells a creator a product update which waited to the end of its 60 days was not sent to everyone (lib/product-updates.ts, tellEnded; Claude 7 on #3403, MEDIUM 1): at most UPDATE_END_NOTICE_TRIES emails on the company meter for each such send, under one idempotency key, and a send waits only while its store is switched off or its plan has no email, so at most one a send. Like the mail job's other company notices, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   UPDATE_HELD_LOOK_SECONDS: "How long a product update held while its store is switched off rests between looks (lib/product-updates.ts, hold and advanceUpdates; Claude 7 on #3403, MEDIUM 2): out of the five-minute queue (nl:updq) into nl:updheld, so a held send is read once a day, not every run: at most 60 looks in its 60 days (and UPDATE_END_NOTICE_TRIES - 1 more while its creator's notice is retried), each the lock's claim and release, the send's GET, its store's read and one SET, then one ZADD and, once it is confirmed, one SREM (Codex V on #3403: the source is kept until the destination is confirmed), instead of the 17,280 runs of a send polled every five minutes; each run of the mail job adds one ZRANGEBYSCORE of the held set and, when any are due, one SADD and, once it is confirmed, one ZREM. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",

@@ -14,7 +14,7 @@ import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
 import { rememberPlan } from "@/lib/plan-remember";
 import { currentMeta } from "@/lib/tier-rules";
@@ -63,6 +63,7 @@ import { imageUrl } from "@/lib/product-image";
 import { readMoves } from "@/lib/call-records";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { isLive, membershipStatus, soldAMembership } from "@/lib/membership-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { purchaseRefunded } from "@/lib/refunds";
 import { BUMP_KEYS, type BumpKey, MIN_BUNDLE_ITEMS, bumpsFromMeta, bundleFromMeta, bundleMeta, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf } from "@/lib/bundles";
@@ -984,6 +985,8 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
+  // Our record that this checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+  await holdCheckout(store, session.id, admitted);
   // A payment plan, or a membership that ends after a set number of payments, is written down before the buyer
   // leaves, so the plans job gives it its end whether or not they come back from paying: here, whichever door opened
   // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
@@ -1229,6 +1232,8 @@ export async function readOrder(
   let membership: "live" | "ended" | null = null;
   if (soldAMembership(product, { mode: session.mode, metadata })) {
     try {
+      // A paid subscription checkout always has its subscription: none at all is an answer not understood (rule 24).
+      if (session.subscription === null || session.subscription === undefined) throw new UnknownReplyError("a checkout's membership");
       membership = isLive(await membershipStatus(store, session.subscription)) ? "live" : "ended";
     } catch (error) {
       console.error("reading a membership failed", error);

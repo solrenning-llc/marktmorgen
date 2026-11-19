@@ -520,8 +520,11 @@ export async function assistantMissedExact(store: Store, limit = ASSISTANT_MISSE
       value = typeof row === "string" ? (JSON.parse(row) as { q?: unknown; at?: unknown }) : null;
     } catch {}
     // Read by the shape it was written in (a non-empty question and a time), never by today's length bounds, which
-    // may change after the row was kept (Claude 2 on #3731, LEVE 1); then cleaned for the prompt as before.
-    const question = typeof value?.q === "string" ? value.q.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_ASSISTANT_QUESTION) : "";
+    // may change after the row was kept (Claude 2 on #3731, LEVE 1); then cleaned for the prompt as before. A row may
+    // have been kept before the writer took contact details out, so they are taken out here too, as the studio's own
+    // reader does (forAi; Codex P and X4 on #3731, MEDIUM).
+    const typed = typeof value?.q === "string" ? value.q.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "";
+    const question = forAi(typed, MAX_ASSISTANT_QUESTION);
     if (!question || typeof value?.at !== "number" || !Number.isSafeInteger(value.at) || value.at <= 0) throw new UnknownReplyError("an unanswered question of the assistant");
     return { question, at: value.at };
   });

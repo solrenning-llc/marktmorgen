@@ -198,6 +198,30 @@ try {
   await forgotten();
   is("passed or out of tries (final): the draft is gone once the lesson opens", await kept(), null);
 
+  // Review of #4324 (MEDIUM 11): two tabs on the device's draft. Each writes only the questions answered in it over
+  // what is kept, and a tab waiting on "Restore" offers what another tab kept since.
+  await tab.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+  const second = await context.newPage();
+  second.setDefaultTimeout(5000);
+  second.on("pageerror", (error) => errors.push(error.message));
+  await open(ada);
+  await tab.getByLabel(DEVICE).check();
+  await tab.getByLabel("B", { exact: true }).check();
+  await second.goto("https://quiz.test/");
+  await second.addScriptTag({ content: ada });
+  await second.getByRole("button", { name: "Start over" }).waitFor();
+  await second.getByLabel("D", { exact: true }).check();
+  is("a second tab's answer joins the first tab's on the device, by question", JSON.parse((await onDevice()) ?? "null")?.answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [1] });
+  await tab.getByLabel("A", { exact: true }).check();
+  is("and the first tab, answering again, keeps the second tab's answer", JSON.parse((await onDevice()) ?? "null")?.answers, { q_aaaaaaaaaaa1: [0], q_aaaaaaaaaaa2: [1] });
+  await open(ada);
+  await ask().waitFor();
+  await second.getByLabel("C", { exact: true }).check();
+  await restore();
+  is("a tab waiting on Restore gets what the other tab kept since", await picked(), [true, false, true, true]);
+  await second.close();
+  await tab.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+
   await context.addInitScript(() => {
     Object.defineProperty(window, "localStorage", { get() { throw new Error("denied"); } });
     Object.defineProperty(window, "sessionStorage", { get() { throw new Error("denied"); } });

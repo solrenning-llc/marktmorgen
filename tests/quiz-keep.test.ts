@@ -238,6 +238,23 @@ part("Kept for this tab only, unless the student chooses the device (review of #
   is("and the register", PERSON_DATA.some((r) => r.file === "lib/quiz-keep-rules.ts" && /this tab/.test(r.what) && /off by default/.test(r.what)), true);
 }
 
+part("Two tabs on the device's draft: merged by question, never one tab's answers lost (review of #4324, MEDIUM 11)");
+{
+  // In a tab's own session storage nothing is shared. On the device, the last tab to write used to win, and could wipe
+  // the answers given in another tab. A tab now writes only the questions answered in it over what is kept.
+  const merge = (keepRules as unknown as Record<string, unknown>).mergeDrafts as ((stored: string | null, mine: keepRules.QuizDraft, touched: readonly string[], now: number) => keepRules.QuizDraft) | undefined;
+  is("the merge exists", typeof merge, "function");
+  if (merge) {
+    const other = { at: NOW - 30_000, shown, tries: 0, version: "v1", answers: { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] } };
+    const mine = { at: NOW, shown, tries: 0, version: "v1", answers: { q_aaaaaaaaaaa1: [], q_aaaaaaaaaaa2: [0] } };
+    is("the other tab's answer stays, this tab's is added", merge(JSON.stringify(other), mine, ["q_aaaaaaaaaaa2"], NOW).answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [0] });
+    is("a question answered in this tab is this tab's", merge(JSON.stringify(other), mine, ["q_aaaaaaaaaaa1", "q_aaaaaaaaaaa2"], NOW).answers, { q_aaaaaaaaaaa1: [], q_aaaaaaaaaaa2: [0] });
+    is("a kept draft for other questions, another count or another quiz is not merged in", [merge(JSON.stringify({ ...other, shown: "x" }), mine, ["q_aaaaaaaaaaa2"], NOW).answers, merge(JSON.stringify({ ...other, tries: 1 }), mine, ["q_aaaaaaaaaaa2"], NOW).answers, merge(JSON.stringify({ ...other, version: "v2" }), mine, ["q_aaaaaaaaaaa2"], NOW).answers], [mine.answers, mine.answers, mine.answers]);
+    is("nothing kept: this tab's draft as it is", merge(null, mine, ["q_aaaaaaaaaaa2"], NOW), mine);
+  }
+  is("the keeping listens for another tab's writes", /addEventListener\("storage"/.test(readFileSync("components/quiz-keep.tsx", "utf8")), true);
+}
+
 part("Said in every language, and in the privacy policy");
 {
   const keys = ["quizKeptBack", "quizKeptClear", "quizKeptCleared", "quizKeepDevice", "quizKeepDeviceHint", "quizKeptAsk", "quizKeptRestore", "quizKeptStartOver", "quizKeptUndo", "quizKeptUndone"] as const;

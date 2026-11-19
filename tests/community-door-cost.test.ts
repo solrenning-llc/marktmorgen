@@ -6,7 +6,7 @@
  * the sweep's own commands for it.
  */
 import * as registry from "./plan-cost-registry";
-import { BLOB_SIMPLE_OPERATION, COMMAND, COMMUNITY_DOOR_COST, UNIT_COST } from "./plan-cost-registry";
+import { BLOB_SIMPLE_OP, BLOB_SIMPLE_OPERATION, COMMAND, COMMUNITY_DOOR_COST, UNIT_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 /** Read by name so the test also runs (and fails) where the figure is missing. */
@@ -15,6 +15,9 @@ const sweepCommands = Number((registry as Record<string, unknown>).COMMUNITY_SWE
 
 part("The community picture door is inside one buyer action");
 is("the head is priced, never zero", BLOB_SIMPLE_OPERATION > 0, true);
+// The store's Blob region is not reviewed: every door prices a Simple Operation at the dearest regional rate, gru1,
+// US$ 0.56 a million, as the listing line does (Codex N1's LOW on #2848).
+is("a Simple Operation is priced at the dearest regional rate (gru1, US$ 0.56 a million)", BLOB_SIMPLE_OPERATION, BLOB_SIMPLE_OP);
 is("an Advanced Operation is priced, never zero, and dearer than a simple one", advanced > BLOB_SIMPLE_OPERATION, true);
 is("the sweep's commands for one door are counted", sweepCommands >= 4, true);
 is(

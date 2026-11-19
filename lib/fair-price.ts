@@ -44,7 +44,7 @@
  * Browser-safe: the studio shows the same numbers the store charges.
  */
 import { PRICE_LEVELS } from "./fair-price-data";
-import { type SaleCandidate, saleable } from "./store-sale";
+import { type SaleCandidate, saleable, salePrice } from "./store-sale";
 
 export type FairPricing = {
   on: boolean;
@@ -61,6 +61,12 @@ export type FairPricing = {
   /** Every product it can cover, or only those in `products`. */
   all: boolean;
   products: string[];
+  /**
+   * The smallest amount the store's currency charges (lib/money.ts, minCharge), set when the store is read
+   * (lib/store.ts), set again from the currency on every read; a stored copy is ignored. A product the fair price
+   * would take below it gets none (DISC-S-1).
+   */
+  floorCents?: number;
 };
 
 export const FAIR_MAX_CHOICES = [20, 30, 40, 50, 60] as const;
@@ -114,10 +120,23 @@ export function parseFair(raw: unknown): FairPricing {
     levels,
     // A setting saved before products could be picked covered every one.
     all: value.all !== false,
-    products: Array.isArray(value.products)
-      ? [...new Set(value.products.filter((p): p is string => typeof p === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p)))].slice(0, MAX_FAIR_PRODUCTS)
-      : [],
+    products: fairProductIds(value.products).slice(0, MAX_FAIR_PRODUCTS),
   };
+}
+
+/** The distinct product ids of the right shape in a setting's `products`, as parseFair reads them; [] for no list. */
+function fairProductIds(raw: unknown): string[] {
+  return Array.isArray(raw) ? [...new Set(raw.filter((p): p is string => typeof p === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p)))] : [];
+}
+
+/**
+ * Whether a setting asks for more products than MAX_FAIR_PRODUCTS, counted as parseFair keeps them (repeats and ids
+ * of another shape do not count). Such a setting is refused whole, never saved cut to the first ones
+ * (app/api/store/fair/route.ts, "fair_products"; Claude 1's order C1-20261117-1449-c6c3-2).
+ */
+export function fairProductsOverCap(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  return fairProductIds((raw as Record<string, unknown>).products).length > MAX_FAIR_PRODUCTS;
 }
 
 /** A two-letter country code as a request carries it, or "". */
@@ -147,7 +166,10 @@ export function storeCountryOff(setting: FairPricing | undefined, country: strin
 export function fairOff(setting: FairPricing | undefined, product: SaleCandidate, country: string): number {
   if (!saleable(product)) return 0;
   if (setting && !setting.all && !setting.products.includes(product.id)) return 0;
-  return storeCountryOff(setting, country);
+  const off = storeCountryOff(setting, country);
+  // Never below what the currency can be charged, as a sale (lib/store-sale.ts, saleOff; DISC-S-1).
+  if (off > 0 && setting?.floorCents !== undefined && salePrice(product.priceCents, off) < setting.floorCents) return 0;
+  return off;
 }
 
 /** Every country a creator can set a level for, by name. */

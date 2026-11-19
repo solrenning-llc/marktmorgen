@@ -40,6 +40,8 @@ let refuseNext = false;
 /** When true, PayPal refuses every token request (it is down), so the settling has no way to read a batch. */
 let tokenDown = false;
 const batches = new Map<string, string>();
+/** The receiver each POSTed item was sent to, by sender_item_id. */
+const sentTo = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -55,6 +57,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return json({ name: "INSUFFICIENT_FUNDS", message: "Sender does not have sufficient funds." }, 422);
     }
     const key = String((init.headers as Record<string, string>)["PayPal-Request-Id"] ?? "");
+    // As PayPal does, the read gives back each item's receiver (#4657: a line is booked only for its own receiver).
+    for (const item of (JSON.parse(String(init.body)) as { items: { sender_item_id: string; receiver: string }[] }).items) sentTo.set(item.sender_item_id, item.receiver);
     if (!batches.has(key)) batches.set(key, `BATCH${batches.size + 1}WEX`);
     return json({ batch_header: { payout_batch_id: batches.get(key), batch_status: "PENDING" } }, 201);
   }
@@ -62,7 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (read && [...batches.values()].includes(read[1])) {
     return json({
       batch_header: { batch_status: "SUCCESS" },
-      items: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"].map((aff) => ({ payout_item: { sender_item_id: aff }, transaction_status: "SUCCESS", payout_item_id: `ITEM${read[1]}${aff.slice(0, 4).toUpperCase()}` })),
+      items: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"].map((aff) => ({ payout_item: { sender_item_id: aff, receiver: sentTo.get(aff) }, transaction_status: "SUCCESS", payout_item_id: `ITEM${read[1]}${aff.slice(0, 4).toUpperCase()}` })),
       total_pages: 1,
     });
   }

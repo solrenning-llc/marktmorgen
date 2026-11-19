@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { BlobNotFoundError } from "@vercel/blob";
 import { DataRoomError } from "@/lib/store-data";
 import { cookies } from "next/headers";
 import { originFrom } from "@/lib/request-origin";
@@ -83,31 +84,40 @@ export async function POST(request: NextRequest) {
           file = before.file;
         } else {
           const folder = taskFolder(await storeFolder(storeRef(store)), course.id, lesson.id, who);
-          // A path in this student's own folder, let in through the door and not handed in before.
-          if (!ownsTaskPath(asked.path, folder) || !(await takeTaskUpload(asked.path))) return no("invalid");
+          // A path in this student's own folder.
+          if (!ownsTaskPath(asked.path, folder)) return no("invalid");
           const path = asked.path;
-          const found = await headFile(path).catch(() => null);
-          // Not there yet (the browser's PUT may still land): the name stays held, and the sweep deletes a late file
-          // a day on (lib/assignment.ts, takeTaskUpload). The same hold covers every way out below that keeps no work.
+          // Measured before the door is taken: a store that could not answer says
+          // nothing about the file, so the door stays for the same file to be handed
+          // in once it answers. Only a store that answered "not there" means missing.
+          // (Task files are always in Blob: ownsTaskPath keeps them under stores/.)
+          const found = await headFile(path).catch((error: unknown) => (error instanceof BlobNotFoundError ? null : undefined));
+          if (found === undefined) return no("unavailable", 503);
           if (!found) return no("missing");
+          // Let in through the door and not handed in before. Taking it is the one
+          // step only one request can win, and nothing is kept, counted or deleted
+          // for this file before it.
+          if (!(await takeTaskUpload(path))) return no("invalid");
+          // Taken, the name is held: the same hold covers every way out below that keeps no work, and the sweep
+          // deletes a file left behind a day on (lib/assignment.ts, takeTaskUpload).
           const extension = taskExtension(found.contentType);
           if (!extension || !path.endsWith(`.${extension}`)) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("type");
           }
           if (found.size > MAX_TASK_FILE_BYTES) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("too_big");
           }
           // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
           // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
           const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
             throw error;
           });
           if (!roomTaken) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("full");
           }
           taken = found.size;

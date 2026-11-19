@@ -24,7 +24,7 @@ import { KeptByCurrency } from "@/components/kept-by-currency";
 import { TaxCollected } from "@/components/tax-collected";
 import { WeeklyCohortsPanel } from "@/components/weekly-cohorts";
 import { RevenueQuality, BuyerChannelsPanel } from "@/components/revenue-quality";
-import { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
+import { READ_MIN_VISITORS, READ_SAMPLE, readingsPartialWords, readingsUnknownWords } from "@/lib/page-read-sample";
 import { NumbersNotes } from "@/components/numbers-notes";
 import { AdSpendEditor } from "@/components/ad-spend-editor";
 import type { MetaAdsView } from "@/lib/meta-ads";
@@ -706,6 +706,7 @@ export function StatsPanel({
 
       {reading ? <ReadingLine reading={reading} /> : null}
 
+      {/* oxlint-disable-next-line react/purity -- pre-existing read of today's date, not flagged by the former ESLint React Compiler rule; changing render behavior is outside the lint swap */}
       {pickDates ? <CustomRange today={data.days[data.days.length - 1]?.date ?? new Date().toISOString().slice(0, 10)} currency={data.currency ?? "usd"} /> : null}
 
       {empty ? (
@@ -1034,7 +1035,7 @@ export function StatsPanel({
       {beside ? <BesideStores band={beside.band} rows={beside.rows} /> : null}
 
       {range !== "all" && salesKnown && data.discounts?.rows ? (
-        <DiscountImpact rows={data.discounts.rows} refundsRead={data.discounts.refundsRead} currency={data.currency ?? "usd"} />
+        <DiscountImpact rows={data.discounts.rows} refundsRead={data.discounts.refundsRead} currency={data.currency ?? "usd"} elsewhere={data.discounts.elsewhere ?? []} codes={data.discounts.codes ?? []} />
       ) : null}
 
       {channels.length ? (
@@ -1296,6 +1297,11 @@ export function StatsPanel({
         </p>
       ) : null}
 
+      {reach && reach.visitors > 0 && data.readsPartial ? (
+        <p className="notice notice-info mt-6 text-sm" role="note">
+          {data.readsPartial === "unknown" ? readingsUnknownWords() : readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens, data.readsPartial.resumed === true)}
+        </p>
+      ) : null}
       {reach && reach.visitors > 0 ? (
         reach.visitors >= READ_MIN_VISITORS ? (
           <div className="mt-6 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="numbers-reach">
@@ -1372,7 +1378,7 @@ export function StatsPanel({
             <tbody>
               {shownProducts.map((product, index) => (
                 <tr key={product.id} className="border-t border-line">
-                  <td className="max-w-[7rem] truncate py-1.5 pr-2 font-semibold text-ink sm:max-w-[14rem]">
+                  <td className="min-w-[7rem] max-w-[14rem] py-1.5 pr-2 font-semibold text-ink [overflow-wrap:anywhere]">
                     {index < 3 && product.cents !== null && product.cents > 0 ? <span className="mr-1.5 tabular-nums text-violet-deep">{index + 1}.</span> : null}
                     {product.title}
                   </td>

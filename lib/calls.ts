@@ -49,7 +49,7 @@ import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-pl
 import { admitOrders } from "@/lib/order-admission";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
-import { saleHandles } from "@/lib/store";
+import { saleHandles, storeForEmail, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { releaseLock } from "@/lib/redis-lock";
@@ -66,7 +66,7 @@ import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant
 import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
-import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
+import { idsOfKind, listingFinder, readListing, readListingExactly, readListings, sellsAny } from "@/lib/catalog";
 
 /** A product that is a call, as listed: all a booking needs but its checkout questions. */
 export type CallListing = Listing & { call: CallSetup };
@@ -96,7 +96,7 @@ import { emitEvent } from "@/lib/webhooks";
 import { recordLead } from "@/lib/affiliate-leads";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomOf } from "@/lib/call-rooms";
 import { alertCreator } from "@/lib/phone-alerts";
-import { MEET_STORES, callMeeting, callMoved, linkUpdates } from "@/lib/meet-links";
+import { callMeeting, callMoved, keepMeetStore, linkUpdates } from "@/lib/meet-links";
 import type { MeetRecord } from "@/lib/meet-records";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
@@ -319,7 +319,7 @@ export async function paidCalls(store: Store): Promise<
     answers: Answer[];
     /** What was paid, in cents. */
     amount: number;
-    /** The currency it was paid in, as the checkout session says; empty when it says none, and readers fall back to the store's (22 [E5], unit 2b). */
+    /** The currency it was paid in, as the checkout session says (chargedIn); empty when it says none or another shape (22 [E5], unit 2b). */
     currency: string;
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
     hosts: string[];
@@ -327,6 +327,8 @@ export async function paidCalls(store: Store): Promise<
     /** The affiliate a lead is credited to once the call has taken place (lib/affiliate-leads.ts), and the payment; empty otherwise. */
     lead: string;
     pi: string;
+    /** The package the session came from (metadata[package], packageOf; lib/call-packages.ts); empty otherwise. */
+    pkg: string;
     /** What is left to pay in person, and a code taken off the whole price, as the sale keeps them (lib/call-deposit.ts). */
     due: DueInPerson | null;
     /** The cancellation deadline the buyer was promised when paying (lib/call-setup.ts, readCancelPromise). */
@@ -408,19 +410,47 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     moves: 0,
     answers: readAnswers(row),
     amount: typeof row.amount_total === "number" ? row.amount_total : 0,
-    currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
+    currency: chargedIn(row.currency) ?? "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
+    // The package a session came from (lib/call-packages.ts), whose confirmation writes it down there.
+    pkg: packageOf(meta),
     pi: paymentOf(row.payment_intent),
     due: readDue(meta),
     cancel: readCancelPromise(meta),
   };
 }
 
+/** The package a booking's checkout came from (metadata[package], callCheckoutBody), or "" when none. */
+export function packageOf(meta: unknown): string {
+  const pkg = meta && typeof meta === "object" ? (meta as { package?: unknown }).package : undefined;
+  return typeof pkg === "string" ? pkg : "";
+}
+
+/**
+ * Writes a session from a package down with its package before its mark
+ * (lib/call-packages.ts, packageSessionUsed): imported when needed, since that
+ * file reads this one's confirmation mark.
+ */
+async function packageSessionUsed(pkg: string, session: string): Promise<void> {
+  if (!pkg) return;
+  const packages = await import("@/lib/call-packages");
+  await packages.packageSessionUsed(pkg, session);
+}
+
 /** A checkout's payment's id, whether Stripe gave the id or the payment itself. */
 export function paymentOf(raw: unknown): string {
   if (typeof raw === "string") return raw;
   return raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+}
+
+/**
+ * The currency Stripe charged a booking in, read exactly (CX-123 rule 24; audit R48): three lowercase letters, as
+ * Stripe gives it. Anything else is null, and the booking's alert and emails leave its amounts out, never the
+ * store's own currency in its place (a store may have changed its currency since).
+ */
+export function chargedIn(raw: unknown): string | null {
+  return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : null;
 }
 
 async function withMoves(found: CallRow[]): Promise<CallRow[]> {
@@ -514,12 +544,13 @@ async function readBusy(
 ): Promise<{ busy: TeamBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
   const local = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : [];
   let paid: PaidCall[] = [];
-  // Read alongside Stripe, and never a reason to fail: a calendar that does
-  // not answer blocks nothing.
+  // Read alongside Stripe. A calendar whose busy times are not known closes
+  // its window (calendarBusy, which does not throw); were the reading to
+  // throw, no time is offered (the throw below), never every time.
   const weekly = sellsAny(store, "weekly");
-  const calendar = weekly
-    ? calendarBusy(store, now).catch(() => ({ busy: [] as Busy[] }))
-    : Promise.resolve({ busy: [] as Busy[] });
+  const calendar = weekly ? calendarBusy(store, now) : Promise.resolve({ busy: [] as Busy[] });
+  // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
+  calendar.catch(() => {});
   // The creator's dated sessions count against weekly hours only.
   const sessions = weekly ? readListings(store, idsOfKind(store, "call")).then((calls) => sessionTimes(calls, now)) : Promise.resolve([]);
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
@@ -691,6 +722,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       currency: call.currency,
       lead: call.lead,
       pi: call.pi,
+      fromPackage: call.pkg,
       due: call.due,
       cancel: call.cancel,
       origin,
@@ -889,6 +921,55 @@ async function keepLock(lock: CallLock): Promise<boolean> {
  */
 async function dropLock(lock: CallLock): Promise<void> {
   await releaseLock({ key: lock.key, token: lock.token, ttlSeconds: LOCK_SECONDS });
+}
+
+/**
+ * Whether the call a request read before taking the lock is still the call as
+ * saved (issue #3983): the store and the product are read again, exactly, once
+ * the lock is ours. A creator's change (fewer seats, a session taken off, other
+ * hours) is written under the same lock (withCallLock), so a booking or a move
+ * that read the call before it is refused, never checked against the old one.
+ * "unknown" when the store or the product cannot be read exactly (rule 24).
+ */
+async function callUnchanged(store: Store, productId: string, read: CallSetup): Promise<boolean | "unknown"> {
+  const now = await storeForEmail(storeRef(store));
+  if (!now || now.callsId !== store.callsId) return "unknown";
+  const listing = await readListingExactly(now, productId);
+  if (listing === "unknown") return "unknown";
+  return Boolean(listing?.call) && JSON.stringify(listing?.call) === JSON.stringify(read);
+}
+
+/**
+ * Runs a creator's check of a call change against what buyers booked, and its
+ * write, under the store's calendar lock, the one a booking and a move take
+ * (issue #3983): no buyer books between the check and the write. `keep` makes
+ * the lock last again right before the write and says false when it is not
+ * ours any more; then nothing is written. A store with no calendar yet has no
+ * booking to keep and runs without a lock. "error" when the lock cannot be had
+ * or read: nothing ran.
+ */
+export async function withCallLock<T>(store: Store | null, work: (keep: () => Promise<boolean>) => Promise<T>): Promise<T | "error"> {
+  if (!store?.callsId) return work(async () => true);
+  let lock: CallLock | null;
+  try {
+    lock = await takeLock(store.callsId);
+  } catch (error) {
+    console.error("taking a call's lock for a change failed", error);
+    return "error";
+  }
+  if (!lock) return "error";
+  const held = lock;
+  try {
+    return await work(async () => {
+      try {
+        return await keepLock(held);
+      } catch {
+        return false;
+      }
+    });
+  } finally {
+    await dropLock(held);
+  }
 }
 
 /**
@@ -1184,7 +1265,10 @@ export async function holdAndCheckout(input: {
   let claimed: { hosts: string[]; claim: string } | null = null;
   let opened = false;
   try {
-    // Read once the lock is ours, so the check is about this moment.
+    // Read once the lock is ours, so the check is about this moment: the call as saved now, too (issue #3983).
+    const unchanged = await callUnchanged(store, product.id, product.call);
+    if (unchanged === "unknown") return { ok: false, reason: "error" };
+    if (!unchanged) return { ok: false, reason: "taken" };
     const now = Date.now();
     if (team) {
       try {
@@ -1435,6 +1519,8 @@ export async function moveBooking(input: {
   booked: { start: number; end: number; email: string | null; buyerTz: string };
   start: number;
   origin: string;
+  /** The package the session came from (metadata[package], packageOf): a move can write its mark first. */
+  fromPackage?: string;
 }): Promise<MoveResult> {
   const { store, product, session, start, origin } = input;
   const setup = product.call;
@@ -1467,6 +1553,10 @@ export async function moveBooking(input: {
   // A team booking whose call is no longer a team event: its hosts' old claim is let go after the move.
   let letGo: { hosts: string[]; claim: string } | null = null;
   try {
+    // The call as saved now, read once the lock is ours (issue #3983): a move that read it before a change is refused.
+    const unchanged = await callUnchanged(store, product.id, product.call);
+    if (unchanged === "unknown") return { ok: false, reason: "error" };
+    if (!unchanged) return { ok: false, reason: "taken" };
     const now = Date.now();
     const recorded = (await readMoves([session])).get(session);
     from = recorded
@@ -1542,6 +1632,9 @@ export async function moveBooking(input: {
       console.error("reading a moved booking's old entries failed; left in place", error);
     }
     const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
+    // The mark below may be the session's first: one from a package is written down with it before (confirmBooking);
+    // a throw refuses the move.
+    await packageSessionUsed(input.fromPackage ?? "", session);
     // Counted in the store's room at what it really adds (lib/order-data.ts).
     // Moved before its confirmation was done (Claude 5, 9 November 2026; rules 24 and 30): the move's emails say it
     // all, so no "Booked" email follows them, but what a booking does besides is still owed ("moved", ConfirmStage),
@@ -1569,12 +1662,10 @@ export async function moveBooking(input: {
 
   const moves = from.moves + 1;
   if (letGo) await releaseClaim(letGo.hosts, letGo.claim).catch(() => {});
-  try {
-    await unplanReminders(callsId, store.handle, session, from.start);
-    if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start);
-  } catch (error) {
-    console.error("planning reminders after a move failed", error);
-  }
+  // Each on its own (Claude 7, 13 November 2026): a failure dropping the old time's reminders never skips planning the
+  // new time's. An old reminder left in the queue is not sent: the reminder job sends only for the booking's start now.
+  await unplanReminders(callsId, store.handle, session, from.start).catch((error) => console.error("dropping a moved booking's old reminders failed", error));
+  if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start).catch((error) => console.error("planning reminders after a move failed", error));
   // A Google Meet or Zoom meeting moves with the booking (lib/meet-links.ts),
   // before anybody is told, so the emails carry the link of the new time.
   await callMoved({ store, product, session, from, start, end, email: input.booked.email }).catch((error) =>
@@ -1823,11 +1914,13 @@ export async function confirmBooking(input: {
   answers?: Answer[];
   /** What was paid, in cents, for the creator's phone; left out when not known. */
   amountCents?: number | null;
-  /** The currency it was paid in; the store's when not known (a store may have changed its currency since). */
-  currency?: string;
+  /** The currency Stripe charged it in, as Stripe gave it; read by chargedIn, and not known leaves every amount out. */
+  currency?: unknown;
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
+  /** The package the session came from (metadata[package], packageOf), written down there before the mark. */
+  fromPackage?: string;
   /**
    * What is left to pay in person and the code taken off the whole price
    * (lib/call-deposit.ts, readDue): null when nothing is; left out when not
@@ -1872,6 +1965,13 @@ export async function confirmBooking(input: {
     team = await bookingTeam(store, product, session);
   } catch (error) {
     throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
+  }
+  // A session from a package is written down with it before its mark, which expires long before a package with no
+  // last day; a throw leaves the confirmation for later, never a mark without it (Claude 4 and Claude 6 on #3487).
+  try {
+    await packageSessionUsed(input.fromPackage ?? "", session);
+  } catch (error) {
+    throw new Error("writing a session down with its package failed; confirmed later", { cause: error });
   }
   // A team booking keeps its hosts and the claim on their time, now for good (read above).
   const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
@@ -1939,7 +2039,7 @@ export async function confirmBooking(input: {
     if (team) {
       await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));
       // The five-minute job reads this store's refunds while it has team bookings to come, so a refund gives the hosts their time back.
-      await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
+      await keepMeetStore(store, end);
     }
     // Reminders are emails too, so the demo plans none (writesAboutBookings). Planning the same booking twice plans nothing new.
     if (writesAboutBookings(store)) {
@@ -1949,8 +2049,9 @@ export async function confirmBooking(input: {
     }
     // The creator's phone, when a device of theirs asked for bookings
     // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid, once per `seed`.
-    // In the currency it was paid in: the store's own, unless the store changed its currency since.
-    const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, input.currency || store.currency) : "";
+    // In the currency Stripe charged it in, read exactly (chargedIn); not known, the amount is left out.
+    const paidIn = chargedIn(input.currency);
+    const paid = paidIn && Number.isSafeInteger(input.amountCents) && Number(input.amountCents) > 0 ? formatMoney(Number(input.amountCents), paidIn) : "";
     await alertCreator(
       store,
       "booking",
@@ -1973,6 +2074,8 @@ export async function confirmBooking(input: {
     }
   }
   const hosts = team?.emails ?? [];
+  // The currency Stripe charged the booking in, read exactly (chargedIn): the emails' amounts below are said only in it.
+  const paidIn = chargedIn(input.currency);
   // A Google Meet or Zoom meeting, when the product makes them: made now, on
   // the creator's account, so both emails carry its link, and made even
   // where email is off, since the pages show it too (lib/meet-links.ts). It
@@ -1994,7 +2097,6 @@ export async function confirmBooking(input: {
   const place = whereOf(setup).kind === "place" ? setup.place! : null;
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
-  const paidIn = input.currency || store.currency;
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
       callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
@@ -2023,7 +2125,8 @@ export async function confirmBooking(input: {
         "",
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
         // The same sentences Stripe's page showed before paying: the code, and what is left to pay in person.
-        ...dueLines(b, due, { currency: paidIn, locale, storeName: store.name }),
+        // Their amounts only in the currency Stripe charged; not known, they are left out rather than said in the store's.
+        ...(paidIn ? dueLines(b, due, { currency: paidIn, locale, storeName: store.name }) : []),
         ...(video ? [b.videoRoomNote] : []),
         "",
         // The reminders planned above: each only while it is at least an hour away (lib/call-records.ts).

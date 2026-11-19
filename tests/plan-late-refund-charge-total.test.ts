@@ -8,7 +8,7 @@ const posted:number[]=[];
 globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
  const url=new URL(String(input));const path=url.pathname.replace(/^\/v1/,'');
  if(url.hostname!=='api.stripe.com')throw Error('unexpected synthetic host');
- if(path==='/invoices')return Response.json({object:'list',has_more:false,data:[{id:invoice,object:'invoice',subscription,status:'paid',created:200,amount_paid:invoicePaid,paid_out_of_band:false,charge:{id:'ch_x8allocation01',object:'charge',payment_intent:intent,invoice:null,amount:charged,amount_refunded:refunded,disputed:false,currency:'usd',balance_transaction:{amount:charged,currency:'usd'},refunds:{object:'list',data:[],has_more:false}}}]});
+ if(path==='/invoices')return Response.json({object:'list',has_more:false,data:[{id:invoice,object:'invoice',subscription,status:'paid',created:200,amount_paid:invoicePaid,paid_out_of_band:false,currency:'usd',charge:{id:'ch_x8allocation01',object:'charge',payment_intent:intent,invoice:null,amount:charged,amount_refunded:refunded,disputed:false,currency:'usd',balance_transaction:{amount:charged,currency:'usd'},refunds:{object:'list',data:[],has_more:false}}}]});
  if(path==='/balance')return Response.json({object:'balance',available:[{amount:100000,currency:'usd'}]});
  if(path==='/refunds'&&init?.method==='POST'){
   const body=new URLSearchParams(String(init.body));const amount=Number(body.get('amount'));posted.push(amount);

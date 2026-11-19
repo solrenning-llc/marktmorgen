@@ -279,6 +279,7 @@ export async function submitApplication(
   const kept: Kept = { email: normaliseEmail(input.email), app, consent: { text: APPLY_CONSENT_TEXT, version: APPLY_CONSENT_VERSION } };
   const text = storedText(kept);
   if (Buffer.byteLength(text, "utf8") > APPLY_RECORD_MAX_BYTES || !readKept(text, app.id)) return { ok: false, reason: "bad-input" };
+  const key = recordKey(sid, app.id);
   try {
     // The day's count first: a store past it keeps nothing more today.
     const day = dayKey(sid, now);
@@ -287,7 +288,6 @@ export async function submitApplication(
     if (!counted || taken === null || taken < 1 || counted[1] !== 1) return { ok: false, reason: "unavailable" };
     if (taken > APPLY_PER_STORE_DAY) return { ok: false, reason: "day" };
     const until = untilOf(app);
-    const key = recordKey(sid, app.id);
     const reply = repliesFor(await redisPipeline([[
       "EVAL", APPLY_NEW, 3, key, storeIndex(sid), personIndex(sid, kept.email),
       app.id, text, seconds(until, now), until, now, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON,
@@ -301,7 +301,9 @@ export async function submitApplication(
     return (await landed(key, text)) ? { ok: true, application: viewOf(kept) } : { ok: false, reason: "unavailable" };
   } catch (error) {
     console.error("keeping an application failed", error);
-    return { ok: false, reason: "unavailable" };
+    // A throw may come after the script ran (the reply lost in transport): only the record itself says so,
+    // and a read back that fails too stays unknown, never kept. A retry then never keeps it twice.
+    return (await landed(key, text)) ? { ok: true, application: viewOf(kept) } : { ok: false, reason: "unavailable" };
   }
 }
 

@@ -18,9 +18,6 @@ if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) th
 redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
 
-/** The EVAL itself and its two guard reads; the SET replaces the command the caller already sent. */
-export const STORE_LIVE_CACHE_EXTRA_COMMANDS = 3;
-
 /**
  * Keeps `value` under `key` for `seconds` while `store` is live: "kept"; "gone" when its erasure has begun or its
  * record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).

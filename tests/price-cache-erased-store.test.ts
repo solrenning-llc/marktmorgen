@@ -12,12 +12,13 @@ import type { Listing } from "@/lib/catalog";
 import { yearlyPrice } from "@/lib/yearly-switch";
 import { tierPrice } from "@/lib/tier-switch";
 import { pwywPriceId } from "@/lib/pay-what-you-want";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_price_cache_erased";
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
-const ACCOUNT = "acct_PriceCacheErased1";
+const ACCOUNT = "acct_PriceCache01";
 
 /** What the next price POST does while Stripe is working on it, before it answers. */
 let duringPost: () => Promise<void> = async () => {};
@@ -61,7 +62,8 @@ async function erase(store: Store, how: "gone" | "erasing"): Promise<void> {
 const makers: [string, (store: Store) => Promise<string>][] = [
   ["the yearly price", (store) => yearlyPrice(store, product, 20_000)],
   ["the tier price", (store) => tierPrice(store, product)],
-  ["the pay-what-you-want price", (store) => pwywPriceId(store, product, { suggestedCents: 2_500 })],
+  // As the server checkout calls it (lib/store-checkout.ts), with the store-live keeper.
+  ["the pay-what-you-want price", (store) => pwywPriceId(store, product, { suggestedCents: 2_500 }, false, (key, id, seconds) => setWhileStoreLive(store, key, id, seconds))],
 ];
 
 async function main(): Promise<void> {

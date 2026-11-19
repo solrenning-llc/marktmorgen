@@ -36,7 +36,6 @@
 import type { Listing, Store } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
-import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type Currency, currencyRule } from "@/lib/money";
 import { activeShipping } from "@/lib/shipping";
 
@@ -119,12 +118,17 @@ const KEEP_SECONDS = 365 * 24 * 60 * 60;
  *
  * `fresh` skips the kept id, for the one retry after Stripe says the kept
  * Price can no longer be used (the creator archived it in their dashboard).
+ *
+ * `keep` writes the kept id. This module is also read in the browser (activePwyw), so it cannot reach the store
+ * module itself: the server checkout passes lib/store-live-cache.ts setWhileStoreLive, which keeps it only while the
+ * store is live, so a Stripe answer after the store's erasure began writes nothing back (Codex G-1346).
  */
 export async function pwywPriceId(
   store: Store,
   product: Listing,
   pwyw: PayWhatYouWant,
-  fresh = false,
+  fresh: boolean,
+  keep: (key: string, id: string, seconds: number) => Promise<unknown>,
 ): Promise<string> {
   const account = store.stripeAccountId;
   if (!account) throw new Error("This store has no account");
@@ -167,7 +171,6 @@ export async function pwywPriceId(
   // Two buyers pressing buy at the same moment make one Price, not two.
   const price = await onAccount("POST", account, "/prices", body, undefined, `pwyw-${print}${fresh ? `-${Date.now()}` : ""}`);
   if (typeof price.id !== "string" || !price.id) throw new Error("Stripe did not return a price");
-  // Kept only while the store is live: a Stripe answer that comes after its erasure began writes nothing back (G-1346).
-  if (cache) await setWhileStoreLive(store, key, price.id, KEEP_SECONDS).catch(() => {});
+  if (cache) await keep(key, price.id, KEEP_SECONDS).catch(() => {});
   return price.id;
 }

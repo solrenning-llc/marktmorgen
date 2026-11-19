@@ -634,6 +634,18 @@ export class MemoryRedis {
           this.run(["HSET", members, field, json]);
           return 1;
         }
+        // lib/search-console.ts KEEP_SEARCHES_IF_LIVE: a delayed Google answer is cached only while the exact store id
+        // still names this store and the closing walk has not marked its erasure.
+        if (key.startsWith("-- marktmorgen:gsc-keep-if-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, id, erasing, cache, ref, field, value, seconds] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", id]) !== ref) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) !== 0) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", cache, value, "EX", seconds]);
+          return 1;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;

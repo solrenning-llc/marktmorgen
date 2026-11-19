@@ -66,6 +66,8 @@ const whole = (value: unknown): value is number => Number.isSafeInteger(value) &
 type Owed = { invoice: string; intent: string; currency: string; give: number; charge: Row; paid: Given };
 /** One late payment refunded in full whose refunds' states are still to be read by its payment intent. */
 type Check = { intent: string; paid: Given };
+/** A lost dispute of what a partial refund left on the charge: settled once the confirmed refunds and the chargeback cover it. */
+type Lost = { invoice: string; intent: string; currency: string; amount: number; chargeback: number };
 /**
  * A late payment given back in full (by a refund made here, now or before, or already refunded at Stripe), for the
  * buyer's email (lib/plan-late-notice.ts): its invoice, the address Stripe holds on it (null when none reads), the
@@ -149,6 +151,7 @@ export async function refundLatePayments(account: string, subscription: string, 
   if (!list || list.object !== "list" || !Array.isArray(list.data) || list.has_more !== false) throw new Error("a plan's late invoices could not be read whole");
   const owed: Owed[] = [];
   const checks: Check[] = [];
+  const lost: Lost[] = [];
   const given: Given[] = [];
   const short: string[] = [];
   let disputed = 0;
@@ -196,7 +199,11 @@ export async function refundLatePayments(account: string, subscription: string, 
           throw new Error("a plan's lost dispute did not prove this charge's returned amount and currency");
         }
         if (dispute.amount >= charge.amount) disputed += 1;
-        else {
+        else if (charge.amount_refunded > 0 && dispute.amount + charge.amount_refunded >= charge.amount) {
+          // A buyer refunded in part who then disputed the rest (Claude 3's MEDIUM on #4893): the dispute covers what
+          // was left. Settled only on the refunds Stripe confirmed, read below; `amount_refunded` counts pending ones.
+          lost.push({ invoice: row.id, intent, currency: charge.currency, amount: charge.amount, chargeback: dispute.amount });
+        } else {
           // Stripe does not promise that the disputed charge's remainder can be refunded. Keep the existing owed
           // line and creator notice, never try another payment or add refunds to a chargeback on a guess.
           left = true;
@@ -224,12 +231,22 @@ export async function refundLatePayments(account: string, subscription: string, 
     else if (settled === "pending") left = true;
     else checks.push({ intent, paid });
   }
-  if (!owed.length && !checks.length) return { state: left ? "owed" : "done", refunded: 0, disputed, given, short };
   // At most LATE_REFUNDS_PER_TRY payments a try, those still to give back first; a payment refunded in full whose
-  // refunds are read here takes one of those places (one call, where one to give back takes two).
+  // refunds are read here takes one of those places (one call, where one to give back takes two), and so does a lost
+  // dispute of what a partial refund left, read before them.
   const slots = LATE_REFUNDS_PER_TRY;
-  if (owed.length + checks.length > slots) left = true;
-  for (const one of checks.slice(0, Math.max(0, slots - owed.length))) {
+  if (owed.length + checks.length + lost.length > slots) left = true;
+  for (const one of lost.slice(0, Math.max(0, slots - owed.length))) {
+    const progress = partialRefundProgress(await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: one.intent, limit: "100" })}`, undefined, AT), one.intent, one.currency, one.amount);
+    if (progress.amount + one.chargeback >= one.amount) disputed += 1;
+    else if (progress.pending) left = true;
+    else {
+      left = true;
+      short.push(one.invoice);
+    }
+  }
+  if (!owed.length && !checks.length) return { state: left ? "owed" : "done", refunded: 0, disputed, given, short };
+  for (const one of checks.slice(0, Math.max(0, slots - owed.length - lost.length))) {
     const read = refundsSettled(await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: one.intent, limit: "100" })}`, undefined, AT), one.intent, one.paid.amount, one.paid.currency);
     if (read === "unknown") throw new Error("the refunds of a plan's late payment could not be read whole");
     if (read === "done") given.push(one.paid);

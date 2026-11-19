@@ -364,6 +364,33 @@ async function main(): Promise<void> {
   posts.length = 0;
   is("only a confirmed whole return settles the plan, with no second refund", [await finishPlan(ACCOUNT, remainder.session), posts.length], ["done", 0]);
 
+  part("An external partial refund is not counted as final while the provider still reports it pending");
+  reset();
+  redis.clear();
+  const external = plan(2, 100, 4);
+  const [partialExternal, unaffected] = external.invoices.slice(2);
+  const partialIntent = partialExternal.charge.payment_intent;
+  const externalPending: Refund = { id: "re_externalPartial", object: "refund", payment_intent: partialIntent, amount: 2_000, currency: "usd", status: "pending", metadata: {} };
+  refunds[partialIntent] = [externalPending];
+  partialExternal.charge.amount_refunded = externalPending.amount;
+  await rememberPlan(ACCOUNT, external.session);
+  const externalRun = await settlePlans();
+  is("the plan remains owed, with no second refund against this charge", [externalRun.owed, externalRun.done, await inALine(external.session), madeFor(partialExternal).length], [1, 0, true, 1]);
+  is("the other late charge is refunded in the same pass", madeFor(unaffected).map((one) => one.amount), [5_000]);
+  externalPending.status = "failed";
+  partialExternal.charge.amount_refunded -= externalPending.amount;
+  posts.length = 0;
+  is("after the external refund fails, the run refunds the whole late charge once", [await finishPlan(ACCOUNT, external.session), posts.map((one) => one.body.get("amount")), madeFor(partialExternal).map((one) => one.status)], ["done", ["5000"], ["failed", "succeeded"]]);
+
+  part("When an external partial refund succeeds, only the remaining amount is refunded");
+  reset();
+  const partialSuccess = plan(2, 70, 3);
+  const one = partialSuccess.invoices[2];
+  const intent = one.charge.payment_intent;
+  refunds[intent] = [{ id: "re_externalSuccess", object: "refund", payment_intent: intent, amount: 2_000, currency: "usd", status: "succeeded", metadata: {} }];
+  one.charge.amount_refunded = 2_000;
+  is("the confirmed partial refund counts toward the total", [await finishPlan(ACCOUNT, partialSuccess.session), posts.map((item) => item.body.get("amount")), one.charge.amount_refunded], ["done", ["3000"], 5_000]);
+
   part("A try stays within the registry's Stripe calls");
   reset();
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

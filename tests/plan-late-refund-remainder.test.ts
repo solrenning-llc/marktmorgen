@@ -83,3 +83,21 @@ test("an unknown piece cannot authorize the remaining refund", async () => {
   seed(); rows[1].currency = "eur";
   await assert.rejects(run); assert.deepEqual(posts, []);
 });
+
+for (const status of ["pending", "requires_action"]) {
+  test(`an external ${status} part without an own refund never settles the whole late payment`, async () => {
+    seed();
+    rows = [row("re_externalpending01", 1500, status, false)];
+    chargeRefunded = 1500;
+    const out = await run();
+    assert.deepEqual([out.state, out.given, posts.map(p => p.amount)], ["owed", [], []]);
+  });
+}
+
+test("a confirmed external part without an own refund still permits the remaining return", async () => {
+  seed();
+  rows = [row("re_externalsucceeded01", 1500, "succeeded", false)];
+  chargeRefunded = 1500;
+  const out = await run();
+  assert.deepEqual([out.state, out.given.map(p => p.amount), posts.map(p => p.amount)], ["done", [5000], [3500]]);
+});

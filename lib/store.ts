@@ -2333,9 +2333,13 @@ export async function chooseExitNotice(
 ): Promise<ExitChoice> {
   const result = await withStore<ExitChoice>(ref, async (store, save) => {
     // Taken away at any time before the closing day, even by a store no longer closing (review of #3730); from that
-    // day the old address may already carry it (closeStoreRecord), so it stays as the visitors see it.
+    // day the old address may already carry it (closeStoreRecord), so it stays as the visitors see it. No closing read
+    // (null) is either a closing cancelled before its day or one whose walk has gone far enough that it is no longer
+    // returned: then the notice's own day decides, so a passed one is never taken away (Codex N1's MEDIUM on #3730).
     if (raw === "" || raw === null || raw === undefined) {
-      if (!Number.isFinite(now) || (closing && now >= closing.day)) return { ok: false, reason: "not_closing" };
+      const noticeDay = store.exitNotice && Number.isFinite(store.exitNotice.closedAt) ? store.exitNotice.closedAt : null;
+      const closed = closing ? now >= closing.day : noticeDay !== null && now >= noticeDay;
+      if (!Number.isFinite(now) || closed) return { ok: false, reason: "not_closing" };
       const { exitNotice: _gone, ...rest } = store;
       void _gone;
       return { ok: true, store: await save(rest) };

@@ -1702,9 +1702,12 @@ export async function watchPayPal(
         continue;
       }
     }
+    // NX: the store's figures read this score as the day the refund was first seen (lib/stats.ts), so a retry of the
+    // steps below (the affiliate book's lasting mark, the hand-back) never moves it to a later day; a mark already
+    // there answers 0, read below as written (Codex X5, X5-20261118-0532).
     const marked = repliesFor(
       await redisPipeline([
-        ["ZADD", refundedKey(statsId), String(now), order],
+        ["ZADD", refundedKey(statsId), "NX", String(now), order],
         ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
       ]),
       2,

@@ -750,7 +750,7 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
   assistant_due: {
     title: "The Store assistant on this store may still be charged",
-    body: "A payment for the Store assistant did not go through, and Stripe may try it again until its month ends. You can delete this store once that month is over, or write to support to end the assistant now. Nothing was deleted.",
+    body: "A payment for the Store assistant did not go through, and Stripe may still try it again. You can delete this store once Stripe has ended the assistant, or write to support to end it now. Nothing was deleted.",
   },
   domain: {
     title: "This store still has its own domain",

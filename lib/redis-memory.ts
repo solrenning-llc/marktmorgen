@@ -421,13 +421,13 @@ export class MemoryRedis {
         }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         // lib/checkout-ask.ts ASK_AGAIN: a retried ask put back only while the entry it was taken with waits in its index.
-        if (key.startsWith("-- marktmorgen:ask-again:v1\n") && args[0] === "2" && args.length === 7) {
-          const [, queue, index, was, at, member, ttl] = args;
+        if (key.startsWith("-- marktmorgen:ask-again:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, index, was, at, member] = args;
           if (this.run(["ZSCORE", index, was]) === null) return -1;
           const added = this.run(["ZADD", queue, at, member]);
           this.run(["ZREM", index, was]);
           this.run(["ZADD", index, at, member]);
-          this.run(["EXPIRE", index, ttl]);
+          this.run(["PERSIST", index]);
           return added;
         }
         // lib/checkout-ask.ts ASK_FORGET: validate, then remove the current own index and its global members atomically.
@@ -450,12 +450,12 @@ export class MemoryRedis {
           return [taken, members.length];
         }
         // lib/checkout-ask.ts ASK_KEEP: an ask kept, with its index, only while its person is not erased from the store.
-        if (key.startsWith("-- marktmorgen:ask-keep:v1\n") && args[0] === "3" && args.length === 8) {
-          const [, queue, index, erased, at, member, ttl, print] = args;
+        if (key.startsWith("-- marktmorgen:ask-keep:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, queue, index, erased, at, member, print] = args;
           if (this.run(["HEXISTS", erased, print]) === 1) return -1;
           this.run(["ZADD", queue, at, member]);
           this.run(["ZADD", index, at, member]);
-          this.run(["EXPIRE", index, ttl]);
+          this.run(["PERSIST", index]);
           return 1;
         }
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.

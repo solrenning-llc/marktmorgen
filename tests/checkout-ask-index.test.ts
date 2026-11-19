@@ -60,7 +60,7 @@ test("asks made the way every ask is made are in the person's own index, and onl
   assert.equal(theirs.length, 2, "their two asks, the product's and the cart's, are in their index");
   assert.ok(theirs.every((member) => member.includes(PERSON)), "and nobody else's");
   assert.equal((redis.run(["ZRANGEBYSCORE", askIndexKey(store.statsId!, OTHER), "-inf", "+inf"]) as string[]).length, 1, "the other buyer's ask is in theirs");
-  assert.ok(Number(redis.run(["TTL", askIndexKey(store.statsId!, PERSON)])) > 3 * 86_400, "kept past the longest wait");
+  assert.equal(redis.run(["TTL", askIndexKey(store.statsId!, PERSON)]), -1, "the erasure locator stays until its queued addresses leave");
   assert.equal(await forgetAskPerson(store.statsId!, PERSON), 2, "their erasure takes both off the queue");
   assert.equal((redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", "+inf"]) as string[]).filter((m) => m.includes(PERSON)).length, 0);
   assert.equal((redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", "+inf"]) as string[]).filter((m) => m.includes(OTHER)).length, 1, "the other buyer's stays");

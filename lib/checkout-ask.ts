@@ -86,12 +86,11 @@ const QUEUE = "nl:recover:asks";
  * One person's asks at one store, the same members at the same times as in QUEUE, written and taken out with it: what
  * that person's erasure and copy read (Claude 2 nuvem B on #4290), so they never scan every store's asks, nor every
  * buyer's asks at the store (Claude 7 on #4290: a store's whole index is about 330 KB at its ceiling). Named by a
- * hash of the store and the address, so the key holds no address. Kept a week past the longest wait and its retries'
- * hours, renewed at each ask, only as a net under a job that stopped: an ask leaves it when the job takes it.
+ * hash of the store and the address, so the key holds no address. It stays until the asks leave the global queue or
+ * finish in flight: expiring this locator first would leave an address that erasure can no longer find.
  */
 export const askIndexKey = (statsId: string, email: string) =>
   `nl:recover:asks:s:${statsId}:${createHash("sha256").update(`nimbus-recover-ask:${statsId}|${normaliseEmail(email) ?? ""}`).digest("hex").slice(0, 32)}`;
-const STORE_QUEUE_SECONDS = 3 * 86_400 + 6 * 3600 + 7 * 86_400;
 
 export type AskOutcome =
   /** Kept, and a reminder goes in about an hour. */
@@ -257,7 +256,7 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
   try {
     kept = repliesFor(await redisPipeline([[
       "EVAL", ASK_KEEP, 3, QUEUE, askIndexKey(statsId, email), suppressedKey(listId),
-      askedAt + after, member, STORE_QUEUE_SECONDS, suppressionPrint(listId, email),
+      askedAt + after, member, suppressionPrint(listId, email),
     ]]), 1)?.[0];
   } catch {
     kept = undefined;
@@ -268,15 +267,16 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
 }
 
 /**
- * Keeps an ask, in one step, only while the person's print is not in the store's erased list (KEYS[3], ARGV[4]): the
- * queue (KEYS[1]) and the person's index (KEYS[2]) at ARGV[1], the member ARGV[2], the index's expiry ARGV[3].
+ * Keeps an ask, in one step, only while the person's print is not in the store's erased list (KEYS[3], ARGV[3]): the
+ * queue (KEYS[1]) and the person's index (KEYS[2]) at ARGV[1], the member ARGV[2]. The locator stays as long as the
+ * queued address. PERSIST also clears an older index's expiry when another ask is kept; the last ZREM deletes it.
  * Answers 1 when kept, -1 when the person was erased.
  */
-const ASK_KEEP = `-- marktmorgen:ask-keep:v1
-if redis.call("HEXISTS", KEYS[3], ARGV[4]) == 1 then return -1 end
+const ASK_KEEP = `-- marktmorgen:ask-keep:v2
+if redis.call("HEXISTS", KEYS[3], ARGV[3]) == 1 then return -1 end
 redis.call("ZADD", KEYS[1], ARGV[1], ARGV[2])
 redis.call("ZADD", KEYS[2], ARGV[1], ARGV[2])
-redis.call("EXPIRE", KEYS[2], ARGV[3])
+redis.call("PERSIST", KEYS[2])
 return 1`;
 
 /**
@@ -286,12 +286,12 @@ return 1`;
  * old entry for the new one in the index; answers ZADD's reply on the queue, or -1. Billed 1 + 5; lib/redis-memory.ts
  * runs it the same way.
  */
-const ASK_AGAIN = `-- marktmorgen:ask-again:v1
+const ASK_AGAIN = `-- marktmorgen:ask-again:v2
 if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return -1 end
 local added = redis.call("ZADD", KEYS[1], ARGV[2], ARGV[3])
 redis.call("ZREM", KEYS[2], ARGV[1])
 redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
-redis.call("EXPIRE", KEYS[2], ARGV[4])
+redis.call("PERSIST", KEYS[2])
 return added`;
 
 /**
@@ -307,7 +307,7 @@ async function again(ask: Ask, was: string, now: number): Promise<boolean> {
   if (tries >= REMINDER_RETRIES || at - (ask.askedAt + ask.after) > STALE_SECONDS) return false;
   try {
     const member = askMember({ ...ask, tries: tries + 1 });
-    const [added] = await redisPipeline([["EVAL", ASK_AGAIN, 2, QUEUE, askIndexKey(ask.statsId, ask.email), was, at, member, STORE_QUEUE_SECONDS]]);
+    const [added] = await redisPipeline([["EVAL", ASK_AGAIN, 2, QUEUE, askIndexKey(ask.statsId, ask.email), was, at, member]]);
     // 1 put back; 0 one just like it already waits; -1 its person was erased while it was in flight (its entry in their
     // index is gone), so it stays out. Anything else is unknown: not counted as put back.
     if (added === 1 || added === 0) return true;

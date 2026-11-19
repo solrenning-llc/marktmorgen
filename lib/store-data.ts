@@ -58,6 +58,9 @@ export const DATA_MONTHS_CLEARED_MOST = 512;
 /** The commands a TAKE_DATA call bills for the months that are over, at the most: their read and their removal. */
 export const DATA_EXPIRED_COMMANDS = 2;
 
+/** Fields one HMGET/HSET/HDEL in TAKE_DATA carries; keeps Lua's unpack bounded. */
+export const DATA_SLOT_COMMAND_BATCH = 250;
+
 /**
  * KEYS[1] the store's room. ARGV[1] how far a change may grow it, ARGV[2]
  * "1" to take the change whatever it comes to, ARGV[3] this month
@@ -126,8 +129,26 @@ local function keep()
   end
   redis.call('HSET', KEYS[1], '#', total)
 end
-local now = {}
+-- Read and write every ordinary slot in one hash command. Upstash bills a
+-- multi-field HMGET/HSET as one command; doing one HGET and one HSET for each
+-- slot made large, already-bounded batches needlessly expensive.
 local order = {}
+local seen = {}
+for i = 4, #ARGV, 3 do
+  local slot = ARGV[i + 1]
+  if not seen[slot] then
+    seen[slot] = true
+    order[#order + 1] = slot
+  end
+end
+local held = {}
+for first = 1, #order, 250 do
+  local last = math.min(first + 249, #order)
+  local part = redis.call('HMGET', KEYS[1], unpack(order, first, last))
+  for i = 1, #part do held[#held + 1] = part[i] end
+end
+local now = {}
+for i, slot in ipairs(order) do now[slot] = tonumber(held[i] or '0') or 0 end
 local delta = 0
 for i = 4, #ARGV, 3 do
   local mode = ARGV[i]
@@ -141,10 +162,6 @@ for i = 4, #ARGV, 3 do
     end
   end
   local old = now[slot]
-  if old == nil then
-    old = tonumber(redis.call('HGET', KEYS[1], slot) or '0') or 0
-    order[#order + 1] = slot
-  end
   local new = old + n
   if mode == 's' then new = n end
   if new < 0 then new = 0 end
@@ -158,13 +175,17 @@ if delta > 0 and not always and total + delta > limit then
   keep()
   return {0, total}
 end
+local sets, dels = {}, {}
 for _, slot in ipairs(order) do
   if now[slot] > 0 then
-    redis.call('HSET', KEYS[1], slot, now[slot])
+    sets[#sets + 1] = slot
+    sets[#sets + 1] = now[slot]
   else
-    redis.call('HDEL', KEYS[1], slot)
+    dels[#dels + 1] = slot
   end
 end
+for first = 1, #sets, 500 do redis.call('HSET', KEYS[1], unpack(sets, first, math.min(first + 499, #sets))) end
+for first = 1, #dels, 250 do redis.call('HDEL', KEYS[1], unpack(dels, first, math.min(first + 249, #dels))) end
 total = total + delta
 if total < 0 then total = 0 end
 keep()
@@ -314,10 +335,14 @@ export function besideKey(store: Pick<DataStore, "sid" | "statsId" | "handle">):
 /**
  * What one TAKE_DATA on the beside pool bills at the most: Upstash bills a script's inner commands beside its EVAL
  * (lib/receipt-number.ts). The pool key never lists expiring months, so the script reaches its EVAL, HGET "#",
- * HGET "~", an HGET and a write a slot, and HSET "#" (held in tests/beside-pool-commands.test.ts).
+ * HGET "~", one HMGET and one HSET per bounded batch, and HSET "#" (held in
+ * tests/beside-pool-commands.test.ts).
  */
 export function poolTakeCommands(slots: number): number {
-  return 4 + 2 * slots;
+  // EVAL, HGET total/list, HSET total, then one HMGET and HSET per bounded field batch. A pool call sets every slot
+  // (takeBeside) or empties every slot (giveBeside), never both: a call that did both would bill one HDEL more a batch,
+  // measured in scripts/test_store_data_redis.py, so such a caller must be priced with takeDataCommands instead.
+  return 4 + 2 * Math.ceil(Math.max(0, slots) / DATA_SLOT_COMMAND_BATCH);
 }
 
 /**
@@ -330,11 +355,14 @@ export const BESIDE_SAVE_COMMANDS = 1 + 2 * poolTakeCommands(1);
 
 /**
  * What one TAKE_DATA on a store's room bills at the most: its EVAL, HGET "#" and HGET "~", the months that are over
- * read and removed (DATA_EXPIRED_COMMANDS), an HGET and a write a slot, and HSET "~" and HSET "#" (the beside pool's
- * sweep, lib/store.ts MOVE_BESIDE_BATCH_COMMANDS; held in tests/beside-pool-commands.test.ts).
+ * read and removed (DATA_EXPIRED_COMMANDS), one HMGET and at most one HSET plus HDEL per bounded slot batch, and
+ * HSET "~" and HSET "#" (the beside pool's sweep, lib/store.ts MOVE_BESIDE_BATCH_COMMANDS; held in
+ * tests/beside-pool-commands.test.ts).
  */
 export function takeDataCommands(slots: number): number {
-  return 1 + 4 + DATA_EXPIRED_COMMANDS + 2 * slots;
+  // Worst case: EVAL, HGET total/list, expired-month HMGET/HDEL, one slot
+  // HMGET, HSET and HDEL per bounded field batch, and the list/total writes.
+  return 1 + 4 + DATA_EXPIRED_COMMANDS + 3 * Math.ceil(Math.max(0, slots) / DATA_SLOT_COMMAND_BATCH);
 }
 
 /** Which of these products have their share in the pool; null when it cannot be read. */

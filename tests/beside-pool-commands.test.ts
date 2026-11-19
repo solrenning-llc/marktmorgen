@@ -19,6 +19,8 @@ const r = registry as unknown as { besideSaveUsd?: (tier: "creator" | "pro" | "s
 // The pool's script, on a key with no month list: the commands it reaches, read from its own text.
 const script = d.TAKE_DATA;
 is("TAKE_DATA reads the total and the month list once each", [script.includes("redis.call('HGET', KEYS[1], '#')"), script.includes("redis.call('HGET', KEYS[1], '~')")], [true, true]);
+const B = (data as unknown as { DATA_SLOT_COMMAND_BATCH?: number }).DATA_SLOT_COMMAND_BATCH ?? 0;
+is("the script's batches are DATA_SLOT_COMMAND_BATCH fields, as priced", [B, script.includes(`for first = 1, #order, ${B} do`), script.includes(`math.min(first + ${B - 1}, #order)`), script.includes(`for first = 1, #sets, ${2 * B} do`), script.includes(`math.min(first + ${2 * B - 1}, #sets)`), script.includes(`for first = 1, #dels, ${B} do`), script.includes(`math.min(first + ${B - 1}, #dels)`)], [250, true, true, true, true, true, true]);
 is("a pool take batches every 250 slots into one read and one write", [d.poolTakeCommands?.(1), d.poolTakeCommands?.(25), d.poolTakeCommands?.(250), d.poolTakeCommands?.(251)], [6, 6, 6, 8]);
 is("a product save adds the pool's read, its take and, refused, its give-back", d.BESIDE_SAVE_COMMANDS, 1 + 2 * 6);
 for (const tier of ["creator", "pro", "scale"] as const) {

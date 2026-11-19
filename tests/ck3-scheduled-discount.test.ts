@@ -51,12 +51,15 @@ async function main() {
   try {
     const rules = await import("@/lib/discount-schedule-rules");
     const sched = await import("@/lib/discount-schedule");
-    const { MAX_SCHEDULED_CODES, ACTIVATION_TRIES, RETRY_SECONDS, SCHEDULE_UNITS, MIN_LEAD_SECONDS, MAX_AHEAD_SECONDS, readWindow, scheduleState, readScheduleConfirmation } = rules;
+    const { MAX_SCHEDULED_CODES, ACTIVATION_TRIES, RETRY_SECONDS, SCHEDULE_UNITS, STOP_TRIES, MIN_LEAD_SECONDS, MAX_AHEAD_SECONDS, readWindow, scheduleState, readScheduleConfirmation } = rules;
 
     part("The rules: bounded, and paid for before anything is spent");
     is("a store keeps at most a handful of scheduled codes", MAX_SCHEDULED_CODES > 0 && MAX_SCHEDULED_CODES <= 20, true);
     is("activation is tried a bounded number of times", ACTIVATION_TRIES >= 2 && ACTIVATION_TRIES <= 5, true);
-    is("each try is one studio request taken when the code is scheduled", SCHEDULE_UNITS, ACTIVATION_TRIES);
+    // Since #4522 (Claude 6): a stop the last try needs, if Stripe does not confirm it, is tried STOP_TRIES runs more, each paid too;
+    // and the failure email's tries (unit 2), each paid as well.
+    is("each try is one studio request taken when the code is scheduled: to switch it on, to switch it off, and the failure email's", SCHEDULE_UNITS, ACTIVATION_TRIES + STOP_TRIES + rules.NOTICE_TRIES);
+    is("and switching it off is tried a bounded number of times", STOP_TRIES >= 1 && STOP_TRIES <= 5, true);
     is("retries wait for a later five-minute run", RETRY_SECONDS >= 300, true);
 
     part("The start and the end, read and refused in words");
@@ -132,8 +135,12 @@ async function main() {
       is(`try ${i + 1} is not activation`, run.activated, 0);
       clock += RETRY_SECONDS;
     }
-    is("one Stripe call a try, no more", calls.length, ACTIVATION_TRIES);
-    is("a new idempotency key for each try", new Set(calls.map((c) => c.key)).size, ACTIVATION_TRIES);
+    // The last try's unclear answer may follow a switch-on that landed, so it is switched off before the failure is
+    // final (Claude 4 on #4522): one switch-on a try, and one stop, confirmed here, at the last.
+    const switchOns = calls.filter((c) => c.body === "active=true");
+    is("one switch-on a try, no more", switchOns.length, ACTIVATION_TRIES);
+    is("a new idempotency key for each try", new Set(switchOns.map((c) => c.key)).size, ACTIVATION_TRIES);
+    is("and the last try switches it off once before the failure is final", calls.filter((c) => c.body === "active=false").length, 1);
     const failedNow = await sched.readSchedules(STATS);
     is("marked failed after the last try", failedNow.ok && failedNow.schedules[0]?.failed, true);
     is("out of the due list", await redis.pipeline([["ZSCORE", "nl:dsched:due", `${SID}|${STATS}|promo_ck3synthetic`]]), [null]);

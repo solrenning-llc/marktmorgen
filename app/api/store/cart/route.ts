@@ -1,3 +1,4 @@
+import { consumerGate } from "@/lib/eu-vat-gate";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm } from "@/lib/digital-consent";
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
@@ -31,7 +32,7 @@ import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/requ
 import { productSegment } from "@/lib/product-slug";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
-import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
+import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { cartOfferOwner } from "@/lib/cart-offers";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
@@ -66,7 +67,10 @@ export async function GET(request: NextRequest) {
   const locale = LANGUAGES[store.language].locale;
   // Which products are still coming soon: a reading that cannot be had is never "none" (Claude 6's audit of rule 24),
   // so no line is payable right now, as for a stock count that cannot be read.
-  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  const [read, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  // A draft is answered as an id the store does not have: no line, no name, no price (MM-SA-30, lib/draft-view.ts).
+  // Whoever knows its id learns nothing from the cart; a draft cannot be paid for in one anyway (lib/cart-rules.ts, cartable).
+  const listings = read.filter((product) => !product.hidden);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
   // Which lines ask questions at checkout: those are bought from their own page, which asks them, and the cart
@@ -299,8 +303,11 @@ export async function POST(request: NextRequest) {
   let remindVersion = "";
   // The box to start access at once, which loses the right to cancel once it starts (lib/digital-consent.ts).
   let digitalConsent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent: FormData = new FormData();
   try {
     const form = await (await limited(request, 4_000)).formData();
+    sent = form;
     digitalConsent = consentFromForm(form);
     const h = form.get("handle");
     handle = typeof h === "string" ? normaliseHandle(h.slice(0, 40)) : "";
@@ -331,6 +338,12 @@ export async function POST(request: NextRequest) {
   // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
   // back to the cart to try again, nothing charged.
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
+  // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as for one product: before anything is held or charged, a cart
+  // with a paid product for the EU or the UK is refused, and one without the billing country asks for it.
+  for (const product of products) {
+    const gate = consumerGate({ product, headers: request.headers, form: sent });
+    if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
+  }
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);
@@ -345,7 +358,7 @@ export async function POST(request: NextRequest) {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
     }).catch(() => null);
-    const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderShown(store);
+    const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && products.every((p) => assistReminderOffered(store, p));
     // Offers after paying, from the first product in the cart whose funnel is
     // on (lib/cart-offers.ts): a secret for this browser, its fingerprint on
     // the checkout, as for one product (app/api/store/checkout/route.ts).

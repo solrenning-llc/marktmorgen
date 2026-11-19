@@ -63,7 +63,7 @@ import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { PATH_LEAD_DAYS } from "@/lib/path-lead";
-import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
+import { BOOK_INVOICES_KEPT_BYTES, NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
@@ -283,6 +283,8 @@ export const FAMILIES: Record<string, Family> = {
     parts: [
       capped(MAX_AFFILIATES * (1_536 + 4 * ENTRY_BYTES), "MAX_AFFILIATES records (an address, a note of MAX_NOTE_LENGTH in any script, the rest), each with its address, code and click counts.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"), src("lib/affiliates.ts", "MAX_NOTE_LENGTH")),
       kept(512, "A sale credited and up to two partners' shares of it."),
+      // Audit A1 (9 November 2026): the paid invoices the book read whole, kept for the next reading.
+      capped(BOOK_INVOICES_KEPT_BYTES + KEY, "One record a store of the membership and plan payments the book read whole (an invoice's line, never the buyer's address), INVOICES_KEPT_MAX_BYTES at the most, INVOICE_KEEP_SECONDS after the last reading that wrote it.", src("lib/affiliates.ts", "INVOICES_KEPT_MAX_BYTES", "INVOICE_KEEP_SECONDS")),
       kept(3 * REFUND_MARK_MAX_BYTES, "The refund kept on the sale and on each partner's share when read on the account it was paid into (lib/affiliates.ts AFFILIATE_REFUND_MARK): one field, `rf`, in base 36, the account being the record's own `acct`."),
     ],
   },
@@ -644,6 +646,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:transparency:@lib/transparency.ts": company("The public transparency page's counts: notices received and acted on, year by year (624 [SZ8](47))", "The company's: one hash and one set of notice ids a year, nothing about any store or person."),
   "nl:transparency:acted:@lib/transparency.ts": company("The notices acted on each year, so each counts once", "The company's: notice ids only, one set a year."),
   "nl:transparency:since@lib/transparency.ts": company("The day counting began", "The company's: one key for the whole platform, a date and nothing else."),
+  "nl:erase:files:@lib/person-erasure.ts": company("The paths of a deleted person's files not yet deleted or queued, under their deletion print, until each is (#4808)", "The erasure's own bookkeeping, kept only while a deletion is not finished: with no expiry, because once the records that named the files are gone these paths are the last reference to them (Codex L on #4871), and each is let go (SREM) as soon as its file is deleted or queued for the daily cleanup of uploads. At most the paths of one person's files in the store, which the store's own data already counts."),
   "nl:erase:link:@lib/erasure-request.ts": company("A person's link to delete themselves from the stores they ask, an hour", "A person's, across stores, behind a per-address limit."),
   "nl:held:walk@lib/plan-closing.ts": company("Final closing continuation", "One global rank cursor, at most1KiB,30days TTL; resumes past a full first page of coverage holds. Partial/changing walks never certify a monthly complete observation; included in HELD_EXPOSURE."),
   "nl:held:stores@lib/held-stores.ts": company("Held closing stores awaiting complete billing evidence", "One private reference up to1280bytes plus score/member overhead per existing obligation; funded post_cancellation case ceiling bounds financed cases, overflow stays counted and funding is unknown. Pruned on deletion; never expires an unresolved obligation. Cost in HELD_EXPOSURE of tests/plan-cost-registry.ts."),
@@ -820,7 +823,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:outreach:stop:all@lib/outreach.ts": company("Domains that asked that nobody here write to them", "One set for every store."),
   "nl:outreach:stoplink:@lib/outreach.ts": room("A pitch's stop link, kept for good: counted in the room when the pitch is written (OUTREACH_TRACE_BYTES)", "lib/outreach.ts"),
   // A discount code with a start and an end set ahead (511 [CK3], lib/discount-schedule.ts): one small field a code, gone once it is switched on.
-  "nl:dsched:@lib/discount-schedule.ts": { what: "A store's discount codes waiting for their start", parts: [capped(KEY + MAX_SCHEDULED_CODES * (ENTRY_BYTES + 176), "MAX_SCHEDULED_CODES fields: a promotion code id (80 characters at most) and its code (24), start, end, tries, failed mark, and the failure email's tries and settled mark (unit 2).", src("lib/discount-schedule-rules.ts", "MAX_SCHEDULED_CODES"))] },
+  "nl:dsched:@lib/discount-schedule.ts": { what: "A store's discount codes waiting for their start", parts: [capped(KEY + MAX_SCHEDULED_CODES * (ENTRY_BYTES + 176), "MAX_SCHEDULED_CODES fields: a promotion code id (80 characters at most) and its code (24), start, end, tries, failed mark, and the failure notice's attempts (failed enqueue attempts included, at most the unchanged NOTICE_TRIES) and settled mark (unit 2); the same n field is used, with no added field.", src("lib/discount-schedule-rules.ts", "MAX_SCHEDULED_CODES"))] },
   "nl:dsched:due@lib/discount-schedule.ts": company("Discount codes due to be switched on", "One sorted set for every store, at most MAX_SCHEDULED_CODES members a store (lib/discount-schedule-rules.ts), each taken out once its code is switched on, canceled, failed, or its store gone."),
   "nl:dsched:tell@lib/discount-schedule.ts": company("Failed discount codes whose email to the creator is due", "One sorted set for every store, at most MAX_SCHEDULED_CODES members a store (lib/discount-schedule-rules.ts), each taken out once its email went, was tried NOTICE_TRIES times, or its code or store went."),
   "nl:dsched:lock:@lib/discount-schedule.ts": { what: "One change to a store's scheduled codes at a time", parts: [capped(KEY, "One key a store, held a minute at most.", src("lib/discount-schedule.ts", "LOCK_SECONDS"))] },
@@ -1243,6 +1246,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:yearask:count:@lib/yearly-ask.ts": short("Asks counted a month", "day", 62, 128),
   "nl:yearask:cursor@lib/yearly-ask.ts": company("Where the yearly ask stopped", "One key, the company's job."),
   "nl:firstsale:@lib/yearly-offer.ts": company("A store's first sale", "The company's offer to a creator about their own plan."),
+  "nl:soldbefore:@lib/yearly-offer.ts": { what: "A store whose earlier sales were not all read, so the search stops", parts: [capped(KEY, "One a store, for as long as the store is: erased with it.")] },
   "nl:yearly-offer:@lib/yearly-offer.ts": company("A yearly offer made", "The company's offer to a creator about their own plan."),
   "nl:tier:@lib/yearly-switch.ts": short("A membership's lock while it goes yearly", "request", 1, 128, REQ("tier switch")),
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),

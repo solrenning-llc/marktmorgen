@@ -2555,11 +2555,19 @@ export class MemoryRedis {
           return 1;
         }
         // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
-        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, hash, tell, due, field, read, next, score, member] = args;
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, hash, tell, due, field, read, next, score, member, attempt] = args;
+          this.scriptCalls += 1;
           if (this.run(["HGET", hash, field]) !== read) return 0;
-          if (read !== next) this.run(["HSET", hash, field, next]);
-          this.run(["ZADD", tell, "NX", score, member]);
+          if (attempt !== "") {
+            this.scriptCalls += 1;
+            this.run(["HSET", hash, field, attempt]);
+            this.scriptCalls += 1;
+            this.run(["ZADD", tell, "NX", score, member]);
+          }
+          this.scriptCalls += 1;
+          this.run(["HSET", hash, field, next]);
+          this.scriptCalls += 1;
           this.run(["ZREM", due, member]);
           return 1;
         }

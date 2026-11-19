@@ -59,7 +59,7 @@ const isDue = async () => (await redis.pipeline([["ZSCORE", "nl:dsched:due", MEM
 
 async function main() {
   try {
-    const { ACTIVATION_TRIES, RETRY_SECONDS } = await import("@/lib/discount-schedule-rules");
+    const { ACTIVATION_TRIES, RETRY_SECONDS, NOTICE_TRIES } = await import("@/lib/discount-schedule-rules");
     const sched = await import("@/lib/discount-schedule");
     const { livePromotionId } = await import("@/lib/discount");
     const start = NOW + 2 * HOUR;
@@ -180,6 +180,35 @@ async function main() {
       stopFails = false;
       redis.run = realRun;
     }
+
+    part("A repeatedly failed notice enqueue spends the existing finite notice budget");
+    await reset();
+    await redis.pipeline([["DEL", sched.TELL_KEY]]);
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    let failedEnqueues = 0;
+    const beforeBudgetRun = redis.run.bind(redis);
+    redis.run = (command) => {
+      if (command[0] === "ZADD" && command[1] === sched.TELL_KEY) {
+        failedEnqueues++;
+        throw new Error("synthetic persistent notice enqueue failure");
+      }
+      return beforeBudgetRun(command);
+    };
+    stopFails = true;
+    clock = start;
+    try {
+      for (let i = 0; i < ACTIVATION_TRIES + NOTICE_TRIES + 10; i++) {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, telling as typeof deps);
+        clock += RETRY_SECONDS;
+      }
+      is("failed enqueues cannot exceed the existing notice attempts", failedEnqueues <= NOTICE_TRIES, true);
+      is("a notice with its budget spent does not occupy the activation queue forever", await isDue(), false);
+      const [kept] = await redis.pipeline([["HGET", `nl:dsched:${STATS}`, "promo_Fixture4466"]]);
+      is("failed enqueue work is recorded in the existing notice budget", JSON.parse(String(kept)).n, NOTICE_TRIES);
+      const atEnd = failedEnqueues;
+      await sched.activateScheduledCodes(Date.now() + 10_000, end + 86400, telling as typeof deps);
+      is("even after code expiry no unbudgeted enqueue is retried", failedEnqueues, atEnd);
+    } finally { stopFails = false; redis.run = beforeBudgetRun; }
 
     // Claude 4 cloud U on #4522 (6894719098, MEDIUM): activateCode answers false for a refusal and for a 5xx, a
     // timeout or a lost reply alike; in the last three the switch-on may have landed. The last try then kept the

@@ -2183,6 +2183,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A course's "Next step" reads what the student has through the same door, only when nothing else keeps the card away (560 [AS1], 10 November 2026).
+      { file: "lib/course-next-step.ts", names: ["takeBuyerRead(store, 1)", "readListing(store, step.productId)", "takeBuyerRead(store, CART_OFFER_REQUEST_UNITS - 1)", "ownedHere(store, input.email)", "paypalOwned(store, input.email", "if (!nextStepShown({ step, courseProductId, product, owned: false, dismissed: false }).shown"] },
       // A member price's proof reads what the visitor holds from the creator's Stripe account (two calls at most) and the purchases
       // brought over, counted before, at the next product's own count and inside its bounds (620 [SZ4], 6 November 2026;
       // MAX_MEMBER_QUALIFYING listings and MEMBER_PRICE_STRIPE_CALLS held under NEXT_OFFER_READ's in tests/member-price.test.ts).

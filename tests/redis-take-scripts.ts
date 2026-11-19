@@ -28,6 +28,12 @@ const SCRIPTS: Record<string, Script> = {
     return 1;
   },
   "hash-del-if:v1": (run, [hash], [field, was]) => (run(["HGET", hash, field]) !== was ? 0 : run(["HDEL", hash, field])),
+  "store-forget-complete:v1": (run, [queue, month], [field, seconds]) => {
+    if (run(["HDEL", queue, field]) !== 1) return [0, 0];
+    const done = run(["HINCRBY", month, "done", 1]);
+    run(["EXPIRE", month, seconds]);
+    return [1, done];
+  },
   "set-take-count:v1": (run, [set]) => {
     const n = Number(run(["SCARD", set])) || 0;
     run(["DEL", set]);

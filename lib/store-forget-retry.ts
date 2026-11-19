@@ -56,7 +56,7 @@
  * MEDIUM on 8a05d01969: a round that finished noted nothing, and the walk's next round listed the files again).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, replyList, stringList } from "@/lib/redis-reply";
 import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
@@ -79,6 +79,17 @@ const MONTH_SECONDS = 400 * 86_400;
 
 const QUEUE = "nl:forget:q";
 const KEPT = "nl:forget:kept";
+
+/**
+ * A finished try's end, in one step: the store out of the line and the month's done counted only when that very field
+ * was taken out, and the month's counts kept their term. Answers [1, done], or [0, 0] when the field was not there
+ * (Codex G on main, G-20261119-0610).
+ */
+const COMPLETE_FORGET = `-- marktmorgen:store-forget-complete:v1
+if redis.call("HDEL", KEYS[1], ARGV[1]) ~= 1 then return {0, 0} end
+local done = redis.call("HINCRBY", KEYS[2], "done", 1)
+redis.call("EXPIRE", KEYS[2], ARGV[2])
+return {1, done}`;
 const FILES = "nl:forget:files";
 const monthKey = (month: string) => `nl:forget:month:${month}`;
 const monthOf = (now: number) => new Date(now).toISOString().slice(0, 7);
@@ -199,6 +210,7 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
     const statsId = statsText === "-" ? null : statsText;
     // A field or an entry this file did not write is never tried and never dropped: it is given up and counted.
     const known = entry !== null && sid !== undefined && fieldOf(statsId, sid) === field;
+    let failed: { error: unknown } | null = null;
     try {
       if (!known) throw new Error("an entry in an unknown shape");
       const filesToo = entry?.files !== false;
@@ -206,9 +218,21 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
       // Its files deleted: noted before the round leaves the line, so a round the walk starts later does not list
       // them again; a note not confirmed throws, and this try counts as failed (Claude 6's MEDIUM on 8a05d01969).
       if (filesToo) await noteStoreFilesForgotten(sid);
-      await redisPipeline([["HDEL", QUEUE, field], ["HINCRBY", monthKey(monthOf(now)), "done", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
-      out.done += 1;
     } catch (error) {
+      failed = { error };
+    }
+    if (failed === null) {
+      // The work is done; its end is read exactly, outside the try's catch, so a lost answer after the end was written
+      // is never taken for another failed try nor counted done: it is unknown, and the run stops on it (rule 24; Codex
+      // G on main, G-20261119-0610). The line is left as it was when nothing was written.
+      const month = monthKey(monthOf(now));
+      const completed = replyList(repliesFor(await redisPipeline([["EVAL", COMPLETE_FORGET, 2, QUEUE, month, field, MONTH_SECONDS]]), 1)?.[0]);
+      const removed = completed?.length === 2 ? countOf(completed[0]) : null;
+      const done = completed?.length === 2 ? countOf(completed[1]) : null;
+      if (removed !== 1 || done === null || done < 1) throw new UnknownReplyError("a deleted store's finished forgetting");
+      out.done += 1;
+    } else {
+      const error = failed.error;
       const carried = { ...(entry?.community ? { community: entry.community } : {}), ...(entry?.files === false ? { files: false as const } : {}) };
       if (known && entry && error instanceof OutOfTime && (entry.late ?? 0) < FORGET_LATE_PASSES) {
         // Cut off by the deadline, not failed: left for the next run, its tries untouched (review of #4348, MÉDIO 2),

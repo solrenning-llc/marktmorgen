@@ -5,7 +5,7 @@
    "scenario": "-0.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 971.3392,
+   "objective": 971.3354,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -52,13 +52,13 @@
    "scenario": "-0.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 983.4321,
+   "objective": 983.4578,
    "plans": {
     "creator": {
      "monthCents": 19900,
      "shares": {
       "ai": 1.0,
-      "video": 0.1,
+      "video": 0.25,
       "storage": 0.1,
       "orders": 0.1,
       "store-email": 0.1,
@@ -99,7 +99,7 @@
    "scenario": "-1",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 342.1288,
+   "objective": 342.1274,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -146,13 +146,13 @@
    "scenario": "-1",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 346.3747,
+   "objective": 346.3838,
    "plans": {
     "creator": {
      "monthCents": 19900,
      "shares": {
       "ai": 1.0,
-      "video": 0.1,
+      "video": 0.25,
       "storage": 0.1,
       "orders": 0.1,
       "store-email": 0.1,
@@ -193,7 +193,7 @@
    "scenario": "-1.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 172.0032,
+   "objective": 172.0015,
    "plans": {
     "creator": {
      "monthCents": 18900,
@@ -240,13 +240,13 @@
    "scenario": "-1.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 244.9747,
+   "objective": 244.9985,
    "plans": {
     "creator": {
      "monthCents": 14900,
      "shares": {
       "ai": 1.0,
-      "video": 0.1,
+      "video": 0.25,
       "storage": 0.1,
       "orders": 0.1,
       "store-email": 0.1,
@@ -287,7 +287,7 @@
    "scenario": "-2",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 90.4372,
+   "objective": 90.4363,
    "plans": {
     "creator": {
      "monthCents": 18900,
@@ -334,13 +334,13 @@
    "scenario": "-2",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 185.0796,
+   "objective": 185.0972,
    "plans": {
     "creator": {
      "monthCents": 14900,
      "shares": {
       "ai": 1.0,
-      "video": 0.1,
+      "video": 0.25,
       "storage": 0.1,
       "orders": 0.1,
       "store-email": 0.1,

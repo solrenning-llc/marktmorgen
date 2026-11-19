@@ -15,9 +15,10 @@
  *   nl:wb:<account>:<subscription>     that membership's email went
  *   nl:wb:once:<statsId>:<hash>        that person heard about that product lately
  *   nl:wb:link:<token>                 who a link in an email is for
- *   nl:wb:n:<statsId>                  how many have been sent, for the studio
+ *   nl:wb:open:<token>                 the checkout that link opened, while Stripe keeps it open
+ *   nl:wb:n:<statsId>                  how many have been sent, for the studio (all time, no expiry; erased with the store)
  */
-import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
+import { type DigitalConsent, DigitalConsentMissing, deliversDigitally, validConsent } from "@/lib/digital-consent";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
@@ -25,7 +26,7 @@ import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { onAccount, platformKey } from "@/lib/stripe-account";
+import { CHECKOUT_OPEN_SECONDS, onAccount, platformKey } from "@/lib/stripe-account";
 import { readStripePage } from "@/lib/stripe-list";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -35,7 +36,8 @@ import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
-import { OFFER_DAYS, ONCE_PER_DAYS, canWinBack, winbackOn } from "@/lib/winback";
+import { OFFER_DAYS, ONCE_PER_DAYS, WINBACK_OPEN_REQUEST_UNITS, WINBACK_OPEN_STRIPE_CALLS, canWinBack, winbackOn } from "@/lib/winback";
+import { takeBuyerRead } from "@/lib/buyer-actions";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -45,6 +47,13 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+/**
+ * Before a come-back checkout is opened, every membership that has not ended counts (R43, follow-up to #3371): only
+ * these two statuses have. One still taking its first payment ("incomplete"), paused or unpaid is read as running, so a
+ * second membership is never opened beside it; a status not in SUB_STATUSES is not read at all (unknown, null).
+ */
+const ENDED = new Set(["canceled", "incomplete_expired"]);
+const NOT_ENDED = { has: (status: string) => !ENDED.has(status) };
 /** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 11/11/2026). */
 const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
@@ -53,6 +62,19 @@ const sentKey = (account: string, sub: string) => `nl:wb:${account}:${sub}`;
 const onceKey = (statsId: string, email: string, product: string) =>
   `nl:wb:once:${statsId}:${sha(`nimbus-wb-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
 const linkKey = (token: string) => `nl:wb:link:${token}`;
+const openKey = (token: string) => `nl:wb:open:${token}`;
+/**
+ * One link, one checkout (Claude 5's first review of #3482): the checkout a link opened is handed back to every later
+ * press while Stripe keeps it open, so two tabs never make two. Stripe closes a checkout 24 hours after it opens unless
+ * told sooner, and one holding a limited unit at CHECKOUT_OPEN_SECONDS; each is handed back for less than that.
+ */
+const OPEN_KEPT_SECONDS = 23 * 3600;
+const OPEN_KEPT_HELD_SECONDS = CHECKOUT_OPEN_SECONDS - 120;
+/** While one press is opening the checkout, longer than a Stripe request may take (lib/fetch-timeout.ts, STRIPE_TIMEOUT_MS). */
+const OPENING_SECONDS = 60;
+/** The longest checkout address kept to hand back (tests/store-data-registry.ts prices the key at it). */
+export const OPEN_URL_MAX = 1_000;
+const CHECKOUT_URL = /^https:\/\/\S+$/;
 const countKey = (statsId: string) => `nl:wb:n:${statsId}`;
 
 /** A day as the store's language writes it: "October 8, 2026", "8 de octubre de 2026". */
@@ -112,7 +134,13 @@ const CAME_BACK_OFFER_PAGES = 10;
  * list. A page that is not one, a membership without an id to go on from, or more pages than are read is unknown,
  * never "has not come back", so no offer goes to somebody who may already be back.
  */
-async function cameBack(account: string, customer: string, product: string, budget: { pages: number }): Promise<boolean | null> {
+async function cameBack(
+  account: string,
+  customer: string,
+  product: string,
+  budget: { pages: number },
+  live: { has(status: string): boolean } = LIVE,
+): Promise<boolean | null> {
   let after = "";
   for (let page = 0; page < CAME_BACK_PAGES; page += 1) {
     if (budget.pages <= 0) return null;
@@ -128,7 +156,7 @@ async function cameBack(account: string, customer: string, product: string, budg
       const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
       if (typeof status !== "string" || !SUB_STATUSES.has(status) || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
       if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
-      if (LIVE.has(status) && (metadata as Record<string, unknown>).product === product) return true;
+      if (live.has(status) && (metadata as Record<string, unknown>).product === product) return true;
     }
     if (listed.has_more === false) return false;
     const last = (subs as { id?: unknown }[]).at(-1)?.id;
@@ -139,25 +167,42 @@ async function cameBack(account: string, customer: string, product: string, budg
 }
 
 /**
+ * Every customer of an address on the creator's account, or null when the list cannot be made whole (CX-123 rule 24;
+ * Claude 2 and Codex S on #3371). Each store checkout keeps the address as it was typed, and Stripe's list filter
+ * matches the text exactly, so the customers are read twice: listed by the address as given, and found by Stripe's
+ * customer search, whose rows count when their address is the same in small letters. Two calls. A list read in part,
+ * in another shape, or with a row that cannot be read is null; a provider error throws, for the caller to read as
+ * unknown.
+ */
+async function customersOf(account: string, email: string): Promise<string[] | null> {
+  const customers: string[] = [];
+  const listed = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+  if (listed.hasMore || listed.unreadable > 0) return null;
+  for (const row of listed.rows) if (!customers.includes(row.id)) customers.push(row.id);
+  const query = new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" });
+  const found = readStripePage(await onAccount("GET", account, `/customers/search?${query}`), (row) => typeof row.email === "string", CUSTOMER_PATTERN);
+  if (found.hasMore || found.unreadable > 0) return null;
+  const address = normaliseEmail(email);
+  for (const row of found.rows) if (normaliseEmail(row.email as string) === address && !customers.includes(row.id)) customers.push(row.id);
+  return customers;
+}
+
+/**
  * Whether this address is back on this product under any of its customers on the creator's account: true, false, or
  * null when it cannot be said (audit R43; CX-123 rule 24). Each store checkout makes a new customer, so the one whose
- * membership ended is read first, then every other customer listed under the address as Stripe holds it and in small
- * letters (Stripe's email filter matches the text exactly). A customer list that is not one, read in part, with a row
- * that cannot be read, or not read at all (a provider error), and more memberships than CAME_BACK_OFFER_PAGES, are
- * unknown, never "has not come back".
+ * membership ended is read first, then every other customer of the address in any letters (customersOf). A customer
+ * list that cannot be made whole or not read at all (a provider error), and more memberships than
+ * CAME_BACK_OFFER_PAGES, are unknown, never "has not come back".
  */
 async function cameBackUnder(account: string, customer: string, email: string, product: string): Promise<boolean | null> {
   const budget = { pages: CAME_BACK_OFFER_PAGES };
   const own = await cameBack(account, customer, product, budget);
   if (own !== false) return own;
   try {
-    const others: string[] = [];
-    for (const address of new Set([email, normaliseEmail(email)])) {
-      const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
-      if (page.hasMore || page.unreadable > 0) return null;
-      for (const row of page.rows) if (row.id !== customer && !others.includes(row.id)) others.push(row.id);
-    }
-    for (const other of others) {
+    const customers = await customersOf(account, email);
+    if (!customers) return null;
+    for (const other of customers) {
+      if (other === customer) continue;
       const back = await cameBack(account, other, product, budget);
       if (back !== false) return back;
     }
@@ -168,15 +213,69 @@ async function cameBackUnder(account: string, customer: string, email: string, p
   }
 }
 
+/**
+ * Whether the person a come-back link is for already has a membership of this product that has not ended, under any
+ * customer of the address on the creator's account (customersOf, in any letters): true, false, or null when it cannot
+ * be said (CX-123 rule 24). At most WINBACK_OPEN_STRIPE_CALLS calls: the two reads of the customers, then their
+ * memberships. A customer list that cannot be made whole or not read at all, and more memberships than the calls left
+ * read, are unknown, never "no membership".
+ */
+async function runningFor(account: string, email: string, product: string): Promise<boolean | null> {
+  try {
+    const customers = await customersOf(account, email);
+    if (!customers) return null;
+    const budget = { pages: WINBACK_OPEN_STRIPE_CALLS - 2 };
+    for (const customer of customers) {
+      const running = await cameBack(account, customer, product, budget, NOT_ENDED);
+      if (running !== false) return running;
+    }
+    return false;
+  } catch (error) {
+    console.error("reading whether a come-back link's member has a running membership failed", error);
+    return null;
+  }
+}
+
 /** Pages of a window's ended memberships read in one run (a hundred each). */
 const EVENT_PAGES = 10;
 /**
- * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to two
- * pages of the address's customers, up to CAME_BACK_OFFER_PAGES pages of their memberships and an email. The window
- * is read whole to decide, but no more than this is spent on it in one run, as when only its first page was read;
- * the rest wait for the next run.
+ * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, two reads of
+ * the address's customers (customersOf), up to CAME_BACK_OFFER_PAGES pages of their memberships and an email. The
+ * window is read whole to decide, but no more than this is spent on it in one run, as when only its first page was
+ * read; the rest wait for the next run.
  */
 const OFFERS_PER_RUN = 100;
+
+/**
+ * At most this many come-back links not written as asked a store a run (Claude 5 on #3889): a link write answered in
+ * another shape says Redis is not answering as asked, so the store's run stops there, nothing more is sent on it, and
+ * the offers after it wait for the next run, as those past OFFERS_PER_RUN do. Without it every offer a run looks at
+ * could fail the same way, each spending UNWRITTEN_LINK_COMMANDS with no email, on every run.
+ */
+export const UNWRITTEN_LINKS_PER_RUN = 1;
+
+/** A mark taken (lib/claim-mark.ts claimMark): its SET NX and, answered in another shape, the GET that reads it back. */
+const MARK_COMMANDS = 2;
+/**
+ * One address's unsubscribe token (lib/contacts.ts tokensFor) at its worst: its three rounds, each the contact's
+ * HMGET, the deleted-addresses HMGET, the token record's SET, the compare-and-set script (one, and its HGET and HSET,
+ * as Upstash bills a script) and either the read-back HMGET of a write answered in another shape or the DEL of a
+ * token lost to a change made meanwhile.
+ */
+const TOKEN_COMMANDS = 3 * (1 + 1 + 1 + 3 + 1);
+/** The link's SET and its three erasure notes (lib/erasure-index.ts noteForErasure: ZADD, ZREMRANGEBYSCORE, EXPIRE). */
+const LINK_WRITE_COMMANDS = 1 + 3;
+/** The link taken back (DEL) and this run's two marks let go (releaseMark: lib/redis-lock.ts RELEASE, one EVAL and its GET and DEL). */
+const TAKE_BACK_COMMANDS = 1 + 2 * 3;
+
+/**
+ * The most commands a come-back offer whose link was not written as asked costs, with nothing sent, from its first
+ * mark to the end (Claude 7 and Claude 5 on #3889): the membership's mark and the once-mark, the unsubscribe token,
+ * the link and its notes, and the take-back. The whole offer is looked at again on the next run, so all of it repeats
+ * outside the store's email figure. At most UNWRITTEN_LINKS_PER_RUN a store a run; priced in tests/plan-cost-registry.ts
+ * (come-back-unwritten-links) and held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.
+ */
+export const UNWRITTEN_LINK_COMMANDS = 2 * MARK_COMMANDS + TOKEN_COMMANDS + LINK_WRITE_COMMANDS + TAKE_BACK_COMMANDS;
 
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;
@@ -202,6 +301,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
   }
   let sent = 0;
   let lookedAt = 0;
+  let unwritten = 0;
 
   // Oldest first (Claude 4 on #2714): Stripe lists events newest first, and the window is two days wide with one run
   // a day, so the offers a run can look at go to the ended memberships about to leave the window, not the newest.
@@ -259,7 +359,24 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
-      await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
+      // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts writes its stop link): the link written
+      // ("OK") and each erasure note a count. Anything else is unknown: the email does not go with a link that may lead
+      // to "this offer has ended" or that an erasure could not find; the link that may have landed is taken back (its
+      // reply read as nothing) and this run's marks are let go, so the next run sends the offer once.
+      const notes = noteForErasure(statsId, email, linkKey(token));
+      const written = repliesFor(
+        await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...notes]).catch(() => null),
+        1 + notes.length,
+      );
+      if (!written || written[0] !== "OK" || !notedExactly(written.slice(1), notes.length)) {
+        await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        await releaseMark(sentKey(account, subId), claim);
+        console.error("a come-back link was not written as asked; nothing sent", store.handle);
+        unwritten += 1;
+        if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;
+        continue;
+      }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,
@@ -304,6 +421,16 @@ export async function winbacksSent(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
   return Number(n) || 0;
+}
+
+/**
+ * noteForErasure's replies in their exact shape (Codex X8 on #3889, as lib/product-updates.ts noted() reads the same
+ * three notes): ZADD of one member 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1 (the set was just written). Anything
+ * else, such as an EXPIRE 0 that says no index was there to keep, means an erasure may not find the link.
+ */
+function notedExactly(replies: unknown[], count: number): boolean {
+  if (count === 0) return replies.length === 0;
+  return count === 3 && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
 }
 
 /** The daily run: every store with the offer on, from where the last run stopped. */
@@ -383,7 +510,9 @@ export async function readWinBack(store: Store, product: string, token: string):
 }
 
 /** "unknown": the link could not be read just now (readWinBack threw); never said as "expired". */
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "unknown" };
+export type OpenResult =
+  | { ok: true; url: string }
+  | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "member" | "limited" | "opening" | "unknown" };
 
 /** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
 export async function openWinBack(
@@ -412,13 +541,40 @@ export async function openWinBack(
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, grant.option)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? grant.option : undefined;
+  // Never a second membership beside one that has not ended (R43, follow-up to #3371): the reading is counted first,
+  // then a running membership under any customer of the address refuses, and so does a reading that cannot be made
+  // whole (CX-123 rule 24). Nothing is opened or charged on either.
+  if (!(await takeBuyerRead(store, WINBACK_OPEN_REQUEST_UNITS))) return { ok: false, reason: "limited" };
+  const running = store.stripeAccountId ? await runningFor(store.stripeAccountId, normaliseEmail(grant.email), product.id) : null;
+  if (running === true) return { ok: false, reason: "member" };
+  if (running === null) return { ok: false, reason: "refused" };
+  // The box is asked of every press, the one handed back an open checkout as well (lib/digital-consent.ts).
+  if (deliversDigitally(product, option ?? null) && !validConsent(consent)) return { ok: false, reason: "consent" };
+  // One link, one checkout: a press while another is opening it waits, and one after it gets the same checkout.
+  const claim = claimValue();
+  const claimed = await claimMark(openKey(token), OPENING_SECONDS, claim);
+  if (claimed !== "ours") {
+    if (claimed === "unknown") return { ok: false, reason: "refused" };
+    return keptCheckout(token);
+  }
+  let opened = "";
   try {
     // A limited product holds a unit while the checkout is open, as any other checkout does.
-    const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: holding, digitalConsent: consent }),
-    );
+    let holding = false;
+    const held = await withStockHold(store, product, (hold) => {
+      holding = hold;
+      return createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: hold, digitalConsent: consent });
+    });
     if (!held.ok) return { ok: false, reason: "unavailable" };
-    return { ok: true, url: held.value.url };
+    opened = held.value.url;
+    // Never longer than Stripe keeps it open: a checkout told to close sooner (the store's reminders ask for an hour;
+    // a held unit, CHECKOUT_OPEN_SECONDS) is kept until two minutes before that (Claude 7's review of #3482, MEDIUM).
+    const ceiling = holding ? OPEN_KEPT_HELD_SECONDS : OPEN_KEPT_SECONDS;
+    // Not said (a physical order's confirmed origin, never a membership's): the ceiling alone.
+    const closesAt = held.value.closesAt ?? null;
+    const left = closesAt === null ? ceiling : Math.min(ceiling, closesAt - Math.floor(Date.now() / 1000) - 120);
+    if (left > 0) await keepCheckout(token, opened, left);
+    return { ok: true, url: opened };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely: said
     // plainly, with the ordinary way back, rather than a checkout at a price
@@ -428,6 +584,46 @@ export async function openWinBack(
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a come-back checkout failed", store.handle, error);
+    return { ok: false, reason: "refused" };
+  } finally {
+    // Nothing opened: the next press may open one.
+    if (!opened) await releaseMark(openKey(token), claim);
+  }
+}
+
+/**
+ * Keeps the checkout a link opened, to hand back to the next press. Only a checkout address of the expected shape and
+ * size is kept; one that cannot be kept lets the claim run out at OPENING_SECONDS, so a later press opens another,
+ * exactly as before this was kept. Never throws: the checkout is open whatever happens here.
+ */
+async function keepCheckout(token: string, url: string, seconds: number): Promise<void> {
+  if (!CHECKOUT_URL.test(url) || url.length > OPEN_URL_MAX) return;
+  try {
+    const reply = repliesFor(await redisPipeline([["SET", openKey(token), url, "EX", seconds]]), 1);
+    if (!reply || reply[0] !== "OK") console.error("keeping a come-back checkout to hand back got an unknown reply");
+  } catch (error) {
+    console.error("keeping a come-back checkout to hand back failed", error);
+  }
+}
+
+/**
+ * What a press gets when another press holds the link's checkout (CX-123 rule 24): the checkout address kept, the
+ * same one; "opening" while the other press is still opening it, or when it ran out between the two reads; anything
+ * else is unknown, and nothing is opened on it.
+ */
+async function keptCheckout(token: string): Promise<OpenResult> {
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", openKey(token)]]), 1);
+    if (!reply) return { ok: false, reason: "refused" };
+    const kept = reply[0];
+    if (kept === null) return { ok: false, reason: "opening" };
+    if (typeof kept !== "string") return { ok: false, reason: "refused" };
+    if (CHECKOUT_URL.test(kept) && kept.length <= OPEN_URL_MAX) return { ok: true, url: kept };
+    // A claim's own value (lib/claim-mark.ts): the time it was taken, then a random part.
+    if (/^\d{13}\.\d{9}$/.test(kept)) return { ok: false, reason: "opening" };
+    return { ok: false, reason: "refused" };
+  } catch (error) {
+    console.error("reading a come-back link's open checkout failed", error);
     return { ok: false, reason: "refused" };
   }
 }

@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { BlobNotFoundError } from "@vercel/blob";
 import { DataRoomError } from "@/lib/store-data";
 import { cookies } from "next/headers";
 import { originFrom } from "@/lib/request-origin";
@@ -8,7 +9,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -83,29 +84,40 @@ export async function POST(request: NextRequest) {
           file = before.file;
         } else {
           const folder = taskFolder(await storeFolder(storeRef(store)), course.id, lesson.id, who);
-          // A path in this student's own folder, let in through the door and not handed in before.
-          if (!ownsTaskPath(asked.path, folder) || !(await takeTaskUpload(asked.path))) return no("invalid");
+          // A path in this student's own folder.
+          if (!ownsTaskPath(asked.path, folder)) return no("invalid");
           const path = asked.path;
-          const found = await headFile(path).catch(() => null);
+          // Measured before the door is taken: a store that could not answer says
+          // nothing about the file, so the door stays for the same file to be handed
+          // in once it answers. Only a store that answered "not there" means missing.
+          // (Task files are always in Blob: ownsTaskPath keeps them under stores/.)
+          const found = await headFile(path).catch((error: unknown) => (error instanceof BlobNotFoundError ? null : undefined));
+          if (found === undefined) return no("unavailable", 503);
           if (!found) return no("missing");
+          // Let in through the door and not handed in before. Taking it is the one
+          // step only one request can win, and nothing is kept, counted or deleted
+          // for this file before it.
+          if (!(await takeTaskUpload(path))) return no("invalid");
+          // Taken, the name is held: the same hold covers every way out below that keeps no work, and the sweep
+          // deletes a file left behind a day on (lib/assignment.ts, takeTaskUpload).
           const extension = taskExtension(found.contentType);
           if (!extension || !path.endsWith(`.${extension}`)) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("type");
           }
           if (found.size > MAX_TASK_FILE_BYTES) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("too_big");
           }
           // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
           // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
           const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
             throw error;
           });
           if (!roomTaken) {
-            await deleteFile(path).catch(() => {});
+            await deleteFile(path, "site_cleanup").catch(() => {});
             return no("full");
           }
           taken = found.size;
@@ -135,6 +147,8 @@ export async function POST(request: NextRequest) {
       });
       // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).
       if (done.state === "approved") await noteIfFinished(store, product.id, course.id, email);
+      // The new file is the work's now: its hold for the sweep is let go (lib/assignment.ts, takeTaskUpload).
+      if (taken && file) await releaseTaskHold(file.path);
       // The file it replaced is no longer anybody's work. Its bytes come back only when this hand-in took it out of the
       // files' hash (lib/assignment.ts, freedBytes) and only once it is gone: a file whose delete failed is still kept
       // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).

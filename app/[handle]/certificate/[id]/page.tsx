@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
@@ -23,15 +24,21 @@ type Params = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-async function load(rawHandle: string, id: string, product: string | undefined, counted = false) {
+/**
+ * The page and its tab's title share this one load within a request (React
+ * cache), so a page drawn is one of the store's public requests, as every
+ * store page is, and a title asked for alone pays the same. It is taken
+ * before the certificate, or the sample's listing and course, is read, as
+ * the PDF's is (./pdf/route.ts): past them, or when the count cannot be
+ * read, the store rests and nothing more is read (R20 finding 3; the
+ * anonymous-traffic audit, for the title).
+ */
+const load = cache(async (rawHandle: string, id: string, product: string | undefined) => {
   const decoded = decodeURIComponent(rawHandle);
   if (!decoded.startsWith("@")) return null;
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return null;
-  // The page itself takes one of the store's public requests before the
-  // certificate is read, as its PDF does (./pdf/route.ts): past them it rests
-  // with the store (R20 finding 3). The tab's title only reads.
-  if (counted && (await isResting(store))) return { store, resting: true as const };
+  if (await isResting(store)) return { store, resting: true as const };
   // The sample a creator looks at before any student has finished: the
   // course's real title and the creator's name, a placeholder for the rest.
   if (id === "sample") {
@@ -61,7 +68,7 @@ async function load(rawHandle: string, id: string, product: string | undefined, 
   // address that store has used.
   if (!certificate || certificate.store !== storeKey(store)) return null;
   return { store, certificate, sample: false, resting: false as const };
-}
+});
 
 /** The store's language, for a page whose certificate was not found. */
 async function languageOf(rawHandle: string): Promise<unknown> {
@@ -77,7 +84,10 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const { handle, id } = await params;
   const query = await searchParams;
   const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined);
-  if (!found || found.resting) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
+  // A resting store's tab says so, as the resting page's does (../../resting/page.tsx),
+  // in its language from the record the load already read.
+  if (found?.resting) return { title: `${speech(found.store).w.restingTitle} — Marktmorgen`, robots: { index: false, follow: false } };
+  if (!found) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
   const { certificate } = found;
   const w = coursesWords(found.store.language);
   return {
@@ -99,7 +109,7 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
 export default async function CertificatePage({ params, searchParams }: Params) {
   const { handle, id } = await params;
   const query = await searchParams;
-  const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined, true);
+  const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined);
   if (!found) notFound();
   if (found.resting) return <StoreResting store={found.store} />;
   const { store, certificate, sample } = found;
@@ -107,6 +117,7 @@ export default async function CertificatePage({ params, searchParams }: Params) 
   const w = coursesWords(store.language);
   const withdrawn = certificate.withdrawnAt > 0;
   // A certificate past its validity (639 [GL7](32)) says so, and is still the record of what it certified.
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const expired = !sample && standingOf(certificate, Math.floor(new Date().getTime() / 1000)) === "expired";
   const url = `${SITE_URL}/@${store.handle}/certificate/${certificate.id}`;
   const shortUrl = url.replace(/^https?:\/\//, "");
@@ -188,7 +199,8 @@ export default async function CertificatePage({ params, searchParams }: Params) 
                 <span>{"✓"}</span>
               </div>
               <div className="cert-proof">
-                <p>{sample ? w.sampleId : w.certId(certificate.id)}</p>
+                {/* Until when, on the sheet that is printed too, as on the PDF (639 [GL7](32)): an expired one never prints as standing. */}
+                <p>{sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id)}</p>
                 <p>{sample ? w.sampleCheck : w.checkAt(shortUrl)}</p>
               </div>
             </div>

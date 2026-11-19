@@ -32,7 +32,8 @@ jobs:
   documentation-scope:
     name: Documentation scope (codeql)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10 min: on 16/11/2026 a full-history checkout alone passed 5 min on main and froze the queue (#4826).
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.scope.outputs.full }}
     steps:
@@ -80,11 +81,14 @@ jobs:
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && github.event_name != 'merge_group' }}
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
+    # 180, not 120 (owner, 16/11/2026): on 16/11/2026 the finished runs of this job took 64 to 112 minutes (25
+    # pull_request and push runs) and three were cut at 120, one on main's own push: the main-red alarm opened #4826
+    # and the queue froze for about 4 hours, until the retry passed in 107. Same queries, same coverage, more time.
     # 120, not 60 (ALL-194, 14/11/2026): the JavaScript analysis is limited by time, not memory. run-queries already
     # uses every core of the runner (--threads=4) and ~14 GB (--ram=14568) with no memory error; runs that finish take
     # 27 to 54 minutes, and those cancelled at 60 had most queries done (82 of 105 on #3559). The merge queue waits
     # 360 minutes for checks, so a longer job is still answered. Coverage is unchanged (tests/codeql-timeout.test.ts).
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read

@@ -27,16 +27,18 @@ import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { batchTotal } from "@/lib/affiliate-payouts";
-import { onTheirWay, payableLines, payWithPayPal, paysAutomatically } from "@/lib/paypal-payouts";
+import { onTheirWay, payableLines, payWithPayPal, paypalLeftOut, paypalLeftOutText, paysAutomatically } from "@/lib/paypal-payouts";
 import { ordinal } from "@/lib/affiliate-setting";
 import { formatMoney } from "@/lib/money";
 
 /** How long the mark on a month lasts: long enough that next month is a new one. */
 const CLAIM_SECONDS = 40 * 86_400;
 /**
- * How long a run holds the month's claim while it pays and writes (#4620, part 3). The claim becomes the month's
- * own (CLAIM_SECONDS) only once the email went, or may have; a run stopped before that (the function's 60 s, a read
- * that failed) leaves a hold that runs out, and a run on one of the next days (PAYDAY_CATCH_UP_DAYS) does it then.
+ * How long a run holds the month's claim while it pays and writes (#4620, part 3). For the email alone, the claim
+ * becomes the month's own (CLAIM_SECONDS) only once the email went, or may have; a run stopped before that (the
+ * function's 60 s, a read that failed) leaves a hold that runs out, and a run on one of the next days
+ * (PAYDAY_CATCH_UP_DAYS) does it then. A store that pays by itself has the month kept before its press instead (payday),
+ * so the press, priced once a month, is never made twice.
  * Nobody is paid twice on it: payWithPayPal re-reads who is already on their way and holds its own lock.
  */
 const HOLD_SECONDS = 15 * 60;
@@ -73,26 +75,27 @@ async function claimMonth(statsId: string, month: string): Promise<boolean> {
 }
 
 /**
- * Makes the month's claim the month's own, once its email went or may have. The EXPIRE is tried twice; when neither
- * is confirmed, the mark is written again for the month (SET ... EX), so a hold that ran out meanwhile is put back
- * too. A failure of all three is said: then, and only then, the hold runs out and a later run that month may write
- * again (Claude 4 on #4667).
+ * Makes the month's claim the month's own, once its email went or may have, or before a press (payday). The EXPIRE
+ * is tried twice; when neither is confirmed, the mark is written again for the month (SET ... EX), so a hold that ran
+ * out meanwhile is put back too. True once Redis confirms one of them. A failure of all three is said: then, and only
+ * then, the hold runs out and a later run that month may write again (Claude 4 on #4667).
  */
-async function keepMonth(statsId: string, month: string): Promise<void> {
+async function keepMonth(statsId: string, month: string): Promise<boolean> {
   const key = `nl:aff:payday:${statsId}:${month}`;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      if (repliesFor(await redisPipeline([["EXPIRE", key, CLAIM_SECONDS]]), 1)?.[0] === 1) return;
+      if (repliesFor(await redisPipeline([["EXPIRE", key, CLAIM_SECONDS]]), 1)?.[0] === 1) return true;
     } catch {
       // Tried again below.
     }
   }
   try {
-    if (repliesFor(await redisPipeline([["SET", key, "kept", "EX", CLAIM_SECONDS]]), 1)?.[0] === "OK") return;
+    if (repliesFor(await redisPipeline([["SET", key, "kept", "EX", CLAIM_SECONDS]]), 1)?.[0] === "OK") return true;
   } catch {
     // Said below.
   }
   console.error("a store's payday claim could not be kept for the month");
+  return false;
 }
 
 /**
@@ -158,8 +161,25 @@ export function paydayEmail(input: {
 }
 
 /** The payday email of a store that pays by itself: what PayPal was asked to send, or why not. */
-export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string): { subject: string; text: string } {
+export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string, leftOut = 0): { subject: string; text: string } {
   const studio = `${SITE_URL}/studio/affiliates`;
+  // Anyone owed whose address PayPal cannot take (Claude 7 on #4318) is named, so the creator is never told that
+  // nobody is owed, nor left to think everyone was paid.
+  const outside = leftOut > 0 ? ["", paypalLeftOutText(leftOut)] : [];
+  if (!paid.ok && paid.reason === "nothing" && leftOut > 0) {
+    return {
+      subject: "Your affiliates were not paid today",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and nothing was sent through PayPal. Nothing left your PayPal.",
+        ...outside,
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
   if (paid.ok) {
     const amount = formatMoney(paid.cents, currency);
     const who = `${paid.people} ${paid.people === 1 ? "affiliate" : "affiliates"}`;
@@ -171,6 +191,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
         `It is your affiliate payday, and you asked us to pay by ourselves. ${amount} went to ${who} from your own PayPal, in PayPal batch ${paid.batch}.`,
         "",
         "Each payment shows as paid on your affiliate page, and on the affiliate's own page, as soon as PayPal confirms it. Anyone PayPal cannot pay stays owed, to be paid again. The money went from your PayPal to theirs; it never passed through us.",
+        ...outside,
         studio,
         "",
         "— Marktmorgen",
@@ -250,7 +271,8 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   if (!store.statsId || !store.email) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
-  const lines = payableLines(book, await onTheirWay(store));
+  const away = await onTheirWay(store);
+  const lines = payableLines(book, away);
   // Nobody to pay is not a message worth sending, and it must not spend the
   // month's claim either: a sale that lands later today should still be able
   // to bring the email.
@@ -261,9 +283,17 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   // Paying by itself, from the creator's own PayPal (lib/paypal-payouts.ts):
   // the email then says what was sent, or why it could not be.
   if (book.refundsChecked && (await paysAutomatically(store))) {
+    // The press is the month's work and the email only its report, and the press takes no integration unit: it is
+    // priced once a month (PAYPAL_PRESSES_UNTAKEN, Claude 6 on #4488). So the month is kept for good BEFORE the press,
+    // and only once Redis confirms it: an email refused at the store's figure, a press whose outcome is not known, or
+    // a run stopped mid-press never lets a later run this month press again. Not confirmed kept, nothing is pressed;
+    // the hold runs out and a later run tries again. Whoever a press did not pay stays owed: in the next payday's
+    // batch and on the studio's own press, never dropped.
+    if (!(await keepMonth(store.statsId, month))) throw new UnknownReplyError("a store's payday month, kept before its auto-pay");
     const paid = await payWithPayPal(store);
-    const { subject, text } = autoPayEmail(paid, book.currency);
-    return sendAndKeep({ ...store, statsId: store.statsId }, month, { meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
+    const { subject, text } = autoPayEmail(paid, book.currency, paypalLeftOut(book, away));
+    const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
+    return outcome === "sent";
   }
   const { subject, text } = paydayEmail({
     storeName: store.name,

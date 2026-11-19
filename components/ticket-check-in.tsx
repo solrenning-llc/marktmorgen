@@ -85,8 +85,9 @@ export function TicketCheckIn({ event }: { event: string }) {
     setResult(next);
     // Ready for the next person once the door decided; a code that could not be checked, or was mistyped, stays,
     // so Enter tries it again or one character can be fixed (3.3.6).
+    // A reply for the previous person must not clear a code already entered for the next one.
     if (next.outcome === "admitted" || next.outcome === "used" || next.outcome === "expired") {
-      setCode("");
+      setCode((current) => current === code ? "" : current);
       attempt.current = null;
     }
     setBusy(false);

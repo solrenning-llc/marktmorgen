@@ -99,7 +99,9 @@ async function main(): Promise<void> {
   is("an attempt that is not 32 hex characters is not read as one", (await post({ event, code: retried, attempt: "not-an-attempt" })).body.outcome, "used");
   const screen = readFileSync("components/ticket-check-in.tsx", "utf8");
   is("the screen sends one attempt per typed code, made again only when the code changes", [/attempt/.test(screen), /JSON\.stringify\(\{ event, code: typed, attempt/.test(screen)], [true, true]);
-  is("a mistyped code stays in the field, cleared only after admitted, used or expired (3.3.6)", /setCode\(""\)/.test(screen) && !/next\.outcome !== "unknown"\) setCode/.test(screen), true);
+  const terminal = /if \(next\.outcome === "admitted" \|\| next\.outcome === "used" \|\| next\.outcome === "expired"\) \{/;
+  const clearSubmitted = /setCode\(\(current\) => current === code \? "" : current\);/;
+  is("only an unchanged field is cleared after admitted, used or expired (3.3.6)", new RegExp(terminal.source + "(?:\\s|//[^\\n]*\\n)*" + clearSubmitted.source).test(screen), true);
   is("signed out or not allowed says so, never \"try again\" forever", [/Sign in again/.test(screen), /cannot check people in/.test(screen)], [true, true]);
 
   const typed = codeFor(event, "typedtyped234567");

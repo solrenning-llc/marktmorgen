@@ -78,7 +78,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
-  "nl:orders:open:", "nl:orders:pending:", "nl:rcode:link:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
+  "nl:orders:held:", "nl:orders:open:", "nl:orders:pending:", "nl:rcode:link:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk", "nl:held:refused:", "nl:held:silent:", "nl:held:answered:",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
@@ -102,7 +102,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
-  "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop", "nl:stamp:noroom:",
   "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
@@ -344,7 +344,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // to retain a closed store's payload without reviewed funding/cleanup.
   "nl:order-confirmation:closed:": C, "nl:order-confirmation:erased:": C, "nl:order-confirmation:due": C, "nl:order-confirmation:person:": C, "nl:order-confirmation:row:": C,
   "nl:order-confirmation:source:": C, "nl:order-confirmation:store:": C,
-  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:rcode:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
+  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:held:": X(2), "nl:rcode:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
   // Legacy marks expire in45days. The inactive original-window checkpoint
   // may retain its receipt for767days; this is not its legacy price envelope.
   "nl:orders:seen:": X(767),
@@ -444,6 +444,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ship:mail:all": C, "nl:ship:mail:closed:": C, "nl:ship:mail:due": C, "nl:ship:mail:erased:": C,
   "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
+  // The hour counts (two hours each) and a resting store's check (a minute) and own count of the hour (two hours) are the
+  // company's and gone by themselves, as its opens in flight (four minutes); its mark is kept at most 32 days and two hours
+  // (a paying store until its window ends) and the studio's notice that its links were turned off 30 days.
+  "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(36), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),

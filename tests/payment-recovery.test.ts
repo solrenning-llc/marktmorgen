@@ -24,7 +24,7 @@ import { cardNoticeEmail, failedPaymentEmail, recoverFailedPayments } from "@/li
 import { KEEP_CARD_OPEN_IF_LIVE, cardGrant, cardLink, cardView, finishCardUpdate, openCardUpdate, openKey } from "@/lib/card-update";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ownerKey, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -289,6 +289,25 @@ async function main(): Promise<void> {
   await redis.pipeline([
     ["SET", `nl:store:id:${store.sid}`, OWNER],
     ["SET", openKey("acct_1TestHarbor0001", "sub_Running000001"), sessionId, "EX", 3600],
+  ]);
+
+  part("A store from before ids (sid \"\") still opens its card page, fenced on its record (Claude 3's MEDIUM on #4906)");
+  const legacy = { ...store, sid: "", extra: false };
+  const legacyOpenKey = openKey("acct_1TestHarbor0001", "sub_Running000001");
+  await redis.pipeline([["DEL", legacyOpenKey]]);
+  const legacyOpen = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001"), "https://marktmorgen.com");
+  const [legacyKept] = await redis.pipeline([["GET", legacyOpenKey]]);
+  is("a store from before ids opens its card page, and its page is kept", [legacyOpen.ok, typeof legacyKept === "string" && legacyKept.startsWith("cs_test_")], [true, true]);
+  const legacyRecord = await ownerKey(OWNER);
+  const [legacySaved] = await redis.pipeline([["GET", legacyRecord]]);
+  eraseStoreDuringSetup = { liveKey: legacyRecord, openKey: legacyOpenKey };
+  const legacyErased = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001"), "https://marktmorgen.com");
+  eraseStoreDuringSetup = null;
+  const [legacyRecreated] = await redis.pipeline([["GET", legacyOpenKey]]);
+  is("a store from before ids whose record went during the setup gets no URL and no recreated open pointer", [legacyErased.ok, legacyRecreated], [false, null]);
+  await redis.pipeline([
+    ["SET", legacyRecord, String(legacySaved)],
+    ["SET", legacyOpenKey, sessionId, "EX", 3600],
   ]);
 
   part("Rule 24: a membership whose status Stripe has no name for is unknown, never \"not ended\"");

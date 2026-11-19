@@ -596,7 +596,12 @@ async function putBack(log: string, ids: string[]): Promise<void> {
 async function forgetFinished(log: string, ids: string[]): Promise<void> {
   if (!ids.length) return;
   const deleted = repliesFor(await redisPipeline(ids.map((id) => ["DEL", jobKey(id)])), ids.length);
-  const gone = ids.filter((_, i) => countOf(deleted?.[i]) !== null);
+  // Each DEL names one key, so only 0 or 1 confirms it; any other count leaves the id in the log for a later cleanup
+  // (Codex G, G-20261119-0446).
+  const gone = ids.filter((_, i) => {
+    const count = countOf(deleted?.[i]);
+    return count === 0 || count === 1;
+  });
   if (gone.length) await redisPipeline(gone.map((id) => ["LREM", log, 0, id]));
 }
 

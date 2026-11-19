@@ -311,6 +311,19 @@ async function main(): Promise<void> {
     is(`${path} ${how}: PayPal still read, no total for any month`, [states(e, "paypal")[0], (e?.months ?? []).every((m) => m.totals === null)], ["read", true]);
   }
 
+  for (const [path, row] of [
+    ["/checkout/sessions", checkout("wrongkind", Date.UTC(2031, 3, 20), 5000, { object: "charge" })],
+    ["/payment_intents", extraPaid("wrongkind", Date.UTC(2031, 3, 20), 5000, { object: "charge" })],
+    ["/invoices", invoice("wrongkind", Date.UTC(2031, 3, 20), Date.UTC(2031, 3, 20), 5000, { object: "charge" })],
+    ["/refunds", refund("wrongkind", Date.UTC(2031, 3, 20), 5000, { object: "charge" })],
+  ] as const) {
+    reset();
+    const shop = makeStore(false);
+    stripe[path] = [row];
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is(`${path}: a row of another Stripe object kind is unreadable, never money`, states(e, "stripe").slice(0, 4), ["read", "read", "not_reached", "not_reached"]);
+  }
+
   reset();
   {
     const shop = makeStore();

@@ -140,6 +140,62 @@ async function main(): Promise<void> {
     is("nothing of them kept", holdingAddress(email), []);
   }
 
+  // C5-20261119-0900-4807, condition 1: on main's path the link is written after the once-mark, in a step of its own.
+  // An erasure that completes between the two finds no link to delete; the link is then written with the address,
+  // and the print read again before the email must take it back, or the address outlives the erasure.
+  part("The erasure completes after the once-mark and before the link is written: the link is taken back");
+  {
+    const email = "eve@example.com";
+    const { erase } = await world("before the link", email, "sub_EveErased00001", "cus_EveErased01");
+    let fired = false;
+    redis.pipeline = (async (commands: Commands) => {
+      if (!fired && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:wb:link:"))) { fired = true; await erase(); }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const result = await sendWinBacks(Date.now() + 30_000, now);
+    redis.pipeline = real;
+    is("the erasure ran just before the link was written", fired, true);
+    is("no email reached them", [result.sent, handed.filter((m) => m.to.includes(email)).length], [0, 0]);
+    is("no come-back key keeps the address", holdingAddress(email), []);
+    is("and no once-mark is left of them", winbackKeys().filter((k) => k.startsWith("nl:wb:once:")).length, 0);
+  }
+
+  // Condition 1, its DEL read exactly (rule 24): a reply other than 0 or 1 stops the store's run, so the offers after it
+  // wait for the next run, as after a link not written as asked.
+  part("The link's DEL after a late erasure answered in another shape: nothing sent, and the store's run stops");
+  {
+    const gus = "gus@example.com";
+    const fay = "fay@example.com";
+    const { store } = await world("odd DEL", gus, "sub_GusLater00001", "cus_GusLater0001");
+    const product = String((events[0]?.data?.object as { metadata?: Record<string, string> })?.metadata?.product);
+    customers.set("cus_FayErased001", fay);
+    await upsertContact(store.listId as string, fay, { agreed: true, explicit: true, source: "buyer" }, ROOM);
+    ended("sub_FayErased00001", "cus_FayErased001", { store: "wberased", product });
+    const eraseFay = async () => {
+      await real([suppressCommand(store.listId as string, fay)]);
+      await forgetWinbackPerson(store.statsId, [product], fay);
+      await forgetNoted(store.statsId as string, fay);
+    };
+    let fired = false;
+    let oddDel = false;
+    redis.pipeline = (async (commands: Commands) => {
+      if (!fired && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:wb:link:"))) { fired = true; await eraseFay(); }
+      if (fired && !oddDel && commands.length === 1 && commands[0]?.[0] === "DEL" && String(commands[0]?.[1]).startsWith("nl:wb:link:")) {
+        oddDel = true;
+        await real(commands);
+        return [5];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const first = await sendWinBacks(Date.now() + 30_000, now);
+    redis.pipeline = real;
+    is("fay was erased just before her link, and its DEL answered 5", [fired, oddDel], [true, true]);
+    is("nothing was sent on that run, to fay or to gus after her", [first.sent, handed.filter((m) => m.to.includes(fay)).length, handed.filter((m) => m.to.includes(gus)).length], [0, 0, 0]);
+    const second = await sendWinBacks(Date.now() + 30_000, now);
+    is("the next run sends gus's offer once, and never fay's", [second.sent, handed.filter((m) => m.to.includes(gus)).length, handed.filter((m) => m.to.includes(fay)).length], [1, 1, 0]);
+    is("nothing keeps fay's address", holdingAddress(fay), []);
+  }
+
   part("The dearest offer that is sent, every script's own command counted (3rjdf on #4807): inside WINBACK_OFFER_COMMANDS");
   {
     const email = "dee@example.com";

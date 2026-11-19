@@ -9,6 +9,7 @@ import { DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-d
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
+import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 type Batch = (string | number)[][];
@@ -19,6 +20,11 @@ const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: Batch) => {
   const one = commands.length === 1 && String(commands[0][1]).startsWith("nl:host:claims:");
   if (one && commands[0][0] === "HSCAN" && hscan) return hscan(await realPipeline(commands)) as never;
+  // Under the walk's lock (#3156, fencedBy) a host's claims are removed inside the fenced step: its answer is the one
+  // read for that HDEL, so it is the one shaped here too.
+  const fenced = commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:closing-fenced:v1")
+    && commands[0].slice(3).some((word) => String(word).startsWith("nl:host:claims:"));
+  if (fenced && hdel) return hdel(await realPipeline(commands)) as never;
   if (one && commands[0][0] === "HDEL" && hdel) {
     // The deletion is done, as a lost receipt would leave it, or not: either way its answer is not one Redis gives.
     return hdel(await realPipeline(commands)) as never;
@@ -38,6 +44,8 @@ async function closing(): Promise<{ key: string; at: number }> {
   if (!store?.sid) throw new Error("setup: no store");
   const key = claimsKey(hostId(X));
   await realPipeline([["HSET", key, FIELD, `1|2|0|${store.sid}`]]);
+  // Closed the way the closing job leaves it, so the walk erases a store really due (#3156, dueForErasure).
+  await closeForErasure(X);
   const at = Date.now();
   await markDue(X, at - 1000);
   return { key, at };

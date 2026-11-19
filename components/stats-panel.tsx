@@ -24,7 +24,7 @@ import { KeptByCurrency } from "@/components/kept-by-currency";
 import { TaxCollected } from "@/components/tax-collected";
 import { WeeklyCohortsPanel } from "@/components/weekly-cohorts";
 import { RevenueQuality, BuyerChannelsPanel } from "@/components/revenue-quality";
-import { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
+import { READ_MIN_VISITORS, READ_SAMPLE, readingsPartialWords, readingsUnknownWords } from "@/lib/page-read-sample";
 import { NumbersNotes } from "@/components/numbers-notes";
 import { AdSpendEditor } from "@/components/ad-spend-editor";
 import type { MetaAdsView } from "@/lib/meta-ads";
@@ -274,7 +274,7 @@ function HeardTable({
           ? "After paying, buyers are asked this one question, which they can skip. It finds what no link can: a friend who told them, a message, a podcast. Only the answer and the sale's amount are kept, nothing about the buyer. "
           : "When it is on, buyers are asked this one question after paying, and can skip it. "}
         {canSet ? (
-          <button type="button" className="font-semibold text-violet-deep underline underline-offset-4" disabled={busy} onClick={() => void toggle()}>
+          <button type="button" className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4" disabled={busy} onClick={() => void toggle()}>
             {asking ? "Stop asking" : "Ask buyers"}
           </button>
         ) : null}
@@ -706,6 +706,7 @@ export function StatsPanel({
 
       {reading ? <ReadingLine reading={reading} /> : null}
 
+      {/* oxlint-disable-next-line react/purity -- pre-existing read of today's date, not flagged by the former ESLint React Compiler rule; changing render behavior is outside the lint swap */}
       {pickDates ? <CustomRange today={data.days[data.days.length - 1]?.date ?? new Date().toISOString().slice(0, 10)} currency={data.currency ?? "usd"} /> : null}
 
       {empty ? (
@@ -870,7 +871,7 @@ export function StatsPanel({
             <span>{shortDate(days[days.length - 1].date)}</span>
           </div>
           <details className="mt-2 text-sm">
-            <summary className="cursor-pointer font-semibold text-ink-soft">See each day</summary>
+            <summary className="cursor-pointer py-3 font-semibold text-ink-soft">See each day</summary>
             <div className="max-h-80 overflow-y-auto" tabIndex={0} role="region" aria-label="Each day">
               <table className="mt-2 w-full text-left text-sm">
                 <thead>
@@ -899,7 +900,7 @@ export function StatsPanel({
             if (!shown.length) return null;
             return (
               <details className="mt-2 text-sm" data-auto-marks>
-                <summary className="cursor-pointer font-semibold text-ink-soft">{`Marked on their own: ${shown.length} ${shown.length === 1 ? "event" : "events"}`}</summary>
+                <summary className="cursor-pointer py-3 font-semibold text-ink-soft">{`Marked on their own: ${shown.length} ${shown.length === 1 ? "event" : "events"}`}</summary>
                 <ul className="mt-2 space-y-1">
                   {[...shown].reverse().map((m, i) => (
                     <li key={`${m.day}-${i}`} className="flex items-baseline gap-2" data-mark>
@@ -1296,6 +1297,11 @@ export function StatsPanel({
         </p>
       ) : null}
 
+      {reach && reach.visitors > 0 && data.readsPartial ? (
+        <p className="notice notice-info mt-6 text-sm" role="note">
+          {data.readsPartial === "unknown" ? readingsUnknownWords() : readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens, data.readsPartial.resumed === true)}
+        </p>
+      ) : null}
       {reach && reach.visitors > 0 ? (
         reach.visitors >= READ_MIN_VISITORS ? (
           <div className="mt-6 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="numbers-reach">

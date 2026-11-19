@@ -91,6 +91,8 @@ export const SERIAL_TEST_FILES = Object.freeze([
   // A real Chrome each (playwright-core), with its own renderer and GPU processes.
   'checkout-focus-browser.test.ts',
   'embed-editor-contrast.test.ts',
+  'mail-access-review-browser.test.ts',
+  'studio-search-label-browser.test.ts',
   'wg14-path-milestone-browser.test.ts',
 ]);
 

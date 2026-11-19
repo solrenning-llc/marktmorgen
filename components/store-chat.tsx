@@ -186,7 +186,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
             <h2 ref={heading} tabIndex={-1} className="font-display text-lg font-semibold leading-snug">
               {w.title(storeName)}
             </h2>
-            <button type="button" onClick={close} className="st-muted text-sm underline" aria-label={w.close}>
+            <button type="button" onClick={close} className="st-muted inline-flex min-h-11 min-w-11 items-center text-sm underline" aria-label={w.close}>
               {w.close}
             </button>
           </div>
@@ -241,7 +241,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
                 {w.send}
               </button>
               {token ? (
-                <button type="button" onClick={startOver} className="st-muted text-xs underline">
+                <button type="button" onClick={startOver} className="st-muted inline-flex min-h-11 min-w-11 items-center text-xs underline">
                   {w.newChat}
                 </button>
               ) : (

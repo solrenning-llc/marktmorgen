@@ -4,6 +4,8 @@
  * that reaches "Activation failed" (lib/discount-schedule.ts decides when,
  * and keeps it to once): which code, that it is still off, and how to switch
  * it on by hand in the studio. Past its end, it says the code ran out instead.
+ * When its stop was never confirmed (stopUnconfirmed), it says the code may
+ * still be on until its end, and to check it in Stripe.
  *
  * What it costs: one email from the store's own email figure, taken before it
  * goes (lib/email.ts, meter "store", kind "email"); one that does not fit is
@@ -39,13 +41,32 @@ function utcMoment(seconds: number): string {
 /** The subject and the plain text body. Pure, so each sentence is held by a test. */
 export function failureNotice(
   store: Pick<Store, "sid"> & { name?: string },
-  entry: Pick<ScheduleEntry, "code" | "start" | "end">,
+  entry: Pick<ScheduleEntry, "code" | "start" | "end" | "stopUnconfirmed">,
   nowSeconds: number,
   site = SITE_URL,
 ): { subject: string; text: string } {
   const code = entry.code;
   const studio = `${site}/studio${store.sid ? `?store=${store.sid}` : ""}#discount-codes`;
   const shop = store.name ? ` on ${store.name}` : "";
+  // Switched on at Stripe, then never confirmed switched off (lib/discount-schedule.ts offThenFailed, Codex X6 on
+  // #4522): never "it is still off". It says what the studio says, and what to check, with no urgency.
+  if (entry.stopUnconfirmed && nowSeconds < entry.end) {
+    return {
+      subject: `Your discount code ${code} may still be on`,
+      text: [
+        `Your discount code ${code} was set to run${shop} from ${utcMoment(entry.start)} to ${utcMoment(entry.end)}.`,
+        "We could not finish switching it on, and Stripe did not confirm that we switched it off.",
+        `Buyers may still be able to use it until its end, ${utcMoment(entry.end)}.`,
+        "",
+        "Check it in your Stripe dashboard, where the code is kept, and switch it off there if you do not want it used.",
+        "Your studio shows the same note under Discount codes:",
+        studio,
+        "",
+        "We send this email only once for this code.",
+        `Questions? Write to ${SUPPORT}.`,
+      ].join("\n"),
+    };
+  }
   const subject = `Your discount code ${code} did not switch on`;
   if (nowSeconds >= entry.end) {
     return {

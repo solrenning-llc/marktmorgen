@@ -930,6 +930,29 @@ async function sha256Hex(value: string): Promise<string> {
 export const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
+/**
+ * A store whose erasure has begun (Codex N1's HIGH on #3156): the closing walk (lib/closed-store-data.ts, prepareStore)
+ * writes one field here, through the same fence as its first delete and before anything of the live store is deleted,
+ * and closeStoreRecord removes it in the same fenced step as the record. While it is there no plan starts on the store
+ * (setSubscription, withRestartPublicationRecord) and a plan paid for it is returned in full like one paid on its closing
+ * day (lib/closing-plan-guard.ts, closingSince): a store half erased is never opened again. The field is the hash of
+ * the store's ref, as its record key is, so no address is written in it.
+ */
+export const ERASING_KEY = "nl:closed:erasing";
+export const erasingField = async (ref: string) => (await sha256Hex(`nimbus-erasing:${ref.toLowerCase()}`)).slice(0, 40);
+/**
+ * When this store's erasure began (ms), or null when it has not. Read exactly (rule 24): an answer that is neither nil
+ * nor a whole number of ms throws, never read as "not erasing", so a plan is never started on a guess.
+ */
+export async function erasingSince(ref: string): Promise<number | null> {
+  const read = repliesFor(await redisPipeline([["HGET", ERASING_KEY, await erasingField(ref)]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("whether a store's erasure has begun");
+  if (raw === null) return null;
+  if (!/^\d{1,16}$/.test(raw)) throw new UnknownReplyError("whether a store's erasure has begun");
+  return Number(raw);
+}
+
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 /**
  * Whether a handle's key, as read, still leads to a store: not free, not held
@@ -1355,6 +1378,8 @@ export async function withRestartPublicationRecord<T>(
   const entry=Object.getOwnPropertyDescriptor(reply,"0");
   if(!entry||!Object.hasOwn(entry,"value"))return null;
   const record=restartPublicationRecord(entry.value,ref,goal);if(!record)return null;
+  // A store whose erasure has begun never starts again (Codex N1's HIGH on #3156).
+  if((await erasingSince(ref))!==null)return null;
   return await work({...record,owner,held});
  }catch{return null;}
  finally{await releaseLockStrict(held);}
@@ -2276,6 +2301,8 @@ export async function closeStoreRecord(
       { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
       // The record is the very last change, so it goes in the last step even when the changes take more than one
       // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
+      // The erasing mark goes in the same step as the record (Codex N1's HIGH on #3156), never before it.
+      { op: "HDEL", key: ERASING_KEY, words: [await erasingField(storeRef(store))] },
       ...[beforeMoveKeyOf(owner), ...extraKeys, owner].map((key) => ({ op: "DEL", key, words: [] })),
     ];
     if (!(await applyIfHeld(held, changes))) throw new StoreBusyError();
@@ -2449,6 +2476,9 @@ export async function setSubscription(
     stripeCustomerId: expected.stripeCustomerId, subscriptionId: expected.subscriptionId,
     subscriptionActive: expected.subscriptionActive, tier: expected.tier, cycle: expected.cycle } : null;
   const result = await withStore<Store | null>(email, async (store, save) => {
+    // No plan runs on a store whose erasure has begun (Codex N1's HIGH on #3156): read under the store's lock, exactly,
+    // so a start racing the walk's first delete is refused; a payment for it is returned (closingSince).
+    if (fields.active && (await erasingSince(storeRef(store))) !== null) return null;
     if (source && (store.sid !== source.sid || store.statsId !== source.statsId ||
         store.stripeCustomerId !== source.stripeCustomerId || store.subscriptionId !== source.subscriptionId ||
         store.subscriptionActive !== source.subscriptionActive || store.tier !== source.tier || store.cycle !== source.cycle)) return null;

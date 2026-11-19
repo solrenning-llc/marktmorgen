@@ -12,6 +12,7 @@ import { erasePerson } from "@/lib/person-erasure";
 import { reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { reviewPhotoPath } from "@/lib/review-photo";
 import { normaliseEmail } from "@/lib/auth";
+import { emailKey } from "@/lib/learn";
 
 type Commands = (string | number)[][];
 // The file store never answers; Resend and Stripe answer empty.
@@ -105,6 +106,39 @@ async function main(): Promise<void> {
   is("photo: said as incomplete", photoFirst, "incomplete");
   is("photo: the repeat finishes", (await erasePerson(world5.store, eve, { kind: "person" })).ok, true);
   is("photo: and the photo is queued for deletion", ((await real([["ZRANGEBYSCORE", "nl:tasks:doors", "-inf", "+inf"]]))[0] as string[]).includes(photo), true);
+  // Codex X4 (X4-20261119-0656-fix-branch-4808, MEDIUM): a record that does not read has its file found only in the
+  // assignment's files hash, by forgetTasksPerson itself. The earlier separate read of the records never saw that path,
+  // so nothing kept it: with the paths' set and the queue failing, the record and its hash entry went, and the file was
+  // left outside every cleanup. The path the eraser finds is kept before anything that leads to it is deleted.
+  part("Codex X4: an unread record's file, found only in the files hash, is kept before the record goes");
+  redis.clear();
+  const world6 = await makeWorld();
+  const flo = normaliseEmail("flo@example.com");
+  await seedPerson(world6, flo, null);
+  const who6 = emailKey(flo);
+  const lesson6 = world6.lessons[1];
+  const sub6 = `nl:course:${world6.courseId}:task:${lesson6}:sub:${who6}`;
+  const files6 = `nl:course:${world6.courseId}:task:${lesson6}:files`;
+  const lost = `stores/i4808synthetic/tasks/${world6.courseId}/${lesson6}/${who6}/${"a".repeat(32)}.pdf`;
+  await real([["SET", sub6, "{unread"], ["HSET", files6, lost, "1000"]]);
+  // A pipeline is not atomic: the commands before the failing one have run (as on a real connection that drops).
+  redis.pipeline = (async (c: Commands) => {
+    const answers: unknown[] = [];
+    for (const command of c) {
+      if ((command[0] === "ZADD" && command[1] === "nl:tasks:doors") || (command[0] === "SADD" && String(command[1]).startsWith("nl:erase:files:"))) throw new Error("synthetic redis failure");
+      answers.push(...(await real([command])));
+    }
+    return answers;
+  }) as typeof redis.pipeline;
+  const unreadFirst = await erasePerson(world6.store, flo, { kind: "person" }).then((r) => (r.ok ? "ok" : "incomplete"), () => "threw");
+  redis.pipeline = real;
+  is("unread: said as incomplete", unreadFirst, "incomplete");
+  is("unread: the record stays until its file's path is kept", typeof (await real([["GET", sub6]]))[0], "string");
+  is("unread: and the file stays listed in the files hash", (await real([["HGET", files6, lost]]))[0], "1000");
+  const doorsNow = async () => (await real([["ZRANGEBYSCORE", "nl:tasks:doors", "-inf", "+inf"]]))[0] as string[];
+  is("unread: nothing queued during the outage", (await doorsNow()).includes(lost), false);
+  await erasePerson(world6.store, flo, { kind: "person" }).catch(() => undefined);
+  is("unread: with everything back, the file reaches the cleanup queue", (await doorsNow()).includes(lost), true);
   done();
 }
 void main().catch((error) => { console.error(error); process.exit(1); });

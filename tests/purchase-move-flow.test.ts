@@ -300,6 +300,35 @@ async function main(): Promise<void> {
     odd = null;
   }
 
+  part("Codex L on #3621 (MEDIUM, privacy), decision (C): the asker's inbox does not tell an erased new address apart either");
+  {
+    // The buyer reads the reply and the current inbox: neither may tell that the new address asked this store to
+    // delete it (coordinator's decision (C), 19 November 2026, 01:33 UTC). Nothing holding that address is written.
+    await redis.pipeline([suppressCommand(moss.listId!, "same.gone@example.com", Math.floor(Date.now() / 1000))]);
+    const requestKeys = () => moveKeys().filter((k) => k.startsWith("nl:pm:r:") || k.startsWith("nl:pm:t:")).length;
+    const dayKeys = () => moveKeys().filter((k) => k.startsWith("nl:pm:day:")).length;
+    const seenBy = async (buyer: string, to: string) => {
+      const token = await signIn(buyer);
+      const [m, d, r] = [mails.length, dayKeys(), requestKeys()];
+      const answer = await askToMovePurchases({ store: moss, token, to, origin: ORIGIN });
+      const sent = mails.slice(m);
+      return {
+        answer,
+        inbox: sent.filter((x) => x.to === buyer).map((x) => ({ subject: x.subject, text: x.text })),
+        elsewhere: sent.filter((x) => x.to !== buyer).length,
+        day: dayKeys() - d,
+        written: requestKeys() - r,
+      };
+    };
+    const normal = await seenBy("same.one@example.com", "same.new@example.com");
+    const gone = await seenBy("same.two@example.com", "same.gone@example.com");
+    is("the same reply", gone.answer, normal.answer);
+    is("the same emails to the current address, word for word", gone.inbox, normal.inbox);
+    is("the same day's count", gone.day, normal.day);
+    is("the current address gets no link before the new one confirms", normal.inbox.some((x) => linkIn(x.text) !== null), false);
+    is("nothing is written or sent for the erased address", [gone.written, gone.elsewhere], [0, 0]);
+  }
+
   part("Three a day");
   {
     const token = await signIn("tri.buyer@example.com");

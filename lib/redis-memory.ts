@@ -364,6 +364,22 @@ export class MemoryRedis {
           this.run(["HSET", list, mark, entry]);
           return 1;
         }
+        // lib/buyer-block.ts UNBLOCK_LUA: the block and its fixed data-room charge leave together.
+        if (key.startsWith("-- marktmorgen:buyer-unblock:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, list, room, mark, slot, rawBytes] = args;
+          if (Number(this.run(["HEXISTS", list, mark])) !== 1) return 0;
+          const old = Number(this.run(["HGET", room, slot]) ?? 0);
+          const total = Number(this.run(["HGET", room, "#"]) ?? 0);
+          const bytes = Number(rawBytes);
+          if (!Number.isFinite(old) || !Number.isFinite(total) || !Number.isFinite(bytes) || bytes < 0) return -1;
+          this.run(["HDEL", list, mark]);
+          const next = Math.max(0, old - bytes);
+          let delta = next - old;
+          if (old > 0 && next === 0) delta -= 64;
+          this.run(next > 0 ? ["HSET", room, slot, String(next)] : ["HDEL", room, slot]);
+          this.run(["HSET", room, "#", String(Math.max(0, total + delta))]);
+          return 1;
+        }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v1\n") && args[0] === "3" && args.length === 9) {
           const [, run, log, index, email, now, entry, keep, person] = args;

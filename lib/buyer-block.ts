@@ -24,7 +24,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { giveData, takeData } from "@/lib/store-data";
+import { dataKey, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -136,6 +136,26 @@ redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
 return 1
 `;
 
+/**
+ * Removes one block and its fixed data-room charge in the same Redis step.
+ * That keeps the charge exact when the script applies but its reply is lost:
+ * a retry sees no block and does not subtract it twice.
+ */
+export const UNBLOCK_LUA = `-- marktmorgen:buyer-unblock:v1
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) ~= 1 then return 0 end
+local old = tonumber(redis.call('HGET', KEYS[2], ARGV[2]) or '0')
+local total = tonumber(redis.call('HGET', KEYS[2], '#') or '0')
+local bytes = tonumber(ARGV[3])
+if not old or not total or not bytes or bytes < 0 then return -1 end
+redis.call('HDEL', KEYS[1], ARGV[1])
+local next = math.max(0, old - bytes)
+local delta = next - old
+if old > 0 and next == 0 then delta = delta - 64 end
+if next > 0 then redis.call('HSET', KEYS[2], ARGV[2], next) else redis.call('HDEL', KEYS[2], ARGV[2]) end
+redis.call('HSET', KEYS[2], '#', math.max(0, total + delta))
+return 1
+`;
+
 /** Blocks a person in the store's messages, with the creator's reason. */
 export async function blockPerson(store: BlockStore, email: string, reasonRaw: unknown, now = Date.now()): Promise<BlockOutcome> {
   if (!store.sid || !isRedisConfigured()) return "error";
@@ -162,19 +182,19 @@ export async function blockPerson(store: BlockStore, email: string, reasonRaw: u
 }
 
 /** Lets a person write to the store again. true when an entry was removed, false when there was none. */
-export async function unblockPerson(store: BlockStore, email: string, now = Date.now()): Promise<boolean | "error"> {
+export async function unblockPerson(store: BlockStore, email: string): Promise<boolean | "error"> {
   if (!store.sid || !isRedisConfigured()) return "error";
   const mark = personMark(email);
-  if (!mark) return "error";
+  const room = dataKey(store);
+  if (!mark || !room) return "error";
   let removed: unknown[] | null;
   try {
-    removed = repliesFor(await redisPipeline([["HDEL", blockKey(store.sid), mark]]), 1);
+    removed = repliesFor(await redisPipeline([["EVAL", UNBLOCK_LUA, 2, blockKey(store.sid), room, mark, BLOCK_SLOT, BLOCK_ENTRY_BYTES]]), 1);
   } catch {
     return "error";
   }
   const count = removed ? countOf(removed[0]) : null;
   if (count === null || count > 1) return "error";
-  if (count === 1) await giveData(store, [{ slot: BLOCK_SLOT, bytes: BLOCK_ENTRY_BYTES }], now);
   return count === 1;
 }
 

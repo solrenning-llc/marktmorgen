@@ -1185,6 +1185,12 @@ export class MemoryRedis {
           for (const target of targets) this.run(["DEL", target]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_WATCH_IF_LIVE: an order put back on a store's refund watch only while the store is live.
+        if (key.startsWith("-- marktmorgen:paypal-watch-if-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, storeId, erasing, watch, field, score, order] = args;
+          if (this.run(["EXISTS", storeId]) === 0 || this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          return this.run(["ZADD", watch, score, order]);
+        }
         // lib/payment-request-store.ts: the observed request and every index deleted together, only by its holder.
         if (key.startsWith("-- marktmorgen:payreq-delete:v1\n") && args[0] === "6" && args.length === 11) {
           const [, lock, target, store, open, due, person, token, observed, id, member] = args;

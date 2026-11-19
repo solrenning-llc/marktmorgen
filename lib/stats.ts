@@ -1561,8 +1561,9 @@ export type RenewalPayment = {
  * read 2 November 2026), so a refund of a membership's or a payment plan's
  * payment can be matched whatever API version the account answers in. At
  * most `pages` pages of a hundred, stopping at `deadline`; `partial` when
- * there was more (270 [GR1], unit 3a). A row that names a payment but has
- * an unreadable status, or is paid with no readable invoice, leaves that intent unconfirmed.
+ * there was more or a payment cannot be identified (270 [GR1], unit 3a).
+ * A row that names a payment but has an unreadable status, or is paid with no readable invoice,
+ * leaves that intent unconfirmed.
  */
 export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{
   byInvoice: Map<string, string[]>;
@@ -1585,7 +1586,13 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     for (const row of rows) {
       if (row.status === "open" || row.status === "canceled") continue;
       const invoice = typeof row.invoice === "string" ? row.invoice : "";
-      const intent = (row.payment as { payment_intent?: unknown } | null | undefined)?.payment_intent;
+      const payment = row.payment as { type?: unknown; payment_intent?: unknown; charge?: unknown; payment_record?: unknown } | null | undefined;
+      const intent = payment?.payment_intent;
+      // Without an intent id this may be another allocation of any intent in the page. Only an identified
+      // non-intent variant can be excluded from that proof; otherwise the bounded individual lookup must decide.
+      const nonIntent = (payment?.type === "charge" && typeof payment.charge === "string" && payment.charge.length > 0) ||
+        (payment?.type === "payment_record" && typeof payment.payment_record === "string" && payment.payment_record.length > 0);
+      if ((typeof intent !== "string" || !intent) && !nonIntent) partial = true;
       if (row.status !== "paid" || !invoice) {
         if (typeof intent === "string" && intent) unconfirmedIntents.add(intent);
         continue;

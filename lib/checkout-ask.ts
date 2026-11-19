@@ -59,11 +59,12 @@ import { recoveryOn } from "@/lib/recovery-setting";
 import { type RemindOutcome, remindAsked } from "@/lib/checkout-recovery";
 import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
 import { canSellProduct } from "@/lib/store-checkout";
-import type { Listing, Store } from "@/lib/store";
+import { type Listing, type Store, ensureListId, storeRef } from "@/lib/store";
 import { ASK_WHENS, type AskWhen } from "@/lib/ask-when";
 import { cartable } from "@/lib/cart-rules";
 import { cartAskKey } from "@/lib/checkout-ask-cart";
 import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 /** How long after asking the reminder goes: the same hour the other one waits. */
 export const ASK_AFTER_SECONDS = 60 * 60;
@@ -242,15 +243,41 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
   if (!(await withinEssentialLimit("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600))) return "limited";
   if (!(await withinEssentialLimit("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400))) return "limited";
+  // The store's list of erased people, made when a store older than it has none yet (as lib/api-write.ts does): without
+  // it no erasure could be checked, so the ask is not kept.
+  const listId = store.listId ?? (await ensureListId(storeRef(store)).catch(() => null))?.listId ?? null;
+  if (!listId) return "closed";
   const askedAt = Math.floor(Date.now() / 1000);
   const member = askMember({ statsId, handle: store.handle, productId, email, askedAt, from, after });
-  await redisPipeline([
-    ["ZADD", QUEUE, askedAt + after, member],
-    ["ZADD", askIndexKey(statsId, email), askedAt + after, member],
-    ["EXPIRE", askIndexKey(statsId, email), STORE_QUEUE_SECONDS],
-  ]);
-  return "asked";
+  // Written only while the person is not erased from this store, in the same step as the check (Codex X7 on #4290):
+  // a person's erasure writes their print before it takes their asks (ASK_FORGET), so an ask written before the print
+  // is taken by the erasure, and one that comes after it is refused, never left with the address after the erasure.
+  // Said kept only on its exact reply (rule 24). Billed 1 + 4; lib/redis-memory.ts runs it the same way.
+  let kept: unknown;
+  try {
+    kept = repliesFor(await redisPipeline([[
+      "EVAL", ASK_KEEP, 3, QUEUE, askIndexKey(statsId, email), suppressedKey(listId),
+      askedAt + after, member, STORE_QUEUE_SECONDS, suppressionPrint(listId, email),
+    ]]), 1)?.[0];
+  } catch {
+    kept = undefined;
+  }
+  // 1 kept; -1 this address was erased from this store; anything else is not known to be kept. Neither is said
+  // "asked", and an erased address is answered as for a store that takes none, so the page reveals nothing.
+  return kept === 1 ? "asked" : "closed";
 }
+
+/**
+ * Keeps an ask, in one step, only while the person's print is not in the store's erased list (KEYS[3], ARGV[4]): the
+ * queue (KEYS[1]) and the person's index (KEYS[2]) at ARGV[1], the member ARGV[2], the index's expiry ARGV[3].
+ * Answers 1 when kept, -1 when the person was erased.
+ */
+const ASK_KEEP = `-- marktmorgen:ask-keep:v1
+if redis.call("HEXISTS", KEYS[3], ARGV[4]) == 1 then return -1 end
+redis.call("ZADD", KEYS[1], ARGV[1], ARGV[2])
+redis.call("ZADD", KEYS[2], ARGV[1], ARGV[2])
+redis.call("EXPIRE", KEYS[2], ARGV[3])
+return 1`;
 
 /**
  * Puts a retried ask back, in one step, only while the entry it was taken with still waits in its person's index

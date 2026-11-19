@@ -377,6 +377,15 @@ export class MemoryRedis {
           this.run(["DEL", index]);
           return [taken, members.length];
         }
+        // lib/checkout-ask.ts ASK_KEEP: an ask kept, with its index, only while its person is not erased from the store.
+        if (key.startsWith("-- marktmorgen:ask-keep:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, queue, index, erased, at, member, ttl, print] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          this.run(["ZADD", queue, at, member]);
+          this.run(["ZADD", index, at, member]);
+          this.run(["EXPIRE", index, ttl]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);

@@ -80,7 +80,7 @@ import {
   TICKET_SESSION_PAGE_ROWS,
 } from "@/lib/community-read-rules";
 import { isSettled } from "@/lib/instant-pay";
-import { isLiveSub } from "@/lib/membership-access";
+import { liveExpanded } from "@/lib/membership-access";
 import { RefundReadCapped, type RefundReadLimits, keptUnlessLost, purchaseRefunded, refundReader, refundedInFull } from "@/lib/refunds";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { type Learner, TOKEN_PATTERN, emailKey, learnerFrom, storeKey } from "@/lib/learn";
@@ -228,6 +228,8 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   if (read.held.size > 0) return true;
   // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
   // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
+  // A membership in a shape Stripe never sends (rule 24; main's #4859): not "no", and not lasting either.
+  if (read.unread) throw new UnreadPurchasesError("a membership in a shape that cannot be read");
   if (!read.whole) throw new UnreadPurchasesError("more than is read", true);
   return false;
 }
@@ -242,14 +244,17 @@ async function paidHoldings(
   email: string,
   ids: ReadonlySet<string>,
   any: boolean,
-): Promise<{ held: Set<string>; whole: boolean; short: Set<string> }> {
+): Promise<{ held: Set<string>; whole: boolean; short: Set<string>; unread: boolean }> {
   const held = new Set<string>();
+  // Whether a membership came back in a shape Stripe never sends (rule 24; main's #4859): a "no" is not a "no" then,
+  // and asking again may tell (not lasting).
+  let unread = false;
   // The products of the purchases passed over only because this reading's refund questions were spent: a door kept
   // for one of them asks for its own products alone, with questions of its own (doorAnswer; Claude 1 cloud's review of
   // #3395: three products in installments left the third unasked for good).
   const short = new Set<string>();
   const account = store.stripeAccountId;
-  if (!account || ids.size === 0) return { held, whole: true, short };
+  if (!account || ids.size === 0) return { held, whole: true, short, unread };
   const enough = () => (any ? held.size > 0 : held.size >= ids.size);
   const handles = saleHandles(store);
   const customers = new Set<string>();
@@ -302,12 +307,20 @@ async function paidHoldings(
         // A membership opens the door while it is being paid for; a payment
         // plan is a one-off paid in parts, and counts like one.
         if (session.mode === "subscription" && meta.kind !== "plan") {
-          const sub = session.subscription as { status?: unknown } | null;
-          // The same rule as every other door a membership opens (lib/membership-access.ts).
-          if (!sub || typeof sub !== "object" || !isLiveSub(sub)) continue;
+          // The same rule as every other door a membership opens (lib/membership-access.ts): one that cannot be read
+          // is not ended, and another purchase may still open the door (main's #4859).
+          let live: boolean;
+          try {
+            live = liveExpanded(session.subscription);
+          } catch (error) {
+            if (!(error instanceof UnknownReplyError)) throw error;
+            unread = true;
+            continue;
+          }
+          if (!live) continue;
         }
         for (const id of bought) held.add(id);
-        if (enough()) return { held, whole: true, short };
+        if (enough()) return { held, whole: true, short, unread };
       }
     }
   }
@@ -349,9 +362,9 @@ async function paidHoldings(
     }
     if (lost) continue;
     for (const id of bought) held.add(id);
-    if (enough()) return { held, whole: true, short };
+    if (enough()) return { held, whole: true, short, unread };
   }
-  return { held, whole: reading.whole, short };
+  return { held, whole: reading.whole, short, unread };
 }
 
 /** Whether a checkout carried the offers after paying (lib/store-checkout.ts, lib/cart-checkout.ts: metadata `upsell_key`). */
@@ -565,6 +578,8 @@ async function readHoldings(store: Store, email: string, ids: readonly string[],
     if (!enough() && left.size > 0) {
       const paid = await paidHoldings(store, email, left, any);
       for (const id of paid.held) held.add(id);
+      // A membership that did not read (main's #4859): unknown, asked again next time, never "not held".
+      if (paid.unread && !enough()) return { ...notRead(new UnreadPurchasesError("a membership in a shape that cannot be read")), held };
       if (!paid.whole) {
         const unread = new UnreadPurchasesError("more than is read", true);
         const short = new Set([...paid.short].filter((id) => !held.has(id)));

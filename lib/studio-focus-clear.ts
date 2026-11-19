@@ -20,16 +20,21 @@ export type FocusClearInput = Readonly<{
   inDialog: boolean;
   /** The control is one of the bars' own, which are always in view. */
   inBars: boolean;
+  /**
+   * The focus came with a mouse or touch press still under way: the press already put the pointer on the control, and
+   * moving the page before it ends would carry the click away (a hidden radio under the bars stayed unchecked, #3757).
+   */
+  fromPointer: boolean;
 }>;
 
 /**
  * The scroll the page needs, in pixels (negative: up), so a focused control sits clear of the bars with its ring's
- * room; 0 when it already does, when no bar is sticky (print, forced reflow), inside a dialog or a bar, or when a
- * reading is not a finite number.
+ * room; 0 when it already does, when no bar is sticky (print, forced reflow), inside a dialog or a bar, during a
+ * pointer press, or when a reading is not a finite number.
  */
 export function focusScrollBy(input: FocusClearInput): number {
-  const { controlTop, barsBottom, inDialog, inBars } = input;
-  if (inDialog || inBars || barsBottom === null) return 0;
+  const { controlTop, barsBottom, inDialog, inBars, fromPointer } = input;
+  if (fromPointer || inDialog || inBars || barsBottom === null) return 0;
   if (!Number.isFinite(controlTop) || !Number.isFinite(barsBottom) || barsBottom <= 0) return 0;
   return controlTop < barsBottom ? controlTop - barsBottom - FOCUS_CLEAR_ROOM : 0;
 }

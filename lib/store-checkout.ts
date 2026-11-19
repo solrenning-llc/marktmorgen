@@ -73,6 +73,7 @@ import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
+import { type RiskLevel, riskLevelOf } from "@/lib/payment-risk";
 import { type UnpaidProof, unpaidProof } from "@/lib/checkout-return";
 
 /**
@@ -1311,6 +1312,12 @@ export type Sale = {
   shipTo?: ShipAddress | null;
   /** And when it was marked as shipped (lib/shipments.ts); null while it has not been. */
   shipped?: Shipped | null;
+  /**
+   * The risk Stripe gave the charge (lib/payment-risk.ts), read off the charge
+   * expanded on the same read; "not_available" when it cannot be read, never
+   * "normal". Null only for a free trial, which charged nothing at checkout.
+   */
+  risk: RiskLevel | null;
 };
 
 // Each state is its own member so a check on one narrows the rest away;
@@ -1331,7 +1338,20 @@ type SessionRecord = {
   metadata?: Record<string, string> | null;
   customer_details?: { email?: unknown } | null;
   custom_fields?: unknown;
+  payment_intent?: unknown;
 };
+
+/**
+ * The charge on an expanded payment, or null when the payment was not
+ * expanded or is not one: only an object that says it is a payment_intent
+ * (rule 24; Codex C2 on #3647).
+ */
+function chargeOfPayment(paymentIntent: unknown): unknown {
+  return paymentIntent && typeof paymentIntent === "object" && !Array.isArray(paymentIntent)
+    && (paymentIntent as { object?: unknown }).object === "payment_intent"
+    ? (paymentIntent as { latest_charge?: unknown }).latest_charge
+    : null;
+}
 
 /**
  * What this store has sold.
@@ -1353,7 +1373,8 @@ export async function listSales(store: Store): Promise<SaleList> {
     page = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}`,
+      // Each payment's charge comes on the same read, for its risk (647 [WG7]).
+      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&expand[]=data.payment_intent.latest_charge&expand[]=data.payment_intent.latest_charge.review`,
     );
   } catch (error) {
     console.error("listing orders failed", error);
@@ -1382,6 +1403,7 @@ export async function listSales(store: Store): Promise<SaleList> {
       const paidAt = typeof row.created === "number" ? row.created : 0;
       const known = row.metadata?.product ? { title: titles.get(row.metadata.product) } : null;
       const email = row.customer_details?.email;
+      const trial = Number(row.metadata?.trial_days) > 0;
       return {
         reference: typeof row.id === "string" ? row.id : "",
         // The title recorded on the charge wins, because it is what the buyer
@@ -1400,8 +1422,9 @@ export async function listSales(store: Store): Promise<SaleList> {
         isCall: row.metadata?.kind === "call",
         oneTime: row.mode === "payment",
         answers: readAnswers(row),
-        trial: Number(row.metadata?.trial_days) > 0,
+        trial,
         isTip: row.metadata?.kind === "tip",
+        risk: trial ? null : riskLevelOf(chargeOfPayment(row.payment_intent)),
         shipTo: wasShipped(row) ? (shippingAddressOf(row as Record<string, unknown>) ?? { name: "", lines: [], country: "" }) : null,
         shipped: null,
       };
@@ -1428,7 +1451,7 @@ export async function listSales(store: Store): Promise<SaleList> {
     const intents = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/payment_intents?limit=${ORDERS_PAGE_SIZE}`,
+      `/payment_intents?limit=${ORDERS_PAGE_SIZE}&expand[]=data.latest_charge&expand[]=data.latest_charge.review`,
     );
     const page = readStripePage(intents, (pi) => plainObject(ownField(pi, "metadata")) && typeof ownField(pi, "status") === "string");
     if (page.unreadable > 0) return { state: "error" };
@@ -1457,6 +1480,8 @@ export async function listSales(store: Store): Promise<SaleList> {
         answers: [],
         trial: false,
         isTip: false,
+        // The same test as a checkout's payment (Codex G on #3647): only a row that says it is a payment_intent.
+        risk: riskLevelOf(chargeOfPayment(pi)),
       };
     });
   } catch (error) {

@@ -28,6 +28,8 @@ type ReceiptsNexusRule = {
   readonly facts: readonly StateBusinessTaxFact[];
   readonly sources: readonly string[];
   readonly readOn: string;
+  /** From this day on, the reading is too old to trust: the state answers `unknown` until it is read again. */
+  readonly reviewBy: string;
 };
 type NotAssessableRule = {
   readonly kind: "not-assessable";
@@ -97,7 +99,8 @@ export const STATE_BUSINESS_TAX_RULES = Object.freeze({
     // in which it is reached. Whether tax is due (the USD 2.65 M no-tax-due threshold) is a separate question.
     // The figure was read in the Franchise Tax section of the remote-sellers page, not in its Use Tax section
     // (a different USD 500,000 test). The rule itself, 34 TAC §3.586 (STAR 202601004R), did not open as readable
-    // text in Codex V's report, so it is not listed as a source read.
+    // text in Codex V's report, so it is not listed as a source read. When the nexus ends was not read either, so a
+    // closed prior period that reached the threshold carries nexus here: a cautious reading of an unread rule, not a finding.
     thresholdMinor: 50_000_000,
     comparison: "gte",
     window: "accounting-period",
@@ -108,6 +111,7 @@ export const STATE_BUSINESS_TAX_RULES = Object.freeze({
       "https://comptroller.texas.gov/taxes/franchise/index.php",
     ],
     readOn: "2026-11-19",
+    reviewBy: "2027-11-19",
   }),
   WA: freezeRule({
     kind: "receipts-nexus",
@@ -124,6 +128,7 @@ export const STATE_BUSINESS_TAX_RULES = Object.freeze({
       "https://app.leg.wa.gov/RCW/default.aspx?cite=82.04.220",
     ],
     readOn: "2026-11-19",
+    reviewBy: "2027-11-19",
   }),
 } as const);
 
@@ -143,7 +148,7 @@ export type StateBusinessTaxSnapshot = {
   settledMinor: number | null;
   reservedMinor: number | null;
   proposedMinor: number | null;
-  /** The closed prior calendar year's total; read only by a current-or-prior-year rule. */
+  /** The closed prior period's total (the prior calendar year, or Texas's prior accounting period). */
   priorYearMinor: number | null;
   facts: Record<StateBusinessTaxFact, boolean | null>;
 };
@@ -196,7 +201,7 @@ export function assessStateBusinessTax(value: unknown, now = Date.now()): StateB
   const rule: StateBusinessTaxRule = STATE_BUSINESS_TAX_RULES[data.state as keyof typeof STATE_BUSINESS_TAX_RULES];
   if (rule.kind !== "receipts-nexus") return stop("unknown");
   const today = new Date(now).toISOString().slice(0, 10);
-  if (today < rule.readOn || data.recordedOn !== today || data.year !== Number(today.slice(0, 4))
+  if (today < rule.readOn || today >= rule.reviewBy || data.recordedOn !== today || data.year !== Number(today.slice(0, 4))
     || data.currency !== rule.currency || data.completeCoverage !== true || data.periodReviewed !== true
     || data.includesMarketplaceSellers !== true) return stop("unknown");
   for (const key of FACT_KEYS) if (facts[key] !== true && facts[key] !== false && facts[key] !== null) return stop("unknown");
@@ -209,19 +214,17 @@ export function assessStateBusinessTax(value: unknown, now = Date.now()): StateB
   const projected = Number(total);
   const threshold = BigInt(rule.thresholdMinor);
 
-  let prior: bigint | null = null;
-  if (rule.window === "current-or-prior-calendar-year") {
-    if (data.priorYearMinor === null || data.priorYearMinor === undefined) return stop("unknown");
-    if (!money(data.priorYearMinor)) return stop("invalid");
-    prior = BigInt(data.priorYearMinor);
-  }
+  // Both rules read the closed prior period: Washington by statute, Texas because when its nexus ends was not read.
+  if (data.priorYearMinor === null || data.priorYearMinor === undefined) return stop("unknown");
+  if (!money(data.priorYearMinor)) return stop("invalid");
+  const prior = BigInt(data.priorYearMinor);
   const reached = (amount: bigint) => rule.comparison === "gte" ? amount >= threshold : amount > threshold;
 
   // A non-sales test that is met needs treatment at any amount; one that is not known refuses.
   const listed = rule.facts.map(fact => facts[fact]);
   if (listed.some(fact => fact === true)) return { status: "treatment-required", projectedMinor: projected };
-  // The closed prior year is compared at the threshold itself.
-  if (prior !== null && reached(prior)) return { status: "treatment-required", projectedMinor: projected };
+  // The closed prior period is compared at the threshold itself.
+  if (reached(prior)) return { status: "treatment-required", projectedMinor: projected };
   if (listed.some(fact => fact === null)) return stop("unknown");
   // The current year must stay below the safety share of the threshold, so treatment comes before the threshold.
   const below = total * BigInt(10_000) < threshold * BigInt(STATE_BUSINESS_TAX_SAFETY_BPS);

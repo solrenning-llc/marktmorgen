@@ -406,8 +406,9 @@ export async function finishConsent(
     // Not kept: what Google or Zoom just gave is given back rather than left
     // granted with nothing here that knows of it. An earlier connection that
     // could not be read (rule 24) stops the write before it, so that grant is
-    // not kept either.
-    if (error instanceof LockBusyError || error instanceof exactReply.UnknownReplyError) {
+    // not kept either. An unknown acknowledgement after the keep may already
+    // have stored the new grant: leave it live, rather than revoke what Redis may hold.
+    if (error instanceof LockBusyError || error instanceof PriorConnectionUnreadError) {
       await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
     }
     throw error;
@@ -433,6 +434,9 @@ redis.call("SADD", KEYS[3], ARGV[4])
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
+/** A malformed prior read stops this attempt before the grant's write. */
+class PriorConnectionUnreadError extends UnknownReplyError {}
+
 async function keepConnection(
   provider: MeetProvider,
   input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; startedAt: number },
@@ -440,7 +444,13 @@ async function keepConnection(
   held: Held,
 ): Promise<ConnectResult> {
   const host = input.host ?? "";
-  const before = await readConnection(input.statsId, provider, host);
+  let before: Connection | null;
+  try {
+    before = await readConnection(input.statsId, provider, host);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) throw new PriorConnectionUnreadError("the prior meeting connection before keeping a new grant");
+    throw error;
+  }
   const connection: Connection = {
     provider,
     account: traded.account,

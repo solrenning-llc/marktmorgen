@@ -84,10 +84,12 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
 
 /**
  * Lets go of a lock, only if it is still ours, in one script. When the script cannot run, the lock is left to run
- * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws.
+ * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws. True only when the
+ * script confirmed it deleted this holder's lock; false when it was not ours or the answer is not known, so a caller
+ * that tells someone to try again at once can say so only on true (Codex L on #4212).
  */
-export async function releaseLock(held: Held): Promise<void> {
-  await script(RELEASE, [held.key], [held.token]).catch(() => 0);
+export async function releaseLock(held: Held): Promise<boolean> {
+  return (await script(RELEASE, [held.key], [held.token]).catch(() => 0)) === 1;
 }
 
 /**

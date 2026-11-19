@@ -13,6 +13,8 @@ async function main(): Promise<void> {
     ["components/page-editor.tsx", "useLeaveGuard(dirty && !busy);"],
     ["components/funnel-editor.tsx", "useLeaveGuard(dirty && !busy);"],
     ["components/page-order-editor.tsx", "useLeaveGuard(changed);"],
+    // The store's look (theme, accent, font, backdrop, badges) waits for "Save look" too (AX274, WCAG 3.3.6).
+    ["components/look-editor.tsx", 'useLeaveGuard(changed && status.kind !== "working");'],
   ]) {
     is(file, readFileSync(file, "utf8").includes(line), true);
   }

@@ -178,6 +178,7 @@ export const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Your changes are still here, not saved yet: log in again in a new tab, then come back to this tab and press Save the page.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  studio_used: "Your studio has used its requests for now, so a picture could not be checked and the page was not saved. Try again when your requests start again.",
 };
 
 /** A Clear refused because the session ended: Clear is offered only with nothing unsaved, when Save the page is off, so it says to press its own Yes again. */
@@ -1160,6 +1161,9 @@ export function PageEditor({
           return;
         }
       }
+      // A picture's check made again that the studio's requests could not pay for: the server's own words (Codex N1 on #2843).
+      const told = (data as { message?: unknown }).message;
+      if (data.error === "studio_used" && typeof told === "string" && told) return setError(`${told} The page was not saved.`);
       setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
       setError(MESSAGES.server_error);

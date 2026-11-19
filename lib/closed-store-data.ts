@@ -108,6 +108,8 @@ import { forgetPath } from "@/lib/path";
 export const DUE_KEY = "nl:closed:due";
 export const BATCH_KEY = "nl:closed:batch";
 export const WALK_KEY = "nl:closed:walk";
+/** The phases a walk writes in WALK_KEY (eraseClosed); "" is a field never written, a walk that never ran. */
+const WALK_PHASES: ReadonlySet<string> = new Set(["", "idle", "walk", "finish"]);
 /** Keys one SCAN of the walk asks for. */
 export const WALK_COUNT = 1000;
 /** The most pages of the database one run of the walk reads. */
@@ -1124,8 +1126,14 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   let unsure = false;
   // An entry naming another store's key not confirmed out of the batch (EntryNotWithdrawnError): no walk starts in this run.
   let entryLeft = false;
-  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
-  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
+  // The walk's own state, read exactly (rule 24/30; #4220, Codex U): one reply of four slots, each a string or nil (a
+  // field never written), with a phase a walk writes and a cursor of digits. Anything else is unknown: it throws before
+  // anything is scanned, deleted or written, so a walk in progress is never restarted from 0 over its saved place.
+  const stateReplies = repliesFor(await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]), 1);
+  const slots = stateReplies ? repliesFor(stateReplies[0], 4) : null;
+  if (!slots || slots.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("the closed-store walk's state");
+  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = slots.map((v) => (typeof v === "string" ? v : ""));
+  if (!WALK_PHASES.has(phaseRaw) || (cursorRaw !== "" && !/^[0-9]+$/.test(cursorRaw))) throw new UnknownReplyError("the closed-store walk's state");
   let phase = phaseRaw || "idle";
   let cursor = cursorRaw || "0";
 

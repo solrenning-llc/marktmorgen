@@ -22,6 +22,7 @@ import { cleanLine, cleanText } from "@/lib/community-text";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
+import { paymentIntentForDelivery } from "@/lib/instant-pay";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { UnknownReplyError, countOf, replyList, repliesFor, stringList } from "@/lib/redis-reply";
@@ -380,9 +381,9 @@ export async function deliverGift(input: {
   const gift = kept;
 
   const sessionId = typeof session.id === "string" ? session.id : "";
-  const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
   const created = typeof session.created === "number" ? session.created : now();
   const grant = grantsOf(session, gift);
+  const pi = paymentIntentForDelivery(session);
   // The payment's index first, before the payment is read, as a pre-order writes nl:pre:pi: before its read (review
   // 6862531714 on #4408): a refund the pass meets from now on finds this gift, whether or not this run gets to the end.
   // Each write answered exactly "OK", or nothing is read or given and the next run tries again.
@@ -390,6 +391,7 @@ export async function deliverGift(input: {
   // the mark is kept only once the gift is given, so a run that stopped on an unknown answer never makes the next one
   // wait out the mark ("another run is giving this gift right now") for a gift nobody is giving.
   try {
+    if (pi === null) throw new UnknownReplyError("a gift checkout's payment reference");
     if (pi) {
       const indexed = repliesFor(await redisPipeline([["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS], ["SET", anyKey(gift.s), "1"]]), 2);
       if (!indexed || indexed[0] !== "OK" || indexed[1] !== "OK") throw new UnknownReplyError("a gift's payment index");

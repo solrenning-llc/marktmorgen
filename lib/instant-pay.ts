@@ -128,3 +128,13 @@ export function isSettled(session: { status?: unknown; payment_status?: unknown 
     (session.payment_status === "paid" || session.payment_status === "no_payment_required")
   );
 }
+
+const DELIVERY_INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
+
+/** An indexed payment ID, an empty string for a confirmed zero total, or null when the receipt does not read. */
+export function paymentIntentForDelivery(session: { amount_total?: unknown; payment_intent?: unknown }): string | null {
+  const intent = session.payment_intent;
+  if (intent === undefined || intent === null) return session.amount_total === 0 ? "" : null;
+  const id = typeof intent === "object" ? (intent as { id?: unknown }).id : intent;
+  return typeof id === "string" && DELIVERY_INTENT_ID.test(id) ? id : null;
+}

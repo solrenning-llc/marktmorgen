@@ -478,19 +478,35 @@ function wroteSet(replies: unknown, commands: (string | number)[][], what: strin
  */
 export async function setPitchStatus(store: Store, id: string, status: PitchStatus, now = Math.floor(Date.now() / 1000)): Promise<Pitch | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const pitch = parsePitch(await keptPitch(store.statsId, id));
+  let raw = await keptPitch(store.statsId, id);
+  const pitch = parsePitch(raw);
   if (!pitch) return null;
   // Once they asked to stop, it stays stopped.
   if (pitch.status === "stopped") return pitch;
-  const next: Pitch = { ...pitch, status, sentAt: status === "draft" ? 0 : pitch.sentAt || now };
   // Said done only on the exact receipt (Claude 6 on #2870): "stopped" is a business's opt-out and "sent" starts the
   // wait before the same business is written to again, so neither is answered done on a write not known to land.
-  const commands: (string | number)[][] = [
-    ["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)],
-    ...(status === "stopped" ? [["SADD", key(store.statsId, "stop"), pitch.domain]] : []),
-  ];
-  wrote(await redisPipeline(commands), commands.length, "a pitch's status");
-  return next;
+  if (status === "stopped") {
+    const next: Pitch = { ...pitch, status, sentAt: pitch.sentAt || now };
+    const commands: (string | number)[][] = [
+      ["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)],
+      ["SADD", key(store.statsId, "stop"), pitch.domain],
+    ];
+    wrote(await redisPipeline(commands), commands.length, "a pitch's status");
+    return next;
+  }
+  // Any other mark is written only over the exact record read (Codex L and U on #4123), as stopFromLink writes its
+  // stop: a business's stop that landed after the read is read again and kept, its stoppedAt beside the creator's
+  // answer. After PITCH_STOP_TRIES changes in a row the mark is not said done.
+  for (let tries = 0; tries < PITCH_STOP_TRIES && typeof raw === "string"; tries += 1) {
+    const current = parsePitch(raw);
+    if (!current) return null;
+    if (current.status === "stopped" && (!(status === "replied" || status === "deal") || !current.stoppedAt)) return current;
+    const next: Pitch = { ...current, status, sentAt: status === "draft" ? 0 : current.sentAt || now };
+    const [swapped] = wrote(await redisPipeline([["EVAL", PITCH_IF_READ, 1, key(store.statsId, "pitches"), id, raw, JSON.stringify(next)]]), 1, "a pitch's status");
+    if (swapped === 1) return next;
+    raw = await keptPitch(store.statsId, id);
+  }
+  throw new UnknownReplyError("a pitch's status");
 }
 
 /** Takes a draft away. Only a draft: what was sent stays, so the same business is not written to twice. */

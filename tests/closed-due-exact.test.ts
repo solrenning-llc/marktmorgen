@@ -26,6 +26,7 @@ const hands = { measure: async () => 10 ** 12 } as unknown as Hands;
 /** How the line's write is answered: as Redis does, with a reply Redis never gives (not applied, or applied), and its read-back. */
 let zadd: "redis" | "lost" | "applied-unconfirmed" = "redis";
 let zscoreUnreadable = false;
+let scoreReply: { value: unknown } | undefined;
 let zadds = 0;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
@@ -37,6 +38,7 @@ redis.pipeline = async (commands: (string | number)[][]) => {
       return [{ ok: 1 }];
     }
   }
+  if (scoreReply && commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === DUE_KEY) return [scoreReply.value];
   if (zscoreUnreadable && commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === DUE_KEY) return ["not a score"];
   return realPipeline(commands);
 };
@@ -70,6 +72,21 @@ async function main(): Promise<void> {
   is("control: in line", score("healthy@example.com"), "4000");
   is("control: already in line (ZADD NX answers 0) is in line, its first time kept", [await threw(() => markDue("healthy@example.com", 5_000)), score("healthy@example.com")], ["resolved", "4000"]);
 
+  part("a foreign score must not confirm an unapplied write");
+  zadd = "lost";
+  for (const [i, value] of ["0x7d0", "0b11111010000", "0o3720", " 2000 ", "\t2000\n"].entries()) {
+    const ref = `foreign-score-${i}@example.test`;
+    scoreReply = { value };
+    is("foreign score is unknown: " + JSON.stringify(value), await threw(() => markDue(ref, 2_000)), "UnknownReplyError");
+    scoreReply = undefined;
+    is("the real queue still has no member", score(ref), null);
+  }
+  zadd = "applied-unconfirmed";
+  scoreReply = { value: "2e3" };
+  is("control: decimal scientific text can confirm an existing member", await threw(() => markDue("decimal-score@example.test", 2_000)), "resolved");
+  scoreReply = undefined;
+  is("control: it is really in line", score("decimal-score@example.test"), "2000");
+
   part("closeOne: a closed store whose line write is not confirmed does not save `due`, and the next run puts it in line");
   const A = "closed-due@example.com";
   await claimHandle(A, "closeddue", "Closed Due", "");
@@ -86,7 +103,10 @@ async function main(): Promise<void> {
 
   zadd = "lost";
   zadds = 0;
+  // The write is absent and its read-back is a foreign numeric-looking string.
+  scoreReply = { value: "0x7d0" };
   const first = await threw(() => closeOne(A, Date.now(), hands));
+  scoreReply = undefined;
   is("the line's write was asked once", zadds, 1);
   is("not confirmed: the pass does not finish as 'removed' (the walk holds it)", first, "UnknownReplyError");
   is("its state does not say `due`", dueOf(), undefined);

@@ -219,7 +219,11 @@ export async function markDue(ref: string, now = Date.now()): Promise<void> {
   if (added && (added[0] === 0 || added[0] === 1)) return;
   const back = repliesFor(await redisPipeline([["ZSCORE", DUE_KEY, ref]]), 1);
   const score = back?.[0];
-  if ((typeof score === "string" || typeof score === "number") && String(score).trim() !== "" && Number.isFinite(Number(score))) return;
+  // A score is a finite number or decimal text, never JavaScript's hex/binary/octal coercion.
+  const scoreRead = typeof score === "number"
+    ? Number.isFinite(score)
+    : typeof score === "string" && /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(score) && Number.isFinite(Number(score));
+  if (scoreRead) return;
   throw new UnknownReplyError("a closed store's place in line for the walk");
 }
 

@@ -511,6 +511,20 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   is("[CORRETO] a store-name lookup that cannot be read is tried again, unread", [await forward(message("x@made.example"), NOON, ["support@marktmorgen.com", "ghostx@mail.marktmorgen.com"]), mailReads - readsBeforeMixed], ["retry", 1]);
   failing = null;
 
+  part("Codex X4/X6 HIGH: truncated recipients never bypass the pre-read ceiling");
+  for (const withRealStore of [false, true]) {
+    fresh();
+    await spend("support-announced", mixedDay, ANNOUNCED - (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200), 2 * 86_400);
+    await spend("support-announced-creator", mixedDay, limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200, 2 * 86_400);
+    if (withRealStore) await claimHandle("x4-owner@example.invalid", "x4-real-store", "Synthetic", "");
+    const recipients = Array.from({ length: 50 }, (_, i) => `receiver${i}@example.invalid`);
+    if (withRealStore) recipients[0] = "x4-real-store@mail.marktmorgen.com";
+    recipients.push("support@marktmorgen.com");
+    const beforeReads = mailReads;
+    const result = await forward(message("x4-sender@example.invalid"), NOON, recipients);
+    is("support after recipient 50 is held before a Resend read, even beside a real store", [result, mailReads - beforeReads], ["held", 0]);
+  }
+
   globalThis.fetch = originalFetch;
   fixture.restore();
   done();

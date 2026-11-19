@@ -18,6 +18,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
+import { type Held, releaseLock, takeLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 /** How long a link opens: seven days. */
@@ -31,6 +32,7 @@ const hashOf = (code: string) => createHash("sha256").update(code).digest("hex")
 const lookupKey = (hash: string) => `nl:dpv:${hash}`;
 const pointerKey = (statsId: string, productId: string) => `nl:dpv:p:${statsId}:${productId}`;
 const downKey = (statsId: string, productId: string) => `nl:dpv:down:${statsId}:${productId}`;
+const lockKey = (statsId: string, productId: string) => `nl:dpv:lock:${statsId}:${productId}`;
 
 /** How long a taken-down mark is kept when the product is never published again: then it expires with nothing left to show. */
 export const TAKEN_DOWN_SECONDS = 400 * 86_400;
@@ -73,6 +75,24 @@ export async function makeDraftPreview(store: Owner, productId: string, now = Ma
   const replies = await exactly(commands);
   if (replies[0] !== "OK" || replies[1] !== "OK") throw new Error("A preview link could not be written");
   return { code, expiresAt };
+}
+
+/** How long the per-draft lock lives, at most: a publish or a link that dies holding it frees it by then. */
+export const PREVIEW_LOCK_SECONDS = 15;
+
+/**
+ * One lock per draft, taken by publication (the product route, from the end of the old link to the product made public
+ * and its takedown mark cleared) and by the link route (make and revoke). A link asked for while publication runs waits
+ * and then reads the product again, so it is never made for a product that publication has just made public (Codex G,
+ * N1 and P on #3597). Throws LockBusyError when it cannot be taken in time: the caller does nothing and says so.
+ */
+export async function takeDraftPreviewLock(store: Owner, productId: string): Promise<Held> {
+  return takeLock(lockKey(statsOf(store), productId), PREVIEW_LOCK_SECONDS, 5_000);
+}
+
+/** Lets go of the per-draft lock; one that cannot be let go runs out after PREVIEW_LOCK_SECONDS. Never throws. */
+export async function releaseDraftPreviewLock(held: Held): Promise<void> {
+  await releaseLock(held);
 }
 
 /** Ends the draft's link at once. */

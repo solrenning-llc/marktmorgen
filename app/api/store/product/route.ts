@@ -60,7 +60,7 @@ import { templateLeft } from "@/lib/template-text";
 import { keptPageBytes, readPage } from "@/lib/sales-page-store";
 import { publishPageUnits } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
-import { clearTakenDown, revokeDraftPreview, takenDownMark } from "@/lib/draft-preview";
+import { clearTakenDown, releaseDraftPreviewLock, revokeDraftPreview, takeDraftPreviewLock, takenDownMark } from "@/lib/draft-preview";
 
 /**
  * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
@@ -560,54 +560,70 @@ export async function POST(request: NextRequest) {
           if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
-      // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
-      // between keeps its own (Codex L's MEDIUM 1 on #3597). A mark that cannot be read is never cleared (null).
-      const seenMark = body.hidden === false && !guarded.store.suspended ? await takenDownMark(guarded.store, id).catch(() => null) : null;
-      // Published: the draft's preview link ends first, so a later unpublish never opens it again (Claude 4 cloud AE on
-      // #3597, LEVE 2). One that cannot be confirmed ended publishes nothing: the creator tries again.
-      if (body.hidden === false && guarded.store.statsId) {
-        const ended = await revokeDraftPreview(guarded.store, id).then(() => true, (error: unknown) => {
-          console.error("a draft's preview link could not be ended before publishing", error);
-          return false;
+      // Publishing takes the draft's preview lock (lib/draft-preview.ts) from the end of the old link to the product made
+      // public and its takedown mark cleared, so a link asked for in between waits and is then refused as no longer a
+      // draft: never one made in the gap that a later unpublish would open again (Codex G, N1 and P on #3597). A lock
+      // that cannot be taken publishes nothing: the creator tries again.
+      const previewHeld =
+        body.hidden === false && guarded.store.statsId
+          ? await takeDraftPreviewLock(guarded.store, id).catch((error: unknown) => {
+              console.error("a draft's preview lock could not be taken before publishing", error);
+              return null;
+            })
+          : undefined;
+      if (previewHeld === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      try {
+        // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
+        // between keeps its own (Codex L's MEDIUM 1 on #3597). A mark that cannot be read is never cleared (null).
+        const seenMark = body.hidden === false && !guarded.store.suspended ? await takenDownMark(guarded.store, id).catch(() => null) : null;
+        // Published: the draft's preview link ends first, so a later unpublish never opens it again (Claude 4 cloud AE on
+        // #3597, LEVE 2). One that cannot be confirmed ended publishes nothing: the creator tries again.
+        if (body.hidden === false && guarded.store.statsId) {
+          const ended = await revokeDraftPreview(guarded.store, id).then(() => true, (error: unknown) => {
+            console.error("a draft's preview link could not be ended before publishing", error);
+            return false;
+          });
+          if (!ended) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+        // The sales page read again under the lock its saves are written under, so a part saved since the read above
+        // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+        let pageChanged = false;
+        let pageUnread = false;
+        let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
+        const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
+          if (!now.page || !store.statsId) return true;
+          // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
+          // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
+          const keptBytes = await keptPageBytes(store.statsId, now.id);
+          if (keptBytes === null) {
+            pageUnread = true;
+            return false;
+          }
+          if (keptBytes > pagePaid) {
+            pageChanged = true;
+            return false;
+          }
+          const page = await readPage(store.statsId, now.id);
+          const fast = fastMoneyOnPage(pageWords(page));
+          const left = templateLeft(page);
+          heldBy = { fast, left, title: now.title };
+          return !fast && !left;
         });
-        if (!ended) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-      }
-      // The sales page read again under the lock its saves are written under, so a part saved since the read above
-      // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
-      let pageChanged = false;
-      let pageUnread = false;
-      let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
-      const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
-        if (!now.page || !store.statsId) return true;
-        // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
-        // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
-        const keptBytes = await keptPageBytes(store.statsId, now.id);
-        if (keptBytes === null) {
-          pageUnread = true;
-          return false;
+        if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
+        if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
+        if (!done.ok && done.reason === "held" && heldBy) {
+          const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
+          if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
+          if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
         }
-        if (keptBytes > pagePaid) {
-          pageChanged = true;
-          return false;
-        }
-        const page = await readPage(store.statsId, now.id);
-        const fast = fastMoneyOnPage(pageWords(page));
-        const left = templateLeft(page);
-        heldBy = { fast, left, title: now.title };
-        return !fast && !left;
-      });
-      if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
-      if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
-      if (!done.ok && done.reason === "held" && heldBy) {
-        const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
-        if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
-        if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
+        result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
+        // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
+        // that fails keeps the mark, which only refuses preview links: never a wrong opening.
+        // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).
+        if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id, seenMark).catch((error) => console.error("preview mark not cleared", error));
+      } finally {
+        if (previewHeld) await releaseDraftPreviewLock(previewHeld);
       }
-      result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
-      // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
-      // that fails keeps the mark, which only refuses preview links: never a wrong opening.
-      // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).
-      if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id, seenMark).catch((error) => console.error("preview mark not cleared", error));
     } else if (action === "unlink") {
       // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
       // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.

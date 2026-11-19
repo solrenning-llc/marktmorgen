@@ -357,9 +357,12 @@ export class MemoryRedis {
           return this.run(["INCR", counter]);
         }
         // A creator's reply and the removal of its buyer's waiting place are one atomic step.
-        if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, record, live, id, json, seconds] = args;
-          if (this.run(["EXISTS", record]) === 0) return 0;
+        if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, lock, record, live, token, expected, id, json, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 2;
+          const current = this.run(["GET", record]);
+          if (current === null) return 0;
+          if (current !== expected) return 2;
           this.run(["ZREM", live, id]);
           this.run(["SET", record, json, "XX", "EX", seconds]);
           return 1;

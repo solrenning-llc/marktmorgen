@@ -887,6 +887,11 @@ const SUBMISSION_CLOSE_WRITE = [
 
 /** A kept record, read exactly; null only when Redis confirms there is none. */
 export async function readSubmission(folder: string, id: string): Promise<KeptSubmission | null> {
+  return (await readSubmissionRecord(folder, id))?.value ?? null;
+}
+
+/** The parsed record and the exact text a reply's write must still find (Codex P on #3571). */
+async function readSubmissionRecord(folder: string, id: string): Promise<{ value: KeptSubmission; text: string } | null> {
   if (!ID.test(id)) return null;
   const replies = repliesFor(await redisPipeline([["GET", recordKey(folder, id)]]), 1);
   if (!replies) throw new UnknownReplyError("a submission record");
@@ -895,7 +900,7 @@ export async function readSubmission(folder: string, id: string): Promise<KeptSu
     if (typeof replies[0] !== "string") throw new Error();
     const value = JSON.parse(replies[0]) as KeptSubmission;
     if (value?.id !== id || value.folder !== folder || typeof value.path !== "string") throw new Error();
-    return value;
+    return { value, text: replies[0] };
   } catch {
     throw new UnknownReplyError("a submission record");
   }
@@ -1082,10 +1087,12 @@ export const SUBMISSION_LIST_PAGE = 10;
  * What one page of the "To review" list or one reply moves at its worst, in
  * studio requests beyond the one the request itself took (lib/sent-bytes.ts):
  * a page reads SUBMISSION_LIST_PAGE records at their largest; a reply reads
- * one and writes it back. The studio route takes them before anything is read.
+ * one and sends both versions to the compare-and-write (the version it read,
+ * which the write must still find, and the new one). The studio route takes
+ * them before anything is read.
  */
 export const SUBMISSION_LIST_UNITS = Math.ceil((SUBMISSION_LIST_PAGE * MAX_SUBMISSION_RECORD_BYTES) / STUDIO_UNIT_SENT_BYTES);
-export const SUBMISSION_REPLY_UNITS = Math.ceil((2 * MAX_SUBMISSION_RECORD_BYTES) / STUDIO_UNIT_SENT_BYTES);
+export const SUBMISSION_REPLY_UNITS = Math.ceil((3 * MAX_SUBMISSION_RECORD_BYTES) / STUDIO_UNIT_SENT_BYTES);
 
 export type ReviewRow = { lessonId: string; id: string; submission: KeptSubmission | "unread" };
 
@@ -1164,11 +1171,24 @@ export type Replied =
   | { ok: true; submission: KeptSubmission }
   | { ok: false; reason: "gone" | "state" | "expired" | "full" | "too_long" };
 
-/** Reply and waiting-place removal commit together; no partial pipeline can strand an answered file's place. */
+/**
+ * Reply and waiting-place removal commit together, so no partial pipeline can
+ * strand an answered file's place (Codex X4 on #3571). They commit only while
+ * this run still holds the reply's lock and the record is exactly the text it
+ * read, so a run delayed past its lock never overwrites a reply another run
+ * confirmed (Codex X5, V and P on #3571). KEYS: lock, record, waiting list.
+ * ARGV: lock token, record as read, file id, new record, seconds left.
+ * 0: the record is gone; 2: the lock or the record changed, nothing written.
+ * The ZREM runs before the SET, so a list of another type fails before the
+ * reply is written.
+ */
 export const SUBMISSION_REPLY_WRITE = `-- marktmorgen:submission-reply-write:v1
-if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
-redis.call("ZREM", KEYS[2], ARGV[1])
-redis.call("SET", KEYS[1], ARGV[2], "XX", "EX", ARGV[3])
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 2 end
+local current = redis.call("GET", KEYS[2])
+if not current then return 0 end
+if current ~= ARGV[2] then return 2 end
+redis.call("ZREM", KEYS[3], ARGV[3])
+redis.call("SET", KEYS[2], ARGV[4], "XX", "EX", ARGV[5])
 return 1`;
 
 /**
@@ -1184,9 +1204,10 @@ export async function replySubmission(
   nowSeconds: number,
 ): Promise<Replied> {
   if (!ID.test(input.id)) return { ok: false, reason: "gone" };
-  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async () => {
-    const kept = await readSubmission(input.folder, input.id);
-    if (!kept || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId) return { ok: false as const, reason: "gone" as const };
+  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async (held) => {
+    const record = await readSubmissionRecord(input.folder, input.id);
+    const kept = record?.value ?? null;
+    if (!record || !kept || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId) return { ok: false as const, reason: "gone" as const };
     const moved = applySubmissionEvent(kept, { event: "review", actor: "creator", reply: input.reply }, nowSeconds);
     if (!moved.ok) return { ok: false as const, reason: moved.reason === "reply" ? ("state" as const) : moved.reason };
     const next: KeptSubmission = { ...kept, ...moved.submission };
@@ -1194,7 +1215,7 @@ export async function replySubmission(
     if (json === null) return { ok: false as const, reason: "too_long" as const };
     const key = recordKey(input.folder, input.id);
     const until = kept.keepUntil + SUBMISSION_SWEEP_GRACE_SECONDS;
-    const grown = dataBytes([key, json], 1) - dataBytes([key, JSON.stringify(kept)], 1);
+    const grown = dataBytes([key, json], 1) - dataBytes([key, record.text], 1);
     if (grown > 0) {
       const room = await takeData(input.data, [{ until: until * 1000, bytes: grown }], nowSeconds * 1000);
       if (!room.ok) {
@@ -1204,9 +1225,9 @@ export async function replySubmission(
     }
     const replies = repliesFor(
       await redisPipeline([[
-        "EVAL", SUBMISSION_REPLY_WRITE, 2, key,
+        "EVAL", SUBMISSION_REPLY_WRITE, 3, held.key, key,
         liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who),
-        kept.id, json, Math.max(1, until - nowSeconds),
+        held.token, record.text, kept.id, json, Math.max(1, until - nowSeconds),
       ]]),
       1,
     );

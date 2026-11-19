@@ -101,6 +101,7 @@ async function seed(store: Store, two = false): Promise<void> {
 }
 
 const paidOf = async (store: Store, email: string) => (await readBook(store)).rows.find((r) => r.affiliate.email === email)?.paid ?? -1;
+const bookWithUndo = (store: Store) => readBook(store, undefined, { payoutUndo: true });
 const paidCents = (store: Store) => paidOf(store, "sara@example.com");
 /** The payouts written in the book, by id. */
 const bookIds = async () => {
@@ -171,21 +172,34 @@ async function main(): Promise<void> {
   // affiliate twice from the creator's PayPal. It is refused, the payout stays, and nothing is sent again.
   is("Undo on a payout PayPal sent is refused", await removePayout(store, id ?? ""), "sent");
   is("and the payout stays in the book", [(await bookIds()).length, await paidCents(store)], [1, 3000]);
-  is("the book marks it sent by PayPal, so the studio draws no Undo", (await readBook(store)).payouts.map((p) => p.sent), [true]);
+  is("the book marks it sent by PayPal, so the studio draws no Undo", (await bookWithUndo(store)).payouts.map((p) => p.sent), [true]);
   await payWithPayPal(store);
   is("after that Undo, the next payday sends nothing more", created.length, 1);
-  const [sentByPayPal] = (await readBook(store)).payouts;
+  const [sentByPayPal] = (await bookWithUndo(store)).payouts;
   const hand = await addPayout(store, { aff: sentByPayPal.aff, cents: 500, currency: sentByPayPal.currency, date: "2026-11-15", reference: "PayPal 7XK2 sent by hand" });
-  is("a payout written by hand is not marked sent", (await readBook(store)).payouts.find((p) => p.id === hand?.id)?.sent, false);
+  is("a payout written by hand is not marked sent", (await bookWithUndo(store)).payouts.find((p) => p.id === hand?.id)?.sent, false);
   is("a payout written by hand is still taken off by Undo", await removePayout(store, hand?.id ?? ""), true);
   // Claude 2 cloud H on #4614: before 08/11/2026 a PayPal payout was written under a random id, with the reference
   // "PayPal <item>" and the item's mark nl:pp:item:<item>. It is sent all the same, and Undo is refused.
   const older = await addPayout(store, { aff: sentByPayPal.aff, cents: 700, currency: sentByPayPal.currency, date: "2026-11-01", reference: "PayPal ITEMOLDER1" });
   await pipeline([["SET", "nl:pp:item:ITEMOLDER1", "BATCH0OLD"]]);
-  is("an older PayPal payout with its item's mark is marked sent", (await readBook(store)).payouts.find((p) => p.id === older?.id)?.sent, true);
+  is("an older PayPal payout with its item's mark is marked sent", (await bookWithUndo(store)).payouts.find((p) => p.id === older?.id)?.sent, true);
+  let statusReads = 0;
+  redis.pipeline = async (commands) => {
+    statusReads += commands.filter(([command, ...keys]) =>
+      (command === "GET" || command === "MGET") && keys.some((key) => String(key).startsWith("nl:pp:item:")),
+    ).length;
+    return pipeline(commands);
+  };
+  try {
+    const plain = await readBook(store, undefined, { titles: false });
+    is("a book that does not show Undo reads no undo-status markers", [statusReads, plain.payouts.find((p) => p.id === older?.id)?.sent], [0, undefined]);
+  } finally {
+    redis.pipeline = pipeline;
+  }
   is("and Undo on it is refused", await removePayout(store, older?.id ?? ""), "sent");
   const typed = await addPayout(store, { aff: sentByPayPal.aff, cents: 800, currency: sentByPayPal.currency, date: "2026-11-02", reference: "PayPal TYPEDBYHAND" });
-  is("a hand payout typed 'PayPal …' with no mark is not sent", (await readBook(store)).payouts.find((p) => p.id === typed?.id)?.sent, false);
+  is("a hand payout typed 'PayPal …' with no mark is not sent", (await bookWithUndo(store)).payouts.find((p) => p.id === typed?.id)?.sent, false);
   is("and Undo still takes it off", await removePayout(store, typed?.id ?? ""), true);
   await pipeline([["SADD", "nl:pp:item:ITEMOLDER1x", "x"]]);
   const odd = await addPayout(store, { aff: sentByPayPal.aff, cents: 900, currency: sentByPayPal.currency, date: "2026-11-03", reference: "PayPal ITEMOLDER1x" });

@@ -62,6 +62,50 @@ async function main() {
   };
   const form = { title: "Weekly letters", summary: "One letter a week.", price: "20", every: "month", trial: "", payments: "", intro: null, yearly: null, pwyw: null, about: "" };
 
+  part("A refusal never adopts the middle of the save that won");
+  // Stop the winning request just after its first store lock is released. Before
+  // this fix, editProduct had already moved rev on, but the yearly price and the
+  // description were still written later under separate locks. The losing tab
+  // could therefore adopt that incomplete snapshot and erase both on its retry.
+  const plainPipeline = redis.pipeline.bind(redis);
+  let openGate!: () => void;
+  let sawRelease!: () => void;
+  const gate = new Promise<void>((resolve) => { openGate = resolve; });
+  const released = new Promise<void>((resolve) => { sawRelease = resolve; });
+  let holdFirstStoreRelease = true;
+  redis.pipeline = async (commands) => {
+    const reply = await plainPipeline(commands);
+    const release = commands.some((command) =>
+      command[0] === "EVAL" &&
+      String(command[1]).startsWith("-- marktmorgen:release:v1\n") &&
+      String(command[3]).startsWith("nl:store:lock:"),
+    );
+    if (holdFirstStoreRelease && release) {
+      holdFirstStoreRelease = false;
+      sawRelease();
+      await gate;
+    }
+    return reply;
+  };
+  const openedBeforeWholeSave = (await readListing((await storeForEmail(owner))!, id))!.rev ?? 0;
+  const winnerSave = save({ ...form, rev: openedBeforeWholeSave, yearly: { price: "200" }, about: "The complete winning description." });
+  await released;
+  const middle = await save({ ...form, rev: openedBeforeWholeSave, title: "The losing tab" });
+  openGate();
+  const winnerAnswer = await winnerSave;
+  redis.pipeline = plainPipeline;
+  is("the other tab is refused while the winning save completes", [middle.status, middle.body.error, winnerAnswer.status, winnerAnswer.body.ok], [409, "stale", 200, true]);
+  is("the refusal carries the whole winning save, never its middle", [middle.body.current?.yearly, middle.body.current?.about], [{ cents: 20000 }, "The complete winning description."]);
+  const adopted = await save({
+    ...form,
+    rev: middle.body.current?.rev,
+    title: "The losing tab, after adopting",
+    yearly: middle.body.current?.yearly ? { price: String(middle.body.current.yearly.cents / 100) } : null,
+    about: middle.body.current?.about ?? "",
+  });
+  const afterAdopting = (await readListing((await storeForEmail(owner))!, id))!;
+  is("adopting and saving cannot erase the winner's yearly price or description", [adopted.status, afterAdopting.yearly, await readAbout((await storeForEmail(owner))!.statsId, id)], [200, { cents: 20000 }, "The complete winning description."]);
+
   part("Both tabs open the product at the same revision");
   const opened = (await readListing((await storeForEmail(owner))!, id))!;
   const base = opened.rev ?? 0;

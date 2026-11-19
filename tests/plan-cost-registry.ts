@@ -150,6 +150,7 @@ import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POL
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { UNWRITTEN_LINKS_PER_RUN, UNWRITTEN_LINK_COMMANDS } from "@/lib/winback-send";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -299,6 +300,8 @@ export const TRANSACTIONAL: Record<Tier, number> = {
 const micro = (n: number) => n / 1_000_000;
 /** One database command, a byte moved through the database, a byte kept there a month. */
 export const COMMAND = micro(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1_000_000;
+/** The plans cron's runs in the longest month: one a day (vercel.json, /api/cron/plans at 09:00 UTC). */
+export const COME_BACK_RUNS_PER_MONTH = 31;
 export const DB_BYTE = micro(UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9;
 export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
@@ -936,6 +939,22 @@ export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
 /**
+ * lib/webhooks.ts erasedSincePaid (R38): before an event read from a payment provider names its buyer (Stripe's
+ * refund.issued, sale.completed, membership.started, an offer's sale.completed and membership.canceled; PayPal's
+ * refund.issued), one HGET of that address's print in the store's deletion hash (lib/suppression.ts), so a person
+ * deleted at or after the payment is sent with no address. Read inside emitEvent only for an event about to be kept
+ * for a live endpoint: new (its SET NX taken), heard, and inside the month's deliveries, so each read goes with at least
+ * one try (this unit), and an event no endpoint hears, one already sent and read again, or one the month cannot take
+ * makes none (reviews of #3491; held in tests/webhook-stripe-erased.test.ts and tests/paypal-refund-erased.test.ts);
+ * only a message too large to keep, which writes its line instead of a try, reads it with none. A read with no answer
+ * takes the event's mark back: a Stripe event is read again next run, as the watcher's other lookups are (one event
+ * waits a store a run, inside the five-minute job's own schedule, STRIPE_WAIT_RUNS in lib/webhooks.ts); PayPal's
+ * refund is owed: its order stays on the refund watch and is told again when it is looked at an hour later
+ * (REFUND_TELL_AGAIN_SECONDS in lib/paypal-sales.ts; review of #3491, MEDIUM), each look priced by PAYPAL_REFUND_WATCH
+ * and PAYPAL_REFUND_TOLD, so each try reads this print once more.
+ */
+export const WEBHOOK_ERASED_READ_COMMANDS = 1;
+/**
  * What one comment's push reads of the members' devices, at the most (lib/community-push.ts devicesOf): the twelve
  * people it can tell (the post's author, the comment it answers, MAX_MENTIONS named), each with MAX_MEMBER_DEVICES
  * devices, each sending at most DEVICE_SENT_BYTES (an endpoint over MAX_ENDPOINT_BYTES is refused when it is turned
@@ -978,10 +997,11 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A webhook settings change (lib/webhooks.ts, changeConfig) is inside a studio or API request above: a GET and the
   // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
   // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
-  // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
+  // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds,
+  // and the deletion print read before a Stripe-read event names its buyer (WEBHOOK_ERASED_READ_COMMANDS).
   // Since 14 November 2026 a try also reads the store's deletion marks for the addresses in its message, one HMGET
   // (namesErased), before the endpoint is called: 11 commands a try in tests/webhook-erased-person.test.ts, inside the 20.
-  webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
+  webhook: request("wait", 20 + TAKE_COMMANDS + WEBHOOK_ERASED_READ_COMMANDS, 40_000),
 };
 
 /**
@@ -1373,8 +1393,19 @@ export const PAYPAL_PENDING_SWEEP = {
  * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted
  * at the person's request is left out (review of #3449, LEVE 2). Held by tests/paypal-receipt-once.test.ts (part M).
  * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH and PAYPAL_REFUND_KEPT above.
+ * A telling that failed (a deletion print or the event's once-only mark that did not read; review of #3491, MEDIUM) is
+ * owed, never lost: what the payment gave is still taken back, and the order stays on the watch, looked at again
+ * tellAgainAfterSeconds later (REFUND_TELL_AGAIN_SECONDS, lib/paypal-sales.ts), the watch's hourly pace, so no more
+ * looks a day than PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost and none past its daysWatchedAtMost. Each such look
+ * makes, besides PAYPAL_REFUND_WATCH's commands of a look, the refund mark's ZADD and EXPIRE again
+ * (markCommandsPerOwedLook), the paid purchase's HGET again (recordReadsPerOwedLook), at most one write of what is
+ * already taken back (writesPerOwedLookAtMost: an SREM or an HSET a second time, harmless twice) and the telling again
+ * (ownNoteReadsPerRefund and emitEvent's own reads, the webhook unit's WEBHOOK_ERASED_READ_COMMANDS among them; its
+ * event id is the capture's, so it is sent once). A scheduled job's work, bounded by its schedule and the batch, a
+ * company fixed cost (NOT_A_COST.REFUND_WATCH_BATCH), not a plan's allowance; its dollar figure is not yet a line of
+ * lib/llc-fixed-costs.ts, so it is not certified, never zero. Held by tests/paypal-refund-erased.test.ts.
  */
-export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
+export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1, tellAgainAfterSeconds: 3_600, markCommandsPerOwedLook: 2, recordReadsPerOwedLook: 1, writesPerOwedLookAtMost: 1 } as const;
 /**
  * The copy a reading of the buyers leaves, stored for its whole life (lib/segments.ts, LEDGER_SECONDS: an hour since
  * the owner's C3-80 (b); Codex R1 on #3226): BUYER_LEDGER_BYTES at Upstash's GB-month rate for that hour. Only a
@@ -1778,6 +1809,20 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/payment-recovery.ts", names: ["const CARD_PAGES = 5", "releaseMark(key, value)"] },
     ],
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
+  },
+  {
+    id: "come-back-unwritten-links",
+    feature: "A come-back offer whose link was not written as asked: the whole offer, from its first mark to the link taken back and the run's two marks let go, with nothing sent (Claude 7 and Claude 5 on #3889, 16 November 2026)",
+    monthlyUsd: () => COME_BACK_RUNS_PER_MONTH * UNWRITTEN_LINKS_PER_RUN * UNWRITTEN_LINK_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/winback-send.ts", names: ["UNWRITTEN_LINK_COMMANDS", "UNWRITTEN_LINKS_PER_RUN", "if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;", "releaseMark(onceKey(statsId, email, product.id), onceValue)", "releaseMark(sentKey(account, subId), claim)"] },
+      { file: "lib/claim-mark.ts", names: ["claimMark", "[\"GET\", key]"] },
+      { file: "lib/contacts.ts", names: ["round < 3", "CAS_HSET", "a contact write's read-back"] },
+      { file: "lib/erasure-index.ts", names: ["noteForErasure"] },
+      { file: "lib/redis-lock.ts", names: ["RELEASE"] },
+      { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
+    ],
+    basis: "At its worst a run's offer fails its link write after every step at its worst: UNWRITTEN_LINK_COMMANDS commands from its first mark to the end (both marks read back, the unsubscribe token lost twice and read back the third time, the link and its three erasure notes, the link's DEL and two RELEASE scripts at one plus their two calls). The first such failure stops the store's run (UNWRITTEN_LINKS_PER_RUN), and the offer is looked at again on the next run, one run a day (the plans cron at 09:00 UTC), COME_BACK_RUNS_PER_MONTH runs a month. A failure that sends nothing takes nothing from the store's email figure, so it is priced here, not in store-email. Held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.",
   },
   {
     id: "ai",

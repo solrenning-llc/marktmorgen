@@ -20,7 +20,8 @@
  *   - one refusal blocks nothing else: Stripe refusing one payment's refund for good (a 4xx such as
  *     charge_expired_for_refund, Claude 3 MEDIUM 1) leaves that payment owed, named in `short` for its creator, and
  *     the others are still given back in the same try;
- *   - never on a disputed payment: the buyer's bank already gives it back;
+ *   - never on a disputed payment: only a readable lost dispute covering the whole payment settles it; a partial
+ *     chargeback leaves the payment owed and names its invoice for the creator to reconcile;
  *   - never paid by the platform: the account's available balance, read first, must cover it (available,
  *     settledCost), and is counted off as it goes; one it does not cover is not attempted, and the plan is tried
  *     again ("owed");
@@ -183,14 +184,24 @@ export async function refundLatePayments(account: string, subscription: string, 
       left = true;
       continue;
     }
-    // Disputed (Codex X5's MEDIUM at 52e9c7a1ed): `disputed` stays true after the dispute closes. Lost, the bank gave it
-    // back: never a second time from here. Still open: tried again, never settled as given back. Won by the creator (or
+    // Disputed (Codex X5's MEDIUM at 52e9c7a1ed): `disputed` stays true after the dispute closes. Lost, only its own
+    // readable amount was given back: a partial chargeback cannot settle the whole late payment (Codex X5-20261119-1137).
+    // Still open: tried again, never settled as given back. Won by the creator (or
     // closed without a chargeback, or prevented), the creator kept a payment taken after the end: refunded as any other.
     if (charge.disputed) {
       const dispute = objectOf(charge.dispute);
       const status = dispute && dispute.object === "dispute" && (dispute.charge === undefined || idOf(dispute.charge) === charge.id) ? dispute.status : undefined;
       if (status === "lost") {
-        disputed += 1;
+        if (!dispute || idOf(dispute.charge) !== charge.id || !whole(dispute.amount) || dispute.amount === 0 || dispute.currency !== charge.currency) {
+          throw new Error("a plan's lost dispute did not prove this charge's returned amount and currency");
+        }
+        if (dispute.amount >= charge.amount) disputed += 1;
+        else {
+          // Stripe does not promise that the disputed charge's remainder can be refunded. Keep the existing owed
+          // line and creator notice, never try another payment or add refunds to a chargeback on a guess.
+          left = true;
+          short.push(row.id);
+        }
         continue;
       }
       if (typeof status === "string" && OPEN_DISPUTE.has(status)) {

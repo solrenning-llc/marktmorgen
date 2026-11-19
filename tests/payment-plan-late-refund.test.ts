@@ -37,7 +37,7 @@ const realNow = Date.now;
 const clock = Math.floor(realNow() / 1000);
 Date.now = () => clock * 1000;
 
-type Charge = { id: string; object: "charge"; payment_intent: string; amount: number; amount_refunded: number; disputed: boolean; dispute?: { id: string; object: "dispute"; status: string; charge: string } | null; currency: string; balance_transaction: { amount: number; currency: string }; invoice: string };
+type Charge = { id: string; object: "charge"; payment_intent: string; amount: number; amount_refunded: number; disputed: boolean; dispute?: { id: string; object: "dispute"; status: string; charge: string; amount?: number; currency?: string } | null; currency: string; balance_transaction: { amount: number; currency: string }; invoice: string };
 type Invoice = { id: string; object: "invoice"; subscription: string; status: string; created: number; amount_paid: number; paid_out_of_band: boolean; charge: Charge };
 type Refund = { id: string; object: "refund"; payment_intent: string; amount: number; currency: string; status: string; metadata: Record<string, string> };
 
@@ -202,9 +202,26 @@ async function main(): Promise<void> {
   reset();
   const c = plan(2, 100, 4);
   c.invoices[2].charge.disputed = true;
-  c.invoices[2].charge.dispute = { id: "du_lostx2", object: "dispute", status: "lost", charge: c.invoices[2].charge.id };
+  c.invoices[2].charge.dispute = { id: "du_lostx2", object: "dispute", status: "lost", charge: c.invoices[2].charge.id, amount: 5_000, currency: "usd" };
   is("settled, only the undisputed late payment refunded", [await finishPlan(ACCOUNT, c.session), madeFor(c.invoices[2]).length, madeFor(c.invoices[3]).length], ["done", 0, 1]);
   is("no refund was even asked for the disputed one", posts.filter((p) => p.body.get("payment_intent") === c.invoices[2].charge.payment_intent).length, 0);
+
+  part("A lost partial dispute keeps the late payment in the daily retry line");
+  reset();
+  redis.clear();
+  const partialDispute = plan(2, 100, 3);
+  const disputedCharge = partialDispute.invoices[2].charge;
+  disputedCharge.disputed = true;
+  disputedCharge.dispute = { id: "du_lostpartial", object: "dispute", status: "lost", charge: disputedCharge.id, amount: 1_000, currency: "usd" };
+  await rememberPlan(ACCOUNT, partialDispute.session);
+  const partialDisputeRun = await settlePlans();
+  is("a 1000 chargeback on a 5000 payment is owed, not done, and remains reachable", [partialDisputeRun.owed, partialDisputeRun.done, await inALine(partialDispute.session), posts.length], [1, 0, true, 0]);
+  // A later, readable full return is evidence the old partial answer did not provide.
+  disputedCharge.dispute.amount = 5_000;
+  Date.now = () => (clock + DAY) * 1000;
+  const reconciled = await settlePlans();
+  is("only a later full return releases the daily line, without a refund POST", [reconciled.done, await inALine(partialDispute.session), posts.length], [1, false, 0]);
+  Date.now = () => clock * 1000;
 
   // Codex X5's MEDIUM at 52e9c7a1ed (adopted by Claude 3, nuvem E): `charge.disputed` stays true after the dispute closes,
   // so a dispute the creator won left them a payment taken after the plan's end, never refunded.

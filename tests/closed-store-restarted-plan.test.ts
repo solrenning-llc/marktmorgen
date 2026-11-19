@@ -21,8 +21,9 @@ import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, unmarkDue } from
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { hostCalendarKeys } from "@/lib/host-calendar";
-import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, ERASING_KEY, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { closeForErasure, recordRemoved } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 // The addresses' hold and the id's release before the record goes answered [] with nothing done.
@@ -42,9 +43,14 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     withdrawUnknown -= 1;
     return [null];
   }
-  if (finalUnknown && commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === FINAL_INDEX) {
+  // The walk reads the store's place in the final line first in dueForErasure (beside its closing record), and
+  // prepareStore reads it again: the first such read is the one answered with what ZSCORE never says.
+  const finalAt = commands.findIndex((c) => c[0] === "ZSCORE" && c[1] === FINAL_INDEX);
+  if (finalUnknown && finalAt >= 0) {
     finalUnknown = false;
-    return ["QUEUED"];
+    const replies = await realPipeline(commands);
+    replies[finalAt] = "QUEUED";
+    return replies;
   }
   if (onTeamRead && commands.some((c) => c[0] === "GET" && /^nl:team:[^:]+$/.test(String(c[1])))) {
     const run = onTeamRead;
@@ -56,7 +62,12 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     inWindow = null;
     await run();
   }
-  if (releaseLost && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:"))) {
+  // The addresses' hold, made bare before, or as one of the record's closing changes in the step that reads the store's
+  // lock (lib/redis-lock.ts applyIfHeld, CLOSING_FENCED, on #3156): answered with nothing, and not run.
+  const holdsAddress = (c: (string | number)[]) =>
+    (c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:")) ||
+    (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).some((k) => String(k).startsWith("nl:store:handle:")));
+  if (releaseLost && commands.some(holdsAddress)) {
     releaseLost = false;
     return [];
   }
@@ -128,19 +139,21 @@ async function main(): Promise<void> {
     releaseLost = true;
     withdrawUnknown = 100;
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const first = await erase(T);
     is("setup: the preparation stopped with the record there", [first.stores, (await storeForEmail(email))?.sid ?? null], [0, store.sid]);
+    // This preparation stopped at the record's own going, after the live store's data had gone (forgetLive): the store
+    // is half erased, and is never opened again (Codex N1's HIGH on #3156, coordinator's decision C5-20261119-0235). Its
+    // erasing mark refuses the plan (a payment for it is returned, tests/erasing-mark.test.ts), and the walk erases it to
+    // the end once the record's going is answered.
+    is("its erasure had begun: the mark is there", Number(redis.run(["HLEN", ERASING_KEY])), 1);
     await restartPlan(email, "0001");
-    const stores: number[] = [];
-    for (let n = 1; n <= 2; n++) stores.push((await erase(T + n * (WALK_GAP_MS + 1))).stores);
-    is("its record is still there", (await storeForEmail(email))?.sid ?? null, store.sid);
-    is("its data is not erased", dataOf(store), "z");
-    is("it is never prepared", stores, [0, 0]);
+    is("its plan does not start again", Boolean((await storeForEmail(email))?.subscriptionActive), false);
+    releaseLost = false;
     withdrawUnknown = 0;
-    for (let n = 3; n <= 4; n++) await erase(T + n * (WALK_GAP_MS + 1));
-    is("once its entry is confirmed out, it is out of the batch and out of line", [redis.run(["HGET", BATCH_KEY, email]), redis.run(["ZSCORE", DUE_KEY, email])], [null, null]);
-    is("and its record and data still stand", [(await storeForEmail(email))?.sid ?? null, dataOf(store)], [store.sid, "z"]);
+    for (let n = 1; n <= 2; n++) await erase(T + n * (WALK_GAP_MS + 1));
+    is("the next walk erases it to the end: its record and its mark go together", [(await storeForEmail(email))?.sid ?? null, Number(redis.run(["HLEN", ERASING_KEY]))], [null, 0]);
   }
 
   part("A plan started while the store is being prepared keeps its record: it is read again under the store's lock");
@@ -154,6 +167,7 @@ async function main(): Promise<void> {
       await setSubscription(email, { customerId: "cus_restart0002", subscriptionId: "sub_restart0002", active: true });
     };
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("the plan started in the window", inWindow, null);
@@ -174,6 +188,7 @@ async function main(): Promise<void> {
       await setSubscription(email, { customerId: "cus_restart0006", subscriptionId: "sub_restart0006", active: true });
     };
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("the plan started before anything was deleted", onTeamRead, null);
@@ -191,6 +206,7 @@ async function main(): Promise<void> {
     await endPlan(email, "0007");
     const live = seedLive(store);
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("it is prepared, walked and finished", [report.stores, report.finished], [1, 1]);
@@ -206,6 +222,7 @@ async function main(): Promise<void> {
     const T = Date.now();
     redis.run(["ZADD", FINAL_INDEX, T - 5000, email]);
     await setSubscription(email, { customerId: "cus_restart0003", subscriptionId: "sub_restart0003", active: true });
+    await recordRemoved(email, T - 5000);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("it is prepared, walked and finished", [report.stores, report.finished], [1, 1]);
@@ -238,6 +255,7 @@ async function main(): Promise<void> {
     await endPlan(email, "0005");
     redis.run(["SET", `nl:zz:${store.statsId}:data`, "e"]);
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("it is prepared, walked and finished", [report.stores, report.finished], [1, 1]);

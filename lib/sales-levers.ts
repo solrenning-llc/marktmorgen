@@ -1,38 +1,10 @@
 import {KIND} from "@/lib/catalog";
-import {bumpsFromMeta,bundleFromMeta} from "@/lib/bundle-rules";
 import type {Store} from "@/lib/store";
-export type LeverKey="bump"|"upsell"|"downsell"|"bundle"|"recovery"|"next";
-type PaidRecord={created:number;cents:number;currency:string;upsell:boolean;row:Record<string,unknown>};
-export type LeverMeasure={records:number;cents:number|null;scope:string};
-export type LeverReading={asOf:string;from:string;currency:string;complete:boolean;rows:Record<LeverKey,LeverMeasure>};
-/** Existing settled payment records only. No extra query, event write, forecast or inferred line-item allocation. */
+import {leverEarnings,type LeverKey,type LeverReading,type PaidRecord} from "@/lib/lever-earnings";
+export type {LeverKey,LeverReading};
+/** What each lever earned in the last 30 days, from the paid records the kept sales reading already holds (lib/lever-earnings.ts). No extra query, event write, forecast or inferred allocation. */
 export function measureSalesLevers(sales:readonly PaidRecord[],currency:string,partial:boolean,now=Date.now()):LeverReading{
- const end=new Date(now),from=new Date(Date.UTC(end.getUTCFullYear(),end.getUTCMonth(),end.getUTCDate())-29*86400000);
- const rows:Record<LeverKey,LeverMeasure>={
- bump:{records:0,cents:null,scope:"Whole checkout payments tagged with an order bump; the bump's separate paid amount is not measured."},
- upsell:{records:0,cents:null,scope:"After-checkout offer payments, including downsells. Existing payment metadata does not distinguish the two."},
- downsell:{records:0,cents:null,scope:"Downsell-only revenue is not separately identified in existing payment records."},
- bundle:{records:0,cents:null,scope:"Whole checkout payments tagged with a bundle; other items, discounts and tax can be included."},
- recovery:{records:0,cents:null,scope:"Payments carrying Stripe's recovered_from marker only; not all reminder outcomes are attributable."},
- next:{records:0,cents:null,scope:"A next-offer-specific paid amount is not separately identified in existing records."}
- };
- const totals={bump:0,upsell:0,bundle:0,recovery:0};let complete=!partial;
- for(const sale of sales){
-  if(!Number.isFinite(sale.created)){complete=false;continue;}
-  if(sale.created<from.getTime()||sale.created>now||sale.currency!==currency)continue;
-  if(!Number.isSafeInteger(sale.cents)||sale.cents<0){complete=false;continue;}
-  const meta=sale.row.metadata&&typeof sale.row.metadata==="object"&&!Array.isArray(sale.row.metadata)?sale.row.metadata as Record<string,string>:{};
-  const add=(key:keyof typeof totals)=>{rows[key].records++;totals[key]+=sale.cents;if(!Number.isSafeInteger(totals[key]))complete=false;};
-  if(sale.upsell)add("upsell");
-  else{
-   if(bumpsFromMeta(meta).length)add("bump");
-   if(bundleFromMeta(meta,"bundle").length)add("bundle");
-   if(typeof sale.row.recovered_from==="string"&&sale.row.recovered_from.startsWith("cs_"))add("recovery");
-  }
- }
- // Tagged subsets are displayed only when present. No tag is unknown attribution, not proof of zero revenue.
- if(complete)for(const key of ["bump","upsell","bundle","recovery"] as const)if(rows[key].records>0)rows[key].cents=totals[key];
- return {asOf:end.toISOString(),from:from.toISOString(),currency,complete,rows};
+ return leverEarnings(sales,currency,partial,now);
 }
 export function salesLeverSettings(store:Store){
  const visible=store.catalog.items.filter(item=>(item.kind&KIND.hidden)===0),loaded=store.catalog.head.filter(item=>!item.hidden);

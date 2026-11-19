@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StoreCopyPanel } from "@/components/store-copy-panel";
 
@@ -34,7 +35,7 @@ export default async function StudioCopyPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Copy this store</p>
+          <StudioTrail store={store} here="Copy this store" />
           <h1 className="t-h2 mt-3">{`Copy ${store.name || `@${store.handle}`} into another of your stores`}</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Its products, pages, forms and funnels come across as drafts, and its store page&apos;s setup if you choose. Customers, orders, contacts, emails,

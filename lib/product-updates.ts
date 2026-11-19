@@ -28,6 +28,7 @@
  *   nl:upd:job:<id>             the send (JSON)
  *   nl:upd:job:<id>:to          addresses, in order (a list)
  *   nl:updq                     sends waiting or under way
+ *   nl:updheld                  sends held while their store is off, by when the mail job looks at each again
  *   nl:upd:last:<statsId>:<p>   when that product's buyers were last written to
  *   nl:upd:off:<statsId>:<hash> that address pressed stop, kept for good
  *   nl:upd:stop:<token>         who a stop link belongs to
@@ -35,11 +36,12 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { type BatchMessage, NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, type MailDay, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -62,7 +64,22 @@ export { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuye
 export const UPDATE_STOP = /^[0-9a-f]{40}$/;
 const JOB_ID = /^[0-9a-f]{24}$/;
 const QUEUE = "nl:updq";
+/**
+ * Sends held while their store is switched off (lib/takedown.ts), scored by when the mail job looks at each again:
+ * out of QUEUE, so a held send is read once a day instead of every five minutes (Claude 7 on #3403, MEDIUM 2).
+ */
+const HELD = "nl:updheld";
 const KEEP_SECONDS = 60 * 86_400;
+/** How long a held send rests between looks: a day, so one held for its whole 60 days is looked at 60 times at most. */
+export const UPDATE_HELD_LOOK_SECONDS = 86_400;
+/** Held sends a run of the mail job puts back in QUEUE at most; the rest wait for the next run. */
+export const UPDATE_HELD_PER_RUN = 100;
+/**
+ * Tries, a day apart, of the company email that tells the creator a send which waited to the end of its 60 days was
+ * not sent to everyone (Claude 7 on #3403, MEDIUM 1): a refused or unknown try is tried again the next day; past the
+ * last one the send ends all the same, logged.
+ */
+export const UPDATE_END_NOTICE_TRIES = 3;
 const STOP_LINK_SECONDS = 400 * 86_400;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -71,6 +88,8 @@ const toKey = (id: string) => `nl:upd:job:${id}:to`;
 const lockKey = (id: string) => `nl:upd:job:${id}:lock`;
 const lastKey = (statsId: string, product: string) => `nl:upd:last:${statsId}:${product}`;
 const latestKey = (statsId: string, product: string) => `nl:upd:latest:${statsId}:${product}`;
+/** That address's stop on update emails, for the person's copy to read (lib/person-copy.ts). */
+export const updatesStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:upd:off:${statsId}:${sha(`nimbus-update-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:upd:stop:${token}`;
 
@@ -90,6 +109,10 @@ export type UpdateJob = {
   note: string;
   failures: number;
   createdAt: number;
+  /** Why a waiting send waits: its store switched off ("off") or its plan with no email ("plan"), for the creator's notice. */
+  why?: "off" | "plan";
+  /** Tries so far of the creator's notice at its end (UPDATE_END_NOTICE_TRIES). */
+  told?: number;
 };
 
 
@@ -134,7 +157,7 @@ export function buyersFrom(rows: Record<string, unknown>[], handles: ReadonlySet
 
 export type StartResult =
   | { ok: true; job: UpdateJob }
-  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number }
+  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe" | "switched_off"; until?: number }
   | { ok: false; reason: "studio_used"; message: string; until?: undefined };
 
 /**
@@ -177,6 +200,9 @@ export async function nextUpdateAt(store: Store, productId: string): Promise<num
 
 /** Writes down an update to go to every buyer of the product now. */
 export async function startUpdate(store: Store, product: Listing, rawNote: unknown, nowSeconds = Math.floor(Date.now() / 1000)): Promise<StartResult> {
+  // Switched off after notices about its content (lib/takedown.ts): the creator's words go to nobody, and nothing is
+  // read, counted or claimed. Any value but "" (on) is taken as off (rule 24).
+  if (store.suspended) return { ok: false, reason: "switched_off" };
   if (!canWrite(store) || !store.statsId || !store.stripeAccountId) return { ok: false, reason: "plan" };
   if (!canTellBuyers(product)) return { ok: false, reason: "kind" };
   const next = await nextUpdateAt(store, product.id);
@@ -312,14 +338,21 @@ export async function readUpdateJob(id: string): Promise<UpdateJob | null> {
       !["sending", "waiting", "sent", "failed"].includes(job.status as string) ||
       (job.total as number) === 0 || (job.total as number) > MAX_UPDATE_RECIPIENTS ||
       (job.done as number) > (job.total as number) || (job.sent as number) > (job.done as number)) throw unknown();
+  if (Object.hasOwn(job, "why") && job.why !== "off" && job.why !== "plan") throw unknown();
+  if (Object.hasOwn(job, "told") && (typeof job.told !== "number" || !Number.isSafeInteger(job.told) || job.told < 0)) throw unknown();
   return value as UpdateJob;
 }
 
 /** The last update sent about this product in the past two months, for the studio to show; null when none. */
 export async function latestUpdate(store: Store, productId: string): Promise<UpdateJob | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [id] = await redisPipeline([["GET", latestKey(store.statsId, productId)]]);
-  return typeof id === "string" ? readUpdateJob(id) : null;
+  // Exactly one reply: null is none, a send's id is read; anything else is unknown (rule 24), never "none".
+  const reply = repliesFor(await redisPipeline([["GET", latestKey(store.statsId, productId)]]), 1);
+  if (!reply) throw new UnknownReplyError("a product's latest update");
+  const id = reply[0];
+  if (id === null) return null;
+  if (typeof id !== "string" || !JOB_ID.test(id)) throw new UnknownReplyError("a product's latest update");
+  return readUpdateJob(id);
 }
 
 async function save(job: UpdateJob): Promise<void> {
@@ -338,16 +371,70 @@ function stopToken(statsId: string, email: string): string {
   return key ? createHmac("sha256", key).update(`${statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40) : randomBytes(20).toString("hex");
 }
 
+/** noteForErasure's three replies, exactly: ZADD 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1 (the set was just written). */
+function noted(replies: unknown[] | null): boolean {
+  return !!replies && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
+}
+
 async function stopLink(store: Store, email: string): Promise<string> {
   const token = stopToken(store.statsId ?? "", email);
   const grant = { s: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.mail?.fromName || store.name };
   // The link itself is counted in the store's room at what it really adds,
   // once an address (lib/order-data.ts); the note that finds it again for an
   // erasure is bounded on its own (lib/erasure-index.ts).
-  await orderWrite(store, [["SET", stopKey(token), JSON.stringify(grant), "EX", STOP_LINK_SECONDS]]);
+  // The note goes first and must be confirmed (rule 24, r24 product-updates 1.2): a record holding the buyer's
+  // address for 400 days is never written unless an erasure will find it. The note cannot ride in orderWrite's
+  // script (ZREMRANGEBYSCORE is not an order command, and the note is not the store's room), so it is its own step
+  // before the record; a note whose record then fails names a key that is not there, which an erasure deletes as
+  // nothing.
   const notes = noteForErasure(store.statsId, email, stopKey(token));
-  if (notes.length) await redisPipeline(notes);
+  if (notes.length && !noted(repliesFor(await redisPipeline(notes), notes.length))) {
+    throw new UnknownReplyError("the erasure note of an update's stop link");
+  }
+  await orderWrite(store, [["SET", stopKey(token), JSON.stringify(grant), "EX", STOP_LINK_SECONDS]]);
   return token;
+}
+
+/** Gives back what reserve() took for a batch that did not go out; a give-back that is not confirmed is unknown and throws. */
+async function giveBack(store: Store, n: number, day: MailDay): Promise<void> {
+  if (!(await release(store, n, day))) throw new UnknownReplyError("the give-back of an update's reserved emails");
+}
+
+/** A day as the studio and the creator's notice say it, in UTC: "December 1, 2026". */
+function updateDay(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+/** Out of the five-minute queue, looked at again in UPDATE_HELD_LOOK_SECONDS (advanceUpdates puts it back then). */
+async function hold(id: string, nowSeconds: number): Promise<void> {
+  // Keep the source until the destination is confirmed; commands in one pipeline can fail independently.
+  const added = repliesFor(await redisPipeline([["ZADD", HELD, nowSeconds + UPDATE_HELD_LOOK_SECONDS, id]]), 1)?.[0];
+  if (added !== 0 && added !== 1) throw new UnknownReplyError("holding a product update");
+  await redisPipeline([["SREM", QUEUE, id]]);
+}
+
+/**
+ * Tells the store's owner that a send which waited to the end of its 60 days was not sent to everyone (Claude 7 on
+ * #3403, MEDIUM 1): one company email, under one key a send so a retry the provider already took is not sent twice.
+ * True only when it was sent; a store with no address to write to has nobody to tell, and counts as told.
+ */
+async function tellEnded(store: Store, job: UpdateJob): Promise<boolean> {
+  if (!store.email) return true;
+  const because = job.why === "plan" ? "your plan did not include email" : "your store's pages and sales were switched off after notices about its content";
+  return sendEmail({
+    meter: { by: "company" },
+    from: NIMBUS_FROM,
+    to: store.email,
+    replyTo: SUPPORT_EMAIL,
+    subject: `Your update about ${job.title} was not sent to everyone`.slice(0, 200),
+    text: [
+      `Your update about ${job.title}, started on ${updateDay(job.createdAt)}, was waiting because ${because}.`,
+      `An update is kept for 60 days, so the rest of it was not sent: ${job.sent} of ${job.total} buyers got it.`,
+      "",
+      "You can send a new update from the product's page in your studio.",
+    ].join("\n"),
+    idempotencyKey: `update-ended-${job.id}`,
+  }).catch(() => false);
 }
 
 /**
@@ -355,28 +442,67 @@ async function stopLink(store: Store, email: string): Promise<string> {
  * places at once: only one holds the send at a time.
  */
 export async function advanceUpdate(id: string, load: (handle: string) => Promise<Store | null>, deadline: number): Promise<UpdateJob | null> {
-  // Held only on an exact "OK" (rule 24): any other reply leaves the send for
-  // the next run and lets go of nothing, since the lock may not be ours.
-  const got = repliesFor(await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]), 1);
-  if (!got || got[0] !== "OK") return null;
+  // Held only when it is ours (rule 24, lib/claim-mark.ts): a value only this run writes, taken on an exact "OK" or
+  // read back as ours; taken or unknown leaves the send for the next run and lets go of nothing. Let go only while it
+  // still holds this run's value, so a run held up past its 90 s never frees the next run's lock (r24 2.3).
+  const mine = claimValue();
+  if ((await claimMark(lockKey(id), 90, mine)) !== "ours") return null;
   try {
     // Unknown evidence must not dequeue a real job or overwrite its payload.
     // Keep it for the next automatic read; only a confirmed null is absent.
     let job: UpdateJob | null;
     try { job = await readUpdateJob(id); } catch { return null; }
     if (!job || job.status === "sent" || job.status === "failed") {
-      await redisPipeline([["SREM", QUEUE, id]]);
+      await redisPipeline([["SREM", QUEUE, id], ["ZREM", HELD, id]]);
       return job;
     }
     const store = await load(job.handle);
     if (!store || store.statsId !== job.statsId) {
       job = { ...job, status: "failed", note: "The store is not here anymore." };
       await save(job);
-      await redisPipeline([["SREM", QUEUE, id]]);
+      await redisPipeline([["SREM", QUEUE, id], ["ZREM", HELD, id]]);
+      return job;
+    }
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    // A send lives KEEP_SECONDS from its start, as its recipient list does: past that it ends here, before either
+    // wait below, so a send held while the store is off or its plan has no email never stays queued without end.
+    if (nowSeconds >= job.createdAt + KEEP_SECONDS) {
+      // One that waited to its end was not sent to everyone: the creator is told by a company email, never left to
+      // find it out (Claude 7 on #3403, MEDIUM 1). A try that is not sent is tried again the next day, at most
+      // UPDATE_END_NOTICE_TRIES; nothing more goes to a buyer meanwhile (its recipient list is gone with its 60 days).
+      if (job.status === "waiting") {
+        const tries = (job.told ?? 0) + 1;
+        if (!(await tellEnded(store, job)) && tries < UPDATE_END_NOTICE_TRIES) {
+          job = { ...job, told: tries };
+          await save(job);
+          await hold(id, nowSeconds);
+          return job;
+        }
+        if (tries >= UPDATE_END_NOTICE_TRIES) console.error("a product update ended without its creator told", id);
+      }
+      job = { ...job, status: "failed", note: "The recipient list expired. Nothing more was sent." };
+      await save(job);
+      await redisPipeline([["DEL", toKey(id)], ["SREM", QUEUE, id], ["ZREM", HELD, id]]);
+      return job;
+    }
+    // Switched off after notices about its content (lib/takedown.ts; any value but "" is off, rule 24): the send
+    // waits where it is, nothing reserved, sent or counted, and goes on once the store is back on. Read once a run,
+    // from the store read above (no read of its own): a run already under way goes on at most to its deadline. It
+    // leaves the five-minute queue and is looked at again in a day (hold; Claude 7 on #3403, MEDIUM 2), and its note
+    // says the day it ends unsent (MEDIUM 1).
+    if (store.suspended) {
+      job = {
+        ...job,
+        status: "waiting",
+        why: "off",
+        note: `Your store's pages and sales are switched off after notices about its content. Nothing more was sent. The rest go out once your store is back on, until ${updateDay(job.createdAt + KEEP_SECONDS)}; after that they are not sent, and we email you.`,
+      };
+      await save(job);
+      await hold(id, nowSeconds);
       return job;
     }
     if (monthlyAllowance(store) === 0 || !store.mail) {
-      job = { ...job, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again." };
+      job = { ...job, status: "waiting", why: "plan", note: "Your plan does not include email right now. It goes out once Pro is on again." };
       await save(job);
       return job;
     }
@@ -416,7 +542,8 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         break;
       }
       if (recipients.length) {
-        const reserved = await reserve(store, recipients.length);
+        const day = mailDay();
+        const reserved = await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -430,9 +557,20 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           };
           break;
         }
+        let stops: string[];
+        try {
+          stops = [];
+          for (const email of recipients) stops.push(await stopLink(store, email));
+        } catch {
+          // A stop link that could not be written sends nothing (rule 24): what reserve() took from the store's month
+          // and the company's day is given back now, exactly, or the run fails, never taking it again on every run.
+          await giveBack(store, recipients.length, day);
+          job = { ...job, status: "waiting", note: "The stop links could not be saved just now. Nothing more was sent. We will try again." };
+          break;
+        }
         const messages: BatchMessage[] = [];
-        for (const email of recipients) {
-          const stop = await stopLink(store, email);
+        for (const [at, email] of recipients.entries()) {
+          const stop = stops[at];
           const page = `${SITE_URL}/unsubscribe?u=${stop}`;
           const r = render(store, text.subject, text.body, null, {
             page,
@@ -448,12 +586,14 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         }
         const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          await giveBack(store, recipients.length, day);
           const failures = job.failures + 1;
           job =
-            failures >= 5 || outcome === "refused"
+            // Only a refusal ends it: a provider that is down or slow keeps the update waiting in the queue, never
+            // abandoned, and the next run goes on with it (outage drill, 13 November 2026).
+            outcome === "refused"
               ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }
-              : { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
+              : { ...job, failures, note: SENDER_RETRY_NOTE };
           break;
         }
       }
@@ -465,10 +605,10 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
       await redisPipeline([["DEL", toKey(id)]]);
     }
     await save(job);
-    if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
+    if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id], ["ZREM", HELD, id]]);
     return job;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    await releaseMark(lockKey(id), mine);
   }
 }
 
@@ -523,44 +663,81 @@ function checkedUpdateRecipients(emails: string[], checks: unknown, hasList: boo
 /** Moves every waiting update on. For the mail job. */
 export async function advanceUpdates(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["SMEMBERS", QUEUE]]);
-  const ids = Array.isArray(raw) ? (raw as string[]) : [];
+  // A queue that does not read in its exact shape is unknown (rule 24): it throws, so the mail job logs this step as
+  // failed instead of reporting no updates, and the next run reads it again.
+  // Held sends whose day is over go back in the queue first (hold; Claude 7 on #3403, MEDIUM 2), at most
+  // UPDATE_HELD_PER_RUN a run; a list that does not read in its exact shape is unknown, and nothing is moved.
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", HELD, "-inf", Math.floor(Date.now() / 1000), "LIMIT", 0, UPDATE_HELD_PER_RUN]]), 1)?.[0]);
+  if (!due) throw new UnknownReplyError("the held product updates");
+  if (due.length > 0) {
+    const added = countOf(repliesFor(await redisPipeline([["SADD", QUEUE, ...due]]), 1)?.[0]);
+    if (added === null || added > due.length) throw new UnknownReplyError("requeueing held product updates");
+    await redisPipeline([["ZREM", HELD, ...due]]);
+  }
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", QUEUE]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("the queue of product updates");
   let touched = 0;
+  // One send that throws (an unknown reply, rule 24) stays as it was for the next run and does not hold up the other
+  // sends of this run; the first such error is thrown at the end, so the mail job still logs this step as failed.
+  let failed: { error: unknown } | null = null;
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    if (await advanceUpdate(id, load, deadline)) touched += 1;
+    try {
+      if (await advanceUpdate(id, load, deadline)) touched += 1;
+    } catch (error) {
+      console.error("moving a product update on failed; it is tried again next run", error);
+      failed ??= { error };
+    }
   }
+  if (failed) throw failed.error;
   return touched;
 }
 
-/** Who a stop link belongs to, without acting on it. */
+/**
+ * Who a stop link belongs to, without acting on it. Null only when the link is confirmed not there (an exact nil) or
+ * its record is not a stop link's; a reply cut short or of another shape throws (CX-123 rule 24), and the unsubscribe
+ * page says it could not open the link just now, never that the link is unknown.
+ */
 export async function readUpdateStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
   if (!UPDATE_STOP.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const read = repliesFor(await redisPipeline([["GET", stopKey(token)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("an update stop link");
+  const raw = read[0];
+  if (raw === null || !raw) return null;
+  let grant: { s?: unknown; e?: unknown; h?: unknown; n?: unknown };
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown; n?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string") return null;
-    const [off] = await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]);
-    return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: Number(off) === 1, handle: typeof grant.h === "string" ? grant.h : "" };
+    grant = JSON.parse(raw) as typeof grant;
   } catch {
     return null;
   }
+  if (!grant || typeof grant.s !== "string" || typeof grant.e !== "string") return null;
+  const off = repliesFor(await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]), 1)?.[0];
+  if (off !== 0 && off !== 1) throw new UnknownReplyError("whether an address stopped a store's update emails");
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: off === 1, handle: typeof grant.h === "string" ? grant.h : "" };
 }
 
-/** Stops every update email from that store to that address, for good. Safe to press twice. */
+/**
+ * Stops every update email from that store to that address, for good. Safe to press twice. False only when the link is
+ * confirmed not there (an exact nil) or its record is not a stop link's; a reply cut short or of another shape, or a
+ * stop whose write is not confirmed, throws (CX-123 rule 24), and the unsubscribe route answers "try again", never
+ * "Not found.".
+ */
 export async function stopUpdates(token: string): Promise<boolean> {
   if (!UPDATE_STOP.test(token) || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return false;
+  const read = repliesFor(await redisPipeline([["GET", stopKey(token)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("an update stop link");
+  const raw = read[0];
+  if (raw === null || !raw) return false;
+  let grant: { s?: unknown; e?: unknown; h?: unknown };
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string") return false;
-    // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
-    const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
-    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]);
-    return true;
+    grant = JSON.parse(raw) as typeof grant;
   } catch {
     return false;
   }
+  if (!grant || typeof grant.s !== "string" || typeof grant.e !== "string") return false;
+  // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
+  const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
+  const written = repliesFor(await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("an update stop's write");
+  return true;
 }

@@ -47,7 +47,7 @@ import { noteTestSales } from "@/lib/headline-test";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
 import { revokeRefundedGroups } from "@/lib/group-buy";
-import { sweepPayPal } from "@/lib/paypal-delivery";
+import { retryPayPalCancelNotices, sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -73,6 +73,8 @@ import { settleStoreList, storesWithRequests } from "@/lib/payment-request-store
 import { createHash } from "node:crypto";
 import { TAKE_DATA, dataKey, monthOf, type DataStore } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
+import { OPEN_HOURS, releaseExpiredHolds } from "@/lib/order-admission";
+import { paidOrdersLimitFor } from "@/lib/order-rules";
 
 const CURSOR_KEY = "nl:sweep:cursor";
 
@@ -319,7 +321,7 @@ export async function observeCheckoutTaxPage(store: Store, rows: unknown, value:
 }
 /**
  * At most this many pages of a hundred checkouts are read per store per pass in each of its two walks (walkDay):
- * the completed ones, and the expired ones on a store with reminders or a list. So at most 2 x 3 = 6 list calls each
+ * the completed ones, and the expired ones on a store with reminders, a list or counted orders. So at most 2 x 3 = 6 list calls each
  * time a store is swept, 288 runs a UTC day (tests/plan-cost-registry.ts, NOT_A_COST.MAX_PAGES_PER_STORE).
  */
 export const MAX_PAGES_PER_STORE = 3;
@@ -386,7 +388,9 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
   let ended = false;
   try {
     for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
-      const query = `/checkout/sessions?limit=100&status=${kind}&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
+      // Each checkout with its payment's charge and the charge's balance transaction, whose time (the settlement) decides a
+      // partner's dated end (lib/affiliates.ts paidAtOf).
+      const query = `/checkout/sessions?limit=100&status=${kind}&created[gte]=${since}&expand[]=data.payment_intent.latest_charge.balance_transaction${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
       let listed: Record<string, unknown>;
       try {
         listed = await onAccount("GET", account, query);
@@ -485,8 +489,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   // Sold through the creator's PayPal (lib/paypal-sales.ts): a payment PayPal
   // held as pending is handed over once it completes, and a full refund takes
-  // the purchase back.
-  if (store.paypalSeller) {
+  // the purchase back. Also after the creator disconnected PayPal, while the
+  // orders it took are still answered (paypalPast, lib/paypal-delivery.ts).
+  if (store.paypalSeller || store.paypalPast) {
     try {
       const paypal = await sweepPayPal(store, deadline);
       counts.confirmed += paypal.cleared;
@@ -689,9 +694,15 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     }
   });
 
-  // The day's expired checkouts, walked the same way, for what an abandoned checkout starts: a reminder and the
-  // workflows. Only on a store that has either; open checkouts are never read, there is nothing to do with them yet.
-  if (reminding || store.listId) await walkDay(store, "expired", since, deadline, counts, async (rows) => {
+  // The expired checkouts, walked the same way, for what an abandoned checkout starts: a reminder and the
+  // workflows, and the order place it held given back (#3970, lib/order-admission.ts, releaseExpiredHolds). Only on a
+  // store that has reminders or workflows, or whose orders are counted; open checkouts are never read, there is
+  // nothing to do with them yet. Read back OPEN_HOURS, not a day: a checkout left at Stripe's default closes a day
+  // after it opened, and still holds its place for the hour after that. Reminders and workflows keep to the day's.
+  const holding = paidOrdersLimitFor(store, now) !== null;
+  if (reminding || store.listId || holding) await walkDay(store, "expired", now - OPEN_HOURS * 3_600, deadline, counts, async (all) => {
+    if (holding) await releaseExpiredHolds(store, all, saleHandles(store));
+    const rows = all.filter((row) => typeof row.created === "number" && row.created >= since);
     if (reminding) {
       for (const row of rows) {
         if (Date.now() >= deadline) break;
@@ -737,6 +748,9 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
+  // The buyers' notices of canceled PayPal orders the sender refused, tried again once a run, for every store
+  // (lib/paypal-sales.ts, retryCancelNotices): one ZRANGEBYSCORE, and a batch at most.
+  await retryPayPalCancelNotices(deadline).catch((error) => console.error("trying canceled PayPal orders' notices again failed", error));
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
   // Redis's SCAN may hand back the same key on more than one page (and a store
@@ -762,7 +776,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
       swept.add(id);
       const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
-      if (worthAsking(store, asks) || reviewed || store.paypalSeller) {
+      if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;
         try {
           await sweepStore(store, counts, deadline, reviewed, asks, taxPass);

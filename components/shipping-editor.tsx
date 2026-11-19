@@ -24,7 +24,6 @@ const MESSAGES: Record<string, string> = {
   ship_membership: "A product you ship is sold once, not as a membership.",
   ship_call: "A call delivers a time, so it cannot be shipped.",
   ship_options: "A product you ship has one price. Take its options off first.",
-  ship_pwyw: "A product you ship has a set price, so buyers cannot choose it.",
   ship_plan: "A product you ship is paid in full. Stop its payment plan first.",
   ship_delivery: "This product already hands over a file, a link, a course, a podcast or a bundle. Take that off first, or make a new product to ship.",
   store_full: "Your store is full. Remove something before adding more.",
@@ -55,7 +54,9 @@ export function ShippingEditor({ product }: { product: Product }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!current && shipProblem(product) !== null) return null;
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  // The opener stands on a line of its own: the same look, as a full-width row.
+  const opener = "flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   const id = `ship-${product.id}`;
 
   async function send(shipping: Record<string, unknown> | null, said: string) {
@@ -124,7 +125,7 @@ export function ShippingEditor({ product }: { product: Product }) {
         ) : (
           <button
             type="button"
-            className={`block ${link}`}
+            className={opener}
             aria-disabled={ready ? undefined : true}
             disabled={!ready}
             onClick={() => {

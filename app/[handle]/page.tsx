@@ -1,6 +1,6 @@
 import { MovedNotice } from "@/components/moved-notice";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { exitAnswerForStore, exitAnswerForValue } from "@/lib/exit-redirect-rules";
 import { closingDayBegun } from "@/lib/plan-closing";
 import { standingOf } from "@/lib/plan-standing";

@@ -30,6 +30,8 @@ export type MemberPlace = {
   selling: boolean;
   /** Coming soon: a waitlist or a pre-order instead of the buy box. */
   soon: boolean;
+  /** Its stock or its keys could not be read: the buy area says it cannot be bought now (Codex X6 on #3021). */
+  unread: boolean;
   /** Units left of a limited product, or null when it is not limited. */
   remaining: number | null;
   /** For a bundle: whether it holds enough to hand over now. */
@@ -47,6 +49,7 @@ export function memberPriceCanShow(store: Store, product: Listing, place: Member
   return (
     place.selling &&
     !place.soon &&
+    !place.unread &&
     place.remaining !== 0 &&
     place.ready &&
     !isFree(product) &&

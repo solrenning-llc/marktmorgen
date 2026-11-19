@@ -432,7 +432,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // it, and it is shown only to a visitor whose address it proves now (lib/member-price.ts). Unknown, or a check that
   // fails, is the normal price. This page reads the visitor's cookies, so it is drawn for each request, never cached
   // for everybody.
-  const memberCheck: MemberCheck = memberPriceCanShow(store, product, { selling, soon, remaining, ready: bundleReady, related })
+  const memberCheck: MemberCheck = memberPriceCanShow(store, product, { selling, soon, unread, remaining, ready: bundleReady, related })
     ? await memberPriceFor(store, product, await cookies()).catch((): MemberCheck => ({ state: "unknown" }))
     : { state: "none" };
   const member = memberShown(store, product, memberCheck);

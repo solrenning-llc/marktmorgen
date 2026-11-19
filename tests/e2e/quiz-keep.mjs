@@ -7,7 +7,7 @@ import { build } from "esbuild";
 
 const root = resolve("."), require = createRequire(root + "/package.json");
 /** A lesson's quiz for one student (`who`, the server's code) with `tries` already recorded and the questions `shown`. */
-const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tries = 0, version = "v1" } = {}) => build({
+const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tries = 0, version = "v1", clickedFirst = false } = {}) => build({
   stdin: { contents: `
     import React from 'react';import {createRoot} from 'react-dom/client';
     import {QuizKeep} from '@/components/quiz-keep';
@@ -20,7 +20,7 @@ const fixture = ({ shown = "aaaaaaaaaaa1,aaaaaaaaaaa2", who = "a".repeat(32), tr
         <input type="hidden" name="shown" value={shown} />
         <QuizKeep who=${JSON.stringify(who)} shown={shown} tries={${tries}} version=${JSON.stringify(version)} language="en" words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint, quizKeptAsk: w.quizKeptAsk, quizKeptRestore: w.quizKeptRestore, quizKeptStartOver: w.quizKeptStartOver, quizKeptUndo: w.quizKeptUndo, quizKeptUndone: w.quizKeptUndone }} />
         <fieldset><legend>One?</legend>
-          <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" /> A</label>
+          <label><input type="radio" name="q_aaaaaaaaaaa1" value="0" ${clickedFirst ? "defaultChecked" : ""} /> A</label>
           <label><input type="radio" name="q_aaaaaaaaaaa1" value="1" /> B</label>
         </fieldset>
         <fieldset><legend>Two?</legend>
@@ -50,6 +50,8 @@ const adaWaiting = await forgetFixture({ final: false });
 const adaOtherQuestions = await fixture({ shown: "aaaaaaaaaaa1,aaaaaaaaaaa9" });
 const adaAfterRecordedTry = await fixture({ tries: 1 });
 const adaQuizChanged = await fixture({ version: "v2" });
+// The server's page is in the browser before its scripts: a student can pick a choice before the keeping starts.
+const adaClickedFirst = await fixture({ clickedFirst: true });
 const bo = await fixture({ who: "b".repeat(32) });
 
 const engine = process.env.E2E_BROWSER ?? "chromium";
@@ -197,6 +199,15 @@ try {
   await openForget(adaPassed);
   await forgotten();
   is("passed or out of tries (final): the draft is gone once the lesson opens", await kept(), null);
+
+  // Review of #4324 (LOW 13): a choice picked before the page's scripts ran is the student's answer: nothing is
+  // offered over it, and what is kept becomes what they picked.
+  await open(ada);
+  await tab.getByLabel("B", { exact: true }).check();
+  await tab.getByLabel("D", { exact: true }).check();
+  await open(adaClickedFirst);
+  await tab.waitForFunction((k) => JSON.parse(sessionStorage.getItem(k) ?? "null")?.answers?.q_aaaaaaaaaaa1?.[0] === 0, ADA);
+  is("a choice picked before the scripts ran: no offer over it, and what is kept is what was picked", [await ask().count(), await picked(), JSON.parse((await kept()) ?? "null")?.answers], [0, [true, false, false, false], { q_aaaaaaaaaaa1: [0], q_aaaaaaaaaaa2: [] }]);
 
   // Review of #4324 (MEDIUM 11): two tabs on the device's draft. Each writes only the questions answered in it over
   // what is kept, and a tab waiting on "Restore" offers what another tab kept since.

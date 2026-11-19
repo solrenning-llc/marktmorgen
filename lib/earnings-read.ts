@@ -123,6 +123,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
   return {
     // A checkout this store opened that was paid: what the buyer paid, after any code, before fees or refunds.
     checkouts: (row, created) => {
+      if (ownField(row, "object") !== "checkout.session") return null;
       const meta = metadataOf(row);
       const status = text(row, "status");
       const paid = text(row, "payment_status");
@@ -132,6 +133,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
     },
     // A product taken in one click after paying: a payment of its own.
     extras: (row, created) => {
+      if (ownField(row, "object") !== "payment_intent") return null;
       const meta = metadataOf(row);
       const status = text(row, "status");
       if (!meta || status === null || !INTENT_STATUSES.has(status)) return null;
@@ -141,6 +143,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
     // Every paid invoice of the store's memberships and payment plans but the first, whose payment the checkout
     // already counted (renewals, a switch charged at once, any other reason), dated by when the invoice was made.
     invoices: (row, created) => {
+      if (ownField(row, "object") !== "invoice") return null;
       const status = text(row, "status");
       const reason = text(row, "billing_reason");
       if (status === null || reason === null || !INVOICE_STATUSES.has(status)) return null;
@@ -161,6 +164,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
     // (only a refund waiting on the buyer can be) never took money: nothing. One waiting on the buyer
     // (`requires_action`) may yet go out, and a status not documented is not understood: unknown, never skipped.
     refunds: (row, created) => {
+      if (ownField(row, "object") !== "refund") return null;
       const status = text(row, "status");
       if (status === "succeeded" || status === "pending" || status === "failed") return money(row, "amount", created);
       return status === "canceled" ? "skip" : null;

@@ -127,4 +127,12 @@ export const moveWords = {
 };
 
 export type AskState = keyof typeof moveWords.asked;
+
+/**
+ * Whether the asking page hides its form after this answer: once an ask was admitted ("received", or "sent" from the
+ * time before it), the buyer checks the inboxes instead of asking again; every other answer asks them to act.
+ */
+export function askFormHidden(state: string): boolean {
+  return state === "received" || state === "sent";
+}
 export type ConfirmState = keyof typeof moveWords.confirmed;

@@ -449,6 +449,13 @@ async function main(): Promise<void> {
     is("and the current address's email never says the other link already went", mails.slice(m2, m2 + 1).map((x) => /we also sent/i.test(x.text)), [false]);
   }
 
+  part("After an admitted ask the asking page hides its form (01S9eVA5 on #3621): \"received\" is the answer now");
+  {
+    const words = (await import("@/lib/purchase-move-words")) as { askFormHidden?: (state: string) => boolean };
+    is("the form is hidden after the neutral receipt, as it was after \"sent\"", [words.askFormHidden?.("received"), words.askFormHidden?.("sent")], [true, true]);
+    is("and shown again for an answer the buyer must act on", ["over", "email", "same", "error", "busy", "signed-out"].map((state) => words.askFormHidden?.(state)), [false, false, false, false, false, false]);
+  }
+
   part("Through the route");
   {
     const token = await signIn("route.buyer@example.com");

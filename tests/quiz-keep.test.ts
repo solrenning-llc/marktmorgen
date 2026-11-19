@@ -6,7 +6,8 @@
  *   - the draft holds every question of the try, answered or not, and only
  *     the quiz's own choices, never a hidden field;
  *   - it is put back only for exactly the same questions, when readable, not
- *     older than 7 days, not from the future and not empty;
+ *     older than 7 days and not empty; a date ahead of the device's clock
+ *     counts as now (LOW 12);
  *   - putting it back sets each question it names and leaves the others;
  *   - the quiz offers the keeping only while the student may answer, never
  *     to the owner or a visitor, nor after passing or with no tries left;
@@ -53,7 +54,9 @@ part("When it is put back");
   is("other questions (a bank drew again): never", draftToRestore(kept, "aaaaaaaaaaa3,aaaaaaaaaaa2", 0, NOW), null);
   const old = JSON.stringify({ ...draftOf(inputs, shown, 0, 0), at: NOW - (QUIZ_KEEP_DAYS * 86_400_000 + 1) });
   is(`older than ${QUIZ_KEEP_DAYS} days: never`, draftToRestore(old, shown, 0, NOW), null);
-  is("from the future: never", draftToRestore(JSON.stringify({ ...JSON.parse(kept), at: NOW + 60_000 }), shown, 0, NOW), null);
+  // Review of #4324 (LOW 12): a draft dated ahead of the device's clock is one whose clock was wrong, not a forgery:
+  // it counts as made now, is put back, and is never removed for that alone.
+  is("dated ahead of the device's clock: counted as now, and put back", draftToRestore(JSON.stringify({ ...JSON.parse(kept), at: NOW + 60_000 }), shown, 0, NOW)?.answers, { q_aaaaaaaaaaa1: [1], q_aaaaaaaaaaa2: [] });
   is("unreadable, empty or not a draft: never", [draftToRestore("{", shown, 0, NOW), draftToRestore(null, shown, 0, NOW), draftToRestore("[]", shown, 0, NOW), draftToRestore(JSON.stringify({ at: NOW, shown, tries: 0, answers: { q_aaaaaaaaaaa1: [] } }), shown, 0, NOW)], [null, null, null, null]);
   is("a choice that is not a small whole number: the whole draft is refused", draftToRestore(JSON.stringify({ at: NOW, shown, tries: 0, answers: { q_aaaaaaaaaaa1: [1.5] } }), shown, 0, NOW), null);
   is("a send that was refused or never arrived (no try recorded): still put back", draftToRestore(kept, shown, 0, NOW) !== null, true);
@@ -147,7 +150,7 @@ part("Old or unreadable drafts go whenever a lesson or the library opens, and al
   // A synthetic browser storage: what localStorage offers the sweep (length, key, getItem, removeItem).
   const storageOf = (entries: [string, string][]) => {
     const kept = new Map(entries);
-    return { kept, storage: { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, getItem: (k: string) => kept.get(k) ?? null, removeItem: (k: string) => void kept.delete(k) } };
+    return { kept, storage: { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, getItem: (k: string) => kept.get(k) ?? null, removeItem: (k: string) => void kept.delete(k), setItem: (k: string, v: string) => void kept.set(k, v) } };
   };
   const named = keepRules as unknown as Record<string, unknown>;
   const sweep = named.sweepQuizDrafts as ((storage: unknown, now: number) => number) | undefined;
@@ -165,10 +168,14 @@ part("Old or unreadable drafts go whenever a lesson or the library opens, and al
   ]);
   is("the sweep exists", typeof sweep, "function");
   if (sweep) {
-    is("removes the four old, unreadable or impossible drafts", sweep(storage, NOW), 4);
-    is("and keeps the fresh draft and what is not a quiz draft", [...kept.keys()], ["mm:quiz:" + "a".repeat(32), "mm:place:other"]);
+    is("removes the three old or unreadable drafts", sweep(storage, NOW), 3);
+    is("and keeps the fresh draft, the one a wrong clock dated ahead, and what is not a quiz draft", [...kept.keys()], ["mm:quiz:" + "a".repeat(32), "mm:quiz:" + "c".repeat(32), "mm:place:other"]);
+    is("the one dated ahead now carries the sweep's own time, so it still goes 7 days on", JSON.parse(kept.get("mm:quiz:" + "c".repeat(32)) ?? "null")?.at, NOW);
+    const waiting = storageOf([["mm:quiz:" + "e".repeat(32), future]]);
+    keepRules.forgetClosedDraft(waiting.storage, "mm:quiz:" + "e".repeat(32), 0, false, NOW);
+    is("waiting between tries, a draft dated ahead is not removed for its date alone", waiting.kept.size, 1);
   }
-  is("signing out removes them all", typeof forgetAll === "function" ? [forgetAll(storage), [...kept.keys()]] : null, [1, ["mm:place:other"]]);
+  is("signing out removes them all", typeof forgetAll === "function" ? [forgetAll(storage), [...kept.keys()]] : null, [2, ["mm:place:other"]]);
   const lesson = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
   const library = readFileSync("app/library/page.tsx", "utf8");
   const signin = readFileSync("app/signin/page.tsx", "utf8");

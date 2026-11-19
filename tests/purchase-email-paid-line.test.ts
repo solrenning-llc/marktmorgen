@@ -134,6 +134,32 @@ async function main(): Promise<void> {
   is("one email, with what was paid", emails.map((e) => e.text.split("\n").find((l) => l.startsWith("Paid:"))), ["Paid: $49"]);
   is("the order counted once", redis.run(["GET", seenKey(`checkout:${sessionId}`)]), "1");
 
+  part("Only a proved claim can send and count a receipt");
+  for (const [label, reply] of [["empty", []], ["number", [1]], ["extra slot", ["OK", null]]] as const) {
+    const id = `cs_test_receiptclaim${label.replaceAll(" ", "")}0001`;
+    const key = confirmationKey(id);
+    const checkout = { ...oneTime, id };
+    const original = redis.pipeline;
+    const mailed = emails.length;
+    let seenClaim = false;
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "SET" && command[1] === key && command.includes("NX"))) {
+        seenClaim = true;
+        return [...reply];
+      }
+      return original.call(redis, commands);
+    };
+    try {
+      is(`${label}: reply is unconfirmed`, await confirmPurchase(store, id, checkout as never), "failed");
+    } finally {
+      redis.pipeline = original;
+    }
+    is(`${label}: reached the claim`, seenClaim, true);
+    is(`${label}: no email sent`, emails.length, mailed);
+    is(`${label}: no order counted`, redis.run(["GET", seenKey(`checkout:${id}`)]), null);
+    is(`${label}: no final marker recorded`, redis.run(["GET", key]), null);
+  }
+
   done();
 }
 

@@ -50,6 +50,7 @@ process.env.ZOOM_CLIENT_SECRET = "synthetic-zoom-secret";
 process.env.ZOOM_WEBHOOK_SECRET_TOKEN = "synthetic-zoom-token";
 
 let outbound: string[] = [];
+let revokedTokens: string[] = [];
 /** Only while true does a stand-in Zoom answer its consent: the code traded, the user read, a grant given back. */
 let zoomAnswers = false;
 globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -62,7 +63,10 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
     return json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600, scope: "meeting:write:meeting user:read:user" });
   }
   if (zoomAnswers && url.hostname === "api.zoom.us" && url.pathname === "/v2/users/me") return json({ id: "acct-zoom-new", email: "new@example.test", first_name: "New" });
-  if (zoomAnswers && url.hostname === "zoom.us" && url.pathname === "/oauth/revoke") return json({ status: "success" });
+  if (zoomAnswers && url.hostname === "zoom.us" && url.pathname === "/oauth/revoke") {
+    revokedTokens.push(url.searchParams.get("token") ?? "");
+    return json({ status: "success" });
+  }
   throw Error("Unexpected external request in a synthetic test");
 }) as typeof fetch;
 
@@ -273,6 +277,31 @@ async function main(): Promise<void> {
   zoomAnswers = false;
   is("healthy: kept", [healthy, JSON.parse(String(await kept(connKey(SID, "zoom")))).account.id], ["true", "acct-zoom-new"]);
   is("healthy: only the replaced account's grant is given back", outbound.filter((u) => u === "https://zoom.us/oauth/revoke").length, 1);
+
+  part("An unreadable acknowledgement after Redis kept a new grant must not revoke that grant");
+  await keepBoth(SID);
+  outbound = [];
+  revokedTokens = [];
+  zoomAnswers = true;
+  let keptThenUnread = false;
+  redis.pipeline = (async (commands: Commands) => {
+    const replies = await pipe(commands);
+    return replies.map((reply, index) => {
+      const command = commands[index];
+      if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:meet-keep:v1\n")) {
+        keptThenUnread = reply === 1;
+        return 42;
+      }
+      return reply;
+    });
+  }) as typeof redis.pipeline;
+  const ambiguous = await outcome(() => finishConsent("zoom", { ...consent, startedAt: Date.now() }));
+  restore();
+  zoomAnswers = false;
+  is("the keep really applied before its reply became unreadable", keptThenUnread, true);
+  is("an unreadable write acknowledgement stays unknown", ambiguous, "unknown");
+  is("the newly kept connection remains present", JSON.parse(String(await kept(connKey(SID, "zoom")))).account.id, "acct-zoom-new");
+  is("the newly stored grant is not revoked after an ambiguous successful keep", revokedTokens, []);
 
   const oddAll: [string, unknown][] = [
     ["a number", 42],

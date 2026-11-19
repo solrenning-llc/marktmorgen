@@ -21,7 +21,7 @@ import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, unmarkDue } from
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { hostCalendarKeys } from "@/lib/host-calendar";
-import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, ERASING_KEY, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { closeForErasure, recordRemoved } from "./closed-for-erasure";
 import { done, is, part } from "./check";
@@ -143,16 +143,17 @@ async function main(): Promise<void> {
     await markDue(email, T - 1000);
     const first = await erase(T);
     is("setup: the preparation stopped with the record there", [first.stores, (await storeForEmail(email))?.sid ?? null], [0, store.sid]);
+    // This preparation stopped at the record's own going, after the live store's data had gone (forgetLive): the store
+    // is half erased, and is never opened again (Codex N1's HIGH on #3156, coordinator's decision C5-20261119-0235). Its
+    // erasing mark refuses the plan (a payment for it is returned, tests/erasing-mark.test.ts), and the walk erases it to
+    // the end once the record's going is answered.
+    is("its erasure had begun: the mark is there", Number(redis.run(["HLEN", ERASING_KEY])), 1);
     await restartPlan(email, "0001");
-    const stores: number[] = [];
-    for (let n = 1; n <= 2; n++) stores.push((await erase(T + n * (WALK_GAP_MS + 1))).stores);
-    is("its record is still there", (await storeForEmail(email))?.sid ?? null, store.sid);
-    is("its data is not erased", dataOf(store), "z");
-    is("it is never prepared", stores, [0, 0]);
+    is("its plan does not start again", Boolean((await storeForEmail(email))?.subscriptionActive), false);
+    releaseLost = false;
     withdrawUnknown = 0;
-    for (let n = 3; n <= 4; n++) await erase(T + n * (WALK_GAP_MS + 1));
-    is("once its entry is confirmed out, it is out of the batch and out of line", [redis.run(["HGET", BATCH_KEY, email]), redis.run(["ZSCORE", DUE_KEY, email])], [null, null]);
-    is("and its record and data still stand", [(await storeForEmail(email))?.sid ?? null, dataOf(store)], [store.sid, "z"]);
+    for (let n = 1; n <= 2; n++) await erase(T + n * (WALK_GAP_MS + 1));
+    is("the next walk erases it to the end: its record and its mark go together", [(await storeForEmail(email))?.sid ?? null, Number(redis.run(["HLEN", ERASING_KEY]))], [null, 0]);
   }
 
   part("A plan started while the store is being prepared keeps its record: it is read again under the store's lock");

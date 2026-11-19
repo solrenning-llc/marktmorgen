@@ -24,7 +24,7 @@ import { allowanceUsed } from "@/lib/store-allowance";
 import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
 import { readFileSync } from "node:fs";
 import type { Podcast } from "@/lib/podcast-rules";
-import { PODCAST_RECORD_MOST, PUBLIC_SHOW_MAX_BYTES, forgetPublicFeeds } from "@/lib/podcast-public-show";
+import { PODCAST_RECORD_MOST, PUBLIC_SHOW_MAX_BYTES, forgetPublicFeeds, showRecord } from "@/lib/podcast-public-show";
 import { PUBLIC_SETTINGS_WORST_BYTES } from "@/app/api/store/podcast/public-settings/route";
 import { SITE_URL } from "@/lib/site-url";
 import { dataKey } from "@/lib/store-data";
@@ -267,6 +267,37 @@ async function main(): Promise<void> {
     const usedRead = (await allowanceUsed(owner, "studio")) - before - used;
     is("a read of a small record still costs one request, what is not moved is given back", [small.status, usedRead], [200, 1]);
     await savePodcast(podcast(POD));
+  }
+  {
+    const baseline = stored();
+    const episodes = Array.from({ length: 16 }, (_, i) => ({
+      ...podcast(POD).episodes[0], id: `ep${String(i).padStart(10, "0")}`,
+    }));
+    const marked = { [episodes[0].id]: AUDIO };
+    const before = showRecord({ category: "Education", explicit: false, episodes: marked });
+    const next = { category: "Arts", explicit: false, episodes: marked } as const;
+    const answer = JSON.stringify({ ok: true, feed: { on: true, ...next, address: `${SITE_URL}/api/store/podcast/public/${HANDLE}/${pid}.xml` } });
+    const boundaryPodcast: Podcast = { id: POD, episodes };
+    const size = (raw: string) => Buffer.byteLength(raw, "utf8");
+    let padding = PAGE_INCLUDED_BYTES - size(before) - size(JSON.stringify(next)) - size(answer) - size(JSON.stringify(boundaryPodcast));
+    for (const episode of episodes) {
+      const length = Math.min(padding, 3_900);
+      episode.notes = "n".repeat(length);
+      padding -= length;
+    }
+    is("the smaller studio JSON puts the transfer on the included-byte boundary", padding, 0);
+    await savePodcast(boundaryPodcast);
+    redis.run(["SET", KEY, before]);
+    const owner = (await storeForEmail(OWNER)) as Store;
+    const usage = await allowanceUsed(owner, "studio");
+    const changed = await post({ action: "on", id: pid, category: "Arts", explicit: false, understood: true });
+    const actualBytes = size(JSON.stringify(boundaryPodcast)) + size(before) + size(stored() ?? "") + size(JSON.stringify(changed.body));
+    is("the settings change writes the wrapped Redis record", [changed.status, stored()], [200, showRecord(next)]);
+    is("the exact write crosses the included-byte boundary", actualBytes > PAGE_INCLUDED_BYTES, true);
+    is("the studio charges for every 50 KB of the actual Redis write and other traffic", (await allowanceUsed(owner, "studio")) - usage, 1 + Math.ceil(actualBytes / PAGE_INCLUDED_BYTES));
+    await savePodcast(podcast(POD));
+    if (baseline === null) redis.run(["DEL", KEY]);
+    else redis.run(["SET", KEY, baseline]);
   }
   is("the takedown says when it takes effect, as the feed's cache gives it", /within 5 minutes/.test(readFileSync("components/podcast-public-feed.tsx", "utf8")), true);
 

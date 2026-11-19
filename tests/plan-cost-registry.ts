@@ -1302,6 +1302,14 @@ export function benefitsRead(pages: number): number {
       + members * (BENEFIT_PERSON_BYTES + MAX_BENEFITS_KEPT * (BENEFIT_MARK_FIELD_BYTES + BENEFIT_MARK_VALUE_BYTES)),
   ) + pages * (STRIPE_LIST_PAGE + ROUND_TRIP_SECONDS * MEMORY_SECOND);
 }
+/** A give press adds at most one script per member, capped by MAX_GIVE_AT_ONCE. Each script bills its EVAL,
+ * EXISTS identity, HEXISTS erasing, HEXISTS person, HSETNX and SADD (six commands). Four KB per person holds the
+ * literal script, all keys/prints/erasing field, bounded mark and replies. benefitMarkUnits admits this separate
+ * write/take/give path before room is taken. No plan allowance or UNIT_COST is changed.
+ */
+export function benefitsGive(people: number): number {
+  return request("studio", 2 * TAKE_COMMANDS + 6 * people, 4_096 + 4_096 * people);
+}
 /**
  * One reading of a store's buyers from the creator's Stripe account at the
  * most (lib/segments.ts, buyerLedger), when its one-hour copy ran out: its

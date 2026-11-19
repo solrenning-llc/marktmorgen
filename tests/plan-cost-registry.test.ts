@@ -12,8 +12,8 @@ import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
-import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead } from "./plan-cost-registry";
-import { BENEFIT_PAGE_UNITS, BENEFIT_STRIPE_PAGES } from "@/lib/tier-benefit-rules";
+import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS, benefitsRead, benefitsGive } from "./plan-cost-registry";
+import { BENEFIT_PAGE_UNITS, BENEFIT_STRIPE_PAGES, MAX_GIVE_AT_ONCE, benefitMarkUnits } from "@/lib/tier-benefit-rules";
 import { TEST_SALES_PAGES, broadcastSizesBytes } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/person-agenda";
@@ -500,6 +500,13 @@ test("a reading of who is owed a membership benefit fits the studio requests cou
   assert.ok(benefitsRead(pages) <= UNIT_COST.studio * BENEFIT_PAGE_UNITS * pages, `${pages} pages: ${benefitsRead(pages)} > ${pages} x ${BENEFIT_PAGE_UNITS} x ${UNIT_COST.studio}`);
  }
  assert.ok(benefitsRead(1) > UNIT_COST.studio * (BENEFIT_PAGE_UNITS - 1), `${benefitsRead(1)} <= ${BENEFIT_PAGE_UNITS - 1} x ${UNIT_COST.studio}: lower BENEFIT_PAGE_UNITS`);
+});
+
+test("a benefit give including both store-erasure checks fits its separately admitted write work", () => {
+ for (let people = 1; people <= MAX_GIVE_AT_ONCE; people += 1) {
+  const reserved = UNIT_COST.studio * benefitMarkUnits(people);
+  assert.ok(benefitsGive(people) <= reserved, `${people} people: give ${benefitsGive(people)} > reserved ${reserved}`);
+ }
 });
 
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {

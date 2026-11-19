@@ -31,7 +31,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Store, ensureListId, saleHandles } from "@/lib/store";
+import { type Store, ensureListId, saleHandles, storeIdCommand, storeRef, erasingField, ERASING_KEY } from "@/lib/store";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { readListings } from "@/lib/catalog";
 import { productOfSub } from "@/lib/tier-rules";
@@ -52,6 +52,7 @@ import {
   type Benefit,
   type MemberLike,
   benefitJson,
+  benefitMarkUnits,
   benefitText,
   isCadence,
   owedNow,
@@ -394,24 +395,33 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   const listId = store.listId ?? (await ensureListId(store.email).catch(() => null))?.listId ?? null;
   if (!listId) return { ok: false, reason: "unknown" };
   const people = [...new Set(writes.map((w) => w.row.person))];
+  const markWork = await charge(benefitMarkUnits(writes.length));
+  if (!markWork.ok) return { ok: false, reason: "used", message: markWork.message };
   // Each person's place in the list is counted before it is known whether it is already there; given back below when it was.
   const bytes = writes.reduce((sum, w) => sum + w.bytes, 0) + people.reduce((sum, p) => sum + whoBytes(p), 0);
   // Its room first; nothing is written when it does not fit or cannot be counted.
   const taken = await takeData(store, [{ slot: SLOT, bytes }], now);
   if (!taken.ok) return taken.reason === "full" ? { ok: false, reason: "full", message: taken.message } : { ok: false, reason: "room" };
   const byPerson = people.map((person) => ({ person, writes: writes.filter((w) => w.row.person === person) }));
+  const storeIdKey = storeIdCommand(store.sid)[1];
+  const erasing = await erasingField(storeRef(store));
   const commands: (string | number)[][] = byPerson.map(({ person, writes: own }) => [
     "EVAL",
     BENEFIT_MARK,
-    3,
+    5,
     marksKey(statsId, person),
     whoKey(statsId),
     suppressedKey(listId),
+    storeIdKey,
+    ERASING_KEY,
     suppressionPrint(listId, own[0].row.email),
     person,
+    erasing,
     ...own.flatMap((w) => [w.field, givenJson(mark)]),
   ]);
   const replies = repliesFor(await redisPipeline(commands).catch(() => null), commands.length);
+  // The closing walk owns the room now; do not recreate even its counter by giving a late reservation back.
+  if (replies?.some((reply) => reply === -2)) return { ok: false, reason: "erased" };
   let giveBack = 0;
   byPerson.forEach(({ person, writes: own }, i) => {
     const reply: unknown = replies ? replies[i] : null;
@@ -442,14 +452,17 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
  * One person's marks written only while they are not on the store's list of the deleted (Codex G on #3014): a person's
  * erasure writes their print (lib/suppression.ts) before it deletes their marks, so a mark written in the same step as
  * this look is either deleted by that erasure or refused here, never left behind it. KEYS[1] their marks, KEYS[2] the
- * list of people with marks, KEYS[3] the store's prints; ARGV[1] their print, ARGV[2] the person, ARGV[3..] field and
- * mark pairs. -1 when they were deleted (nothing written); otherwise each HSETNX's reply, then the SADD's.
- * lib/redis-memory.ts runs it the same way.
+ * list of people with marks, KEYS[3] the store's prints; ARGV[1] their print, ARGV[2] the person. -1 when they were
+ * deleted (nothing written); otherwise each HSETNX's reply, then the SADD's.
+ * KEYS[4] is the store's identity, KEYS[5] its erasing index, and ARGV[3] its erasing field. A gone/erasing store
+ * returns -2 without any mark/index write. Mark pairs start at ARGV[4]. lib/redis-memory.ts runs it the same way.
  */
-export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v1
+export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v2
+if redis.call("EXISTS", KEYS[4]) == 0 then return -2 end
+if redis.call("HEXISTS", KEYS[5], ARGV[3]) == 1 then return -2 end
 if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return -1 end
 local out = {}
-for i = 3, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
+for i = 4, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
 out[#out + 1] = redis.call("SADD", KEYS[2], ARGV[2])
 return out`;
 

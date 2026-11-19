@@ -530,6 +530,10 @@ async function main(): Promise<void> {
   for (const [label, intent] of [
     ["a payment not expanded (an id only)", "pi_plain"],
     ["a payment with no store in its metadata (a membership's renewal)", { id: "pi_renewal", object: "payment_intent", metadata: {} }],
+    ["a payment with an empty store identifier", { id: "pi_empty_owner", object: "payment_intent", metadata: { store: "" } }],
+    ["a payment with a whitespace-only store identifier", { id: "pi_blank_owner", object: "payment_intent", metadata: { store: "   " } }],
+    ["a payment with whitespace around the store identifier", { id: "pi_spaced_owner", object: "payment_intent", metadata: { store: " shop " } }],
+    ["a payment with an impossible store identifier", { id: "pi_invalid_owner", object: "payment_intent", metadata: { store: ".shop" } }],
     ["a payment of another kind of object", { id: "ch_x", object: "charge", metadata: { store: "shop" } }],
     ["no payment at all", null],
   ] as const) {
@@ -538,6 +542,19 @@ async function main(): Promise<void> {
     stripe["/refunds"] = [refund("newer02", Date.UTC(2031, 5, 5), 300), refund("unproved", Date.UTC(2031, 3, 10), 1000, { payment_intent: intent })];
     const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
     is(`${label}: whose refund it is is unknown, so its month and before are unknown, never a smaller exact net`, states(e, "stripe").slice(0, 4), ["read", "read", "not_reached", "not_reached"]);
+  }
+
+  reset();
+  {
+    // Historical identifiers already kept by the store are ownership evidence,
+    // even when they do not match the grammar for a newly chosen handle.
+    const shop = { ...makeStore(false), previousHandles: [".legacy"] } as Store;
+    stripe["/refunds"] = [refund("legacy01", Date.UTC(2031, 5, 5), 1000, {
+      payment_intent: { id: "pi_legacy", object: "payment_intent", metadata: { store: ".legacy" } },
+    })];
+    const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+    const june = of(e, "2031-06", "stripe") as { state?: string; lines?: { refundCents: number }[] };
+    is("a historical identifier already kept by this store still proves its own refund", [june?.state, june?.lines?.[0]?.refundCents], ["read", 1000]);
   }
 
   part("An unknown provider status is never a proved exclusion from the store's money");

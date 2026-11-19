@@ -193,6 +193,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RISK_WORDS } from "@/lib/payment-risk";
 import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
@@ -1719,7 +1720,7 @@ export default async function StudioPage({
               </div>
 
               <details className="mt-5 rounded-2xl bg-paper p-4 ring-1 ring-line">
-                <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
+                <summary className="cursor-pointer py-3 text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {
@@ -3553,6 +3554,7 @@ export default async function StudioPage({
                               { day: "numeric", month: "long", year: "numeric" },
                             )}
                           </p>
+                          {sale.risk ? <p className="mt-1 text-sm text-ink-soft">{RISK_WORDS[sale.risk]}</p> : null}
                           {sale.shipTo !== undefined && sale.shipTo !== null ? (
                             <MarkShipped session={sale.reference} to={sale.shipTo} shipped={sale.shipped ?? null} />
                           ) : null}

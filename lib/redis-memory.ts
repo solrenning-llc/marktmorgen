@@ -419,6 +419,13 @@ export class MemoryRedis {
           return n;
         }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
+        if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, pitches, id, before, after] = args;
+          if (this.run(["HGET", pitches, id]) !== before) return 0;
+          this.run(["HSET", pitches, id, after]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);
@@ -2548,11 +2555,19 @@ export class MemoryRedis {
           return 1;
         }
         // lib/discount-schedule.ts: keep the decision and queue the warning before removing the due entry.
-        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, hash, tell, due, field, read, next, score, member] = args;
+        if (key.startsWith("-- marktmorgen:dsched-fail-and-tell:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, hash, tell, due, field, read, next, score, member, attempt] = args;
+          this.scriptCalls += 1;
           if (this.run(["HGET", hash, field]) !== read) return 0;
-          if (read !== next) this.run(["HSET", hash, field, next]);
-          this.run(["ZADD", tell, "NX", score, member]);
+          if (attempt !== "") {
+            this.scriptCalls += 1;
+            this.run(["HSET", hash, field, attempt]);
+            this.scriptCalls += 1;
+            this.run(["ZADD", tell, "NX", score, member]);
+          }
+          this.scriptCalls += 1;
+          this.run(["HSET", hash, field, next]);
+          this.scriptCalls += 1;
           this.run(["ZREM", due, member]);
           return 1;
         }

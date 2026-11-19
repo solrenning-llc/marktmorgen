@@ -37,6 +37,7 @@ export const moveWords = {
 
   /** What an ask answers, by the state the route sends back. */
   asked: {
+    received: { title: "Check your inboxes if this move is available", body: "If this move is eligible, check both inboxes and spam for confirmation links. Nothing moves until both addresses confirm. Check before asking again; delivery is not confirmed here." },
     sent: { title: "Check both inboxes", body: "We sent a link to your current address and one to the new address. Open each one and press Confirm within 24 hours." },
     half: {
       title: "We could not confirm the second link",

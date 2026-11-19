@@ -19,12 +19,9 @@
  * taken from the store's access emails before it goes (lib/email.ts,
  * EmailMeter "store", "transactional"; the new address, typed by the buyer,
  * as `asked`, so a stranger's inbox only ever gets a share of them). The
- * sender answers false both when it refused and when the provider's answer
- * was lost after it took the email, so a false is never said as "not sent":
- * the page says the first email is not confirmed ("unconfirmed"), or that the
- * second is not ("half"), and asks the buyer to look in the inbox before
- * asking again (Codex V on #3621). Nothing is said to have been sent, or not
- * sent, that is not known.
+ * sender may answer false after an unknown delivery. To avoid disclosing
+ * suppression membership, all admitted requests use the same neutral notice
+ * whether suppressed, delivered or unconfirmed. No delivery is promised.
  *
  * A link opens a page that says what would move, from where to where, and
  * asks for Confirm: opening it confirms nothing (mail scanners open links).
@@ -117,9 +114,9 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
   if (!day.ok) return day.reason === "over" || day.reason === "email" ? day.reason : "error";
   const deleted = await deletedAmong(store, [addresses.from, addresses.to]);
   if (deleted === "unknown") return "error";
-  // The same public answer as a normal request, but no request, link or email
-  // is made: suppression membership is not exposed to the person typing `to`.
-  if (deleted) return "sent";
+  // No delivery is claimed. The same neutral notice covers eligible requests,
+  // even if an email is refused or its acknowledgement is unknown.
+  if (deleted) return "received";
 
   let asked: Awaited<ReturnType<typeof askPurchaseMove>>;
   try {
@@ -148,15 +145,15 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
     subject: words.oldSubject(store.name),
     text: words.oldText(store.name, addresses.to, link(asked.fromToken)),
   });
-  if (!toCurrent) return "unconfirmed";
-  const toNew = await send({
+  if (!toCurrent) return "received";
+  await send({
     meter: { by: "store", store, kind: "transactional", asked: true },
     from,
     to: addresses.to,
     subject: words.newSubject(store.name),
     text: words.newText(store.name, addresses.from, link(asked.toToken)),
   });
-  return toNew ? "sent" : "half";
+  return "received";
 }
 
 export type MoveLinkView =

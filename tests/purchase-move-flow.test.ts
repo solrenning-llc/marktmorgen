@@ -183,7 +183,7 @@ async function main(): Promise<void> {
     // The day's count is one script: its EVAL is billed too, besides the INCR and EXPIRE it runs (lib/purchase-moves.ts MOVE_DAY_COUNT).
     const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:")).length;
     seen = null;
-    is("sent", answer, "sent");
+    is("received", answer, "received");
     const sent = mails.slice(m);
     is("one email to each address, the current one first", sent.map((s) => s.to), ["ana.buyer@example.com", "ana.new@example.com"]);
     is("two store access emails taken", (await used()) - q, 2);
@@ -266,10 +266,10 @@ async function main(): Promise<void> {
     await redis.pipeline([suppressCommand(moss.listId!, "gone.new@example.com", Math.floor(Date.now() / 1000))]);
     const [m, q, k] = [mails.length, await used(), moveKeys().filter((key) => !key.startsWith("nl:pm:day:")).length];
     const erasedAnswer = await askToMovePurchases({ store: moss, token, to: "Gone.New@example.com", origin: ORIGIN });
-    is("an erased destination is indistinguishable from a fresh one", [freshAnswer, erasedAnswer], ["sent", "sent"]);
+    is("an erased destination is indistinguishable from a fresh one", [freshAnswer, erasedAnswer], ["received", "received"]);
     const gone = await signIn("gone.old@example.com");
     await redis.pipeline([suppressCommand(moss.listId!, "gone.old@example.com", Math.floor(Date.now() / 1000))]);
-    is("an erased current address is not disclosed either", await askToMovePurchases({ store: moss, token: gone, to: "gone.other@example.com", origin: ORIGIN }), "sent");
+    is("an erased current address is not disclosed either", await askToMovePurchases({ store: moss, token: gone, to: "gone.other@example.com", origin: ORIGIN }), "received");
 
     const bounded = await signIn("bounded.buyer@example.com");
     await redis.pipeline([suppressCommand(moss.listId!, "bounded.new@example.com", Math.floor(Date.now() / 1000))]);
@@ -277,14 +277,14 @@ async function main(): Promise<void> {
     for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY + 1; i += 1) {
       answers.push(await askToMovePurchases({ store: moss, token: bounded, to: "bounded.new@example.com", origin: ORIGIN }));
     }
-    is("suppressed probes use the same daily bound", answers, ["sent", "sent", "sent", "over"]);
+    is("suppressed probes use the same daily bound", answers, ["received", "received", "received", "over"]);
     const kept = moveKeys().filter((key) => !key.startsWith("nl:pm:day:")).length;
     is("no request, link, email or store email is made for erased addresses", [kept - k, mails.length - m, (await used()) - q], [0, 0, 0]);
 
     // Asked first, then deleted before confirming.
     const late = await signIn("late.buyer@example.com");
     const m2 = mails.length;
-    is("asked", await askToMovePurchases({ store: moss, token: late, to: "late.new@example.com", origin: ORIGIN }), "sent");
+    is("asked", await askToMovePurchases({ store: moss, token: late, to: "late.new@example.com", origin: ORIGIN }), "received");
     const lateLink = linkIn(mails[m2]?.text ?? "") ?? "";
     await redis.pipeline([suppressCommand(moss.listId!, "late.new@example.com", Math.floor(Date.now() / 1000))]);
     const marks = () => moveKeys().filter((key) => key.startsWith("nl:pm:c:")).length;
@@ -305,7 +305,7 @@ async function main(): Promise<void> {
     const token = await signIn("tri.buyer@example.com");
     const answers: string[] = [];
     for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY + 1; i += 1) answers.push(await askToMovePurchases({ store: moss, token, to: `tri.new${i}@example.com`, origin: ORIGIN }));
-    is("the fourth is refused", answers, ["sent", "sent", "sent", "over"]);
+    is("the fourth is refused", answers, ["received", "received", "received", "over"]);
   }
 
   part("The store's access emails spent or unreadable: said as it is");
@@ -313,13 +313,13 @@ async function main(): Promise<void> {
     const one = await signIn("spent.buyer@example.com");
     const [m, q] = [mails.length, await used()];
     odd = { command: "INCRBY", prefix: "nl:allow:transactional:", reply: "not a count", times: 1, skip: 0 };
-    is("none taken: no email, and the page cannot say more than that it is not confirmed", await askToMovePurchases({ store: moss, token: one, to: "spent.new@example.com", origin: ORIGIN }), "unconfirmed");
+    is("none taken: no email, and the page cannot say more than that it is not confirmed", await askToMovePurchases({ store: moss, token: one, to: "spent.new@example.com", origin: ORIGIN }), "received");
     odd = null;
     is("nothing went out", mails.length - m, 0);
     const two = await signIn("half.buyer@example.com");
     const m2 = mails.length;
     odd = { command: "INCRBY", prefix: "nl:allow:transactional:", reply: "not a count", times: 1, skip: 1 };
-    is("the second not taken: half", await askToMovePurchases({ store: moss, token: two, to: "half.new@example.com", origin: ORIGIN }), "half");
+    is("the second not taken: half", await askToMovePurchases({ store: moss, token: two, to: "half.new@example.com", origin: ORIGIN }), "received");
     odd = null;
     is("only the current address was emailed", mails.slice(m2).map((s) => s.to), ["half.buyer@example.com"]);
     is("the store's figure counts only what it took", (await used()) - q >= 1, true);
@@ -332,13 +332,13 @@ async function main(): Promise<void> {
     ackLost = { skip: 0, times: 1 };
     const first = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
     ackLost = { skip: 0, times: 0 };
-    is("the current address's email taken, its answer lost: the page does not say no link was sent", [mails.length - m, first, moveWords.asked[first].title], [1, "unconfirmed", "We could not confirm the email went"]);
+    is("the current address's email taken, its answer lost: the page does not say no link was sent", [mails.length - m, first, moveWords.asked[first].title], [1, "received", "Check your inboxes if this move is available"]);
     const two = await signIn("lost2.buyer@example.com");
     const m2 = mails.length;
     ackLost = { skip: 1, times: 1 };
     const second = await askToMovePurchases({ store: moss, token: two, to: "lost2.new@example.com", origin: ORIGIN });
     ackLost = { skip: 0, times: 0 };
-    is("both taken, the second's answer lost: never \"only one link was sent\"", [mails.length - m2, second, /only one link was sent/i.test(moveWords.asked[second].title + moveWords.asked[second].body)], [2, "half", false]);
+    is("both taken, the second's answer lost: never \"only one link was sent\"", [mails.length - m2, second, /only one link was sent/i.test(moveWords.asked[second].title + moveWords.asked[second].body)], [2, "received", false]);
     is("and the current address's email never says the other link already went", mails.slice(m2, m2 + 1).map((x) => /we also sent/i.test(x.text)), [false]);
   }
 
@@ -346,7 +346,7 @@ async function main(): Promise<void> {
   {
     const token = await signIn("route.buyer@example.com");
     const answer = await askMoveRoute(post(`${ORIGIN}/api/store/purchase-move`, { handle: "moss", token, to: "route.new@example.com" }), true);
-    is("back to the page with what happened", [answer.status, answer.headers.get("location")], [303, `${ORIGIN}/@moss/orders/move?${new URLSearchParams({ token, m: "sent" })}`]);
+    is("back to the page with what happened", [answer.status, answer.headers.get("location")], [303, `${ORIGIN}/@moss/orders/move?${new URLSearchParams({ token, m: "received" })}`]);
     is("the new address is never in the URL", answer.headers.get("location")?.includes("route.new"), false);
     const unknown = await askMoveRoute(post(`${ORIGIN}/api/store/purchase-move`, { handle: "nobody", token, to: "route.new@example.com" }), true);
     is("no such store", unknown.status, 404);

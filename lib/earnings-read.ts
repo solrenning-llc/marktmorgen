@@ -59,6 +59,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { readsSales } from "@/lib/stats";
 import { type Store, saleHandles } from "@/lib/store";
+import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 import { keyFor, onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type Kept, NotRead, keptReading } from "@/lib/store-readings";
@@ -179,8 +180,10 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       const meta = metadataOf(intent);
       const owner = meta ? ownField(meta, "store") : undefined;
       if (typeof owner !== "string") return null;
-      if (!handles.has(owner)) return "skip";
-      return money(row, "amount", created);
+      // Keep every identifier this store already owns, including archived ones.
+      if (handles.has(owner)) return money(row, "amount", created);
+      // An unreadable identifier cannot prove this is another store's refund.
+      return HANDLE_PATTERN.test(owner) ? "skip" : null;
     },
   };
 }

@@ -74,13 +74,29 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
       // when that cannot be read, it is said as blocked with no note, never with the one typed here.
       const kept = await post({ action: "blocked", id });
       const read = stateOf(kept);
-      setState(read.phase === "blocked" ? read : { phase: "blocked", reason: "" });
+      // The state read back wins when it is known: a teammate may have let them write again meanwhile (Codex G on #3840).
+      const current = read.phase === "unknown" ? { phase: "blocked" as const, reason: "" } : read;
+      setState(current);
       moveFocus.current = true;
-      setSaid("Blocked. They can no longer write to you from your store.");
+      setSaid(
+        current.phase === "open"
+          ? "Someone on your team let this person write again before this check finished."
+          : "Blocked. They can no longer write to you from your store.",
+      );
+    } else if (answer.error === "many" || answer.error === "store_full") {
+      setSaid(REFUSED[answer.error]);
     } else {
-      setSaid(REFUSED[String(answer.error)] ?? "That did not work, so nothing changed. Check your connection and try again.");
+      // Any other answer, a lost reply included, may have blocked them: not known, never "nothing changed" (Codex X4 on #3840).
+      unconfirmedChange();
     }
     setBusy(false);
+  }
+
+  /** A block or unblock whose answer is not known: shown as not known, with a way to check again (Codex X4 on #3840). */
+  function unconfirmedChange() {
+    moveFocus.current = true;
+    setState({ phase: "unknown" });
+    setSaid("We could not confirm the change. Check again to see whether this person is blocked.");
   }
 
   async function unblock() {
@@ -94,7 +110,8 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
       setNote("");
       setSaid("They can write to you again.");
     } else {
-      setSaid("That did not work, so they are still blocked. Try again.");
+      // A lost reply may have let them write again: not known, never "still blocked" (Codex X4 on #3840).
+      unconfirmedChange();
     }
   }
 

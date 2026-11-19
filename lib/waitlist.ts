@@ -149,7 +149,10 @@ export async function joinWaitlist(input: {
   // there. False is not known to be unwritten: the caller deletes the tokens it made and gives back what it took.
   const links = async (leave: string): Promise<boolean> => {
     const commands = [grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))];
-    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    const replies = repliesFor(await redisPipeline(commands).catch((error: unknown) => {
+      console.error("writing waitlist links answered no receipt", error);
+      return null;
+    }), commands.length);
     if (!replies) return false;
     return commands.every((command, i) => {
       if (command[0] === "SET") return replies[i] === "OK";

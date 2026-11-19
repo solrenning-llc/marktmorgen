@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $138.45 | $1,447.88 | $69 / $690 |
-| Studio | $278.48 | $3,095.95 | $449 / $4,490 |
-| Scale | $501.20 | $5,728.20 | $999 / $9,990 |
+| Store | $138.58 | $1,448.45 | $69 / $690 |
+| Studio | $278.48 | $3,096.58 | $449 / $4,490 |
+| Scale | $501.20 | $5,728.80 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -43,7 +43,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $149 / $1,490 | 7.4% | 60.28% | 60.04% | $89.82 | 0.42 |
+| $149 / $1,490 | 7.3% | 60.28% | 60.04% | $89.82 | 0.42 |
 | $169 / $1,690 **(recommended)** | 60.0% | 60.30% | 60.05% | $101.92 | 0.37 |
 | $199 / $1,990 | 100.0% | 60.54% | 60.29% | $120.48 | 0.31 |
 
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.02% | 60.01% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.10% | 12.15% | 12.17% |
 | Net a customer, a month, at full included use | $101.92 | $271.32 | $604.07 |
-| The same at #553's price | $37.67 | $263.98 | $592.07 |
+| The same at #553's price | $37.67 | $263.97 | $592.07 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

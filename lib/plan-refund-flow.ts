@@ -34,24 +34,32 @@
  * and the stop for the daily job. A refund whose answer was lost is found by
  * its metadata (`plan_refund` = the store's id) among the platform's refunds
  * made between the note and SETTLE_SECONDS after its last try. Undecidable
- * for GIVE_UP_DAYS: the stop is taken back and the plan goes on as it was,
- * never ended without a refund that can be seen.
+ * (rule 24: a reply that does not read is never "none"): the note and the
+ * stop stay and the daily job keeps reading it, so the plan is never ended
+ * without a refund that can be seen and the creator is never told "Nothing
+ * was refunded" for a refund nobody could read; after GIVE_UP_DAYS each run
+ * says the still-held case in the log (finding F1, Codex G and Claude 3).
  *
  * One at a time per store (FLOW_LOCK_SECONDS, lib/redis-lock.ts); the daily
  * job skips a store whose lock is held.
  */
-import { BillingError, isBillingConfigured, onPlatform, setCancelAtPeriodEnd } from "@/lib/billing";
+import { BillingError, PLAN_REFUND_STOP_MARK, PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, isBillingConfigured, onPlatform, planStopLockKey } from "@/lib/billing";
+import { holdLock, withLock } from "@/lib/redis-lock";
 import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan-refund-write";
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
+import { planRefundLetter, planRefundNotMadeEndedLetter, planRefundNotMadeLetter, planRefundPartLetter, planRefundUnknownLetter } from "@/lib/plan-refund-words";
 import { randomBytes } from "node:crypto";
+import { types } from "node:util";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { readStripePage } from "@/lib/stripe-list";
 
 const AT = "2024-06-20";
 /** The notes of plan refunds not finished yet: field a store's id, value a Note. */
@@ -70,15 +78,25 @@ export const flowKeyOf = (sid: string): string => `nl:plan-refund:${sid}:flow`;
 export const FLOW_LOCK_SECONDS = LOCK_SECONDS + 160;
 /** A refund not found this long after its note was not made: Stripe's answer has long come back by then. */
 export const SETTLE_SECONDS = 10 * 60;
-/** A note the daily job could not decide (Stripe unread) for this long is dropped, said in the log. */
+/** A note the daily job could not decide (Stripe unread) for this long is said in the log on every run; it is kept, with its stop. */
 export const GIVE_UP_DAYS = 7;
 /** Pages of the platform's refunds read to find one (newest first, 100 a page, only those since the note). */
 export const MAX_REFUND_PAGES = 3;
 /** The most notes the daily job looks at in one run. */
 export const MAX_NOTES = 50;
+/**
+ * The store id whose note the daily job looked at last. The next run starts after it (store ids in order, from the
+ * start again after the last), so a note kept because its refund does not read never holds back the others: with N
+ * notes, each one is looked at within ceil(N / MAX_NOTES) runs that are not cut short.
+ */
+export const NEXT_KEY = "nl:plan-refund:next";
+/** The place goes by itself when the job has not moved it for this long (no note left to look at). */
+const NEXT_SECONDS = 30 * 86_400;
 /** Before the note: the refund's own `created` may be a few seconds before ours. */
 const CLOCK_SLACK = 300;
 const LIVE = ["active", "trialing", "past_due", "unpaid", "paused"];
+/** The live statuses a letter may say "goes on and renews as usual" of; "unpaid" and "paused" do not. */
+const RENEWS = ["active", "trialing", "past_due"];
 const ENDED = ["canceled", "incomplete_expired"];
 const REFUND_ID = /^re_[A-Za-z0-9]{6,128}$/;
 const OBJECT_ID = /^[a-z]{2,4}_[A-Za-z0-9]{6,128}$/;
@@ -92,6 +110,12 @@ export type Note = { s: string; at: number; t: number; m: 0 | 1; p?: NotedPart[]
 /** A charge the refund was about to give back, and how much (written before any money moves). */
 export type NotedPart = { c: string; a: number };
 
+/**
+ * A note whose debt list is present but damaged: what remains owed is unknown. Its plan, its time and whether we set
+ * a stop are still read, so the daily job can let it go after GIVE_UP_DAYS and tell the creator (Claude 4 on #2692).
+ */
+type DamagedNote = { damaged: true; s: string; at: number; m: 0 | 1 };
+
 export type PlanRefundFlow =
   /** Given back; `ended` false: the plan is ended by the daily job. `earlier`: given back by an earlier request. */
   | { ok: true; cents: number; currency: string; refundId: string; status: "succeeded" | "pending"; ended: boolean; earlier: boolean }
@@ -99,23 +123,67 @@ export type PlanRefundFlow =
   | { ok: false; reason: Exclude<PlanRefundMade, { ok: true }>["reason"] | "no_plan" | "stop_failed" | "partial"; stopLeft: boolean };
 
 type Row = Record<string, unknown>;
-const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
 
-function readNote(raw: unknown): Note | null {
+function readNote(raw: unknown): Note | DamagedNote | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Note>;
     if (typeof v.s !== "string" || !SUBSCRIPTION_PATTERN.test(v.s) || typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0) return null;
     const t = typeof v.t === "number" && Number.isSafeInteger(v.t) && v.t >= v.at ? v.t : v.at;
+    const hasParts = Object.hasOwn(v, "p");
     const p = Array.isArray(v.p) && v.p.length && v.p.every((x) => x && typeof x.c === "string" && /^(ch|py)_[A-Za-z0-9]{6,128}$/.test(x.c) && Number.isSafeInteger(x.a) && x.a > 0) ? v.p : undefined;
+    // A legacy note may have no debt list. Once `p` is present, however, every entry is durable evidence of what
+    // remains owed. Treating a damaged present list as absent would fall back to a store-wide search and could
+    // mistake one refund for the whole multi-charge debt.
+    if (hasParts && !p) return { damaged: true, s: v.s, at: v.at, m: v.m === 1 ? 1 : 0 };
     return { s: v.s, at: v.at, t, m: v.m === 1 ? 1 : 0, ...(p ? { p } : {}) };
   } catch {
     return null;
   }
 }
-const noteOf = async (sid: string): Promise<Note | null> => readNote((await redisPipeline([["HGET", ENDING_KEY, sid]]))[0]);
-const writeNote = (sid: string, note: Note) => redisPipeline([["HSET", ENDING_KEY, sid, JSON.stringify(note)]]);
-const dropNote = (sid: string) => redisPipeline([["HDEL", ENDING_KEY, sid]]);
+
+/** Plain owned array slots only: a getter, Proxy, hole or extra field is not Redis evidence. */
+function exactArray(value: unknown, expected?: number): unknown[] | null {
+  try {
+    if (types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return null;
+    const length = Object.getOwnPropertyDescriptor(value, "length");
+    if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < 0 ||
+      (expected !== undefined && length.value !== expected) || Reflect.ownKeys(value).length !== length.value + 1) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < length.value; i += 1) {
+      const slot = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      out.push(slot.value);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+const oneNoteReply = async (command: (string | number)[], what: string): Promise<unknown> => {
+  const replies = exactArray(await redisPipeline([command]), 1);
+  if (!replies) throw new UnknownReplyError(what);
+  return replies[0];
+};
+
+const noteOf = async (sid: string): Promise<Note | null> => {
+  const raw = await oneNoteReply(["HGET", ENDING_KEY, sid], "the plan-refund recovery note");
+  if (raw === null) return null;
+  const note = readNote(raw);
+  if (!note || "damaged" in note) throw new UnknownReplyError("the plan-refund recovery note");
+  return note;
+};
+
+const writeNote = async (sid: string, note: Note): Promise<void> => {
+  const count = await oneNoteReply(["HSET", ENDING_KEY, sid, JSON.stringify(note)], "the plan-refund recovery note write");
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("the plan-refund recovery note write");
+};
+
+const dropNote = async (sid: string): Promise<void> => {
+  const count = await oneNoteReply(["HDEL", ENDING_KEY, sid], "the plan-refund recovery note removal");
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("the plan-refund recovery note removal");
+};
 
 /** The subscription as Stripe has it now, or null when it cannot be read. */
 async function subscriptionOf(id: string): Promise<Row | null> {
@@ -129,22 +197,114 @@ async function subscriptionOf(id: string): Promise<Row | null> {
   }
 }
 const stopSet = (sub: Row) => sub.cancel_at_period_end === true || (typeof sub.cancel_at === "number" && sub.cancel_at > 0);
+/** What a letter may say of the plan, from a subscription read just now. Rule 24: a status Stripe has no name for, a
+ *  stop flag that is not a boolean, or a cancel_at that is neither null nor a number is "unknown", never "renews". */
+const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" => {
+  if (!sub) return "unknown";
+  if (sub.status === "canceled") return "ended";
+  if (!LIVE.includes(String(sub.status))) return "unknown";
+  // A paused or unpaid plan does not go on as usual (Claude 1's LOW 1 on #3585): the letter says to check the studio.
+  if (!RENEWS.includes(String(sub.status))) return "unknown";
+  if (typeof sub.cancel_at_period_end !== "boolean") return "unknown";
+  if (sub.cancel_at !== null && typeof sub.cancel_at !== "number") return "unknown";
+  return stopSet(sub) ? "stops" : "renews";
+};
 
-/** Takes back the stop we set, when it is still there. True when nothing of ours is left. */
-async function takeBackStop(id: string): Promise<boolean> {
-  try {
-    const sub = await subscriptionOf(id);
-    if (!sub) return false;
-    if (!LIVE.includes(String(sub.status)) || sub.cancel_at_period_end !== true) return true;
-    await setCancelAtPeriodEnd(id, false);
-    return true;
-  } catch (error) {
-    console.error("taking back a plan's stop after a refund that was not made failed", error);
-    return false;
+/**
+ * Whose stop it is, kept on the subscription itself (Codex G on #3740): set in the same Stripe call as our stop, and
+ * unset in the same call that takes it back. A note in Redis can be stale (its m: 0 write may never land); Stripe's own
+ * record cannot, so a stop the creator set after ours was taken back carries no mark and is never touched.
+ */
+export const OUR_STOP_MARK = PLAN_REFUND_STOP_MARK;
+
+/** Sets our stop with its mark, in one call. Only an answer naming this subscription, stopped and marked, confirms it. */
+async function setOurStop(id: string, mark: string): Promise<void> {
+  const sub = await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, () => onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "true", [`metadata[${OUR_STOP_MARK}]`]: mark })));
+  const row = sub as Row & { metadata?: unknown };
+  const metadata = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : null;
+  if (!row || row.id !== id || row.cancel_at_period_end !== true || metadata?.[OUR_STOP_MARK] !== mark) {
+    throw new Error("The stop's answer does not show this subscription stopped with our mark");
   }
 }
 
-type Found = { kind: "found"; refund: Row; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
+/**
+ * Takes back the stop we set, when it is still there and still ours (its mark on the subscription). "live" when nothing
+ * of ours is left and the plan goes on, "ended" when the subscription is no longer live (our stop may have ended it),
+ * null when it could not be done. A stop without our mark is the creator's own, or one taken back already: never touched.
+ */
+async function takeBackStop(id: string): Promise<"live" | "ended" | null> {
+  try {
+    // Read and taken back under the stop's lock (Codex U on #3740): the creator's own cancel or resume
+    // (lib/billing.ts setCancelAtPeriodEnd, which also clears the mark) cannot land between the two.
+    return await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, async (held) => {
+      const sub = await subscriptionOf(id);
+      if (!sub) return null;
+      const metadata = (sub as Row & { metadata?: unknown }).metadata;
+      const mark = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+      if (!LIVE.includes(String(sub.status))) return "ended";
+      if (mark === undefined || mark === null || mark === "") return "live";
+      if (typeof mark !== "string") return null;
+      // Still ours after the read, or nothing is sent (Claude 7 on #3740): a slow read never outlives the lock and then
+      // posts over a change the creator made meanwhile. The job tries again tomorrow.
+      if (!(await holdLock(held))) return null;
+      // Taken back and unmarked in one call: a later run, on a stale note, finds no mark and leaves any stop alone.
+      const after = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "false", [`metadata[${OUR_STOP_MARK}]`]: "" }));
+      const row = after as Row & { metadata?: unknown };
+      const left = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+      return Boolean(row) && row.id === id && row.cancel_at_period_end === false && (left === undefined || left === "") ? "live" : null;
+    });
+  } catch (error) {
+    console.error("taking back a plan's stop after a refund that was not made failed", error);
+    return null;
+  }
+}
+
+type RefundRow = { id: string; charge: string | null; amount: number; currency: string; status: string; metadata: { plan_refund: string } };
+type Found = { kind: "found"; refund: RefundRow; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
+const ownValue = (row: unknown, key: string): unknown => {
+  if (!row || typeof row !== "object" || types.isProxy(row) || Array.isArray(row)) return undefined;
+  const field = Object.getOwnPropertyDescriptor(row, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+};
+
+/** Validate the complete observed page before any refund settles a plan or is said to be absent. */
+function refundPage(page: unknown, sid: string): { data: RefundRow[]; ids: string[]; more: boolean } | null {
+  try {
+    // Stripe names every list reply `"object": "list"`: a reply named anything else, or not named, is not that list,
+    // however empty its `data` looks, so it never reads as "no refund" (Codex G on #3190, 6726655568).
+    if (ownValue(page, "object") !== "list") return null;
+    const data = ownValue(page, "data"), more = ownValue(page, "has_more");
+    if (typeof more !== "boolean" || types.isProxy(data) || !Array.isArray(data)) return null;
+    const length = Object.getOwnPropertyDescriptor(data, "length")?.value;
+    if (!Number.isSafeInteger(length) || length > 100 || Object.getOwnPropertyNames(data).length !== length + 1 || Object.getOwnPropertySymbols(data).length) return null;
+    const refunds: RefundRow[] = [], ids = new Set<string>();
+    for (let i = 0; i < length; i++) {
+      const slot = Object.getOwnPropertyDescriptor(data, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      const row: unknown = slot.value;
+      const id = ownValue(row, "id"), metadata = ownValue(row, "metadata");
+      if (typeof id !== "string" || !REFUND_ID.test(id) || ids.has(id)) return null;
+      ids.add(id);
+      // Stripe permits null metadata/charge/status on unrelated refunds. Only ours can settle this plan.
+      if (metadata === null) continue;
+      if (!metadata || typeof metadata !== "object" || types.isProxy(metadata) || Array.isArray(metadata)) return null;
+      const owner = Object.getOwnPropertyDescriptor(metadata, "plan_refund");
+      if ((owner && (!Object.hasOwn(owner, "value") || typeof owner.value !== "string")) || (!owner && "plan_refund" in metadata)) return null;
+      if (!owner || owner.value !== sid) continue;
+      const charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status");
+      // The status first: one of ours that failed or was canceled gave no money back, whatever its amount reads, so it
+      // never holds the plan (R1 on #3190). Only a refund that gives money back must read its amount exactly.
+      if (typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
+      if (status === "failed" || status === "canceled") continue;
+      if ((charge !== null && (typeof charge !== "string" || !OBJECT_ID.test(charge))) ||
+          typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
+          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
+      // Snapshot only validated data; later projections never observe an unchecked amount.
+      refunds.push({ id, charge, amount, currency, status, metadata: { plan_refund: sid } });
+    }
+    return { data: refunds, ids: [...ids], more };
+  } catch { return null; }
+}
 
 /**
  * What became of the charges a note says were about to be given back, read from each charge's own refunds (ours:
@@ -167,8 +327,10 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
   let succeededAll = true;
   let coveredAll = true;
   let anyOurs = false;
-  let first: Row | null = null;
+  let first: RefundRow | null = null;
+  let currency: string | null = null;
   let total = 0;
+  const observed = new Set<string>();
   for (const part of parts) {
     let listed: Row;
     try {
@@ -177,11 +339,23 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
       console.error("reading a plan payment's refunds failed", error);
       return { kind: "unknown" };
     }
-    if (listed.has_more !== false) return { kind: "unknown" };
-    const ours = rows(listed).filter((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id));
-    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + (Number(r.amount) || 0), 0);
+    const page = refundPage(listed, sid);
+    if (!page || page.more) return { kind: "unknown" };
+    // A refund belongs to exactly one charge: contradictory pages cannot repay two debts.
+    for (const id of page.ids) {
+      if (observed.has(id)) return { kind: "unknown" };
+      observed.add(id);
+    }
+    if (page.data.some((r) => r.charge !== part.c)) return { kind: "unknown" };
+    const ours = page.data.filter((r) => r.metadata.plan_refund === sid);
+    for (const r of ours) {
+      currency ??= r.currency;
+      if (r.currency !== currency) return { kind: "unknown" };
+    }
+    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + r.amount, 0);
     const given = sum((x) => x === "succeeded");
     const coming = sum((x) => x === "pending" || x === "requires_action");
+    if (!Number.isSafeInteger(given + coming) || !Number.isSafeInteger(part.a) || part.a < 1 || !Number.isSafeInteger(total + part.a)) return { kind: "unknown" };
     if (given + coming > 0) anyOurs = true;
     if (given < part.a) succeededAll = false;
     if (given + coming < part.a) coveredAll = false;
@@ -199,6 +373,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
  */
 export async function findPlanRefund(sid: string, at: number, until: number): Promise<Found> {
   let after = "";
+  const observed = new Set<string>();
   for (let page = 0; page < MAX_REFUND_PAGES; page += 1) {
     let listed: Row;
     try {
@@ -209,14 +384,20 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
       console.error("reading the platform's refunds failed", error);
       return { kind: "unknown" };
     }
-    const data = rows(listed);
-    const ours = data.find((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id) &&
+    const parsed = refundPage(listed, sid);
+    if (!parsed) return { kind: "unknown" };
+    for (const id of parsed.ids) {
+      if (observed.has(id)) return { kind: "unknown" };
+      observed.add(id);
+    }
+    const data = parsed.data;
+    const ours = data.find((r) => r.metadata.plan_refund === sid &&
       (r.status === "succeeded" || r.status === "pending" || r.status === "requires_action"));
-    if (ours) return { kind: "found", refund: ours, settled: ours.status === "succeeded" };
-    if (listed.has_more !== true) return listed.has_more === false ? { kind: "none" } : { kind: "unknown" };
-    const last = data[data.length - 1];
-    if (!last || typeof last.id !== "string") return { kind: "unknown" };
-    after = last.id;
+    if (ours) return ours.charge === null ? { kind: "unknown" } : { kind: "found", refund: ours, settled: ours.status === "succeeded" };
+    if (!parsed.more) return { kind: "none" };
+    const last = parsed.ids.at(-1);
+    if (!last) return { kind: "unknown" };
+    after = last;
   }
   // More refunds since the note than we read: not decided, never "none".
   return { kind: "unknown" };
@@ -238,10 +419,13 @@ export async function endPlanNow(store: Store, id: string): Promise<boolean> {
     if (!sub || !ENDED.includes(String(sub.status))) return false;
     for (const status of ["open", "draft"] as const) {
       const listed = await onPlatform("GET", `/invoices?${new URLSearchParams({ subscription: id, status, limit: "10" })}`, undefined, { version: AT });
-      if (listed.has_more !== false) return false;
-      for (const invoice of rows(listed)) {
-        const invoiceId = typeof invoice.id === "string" ? invoice.id : "";
-        if (!OBJECT_ID.test(invoiceId) || invoice.status !== status) continue;
+      // Read exactly (rule 24): a page that is not a list, a row with no id of its own or of another status than the one
+      // asked for proves nothing about what is still payable, so the plan is not taken as ended (false; the daily job
+      // tries again). readStripePage throws on a page that does not read, caught below as false too.
+      const page = readStripePage(listed, (row) => row.status === status, OBJECT_ID);
+      if (page.hasMore || page.unreadable > 0) return false;
+      for (const invoice of page.rows) {
+        const invoiceId = invoice.id as string;
         if (status === "open") await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `plan-refund-void:${invoiceId}` });
         else await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
       }
@@ -272,26 +456,37 @@ export async function issueReview(sid: string, cents: number): Promise<string> {
   await redisPipeline([["SET", reviewKeyOf(sid), `${token}:${cents}`, "EX", REVIEW_SECONDS]]);
   return token;
 }
+/**
+ * Takes the pass (KEYS[1]) only while it is the one issued for ARGV[1], the
+ * token: compared and deleted in one step, so an old tab's token never takes
+ * the pass of the page issued after it. Its text when taken, nil otherwise.
+ */
+const TAKE_REVIEW = `-- marktmorgen:plan-refund-take-review:v1
+local kept = redis.call('GET', KEYS[1])
+if not kept or string.sub(kept, 1, string.len(ARGV[1]) + 1) ~= ARGV[1] .. ':' then return false end
+redis.call('DEL', KEYS[1])
+return kept`;
 /** Takes the pass once: the amount it was issued for, only for the token the page issued and not yet used; else null. */
 export async function takeReview(sid: string, token: string): Promise<number | null> {
   if (!/^[A-Za-z0-9_-]{20,40}$/.test(token)) return null;
-  const [kept] = await redisPipeline([["GETDEL", reviewKeyOf(sid)]]);
+  const [kept] = await redisPipeline([["EVAL", TAKE_REVIEW, 1, reviewKeyOf(sid), token]]);
   const m = typeof kept === "string" ? /^([A-Za-z0-9_-]{20,40}):(\d{1,12})$/.exec(kept) : null;
   return m && m[1] === token ? Number(m[2]) : null;
 }
 
 /** One email to the store's own address, from the company's sending, under an idempotency key. Not sent only logs. */
-async function mail(store: Store, letter: { subject: string; text: string }, key: string): Promise<void> {
+async function mail(store: Store, letter: { subject: string; text: string }, key: string): Promise<boolean> {
   const to = normaliseEmail(store.email);
   if (!EMAIL_PATTERN.test(to) || !isSenderConfigured()) {
     console.error(`plan-refund: store ${store.sid}'s email was not sent (no address or no sender)`);
-    return;
+    return false;
   }
   const sent = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to, replyTo: SUPPORT_EMAIL, subject: letter.subject, text: letter.text, idempotencyKey: key }).catch((error) => {
     console.error("sending a plan refund email failed", error);
     return false;
   });
   if (!sent) console.error(`plan-refund: store ${store.sid}'s email was not sent`);
+  return sent;
 }
 
 /** The confirmation, once the plan has ended; keyed by the refund, so a retry never sends it twice. */
@@ -299,10 +494,10 @@ async function tell(store: Store, r: { cents: number; currency: string; refundId
   await mail(store, planRefundLetter({ store: store.name || store.handle, cents: r.cents, currency: r.currency, pending: r.status === "pending", assistant: Boolean(store.assistantPlan?.active) }), `plan-refund-told:${r.refundId}`);
 }
 
-const refundOf = (r: Row, earlier: boolean, ended: boolean): PlanRefundFlow => ({
+const refundOf = (r: RefundRow, earlier: boolean, ended: boolean): PlanRefundFlow => ({
   ok: true,
-  cents: Number(r.amount) || 0,
-  currency: typeof r.currency === "string" ? r.currency : "usd",
+  cents: r.amount,
+  currency: r.currency,
   refundId: String(r.id),
   status: r.status === "succeeded" ? "succeeded" : "pending",
   ended,
@@ -338,8 +533,15 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // our stop is taken back at once and the note goes.
     const notMade = async (reason: Exclude<PlanRefundFlow, { ok: true }>["reason"], maybe: boolean): Promise<PlanRefundFlow> => {
       if (!maybe) {
-        if (note.m === 1 && (await takeBackStop(id))) note = { ...note, m: 0 };
-        if (note.m === 0) {
+        const back = note.m === 1 ? await takeBackStop(id) : null;
+        if (back === "live") {
+          // Said before the note goes: if its removal is lost, a later run must not take back a stop the creator
+          // set themselves since (comment 6807195181 on #3585). Not when the plan has ended: the note keeps m: 1, so
+          // the daily job, after a lost removal, reads the plan again and never says it renews (Codex Y on #3740).
+          note = { ...note, m: 0 };
+          await writeNote(store.sid, note);
+        }
+        if (note.m === 0 || back === "ended") {
           await dropNote(store.sid);
           return { ok: false, reason, stopLeft: false };
         }
@@ -357,7 +559,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 
     if (weStop) {
       try {
-        await setCancelAtPeriodEnd(id, true);
+        await setOurStop(id, String(note.at));
       } catch (error) {
         console.error("setting a plan to stop before its refund failed", error);
         return notMade("stop_failed", Boolean(kept));
@@ -391,21 +593,40 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 /**
  * The daily job's part (app/api/cron/closing): each note left by a request that did not finish is decided. Its
  * refund found: the plan is ended. Not found SETTLE_SECONDS after the note: none was made, and a stop we set is
- * taken back. Not decidable: tried again tomorrow, for GIVE_UP_DAYS. One failure never stops the rest.
+ * taken back. Not decidable: kept and tried again tomorrow, said in the log after GIVE_UP_DAYS. One failure never
+ * stops the rest. At most MAX_NOTES a run, starting after the store looked at last (NEXT_KEY), so notes kept undecided
+ * never take the turn of the ones after them.
  */
 export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ ended: number; dropped: number; left: number }> {
   const counts = { ended: 0, dropped: 0, left: 0 };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
-  const [raw] = await redisPipeline([["HGETALL", ENDING_KEY]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
-  const fields: [string, unknown][] = [];
-  for (let i = 0; i + 1 < flat.length && fields.length < MAX_NOTES; i += 2) fields.push([String(flat[i]), flat[i + 1]]);
-  counts.left = Math.max(0, flat.length / 2 - fields.length);
+  // Rule 24: the notes and the job's place, each read exactly. One that does not read is unknown: nothing is decided
+  // on a guess (the caller logs it and the next run tries again), never "no notes" or "start from the top".
+  const raw = await oneNoteReply(["HGETALL", ENDING_KEY], "the plan-refund recovery-note list");
+  const flat = exactArray(raw);
+  if (!flat || flat.length % 2 !== 0 || flat.some((value) => typeof value !== "string")) {
+    throw new UnknownReplyError("the plan-refund recovery-note list");
+  }
+  const place = exactArray(await redisPipeline([["GET", NEXT_KEY]]), 1);
+  const last = place ? place[0] : undefined;
+  if (last !== null && typeof last !== "string") throw new UnknownReplyError(`GET ${NEXT_KEY}`);
+  const all: [string, string][] = [];
+  for (let i = 0; i < flat.length; i += 2) all.push([String(flat[i]), String(flat[i + 1])]);
+  // Fair turns: store ids in order, starting after the one looked at last, so every note has its turn however many
+  // stay undecided (finding of Claude 5, 6732230896, and Codex G, G102-Q). Unread notes are never let go to make room.
+  all.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const after = last === null ? 0 : all.findIndex(([sid]) => sid > last);
+  const start = after < 0 ? 0 : after;
+  const fields: [string, string][] = [];
+  for (let j = 0; j < Math.min(MAX_NOTES, all.length); j += 1) fields.push(all[(start + j) % all.length]);
+  counts.left = all.length - fields.length;
+  let passed: string | null = null;
   for (const [sid, value] of fields) {
     if (Date.now() >= deadline) {
       counts.left += 1;
       continue;
     }
+    passed = sid;
     let held;
     try {
       held = await takeLock(flowKeyOf(sid), FLOW_LOCK_SECONDS, 0);
@@ -416,6 +637,46 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
     }
     try {
       const note = readNote(value);
+      if (note && "damaged" in note) {
+        // Retained, byte for byte, for GIVE_UP_DAYS: no refund, no end and no stop taken back on it. Past them it is let
+        // go, the plan as it is (a stop stays), and the creator is told that what was refunded could not be confirmed,
+        // what Stripe shows of the plan, and to write to support; never kept forever with only a log line.
+        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: store ${sid}'s recovery note has unknown debt evidence; it is retained`);
+          counts.left += 1;
+          continue;
+        }
+        // Unknown stays unknown: a store reply that is not an exact answer keeps the note, and so does a letter that was
+        // not sent. The note is dropped only after the send, so nothing is let go without the creator being told
+        // (Revisor 2's LOW on #3585). The letter's key makes a retry never send it twice.
+        // Read exactly (cloud D on #3740): a store that is gone has nobody to tell, and its note goes, so it never holds
+        // a place among the first MAX_NOTES for good; only a reply that is not an exact answer keeps it.
+        const found = await storeForIdExactly(sid);
+        if (found === "none") {
+          await dropNote(sid);
+          console.error(`plan-refund: store ${sid} is gone; its damaged recovery note is dropped, with nobody to tell`);
+          counts.dropped += 1;
+          continue;
+        }
+        if (found === "unknown") {
+          console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: its store could not be read exactly`);
+          counts.left += 1;
+          continue;
+        }
+        const damagedStore = found;
+        // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
+        // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
+        const sub = await subscriptionOf(note.s);
+        if (!(await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan: planState(sub) }), `plan-refund-unknown:${sid}:${note.at}`))) {
+          console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: the letter was not sent`);
+          counts.left += 1;
+          continue;
+        }
+        await dropNote(sid);
+        console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; the creator was told and it is dropped`);
+        counts.dropped += 1;
+        continue;
+      }
       const store = note ? await storeForId(sid) : null;
       if (!note || !store) {
         if (!note) console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);
@@ -441,36 +702,63 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
           counts.left += 1;
           continue;
         }
+        // The note is the only way to retry this notice. Keep it until the sender confirms, as for a damaged note.
+        if (!(await mail(store, planRefundPartLetter({ store: store.name || store.handle }), `plan-refund-part:${sid}:${note.at}`))) {
+          counts.left += 1;
+          continue;
+        }
         await dropNote(sid);
-        await mail(store, planRefundPartLetter({ store: store.name || store.handle }), `plan-refund-part:${sid}:${note.at}`);
         counts.dropped += 1;
         continue;
       }
       if (found.kind === "unknown" || nowSeconds - note.t < SETTLE_SECONDS) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+        // Rule 24 (finding F1): an outcome that was not read is never "none", however long it lasts. The note and the
+        // stop stay (no renewal is charged, the plan is never ended without a refund we can see, the studio keeps
+        // saying it is being settled) and the creator is never emailed "Nothing was refunded" for it.
+        if (found.kind === "unknown" && nowSeconds - note.at > GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: the refund asked for store ${sid} is still undecided after ${GIVE_UP_DAYS} days; still held with its stop, read again tomorrow`);
         }
-        // Undecidable for GIVE_UP_DAYS: the plan goes on as it was, never ended without a refund we can see.
-        console.error(`plan-refund: the refund asked for store ${sid} could not be decided in ${GIVE_UP_DAYS} days; its stop is taken back and its note dropped`);
+        counts.left += 1;
+        continue;
       }
-      // None was made: our stop goes, the plan goes on as it was.
-      if (note.m === 1 && !(await takeBackStop(note.s))) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+      // None was made: our stop goes, the plan goes on as it was; or our stop already ended it, and the letter says so.
+      const back = note.m === 1 ? await takeBackStop(note.s) : "live";
+      // Our stop could not be taken back: the note and the stop stay and it is tried again tomorrow, however long, so no
+      // letter ever says the plan goes on while our stop would end it (Claude 1 on #3190).
+      if (back === null) {
+        if (nowSeconds - note.at > GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; still held, tried again tomorrow`);
         }
-        console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
+        counts.left += 1;
+        continue;
+      }
+      if (note.m === 1 && back === "live") {
+        // Our stop is gone: the note says so before it is dropped, so a lost removal never lets a later run take back
+        // a stop the creator set themselves since (comment 6807195181 on #3585). Not when the plan has ended: the note
+        // keeps m: 1, so a run after a lost removal reads the plan again and says it ended, never that it renews
+        // (Codex Y on #3740). An ended plan has no stop left for a later run to take back.
+        await writeNote(sid, { ...note, m: 0 });
       }
       await dropNote(sid);
-      // The creator saw "nothing was refunded" or "we check within a day": the outcome reaches them by email.
-      await mail(store, planRefundNotMadeLetter({ store: store.name || store.handle, undecided: found.kind === "unknown" }), `plan-refund-none:${sid}:${note.at}`);
+      // Read and none was made: the creator saw "nothing was refunded" or "we check every day", so it reaches them by email.
+      const letter = back === "ended" ? planRefundNotMadeEndedLetter : planRefundNotMadeLetter;
+      await mail(store, letter({ store: store.name || store.handle }), `plan-refund-none:${sid}:${note.at}`);
       counts.dropped += 1;
     } catch (error) {
       console.error(`plan-refund: the note for store ${sid} is not decided yet; tried again tomorrow`, error);
       counts.left += 1;
     } finally {
       await releaseLock(held);
+    }
+  }
+  // The place moves only past the notes whose turn came (not those the deadline left), so none loses its turn. Not
+  // written: the next run looks at the same notes again, which delays the others by a run and decides nothing wrong.
+  if (passed !== null) {
+    try {
+      const [set] = await redisPipeline([["SET", NEXT_KEY, passed, "EX", NEXT_SECONDS]]);
+      if (set !== "OK") console.error("plan-refund: the daily job's place was not confirmed written; the next run may look at the same notes again");
+    } catch (error) {
+      console.error("plan-refund: the daily job's place could not be written; the next run may look at the same notes again", error);
     }
   }
   return counts;

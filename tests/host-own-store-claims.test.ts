@@ -21,7 +21,7 @@ import { movedKey } from "@/lib/call-records";
 import { CLAIM_MARGIN_MS, claimsKey, hostId, readClaims } from "@/lib/host-claims";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { writeTeam } from "@/lib/team-booking";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
@@ -317,6 +317,58 @@ async function main(): Promise<void> {
   is("a new buyer holds a seat", resold.ok, true);
   is("still one claim on her for that hour", (await mayaClaims()).filter((c) => c.start === X).length, 1);
   listed.length = 0;
+  // Codex L HIGH, revalidated by X4 at the current head: a durable move must never outlive its destination claim.
+  part("A failed destination promotion cannot publish a move protected only by a short hold");
+  {
+    const before = weekdayAt(10, 660);
+    const after = before + HOUR;
+    const booking = await hold(lantern.store, lantern.product, before);
+    if (!booking.ok) throw new Error("no hold for the promotion failure");
+    await confirmBooking({ store: lantern.store, product: lantern.product, session: booking.session, start: before, end: before + HOUR, buyerEmail: "buyer@example.com", buyerTz: NY, due: null, cancel: null, origin: "https://marktmorgen.com" });
+    listed.push(paidRow(booking.session, lantern.store, lantern.product, before, false));
+    const moveKey = movedKey(booking.session);
+    const claimKey = claimsKey(hostId(MAYA));
+    const pipeline = redis.pipeline;
+    let wroteMove = false;
+    let permanentAtWrite = false;
+    let blockedPromotions = 0;
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "HSET" && c[1] === claimKey && String(c[3]).startsWith(`${after}|${after + HOUR}|0|`))) {
+        blockedPromotions += 1;
+        // Neither write applies; read-back sees the original temporary claim.
+        return commands.map(() => "unknown");
+      }
+      const writing = commands.some((c) => c[0] === "SET" && c[1] === moveKey);
+      if (writing) permanentAtWrite = (await mayaClaims()).some((c) => c.start === after && !c.held);
+      const result = await pipeline.call(redis, commands);
+      if (writing) wroteMove = true;
+      // The move SET lands, but neither its answer nor its GET read-back can confirm it.
+      return commands.some((c) => (c[0] === "SET" || c[0] === "GET") && c[1] === moveKey) ? ["unknown"] : result;
+    };
+    try {
+      const result = await moveBooking({ store: lantern.store, product: lantern.product, session: booking.session, booked: { start: before, end: before + HOUR, email: "buyer@example.com", buyerTz: NY }, start: after, origin: "https://marktmorgen.com" });
+      is("promotion failure reports error", result.ok ? "moved" : result.reason, "error");
+      is("both promotion attempts were exercised", blockedPromotions, 2);
+      is("a move can be published only after its destination is permanent", !wroteMove || permanentAtWrite, true);
+      redis.pipeline = pipeline;
+      const savedNow = Date.now;
+      const wait = HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS + 60_000;
+      const later = savedNow() + wait;
+      Date.now = () => later;
+      advance(wait);
+      try {
+        const rival = await hold(harbor.store, harbor.product, after);
+        is("no authoritative moved booking competes with the other store after the hold expires", !wroteMove || !rival.ok, true);
+        if (rival.ok) await releaseOwnHold(harbor.store, rival.session);
+        is("the unchanged original time stays permanently protected", (await mayaClaims()).some((c) => c.start === before && !c.held), true);
+      } finally {
+        Date.now = savedNow;
+      }
+    } finally {
+      redis.pipeline = pipeline;
+      listed.length = 0;
+    }
+  }
   done();
 }
 

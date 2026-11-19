@@ -51,6 +51,7 @@ type Row = Record<string, unknown> & { id: string; created: number };
 type ListPath = "/checkout/sessions" | "/payment_intents" | "/invoices" | "/refunds" | "/disputes";
 let stripe: Record<ListPath, Row[]>;
 let broken: Partial<Record<ListPath, "garbled" | "error" | "shuffled">> = {};
+let replacedField: { path: ListPath; field: string; value: string } | null = null;
 const log: string[] = [];
 const pagesOf: Record<string, number> = {};
 let versions = new Set<string>();
@@ -78,7 +79,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const rows = (stripe[path] ?? []).filter((r) => r.created >= gte && (!status || r.status === status)).sort((a, b) => b.created - a.created);
   if (broken[path] === "shuffled" && rows.length > 2) [rows[0], rows[rows.length - 1]] = [rows[rows.length - 1], rows[0]];
   const start = after ? rows.findIndex((r) => r.id === after) + 1 : 0;
-  return json({ object: "list", data: rows.slice(start, start + limit), has_more: start + limit < rows.length });
+  const data = rows.slice(start, start + limit).map(row => replacedField?.path === path ? { ...row, [replacedField.field]: replacedField.value } : row);
+  return json({ object: "list", data, has_more: start + limit < rows.length });
 }) as typeof fetch;
 
 // ---- The in-memory Redis, every command logged in order (and its reply's size), one reply garbled on demand.
@@ -98,6 +100,7 @@ function reset(): void {
   redis.clear();
   stripe = { "/checkout/sessions": [], "/payment_intents": [], "/invoices": [], "/refunds": [], "/disputes": [] };
   broken = {};
+  replacedField = null;
   log.length = 0;
   for (const key of Object.keys(pagesOf)) delete pagesOf[key];
   versions = new Set();
@@ -494,6 +497,38 @@ async function main(): Promise<void> {
     stripe["/refunds"] = [refund("cancel01", Date.UTC(2031, 3, 10), 1000, { status: "canceled" })];
     const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
     is("a canceled refund (only one waiting on the buyer can be, so no money left): nothing taken off, every month read", [states(e, "stripe"), of(e, "2031-04", "stripe")?.state === "read" && !(of(e, "2031-04", "stripe") as { lines?: unknown[] }).lines?.length], [Array(12).fill("read"), true]);
+  }
+
+  part("An unknown provider status is never a proved exclusion from the store's money");
+  const statuses: { label: string; path: ListPath; field: string; row: () => Row; negatives: string[] }[] = [
+    { label: "checkout status", path: "/checkout/sessions", field: "status", row: () => checkout("statusbad", Date.UTC(2031, 5, 3), 5000), negatives: ["open", "expired"] },
+    { label: "checkout payment status", path: "/checkout/sessions", field: "payment_status", row: () => checkout("paystatusbad", Date.UTC(2031, 5, 3), 5000), negatives: ["unpaid", "no_payment_required"] },
+    { label: "one-click payment status", path: "/payment_intents", field: "status", row: () => extraPaid("intentstatusbad", Date.UTC(2031, 5, 3), 5000), negatives: ["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled"] },
+    { label: "invoice status", path: "/invoices", field: "status", row: () => invoice("invoicestatusbad", Date.UTC(2031, 5, 3), Date.UTC(2031, 5, 3), 5000), negatives: ["draft", "open", "uncollectible", "void"] },
+  ];
+  for (const scenario of statuses) {
+    for (const value of ["not-a-provider-state", ""]) {
+      reset();
+      const shop = makeStore(false);
+      stripe[scenario.path] = [scenario.row()];
+      // Alter the wire reply after the stand-in selected the page: even status=paid is not proof that a damaged
+      // invoice reply is readable. Keep another kind's payment real, so refusing every total is not the control.
+      if (scenario.path !== "/checkout/sessions") stripe["/checkout/sessions"] = [checkout("healthyStatus", Date.UTC(2031, 5, 10), 1100)];
+      replacedField = { path: scenario.path, field: scenario.field, value };
+      const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+      const shown = of(e, "2031-06", "stripe");
+      is(`${scenario.label} ${JSON.stringify(value)}: unknown, never an exact lower amount or zero`, [shown?.state, (shown as { lines?: unknown })?.lines], ["unknown", undefined]);
+    }
+    for (const value of scenario.negatives) {
+      reset();
+      const shop = makeStore(false);
+      stripe[scenario.path] = [scenario.row()];
+      // A documented non-money state is still a known exclusion, not a reason to mark the month unknown.
+      replacedField = { path: scenario.path, field: scenario.field, value };
+      const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+      const shown = of(e, "2031-06", "stripe");
+      is(`${scenario.label} ${value}: confirmed non-money state remains a read zero`, [shown?.state, (shown as { lines?: unknown[] })?.lines], ["read", []]);
+    }
   }
 
   done();

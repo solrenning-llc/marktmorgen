@@ -95,6 +95,9 @@ export const STATE_BUSINESS_TAX_RULES = Object.freeze({
     currency: "USD",
     // USD 500,000 or more of Texas gross receipts; nexus starts on the first day of the federal accounting period
     // in which it is reached. Whether tax is due (the USD 2.65 M no-tax-due threshold) is a separate question.
+    // The figure was read in the Franchise Tax section of the remote-sellers page, not in its Use Tax section
+    // (a different USD 500,000 test). The rule itself, 34 TAC §3.586 (STAR 202601004R), did not open as readable
+    // text in Codex V's report, so it is not listed as a source read.
     thresholdMinor: 50_000_000,
     comparison: "gte",
     window: "accounting-period",

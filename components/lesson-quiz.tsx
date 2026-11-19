@@ -141,7 +141,17 @@ export function LessonQuiz({
             shown={quiz.questions.map((q) => q.id).join(",")}
             tries={used}
             version={quizVersion(quiz.questions)}
-            words={{ quizKeptBack: w.quizKeptBack, quizKeptClear: w.quizKeptClear, quizKeptCleared: w.quizKeptCleared, quizKeepDevice: w.quizKeepDevice, quizKeepDeviceHint: w.quizKeepDeviceHint }}
+            language={language}
+            words={{
+              quizKeptBack: w.quizKeptBack,
+              quizKeptClear: w.quizKeptClear,
+              quizKeptCleared: w.quizKeptCleared,
+              quizKeepDevice: w.quizKeepDevice,
+              quizKeepDeviceHint: w.quizKeepDeviceHint,
+              quizKeptAsk: w.quizKeptAsk,
+              quizKeptRestore: w.quizKeptRestore,
+              quizKeptStartOver: w.quizKeptStartOver,
+            }}
           />
         ) : null}
         {/* While it cannot be answered, a draft a recorded try made useless is removed, even on the result-only view (review of #4324). */}

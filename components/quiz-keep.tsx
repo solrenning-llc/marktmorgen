@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useHydrated } from "@/components/use-hydrated";
-import { type ChoiceInput, checkedAfter, draftOf, draftToRestore, forgetClosedDraft, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
+import { type ChoiceInput, type QuizDraft, checkedAfter, draftOf, draftToRestore, forgetClosedDraft, hasAnswers, quizKeepKey } from "@/lib/quiz-keep-rules";
 
 /**
  * Keeps a quiz's answers in the student's own browser while they answer
@@ -25,6 +25,7 @@ export function QuizKeep({
   shown,
   tries,
   version,
+  language,
   words,
 }: {
   who: string;
@@ -32,13 +33,26 @@ export function QuizKeep({
   tries: number;
   /** The server's code for the quiz's words and choices (lib/quiz-keep-key.ts quizVersion). */
   version: string;
-  words: { quizKeptBack: string; quizKeptClear: string; quizKeptCleared: string; quizKeepDevice: string; quizKeepDeviceHint: string };
+  /** The store's language, for the draft's date in the question to restore it. */
+  language: string;
+  words: {
+    quizKeptBack: string;
+    quizKeptClear: string;
+    quizKeptCleared: string;
+    quizKeepDevice: string;
+    quizKeepDeviceHint: string;
+    quizKeptAsk: string;
+    quizKeptRestore: string;
+    quizKeptStartOver: string;
+  };
 }) {
   const mark = useRef<HTMLSpanElement>(null);
   const key = quizKeepKey(who);
   const ready = useHydrated();
   const [back, setBack] = useState(false);
   const [said, setSaid] = useState("");
+  // A draft found when the lesson opened, offered and never put back on its own (review of #4324, MEDIUM 9).
+  const [offer, setOffer] = useState<QuizDraft | null>(null);
   // Kept in this tab's session storage by default; on the device only once the student chooses it (review of #4324).
   const [onDevice, setOnDevice] = useState(false);
   const device = useRef(false);
@@ -63,19 +77,20 @@ export function QuizKeep({
     const raw = fromDevice ?? read(session);
     device.current = fromDevice !== null;
     const draft = draftToRestore(raw, shown, tries, Date.now(), version);
-    let pending: ReturnType<typeof setTimeout> | undefined;
     if (draft) {
-      for (const input of choices()) input.checked = checkedAfter({ name: input.name, value: input.value, checked: input.checked }, draft);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- the DOM was just changed outside React; the button to clear follows it.
-      setBack(true);
+      // Offered, not put back: the student chooses Restore or Start over (WCAG 3.3.6), and nothing is said before that.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the draft was read from storage outside React.
+      setOffer(draft);
       setOnDevice(device.current);
-      // Said a moment after the status line is in the page, so a screen reader hears it (4.1.3).
-      pending = setTimeout(() => setSaid(words.quizKeptBack), 150);
     } else if (raw !== null) {
       forget(key);
       device.current = false;
     }
     const save = () => {
+      // The first change after a draft was put back or offered: the status line is cleared, and an offer not taken goes,
+      // since these answers now replace it.
+      setSaid("");
+      setOffer(null);
       const now = draftOf(snapshot(), shown, tries, Date.now(), version);
       const [here, other] = device.current ? [local, session] : [session, local];
       try {
@@ -89,10 +104,11 @@ export function QuizKeep({
     saveNow.current = save;
     form.addEventListener("change", save);
     return () => {
-      if (pending) clearTimeout(pending);
       form.removeEventListener("change", save);
     };
-  }, [key, shown, tries, version, words.quizKeptBack]);
+  }, [key, shown, tries, version]);
+
+  const firstChoice = () => mark.current?.closest("form")?.querySelector<HTMLInputElement>('input[name^="q_"]');
 
   return (
     <span ref={mark} className="block" data-quiz-keep>
@@ -101,6 +117,39 @@ export function QuizKeep({
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {/* One status line, in the page from the start and empty until there is something to say. */}
             <span role="status" className="st-muted">{said}</span>
+            {offer ? (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>{words.quizKeptAsk.replace("{when}", draftWhen(offer.at, language))}</span>
+                <button
+                  type="button"
+                  className="st-footer-link inline-flex min-h-11 items-center font-semibold"
+                  onClick={() => {
+                    const form = mark.current?.closest("form");
+                    form?.querySelectorAll<HTMLInputElement>('input[name^="q_"]').forEach((input) => {
+                      input.checked = checkedAfter({ name: input.name, value: input.value, checked: input.checked }, offer);
+                    });
+                    setOffer(null);
+                    setBack(true);
+                    setSaid(words.quizKeptBack);
+                    // The buttons go with the question: the focus moves to the quiz's first choice (2.4.3).
+                    firstChoice()?.focus();
+                  }}
+                >
+                  {words.quizKeptRestore}
+                </button>
+                <button
+                  type="button"
+                  className="st-footer-link inline-flex min-h-11 items-center font-semibold"
+                  onClick={() => {
+                    forget(key);
+                    setOffer(null);
+                    firstChoice()?.focus();
+                  }}
+                >
+                  {words.quizKeptStartOver}
+                </button>
+              </span>
+            ) : null}
             {back ? (
               <button
                 type="button"
@@ -145,6 +194,16 @@ export function QuizKeep({
       ) : null}
     </span>
   );
+}
+
+/** A draft's date and time in the reader's own clock, in the store's language; a language this browser does not know falls back to English. */
+function draftWhen(at: number, language: string): string {
+  const options = { dateStyle: "medium", timeStyle: "short" } as const;
+  try {
+    return new Intl.DateTimeFormat(language, options).format(at);
+  } catch {
+    return new Intl.DateTimeFormat("en", options).format(at);
+  }
 }
 
 /** One of the browser's storage areas, or null where it cannot be opened (a private window, storage blocked). */

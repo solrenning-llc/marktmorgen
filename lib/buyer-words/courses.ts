@@ -242,6 +242,10 @@ const en = {
   quizKeptCleared: "Your answers are cleared.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Keep my answers on this device for 7 days",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Restore your answers from {when}?",
+  quizKeptRestore: "Restore",
+  quizKeptStartOver: "Start over",
   quizKeepDeviceHint: "Off: they stay only in this tab and go when you close it. Leave it off on a shared computer.",
   check: "Check my answers",
   triesLeft: (left: number) => `${left} ${plural(left, "try", "tries")} left`,
@@ -583,6 +587,10 @@ const es: CoursesWords = {
   quizKeptCleared: "Tus respuestas se han borrado.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Guardar mis respuestas en este dispositivo durante 7 días",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "¿Recuperar tus respuestas del {when}?",
+  quizKeptRestore: "Recuperar",
+  quizKeptStartOver: "Empezar de nuevo",
   quizKeepDeviceHint: "Desactivado: solo se quedan en esta pestaña y se borran al cerrarla. Déjalo desactivado en un ordenador compartido.",
   check: "Comprobar mis respuestas",
   triesLeft: (left) => `${plural(left, "Queda", "Quedan")} ${left} ${plural(left, "intento", "intentos")}`,
@@ -914,6 +922,10 @@ const fr: CoursesWords = {
   quizKeptCleared: "Vos réponses sont effacées.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Garder mes réponses sur cet appareil pendant 7 jours",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: `Récupérer vos réponses du {when}${S}?`,
+  quizKeptRestore: "Récupérer",
+  quizKeptStartOver: "Recommencer",
   quizKeepDeviceHint: `Désactivé${S}: elles restent seulement dans cet onglet et disparaissent quand vous le fermez. Laissez désactivé sur un ordinateur partagé.`,
   check: "Vérifier mes réponses",
   triesLeft: (left) => `${left}${S}${frPlural(left, "tentative restante", "tentatives restantes")}`,
@@ -1239,6 +1251,10 @@ const de: CoursesWords = {
   quizKeptCleared: "Ihre Antworten sind gelöscht.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Meine Antworten 7 Tage auf diesem Gerät behalten",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Ihre Antworten vom {when} wiederherstellen?",
+  quizKeptRestore: "Wiederherstellen",
+  quizKeptStartOver: "Neu beginnen",
   quizKeepDeviceHint: "Aus: Sie bleiben nur in diesem Tab und verschwinden, wenn Sie ihn schließen. Auf einem gemeinsam genutzten Computer ausgeschaltet lassen.",
   check: "Meine Antworten prüfen",
   triesLeft: (left) => `Noch ${left} ${plural(left, "Versuch", "Versuche")}`,
@@ -1566,6 +1582,10 @@ const it: CoursesWords = {
   quizKeptCleared: "Le tue risposte sono state cancellate.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Conserva le mie risposte su questo dispositivo per 7 giorni",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Ripristinare le tue risposte del {when}?",
+  quizKeptRestore: "Ripristina",
+  quizKeptStartOver: "Ricomincia",
   quizKeepDeviceHint: "Disattivato: restano solo in questa scheda e spariscono quando la chiudi. Lascialo disattivato su un computer condiviso.",
   check: "Controlla le mie risposte",
   triesLeft: (left) => `${plural(left, "Resta", "Restano")} ${left} ${plural(left, "tentativo", "tentativi")}`,
@@ -1894,6 +1914,10 @@ const nl: CoursesWords = {
   quizKeptCleared: "Je antwoorden zijn gewist.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Mijn antwoorden 7 dagen op dit apparaat bewaren",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Je antwoorden van {when} terugzetten?",
+  quizKeptRestore: "Terugzetten",
+  quizKeptStartOver: "Opnieuw beginnen",
   quizKeepDeviceHint: "Uit: ze blijven alleen in dit tabblad en verdwijnen als je het sluit. Laat het uit op een gedeelde computer.",
   check: "Controleer mijn antwoorden",
   triesLeft: (left) => `Nog ${left} ${plural(left, "poging", "pogingen")} over`,
@@ -2222,6 +2246,10 @@ const pt: CoursesWords = {
   quizKeptCleared: "As suas respostas foram apagadas.",
   /** Review of #4324: off by default; only then is a draft kept on the device, not just in the tab. */
   quizKeepDevice: "Guardar as minhas respostas neste dispositivo durante 7 dias",
+  /** Review of #4324: asked before anything is put back; `{when}` is the draft's date in the reader's own clock. */
+  quizKeptAsk: "Recuperar as suas respostas de {when}?",
+  quizKeptRestore: "Recuperar",
+  quizKeptStartOver: "Recomeçar",
   quizKeepDeviceHint: "Desligado: ficam só neste separador e desaparecem quando o fechar. Deixe desligado num computador partilhado.",
   check: "Verificar as minhas respostas",
   triesLeft: (left) => `${plural(left, "Resta", "Restam")} ${left} ${plural(left, "tentativa", "tentativas")}`,

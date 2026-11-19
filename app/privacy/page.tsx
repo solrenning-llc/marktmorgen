@@ -722,8 +722,10 @@ export default function PrivacyPage() {
           holds which choices were picked for which questions, the questions
           that try showed, how many tries were already recorded, and when, and
           is never sent to us: pressing the quiz&apos;s own button sends the
-          answers as before. Coming back to the lesson puts the choices back,
-          and &quot;Clear my answers&quot; removes them at once. Once a try is
+          answers as before. Coming back to the lesson asks whether to put the
+          choices back, and puts nothing back unless the student presses
+          &quot;Restore&quot;; &quot;Start over&quot; and
+          &quot;Clear my answers&quot; remove them at once. Once a try is
           recorded, or for a quiz that draws its questions again, what was kept
           is never put back and is removed the next time that lesson opens in
           that browser.

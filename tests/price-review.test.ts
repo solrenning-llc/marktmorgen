@@ -186,7 +186,7 @@ part("What the member notes rest on");
 const checkout = readFileSync("lib/store-checkout.ts", "utf8");
 const route = readFileSync("app/api/store/product/route.ts", "utf8");
 is("an option's price is what its checkout charges, read on the server from the saved option", checkout.includes("const priceCents = plan ? plan.amountCents : chosen ? chosen.priceCents : product.priceCents;"), true);
-is("each membership is made at checkout at that moment's price and schedule; saving the product or one of its prices calls Stripe for no subscription", [checkout.includes('body.set("line_items[0][price_data][recurring][interval]", membership.interval);'), /\/subscriptions/.test(route), /\/subscriptions/.test(readFileSync("app/api/store/option/route.ts", "utf8"))], [true, false, false]);
+is("each membership is made at checkout at that moment's price and schedule; saving the product or one of its prices calls Stripe for no subscription", [checkout.includes('stripeEveryFields("line_items[0][price_data][recurring]", membership.interval, everyOf(membership))'), /\/subscriptions/.test(route), /\/subscriptions/.test(readFileSync("app/api/store/option/route.ts", "utf8"))], [true, false, false]);
 const editor = readFileSync("components/product-editor.tsx", "utf8");
 is("every field a row names is on the form under the id its Change goes to, the price when it is not shown", [["price", "pwyw", "suggested", "every", "intro", "yearly", "trial", "payments"].every((f) => editor.includes(`id={\`product-${f}-\${id}\`}`)), editor.includes("document.getElementById(`product-${field}-${productId}`) ?? document.getElementById(`product-price-${productId}`)")], [true, true]);
 

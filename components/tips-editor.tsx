@@ -93,7 +93,7 @@ export function TipsEditor({
         message, and no affiliate or partner share is taken from it.
       </p>
 
-      <label className="mt-5 flex items-start gap-3 text-ink">
+      <label className="mt-5 flex min-h-11 items-start gap-3 text-ink">
         <input type="checkbox" disabled={saving} checked={on} onChange={(e) => setOn(e.target.checked)} className="mt-1 size-5 shrink-0 accent-violet-brand" />
         <span className="font-semibold">Show Support my work on my store page</span>
       </label>

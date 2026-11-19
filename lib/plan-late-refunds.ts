@@ -75,21 +75,31 @@ export type Given = { invoice: string; email: string | null; amount: number; cur
 export type LateOutcome = { state: "done" | "owed"; refunded: number; disputed: number; given: Given[]; short: string[] };
 
 /**
- * Whether every refund of a payment reads succeeded (or failed or canceled, which give nothing back and are no longer
- * in the charge's amount refunded): "done"; "pending" when one is still pending or requires action; "unknown" when
- * the list is not whole or a row does not read as this payment's refund in one of Stripe's own states.
+ * Whether distinct succeeded refunds in this currency cover the whole payment: "done"; "pending" when a valid part
+ * is still pending or requires action; "unknown" when the list, a row or its total does not prove the return. Failed
+ * and canceled parts gave nothing back, even when an earlier charge reading still counted them.
  */
-export function refundsSettled(list: unknown, intent: string): "done" | "pending" | "unknown" {
+export function refundsSettled(list: unknown, intent: string, amount: number, currency: string): "done" | "pending" | "unknown" {
   const read = objectOf(list);
   if (!read || read.object !== "list" || !Array.isArray(read.data) || read.has_more !== false) return "unknown";
   let pending = false;
+  let given = 0;
+  const seen = new Set<string>();
   for (const item of read.data) {
     const row = objectOf(item);
-    if (!row || row.object !== "refund" || typeof row.id !== "string" || idOf(row.payment_intent) !== intent) return "unknown";
+    if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{6,128}$/.test(row.id) ||
+        seen.has(row.id) || idOf(row.payment_intent) !== intent || !whole(row.amount) || row.amount === 0 || row.currency !== currency) return "unknown";
+    seen.add(row.id);
     if (row.status === "pending" || row.status === "requires_action") pending = true;
     else if (row.status !== "succeeded" && row.status !== "failed" && row.status !== "canceled") return "unknown";
+    if (row.status !== "failed" && row.status !== "canceled") {
+      given += row.amount;
+      if (!Number.isSafeInteger(given) || given > amount) return "unknown";
+    }
   }
-  return pending ? "pending" : "done";
+  // The charge and its refunds can be read at different times. Only distinct confirmed parts in this currency
+  // covering the whole payment prove it returned; failed parts, an empty list or a smaller sum never do.
+  return pending ? "pending" : given === amount ? "done" : "unknown";
 }
 
 /** A prior refund of only part of the late payment needs the whole list's confirmed amounts, not its mark alone. */
@@ -198,7 +208,7 @@ export async function refundLatePayments(account: string, subscription: string, 
     }
     // Refunded in full: given back only once no refund of it is still pending. Its refunds expanded on the charge
     // decide here; when they are not (or not whole), they are read by its payment intent below.
-    const settled = Object.hasOwn(charge, "refunds") ? refundsSettled(charge.refunds, intent) : "unknown";
+    const settled = Object.hasOwn(charge, "refunds") ? refundsSettled(charge.refunds, intent, paid.amount, paid.currency) : "unknown";
     if (settled === "done") given.push(paid);
     else if (settled === "pending") left = true;
     else checks.push({ intent, paid });
@@ -209,7 +219,7 @@ export async function refundLatePayments(account: string, subscription: string, 
   const slots = LATE_REFUNDS_PER_TRY;
   if (owed.length + checks.length > slots) left = true;
   for (const one of checks.slice(0, Math.max(0, slots - owed.length))) {
-    const read = refundsSettled(await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: one.intent, limit: "100" })}`, undefined, AT), one.intent);
+    const read = refundsSettled(await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: one.intent, limit: "100" })}`, undefined, AT), one.intent, one.paid.amount, one.paid.currency);
     if (read === "unknown") throw new Error("the refunds of a plan's late payment could not be read whole");
     if (read === "done") given.push(one.paid);
     else left = true;

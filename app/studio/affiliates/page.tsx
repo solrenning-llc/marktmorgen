@@ -6,7 +6,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { affiliateLink, readBook } from "@/lib/affiliates";
+import { UNCONFIRMED_DAYS, affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
@@ -45,7 +45,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
   const { store } = view;
 
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
-  await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
+  await settlePayPal(store, { paced: true }).catch((error) => console.error("settling PayPal payouts failed", error));
   const [paypal, away, owners, codeList, checks] = await Promise.all([
     // Not known is never shown as "not connected" (rule 24): undefined, and the panel says it could not be read.
     readPayPal(store).catch((error) => {
@@ -197,9 +197,28 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
             why: line.lead!.why,
           }))}
           leadsTotal={book ? book.lines.filter((line) => line.how === "lead").length : 0}
+          unconfirmed={(book?.lines ?? [])
+            .filter((line) => line.unconfirmed === 1 && line.commission > 0 && line.how !== "lead" && line.how !== "bonus")
+            .sort((a, b) => b.at - a.at)
+            .slice(0, 50)
+            .map((line) => ({
+              ref: line.ref,
+              at: line.at,
+              title: line.title || titles.get(line.product) || "A product that is no longer listed",
+              aff: line.aff,
+              base: line.base,
+              rate: line.rate,
+              commission: line.commission,
+              currency: line.currency,
+              second: line.how === "tier2",
+            }))}
+          unconfirmedTotal={(book?.lines ?? []).filter((line) => line.unconfirmed === 1 && line.commission > 0 && line.how !== "lead" && line.how !== "bonus").length}
+          unconfirmedDays={UNCONFIRMED_DAYS}
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}
+          invoicesPastCeiling={book?.invoicesPastCeiling ?? false}
+          unlinkedInvoices={book?.unlinkedInvoices ?? 0}
           // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
           today={new Date().toISOString().slice(0, 10)}
           currency={store.currency}

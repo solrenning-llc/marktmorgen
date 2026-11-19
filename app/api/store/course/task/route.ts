@@ -9,7 +9,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, HandInClosedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -174,6 +174,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof DataRoomError) return no("noroom", 409);
     // Another hand-in of the same work still running: nothing was read or taken, the student hands in again.
     if (error instanceof LockBusyError) return no("busy", 409);
+    if (error instanceof HandInClosedError) return no("closed", 409);
     // Another hand-in of the same work was written while this one waited past its lease: this one wrote nothing.
     if (error instanceof HandInChangedError) return no("busy", 409);
     console.error("handing in an assignment failed", error);

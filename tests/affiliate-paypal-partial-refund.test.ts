@@ -131,13 +131,16 @@ async function main(): Promise<void> {
     captures.set(priced.capture, "PARTIALLY_REFUNDED");
     await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", priced.order]]);
     const first = await look();
-    is("the first look reads the mark once and writes it once", [first.filter((c) => c[0] === "HEXISTS").length, first.filter((c) => c[0] === "EVAL").length], [1, 1]);
+    // Since #4892 the look's own put-back is an EVAL too (PAYPAL_WATCH_IF_LIVE): the mark's write is told apart by its
+    // script's first line, never by the command's name.
+    const markWrites = (sent: (string | number)[][]) => sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:order-write:v1"));
+    is("the first look reads the mark once and writes it once", [first.filter((c) => c[0] === "HEXISTS").length, markWrites(first).length], [1, 1]);
     is("the whole first look is within the lines' sum", first.length <= counted + PAYPAL_PARTLY_KEPT.markReadsPerLook + PAYPAL_PARTLY_KEPT.scriptsPerFirstLook, true);
-    is("its one script carries one write, the HSETNX", first.filter((c) => c[0] === "EVAL").map((c) => [Number(c[2 + Number(c[2]) + 1]), c[2 + Number(c[2]) + 2]]), [[PAYPAL_PARTLY_KEPT.writesPerScript, "HSETNX"]]);
+    is("its one script carries one write, the HSETNX", markWrites(first).map((c) => [Number(c[2 + Number(c[2]) + 1]), c[2 + Number(c[2]) + 2]]), [[PAYPAL_PARTLY_KEPT.writesPerScript, "HSETNX"]]);
     is("the script is the refund in full's ORDER_WRITE, priced the same", PAYPAL_PARTLY_KEPT.commandsPerScriptAtMost, PAYPAL_REFUND_KEPT.commandsPerScriptAtMost);
     await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", priced.order]]);
     const later = await look();
-    is("a later look reads the mark again and writes nothing", [later.filter((c) => c[0] === "HEXISTS").length, later.filter((c) => c[0] === "EVAL").length], [1, 0]);
+    is("a later look reads the mark again and writes nothing", [later.filter((c) => c[0] === "HEXISTS").length, markWrites(later).length], [1, 0]);
     is("the whole later look is within the lines' sum", later.length <= counted + PAYPAL_PARTLY_KEPT.markReadsPerLook, true);
     is("looked at no more often, nor longer, than the watch keeps it", [PAYPAL_PARTLY_KEPT.looksPerDayAtMost, PAYPAL_PARTLY_KEPT.daysAtMost], [PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost, PAYPAL_REFUND_WATCH.daysWatchedAtMost]);
   }
@@ -162,12 +165,21 @@ async function main(): Promise<void> {
   await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", unsure.order]]);
   const pipeline = redis.pipeline.bind(redis);
   // The kept mark's write (one ORDER_WRITE script naming the key) answered in another shape.
+  const unsureSent: (string | number)[][] = [];
   redis.pipeline = (async (commands: (string | number)[][]) => {
+    unsureSent.push(...commands);
     const replies = await pipeline(commands);
     return commands.map((command, i) => (command[0] === "EVAL" && command.some((arg) => String(arg).startsWith("nl:ppsell:partback:")) ? "garbled" : replies[i]));
   }) as typeof redis.pipeline;
   await watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {}, refunded: async () => {} });
   redis.pipeline = pipeline;
+  // Claude 6 at the cost-turn merge (7024348670): since #4892 every put-back on the watch is fenced against the
+  // store's erasure (PAYPAL_WATCH_IF_LIVE); the mark's failed write must put the order back the same way, never with a
+  // plain ZADD that would write an erased store's watch list back.
+  is("the failed mark's put-back is fenced, never a plain ZADD of the watch list", [
+    unsureSent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${store.statsId}`).length,
+    unsureSent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-watch-if-live:v1")).length,
+  ], [0, 1]);
   const lookAgain = Number((await redis.pipeline([["ZSCORE", `nl:ppsell:watch:${store.statsId}`, unsure.order]]))[0]);
   is("looked at again in about an hour", lookAgain >= Math.floor(Date.now() / 1000) + 3000, true);
 

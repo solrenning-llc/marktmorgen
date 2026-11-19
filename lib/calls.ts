@@ -1809,8 +1809,8 @@ export async function moveBooking(input: {
         const mine = busy.find((b) => b.session === session && b.own);
         const alone = mine && ownAlone(callsId, mine) ? (mine.own as string) : null;
         // The new time is claimed as a hold is, under a claim of its own (a group seat joins the claim of its new time),
-        // kept for good only once the move is written, and the old one let go only then (Claude 1's review 6799341330 of
-        // #3490, MEDIUM): a move refused after its claim was taken leaves the old time claimed and gives the new one back.
+        // kept for good before the move can be written, and the old one let go only after it is written. A move proved
+        // not written gives its fresh destination claim back; an unknown move keeps both times protected (#3490).
         const taken = await claimOwner(store, { id: product.id, call: at }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now, moveClaim);
         if (!taken.ok) return { ok: false, reason: taken.reason };
         ownMoved = taken.claim;
@@ -1819,6 +1819,9 @@ export async function moveBooking(input: {
       }
     }
 
+    // A durable move must never outlive the destination's protection (Codex L HIGH on #3490). If promotion cannot be
+    // proved, stop before publishing the move: the authoritative booking still points to its protected old time.
+    if (ownMoved) await confirmClaim([ownerOf(store)], ownMoved, start, end, `${callsId}:${product.id}`);
     try {
       await writeMove(session, { s: start, e: end, n: from.moves + 1 });
     } catch (error) {
@@ -1827,14 +1830,10 @@ export async function moveBooking(input: {
         if (ownMoved && ownFresh) await releaseClaim([ownerOf(store)], ownMoved).catch(() => {});
         throw error;
       }
-      // Not known (Codex V's HIGH on #3490): the move may be written, so the new time is kept for good and the old one
-      // stays claimed too, both protected, until the same move asked again finishes it (the "same move" step above),
-      // which lets the old time go. Never a time the booking may now hold given back on an unknown reply.
-      if (ownMoved) await confirmClaim([ownerOf(store)], ownMoved, start, end, `${callsId}:${product.id}`).catch((why) => console.error("keeping a move's new time after an unknown write failed", why));
+      // Not known: the move may be written. Its destination is already permanent and its old time stays protected
+      // until the same move asked again finishes it and lets the old time go. Never give back an uncertain move's time.
       throw error;
     }
-    // Written: the owner's new time is kept for good (an answer not confirmed throws, and the move says it failed).
-    if (ownMoved) await confirmClaim([ownerOf(store)], ownMoved, start, end, `${callsId}:${product.id}`);
     // The seat moves in the diary too: whatever was written under this
     // checkout — a hold, a booking, one filed by its start before group calls
     // — gives way to one entry at the new time.

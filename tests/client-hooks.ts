@@ -5,7 +5,7 @@
  * renderToString never runs effects or click handlers. This runner calls one
  * function component directly with React's own hook dispatcher swapped for a
  * small one (useState, useEffect, useRef, useSyncExternalStore, useMemo,
- * useCallback, useId), re-renders it after every state change and runs its
+ * useCallback, useId, useContext), re-renders it after every state change and runs its
  * effects, so the component's real code decides what the person is shown.
  * Child components are not rendered: the proof reads the host elements and
  * text the component itself returns. Test-only; no product file uses it.
@@ -20,8 +20,11 @@ const same = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.leng
 
 export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void };
 
-/** Renders `component(props)`, runs its effects, and re-renders on every state change. */
-export async function mount<P>(component: (props: P) => unknown, props: P): Promise<Mounted> {
+/**
+ * Renders `component(props)`, runs its effects, and re-renders on every state change.
+ * `contexts` gives a context the value a provider above would; any other reads its default.
+ */
+export async function mount<P>(component: (props: P) => unknown, props: P, contexts?: Map<unknown, unknown>): Promise<Mounted> {
   const slots: Slot[] = [];
   let index = 0;
   let dirty = false;
@@ -57,6 +60,9 @@ export async function mount<P>(component: (props: P) => unknown, props: P): Prom
     },
     useId() {
       return `id-${index++}`;
+    },
+    useContext(context: { _currentValue?: unknown }) {
+      return contexts?.has(context) ? contexts.get(context) : context._currentValue;
     },
     useSyncExternalStore(subscribe: (change: () => void) => () => void, snapshot: () => unknown) {
       const i = index++;

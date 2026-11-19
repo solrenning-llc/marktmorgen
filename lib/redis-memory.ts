@@ -634,6 +634,13 @@ export class MemoryRedis {
           this.run(["HSET", members, field, json]);
           return 1;
         }
+        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the store is live and not being erased.
+        if (key.startsWith("-- marktmorgen:ads-last-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, storeId, erasing, last, field, json, seconds] = args;
+          if (Number(this.run(["EXISTS", storeId])) !== 1 || Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          this.run(["SET", last, json, "EX", seconds]);
+          return 1;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;

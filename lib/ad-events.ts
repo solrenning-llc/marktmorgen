@@ -60,7 +60,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
-import { type Store, ensureListId, saleHandles, storeRef } from "@/lib/store";
+import { ERASING_KEY, type Store, ensureListId, erasingField, saleHandles, storeIdCommand, storeRef } from "@/lib/store";
 import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
@@ -73,6 +73,18 @@ export const SERVER_PLATFORMS: ServerPlatform[] = [...ADS_SERVER_PLATFORMS];
 
 const configKey = (statsId: string) => `nl:adsrv:${statsId}`;
 const lastKey = (statsId: string) => `nl:adsrv:last:${statsId}`;
+/**
+ * The platforms' last answers, kept only while the store is live and its erasure has not begun, in one step (Codex L,
+ * L-20261119-1153): a platform can answer after the store was erased, and a plain SET then wrote back for ninety days
+ * the record the eraser had just deleted. KEYS: the store's id (storeIdCommand), nl:closed:erasing, the record;
+ * ARGV: the store's erasing field, the JSON, its seconds. 1 kept, 0 refused (nothing written). Its EVAL and at most
+ * three calls inside it (EXISTS, HEXISTS, SET) as Upstash bills them: KEEP_LAST_COMMANDS, in place of the one SET.
+ */
+export const KEEP_LAST_IF_LIVE = `-- marktmorgen:ads-last-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return 0 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
+export const KEEP_LAST_COMMANDS = 4;
 const sentKey = (id: string) => `nl:adsrv:sent:${id}`;
 /** What a renewal's sent mark takes in the store's data room for its forty days. */
 export const RENEWAL_MARK_BYTES = 192;
@@ -570,7 +582,11 @@ async function deliver(store: Store, stored: Stored, c: Conversion, buyer: Buyer
   );
   // In one order whatever answered first, so the studio reads them the same way each time.
   const ordered = Object.fromEntries(SERVER_PLATFORMS.filter((p) => answers[p]).map((p) => [p, answers[p]]));
-  await redisPipeline([["SET", lastKey(store.statsId), JSON.stringify({ at: now, kind: c.kind, ...ordered }), "EX", 90 * 86400]]);
+  // Kept only while the store is live and not being erased: an answer may come back after the eraser deleted it.
+  const json = JSON.stringify({ at: now, kind: c.kind, ...ordered });
+  await redisPipeline([
+    ["EVAL", KEEP_LAST_IF_LIVE, 3, storeIdCommand(store.sid)[1], ERASING_KEY, lastKey(store.statsId), await erasingField(storeRef(store)), json, 90 * 86400],
+  ]);
   return platforms.length;
 }
 

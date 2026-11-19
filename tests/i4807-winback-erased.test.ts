@@ -115,6 +115,58 @@ async function main(): Promise<void> {
     is("no come-back key keeps their subscription's id", winbackKeys().filter((k) => k.includes("sub_AnnErased00001")), []);
   }
 
+  // Codex L on #4877 (MEDIUM, privacy): the release of the membership's mark on "erased" was awaited and its answer
+  // ignored. A release that fails is tried once more at once; still not confirmed, the store's run stops there.
+  part("The membership's mark after an erased claim: a failed release is tried again, never taken as done");
+  {
+    const email = "ivy@example.com";
+    const { erase } = await world("release fails once", email, "sub_IvyErased00001", "cus_IvyErased01");
+    let fired = false;
+    let failedReleases = 0;
+    redis.pipeline = (async (commands: Commands) => {
+      const marking = commands.some((c) => c[0] === "EVAL" && c.some((x) => String(x).startsWith("nl:wb:once:")));
+      if (!fired && marking) { fired = true; await erase(); }
+      const releasing = commands.length === 1 && commands[0]?.[0] === "EVAL" && commands[0].some((x) => String(x).includes("sub_IvyErased00001"));
+      if (releasing && failedReleases === 0) { failedReleases += 1; throw new Error("synthetic redis failure on the mark's release"); }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    await sendWinBacks(Date.now() + 30_000, now);
+    redis.pipeline = real;
+    is("the erasure landed before the claim, and the first release failed", [fired, failedReleases], [true, 1]);
+    is("the release was tried again: no come-back key keeps their subscription's id", winbackKeys().filter((k) => k.includes("sub_IvyErased00001")), []);
+  }
+
+  part("Both releases fail: the store's run stops there, and the next membership waits for the next run");
+  {
+    const jon = "jon@example.com";
+    const kit = "kit@example.com";
+    const { store } = await world("release never confirmed", jon, "sub_JonLater00001", "cus_JonLater0001");
+    const product = String((events[0] as { data?: { object?: { metadata?: Record<string, string> } } } | undefined)?.data?.object?.metadata?.product);
+    customers.set("cus_KitErased001", kit);
+    await upsertContact(store.listId as string, kit, { agreed: true, explicit: true, source: "buyer" }, ROOM);
+    ended("sub_KitErased00001", "cus_KitErased001", { store: "wberased", product });
+    const eraseKit = async () => {
+      await real([suppressCommand(store.listId as string, kit)]);
+      await forgetWinbackPerson(store.statsId, [product], kit);
+      await forgetNoted(store.statsId as string, kit);
+    };
+    let fired = false;
+    let tries = 0;
+    redis.pipeline = (async (commands: Commands) => {
+      const marking = commands.some((c) => c[0] === "EVAL" && c.some((x) => String(x).startsWith("nl:wb:once:")));
+      if (!fired && marking) { fired = true; await eraseKit(); }
+      const releasing = commands.length === 1 && commands[0]?.[0] === "EVAL" && commands[0].some((x) => String(x).includes("sub_KitErased00001"));
+      if (releasing) { tries += 1; throw new Error("synthetic redis failure on every release of the mark"); }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const first = await sendWinBacks(Date.now() + 30_000, now);
+    redis.pipeline = real;
+    is("kit was erased before her claim, and her mark's release was tried twice", [fired, tries], [true, 2]);
+    is("nothing was sent on that run, to kit or to jon after her", [first.sent, handed.filter((m) => m.to.includes(kit)).length, handed.filter((m) => m.to.includes(jon)).length], [0, 0, 0]);
+    const second = await sendWinBacks(Date.now() + 30_000, now);
+    is("the next run sends jon's offer once, and never kit's", [second.sent, handed.filter((m) => m.to.includes(jon)).length, handed.filter((m) => m.to.includes(kit)).length], [1, 1, 0]);
+  }
+
   part("The erasure completes after the once-mark and grant, before the email");
   {
     const email = "bea@example.com";

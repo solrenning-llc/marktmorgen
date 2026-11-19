@@ -35,7 +35,7 @@ The lowest of them is **74.31%**. One percentage for every plan, as most program
 
 ### What paying an affiliate costs: what was read (unit 2)
 
-Each page was read on 11 November 2026. Quotes are as read.
+The original Stripe pages were read on 11 November 2026. Recipient availability and dispute timing were checked again on 18 November 2026 by Codex X4 (report X4-20261118-1405-fix-pr-3764), not by the session that wrote this file.
 
 **Stripe Connect, paying an affiliate who has their own connected account**
 - Source: https://stripe.com/connect/pricing, read on 11 November 2026.
@@ -52,7 +52,7 @@ Each page was read on 11 November 2026. Quotes are as read.
 - Source: https://docs.stripe.com/global-payouts, read on 11 November 2026.
 - Available to businesses in the US and the UK. It "requires Treasury". SR5 records that Stripe Treasury was mentioned only for whoever is eligible, not as a contract or a promise.
 - The page gives no fee, so its cost is unknown.
-- Recipients: https://docs.stripe.com/global-payouts/recipient-requirements, read on 11 November 2026. For a US sender and an individual recipient, the list of countries runs from Albania to Vietnam. **Brazil is not in the list**, so an affiliate in Brazil cannot be paid this way either.
+- Recipients: https://docs.stripe.com/global-payouts/recipient-countries and https://docs.stripe.com/global-payouts/recipient-requirements, checked on 18 November 2026 by Codex X4. **Brazil (BRL) is listed in private preview**. The requirements table for a US sender and an individual recipient has no Brazil entry, so coverage for a US sender and an individual recipient remains unconfirmed. No access or fee is assumed.
 
 **Not read here.** This session's network does not reach these sites, so each stays unknown, never zero:
 - **PayPal** Payouts: its fee per payment and per country could not be read.
@@ -64,9 +64,9 @@ Each page was read on 11 November 2026. Quotes are as read.
 
   Any withholding on a payment to a foreign person also stays unknown. TX point 8 (no US federal tax on the LLC's foreign-source income) is about the LLC's own income, not about what it pays others.
 
-**What this means for the proposal.** No payout channel has a known worst cost per payment for every country an affiliate may live in. The next step is for a session that can reach paypal.com, wise.com and irs.gov to read them, dated, and add the dearest cost to the net. Until then, the programme can only be planned for affiliates in the regions Stripe Connect reaches, and still with that unknown cross-border fee.
+**What this means for the proposal.** No payout channel has a known worst cost per payment for every country an affiliate may live in. The next step is for a session that can reach paypal.com, wise.com and irs.gov to read them, dated, and add the dearest cost to the net. The proposal still needs confirmed coverage and costs for the chosen countries before any payout channel is relied on.
 
-**A dispute after the commission was paid** is a cost not yet covered, and so unknown, never zero (review of #3756). The commission is owed after the 30 days of the refund, but a card dispute can come up to 120 days after the later of the payment and the end of the period it paid for (`lib/refund-reserve-rules.ts`, `DISPUTE_DAYS`, from Stripe's "Dispute timing": for a service paid ahead the window starts at the event, not the payment), so up to about 485 days after a yearly charge, when the affiliate has already been paid. Taking it back then depends on the affiliate earning more commissions. The dispute reserve of `lib/receiving-costs.ts` covers the price disputed, not a commission already paid. The unit that builds the programme either holds the commission until the dispute window has passed or prices this risk.
+**A dispute after the commission was paid** is a cost not yet covered, and so unknown, never zero (review of #3756). The commission is owed after the 30 days of the refund. The repository model uses 120 days after the later of the payment and the end of the period it paid for (`lib/refund-reserve-rules.ts`, `DISPUTE_DAYS`), or about 485 days in the yearly example. Some card network rules allow more time, and Stripe generally starts the window on the event date for a service paid ahead (https://docs.stripe.com/disputes/how-disputes-work#dispute-timing, checked on 18 November 2026). An affiliate can already have been paid when a dispute arrives. Taking it back then depends on the affiliate earning more commissions. The dispute reserve of `lib/receiving-costs.ts` covers the price disputed, not a commission already paid. The unit that builds the programme has to account for that exposure because the maximum dispute window has not been confirmed.
 
 **The company's fixed costs and funded exposures** stay outside the unit, as MR says: they are covered from the minimum base of paying customers, not by any one customer.
 

@@ -1516,9 +1516,11 @@ export const PAYPAL_REFUND_KEPT = {
  * - scriptsPerFirstLook / writesPerScript: the first look writes the mark with one ORDER_WRITE script carrying one
  *   HSETNX, charged to the store's room, as PAYPAL_REFUND_KEPT's write is; later looks find it and write nothing;
  * - commandsPerScriptAtMost: the same script's own calls at their dearest as PAYPAL_REFUND_KEPT's (11);
- * - retryWritesPerFailedLook: a read or write not known puts the order back an hour on (one ZADD, in place of the
- *   look's own list write), so its worst is the HEXISTS and one script an hour (looksPerDayAtMost, the watch's own
- *   hourly look), for as long as the watch keeps the order (daysAtMost, the paid record's 400 days).
+ * - retryWritesPerFailedLook: a read or write not known puts the order back an hour on, in place of the look's own
+ *   list write, fenced against the store's erasure like every put-back since #4892 (PAYPAL_WATCH_IF_LIVE: the EVAL
+ *   and its EXISTS, HEXISTS and ZADD, 4), so its worst is the HEXISTS, one script and that put-back an hour
+ *   (looksPerDayAtMost, the watch's own hourly look), for as long as the watch keeps the order (daysAtMost, the paid
+ *   record's 400 days).
  * The look's other commands are PAYPAL_REFUND_WATCH's (the paid record's GET and the list write) and the run's list
  * reads. A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
  * tests/affiliate-paypal-partial-refund.test.ts.
@@ -1528,7 +1530,7 @@ export const PAYPAL_PARTLY_KEPT = {
   scriptsPerFirstLook: 1,
   writesPerScript: 1,
   commandsPerScriptAtMost: 11,
-  retryWritesPerFailedLook: 1,
+  retryWritesPerFailedLook: 4,
   looksPerDayAtMost: 24,
   daysAtMost: 400,
 } as const;

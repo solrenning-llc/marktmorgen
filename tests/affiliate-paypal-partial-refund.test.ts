@@ -142,6 +142,7 @@ async function main(): Promise<void> {
     const later = await look();
     is("a later look reads the mark again and writes nothing", [later.filter((c) => c[0] === "HEXISTS").length, markWrites(later).length], [1, 0]);
     is("the whole later look is within the lines' sum", later.length <= counted + PAYPAL_PARTLY_KEPT.markReadsPerLook, true);
+    is("a failed mark's fenced put-back is priced as the refund in full's", PAYPAL_PARTLY_KEPT.retryWritesPerFailedLook, PAYPAL_REFUND_KEPT.retryWritesPerFailedLook);
     is("looked at no more often, nor longer, than the watch keeps it", [PAYPAL_PARTLY_KEPT.looksPerDayAtMost, PAYPAL_PARTLY_KEPT.daysAtMost], [PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost, PAYPAL_REFUND_WATCH.daysWatchedAtMost]);
   }
 

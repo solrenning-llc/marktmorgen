@@ -1729,7 +1729,8 @@ export async function watchPayPal(
       if (!(kept === 0 || kept === 1)) {
         console.error("a PayPal refund in part could not be marked; looked at again in an hour", order);
         // A reschedule not confirmed leaves the order due, where the next pass finds it again.
-        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+        // Fenced against the store's erasure, as every other put-back (PAYPAL_WATCH_IF_LIVE; #4892).
+        await watchAt(now + 3600, order).catch(() => undefined);
         continue;
       }
     }

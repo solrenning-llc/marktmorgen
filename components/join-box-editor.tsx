@@ -69,7 +69,7 @@ export function JoinBoxEditor({
         someone else. They land in your list on the Email screen, ready for your broadcasts and welcome emails.
       </p>
 
-      <label className="mt-5 flex items-start gap-3 text-ink">
+      <label className="mt-5 flex min-h-11 items-start gap-3 text-ink">
         <input type="checkbox" disabled={saving} checked={on} onChange={(e) => setOn(e.target.checked)} className="mt-1 size-5 shrink-0 accent-violet-brand" />
         <span className="font-semibold">Show the sign-up box on my store page</span>
       </label>

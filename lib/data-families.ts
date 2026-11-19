@@ -49,7 +49,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
-  "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
+  "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:claims:", "nl:closed:due", "nl:closed:erasing", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:fields:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
@@ -102,7 +102,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
-  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:soldbefore:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop", "nl:stamp:noroom:",
   "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
@@ -239,7 +239,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // itself within a day.
   "nl:cimg:": T("nl:cm:", 1), "nl:cimg:doors": C, "nl:cimg:n:": E,
   "nl:closing:lock": C,
-  "nl:closed:batch": C, "nl:closed:due": C, "nl:closed:walk": C, "nl:closed:lock": C,
+  "nl:closed:batch": C, "nl:closed:claims:": C, "nl:closed:due": C, "nl:closed:erasing": C, "nl:closed:walk": C, "nl:closed:lock": C,
   // Queue item 307 [EC1]: a store's closing emails, the addresses told and its members' last payments, named by its folder; the stores whose members are held.
   "nl:closing:credit:": E, "nl:closing:told:": E, "nl:closing:paid:": E, "nl:closing:held": I, "nl:closing:final": I, "nl:closing:work:": E, "nl:closing:refund:": C,
   // A plan paid for a store already closing, until it is ended and returned (company); a closed store's address, hashed, until it expires.
@@ -451,6 +451,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(36), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
+  // A store whose earlier sales were not all read: one mark, erased with it (lib/yearly-offer.ts, soldBeforeUnknownKey).
+  "nl:soldbefore:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
   "nl:stamp:drop": C,
   // A store found without room for a new stamped copy or preview: one mark a store, kept NO_ROOM_NOTE_SECONDS (an hour), erased with it.

@@ -63,6 +63,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   labels: ["Can I keep my own details about people, and track deals?"],
   meetings: ["Can I sell paid calls?", "Can I run a community or a webinar?"],
   memberships: ["Can I sell a membership?"],
+  moved: ["What happens when my plan ends?"],
   notifications: ["How do I choose which alert emails I get?"],
   outreach: ["Can my store help me find sponsors and partners?", "Who can I write to, and what are the rules?"],
   pages: ["Can I build a sales page or a landing page?", "Can I reuse a section on several pages?"],

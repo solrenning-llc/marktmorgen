@@ -129,6 +129,11 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId as string;
   const watch = `nl:ppsell:watch:${statsId}`;
+  // The order put back on the watch only while the store is live (lib/paypal-sales.ts, PAYPAL_WATCH_IF_LIVE; #4892),
+  // billed as its EVAL and each call it runs (EXISTS, HEXISTS, ZADD).
+  const fencedPutBack = (c: (string | number)[], order: string) =>
+    c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-watch-if-live:v1") && c.includes(watch) && c[c.length - 1] === order;
+  const billed = (c: (string | number)[]) => 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length;
   is("an endpoint listening for refunds is kept", (await addEndpoint(store, "https://hooks.example.net/in", ["refund.issued"])).ok, true);
   const product = (await readListing(store, added.product.id))!;
   const retrySeconds = (sales as Record<string, unknown>).REFUND_TELL_RETRY_SECONDS;
@@ -204,7 +209,7 @@ async function main(): Promise<void> {
     const pass = sent.slice(before);
     if (pass.some((c) => c[0] === "HGET" && keyOf(c).startsWith("nl:erased:"))) tries += 1;
     const lineAt = pass.findIndex((c) => c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") && pass.some((d) => d[0] === "SET" && keyOf(d).startsWith("nl:hooks:d:") && d.includes("NX")));
-    own.push(pass.filter((c) => keyOf(c).startsWith("nl:ppsell:tell:") || (c[0] === "ZADD" && keyOf(c) === watch && c[3] === lost.order && Number(c[2]) > 0)).length);
+    own.push(pass.reduce((sum, c) => sum + (keyOf(c).startsWith("nl:ppsell:tell:") ? 1 : fencedPutBack(c, lost.order) ? billed(c) : 0), 0));
     looks.push(pass.filter((c) => (c[0] === "GET" && keyOf(c) === `nl:ppsell:paid:${lost.order}`) || ((c[0] === "ZADD" || c[0] === "EXPIRE") && keyOf(c) === `nl:ppsell:refunded:${statsId}`)).length);
     // The last pass: what the "Not sent" lines took, from the event's mark taken for them to the log's LTRIM.
     const lastEvt = pass.map((c, at) => (c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") ? at : -1)).filter((at) => at >= 0).pop();
@@ -214,7 +219,7 @@ async function main(): Promise<void> {
   }
   is("tried at most REFUND_TELL_TRIES_AT_MOST times, an hour apart", tries, triesAtMost);
   is("the registry's triesAtMost is that bound (PAYPAL_REFUND_TELL_RETRY)", PAYPAL_REFUND_TELL_RETRY.triesAtMost, triesAtMost);
-  is("each failed try's own commands as the registry prices them, none more at the last", own, [...Array(tries - 1).fill(PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry), PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry - 1]);
+  is("each failed try's own commands as the registry prices them, no put-back at the last", own, [...Array(tries - 1).fill(PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry), PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry - PAYPAL_REFUND_TELL_RETRY.putBackCommandsPerTry]);
   is("each try looks at the order with the commands the registry prices", looks.every((n) => n === PAYPAL_REFUND_TELL_RETRY.lookCommandsPerFailedTry), true);
   is("the not-sent lines take no more than the registry prices", lineCommands > 0 && lineCommands <= PAYPAL_REFUND_TELL_RETRY.notSentCommandsAtMost, true);
   is("never told", await told(lost.capture), 0);
@@ -283,7 +288,7 @@ async function main(): Promise<void> {
       await sweep();
       const pass = sent.slice(before);
       if (pass.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) n += 1;
-      ownLooks.push(pass.filter((c) => String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "HGET" && String(c[1]) === sales.backKey(statsId)) || (c[0] === "ZADD" && String(c[1]) === watch && c[3] === order && Number(c[2]) > 0)).length);
+      ownLooks.push(pass.reduce((sum, c) => sum + (String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "HGET" && String(c[1]) === sales.backKey(statsId)) ? 1 : fencedPutBack(c, order) ? billed(c) : 0), 0));
       hour();
     }
     return n;

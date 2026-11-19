@@ -1827,7 +1827,7 @@ export async function watchPayPal(
           const observed = await refundObservedFirst(statsId, paid, now);
           if (observed === null || now - observed < REFUND_TELL_RETRY_SECONDS) {
             console.error("when telling of a PayPal refund first failed is unknown; looked at again in an hour", order);
-            await redisPipeline([["ZADD", watchKey(statsId), String(now + REFUND_TELL_AGAIN_SECONDS), order]]).catch(() => undefined);
+            await watchAt(now + REFUND_TELL_AGAIN_SECONDS, order).catch(() => undefined);
             continue;
           }
           // The independent durable date proves the existing window elapsed. It never makes the unknown notice

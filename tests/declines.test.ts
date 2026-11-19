@@ -36,6 +36,9 @@ async function main(): Promise<void> {
   is("each reason in its group", ["insufficient_funds", "expired_card", "incorrect_cvc", "authentication_required", "do_not_honor", "stolen_card", "processing_error", "currency_not_supported", "something_new"].map(declineGroup), ["funds", "expired", "typo", "confirm", "bank", "fraud", "network", "unsupported", "other"]);
   is("every group has a title and what helps", Object.values(DECLINE_WORDS).every((w) => w.title.length > 5 && w.help.length > 20), true);
   is("fraud is never met with asking for the same card again", DECLINE_WORDS.fraud.help.includes("Do not ask for the same card again"), true);
+  // A card the bank restricts (possibly reported lost or stolen) or declines for a security reason is met like fraud:
+  // never "ask for the same card again" (Codex X6 on #1913).
+  is("a restricted card and a security violation are in the fraud group", ["restricted_card", "security_violation"].map(declineGroup), ["fraud", "fraud"]);
   const summary = declineSummary([
     { reason: "insufficient_funds", cents: 4900, currency: "usd", created: 1 },
     { reason: "insufficient_funds", cents: 1000, currency: "eur", created: 2 },

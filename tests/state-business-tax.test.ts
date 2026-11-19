@@ -25,6 +25,24 @@ test("Texas: the economic nexus at USD 500,000 or more is treated before 90% of 
   assert.deepEqual(assessStateBusinessTax(row("TX", 1_000), NOW), { status: "below-threshold", projectedMinor: 1_000 });
 });
 
+test("Texas: a closed prior period that reached the threshold carries nexus until 34 TAC §3.586 is read", () => {
+  // Codex V could not read when the nexus ends, so a reached prior period refuses to read as no nexus.
+  assert.equal(status(row("TX", 0, 50_000_000)), "treatment-required");
+  assert.equal(status(row("TX", 0, 49_999_999)), "below-threshold");
+  assert.equal(status(row("TX", 0, null)), "unknown");
+  assert.equal(status({ ...row("TX", 0), priorYearMinor: -1 }), "invalid");
+});
+
+test("an old reading refuses: each rule answers only until its review date", () => {
+  for (const state of ["TX", "WA"] as const) {
+    const rule = STATE_BUSINESS_TAX_RULES[state];
+    assert.equal(rule.reviewBy, "2027-11-19", state);
+    const at = (day: string) => ({ ...row(state, 0), year: Number(day.slice(0, 4)), recordedOn: day });
+    assert.equal(status(at("2027-11-18"), Date.parse("2027-11-18T12:00:00Z")), "below-threshold", state);
+    assert.equal(status(at("2027-11-19"), Date.parse("2027-11-19T12:00:00Z")), "unknown", state);
+  }
+});
+
 test("Washington: above USD 100,000 in the current or the prior calendar year, equality does not trigger", () => {
   assert.equal(status(row("WA", 8_999_999)), "below-threshold");
   assert.equal(status(row("WA", 9_000_000)), "treatment-required");

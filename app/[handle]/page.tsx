@@ -1,6 +1,6 @@
 import { MovedNotice } from "@/components/moved-notice";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { exitAnswerForValue } from "@/lib/exit-redirect-rules";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { StoreTrustCard } from "@/components/store-trust-card";

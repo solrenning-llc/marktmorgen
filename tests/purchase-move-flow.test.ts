@@ -9,7 +9,8 @@
  * anything is read; three a day; the two emails, one to each address, each
  * taken from the store's access emails before it goes, and none (or the
  * second not) when the figure is spent or cannot be read, said as it is;
- * an address the store deleted refused when asking and when confirming;
+ * an address the store deleted is never contacted or disclosed when asking,
+ * and is refused when confirming;
  * opening a link confirms nothing, pressing Confirm records that address's
  * confirmation once; a link from another store does nothing here; and what
  * each request reads costs less than the public request held for it.
@@ -236,14 +237,26 @@ async function main(): Promise<void> {
 
   part("An address the store deleted");
   {
+    const fresh = await signIn("fresh.buyer@example.com");
+    const freshAnswer = await askToMovePurchases({ store: moss, token: fresh, to: "fresh.new@example.com", origin: ORIGIN });
     const token = await signIn("dee.buyer@example.com");
     await redis.pipeline([suppressCommand(moss.listId!, "gone.new@example.com", Math.floor(Date.now() / 1000))]);
-    const [m, q, k] = [mails.length, await used(), moveKeys().length];
-    is("moving to it is refused", await askToMovePurchases({ store: moss, token, to: "Gone.New@example.com", origin: ORIGIN }), "deleted");
+    const [m, q, k] = [mails.length, await used(), moveKeys().filter((key) => !key.startsWith("nl:pm:day:")).length];
+    const erasedAnswer = await askToMovePurchases({ store: moss, token, to: "Gone.New@example.com", origin: ORIGIN });
+    is("an erased destination is indistinguishable from a fresh one", [freshAnswer, erasedAnswer], ["sent", "sent"]);
     const gone = await signIn("gone.old@example.com");
     await redis.pipeline([suppressCommand(moss.listId!, "gone.old@example.com", Math.floor(Date.now() / 1000))]);
-    is("moving from it is refused", await askToMovePurchases({ store: moss, token: gone, to: "gone.other@example.com", origin: ORIGIN }), "deleted");
-    is("no request, no email, no store email taken", [moveKeys().length - k, mails.length - m, (await used()) - q], [0, 0, 0]);
+    is("an erased current address is not disclosed either", await askToMovePurchases({ store: moss, token: gone, to: "gone.other@example.com", origin: ORIGIN }), "sent");
+
+    const bounded = await signIn("bounded.buyer@example.com");
+    await redis.pipeline([suppressCommand(moss.listId!, "bounded.new@example.com", Math.floor(Date.now() / 1000))]);
+    const answers: string[] = [];
+    for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY + 1; i += 1) {
+      answers.push(await askToMovePurchases({ store: moss, token: bounded, to: "bounded.new@example.com", origin: ORIGIN }));
+    }
+    is("suppressed probes use the same daily bound", answers, ["sent", "sent", "sent", "over"]);
+    const kept = moveKeys().filter((key) => !key.startsWith("nl:pm:day:")).length;
+    is("no request, link, email or store email is made for erased addresses", [kept - k, mails.length - m, (await used()) - q], [0, 0, 0]);
 
     // Asked first, then deleted before confirming.
     const late = await signIn("late.buyer@example.com");

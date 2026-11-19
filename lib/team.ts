@@ -409,6 +409,43 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
 }
 
 /**
+ * Takes ids out of a person's team index only where the same Redis step reads the store's team as gone or as listing
+ * everyone but them (Codex U's MEDIUM on #3660). A join that lands before this step keeps its id; one that lands after
+ * it adds the id itself with its own SADD. A team record that does not read as a team keeps the id: unknown is never
+ * "not on the team". The read past (memberStoresExact) calls it for the ids it read off their team; one command.
+ */
+export const TEAM_INDEX_OFF_TEAM = `-- marktmorgen:team-index-off-team:v1
+local address, removed = ARGV[1], 0
+for i = 2, #KEYS do
+  local raw = redis.call('GET', KEYS[i])
+  local off = false
+  if not raw then
+    off = true
+  else
+    local ok, team = pcall(cjson.decode, raw)
+    if ok and type(team) == 'table' and type(team.members) == 'table' and type(team.invites) == 'table' then
+      off = true
+      for _, member in ipairs(team.members) do
+        if type(member) == 'table' and type(member.email) == 'string' and string.lower(string.match(member.email, '^%s*(.-)%s*$')) == address then
+          off = false
+          break
+        end
+      end
+    end
+  end
+  if off then removed = removed + redis.call('SREM', KEYS[1], ARGV[i]) end
+end
+return removed`;
+
+/** Runs TEAM_INDEX_OFF_TEAM for `sids`; throws on a reply that is not a count of at most that many (rule 24). */
+async function dropOffTeam(address: string, sids: string[]): Promise<void> {
+  if (!sids.length) return;
+  const replies = repliesFor(await redisPipeline([["EVAL", TEAM_INDEX_OFF_TEAM, 1 + sids.length, indexKey(address), ...sids.map(teamKey), address, ...sids]]), 1);
+  const removed = replies ? countOf(replies[0]) : null;
+  if (removed === null || removed > sids.length) throw new UnknownReplyError("ids taken out of a teammate's store index");
+}
+
+/**
  * memberStores read exactly, for a caller that deletes what a person keeps across the stores they serve when they
  * serve no other (lib/closed-store-data.ts, prepareStore: a host's own calendar; Claude 6 on #3156). Nothing is left
  * out: a store whose team or record does not read, or an index of more than MEMBER_STORES_READ stores, throws
@@ -439,8 +476,9 @@ export async function memberStoresExact(email: string, other?: string): Promise<
   const found: { store: Store; role: TeamRole }[] = [];
   // The ids read exactly that are no store this person serves: out of the index when it is longer than is read.
   const stale: string[] = [];
-  // Of those, the ones whose team was read without them: only these can have been joined between the read and the
-  // SREM, so only these are read again and put back (Claude 4's LEVE on #3660). An id with no store (nil) or a store
+  // Of those, the ones whose team was read without them: only these can have been joined between the read and their
+  // removal, so only these leave through TEAM_INDEX_OFF_TEAM, which reads the team again in the same step (Claude 4's
+  // LEVE and Codex U's MEDIUM on #3660). An id with no store (nil) or a store
   // they own, whose team still lists them, is no store they serve whoever joins: it leaves the index for good, so the
   // read past gets further every read (decideCalendarRuns).
   const offTeam: string[] = [];
@@ -461,16 +499,13 @@ export async function memberStoresExact(email: string, other?: string): Promise<
     // Read past (Codex G on #3660): the next read starts after these. One not confirmed is only no progress this
     // time; the answer is unknown either way, so this read never decides.
     if (stale.length) {
-      await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
-      // A join that landed between its team's read and the SREM was taken out with it (its SADD was a no-op, the id
-      // was there): each id taken out is read again, and put back when the person is on its team now, or when that
-      // read is not known (Claude 1 C3 on #3660). A join saved after this read adds the id itself, after the SREM.
-      const back: string[] = [];
-      for (const sid of offTeam) {
-        const now = await readTeam(sid).catch(() => null);
-        if (!now || now.members.some((m) => m.email === address)) back.push(sid);
-      }
-      if (back.length) await redisPipeline([["SADD", indexKey(address), ...back]]).catch(() => {});
+      // An id with no store, or a store they own, is no store they serve whoever joins: it leaves for good.
+      const forGood = stale.filter((sid) => !offTeam.includes(sid));
+      if (forGood.length) await redisPipeline([["SREM", indexKey(address), ...forGood]]).catch(() => {});
+      // An id read off its team leaves only where the same Redis step still reads them off it, so a join that landed
+      // after the read is never taken out, and there is no repair write to fail (Codex U's MEDIUM on #3660; before it,
+      // Claude 1 C3's join race). A step that does not confirm is only no progress this time.
+      await dropOffTeam(address, offTeam).catch(() => {});
     }
     throw over();
   }

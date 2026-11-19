@@ -8,7 +8,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { FOCUS_CLEAR_ROOM, focusScrollBy } from "@/lib/studio-focus-clear";
 
-const base = { barsBottom: 124, inDialog: false, inBars: false };
+const base = { barsBottom: 124, inDialog: false, inBars: false, fromPointer: false };
 
 test("a control under the bars scrolls the page by the overlap and the focus ring's room", () => {
   assert.equal(FOCUS_CLEAR_ROOM, 12, "124 px of bars + 12 = the 8.5rem of scroll-padding-top");
@@ -34,4 +34,13 @@ test("nothing when no bar is sticky (print, forced reflow) or a reading is not a
   assert.equal(focusScrollBy({ ...base, controlTop: Number.NaN }), 0);
   assert.equal(focusScrollBy({ ...base, barsBottom: Number.POSITIVE_INFINITY, controlTop: 10 }), 0);
   assert.equal(focusScrollBy({ ...base, controlTop: Number.NEGATIVE_INFINITY }), 0);
+});
+
+test("never during a pointer press: a mouse or touch focus is the click's own, and moving the page would lose it", () => {
+  // Cross-browser (firefox 2/3, webkit 2/3) and Copying a whole store (chromium 2/3) on 9d3a4bdfe6: a forced click on the
+  // look editor's visually hidden theme radio focused it under the bars, the page moved before the click ended, and the
+  // radio stayed unchecked (tests/e2e/look-acknowledgment.mjs:32).
+  assert.equal(focusScrollBy({ ...base, controlTop: 10, fromPointer: true }), 0);
+  assert.equal(focusScrollBy({ ...base, controlTop: -400, fromPointer: true }), 0);
+  assert.equal(focusScrollBy({ ...base, controlTop: 10, fromPointer: false }), 10 - 124 - FOCUS_CLEAR_ROOM, "keyboard and script focus still come clear");
 });

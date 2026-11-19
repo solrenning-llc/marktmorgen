@@ -42,7 +42,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 82.4% | 60.19% | 60.06% | $77.65 | 0.50 |
+| $129 / $1,290 **(recommended)** | 82.4% | 60.19% | 60.05% | $77.65 | 0.50 |
 | $149 / $1,490 | 100.0% | 60.48% | 60.35% | $90.12 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.86% | 60.74% | $102.86 | 0.38 |
 | $199 / $1,990 | 100.0% | 61.29% | 61.19% | $121.97 | 0.32 |
@@ -56,7 +56,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $299 / $2,990 | 8.6% | 60.40% | 60.02% | $180.61 | 1.47 |
+| $299 / $2,990 | 8.5% | 60.40% | 60.02% | $180.61 | 1.47 |
 | $449 / $4,490 **(recommended)** | 51.4% | 60.41% | 60.03% | $271.25 | 0.98 |
 
 ### Scale
@@ -91,10 +91,10 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Access emails a month: included · #553 · before #553 | **120** · 150 · 150 | **200** · 400 · 400 | **590** · 1,000 · 1,000 |
 | Store emails a month: included · #553 · before #553 | **61** · 75 · 75 | **150** · 300 · 300 | **470** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.19% | 60.41% | 60.48% |
-| Net at full included use, yearly (sizing reading) | 60.06% | 60.03% | 60.04% |
+| Net at full included use, yearly (sizing reading) | 60.05% | 60.03% | 60.04% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.06% | 12.15% | 12.17% |
 | Net a customer, a month, at full included use | $77.65 | $271.25 | $604.25 |
-| The same at #553's price | $39.17 | $265.53 | $593.81 |
+| The same at #553's price | $39.17 | $265.53 | $593.80 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 
@@ -121,7 +121,7 @@ Each plan at its recommended price with every included figure used, plus one of 
 
 | Plan | Monthly: revenue, net | Yearly: revenue, net |
 | --- | --- | --- |
-| Store | $275.00, 60.37% | $3,042.00, 60.33% |
+| Store | $275.00, 60.37% | $3,042.00, 60.32% |
 | Studio | $707.00, 60.42% | $7,586.00, 60.20% |
 | Scale | $1,257.00, 60.47% | $13,086.00, 60.14% |
 

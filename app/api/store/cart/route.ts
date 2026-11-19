@@ -1,10 +1,11 @@
+import { consumerGate } from "@/lib/eu-vat-gate";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm } from "@/lib/digital-consent";
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readListings, readProduct } from "@/lib/catalog";
+import { readAsking, readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
 import { codeCookieName, readLinkCode } from "@/lib/code-link";
@@ -24,14 +25,14 @@ import { LANGUAGES } from "@/lib/store-language";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { countHit } from "@/lib/visit";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { productSegment } from "@/lib/product-slug";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
-import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
+import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { cartOfferOwner } from "@/lib/cart-offers";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
@@ -66,10 +67,20 @@ export async function GET(request: NextRequest) {
   const locale = LANGUAGES[store.language].locale;
   // Which products are still coming soon: a reading that cannot be had is never "none" (Claude 6's audit of rule 24),
   // so no line is payable right now, as for a stock count that cannot be read.
-  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  const [read, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  // A draft is answered as an id the store does not have: no line, no name, no price (MM-SA-30, lib/draft-view.ts).
+  // Whoever knows its id learns nothing from the cart; a draft cannot be paid for in one anyway (lib/cart-rules.ts, cartable).
+  const listings = read.filter((product) => !product.hidden);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
+  // Which lines ask questions at checkout: those are bought from their own page, which asks them, and the cart
+  // checkout below refuses them (#4350), so they are not payable here. A reading that cannot be had is never
+  // "asks nothing" (rule 24): no line is payable right now.
+  const [stocks, asking] = await Promise.all([
+    Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)),
+    readAsking(store, listings.filter((p) => cartable(p)).map((p) => p.id)).catch(() => null),
+  ]);
+  const left = new Map(stocks);
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -81,7 +92,7 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && asking !== null && !asking.has(id) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
   // A product a bundle in the same cart already hands over is not payable on its own line: the bundle brings it (lib/bundle-rules.ts, heldByABundle).
   // Only a bundle that can be paid for itself brings anything: one sold out or coming soon holds nothing back.
@@ -292,8 +303,11 @@ export async function POST(request: NextRequest) {
   let remindVersion = "";
   // The box to start access at once, which loses the right to cancel once it starts (lib/digital-consent.ts).
   let digitalConsent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent: FormData = new FormData();
   try {
     const form = await (await limited(request, 4_000)).formData();
+    sent = form;
     digitalConsent = consentFromForm(form);
     const h = form.get("handle");
     handle = typeof h === "string" ? normaliseHandle(h.slice(0, 40)) : "";
@@ -324,6 +338,12 @@ export async function POST(request: NextRequest) {
   // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
   // back to the cart to try again, nothing charged.
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
+  // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as for one product: before anything is held or charged, a cart
+  // with a paid product for the EU or the UK is refused, and one without the billing country asks for it.
+  for (const product of products) {
+    const gate = consumerGate({ product, headers: request.headers, form: sent });
+    if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
+  }
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);
@@ -334,11 +354,13 @@ export async function POST(request: NextRequest) {
   // Whether this press took a hold count (holdAdmission), given back when no unit stays held.
   let charged = false;
   try {
-    const via = await attributionFor(store, products[0].id, {
+    // A lookup that does not answer never stops the sale: the click rides on the order as pending (owner's decision 6).
+    const credit = await attributionOrPending(store, products[0].id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    }).catch(() => null);
-    const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderShown(store);
+    }, products.map((p) => p.id));
+    const via = credit.known ? credit.via : null;
+    const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && products.every((p) => assistReminderOffered(store, p));
     // Offers after paying, from the first product in the cart whose funnel is
     // on (lib/cart-offers.ts): a secret for this browser, its fingerprint on
     // the checkout, as for one product (app/api/store/checkout/route.ts).
@@ -366,7 +388,7 @@ export async function POST(request: NextRequest) {
       cameFrom: cameFrom(request.headers.get("referer"), new URL(origin).hostname),
         // The channel this sale is credited to: the page's own tags, else the
         // one remembered for this visitor (lib/visit-channel.ts), else direct.
-        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
+        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)), ...pendingChannel(credit) },
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,

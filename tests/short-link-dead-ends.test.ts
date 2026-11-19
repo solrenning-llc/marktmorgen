@@ -17,6 +17,7 @@ import { addLink, findLink, linkKey, readLinks, removeLink, retarget } from "@/l
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 
 const pipeline = redis.pipeline.bind(redis);
 let sid = "", statsId = "", code = "";
@@ -33,6 +34,8 @@ const broken = (c: string, owner = statsId) => JSON.stringify({ code: c, name: "
 beforeEach(async () => {
   redis.pipeline = pipeline;
   redis.clear();
+  // #3330's per-instance memory, cleared with Redis (see tests/short-link-evidence.test.ts).
+  forgetShortLinkOpenMemory();
   await claimHandle("owner@example.com", "harbor", "Harbor", "");
   await ensureStoreId("owner@example.com");
   await ensureStatsId("owner@example.com");
@@ -53,7 +56,13 @@ for (const stage of ["pointer", "owner-record"] as const) test(`J: a partial ${s
 });
 
 test("J: a store confirmed gone still ends the link", async () => {
-  redis.pipeline = (commands) => commands[0][0] === "GET" && commands[0][1] === `nl:store:id:${sid}` ? Promise.resolve([null]) : pipeline(commands);
+  // The store's record answers "none" in its own place of the batch it is read in (on #3330 that read is the first of
+  // the open's batch, not a pipeline of its own); every other command of that batch answers as Redis does.
+  redis.pipeline = async (commands) => {
+    if (commands[0][0] !== "GET" || commands[0][1] !== `nl:store:id:${sid}`) return pipeline(commands);
+    const replies = await pipeline(commands);
+    return [null, ...replies.slice(1)];
+  };
   const response = await open();
   assert.equal(response.status, 302);
   assert.match(response.headers.get("location")!, /\/l\/ended$/);

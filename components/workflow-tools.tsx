@@ -350,7 +350,7 @@ export function WorkflowPreview({
       {confirm ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button" className="btn btn-primary btn-sm" disabled={confirm.busy} aria-busy={confirm.busy} onClick={confirm.onConfirm}>{confirm.label}</button>
-          <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={confirm.onCancel}>Not now</button>
+          <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4" onClick={confirm.onCancel}>Not now</button>
         </div>
       ) : null}
     </div>
@@ -391,6 +391,7 @@ const RUN_ERRORS: Record<string, string> = {
   run_paused: "Switch the workflow on first: a paused workflow sends nothing, so continuing would only end the run.",
   unknown: "That run is not there any more. Reload the page.",
   flow_write_unconfirmed: "Your choice could not be confirmed. Reload this run's history before choosing again.",
+  flow_write_busy: "Someone else changed this workflow at the same time, so your choice was not saved. Try again.",
   run_retry_limit: `This run has been tried again ${MAX_RETRIES_BY_YOU} times, the most one run may. Choose whether it went through, or end it.`,
 };
 
@@ -493,7 +494,7 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
               <span className="flex flex-wrap items-center gap-2">
                 <span className={r.status === "held" ? "tag tag-next" : "tag"}>{RUN_STATUS_WORDS[r.status] ?? r.status}</span>
                 <span className="text-ink-soft">{when(r.updatedAt)}</span>
-                <button type="button" className="font-bold text-ink-soft underline underline-offset-4" disabled={busy} onClick={() => show(r.person)}>History</button>
+                <button type="button" className="inline-flex min-h-11 min-w-11 items-center font-bold text-ink-soft underline underline-offset-4" disabled={busy} onClick={() => show(r.person)}>History</button>
               </span>
             </li>
           ))}

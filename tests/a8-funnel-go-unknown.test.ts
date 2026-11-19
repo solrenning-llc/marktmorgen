@@ -18,6 +18,7 @@ import { GET as goRoute } from "@/app/[handle]/go/[funnel]/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+import { readsKey } from "./listing-reads";
 
 type Command = (string | number)[];
 const OWNER = "a8-funnel-go@example.test";
@@ -26,7 +27,7 @@ let key = "";
 let inject: ((values: unknown[]) => unknown[] | Promise<unknown[]>) | null = null;
 let failListing = "";
 redis.pipeline = (async (batch: Command[]) => {
-  if (failListing && batch.some((c) => c[0] === "GET" && c[1] === failListing)) throw new Error("synthetic Redis timeout");
+  if (failListing && batch.some((c) => readsKey(c, failListing))) throw new Error("synthetic Redis timeout");
   const values = await real(batch);
   if (inject && batch.some((c) => c[0] === "HVALS" && c[1] === key)) return inject(values);
   return values;

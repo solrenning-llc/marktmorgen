@@ -76,7 +76,7 @@
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, readPaidExact, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
-import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
+import { ERASING_KEY, MAX_STORE_BYTES, erasingField, saleHandles, storeForEmailSeen, storeForId, storeIdCommand, storeRef } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -87,7 +87,7 @@ import { REFUSED_TRIES, countRefusal, refusedTooOften } from "@/lib/refused-trie
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { giveData, needData } from "@/lib/store-data";
-import { orderWrite } from "@/lib/order-data";
+import { orderWrite, orderWriteIfStoreLive } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -6362,7 +6362,14 @@ async function approveRenewal(store: Store, invoiceId: string): Promise<"approve
   const { buyerUnknown: _waits, selfUnknown: _self, ...decided } = line;
   void _waits;
   void _self;
-  const written = await orderWrite(store, [["HSETNX", salesKey(store.statsId as string), invoiceId, JSON.stringify(decided)]]);
+  const written = await orderWriteIfStoreLive(
+    store,
+    [["HSETNX", salesKey(store.statsId as string), invoiceId, JSON.stringify(decided)]],
+    storeIdCommand(store.sid)[1],
+    ERASING_KEY,
+    await erasingField(storeRef(store)),
+  );
+  if (!written) return "gone";
   if (written[0] !== 1) return written[0] === 0 ? "not-waiting" : "unknown";
   await countUnconfirmed({ approved: 1 });
   return "approved";

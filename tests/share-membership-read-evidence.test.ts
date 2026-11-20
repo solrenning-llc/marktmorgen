@@ -27,10 +27,12 @@ async function world(options: Options = {}) {
   let searches = 0;
   try {
     redis.pipeline = async commands => {
-      if (options.historyFailure === "marker" && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === "nl:share:read-until") return [null];
-      if (commands.length === 1 && commands[0][1] === "nl:share:applied") {
+      const fencedMarker = commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:share-marker-live:v1\n");
+      const markerKey = fencedMarker ? commands[0][5] : commands[0]?.[1];
+      if (options.historyFailure === "marker" && fencedMarker && markerKey === "nl:share:read-until") return [null];
+      if (commands.length === 1 && markerKey === "nl:share:applied") {
         if (commands[0][0] === "HGET" && options.applied !== undefined) return options.applied;
-        if ((commands[0][0] === "HSET" || commands[0][0] === "HDEL") && options.appliedWrite !== undefined) return options.appliedWrite;
+        if ((fencedMarker || commands[0][0] === "HDEL") && options.appliedWrite !== undefined) return options.appliedWrite;
       }
       return base(commands);
     };

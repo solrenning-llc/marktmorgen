@@ -82,8 +82,8 @@ function paidCheckout(id: string, product: string, fingerprint: string, over: Re
     customer: "cus_TestBuyer01",
     currency: "usd",
     metadata: { store: "harbor", product, upsell_key: fingerprint },
-    customer_details: { email: BUYER },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    customer_details: { email: BUYER, address: { country: "US" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
     ...over,
   };
 }
@@ -114,12 +114,12 @@ async function main(): Promise<void> {
   const origin = "https://marktmorgen.com";
   const browser = newUpsellKey();
   const take = async (session: string, step: string, answer: "yes" | "no") =>
-    takeUpsell({ store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
+    takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
 
   const noteFor = async (session: string) => {
     // What the thanks page does on load: settle first, then draw the notes (app/[handle]/thanks/page.tsx).
     await settleUpsells(store, session);
-    const view = await funnelView({ store, session, product: (await readListing(store, front))!, alsoOwned: [], eligible: true, created: NOW - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US", card: "US" }, store, session, product: (await readListing(store, front))!, alsoOwned: [], eligible: true, created: NOW - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     const note = view.notes[0];
     const t = thanksWords("en");
     const shown = note ? (note.state === "checking" ? t.stillHearing(note.title) : note.state === "unconfirmed" ? t.bankNotConfirmed(note.title) : t.notChargedCard(note.title)) : "";

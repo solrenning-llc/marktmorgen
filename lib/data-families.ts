@@ -37,11 +37,11 @@ export const COUNTED_FAMILIES: readonly string[] = [
 export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
-  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:", "nl:agent:book:lock:",
-  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:alert:",
+  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:aff:unc:month:", "nl:affhub:", "nl:agent:book:lock:",
+  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:stop:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
-  "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
+  "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:move-broken:open", "nl:auth:move-room:", "nl:auth:moving:", "nl:auth:rec:",
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
@@ -64,6 +64,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:hooks:q", "nl:hooks:stores", "nl:hooks:wait:", "nl:hookout:", "nl:hookout:due", "nl:host:claims:", "nl:hostcal:cfg:", "nl:hostcal:err:",
   "nl:hostcal:good:", "nl:hostcal:lock:", "nl:house:seed", "nl:house:seed:lock", "nl:import:",
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
+  "nl:inbound:support:bytes:", "nl:inbound:support:counted:", "nl:inbound:support:held:",
   "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
   "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
   "nl:learn:rate:ip:", "nl:leave:", "nl:letters:link:", "nl:letters:ok:", "nl:letters:rl:addr:", "nl:letters:rl:ip:", "nl:lib:joined:", "nl:lib:link:", "nl:list:try:", "nl:listed:", "nl:lock:plan-stop:", "nl:lostdispute:cursor:", "nl:mail-check:last",
@@ -91,7 +92,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
   "nl:recover:asks", "nl:recover:asks:s:", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:recover:tries:", "nl:ref:all", "nl:ref:by:",
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
-  "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
+  "nl:ref:owed", "nl:refused:", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
   "nl:resend-budget:{", "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
   "nl:reading:", "nl:reading:day:", "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
@@ -111,8 +112,9 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:search:", "nl:search:build:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:held", "nl:tasks:taken:",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tben:", "nl:ticket:in:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:read:", "nl:traffic:x:", "nl:trialnudge:cursor", "nl:upd:job:",
+  "nl:operator:traffic-log", "nl:operator:traffic-reset:lock", "nl:traffic:spike-day:", "nl:traffic:spike:",
   "nl:updheld", "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
-  "nl:upsell:pending", "nl:usage-watch:lock", "nl:usage-watch:told", "nl:vault:fresh:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
+  "nl:upsell:pending", "nl:usage-watch:lock", "nl:usage-watch:told", "nl:usage-watch:told:", "nl:vault:ctl:", "nl:vault:fresh:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:", "nl:wb:open:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:", "nl:wf:ver:pause:",
@@ -192,7 +194,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- an account's sign-in: a person's, not a store's
   // nl:2fa:lockedset: also holds one shared list of kept accounts, at most KEPT_ANY_MAX tags of 41 bytes (lib/two-step.ts KEEP_ANY).
   "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lock:": C, "nl:2fa:lockedset:": C, "nl:2fa:keptstar:": Cr(400), "nl:2fa:once:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
-  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:bound:": C, "nl:auth:rec:link:": C,
+  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:move-broken:open": C, "nl:auth:move-room:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:bound:": C, "nl:auth:rec:link:": C,
   "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:second:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
   "nl:auth:code:": C, "nl:auth:linkcode:": C, "nl:auth:lastcode:": C, "nl:rl:code-addr:": C, "nl:rl:code-day:": C, "nl:rl:code-ip:": C,
   "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:drop:": C, "nl:pk:lock:": C, "nl:lock:plan-stop:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
@@ -200,13 +202,13 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
   "nl:adsrv:": E, "nl:adsrv:ctx:": X(4), "nl:adsrv:last:": E, "nl:adsrv:sent:": X(3), "nl:adsrv:sub:": X(400),
-  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:seen:": X(2), "nl:aff:session:": X(30),
+  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30), "nl:aff:unc:month:": Cr(400),
   "nl:affhub:": L, "nl:affhub:link:": Cr(1), "nl:affkit:": E,
   // Proposals and agreements (lib/agreement-store.ts): the store's lists go, and each agreement and its versions through them.
   "nl:agree:s:": E, "nl:agree:p:": E, "nl:agree:r:": T("nl:agree:s:", 400), "nl:agree:v:": T("nl:agree:s:", 400), "nl:agree:lock:": X(1),
   // The creator's own notes for their assistant (lib/assistant-memory-store.ts): go with the store.
   "nl:amem:": E, "nl:amem:lock:": X(1),
-  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E,
+  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E, "nl:ai:stop:": X(1),
   "nl:alert:": E, "nl:alert:seen:": Cr(2), "nl:allow:": E,
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,
@@ -295,6 +297,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:import:": X(14), "nl:imports:active": I, "nl:imports:busy:": E, "nl:imports:cf:": E, "nl:imports:cf:lock:": E,
   "nl:imports:list:": E, "nl:imports:lock": C, "nl:imports:moved:": E, "nl:imports:rows:": E,
   "nl:inbound:seen:": C,
+  "nl:inbound:support:bytes:": C, "nl:inbound:support:counted:": C, "nl:inbound:support:held:": C,
   "nl:inbox:": E, "nl:inbox:tok:": T("nl:inbox:"),
   "nl:intro:c:": E,
   "nl:indexnow:sent": C,
@@ -417,7 +420,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:recount:": C, "nl:recount:ids": C, "nl:recount:lock": C, "nl:recount:state": C, "nl:recount:sum": C,
   "nl:recover:asks": I, "nl:recover:asks:s:": I, "nl:recover:link:": T("nl:erase:ix:", 400), "nl:recover:off:": E, "nl:recover:once:": E, "nl:recover:sent:": X(15), "nl:recover:tries:": X(1),
   "nl:ref:all": C, "nl:ref:by:": C, "nl:ref:c:": C, "nl:ref:code:": C, "nl:ref:cursor": C, "nl:ref:list:": C, "nl:ref:mine:": C,
-  "nl:ref:mycode:": C, "nl:ref:owed": C,
+  "nl:ref:mycode:": C, "nl:ref:owed": C, "nl:refused:": X(45),
   "nl:remind:": C, "nl:remind:failed:": C, "nl:remind:lock": C,
   "nl:report:": C, "nl:report:t:": C,
   "nl:rev:": E, "nl:rev:all:": E, "nl:rev:hid:": E, "nl:rev:ask:due": I, "nl:rev:ask:sent:": X(120), "nl:rev:link:": T("nl:erase:ix:", 60), "nl:rev:lock:": E,
@@ -481,14 +484,21 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:traffic:c:": E, "nl:traffic:day:": E, "nl:traffic:folders:": I, "nl:traffic:n:": E, "nl:traffic:r:": E, "nl:traffic:x:": E,
   // A store's page readings counted in its window (lib/page-read.ts, 639 [GL7](25)): by its statistics id, gone a day after the window ends.
   "nl:traffic:read:": E,
+  // The operator's early-use alarm (lib/traffic-spike.ts): a claim a store, window and mark, kept until a day after
+  // the window ends, and the day's count of all of them, kept two days: the company's own, like the sweep's cursor.
+  "nl:traffic:spike:": C, "nl:traffic:spike-day:": C,
+  // The operator's lowering of a store's visits (lib/traffic-reset.ts): one record list, at most TRAFFIC_LOG_KEEP
+  // entries expiring TRAFFIC_LOG_DAYS after the last reset, and its short lock: the company's own.
+  "nl:operator:traffic-log": C, "nl:operator:traffic-reset:lock": C,
   "nl:trialnudge:cursor": C,
   "nl:upd:job:": X(120), "nl:upd:last:": E, "nl:upd:latest:": E, "nl:upd:off:": E, "nl:upd:stop:": T("nl:erase:ix:", 400), "nl:updheld": I, "nl:updq": I,
   // The creator's business card (lib/creator-card.ts): goes with the store.
   "nl:vcard:": E,
   "nl:upload-budget:v2:{": C, "nl:upload-budget:v2:{YYYY-MM}": C,
   "nl:upsell-slots:": X(8), "nl:upsell:": X(8), "nl:upsell:pending": I,
-  "nl:usage-watch:lock": C, "nl:usage-watch:told": C,
-  "nl:vault:fresh:": X(7), "nl:vault:up:": X(1),
+  "nl:usage-watch:lock": C, "nl:usage-watch:told": C, "nl:usage-watch:told:": C,
+  // An upload's finish and cancel count and first answers (lib/vault.ts): a day after their last write.
+  "nl:vault:ctl:": X(1), "nl:vault:fresh:": X(7), "nl:vault:up:": X(1),
   "nl:verified:": E, "nl:verified:cursor": C,
   "nl:voice:": E, "nl:voice:lock:": E,
   // A product's AI summary of its reviews (lib/review-ai-summary.ts): kept eight days, and goes with the store.

@@ -41,7 +41,7 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { type Store, storeForId, storeIdGone } from "@/lib/store";
+import { ERASING_KEY, type Store, erasingField, ownerKey, storeForId, storeIdCommand, storeIdGone, storeRef } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
 const PAYPAL_API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? "")
@@ -73,6 +73,20 @@ const SETTLE_PACE_SECONDS = 300;
 export const PRESS_PACE_SECONDS = 60;
 const pressKey = (statsId: string) => `nl:pp:press:${statsId}`;
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
+
+/**
+ * The link written only while its store is live, in one step (Codex L-20261119-2344): connectPayPal waits on PayPal
+ * to check the app, and the store's erasure can begin or end meanwhile; a plain SET after it would write the sealed
+ * Secret back into nl:pp:<statsId>, an erased family, with no expiry. KEYS[1] the store's own key (its id key, or
+ * for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the link;
+ * ARGV[1] the store's erasing field, ARGV[2] the link. 1 written, 0 not (gone or erasing). Billed 1 + 3, in place of
+ * the SET's 1: a connection stays inside the integration unit's 10 commands (tests/paypal-link-store-erasure.test.ts).
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const KEEP_LINK_IF_LIVE = `-- marktmorgen:paypal-link-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
 
 type Link = { client: string; secret: string; at: number; auto: boolean };
 export type PayPalView = { client: string; at: number; auto: boolean; broken: boolean };
@@ -258,7 +272,18 @@ export async function connectPayPal(store: Store, client: string, secret: string
     return null;
   });
   const link: Link = { client, secret: seal(secret, context(store.statsId)), at: Date.now(), auto: before?.auto === true };
-  await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify(link)]]);
+  // The store's id key; for a store from before ids (sid ""), its record under its owner. A sid of any other shape
+  // has no id key to find, so it reads as gone and nothing is kept (fail closed).
+  const ref = storeRef(store);
+  const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const written = repliesFor(await redisPipeline([
+    ["EVAL", KEEP_LINK_IF_LIVE, 3, live, ERASING_KEY, linkKey(store.statsId), await erasingField(ref), JSON.stringify(link)],
+  ]), 1);
+  // Kept only on its exact 1: 0 is a store gone or being erased, and any other answer is not known to be kept.
+  if (written?.[0] !== 1) {
+    console.error(written?.[0] === 0 ? "the PayPal link was not kept: the store is gone or being erased" : "the PayPal link's write got no exact answer");
+    return { ok: false, reason: "error" };
+  }
   return { ok: true };
 }
 

@@ -674,17 +674,15 @@ async function patchMember(
         held = grown;
       }
       const listed = next.dir && next.n && !next.removed ? "1" : "0";
+      // A rejected pipeline can lose the reply after the write. Keep the reservation until a known result arrives.
+      unknown = true;
       const replies = repliesFor(await redisPipeline([
         ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
       ]), 1);
-      // 1 written, 0 changed since it was read (read again, keeping what is held); anything else is not known to be either.
       const written = replies?.[0];
+      if (written !== 0 && written !== 1) throw new UnknownReplyError("a change to a community member record");
+      unknown = false;
       if (written === 0) continue;
-      if (written !== 1) {
-        // Not known to have gone in or not: what was taken stays taken, and nothing is given back.
-        unknown = true;
-        throw new UnknownReplyError("a change to a community member record");
-      }
       // The record took `grown` (less than nothing when it shrank): the rest of what is held goes back, once.
       const excess = held - grown;
       held = 0;

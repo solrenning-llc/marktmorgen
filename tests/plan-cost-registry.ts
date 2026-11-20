@@ -2368,6 +2368,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       // A course's "Next step" reads what the student has through the same door, only when nothing else keeps the card away (560 [AS1], 10 November 2026).
       { file: "lib/course-next-step.ts", names: ["takeBuyerRead(store, 1)", "readListing(store, step.productId)", "takeBuyerRead(store, CART_OFFER_REQUEST_UNITS - 1)", "ownedHere(store, input.email)", "paypalOwned(store, input.email", "if (!nextStepShown({ step, courseProductId, product, owned: false, dismissed: false }).shown"] },
+      // A buyer's list of their own files for review on a lesson (750 [CD1] unit 5): after the door's one public request, mineUnits(n)
+      // more for the n records it reads, taken before they are read, each at its largest (tests/submission-buyer-cost.test.ts).
+      { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store, units)"] },
+      { file: "lib/submission-store.ts", names: ["SUBMISSION_MINE_BYTES_PER_UNIT", "mineUnits", "if (units > 0 && !(await pay(units)))"] },
       // A member price's proof reads what the visitor holds from the creator's Stripe account (two calls at most) and the purchases
       // brought over, counted before, at the next product's own count and inside its bounds (620 [SZ4], 6 November 2026;
       // MAX_MEMBER_QUALIFYING listings and MEMBER_PRICE_STRIPE_CALLS held under NEXT_OFFER_READ's in tests/member-price.test.ts).
@@ -2767,6 +2771,8 @@ export const COST_LINES: CostLine[] = [
       // and closing one buyer action each; this route's own commands are SUBMISSION_STEP_COMMANDS, inside the hundred.
       { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store)", "takeBuyerAction(store)"] },
       { file: "lib/submission-store.ts", names: ["SUBMISSION_STEP_COMMANDS"] },
+      // Withdrawing one of their files (unit 5) is one buyer action, taken before the record is read; its commands are SUBMISSION_STEP_COMMANDS.withdraw.
+      { file: "app/api/store/course/submission/route.ts", names: ["withdrawSubmission({ data: store"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
@@ -3720,6 +3726,9 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/payment-requests.ts": STORE, "lib/payment-request-store.ts": ORDER,
   // A proposal or agreement to sign, its new versions and its signed copies are the store's own emails (18 October 2026).
   "lib/agreements.ts": STORE,
+  // The buyer told of the creator's reply to a file they sent for review (750 [CD1] unit 6): one store email per reply, taken
+  // from the store's emails before it goes, once (its mark), never to a bounced, complained or deleted address.
+  "lib/submission-notice.ts": STORE,
 };
 
 /**

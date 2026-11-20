@@ -285,7 +285,8 @@ test("an address status the route never sends shows no notice, even a name every
 
 test("the page never says an emailed link is the only way back in: a passkey on that device still logs in (Codex X6 on #3459)", () => {
   const page = read("app/studio/devices/page.tsx");
-  assert.doesNotMatch(page, /someone needs a new login link sent to your email\./);
+  // The old sentence, that only an emailed link gets back in, is gone; the passkey is named beside it.
+  assert.doesNotMatch(page, /To get back in there, someone needs a new login link sent to your email\./);
   assert.match(page, /A passkey saved on that device still logs in there\./);
   // The way to take it away is named and linked, by the studio's own passkeys part.
   assert.match(page, /href=\{`\$\{studioPath\(store\)\}#passkeys`\}/);

@@ -19,7 +19,10 @@ export const DEVICES_RESULT: Readonly<Record<string, DevicesResult>> = {
   },
 };
 
-/** The notice for a `status` in the address, or none. */
+/**
+ * The notice for a `status` in the address, or none. Only the route's own three names count: a name every object
+ * has (`constructor`, `__proto__`, `toString`) is no notice (Codex X6 on #3459).
+ */
 export function devicesResult(status: unknown): DevicesResult | undefined {
-  return typeof status === "string" ? DEVICES_RESULT[status] : undefined;
+  return typeof status === "string" && Object.hasOwn(DEVICES_RESULT, status) ? DEVICES_RESULT[status] : undefined;
 }

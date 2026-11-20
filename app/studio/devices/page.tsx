@@ -3,6 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { devicesResult } from "@/lib/devices-result";
@@ -35,7 +36,7 @@ export default async function StudioDevicesPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page max-w-3xl pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Your login</p>
+          <div className="mb-4"><StudioTrail store={store} here="Log out of other devices" /></div>
           <h1 className="t-h2 mt-3">Log out of other devices</h1>
           <div role="status" aria-live="polite">
             {result ? <p className={`notice ${result.tone} mt-6`}>{result.words}</p> : null}
@@ -49,7 +50,11 @@ export default async function StudioDevicesPage({ searchParams }: Params) {
             This logs you out on every other computer, phone or browser where you are logged in with this email address. You stay logged in here.
           </p>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            Use it if you left your account open on a device that is not yours, or one that was lost. To get back in there, someone needs a new login link sent to your email.
+            Use it if you left your account open on a device that is not yours, or one that was lost. To log in there again, someone needs a new login link sent to your email. A passkey saved on that device still logs in there. If the device is lost or not yours, also{" "}
+            <Link href={`${studioPath(store)}#passkeys`} prefetch={false} className="underline">
+              remove that device&apos;s passkey in your studio
+            </Link>
+            .
           </p>
           <p className="mt-3 max-w-2xl text-ink-soft">
             API keys are not affected. If a script or app on that device holds one of your store&apos;s API keys, it keeps working until you revoke the key in the API section of your studio.

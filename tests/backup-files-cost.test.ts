@@ -8,12 +8,14 @@
  * listing price is not read (Bunny Stream) makes the month unknown, never zero.
  */
 import { readFileSync } from "node:fs";
+import * as contract from "@/lib/backup-files-contract";
 import { BACKUP_FILES_PAGE_BYTES } from "@/lib/backup-files-contract";
 import { BACKUP_FILES_PAGE_MICRO_USD, BACKUP_FILES_ROUTE_SECONDS, backupFilesRouteWorstMonth } from "@/lib/backup-files-source";
 import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
-const review = (maxPagesPerDay: number) => ({ maxPagesPerDay, reviewedAt: "2026-11-15", source: "synthetic" });
+const BACKUP_FILES_DAY_CEILING_REFUSALS = (contract as Record<string, unknown>).BACKUP_FILES_DAY_CEILING_REFUSALS as number;
+const review = (maxPagesPerDay: number) => ({ maxPagesPerDay, maxStoresPagesPerDay: 30, maxDeletionsPagesPerDay: 40, reviewedAt: "2026-11-15", source: "synthetic" });
 
 part("One admitted page, at the dearest prices");
 // gru1 CPU $0.221 an hour and memory $0.0183 a GB-hour at 2 GB for the route's 10 s; $0.60 a million calls; Fast Origin
@@ -34,8 +36,12 @@ is("rounded up to a whole micro-dollar, no more", BACKUP_FILES_PAGE_MICRO_USD, M
 part("The month: the review's ceiling, each source on, 32 UTC days, R2's block, 10% room");
 is("no review: the route answers 404 before any command, nothing spent", backupFilesRouteWorstMonth(null), 0);
 const month = backupFilesRouteWorstMonth(review(40));
-const pages = 2 * 40 * 32;
-is("two sources on (Bunny is off), forty pages a day each", month, Math.ceil((pages * BACKUP_FILES_PAGE_MICRO_USD + 4_500_000) * 1.1));
+// Codex N1's LOW 1 on #3313: a call refused past the day's ceiling still runs the count (INCR, EXPIRE NX) and is a call;
+// the Worker stops a source for the rest of the UTC day at its first day_ceiling (BACKUP_FILES_DAY_CEILING_REFUSALS),
+// so one refused call a source a day is priced, at a whole page's ceiling, which is more than a refusal can cost.
+is("the Worker's contract: one refused call a source a day at most", BACKUP_FILES_DAY_CEILING_REFUSALS, 1);
+const pages = 2 * (40 + BACKUP_FILES_DAY_CEILING_REFUSALS) * 32;
+is("two sources on (Bunny is off), forty pages a day each and the day's one refusal", month, Math.ceil((pages * BACKUP_FILES_PAGE_MICRO_USD + 4_500_000) * 1.1));
 is("more pages a day, more cost", (backupFilesRouteWorstMonth(review(41)) ?? 0) > (month ?? 0), true);
 is("a review that is not a whole page count is unknown", [backupFilesRouteWorstMonth(review(0)), backupFilesRouteWorstMonth(review(1.5))], [null, null]);
 const source = readFileSync("lib/backup-files-source.ts", "utf8");

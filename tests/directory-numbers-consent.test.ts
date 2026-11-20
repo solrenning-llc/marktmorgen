@@ -67,7 +67,8 @@ async function main(): Promise<void> {
   await original([["DEL", DIRECTORY_CACHE]]);
   let withdrawn = false;
   redis.pipeline = (async (commands: Commands) => {
-    if (!withdrawn && commands.some((c) => c[0] === "SET" && c[1] === DIRECTORY_CACHE)) {
+    // The page is kept by the build's own script (PUBLISH_IF_OWNER, Codex N1 on #2921), the cache key among its keys.
+    if (!withdrawn && commands.some((c) => (c[0] === "SET" && c[1] === DIRECTORY_CACHE) || (c[0] === "EVAL" && c.slice(3).includes(DIRECTORY_CACHE)))) {
       withdrawn = true;
       redis.pipeline = original;
       // The save lands while the build is writing: after it read the baker's numbers, before its page is kept.

@@ -24,7 +24,8 @@ type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 let breakExtras = false;
 redis.pipeline = (async (batch: Command[]) => {
-  if (breakExtras && batch.some((c) => c[0] === "GET" && typeof c[1] === "string" && c[1].includes(":x:"))) throw new Error("connection lost");
+  // GET, or MGET since the merge with #3079's batched reads (lib/redis-mget.ts): either read of a product's extras fails.
+  if (breakExtras && batch.some((c) => (c[0] === "GET" || c[0] === "MGET") && c.slice(1).some((k) => typeof k === "string" && k.includes(":x:")))) throw new Error("connection lost");
   return real(batch);
 }) as typeof redis.pipeline;
 
@@ -58,7 +59,7 @@ async function open(ids: string[]): Promise<Cart> {
 
 async function pay(ids: string[]): Promise<{ location: string; opened: number }> {
   const before = stripeSessions.length;
-  const form = withConsent(new URLSearchParams([["handle", HANDLE], ...ids.map((id) => ["id", id] as [string, string])]));
+  const form = withConsent(new URLSearchParams([["handle", HANDLE], ["billing_country", "US"], ...ids.map((id) => ["id", id] as [string, string])]));
   const response = await payCart(new NextRequest("https://marktmorgen.test/api/store/cart", {
     method: "POST",
     headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },

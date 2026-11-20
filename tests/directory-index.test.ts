@@ -140,7 +140,7 @@ test("an SREM reply in an unknown shape counts as listed: the kept rows are drop
 });
 
 test("search engines are asked to show it only once there is a catalog", () => {
-  assert.ok(INDEX_DIRECTORY_AT >= 5 && INDEX_DIRECTORY_AT <= 50);
+  assert.equal(INDEX_DIRECTORY_AT, 10);
 });
 
 test("the index is written where the program is saved", () => {

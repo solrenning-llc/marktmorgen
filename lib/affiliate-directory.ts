@@ -46,6 +46,7 @@
  *                 ceiling, a visit is shown them without every store no
  *                 longer listed (DIRECTORY_LAST)
  */
+import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForIdExact } from "@/lib/store";
 import { recordListings, type Listing } from "@/lib/catalog";
@@ -414,7 +415,10 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
     if (page && page.rows.every(isDirectoryRow)) return page;
     // Read again below.
   }
-  const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, "building", "EX", BUILD_HOLD_SECONDS, "NX"]]);
+  // Each build holds its own mark (Codex N1 on #2921): it publishes its page and lets the mark go, or marks it failed, only
+  // while the mark is still its own, so a build that outlived its hold never undoes the next one's.
+  const token = `${BUILDING}${randomBytes(12).toString("hex")}`;
+  const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, token, "EX", BUILD_HOLD_SECONDS, "NX"]]);
   // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
   if (claim === null) {
     const other = await otherBuildsPage();
@@ -427,12 +431,12 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
   try {
     built = await buildDirectory();
   } catch (error) {
-    await markFailed();
+    await markFailed(token);
     throw error;
   }
   const page: DirectoryPage = { rows: built.rows, omitted: built.omitted };
   if (built.partial === "failed") {
-    await markFailed();
+    await markFailed(token);
     return page;
   }
   if (built.partial === "unknown" || built.omitted > 0) {
@@ -443,18 +447,21 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
     // at no more builds than a healthy page. A store that could not be read is the same
     // (Codex N1, MEDIUM on #2921): left out, counted on the page, read again next build.
     // It is also the last build a visit past the ceiling is shown (lastDirectory), with its count left out.
-    await redisPipeline([
-      ["SET", DIRECTORY_CACHE, pageToKeep(page), "EX", PARTIAL_KEEP_SECONDS],
-      ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows, omitted: built.omitted }), "EX", LAST_KEEP_SECONDS],
-      ["DEL", DIRECTORY_BUILD],
-    ]).catch(() => null);
-    return keptWithConsent(page, built.sids);
+    return keepBuilt(token, page, built, PARTIAL_KEEP_SECONDS);
   }
-  await redisPipeline([
-    ["SET", DIRECTORY_CACHE, pageToKeep(page), "EX", KEEP_SECONDS],
-    ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows, omitted: built.omitted }), "EX", LAST_KEEP_SECONDS],
-    ["DEL", DIRECTORY_BUILD],
-  ]).catch(() => null);
+  return keepBuilt(token, page, built, KEEP_SECONDS);
+}
+
+/**
+ * Keeps a finished build: its page, with the mark let go, by one script that acts only while the mark is still this
+ * build's own (PUBLISH_IF_OWNER, Codex N1 on #2921); then, only when that script kept it, the last good build a visit
+ * past the ceiling is shown (lastDirectory). A late build, whose mark the next one took, keeps neither. The numbers'
+ * consent is checked once either way (keptWithConsent): its DEL of the kept page only ever costs a rebuild.
+ */
+async function keepBuilt(token: string, page: DirectoryPage, built: { sids: string[]; rows: DirectoryRow[]; omitted: number }, seconds: number): Promise<DirectoryPage> {
+  if (await publishIfOwner(token, page, seconds)) {
+    await redisPipeline([["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows, omitted: built.omitted }), "EX", LAST_KEEP_SECONDS]]).catch(() => null);
+  }
   return keptWithConsent(page, built.sids);
 }
 
@@ -539,8 +546,29 @@ async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryPage> {
   return (await numbersChecked({ rows: kept.map((k) => k.row), omitted }, kept.map((k) => k.sid))).page;
 }
 
+/** What a build's own mark starts with; the rest is its token. */
+const BUILDING = "building:";
+/** Keeps the page and lets the mark go, only while the mark is the build's own (Codex N1 on #2921). */
+const PUBLISH_IF_OWNER = `-- marktmorgen:directory-build-publish:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+redis.call("DEL", KEYS[1])
+return 1`;
+/** Marks the build failed for FAILED_SECONDS, only while the mark is the build's own (Codex N1 on #2921). */
+const FAIL_IF_OWNER = `-- marktmorgen:directory-build-fail:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[1], "failed", "EX", ARGV[2])
+return 1`;
+
+/** A late build (its mark taken by the next one) answers its page but keeps nothing over the next build's; true when this build kept it. */
+async function publishIfOwner(token: string, page: DirectoryPage, seconds: number): Promise<boolean> {
+  const replies = await redisPipeline([["EVAL", PUBLISH_IF_OWNER, 2, DIRECTORY_BUILD, DIRECTORY_CACHE, token, pageToKeep(page), seconds]]).catch(() => null);
+  // Kept only on exactly 1 (rule 24): 0 is a late build, and any other reply is not known to have kept anything.
+  return Array.isArray(replies) && replies.length === 1 && replies[0] === 1;
+}
+
 /**
- * The page another visitor's healthy build is making (Codex X6, LOW on #2921): while the mark reads "building", the
+ * The page another visitor's healthy build is making (Codex X6, LOW on #2921): while the mark reads "building:" and a build's token, the
  * read looks for the kept page again, at most BUILD_WAIT_LOOKS times BUILD_WAIT_MS apart (one second in all), so a
  * visitor who came during a rebuild sees the list instead of "unavailable". It never builds. Null when the mark
  * is "failed" or gone, when the page is still not there, or on any reply off its shape; the caller then throws.
@@ -555,14 +583,17 @@ async function otherBuildsPage(): Promise<DirectoryPage | null> {
     // The same exact row check as the first read (Codex CX1 on #3062): a kept page with any row out of shape is never
     // shown, so the wait ends and the visit is told the list could not be checked.
     if (page) return page.rows.every(isDirectoryRow) ? page : null;
-    if (mark !== "building") return null;
+    if (typeof mark !== "string" || !mark.startsWith(BUILDING)) return null;
   }
   return null;
 }
 
-/** A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its BUILD_HOLD_SECONDS. */
-async function markFailed(): Promise<void> {
-  await redisPipeline([["SET", DIRECTORY_BUILD, "failed", "EX", FAILED_SECONDS]]).catch(() => null);
+/**
+ * A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its
+ * BUILD_HOLD_SECONDS. Only the build's own mark is turned into "failed": a late build leaves the next one's alone.
+ */
+async function markFailed(token: string): Promise<void> {
+  await redisPipeline([["EVAL", FAIL_IF_OWNER, 1, DIRECTORY_BUILD, token, FAILED_SECONDS]]).catch(() => null);
 }
 
 /**

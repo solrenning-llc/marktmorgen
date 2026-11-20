@@ -171,6 +171,44 @@ async function main(): Promise<void> {
   is("the next look closes it", await syncAutoCaptions(VIDEO, now + 60_000), "done");
   is("the record is gone", redis.run(["GET", `nl:stream:auto:${VIDEO}`]), null);
   is("and nothing was returned", returned(), 0);
+
+  part("A late close cannot remove the later captions request for the same video");
+  const recordKey = `nl:stream:auto:${VIDEO}`;
+  const listingKey = `nl:stream:autoowed:${FOLDER}`;
+  const queueKey = "nl:stream:autoq";
+  const earlier = JSON.stringify({ langs: ["en"], got: ["en"], at: at4, cents: CHARGED, pi: PI, path: PATH,
+    owed: { cents: 0, key: "first-close", since: now, looks: 0 } });
+  const later = JSON.stringify({ langs: ["es"], got: [], at: now + 1, cents: CHARGED, pi: "pi_Captions000002", path: PATH,
+    owed: { cents: CHARGED, key: "later-close", since: now + 1, looks: 0 } });
+  await redis.pipeline([["SET", recordKey, earlier], ["ZADD", queueKey, now, VIDEO]]);
+  let readEarlier!: () => void;
+  const firstRead = new Promise<void>((resolve) => { readEarlier = resolve; });
+  let resumeEarlier!: () => void;
+  const resume = new Promise<void>((resolve) => { resumeEarlier = resolve; });
+  const pipeline = redis.pipeline.bind(redis);
+  let heldEarlier = false;
+  redis.pipeline = async (commands) => {
+    const responses = await pipeline(commands);
+    if (!heldEarlier && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === recordKey) {
+      heldEarlier = true;
+      readEarlier();
+      await resume;
+    }
+    return responses;
+  };
+  const delayedClose = syncAutoCaptions(VIDEO, now);
+  try {
+    await firstRead;
+    is("the current worker closes the settled request", await syncAutoCaptions(VIDEO, now), "done");
+    await pipeline([["SET", recordKey, later], ["SADD", listingKey, VIDEO], ["ZADD", queueKey, now + 1, VIDEO]]);
+  } finally {
+    redis.pipeline = pipeline;
+    resumeEarlier();
+  }
+  is("the delayed close leaves work to its current worker", await delayedClose, "waiting");
+  is("the later payment record, owed listing and queue time survive", [
+    redis.run(["GET", recordKey]), redis.run(["SMEMBERS", listingKey]), redis.run(["ZSCORE", queueKey, VIDEO]),
+  ], [later, [VIDEO], String(now + 1)]);
   done();
 }
 

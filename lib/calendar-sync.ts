@@ -46,7 +46,7 @@ import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { claimMark, claimValue } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";

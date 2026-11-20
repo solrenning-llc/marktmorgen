@@ -13,6 +13,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import { keepUnlessErased, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { listForNaming } from "@/lib/store-readings";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -290,10 +291,18 @@ async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string>
  * meanwhile, or a read that does not answer, deletes the copy, never leaving it with them in it. Prints that do not
  * read before the write keep no copy at all.
  */
-async function keepCopy(store: Store, health: Health): Promise<Health | null> {
-  // A legacy snapshot can predate the namespace created by an erasure already completed in another request.
-  // Without its id no print can be checked, so no copy containing a person may be kept from this snapshot.
-  if (!store.listId && health.members.length) return null;
+async function keepCopy(snapshot: Store, health: Health): Promise<Health | null> {
+  // A snapshot with no list id (a store from before lists, or one read before an erasure in another request gave it
+  // one) has its list read fresh (lib/store-readings.ts, listForNaming: the record read again, a list made for a
+  // store that truly has none, tried at most once a UTC day and priced in the store-readings line), so the prints are
+  // checked against the namespace an erasure would have written (Claude 3's and Claude 2's LOW on #4914). None to be
+  // had: no print can be checked, so no copy naming a person is kept or answered from this snapshot.
+  let store = snapshot;
+  if (!store.listId && health.members.length) {
+    const listId = await listForNaming(store).catch(() => null);
+    if (!listId) return null;
+    store = { ...store, listId };
+  }
   const erased = await erasedOf(store, health.members);
   if (!erased) return null;
   let copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;

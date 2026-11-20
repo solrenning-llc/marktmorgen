@@ -53,6 +53,7 @@ export async function claimMark(key: string, seconds: number | null, value = cla
  * with an expiry runs out at it, but one kept for good (claimMark with seconds null) never does: it stays, and whatever
  * it guards is not done again on it (Claude 5 on #2722). Never throws.
  */
-export async function releaseMark(key: string, value: string): Promise<void> {
-  await releaseLock({ key, token: value, ttlSeconds: 1 });
+export async function releaseMark(key: string, value: string): Promise<boolean> {
+  // True only when the mark was confirmed gone (lib/redis-lock.ts, releaseLock).
+  return releaseLock({ key, token: value, ttlSeconds: 1 });
 }

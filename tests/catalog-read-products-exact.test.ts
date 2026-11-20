@@ -28,7 +28,15 @@ let rewrite: { key: string; reply: unknown } | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
   if (!rewrite) return values;
-  return values.map((value, i) => (batch[i][0] === "GET" && batch[i][1] === rewrite!.key ? rewrite!.reply : value));
+  return values.map((value, i) => {
+    if (batch[i][0] === "GET" && batch[i][1] === rewrite!.key) return rewrite!.reply;
+    // The catalog reads its records many keys to an MGET (lib/catalog.ts getMany): the same reply, in that key's slot.
+    const slot = batch[i][0] === "MGET" ? batch[i].indexOf(rewrite!.key) - 1 : -1;
+    if (slot < 0 || !Array.isArray(value)) return value;
+    const values = [...value];
+    values[slot] = rewrite!.reply;
+    return values;
+  });
 }) as typeof redis.pipeline;
 
 async function outcome(run: () => Promise<unknown>): Promise<string> {

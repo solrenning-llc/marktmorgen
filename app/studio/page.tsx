@@ -7,6 +7,8 @@ import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pa
 import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { RenewalUnpaidNotice } from "@/components/renewal-unpaid-notice";
+import { ShortLinksOffNotice } from "@/components/short-links-off-notice";
+import { shortLinksOffNotice } from "@/lib/short-link-rest";
 import { funnelLaunchChecklist } from "@/lib/funnel-launch-checklist";
 import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
@@ -191,6 +193,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RISK_WORDS } from "@/lib/payment-risk";
 import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
@@ -792,6 +795,14 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "This store is closing",
     body: `Its plan has ended, so it closes on its own and you do not need to delete it. Everyone who bought from it is emailed at least ${BUYER_NOTICE_DAYS} days before its closing day, which is at least ${CLOSING_DAYS} days after the plan ended. On that day, each member's renewal ends and they get back the part of their last payment they did not use. The store and its records are then removed within ${ERASE_WITHIN_DAYS} days. Your studio shows its closing day. Nothing was deleted.`,
   },
+  assistant: {
+    title: "This store still has the Store assistant running",
+    body: "The assistant would keep billing you after the store is gone. Under Store assistant, press \u201cStop at the end of this month\u201d. Then you can delete the store. Nothing was deleted.",
+  },
+  assistant_due: {
+    title: "The Store assistant on this store may still be charged",
+    body: "A payment for the Store assistant did not go through, and Stripe may still try it again. You can delete this store once Stripe has ended the assistant, or write to support to end it now. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",
@@ -1039,6 +1050,8 @@ export default async function StudioPage({
   const planReads = {
     // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
     renewalPage: current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? early(renewalInvoicePage(store.subscriptionId)) : null,
+    // The notice that the store's short links were turned off and work again (the owner's decision 14 on #3330): one GET.
+    linksOff: current && paid && store?.sid ? early(shortLinksOffNotice(store.sid).catch(() => null)) : null,
     firstSale: PLANS_ON_SALE && store && paid && !billedYearly ? early(firstSaleAt(store)) : null,
     domainNow: domainsOn && store?.domain && !store.domain.liveAt && paid && hasPro(tier) ? early(domainStatus(store.domain.name, store).catch(() => null)) : null,
     sold: current && current.stripeAccountId && may("orders") ? early(listSales(current)) : null,
@@ -1100,6 +1113,7 @@ export default async function StudioPage({
       ]))
     : null;
   const renewalPage = planReads.renewalPage ? await planReads.renewalPage : null;
+  const linksOff = planReads.linksOff ? await planReads.linksOff : null;
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
   // button, that it pays from today — the same rule the checkout opens with.
@@ -1484,6 +1498,7 @@ export default async function StudioPage({
         {store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
+        {linksOff ? <ShortLinksOffNotice offAt={linksOff.offAt} backAt={linksOff.backAt} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
         {actionNotice ? (
@@ -1713,7 +1728,7 @@ export default async function StudioPage({
               </div>
 
               <details className="mt-5 rounded-2xl bg-paper p-4 ring-1 ring-line">
-                <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
+                <summary className="cursor-pointer py-3 text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {
@@ -3547,6 +3562,7 @@ export default async function StudioPage({
                               { day: "numeric", month: "long", year: "numeric" },
                             )}
                           </p>
+                          {sale.risk ? <p className="mt-1 text-sm text-ink-soft">{RISK_WORDS[sale.risk]}</p> : null}
                           {sale.shipTo !== undefined && sale.shipTo !== null ? (
                             <MarkShipped session={sale.reference} to={sale.shipTo} shipped={sale.shipped ?? null} />
                           ) : null}

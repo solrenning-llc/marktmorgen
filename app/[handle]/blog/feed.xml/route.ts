@@ -2,6 +2,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { postSegment, publishedPosts } from "@/lib/store-blog";
 import { speech } from "@/lib/buyer-words";
 import { SITE_URL } from "@/lib/site-url";
+import { blogReadingWords } from "@/lib/buyer-words/blog-reading";
 
 /** Escapes text for the feed: nothing a creator typed is read as markup. */
 const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -15,7 +16,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ han
   const decoded = decodeURIComponent((await params).handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   if (!store || store.posts === 0 || store.suspended) return new Response("Not found", { status: 404 });
-  const { posts } = await publishedPosts(store.statsId, 1);
+  const listing = await publishedPosts(store.statsId, 1).catch(() => null);
+  if (listing === null) return new Response(blogReadingWords(store.language).unavailable, {
+    status: 503,
+    headers: { "Retry-After": "60", "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" },
+  });
+  const { posts } = listing;
   const base = `${SITE_URL}/@${store.handle}`;
   const title = speech(store).w.blogOf(store.name);
   const items = posts

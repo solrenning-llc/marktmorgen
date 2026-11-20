@@ -175,7 +175,7 @@ test("Switzerland's worldwide rule and countries without a rule are never fed fr
   for (const country of ["CH", "LI", "US", "GB", "XK", "__proto__", null]) {
     assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, country, totals(1), sale(1), NOW), { status: "unknown" }, String(country));
   }
-  assert.deepEqual([...PLACE_COUNTED_COUNTRIES].sort(), ["CA", "NO"]);
+  assert.deepEqual([...PLACE_COUNTED_COUNTRIES].sort(), ["CA", "NO", "TW"]);
 });
 
 test("the window reaches at least 12 calendar months back, one day more at a month's end", () => {

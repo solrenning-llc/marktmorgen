@@ -158,6 +158,18 @@ Até lá, `PLANS_ON_SALE` continua false e a trava que recusa consumidores da UE
 
 (h) **Lacunas.** Ainda não está conferido, em fonte oficial datada, se uma plataforma dos EUA pode cobrar `application_fee_amount` em cobrança direta nas contas de criadores do Reino Unido, do EEE e do Canadá. O que não estiver conferido continua recusado, nunca vendido sem imposto.
 
+(i) **Endereço de cobrança em toda compra paga** (dono, 20/11/2026, por volta da 00h20 Fortaleza; item 790 [IV2]):
+- **O que muda:** todo checkout de compra paga pede à Stripe o endereço de cobrança completo do comprador (`billing_address_collection=required`), em todos os países, com o preenchimento automático da própria Stripe. Compra gratuita não pede endereço.
+- **Para que serve, e só para isso:**
+  - as duas provas de localização que não se contradizem para o IVA da UE e do Reino Unido: o endereço e o país do cartão (arts. 24b e 24f); se elas se contradisserem, vale a regra que já existe no código, nunca imposto errado;
+  - o local do comprador para o sales tax dos estados americanos;
+  - liberar a oferta de um clique para todo comprador.
+- **Privacidade:**
+  - só o endereço de cobrança, sem telefone nem outro dado, e nunca usado para marketing;
+  - a política de privacidade diz para que serve e por quanto tempo fica guardado: 10 anos nas vendas da UE (art. 63c); nas demais, o prazo que a lei exigir;
+  - as regras de apagar dados continuam onde a lei permite;
+  - os registros fiscais ficam com a Solrenning LLC.
+
 Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
 
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)

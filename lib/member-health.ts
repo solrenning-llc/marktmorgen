@@ -8,10 +8,11 @@
  * is written about anybody to work it out, and nothing is read on a visit to
  * the store.
  *
- *   nl:health:<statsId>   JSON Health, ten minutes
+ *   nl:health:<statsId>   JSON Health, ten minutes, never with a person the store deleted (keepCopy)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
+import { keepUnlessErased, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -253,8 +254,48 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     else atRisk += m.monthly;
   }
   const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
-  if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
+  if (isRedisConfigured()) await keepCopy(store, health).catch((error) => console.error("the members' scores copy could not be kept", error));
   return health;
+}
+
+/**
+ * The members of `members` this store has deleted (lib/suppression.ts prints, written first by a person's erasure),
+ * by address, read in one HMGET; null when the reply does not read as one slot a member, each nil or text (rule 24).
+ * A snapshot without a list id cannot certify no erasures; keepCopy refuses member-bearing copies from it.
+ */
+async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string> | null> {
+  const listId = store.listId;
+  if (!listId || !members.length) return new Set();
+  const prints = members.map((m) => suppressionPrint(listId, m.email));
+  const replies = repliesFor(await redisPipeline([["HMGET", suppressedKey(listId), ...prints]]), 1);
+  const slots = replies ? listSlots(replies[0]) : null;
+  if (!slots || slots.length !== prints.length || slots.some((slot) => slot !== null && typeof slot !== "string")) return null;
+  return new Set(members.filter((_, i) => slots[i] !== null).map((m) => m.email));
+}
+
+/**
+ * Keeps the ten-minute copy without anybody this store has deleted (#3967, Codex L): a membership stays on the
+ * creator's Stripe account after the person's erasure, so a refresh reads them again; their row stays out of the
+ * copy and its numbers stay whole. A person's erasure writes their print before it deletes the copy
+ * (lib/person-erasure.ts, forgetHealthCopy), so the prints are read again once the copy is written: one deleted
+ * meanwhile, or a read that does not answer, deletes the copy, never leaving it with them in it. Prints that do not
+ * read before the write keep no copy at all.
+ */
+async function keepCopy(store: Store, health: Health): Promise<void> {
+  // A legacy snapshot can predate the namespace created by an erasure already completed in another request.
+  // Without its id no print can be checked, so no copy containing a person may be kept from this snapshot.
+  if (!store.listId && health.members.length) return;
+  const erased = await erasedOf(store, health.members);
+  if (!erased) return;
+  const copy = erased.size ? { ...health, members: health.members.filter((m) => !erased.has(m.email)) } : health;
+  if (store.listId && copy.members.length) {
+    // The pre-read and a later deletion cannot protect the gap after SET. Check and write in one Redis step.
+    await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(copy), CACHE_SECONDS, copy.members.map((m) => m.email));
+  } else {
+    await redisPipeline([["SET", cacheKey(store), JSON.stringify(copy), "EX", CACHE_SECONDS]]);
+  }
+  const after = await erasedOf(store, copy.members).catch(() => null);
+  if (after === null || after.size) await redisPipeline([["DEL", cacheKey(store)]]);
 }
 
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */

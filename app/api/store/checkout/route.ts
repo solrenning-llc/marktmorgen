@@ -11,9 +11,9 @@ import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemRetu
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { giveBackHold, holdAdmission, refusedBeforeStripe, releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan, limitedStock } from "@/lib/product-extras";
+import { activePlan, bumpTargets, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
@@ -338,11 +338,14 @@ export async function POST(request: NextRequest) {
     const inPlan = !gift && !group && !preorder && plan && activePlan(product) !== null;
     const upsell = !gift && !group && !preorder && !inPlan && !store.tax.enabled && activeFunnel(await readListings(store, funnelProductIds(product.funnel)), product) ? newUpsellKey() : null;
     // Sent by an affiliate within the store's window: credited to them. A
-    // lookup that fails never stops the sale; it is only not credited.
-    const via = await attributionFor(store, product.id, {
+    // lookup that does not answer never stops the sale: the click rides on the
+    // order as pending and is credited once a later read answers (owner's
+    // decision 6, lib/affiliates.ts notePendingLinks).
+    const credit = await attributionOrPending(store, product.id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    }).catch(() => null);
+    }, [product.id, ...bumpTargets(product)]);
+    const via = credit.known ? credit.via : null;
     // A course opens right away in the browser that paid for it.
     // So does a course in a bundle.
     const buyer = !gift && !group && !preorder && (product.course || product.bundle) ? newBuyerKey() : null;
@@ -368,7 +371,6 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    const ads = await adsCheckout(request, store);
     // A member price the page showed: charged only when it is exactly what
     // this address is proved to get now, for the member's own purchase of
     // this product alone (not a payment plan, a box ticked, a gift, places
@@ -381,6 +383,9 @@ export async function POST(request: NextRequest) {
       if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
       member = { percent: claim.member, email: claim.email };
     }
+    // The buyer's request is kept for advertising only once nothing above can refuse the checkout: a member claim
+    // that no longer holds keeps nothing of it (Codex P's MEDIUM on #3021).
+    const ads = await adsCheckout(request, store);
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
     const held = await withStockHold(store, product, (holding) =>
@@ -419,7 +424,9 @@ export async function POST(request: NextRequest) {
         channel: {
           ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays),
           ...ads,
+          ...pendingChannel(credit),
           ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
+          ...pendingChannel(credit),
         },
         // A code that came in a link to this store (lib/code-link.ts), applied
         // by Stripe only if it is one of the creator's live codes.

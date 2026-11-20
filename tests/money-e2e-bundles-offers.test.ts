@@ -143,7 +143,7 @@ function paidCheckout(id: string, product: string, fingerprint: string): Record<
     customer: "cus_TestBuyer01",
     currency: "usd",
     metadata: { store: "bundlehouse", product, upsell_key: fingerprint },
-    customer_details: { email: BUYER },
+    customer_details: { email: BUYER, address: { country: "US" } },
     payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
   };
 }
@@ -284,7 +284,7 @@ async function main(): Promise<void> {
   const origin = "https://marktmorgen.com";
   const browser = newUpsellKey();
   const take = async (session: string, step: string, answer: "yes" | "no") =>
-    takeUpsell({ store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
+    takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
   sessions.cs_test_bundleorder0001 = paidCheckout("cs_test_bundleorder0001", front, browser.fingerprint);
   is("yes to the bundle at $30 (its own price $39) is charged", (await take("cs_test_bundleorder0001", "pack01", "yes")).kind, "done");
   const first = charges[0];

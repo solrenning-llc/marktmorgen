@@ -30,11 +30,12 @@ const storeOf = (catalog: { id: string | null; head: string[]; inline: boolean }
     },
   }) as unknown as Store;
 
-/** The listings readListings asked the database for. */
+/** The listings readListings asked the database for: the keys of its MGETs (LISTINGS_PER_MGET at one, lib/catalog.ts getMany). */
 async function readCount(store: Store, asked?: string[]): Promise<number> {
   commands = [];
   await readListings(store, asked);
-  return commands.filter((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))).length;
+  const keys = commands.flatMap((c) => (c[0] === "MGET" ? c.slice(1) : c[0] === "GET" ? [c[1]] : []));
+  return keys.filter((key) => /^nl:catalog:.*:l:/.test(String(key))).length;
 }
 
 async function main(): Promise<void> {

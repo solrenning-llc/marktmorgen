@@ -57,7 +57,7 @@ type Kept = { c: number; off?: number; sale?: number; meta?: Record<string, stri
 /** Posts the PayPal button's form; `country` is what the edge says, `formCountry` a field the page never sends. */
 async function buy(store: Store, product: string, country: string | null, formCountry = ""): Promise<{ value: string | null; kept: Kept | null }> {
   const before = sent.length;
-  const form = withConsent(new URLSearchParams({ handle: store.handle, product }));
+  const form = withConsent(new URLSearchParams({ handle: store.handle, product, billing_country: "US" }));
   if (formCountry) form.set("country", formCountry);
   const headers: Record<string, string> = { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded" };
   if (country !== null) headers["x-vercel-ip-country"] = country;
@@ -134,7 +134,9 @@ async function main(): Promise<void> {
   // Claude 3 cloud L, LEVE 1: this was held only by a pattern over the route's source).
   const withCode = async (fields: Record<string, string>): Promise<{ orders: number; location: string | null }> => {
     const before = sent.length;
-    const form = withConsent(new URLSearchParams({ handle: store.handle, product: product.id, ...fields }));
+    // The billing country the checkout asks since main's EU VAT unit 11b (lib/eu-vat-gate.ts), as buy() sends it: without
+    // it the gate refuses before PayPal, and the control below would not reach the order (merge of main, 18 November 2026).
+    const form = withConsent(new URLSearchParams({ handle: store.handle, product: product.id, billing_country: "US", ...fields }));
     let location: string | null = null;
     try {
       const response = await payPayPal(new NextRequest("https://marktmorgen.com/api/store/paypal/checkout", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", "x-vercel-ip-country": "US" }, body: form.toString() }));

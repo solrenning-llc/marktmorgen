@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   part("Already paid online: written down as such, the mark refused");
   const online = await make();
   // The request's own checkout, as Stripe keeps it: its metadata names the request and the store (lib/payment-requests.ts).
-  await withSession(online, "cs_test_paidone1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_paid12345", created: Math.floor(day / 1000), metadata: { kind: "request", request: online, store: "outsideshop" } });
+  await withSession(online, "cs_test_paidone1234", { status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_paid12345", created: Math.floor(day / 1000), metadata: { kind: "request", request: online, store: "outsideshop" } });
   const refused = await markPaidOutside(store, online, { method: "cash", note: "", paidAt: day });
   const after = await requestOf(store, online);
   is("refused as paid online", refused.ok ? "marked" : refused.reason, "paid_online");
@@ -103,13 +103,13 @@ async function main(): Promise<void> {
   part("Another request's paid checkout answers for this one (#4447)");
   const reqA = await make();
   const reqB = await make();
-  await withSession(reqA, "cs_test_sessionofA1", { id: "cs_test_sessionofB1", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofBpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
+  await withSession(reqA, "cs_test_sessionofA1", { id: "cs_test_sessionofB1", status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_ofBpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
   const crossed = await markPaidOutside(store, reqA, { method: "cash", note: "", paidAt: day });
   const afterA = await requestOf(store, reqA);
   is("the answer for another checkout is a read error", crossed.ok ? "marked" : crossed.reason, "error");
   is("request A stays open, with its own session and no payment of B's", [afterA?.state, afterA?.session, afterA?.payment], ["open", "cs_test_sessionofA1", ""]);
   const reqC = await make();
-  await withSession(reqC, "cs_test_sessionofC1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofDpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
+  await withSession(reqC, "cs_test_sessionofC1", { status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_ofDpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
   const named = await markPaidOutside(store, reqC, { method: "cash", note: "", paidAt: day });
   is("its own checkout naming another request: a read error, left open", [named.ok ? "marked" : named.reason, (await requestOf(store, reqC))?.state], ["error", "open"]);
 
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   is("an open checkout of another session: a read error, the buyer is not sent to it", sent.ok ? sent.url : sent.reason, "error");
   const reqF = await make();
   const reqG = await make();
-  await withSession(reqF, "cs_test_sessionofF1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofGpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqG, store: "outsideshop" } });
+  await withSession(reqF, "cs_test_sessionofF1", { status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_ofGpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqG, store: "outsideshop" } });
   const paidOther = await openRequestCheckout(store, reqF, "https://marktmorgen.com", day);
   const afterF = await requestOf(store, reqF);
   is("its own checkout paid for another request: a read error", paidOther.ok ? "sent" : paidOther.reason, "error");
@@ -145,18 +145,18 @@ async function main(): Promise<void> {
   is("the buyer's press: an error, and no second checkout opened beside the one still open", [buyer.ok ? "sent" : buyer.reason, openedCheckouts - before, sessions.cs_test_ownprobe5678?.status], ["error", 0, "open"]);
   expireReceipt = null;
 
-  part("A checkout Stripe no longer has (404): no checkout, marked");
+  part("A checkout the current Stripe account does not know (404): refused");
   const missing = await make();
   await changeRequest(store, missing, (r) => ({ next: { ...r, session: "cs_test_goneone1234", sessionAt: Date.now() }, answer: true }));
   const afterMissing = await markPaidOutside(store, missing, { method: "cash", note: "", paidAt: day });
-  is("404: marked paid outside, nothing closed", [afterMissing.ok, (await requestOf(store, missing))?.outside?.method, expired.includes("cs_test_goneone1234")], [true, "cash", false]);
+  is("404: still open, nothing closed", [afterMissing.ok ? "ok" : afterMissing.reason, (await requestOf(store, missing))?.state, expired.includes("cs_test_goneone1234")], ["error", "open", false]);
 
   part("A malformed 200 reply: an error, nothing marked, closed or written down");
   for (const [label, session, state] of [
     ["no status", "cs_test_nostatus123", { payment_status: "unpaid" }],
     ["an unknown status", "cs_test_oddstate123", { status: "processing", payment_status: "unpaid" }],
     ["another checkout's id, open", "cs_test_otheropen12", { id: "cs_test_someoneelse0000", status: "open", payment_status: "unpaid" }],
-    ["another checkout's id, paid", "cs_test_otherpaid12", { id: "cs_test_someoneelse0001", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_other12345", created: Math.floor(day / 1000) }],
+    ["another checkout's id, paid", "cs_test_otherpaid12", { id: "cs_test_someoneelse0001", status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_other12345", created: Math.floor(day / 1000) }],
   ] as const) {
     const odd = await make();
     await withSession(odd, session, state);

@@ -103,7 +103,7 @@ async function finishHostConnect(
   request: NextRequest,
   origin: string,
   email: string,
-  taken: { statsId: string; sid: string; verifier: string; host: string },
+  taken: { statsId: string; sid: string; verifier: string; host: string; at: number },
 ): Promise<Response> {
   const allowed = await resolveAccess(email, { pinned: taken.sid, session: request.cookies.get(SESSION_COOKIE)?.value ?? "" }, "member");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
@@ -125,6 +125,7 @@ async function finishHostConnect(
       by: email,
       owner: { email: store.email, handle: store.handle },
       host: taken.host,
+      startedAt: taken.at,
     });
     if (!result.ok) return back(`cal=${result.error}`);
     return back("cal=connected");
@@ -184,6 +185,7 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
       verifier: taken.verifier,
       by: email,
       owner: { email: store.email, handle: store.handle },
+      startedAt: taken.at,
     });
     if (!result.ok) return back(`meet=${result.error}&p=${provider}`);
     // Buyers' names and addresses go into it from now on: the owner is told

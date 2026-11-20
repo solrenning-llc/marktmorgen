@@ -87,13 +87,17 @@ async function main() {
   is("unknown status on a payment of another type: fails, never settles none", counts(await giveBackUnused(unread.store, DAY, { final: true })), [1, 0, 0]);
   is("unknown status on a payment of another type: its durable row stays unsettled", await durable(unread.folder), null);
 
-  // A readable paid intent of this invoice is found whatever the order, next to a row of unknown status.
+  // A row of unknown status beside a readable paid one, in either order (Codex P on #4428, HIGH): it may be another
+  // payment made, given back or disputed under a state not read here, so nothing is given back on the paid one, even
+  // when it could cover all that is owed; the member fails and stays unsettled until every row reads.
   for (const order of ["unknown first", "paid first"]) {
     const rows = [row("odd", "processing"), row("good", "paid")];
     listed = order === "unknown first" ? rows : rows.reverse();
-    const { store } = await seed(order.split(" ")[0]);
+    const { store, folder } = await seed(order.split(" ")[0]);
+    const before = posts;
     const got = await giveBackUnused(store, DAY, { final: true });
-    is(`${order}: the readable paid intent is refunded once`, typeof got === "object" ? [got.failed, got.done.map((x) => x.sub), posts] : got, [0, [SUB], 1]);
+    is(`${order}: nothing is given back beside the unknown status`, typeof got === "object" ? [got.failed, got.done.map((x) => x.sub), posts - before] : got, [1, [], 0]);
+    is(`${order}: its durable row stays unsettled`, await durable(folder), null);
   }
 
   // Controls: a complete list whose rows all carry a documented non-paid status still settles none. ("failed" is not

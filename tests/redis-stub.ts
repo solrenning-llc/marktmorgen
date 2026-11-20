@@ -1,5 +1,6 @@
 import { MemoryRedis } from "@/lib/redis-memory";
-export const store = new MemoryRedis();
+import { withTakeScripts } from "./redis-take-scripts";
+export const store = withTakeScripts(new MemoryRedis());
 export const isRedisConfigured = () => true;
 export const redisPipeline = (commands: (string | number)[][]) => store.pipeline(commands);
 /** Moves the test clock, for a cooldown that has to be outlasted. */

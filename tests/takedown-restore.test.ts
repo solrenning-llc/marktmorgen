@@ -306,6 +306,55 @@ async function main(): Promise<void> {
   const seventhUntil = Date.parse((await current()).heldLinks?.find((h) => h.link.id === seventh.id)?.until ?? "");
   is("(the window ends and it is deleted, which frees its place)", (await settleHeld(seventhUntil + 1)).deleted, 1);
 
+  part("A notice page lost after the route opened it never leaves an unreachable copyright hold (N1 on #3539)");
+  const tokenValue = (await redis.pipeline([["GET", tokenKey]]))[0];
+  if (typeof tokenValue !== "string") throw new Error("the control notice token is not there");
+  const operatorCookie = await openSession(process.env.DEMO_STUDIO_ADMIN ?? "");
+  for (const [when, pictureNo] of [["before TTL", 8], ["before EXPIRE", 9]] as const) {
+    await redis.pipeline([["SET", tokenKey, tokenValue, "EX", 60]]);
+    const pending = await pictured(`Expired notice ${when}`, pictureNo);
+    const mailBefore = sent.length;
+    const filesBefore = [...kept.keys()].sort();
+    let openedFirst = false;
+    let expired = false;
+    let missingReply: unknown;
+    const pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "GET" && c[1] === tokenKey)) openedFirst = true;
+      const trigger = when === "before TTL" ? "TTL" : "EXPIRE";
+      if (!expired && commands.length === 1 && commands[0][0] === trigger && commands[0][1] === tokenKey) {
+        expired = true;
+        await pipeline([["DEL", tokenKey]]);
+        const reply = await pipeline(commands);
+        missingReply = reply[0];
+        return reply;
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    let answer: Response;
+    try {
+      answer = await act(new NextRequest(`${ORIGIN}/api/takedown`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: ORIGIN, host: "marktmorgen.com", cookie: `${SESSION_COOKIE}=${operatorCookie}` },
+        body: JSON.stringify({ token, action: { type: "link", id: pending.id } }),
+      }));
+    } finally {
+      redis.pipeline = pipeline;
+      await pipeline([["SET", tokenKey, tokenValue, "EX", ttlBefore]]);
+    }
+    const now = await current();
+    is(`${when}: expiry really happened after the route read its token`, [openedFirst, expired, missingReply], [true, true, when === "before TTL" ? -2 : 0]);
+    is(`${when}: the route refuses, never reports a completed takedown`, [answer.status, await answer.json()], [500, { ok: false, error: "error" }]);
+    is(`${when}: the link stays live and has no unreachable hold`, [now.links.some((l) => l.id === pending.id), now.heldLinks?.some((h) => h.link.id === pending.id) ?? false], [true, false]);
+    is(`${when}: no original or copied picture changes`, [...kept.keys()].sort(), filesBefore);
+    is(`${when}: no creator notice claims the link was taken down`, sent.length, mailBefore);
+    // Keep later capacity checks independent when this regression is run RED: put only this unexpected hold back.
+    if (now.heldLinks?.some((h) => h.link.id === pending.id)) {
+      await actOnHeld(report, now, pending.id, "counter", ORIGIN, Date.now());
+      await actOnHeld(report, await current(), pending.id, "restore", ORIGIN, restoreFrom(Date.now()));
+    }
+  }
+
   part("A held link keeps its place in the store's list");
   const s = await current();
   const room = MAX_STORE_LINKS - s.links.length - 1;

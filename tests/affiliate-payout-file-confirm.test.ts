@@ -18,6 +18,7 @@
  *   - `left` is what the next file would pay, not every row's balance (review of #3906, LEVE 3).
  */
 import { NextRequest } from "next/server";
+import { payoutIdForFileLine } from "@/lib/affiliate-payouts";
 import { readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -195,6 +196,60 @@ async function main(): Promise<void> {
   is("the file is kept, not used up", (await redis.pipeline([["HEXISTS", `nl:affpay:${statsId}`, f6.file]]))[0], 1);
   await redis.pipeline([["HDEL", payoutsKey, "fafafafafafa"]]);
   is("control: without that payout the same file is written down", (await confirm({ date: "2026-11-12", reference: "x", file: f6.file })).status, 200);
+  const paidBeforeReadRace = (await paidTo())[BEA] ?? 0;
+  part("A payout between the book read and keeping its file still makes that file stale");
+  await redis.pipeline([["HSET", sales, "cs_bea4", sale("cs_bea4", BEA, 10_000)]]);
+  const pipelineBeforeReadRace = redis.pipeline;
+  const actualNow = Date.now;
+  let clock = actualNow() + 100_000;
+  let payoutLanded = false;
+  Date.now = () => clock;
+  try {
+    redis.pipeline = async (commands) => {
+      const reply = await pipelineBeforeReadRace(commands);
+      if (!payoutLanded && commands.length === 7 && commands.some((c) => c[0] === "HGETALL" && c[1] === payoutsKey)) {
+        payoutLanded = true;
+        // The book's reply was read first; this payout lands before the file takes its lock and timestamp.
+        clock += 10;
+        await pipelineBeforeReadRace([["HSET", payoutsKey, "abababababab", JSON.stringify({
+          id: "abababababab", aff: BEA, cents: 3_000, currency: "usd",
+          date: "2026-11-12", reference: "cash between read and keep", at: clock,
+        })]]);
+        clock += 10;
+      }
+      return reply;
+    };
+    const racedFile = await download();
+    redis.pipeline = pipelineBeforeReadRace;
+    is("the fixture placed the concurrent payout after a readable book snapshot", [payoutLanded, racedFile.status, racedFile.body.includes(",30.00,USD,")], [true, 200, true]);
+    const [racedRaw] = await redis.pipeline([["HGET", `nl:affpay:${statsId}`, racedFile.file]]);
+    const readRace = await confirm({ date: "2026-11-12", reference: "file after stale read", file: racedFile.file });
+    is("a payout during the book read is not recorded a second time from its file",
+      [readRace.status, readRace.data.error, (await paidTo())[BEA]], [409, "stale", paidBeforeReadRace + 3_000]);
+    // Remove only this attempted file's deterministic lines after the race assertion, keeping the metadata cases independent.
+    const racedLines = (JSON.parse(String(racedRaw)) as { lines: { a: string }[] }).lines;
+    for (const line of racedLines) await redis.pipeline([["HDEL", payoutsKey, payoutIdForFileLine(racedFile.file, line.a)]]);
+    const legacy = JSON.parse(String(racedRaw)) as Record<string, unknown>;
+    delete legacy.readAt;
+    const legacyId = "edededededededededededed";
+    await redis.pipeline([["HSET", `nl:affpay:${statsId}`, legacyId, JSON.stringify(legacy)]]);
+    const paidBeforeLegacy = await paidTo();
+    const oldFile = await confirm({ date: "2026-11-12", reference: "old file without read proof", file: legacyId });
+    is("an old file without the book-read proof is refused without recording another payout",
+      [oldFile.status, oldFile.data.error, await paidTo()], [409, "file", paidBeforeLegacy]);
+    const badReadTimes: unknown[] = [null, "1", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number(legacy.at) + 1];
+    const unreadable: unknown[] = [];
+    for (const readAt of badReadTimes) {
+      await redis.pipeline([["HSET", `nl:affpay:${statsId}`, legacyId, JSON.stringify({ ...legacy, readAt })]]);
+      const invalid = await confirm({ date: "2026-11-12", reference: "invalid read proof", file: legacyId });
+      unreadable.push([invalid.status, invalid.data.error]);
+    }
+    is("malformed or reversed book-read times never authorize a payout",
+      unreadable, badReadTimes.map(() => [409, "file"]));
+  } finally {
+    redis.pipeline = pipelineBeforeReadRace;
+    Date.now = actualNow;
+  }
   done();
 }
 

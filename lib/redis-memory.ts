@@ -359,6 +359,34 @@ export class MemoryRedis {
           const [, list, member, mark] = args;
           return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
         }
+        // lib/traffic-reset.ts RESET_SCRIPT: under the caller's own lock token only, the record first, then the people
+        // lowered by the delta, with the live room's parts as they are now; nothing written on a lost lock or a count or
+        // a room read otherwise.
+        if (key.startsWith("-- marktmorgen:traffic-reset:v2\n") && args[0] === "4" && args.length === 11) {
+          const [, visits, log, lock, room, before, delta, entry, token, keep, keepSeconds] = args;
+          if (this.run(["GET", lock]) !== token) return [-2];
+          const held = this.run(["GET", visits]);
+          const current = held === null ? "0" : held;
+          if (typeof current !== "string" || !/^\d+$/.test(current)) return [-3];
+          const roomHeld = this.run(["GET", room]);
+          const parts = roomHeld === null ? "0" : roomHeld;
+          if (typeof parts !== "string" || !/^\d+$/.test(parts)) return [-3];
+          if (Number(current) < Number(before)) return [-1, Number(current)];
+          // Redis stops the script on a record key of another type, before anything is written.
+          this.live(log);
+          const record = this.data.get(log);
+          if (record !== undefined && !Array.isArray(record)) throw new Error("WRONGTYPE");
+          this.run(["LPUSH", log, entry]);
+          this.run(["LTRIM", log, 0, Number(keep) - 1]);
+          this.run(["EXPIRE", log, keepSeconds]);
+          return [1, this.run(["DECRBY", visits, delta]), Number(parts)];
+        }
+        // lib/traffic-reset.ts RELEASE_SCRIPT: the lock let go only by the token that took it.
+        if (key.startsWith("-- marktmorgen:traffic-reset-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, lock, token] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          return this.run(["DEL", lock]);
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;

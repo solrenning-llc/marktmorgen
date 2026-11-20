@@ -59,7 +59,9 @@ def own_take_scripts(redis, root, base):
     move_own = script(root / "lib/flows.ts", "FLOW_MOVE_OWN")
     queue_if = script(root / "lib/flows.ts", "QUEUE_IF_LEASED")
     drop_own = script(root / "lib/flows.ts", "DROP_OWN_LEASES")
-    claim_if = script(root / "lib/flow-runs.ts", "CLAIM_IF_LEASED")
+    # CLAIM_IF_RUN v3 (the merge of #2287 with main's #4234): KEYS run, history, runs, lease; ARGV member, score,
+    # open, event, generation ("*" for a run with none), keep seconds, person, now.
+    claim_if = script(root / "lib/flow-runs.ts", "CLAIM_IF_RUN")
     lease, queue = base + ":own:lease", base + ":own:queue"
     run, log, runs = base + ":own:run", base + ":own:log", base + ":own:runs"
     take, other = "1700000900.0000004768371582", "1700000900.0000009536743164"
@@ -82,20 +84,27 @@ def own_take_scripts(redis, root, base):
         # A claim needs the lease at this take's score and the run still there; it writes once, and renews the run.
         redis.command("ZADD", lease, take, a)
         redis.command("HSET", run, "email", "a@example.com")
-        argv = [a, take, "open-1", "{}", 1000, "person-a", 1700000901]
-        assert redis.command("EVAL", claim_if, 4, lease, run, log, runs, *argv) == 1
+        argv = [a, take, "open-1", "{}", "*", 1000, "person-a", 1700000901]
+        assert redis.command("EVAL", claim_if, 4, run, log, runs, lease, *argv) == 1
         assert redis.command("HGET", run, "open") == "open-1"
         assert redis.command("LRANGE", log, 0, -1) == ["{}"]
         assert 0 < int(redis.command("TTL", run)) <= 1000 and 0 < int(redis.command("TTL", log)) <= 1000
         assert redis.command("ZSCORE", runs, "person-a") == "1700000901"
         # Already open: not claimed again, nothing more written.
-        assert redis.command("EVAL", claim_if, 4, lease, run, log, runs, a, take, "open-2", "{}", 1000, "person-a", 1700000902) == 0
+        assert redis.command("EVAL", claim_if, 4, run, log, runs, lease, a, take, "open-2", "{}", "*", 1000, "person-a", 1700000902) == 0
         assert redis.command("HGET", run, "open") == "open-1" and redis.command("LLEN", log) == 1
         # Taken over (another score) or erased (no run): gone, nothing written.
-        assert redis.command("EVAL", claim_if, 4, lease, run, log, runs, a, other, "open-3", "{}", 1000, "person-a", 1) == -1
+        assert redis.command("EVAL", claim_if, 4, run, log, runs, lease, a, other, "open-3", "{}", "*", 1000, "person-a", 1) == -1
+        # Started again (another generation): gone, nothing written; at its own generation it is claimed.
+        redis.command("HDEL", run, "open")
+        redis.command("HSET", run, "gen", "g2")
+        assert redis.command("EVAL", claim_if, 4, run, log, runs, lease, a, take, "open-5", "{}", "g1", 1000, "person-a", 1700000903) == -1
+        assert redis.command("HEXISTS", run, "open") == 0 and redis.command("LLEN", log) == 1
+        assert redis.command("EVAL", claim_if, 4, run, log, runs, lease, a, take, "open-6", "{}", "g2", 1000, "person-a", 1700000904) == 1
+        assert redis.command("HGET", run, "open") == "open-6" and redis.command("LLEN", log) == 2
         redis.command("DEL", run)
-        assert redis.command("EVAL", claim_if, 4, lease, run, log, runs, a, take, "open-4", "{}", 1000, "person-a", 1) == -1
-        assert redis.command("EXISTS", run) == 0 and redis.command("LLEN", log) == 1
+        assert redis.command("EVAL", claim_if, 4, run, log, runs, lease, a, take, "open-4", "{}", "*", 1000, "person-a", 1) == -1
+        assert redis.command("EXISTS", run) == 0 and redis.command("LLEN", log) == 2
         print("PASS: the lease scripts of #2287 act only at the take's own fractional score, against real Redis")
     finally:
         redis.command("DEL", lease, queue, run, log, runs)

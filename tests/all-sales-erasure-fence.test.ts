@@ -52,7 +52,7 @@ async function seed(owner: string, name: string): Promise<Store> {
   await claimHandle(owner, name, "All Sales", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1SyntheticAllSales", true);
+  await setStripeAccount(owner, "acct_synthAllSales", true);
   return (await storeForEmail(owner))!;
 }
 

@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   is("no batch, nothing failed, claimed", [created.length, off.failed, await claimed()], [0, 0, true]);
 
   part("The reminder says the connection could not be read, only when it could not");
-  const base = { storeName: "Harbor Kitchen", payday: 5, people: 1, totalCents: 3000, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true };
+  const base = { storeName: "Harbor Kitchen", payday: 5, people: 1, totalCents: 3000, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true, invoicesChecked: true };
   const unread = paydayEmail({ ...base, linkUnread: true });
   is("it says so, and that nothing left their PayPal", [unread.text.includes(UNREAD), unread.text.includes("Nothing left your PayPal")], [true, true]);
   is("it is still the reminder with the amount to pay", unread.subject, "$30 to pay your affiliates today");

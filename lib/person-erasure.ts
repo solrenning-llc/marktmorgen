@@ -85,6 +85,7 @@ import { forgetPodcastPerson, podcastProductCount } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
 import { forgetRecoveryPerson } from "@/lib/checkout-recovery";
+import { checkoutAskCount, forgetAskPerson } from "@/lib/checkout-ask";
 import { forgetAssistReminderPerson } from "@/lib/assistant-reminder";
 import { forgetInvitesPerson } from "@/lib/move-members";
 import { forgetInboxPerson } from "@/lib/inbox";
@@ -178,6 +179,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/welcome-offer-send.ts", run: (s) => forgetWelcomePerson(s.statsId, s.email) },
   { module: "lib/winback-send.ts", run: (s) => forgetWinbackPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/checkout-recovery.ts", run: (s) => forgetRecoveryPerson(s.statsId, s.productIds, s.email) },
+  { module: "lib/checkout-ask.ts", run: (s) => forgetAskPerson(s.statsId, s.email, s.checkoutAsks) },
   { module: "lib/assistant-reminder.ts", run: (s) => forgetAssistReminderPerson(s.statsId, s.email) },
   { module: "lib/move-members.ts", run: (s) => forgetInvitesPerson(s.store, s.productIds, s.email) },
   { module: "lib/inbox.ts", run: (s) => forgetInboxPerson(s.statsId, s.email) },
@@ -301,7 +303,7 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts, checkoutAsks] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
@@ -309,6 +311,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
     podcastProductCount(scope.statsId),
+    checkoutAskCount(scope.statsId, scope.email),
   ]);
   return {
     products: scope.productIds.length,
@@ -323,6 +326,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     droppedCourses: scope.droppedCourses ?? 0,
     droppedRecords: scope.droppedRecords ?? 0,
     podcastProducts,
+    checkoutAsks,
     waitlists: scope.waitlistMarks ?? 0,
   };
 }
@@ -376,6 +380,7 @@ export async function erasePerson(
     if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
   }
 
+  scope.checkoutAsks = size.checkoutAsks;
   // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
   await redisPipeline([suppressCommand(scope.listId as string, email)]);
   // A person's own deletion is noted as theirs too, before anything is deleted (lib/suppression.ts ownErasureCommand):

@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
   // MEDIUM): with none, nothing was written, so the mark is taken off at once and nothing moves.
   const op = await markBrokenMove(from, to).catch(() => null);
   if (op === "full") {
-    await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    await endMoving(from, to, mark).catch(() => console.error("unmarking a move failed"));
     return away("/signin?status=move-held");
   }
   if (!op) return away("/signin?status=move-error");

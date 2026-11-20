@@ -241,6 +241,35 @@ levels). GitHub retargets automatically when a base merges; no new check (B3 sta
 clone's price into 4 lines); `scripts/pricing-optimization.mjs` checks the solver before writing and writes only at the
 end (today it writes the MILP input and then fails without scipy, leaving a half-updated set).
 
+### S8. The coordination channel is found by label, never by number (added 20/11/2026, after the owner's question)
+
+**Measured on 20/11/2026 (GitHub REST, read only).** The coordination channel is an issue, and GitHub accepts at most
+2,500 comments per issue, so the channel has moved six times in eight days: #3869 (part 1, 12/11) → #4765 → #4821 →
+#4827 → #4848 → #4858 → #4932 (part 7, opened 20/11 05:05 UTC). All seven are still open and none has a label. Only
+#3869 has a "FULL, continues in #N" line at the top of its body; #4765, #4821, #4827, #4848 and #4858 do not, so an agent
+that opens one of them sees no pointer forward unless it reads to the last comment. AGENTS.md AC (p) still says "hoje o
+#4827", three channels behind. A number written in a rule, a prompt, an inbox message or an agent's memory goes stale
+at the next rotation; this is what leaves agents outdated.
+
+**Fix (no rule about money, price, limit or gate changes).**
+1. **One label, one open channel.** The current channel carries the label `canal-ativo`; it is the only open issue with
+   that label. Every agent finds it, at the start of every cycle and before every claim or post, with
+   `gh api -X GET 'repos/solrenning-llc/marktmorgen/issues?labels=canal-ativo&state=open' --jq '.[0].number'`
+   (REST, accepted in Claude Code sessions). No answer, an error, zero or more than one result: post nothing, report it
+   to Claude 1 through `para-claude-1`, and keep working locally. Nobody stores the number between cycles.
+2. **Rotation in a fixed order** (at 2,250 comments, the practice already in use): create the next part with the same
+   body template; add `canal-ativo` to it; edit the FIRST line of the old body to "**FULL — continues in #N**"; remove the
+   label from the old one; close it as completed (closing deletes nothing, everything stays readable, and it can be
+   reopened). Until the label moves, the old one is still the channel, so there is never a moment with zero channels.
+3. **Automatic rotation (owner authorization, new workflow).** `.github/workflows/channel-rotate.yml`, hourly schedule and
+   manual dispatch, `permissions: issues: write` only (no `contents: write`, no checkout of app code, no secret): counts
+   the comments of the `canal-ativo` issue and, at 2,250 or more, performs step 2. If it finds zero or two labelled
+   issues it fails visibly and changes nothing. Until authorized, the coordinator performs step 2 by hand.
+4. **One-time catch-up (owner authorization; GitHub writes, reversible):** add "**FULL — continues in #4932**" at the
+   top of the bodies of #4765, #4821, #4827, #4848 and #4858, label #4932 `canal-ativo`, and close the six full parts.
+5. **Text:** AC (p) "hoje o #4827" becomes "a issue aberta com o rótulo `canal-ativo`"; AC-M (4.1) gets the command of
+   step 1 as one line, so Codex, which reads only the top of AGENTS.md, also learns it (Q5).
+
 ### Phase 2 (only if 7 days of measurement show a need) and retired items
 
 - **Phase 2:** `scripts/agent-turn.mjs` (one read-only command per agent), adoption labels, the migration-window issue,
@@ -571,6 +600,14 @@ impede que ela saia do topo; (b) corrigir AC (j) para o caso da base fechada sem
 houver trabalho não revisado, levar só os próprios commits para um PR novo; (c) trocar, em MV (a) e CV (a), os comandos
 `gh issue list` e `gh pr view`, que o GitHub recusa nas sessões do Claude Code, pelos da API REST, com a regra de que
 qualquer erro na conferência significa 'não envie'? Nenhum preço, limite, comissão ou trava muda."
+
+**Q5 — Canal de coordenação achado pelo rótulo (acrescentada em 20/11/2026).**
+"O canal de coordenação lota a cada 2.500 comentários e já mudou seis vezes em oito dias (hoje é o #4932; AGENTS.md
+ainda manda usar o #4827). Você autoriza: (a) o canal atual passar a ser achado por um rótulo fixo, `canal-ativo`, que
+fica só na issue em uso, e nunca mais pelo número; (b) um workflow que, ao chegar a 2.250 comentários, abre a próxima
+parte, move o rótulo, escreve 'CHEIO — continua na #N' no topo da anterior e a fecha, sem apagar nada e com permissão só
+de issues; (c) arrumar agora as cinco issues cheias sem aviso no topo e fechar as seis cheias; (d) trocar em AGENTS.md o
+'hoje o #4827' pelo rótulo, também na seção curta do topo, que o Codex lê? Nenhum preço, limite, comissão ou trava muda."
 
 Informative note to send with Q4, not a new question: AC already ends with two points in "Depende do dono" since 15/11
 (scan interval of 30 or 60 minutes; whether the second of two colliding PRs waits or proceeds). They are not decided

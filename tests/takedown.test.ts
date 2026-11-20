@@ -77,7 +77,8 @@ async function main(): Promise<void> {
   if (!read.ok) throw new Error("notice");
   is("sent", await fileReport(read.report, "9.9.9.9", "https://marktmorgen.com"), "sent");
   const mail = sent[0];
-  is("to the support inbox, with Reply to the sender, and nothing to the sender", [[mail.to].flat(), mail.reply_to, sent.length], [["support@marktmorgen.com"], "rita@example.com", 1]);
+  // It carries the notice's link, so a Reply never goes to the sender (HIGH on #3612): their address is there for a new email.
+  is("to the support inbox, Reply to the inbox only, the sender's address for a new email, nothing to the sender", [[mail.to].flat(), mail.reply_to, mail.text.includes("start a new email to rita@example.com"), sent.length], [["support@marktmorgen.com"], "support@marktmorgen.com", true, 1]);
   is("saying everything the notice said", [mail.subject, mail.text.includes("Harbor Lights"), mail.text.includes("+1 555 0100"), mail.text.includes("under penalty of perjury")], ["Copyright notice about @noticeshop", true, true, true]);
   const token = mail.text.match(/\/takedown\/([0-9a-f]{48})/)?.[1] ?? "";
   const opened = await openReport(token);

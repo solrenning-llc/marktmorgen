@@ -177,8 +177,18 @@ async function requests(): Promise<void> {
   is("and the request stays open, nothing written as paid", [(await requestOf(store, unknown.id))?.state, (await requestOf(store, unknown.id))?.amountPaid], ["open", 0]);
   const textAmount = await settle(() => markPaid(store, unknown.id, { id: "cs_test_r48request00000001", amount_total: "10825" }, now));
   is("an amount in another shape: refused as unknown, still open", [textAmount.threw, (await requestOf(store, unknown.id))?.state], ["UnknownReplyError", "open"]);
-  const read = await markPaid(store, unknown.id, { id: "cs_test_r48request00000001", payment_intent: "pi_r48request0001", amount_total: 10825, created: Math.floor(now / 1000) }, now);
-  is("read exactly on the next pass: paid at what Stripe took", [read?.fresh, read?.request.state, read?.request.amountPaid], [true, "paid", 10825]);
+  for (const currency of [undefined, null, "USD", "jpy"] as const) {
+    const wrongMoney = await open("100");
+    const result = await settle(() => markPaid(store, wrongMoney.id, {
+      id: "cs_test_r48request00000001", amount_total: 10825, currency,
+      payment_intent: "pi_r48request0001",
+    }, now));
+    is(`currency ${String(currency)}: unknown, with the request still open`,
+      [result.threw, (await requestOf(store, wrongMoney.id))?.state], ["UnknownReplyError", "open"]);
+  }
+  const read = await markPaid({ ...store, currency: "eur" }, unknown.id, { id: "cs_test_r48request00000001", payment_intent: "pi_r48request0001", amount_total: 10825, currency: "usd", created: Math.floor(now / 1000) }, now);
+  is("the exact currency is the request’s original one, even after the store changes currency",
+    [read?.fresh, read?.request.state, read?.request.amountPaid, read?.request.currency], [true, "paid", 10825, "usd"]);
   const again = await markPaid(store, unknown.id, { id: "cs_test_r48request00000001" }, now);
   is("already paid: answered as it is, whatever the reply", [again?.fresh, again?.request.amountPaid], [false, 10825]);
 
@@ -201,7 +211,7 @@ async function requests(): Promise<void> {
   }
 
   const plain = await open("100");
-  const paidPlain = await markPaid(store, plain.id, { id: "cs_test_r48request00000002", payment_intent: "pi_r48request0002", amount_total: 10000, created: Math.floor(now / 1000) }, now);
+  const paidPlain = await markPaid(store, plain.id, { id: "cs_test_r48request00000002", payment_intent: "pi_r48request0002", amount_total: 10000, currency: "usd", created: Math.floor(now / 1000) }, now);
   emails.length = 0;
   await send(paidPlain!.request);
   const untaxed = emails.at(-1)?.text.split("\n") ?? [];

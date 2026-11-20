@@ -37,7 +37,9 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
-import { productIdFromAddress, readAsking, readListing, readListings } from "@/lib/catalog";
+import { productIdFromAddress, readAsking, readListing, readListings, readProductLegal } from "@/lib/catalog";
+import { activeShipping } from "@/lib/shipping";
+import { ProductSafetyFacts } from "@/components/product-safety-facts";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -327,7 +329,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, asksAtCheckout] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, legal, asksAtCheckout] = await Promise.all([
     product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""),
     // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
     stockLeft(store, product).catch(() => undefined),
@@ -351,6 +353,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
           shownEnd: course && !product.recurring ? shownAccessEnd(course) : product.recurring ? null : "none",
           unread,
         })) : Promise.resolve(null),
+    // The legal information of a product the creator ships (618 [SZ2]): one read of its own record, only then.
+    activeShipping(product) ? readProductLegal(store, product.id).catch(() => null) : Promise.resolve(null),
     // Whether it asks questions at checkout: then it is bought here, from the buy box that asks them, and is not
     // offered for a cart, whose checkout refuses it (#4350). Read only where the cart would be offered; unknown is
     // not "asks nothing" (rule 24), so the cart is not offered then either.
@@ -373,6 +377,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // recordOpenEnrollment), so a course sold here through PayPal alone never shows a date (Claude 5's M1 on #3445).
   const accessEndLine = canSellProduct(store, product) ? courseFacts?.accessEndLine ?? null : null;
   const courseUnread = courseFacts?.unread === true;
+  // What was read goes with the product to its buy box, so the countries it says it ships to are the ones
+  // its checkout offers (lib/physical-legal-ship.ts); a record not read is not filled.
+  const shippedNow = activeShipping(product) ? { ...product, legal } : product;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -490,6 +497,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
+      {/* 618 [SZ2]: what the creator filled on a physical product, before the buy button (components/product-safety-facts.tsx). */}
+      <ProductSafetyFacts store={store} product={product} legal={legal} />
       {query.terms === "changed" && product.course ? <p className="st-note mt-4 text-sm" role="alert">{coursesWords(store.language).accessEndChanged}</p> : null}
       {unread && selling && !soon ? (
         <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
@@ -505,7 +514,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
               </p>
             </div>
           ) : null}
-          <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
+          <BuyBox store={store} product={shippedNow} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
         </>
       )}
       {/* A course whose exact read failed offers no way to buy here, the cart included (Codex L on #3445): the BuyBox is closed on the same reading. */}

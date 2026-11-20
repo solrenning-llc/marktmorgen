@@ -62,8 +62,12 @@ export default function PrivacyPage() {
           <strong className="text-black">Payment information.</strong> Payments
           are processed by Stripe, our payment processor. We do not store your
           full credit or debit card number, CVC, or equivalent payment
-          credentials. Stripe asks for your billing address on every paid
-          checkout, and may collect other payment method details as needed to
+          credentials. Stripe asks for your billing address when you pay on
+          its checkout page (see{" "}
+          <a href="#billing-address" className="underline">
+            how we use your billing address
+          </a>
+          ), and may collect other payment method details as needed to
           complete the transaction. We may
           receive limited payment metadata, such as the last four digits of a
           card, payment status, and subscription period.
@@ -427,8 +431,10 @@ export default function PrivacyPage() {
         </p>
         <p id="billing-address">
           <strong className="text-black">Your billing address.</strong>{" "}
-          Stripe asks for your billing address on every paid checkout, and
-          keeps it with the payment, on the Stripe account of whoever is paid:
+          Stripe asks for your billing address on every paid checkout on its
+          page, except, for now, when you buy a package of calls. PayPal asks
+          for what it needs on its own page. Stripe keeps the address with the
+          payment, on the Stripe account of whoever is paid:
           the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
           plan or add-on. Stripe&apos;s own privacy policy applies. It is not
           asked when

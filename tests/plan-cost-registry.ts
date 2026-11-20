@@ -1096,10 +1096,12 @@ export const COMMUNITY_DEVICES_READ = {
  * One sweep of a store's beside pool at its most (lib/store.ts, moveBesideToPool; C1-20261117-1500-c6c4-1, PR 2):
  * MOVE_BESIDE_BATCHES batches, each a heavy request's time with MOVE_BESIDE_BATCH_COMMANDS commands, the store's
  * record read at MAX_STORE_BYTES and each of its MOVE_BESIDE_BATCH products' pool field, room slot and two changes at
- * 256 bytes, plus the sweep's mark read and written. A store sweeps once; priced whole in every month.
+ * 256 bytes, plus the sweep's own commands (MOVE_BESIDE_SWEEP_COMMANDS: the store read that opens it, the mark read and
+ * the mark written) and that opening read's bytes, the record at MAX_STORE_BYTES (Claude 3's LOW on #4847). A store
+ * sweeps once; priced whole in every month.
  */
 export const BESIDE_SWEEP_USD =
-  MOVE_BESIDE_BATCHES * request("heavy", MOVE_BESIDE_BATCH_COMMANDS, MAX_STORE_BYTES + MOVE_BESIDE_BATCH * 256) + MOVE_BESIDE_SWEEP_COMMANDS * COMMAND;
+  MOVE_BESIDE_BATCHES * request("heavy", MOVE_BESIDE_BATCH_COMMANDS, MAX_STORE_BYTES + MOVE_BESIDE_BATCH * 256) + MOVE_BESIDE_SWEEP_COMMANDS * COMMAND + MAX_STORE_BYTES * DB_BYTE;
 
 /**
  * The beside pool's commands on product saves (lib/store-data.ts, BESIDE_SAVE_COMMANDS), at Upstash's count of a

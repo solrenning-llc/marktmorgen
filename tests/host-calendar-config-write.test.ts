@@ -43,7 +43,7 @@ const real = redis.pipeline.bind(redis);
 /** SET replies that are not Redis confirming the write. */
 const UNKNOWN_SET: unknown[] = [[], [undefined], ["QUEUED"], [null], [1], [["OK"]], ["OK", "OK"], ["ok"], {}];
 /** DEL replies that are not a count. */
-const UNKNOWN_DEL: unknown[] = [[], [undefined], ["QUEUED"], [null], [-1], [1.5], ["1"], [1, 1]];
+const UNKNOWN_DEL: unknown[] = [[], [undefined], ["QUEUED"], [null], [-1], [1.5], ["1"], [3], [1, 1]];
 
 /** A reply's shape in words, with a missing slot shown as such (JSON would print it as null). */
 const label = (shape: unknown): string => (Array.isArray(shape) ? `[${shape.map((v) => (v === undefined ? "undefined" : JSON.stringify(v))).join(",")}]` : JSON.stringify(shape));

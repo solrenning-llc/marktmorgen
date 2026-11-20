@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT, INVOICES_UNLINKED_TEXT } from "@/components/affiliate-commission-history";
+import { AffiliateUnconfirmed, type WaitingLine } from "@/components/affiliate-unconfirmed";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
 import { useState } from "react";
@@ -88,6 +89,7 @@ const MESSAGES: Record<string, string> = {
   invoices_ceiling: INVOICES_CEILING_TEXT,
   invoices_unlinked: INVOICES_UNLINKED_TEXT,
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
+  sent: "PayPal already sent this payout, so it stays on the record. Taking it off would pay the affiliate again on the next payday.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "This could not be done just now, so nothing was saved. Try again in a moment.",
@@ -220,6 +222,9 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  unconfirmed = [],
+  unconfirmedTotal = 0,
+  unconfirmedDays = 14,
 }: {
   handle: string;
   setting: AffiliateSetting;
@@ -227,7 +232,8 @@ export function AffiliateStudio({
   rows: Row[];
   lines: LineView[];
   linesTotal?: number | null;
-  payouts: Payout[];
+  /** `sent` when PayPal sent it (lib/affiliates.ts paidThroughPayPal): shown without Undo. */
+  payouts: (Payout & { sent?: boolean })[];
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked?: boolean;
@@ -253,6 +259,10 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** Second-level lines waiting as "buyer not confirmed" (newest first, some), how many in all, and the days the job keeps looking. */
+  unconfirmed?: WaitingLine[];
+  unconfirmedTotal?: number;
+  unconfirmedDays?: number;
 }) {
   const router = useRouter();
   const pending = rows.filter((r) => r.affiliate.status === "pending");
@@ -657,6 +667,8 @@ export function AffiliateStudio({
 
         {leadsTotal > 0 ? <LeadReview leads={leads} total={leadsTotal} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} /> : null}
 
+        <AffiliateUnconfirmed lines={unconfirmed} total={unconfirmedTotal} days={unconfirmedDays} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} />
+
         <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} invoicesPastCeiling={invoicesPastCeiling} unlinkedInvoices={unlinkedInvoices} />
 
         {payouts.length ? (
@@ -671,14 +683,19 @@ export function AffiliateStudio({
                   </span>
                   <span className="flex items-center gap-3">
                     <span className="font-semibold tabular-nums text-ink">{money(payout.cents, payout.currency)}</span>
-                    <button
-                      type="button"
-                      className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
-                      disabled={busy !== null}
-                      onClick={() => act(`p-${payout.id}`, { action: "unpay", payout: payout.id }, "Payout taken off the record.")}
-                    >
-                      Undo
-                    </button>
+                    {/* A payout PayPal sent has no Undo (#4606): taking it off would pay the affiliate twice. */}
+                    {payout.sent ? (
+                      <span className="text-sm text-ink-soft">Sent by PayPal</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+                        disabled={busy !== null}
+                        onClick={() => act(`p-${payout.id}`, { action: "unpay", payout: payout.id }, "Payout taken off the record.")}
+                      >
+                        Undo
+                      </button>
+                    )}
                   </span>
                   {errorAt(`p-${payout.id}`)}
                 </li>

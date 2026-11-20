@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
+import { devicesResult } from "@/lib/devices-result";
 
 export const metadata: Metadata = {
   title: "Log out of other devices — Marktmorgen",
@@ -13,22 +14,6 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
-
-/** What the route answered (app/api/auth/signout-others): done, or not known, never "done" when it is not known. */
-const RESULT: Record<string, { tone: "notice-success" | "notice-warn"; words: string }> = {
-  "out-others": {
-    tone: "notice-success",
-    words: "Done. Every other device that was logged in is now logged out. This browser is still logged in. A login finished at that very moment may stay open, so if you still see one, press the button again.",
-  },
-  "out-others-reauth": {
-    tone: "notice-warn",
-    words: "For your safety, log in again to log out your other devices. Nothing was logged out. This needs a login from the last 15 minutes. After you log in, your studio opens. Choose “Log out of other devices” there again.",
-  },
-  "out-others-unknown": {
-    tone: "notice-warn",
-    words: "We could not log out your other devices just now, so none of them is known to be logged out. Try again in a moment. If it keeps failing, use “Log out of all devices” in your studio.",
-  },
-};
 
 /**
  * Asks before it logs out every other device of this account (757 [STN4], unit 1; AX274 3.3.6): opening this
@@ -44,7 +29,7 @@ export default async function StudioDevicesPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
-  const result = typeof query.status === "string" ? RESULT[query.status] : undefined;
+  const result = devicesResult(query.status);
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />

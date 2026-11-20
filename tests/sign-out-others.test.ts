@@ -11,6 +11,7 @@
  */
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
+import { DEVICES_RESULT, devicesResult } from "@/lib/devices-result";
 import { join } from "node:path";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
@@ -231,11 +232,13 @@ test("a request from another site is refused before anything is read", async () 
 // ---- The page that asks first ------------------------------------------------------------------------------------
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
+// The page and the notices it shows (lib/devices-result.ts), read together.
+const pageAndWords = () => read("app/studio/devices/page.tsx") + read("lib/devices-result.ts");
 
 test("the studio links to the page, and the page asks before it closes anything (AX274 3.3.6), with no time limit", () => {
   const studio = read("app/studio/page.tsx");
   assert.match(studio, /href=\{studioPath\(store, "", "devices"\)\}[\s\S]{0,400}Log out of other devices/);
-  const page = read("app/studio/devices/page.tsx");
+  const page = pageAndWords();
   // A plain form that posts only when the creator presses the button: nothing is closed by opening the page.
   assert.match(page, /<form action="\/api\/auth\/signout-others" method="post"/);
   assert.match(page, /Yes, log out the other devices/);
@@ -250,7 +253,7 @@ test("the studio links to the page, and the page asks before it closes anything 
 });
 
 test("the page asks a session that is not fresh to log in again, in plain words, with a way to do it", () => {
-  const page = read("app/studio/devices/page.tsx");
+  const page = pageAndWords();
   assert.match(page, /"out-others-reauth"/);
   assert.match(page, /For your safety, log in again to log out your other devices\./);
   assert.match(page, /href="\/signin\?to=login"/);
@@ -261,10 +264,30 @@ test("the page asks a session that is not fresh to log in again, in plain words,
 });
 
 test("the page promises no more than the code does (Claude 3 on #3459, rule 27)", () => {
-  const page = read("app/studio/devices/page.tsx");
+  const page = pageAndWords();
   // A login that finishes during the sign-out may stay open, so the page never says "every other device is logged out".
   assert.doesNotMatch(page, /Every other device is logged out/);
   assert.match(page, /Every other device that was logged in is now logged out\./);
   // API keys are not sessions: a script holding one keeps working until the key is revoked.
   assert.match(page, /API keys are not affected/);
+});
+
+test("an address status the route never sends shows no notice, even a name every object has (Codex X6 on #3459)", () => {
+  for (const status of ["out-others", "out-others-reauth", "out-others-unknown"]) assert.equal(devicesResult(status), DEVICES_RESULT[status], status);
+  for (const status of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf", "", "out-others ", undefined, ["out-others"]]) {
+    assert.equal(devicesResult(status), undefined, String(status));
+  }
+  // The page reads the notice only through it.
+  const page = read("app/studio/devices/page.tsx");
+  assert.match(page, /devicesResult\(query\.status\)/);
+  assert.doesNotMatch(page, /RESULT\[/);
+});
+
+test("the page never says an emailed link is the only way back in: a passkey on that device still logs in (Codex X6 on #3459)", () => {
+  const page = read("app/studio/devices/page.tsx");
+  assert.doesNotMatch(page, /someone needs a new login link sent to your email\./);
+  assert.match(page, /A passkey saved on that device still logs in there\./);
+  // The way to take it away is named and linked, by the studio's own passkeys part.
+  assert.match(page, /href=\{`\$\{studioPath\(store\)\}#passkeys`\}/);
+  assert.match(read("components/passkey-manager.tsx"), /id="passkeys"/);
 });

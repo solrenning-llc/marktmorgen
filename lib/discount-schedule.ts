@@ -17,7 +17,9 @@
  * holds the rest from then), or when the creator cancels it, or with the
  * store. A try is confirmed only by Stripe's exact answer (active true, this
  * code); anything else is tried again at the next run, ACTIVATION_TRIES times
- * in all, then kept as failed for the studio to say so, the code still off.
+ * in all, then kept as failed for the studio to say so, the code still off:
+ * a code Stripe confirmed live at the last try is switched off first, and a
+ * stop Stripe does not confirm keeps it due, never failed while it may be live.
  * Every Redis reply is read in its exact shape (lib/redis-reply.ts): an
  * unreadable one acts on nothing and leaves the entry for the next run. A
  * kept record that cannot be parsed reads the same at every run, so it
@@ -40,6 +42,7 @@ import {
   NOTICE_RETRY_SECONDS,
   NOTICE_TRIES,
   RETRY_SECONDS,
+  STOP_TRIES,
   type ScheduleEntry,
   type ScheduleWindow,
 } from "@/lib/discount-schedule-rules";
@@ -96,25 +99,26 @@ function readRecord(id: string, raw: string): Kept | null {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const { c, s, e, t, f } = record;
+  const { c, s, e, t, f, u } = record;
   const int = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
-  if (typeof c !== "string" || !c || !int(s) || !int(e) || e <= s || !int(t) || (f !== 0 && f !== 1)) return null;
+  if (typeof c !== "string" || !c || !int(s) || !int(e) || e <= s || !int(t) || (f !== 0 && f !== 1) || (u !== undefined && u !== 1)) return null;
   // Absent until the first email try; present, only in their own shape.
   const n = Object.hasOwn(record, "n") ? record.n : 0;
   const m = Object.hasOwn(record, "m") ? record.m : 0;
   if (!int(n) || n > NOTICE_TRIES || (m !== 0 && m !== 1)) return null;
-  return { id, code: c, start: s, end: e, tries: t, failed: f === 1, notices: n, mailed: m === 1 };
+  return { id, code: c, start: s, end: e, tries: t, failed: f === 1, ...(u === 1 ? { stopUnconfirmed: true } : {}), notices: n, mailed: m === 1 };
 }
 
 const writeRecord = (entry: ScheduleEntry & Partial<Pick<Kept, "notices" | "mailed">>) =>
   JSON.stringify({
     c: entry.code, s: entry.start, e: entry.end, t: entry.tries, f: entry.failed ? 1 : 0,
+    ...(entry.stopUnconfirmed ? { u: 1 } : {}),
     ...(entry.notices ? { n: entry.notices } : {}),
     ...(entry.mailed ? { m: 1 } : {}),
   });
 
-/** What the studio is told of a kept schedule: nothing about the email. */
-const shown = ({ id, code, start, end, tries, failed }: Kept): ScheduleEntry => ({ id, code, start, end, tries, failed });
+/** What the studio is told of a kept schedule: nothing about the email; a stop not confirmed is said (#4522). */
+const shown = ({ id, code, start, end, tries, failed, stopUnconfirmed }: Kept): ScheduleEntry => ({ id, code, start, end, tries, failed, ...(stopUnconfirmed ? { stopUnconfirmed: true } : {}) });
 
 /** Runs `work` holding the store's lock: "busy" when another hand holds it, "unknown" when that cannot be told. */
 async function holding<T>(statsId: string, work: () => Promise<T>): Promise<T | "busy" | "unknown"> {
@@ -129,11 +133,14 @@ async function holding<T>(statsId: string, work: () => Promise<T>): Promise<T | 
   }
 }
 
-/** Whether every reply of a pipeline is a count: the writes landed as asked. */
+/**
+ * Whether every write landed as asked. Each one sent here touches one field or one member (HSET, HDEL, ZADD, ZREM), so
+ * only 0 or 1 is a real answer (Codex X8): 2 or more is unknown, never a cancellation or an activation confirmed.
+ */
 async function counted(commands: (string | number)[][]): Promise<boolean> {
   try {
     const replies = repliesFor(await redisPipeline(commands), commands.length);
-    return Boolean(replies && replies.every((reply) => countOf(reply) !== null));
+    return Boolean(replies && replies.every((reply) => reply === 0 || reply === 1));
   } catch {
     return false;
   }
@@ -336,17 +343,44 @@ async function drop(member: string, key = DUE_KEY): Promise<void> {
   await counted([["ZREM", key, member]]);
 }
 
+/**
+ * A failed notice enqueue spends one of the existing notice attempts before it can fail. A successful enqueue
+ * restores that reservation: tellOne counts its actual send later. No extra field, attempt or allowance is added.
+ * If enqueueing errors, the saved decision and spent attempt remain due, until the existing notice budget is gone.
+ */
+const FAIL_AND_TELL = `-- marktmorgen:dsched-fail-and-tell:v2
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[6] ~= '' then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[6])
+  redis.call('ZADD', KEYS[2], 'NX', ARGV[4], ARGV[5])
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+redis.call('ZREM', KEYS[3], ARGV[5])
+return 1`;
+
+async function failAndTell(statsId: string, id: string, read: string, next: string, nowSeconds: number, member: string, attempt: string | null): Promise<boolean> {
+  try {
+    const replies = repliesFor(await redisPipeline([
+      ["EVAL", FAIL_AND_TELL, 3, scheduleKey(statsId), TELL_KEY, DUE_KEY, id, read, next, nowSeconds, member, attempt ?? ""],
+    ]), 1);
+    return replies?.[0] === 1;
+  } catch {
+    return false;
+  }
+}
+
 /** A try that did not confirm: counted, and the next one set, or the code kept as failed. */
-async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: number, last = false): Promise<Outcome> {
+async function missed(shop: Shop, statsId: string, entry: Kept, raw: string, nowSeconds: number, last = false): Promise<Outcome> {
   const tries = entry.tries + 1;
   const member = memberOf(shop.sid, statsId, entry.id);
   if (last || tries >= ACTIVATION_TRIES) {
-    // Failed: out of the list to switch on, onto the list to tell the creator, in this same run.
-    const kept = await counted([
-      ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries, failed: true })],
-      ["ZREM", DUE_KEY, member],
-      ["ZADD", TELL_KEY, nowSeconds, member],
-    ]);
+    // Failed: out of the list to switch on, onto the list to tell the creator, in one step over the record as read
+    // (FAIL_AND_TELL, Codex T): a notice write cut short leaves the decision due with one notice attempt spent, and the
+    // next run queues it (activateOne), never failed with nothing to tell.
+    const failed = { ...entry, tries, failed: true };
+    const next = writeRecord(failed);
+    const attempt = entry.notices < NOTICE_TRIES ? writeRecord({ ...failed, notices: entry.notices + 1 }) : null;
+    const kept = await failAndTell(statsId, entry.id, raw, next, nowSeconds, member, attempt);
     return kept ? "failed" : "unknown";
   }
   const kept = await counted([
@@ -354,6 +388,41 @@ async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: numb
     ["ZADD", DUE_KEY, nowSeconds + RETRY_SECONDS, member],
   ]);
   return kept ? "retried" : "unknown";
+}
+
+/**
+ * The last try left a code Stripe confirmed live while the checkout's code box
+ * was never confirmed on (issue #4466): it is switched off before the failure
+ * is final, so a schedule kept as failed never leaves a code a link can still
+ * apply. A stop Stripe does not confirm may not have happened, so it is never
+ * taken for one: the try is counted and the schedule stays due, and the next
+ * run asks Stripe to switch it off again (activateOne), at most STOP_TRIES
+ * times, all paid for at scheduling (SCHEDULE_UNITS). Past them it leaves the
+ * due list, kept as failed with its stop unconfirmed, and the studio says it
+ * may still be live on the creator's Stripe account (Claude 6 on #4522), and
+ * the creator is emailed so (Codex X6 on #4522). Stripe's own expiry still
+ * stops it at its end.
+ */
+async function offThenFailed(shop: Shop, account: string, statsId: string, raw: string, entry: Kept, nowSeconds: number): Promise<Outcome> {
+  // Asked twice, as in scheduleCode: a stop Stripe answers in an unclear way is tried once more at once.
+  if ((await stopCode(account, entry.id)) || (await stopCode(account, entry.id))) return missed(shop, statsId, entry, raw, nowSeconds, true);
+  const tries = entry.tries + 1;
+  if (tries >= ACTIVATION_TRIES + STOP_TRIES) {
+    // Out of the list to switch on, onto the list to tell the creator, in this same run (Codex X6's MEDIUM on #4522):
+    // the worst state for money, a code Stripe may still apply, is never left for the creator to find in the studio.
+    // The email says the stop was not confirmed (failureNotice, stopUnconfirmed); tellOne still sends it once.
+    const member = memberOf(shop.sid, statsId, entry.id);
+    const failed = { ...entry, tries, failed: true, stopUnconfirmed: true };
+    const next = writeRecord(failed);
+    const attempt = entry.notices < NOTICE_TRIES ? writeRecord({ ...failed, notices: entry.notices + 1 }) : null;
+    const kept = await failAndTell(statsId, entry.id, raw, next, nowSeconds, member, attempt);
+    return kept ? "failed" : "unknown";
+  }
+  await counted([
+    ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries: entry.tries + 1 })],
+    ["ZADD", DUE_KEY, nowSeconds + RETRY_SECONDS, memberOf(shop.sid, statsId, entry.id)],
+  ]);
+  return "unknown";
 }
 
 async function activateOne<S extends Shop>(shop: S, statsId: string, id: string, nowSeconds: number, deps: Deps<S>): Promise<Outcome> {
@@ -382,16 +451,31 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
       return "failed";
     }
     if (entry.failed) {
+      // A failed enqueue can leave the decision saved but its warning unqueued, an ordinary failure's as an unconfirmed
+      // stop's (Codex T). Repair it without another stop, inside the existing notice budget.
+      if (!entry.mailed && entry.notices < NOTICE_TRIES) {
+        const attempt = writeRecord({ ...entry, notices: entry.notices + 1 });
+        return (await failAndTell(statsId, id, raw, raw, nowSeconds, member, attempt)) ? "dropped" : "unknown";
+      }
       await drop(member);
       return "dropped";
     }
     if (nowSeconds < entry.start) return "unknown";
     // Its end came before any try could: shown as failed, Stripe not asked.
-    if (nowSeconds >= entry.end) return missed(shop, statsId, entry, nowSeconds, true);
-    if (!shop.stripeAccountId) return missed(shop, statsId, entry, nowSeconds);
+    if (nowSeconds >= entry.end) return missed(shop, statsId, entry, raw, nowSeconds, true);
+    if (!shop.stripeAccountId) return missed(shop, statsId, entry, raw, nowSeconds);
+    // Every try used and not yet failed: only a stop that was not confirmed leaves it so. The code may be
+    // live, so it is switched off before the failure is final, never switched on again.
+    if (entry.tries >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, raw, entry, nowSeconds);
     // One key a try: a repeat of the same try is answered, not done again; the next try is a new request.
     const live = await activateCode(shop.stripeAccountId, id, `dsched:${id}:${entry.start}:${entry.tries}`);
-    if (!live) return missed(shop, statsId, entry, nowSeconds);
+    // Not confirmed live is not confirmed off: a 5xx, a timeout or a lost reply may follow a switch-on that landed
+    // (Claude 4 on #4522). Tried again while tries remain; the last one switches it off before the failure is final,
+    // as a code box never confirmed on does, which is harmless when the switch-on never landed.
+    if (!live) {
+      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, raw, entry, nowSeconds);
+      return missed(shop, statsId, entry, raw, nowSeconds);
+    }
     // Live on Stripe. The checkout's code box goes on first, confirmed by the store it answers with; a box
     // not confirmed on is a missed try like any other (counted, tried again at the next run, which Stripe
     // answers the same way, then kept as failed), so the code is never counted live while buyers cannot type it.
@@ -402,7 +486,9 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
       console.error("switching the checkout's code box on failed", error);
     }
     if (!boxOn(box)) {
-      await missed(shop, statsId, entry, nowSeconds);
+      // The last try: the code is live on Stripe, so it is switched off before it is kept as failed.
+      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, raw, entry, nowSeconds);
+      await missed(shop, statsId, entry, raw, nowSeconds);
       return "unknown";
     }
     // Only then the schedule goes: Stripe holds the rest. If this write is not confirmed the entry stays,

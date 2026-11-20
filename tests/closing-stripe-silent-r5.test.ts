@@ -230,6 +230,33 @@ async function main(): Promise<void> {
   is("a store held past its published time keeps why, as a number", Object.entries(kept ?? {}).filter(([name, value]) => name === "buyersAfter" ? typeof value !== "string" : typeof value !== "number" || !Number.isFinite(value)).map(([name]) => name), []);
   is("…and it was kept", typeof (kept as Record<string, unknown> | null)?.overdueAs, "number");
 
+  // Claude 4's LOW on #3501: the reason is written only over the state this run read (CLOSING_STATE_SAVE), never by a
+  // plain SET: a run that advanced the state between this run's read and its note keeps what it wrote.
+  {
+    const key = stateKey(b.email);
+    const { overdueAs: _gone, ...without } = (kept ?? {}) as Record<string, unknown>;
+    await redis.pipeline([["SET", key, JSON.stringify(without)]]);
+    const field = Object.keys(without).find((name) => name !== "buyersAfter" && typeof without[name] === "number")!;
+    const other = JSON.stringify({ ...without, [field]: (without[field] as number) + 1 });
+    const real = redis.pipeline.bind(redis);
+    let raced = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const note = commands.some((c) => (c[0] === "SET" && c[1] === key && String(c[2]).includes('"overdueAs"')) || (c[0] === "EVAL" && c[3] === key && String(c[c.length - 1]).includes('"overdueAs"')));
+      if (note && !raced) {
+        raced = true;
+        await real([["SET", key, other]]);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await quietly(() => closeOne(b.email, b.ended + (C + ERASE_WITHIN_DAYS + 3) * DAY, hands));
+    } finally {
+      redis.pipeline = real;
+    }
+    const [after] = await redis.pipeline([["GET", key]]);
+    is("a run that advanced the state meanwhile keeps it: the reason is not written over it", [raced, after], [true, other]);
+  }
+
   part("A platform outage too (our key silent in the same run): ours, held every day");
   fresh();
   const c = await withMember("outagesilent", "acct_1OutageSilent01");

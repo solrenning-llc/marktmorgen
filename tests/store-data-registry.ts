@@ -1216,6 +1216,7 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [
     per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other."),
+    capped(0, "A message not kept's place in its day's count (lib/webhooks.ts SKIP_COUNT, `nl:hooks:evt:<id>:skip:<reason>`, Codex X6 on #3446): one an event, deleted once its lines are in the log, or with the day's count given back, and gone at the end of the next UTC day at the latest. Counted with the event's own mark above, which it stands beside or in place of (a mark let go on a failure).", src("lib/webhooks.ts", "SKIP_COUNT")),
     capped(30 * (288 / 3) * MARK, "The mark of a passed-over Stripe event, kept thirty days. Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS")),
   ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },

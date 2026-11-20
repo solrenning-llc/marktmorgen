@@ -2239,6 +2239,24 @@ const givenUpMark = (statsId: string, stripeEvent: string) => eventKey(eventIdFo
 
 /** The count of a store's messages not kept for one reason on one UTC day (skippedLines), under the family of the store's waits. */
 const skippedDayKey = (statsId: string, reason: "large" | "used", day: number) => `nl:hooks:wait:${statsId}:skip:${reason}:${day}`;
+/** A message's own place in its day's count (SKIP_COUNT), kept only until its lines are in the store's log. */
+const skippedMarkKey = (eventId: string, reason: "large" | "used") => `${eventKey(eventId)}:skip:${reason}`;
+
+/**
+ * The day's count of messages not kept, taken once for a message (Codex X6 on #3446): a message already counted
+ * (KEYS[2], its mark, holding its place) answers that place and counts nothing, so one whose INCR landed and whose
+ * reply was lost or came back in another shape is counted once when it is noticed again. Otherwise the day's count
+ * (KEYS[1]) is taken and kept to the end of the next UTC day (ARGV[1]), and the place is marked until then too.
+ * Billed 1 + GET + INCR + EXPIREAT + SET + EXPIREAT, and one DEL of the mark once the lines are in the log.
+ */
+const SKIP_COUNT = `-- marktmorgen:webhook-skip-count:v1
+local had = redis.call("GET", KEYS[2])
+if had then return tonumber(had) end
+local n = redis.call("INCR", KEYS[1])
+redis.call("EXPIREAT", KEYS[1], ARGV[1])
+redis.call("SET", KEYS[2], n)
+redis.call("EXPIREAT", KEYS[2], ARGV[1])
+return n`;
 
 /**
  * The lines a message that is not kept leaves in the store's log, one an
@@ -2252,18 +2270,20 @@ const skippedDayKey = (statsId: string, reason: "large" | "used", day: number) =
 async function skippedLines(statsId: string, deliveries: Delivery[], reason: "large" | "used", words: string, now: number): Promise<void> {
   const day = Math.floor(now / 86_400_000);
   const key = skippedDayKey(statsId, reason, day);
-  // INCR's whole number from 1 up, one reply for each command (CX-123 rule 24); text or true was read as a number.
-  // Thrown, emitEvent takes the event's mark back, so it is noticed again.
-  const n = countOf(repliesFor(await redisPipeline([["INCR", key], ["EXPIREAT", key, (day + 2) * 86400]]), 2)?.[0]);
-  if (n === null || n < 1) throw new Error("the day's messages not kept could not be counted");
+  const mark = skippedMarkKey(deliveries[0]?.eventId ?? eventIdFor(statsId, `skipped.${reason}`, String(now)), reason);
+  // The message's place, a whole number from 1 up (CX-123 rule 24). Thrown, emitEvent takes the event's mark back, so
+  // it is noticed again, and SKIP_COUNT then answers the place it already took, never a second one.
+  const n = countOf(repliesFor(await redisPipeline([["EVAL", SKIP_COUNT, 2, key, mark, (day + 2) * 86400]]), 1)?.[0]);
+  if (n === null || n < 1) throw new UnknownReplyError("the day's messages not kept");
   if (n <= SKIPPED_LINES_PER_DAY) {
     const lines = deliveries.map((d) => noticeLine(d.id, statsId, d.endpoint, d.eventId, d.type as WebhookEvent, words, now));
     const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), true);
     // Putting the lines in the log that fails (a log read in another shape, a push that did not answer) gives the day's
     // count back before the event's mark is let go, so the event noticed again is counted once (Codex L on #3446).
     await pushMissing(statsId, lines.filter((_, at) => written[at] === "there").map((line) => line.id), lines.filter((_, at) => written[at] === "new").map((line) => line.id))
-      .catch(() => countNotKept(key));
-    if (written.includes("absent")) await countNotKept(key);
+      .catch(() => countNotKept(key, mark));
+    if (written.includes("absent")) await countNotKept(key, mark);
+    await letMarkGo(mark);
     return;
   }
   const more = n - SKIPPED_LINES_PER_DAY;
@@ -2277,18 +2297,25 @@ async function skippedLines(statsId: string, deliveries: Delivery[], reason: "la
     ),
   }));
   const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), false);
-  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "absent").map((line) => line.id)).catch(() => countNotKept(key));
-  if (written.includes("absent")) await countNotKept(key);
+  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "absent").map((line) => line.id)).catch(() => countNotKept(key, mark));
+  if (written.includes("absent")) await countNotKept(key, mark);
+  await letMarkGo(mark);
 }
 
 /**
  * A message not kept whose lines are not there, or not put in the store's log: its count for the day is given back,
- * so it is counted once when the event is noticed again, and it throws (emitEvent lets the event's mark go). A count that cannot be given back
- * is said in the server's log; the figure is then one more than the messages.
+ * with its place's mark, so it is counted once when the event is noticed again, and it throws (emitEvent lets the
+ * event's mark go). A count that cannot be given back is said in the server's log; the figure is then one more than
+ * the messages, and the mark, if it stayed, holds that place for the message noticed again.
  */
-async function countNotKept(key: string): Promise<never> {
-  await redisPipeline([["DECR", key]]).catch((lost) => console.error("a webhook day's count of messages not kept could not be given back", key, lost));
+async function countNotKept(key: string, mark: string): Promise<never> {
+  await redisPipeline([["DECR", key], ["DEL", mark]]).catch((lost) => console.error("a webhook day's count of messages not kept could not be given back", key, lost));
   throw new UnknownReplyError("a webhook delivery line's write");
+}
+
+/** Its lines are in the log: the message's place is not needed again. Best effort: the mark ends with the next UTC day. */
+async function letMarkGo(mark: string): Promise<void> {
+  await redisPipeline([["DEL", mark]]).catch((lost) => console.error("a webhook message's count mark could not be let go; it ends with the next UTC day", mark, lost));
 }
 
 /** A line of the delivery log no message is behind: the studio shows it "Not sent", with `words`. */
@@ -2334,7 +2361,13 @@ async function pushMissing(statsId: string, ids: string[], known: string[] = [])
     const inLog = new Set(logged);
     push = [...known, ...ids.filter((id) => !inLog.has(id))];
   }
-  if (push.length) await redisPipeline([...push.map((id) => ["LPUSH", logKey(statsId), id]), ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
+  if (!push.length) return;
+  // Each LPUSH answers the list's new length (a whole number from 1 up) and LTRIM "OK" (CX-123 rule 24; Codex X6 on
+  // #3446): any other reply may not have pushed, so it throws, and the caller lets the event's mark go. Noticed again,
+  // the line is there (SET NX), so it goes in only if the log, read exactly above, does not hold it: never twice.
+  const replies = repliesFor(await redisPipeline([...push.map((id) => ["LPUSH", logKey(statsId), id]), ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]), push.length + 1);
+  const pushed = replies?.slice(0, push.length).every((reply) => { const length = countOf(reply); return length !== null && length >= 1; });
+  if (!replies || !pushed || replies[push.length] !== "OK") throw new UnknownReplyError("a store's webhook delivery log push");
 }
 
 /**

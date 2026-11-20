@@ -1817,6 +1817,18 @@ export class MemoryRedis {
           if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
         }
+        // lib/webhooks.ts SKIP_COUNT: the day's count of messages not kept, taken once a message: a message already
+        // counted (its mark) answers its place and counts nothing.
+        if (key.startsWith("-- marktmorgen:webhook-skip-count:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, day, mark, at] = args;
+          const had = this.run(["GET", mark]);
+          if (typeof had === "string") return Number(had);
+          const n = this.run(["INCR", day]);
+          this.run(["EXPIREAT", day, at]);
+          this.run(["SET", mark, String(n)]);
+          this.run(["EXPIREAT", mark, at]);
+          return n;
+        }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
           this.live(target);

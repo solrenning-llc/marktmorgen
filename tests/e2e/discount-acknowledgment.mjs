@@ -2,14 +2,15 @@
 export async function checkDiscountAcknowledgment({browser,LOCAL,fixture,is}){
  const kept={id:"promo_synthetic_kept",code:"KEPT20",off:{kind:"percent",percent:20},timesRedeemed:2,maxRedemptions:null,expiresAt:null,active:true};
  const cases=[
- {name:"HTTP failure",status:500,body:{ok:true,codes:[],schedules:[]}},
- {name:"truthy success",body:{ok:"true",codes:[],schedules:[]}},
- {name:"missing codes",body:{ok:true,schedules:[]}},
- {name:"missing schedules",body:{ok:true,codes:[kept]}},
- {name:"invalid list",body:{ok:true,codes:{},schedules:[]}},
- {name:"invalid row",body:{ok:true,codes:[null],schedules:[]}},
- {name:"invalid active",body:{ok:true,codes:[{...kept,active:"true"}],schedules:[]}},
- {name:"contradictory error",body:{ok:true,codes:[],schedules:[],error:"stripe"}},
+ {name:"HTTP failure",status:500,body:{ok:true,codes:[],schedules:[],returning:[]}},
+ {name:"truthy success",body:{ok:"true",codes:[],schedules:[],returning:[]}},
+ {name:"missing codes",body:{ok:true,schedules:[],returning:[]}},
+ {name:"missing schedules",body:{ok:true,codes:[kept],returning:[]}},
+ {name:"missing returning",body:{ok:true,codes:[kept],schedules:[]}},
+ {name:"invalid list",body:{ok:true,codes:{},schedules:[],returning:[]}},
+ {name:"invalid row",body:{ok:true,codes:[null],schedules:[],returning:[]}},
+ {name:"invalid active",body:{ok:true,codes:[{...kept,active:"true"}],schedules:[],returning:[]}},
+ {name:"contradictory error",body:{ok:true,codes:[],schedules:[],returning:[],error:"stripe"}},
  {name:"inherited error name",body:{ok:false,error:"__proto__"}},
  {name:"malformed JSON",raw:"<html>unknown</html>"},
  {name:"lost reply",abort:true},
@@ -18,7 +19,7 @@ export async function checkDiscountAcknowledgment({browser,LOCAL,fixture,is}){
   const context=await browser.newContext({viewport:{width,height:1000}});
   try{
    await context.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
-   const page=await context.newPage();let reply={body:{ok:true,codes:[kept],schedules:[]}},requests=0,otherWrites=0;
+   const page=await context.newPage();let reply={body:{ok:true,codes:[kept],schedules:[],returning:[]}},requests=0,otherWrites=0;
    await page.route("**/api/**",async route=>{
     const request=route.request();
     if(["GET","HEAD"].includes(request.method())){await route.continue();return;}
@@ -42,7 +43,7 @@ export async function checkDiscountAcknowledgment({browser,LOCAL,fixture,is}){
     is("unknown discount reply never claims empty list "+scenario.name+"/"+width,(await panel.innerText()).includes("No live code right now"),false);
     is("discount refresh unlocks after refusal "+scenario.name+"/"+width,await panel.getByRole("button",{name:"Refresh discount codes",exact:true}).isEnabled(),true);
    }
-   reply={body:{ok:true,codes:[{...kept,active:false}],schedules:[]}};
+   reply={body:{ok:true,codes:[{...kept,active:false}],schedules:[],returning:[]}};
    await panel.getByRole("button",{name:"Switch it off",exact:true}).click();
    await panel.getByText(/1 code is switched off/).waitFor();
    await page.locator('.nb-toast-region [role="status"]').getByText("KEPT20 switched off.",{exact:true}).waitFor();

@@ -44,6 +44,22 @@ export function readDiscountConfirmation(raw: unknown, httpOk: boolean): Discoun
  return result;
 }
 
+/** A code for returning buyers as the studio lists it (554 [DS1], unit 2): never its coupon id. */
+export type ReturningListed = { code: string; off: Off; createdAt: number };
+
+/** The studio's list of codes for returning buyers, read exactly; anything else is no confirmation. Browser-safe. */
+export function readReturningConfirmation(raw: unknown): ReturningListed[] | null {
+ if(!record(raw) || !Object.hasOwn(raw,"returning") || !Array.isArray(raw.returning))return null;
+ const result: ReturningListed[]=[];const words=new Set<string>();
+ for(const row of raw.returning){
+  if(!record(row) || !own(row,["code","off","createdAt"]) || typeof row.code !== "string" || !/^[A-Z0-9-]{3,24}$/.test(row.code) || words.has(row.code) || !count(row.createdAt) || row.createdAt <= 0)return null;
+  const off=readOff(row.off);if(!off)return null;
+  words.add(row.code);
+  result.push({code:row.code,off,createdAt:row.createdAt});
+ }
+ return result;
+}
+
 /** Whether the studio's list is the whole list: only from an exact `complete: true`; otherwise it is the newest page. */
 export function discountListComplete(raw: unknown): boolean {
  return record(raw) && Object.hasOwn(raw,"complete") && raw.complete === true;

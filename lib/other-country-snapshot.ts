@@ -31,13 +31,30 @@ export const OTHER_COUNTRY_WINDOW_MONTHS: Readonly<Record<"ca-specified-supplies
   "no-remote-services": 12,
 });
 
-/** Minor-unit digits of the only currencies converted here; any other currency is unknown. */
-const EXPONENT: Readonly<Record<string, number>> = Object.freeze({ USD: 2, CAD: 2, NOK: 2, CHF: 2 });
+/**
+ * Calendar years a rule counts, the current one included (Taiwan: the previous or the current year, FAQ FOUR, Q1,
+ * 14/05/2025). Both years are counted together from 1 January of the first, which reaches the threshold sooner, never
+ * later, than either year alone.
+ */
+export const OTHER_COUNTRY_CALENDAR_YEARS: Readonly<Record<"tw-cross-border-e-services", number>> = Object.freeze({
+  "tw-cross-border-e-services": 2,
+});
+
+/** The rules a place counter can feed: a rolling window of months, or calendar years. */
+export type PlaceCountedRuleId = keyof typeof OTHER_COUNTRY_WINDOW_MONTHS | keyof typeof OTHER_COUNTRY_CALENDAR_YEARS;
+export const placeCounted = (ruleId: string): ruleId is PlaceCountedRuleId =>
+  Object.hasOwn(OTHER_COUNTRY_WINDOW_MONTHS, ruleId) || Object.hasOwn(OTHER_COUNTRY_CALENDAR_YEARS, ruleId);
+
+/**
+ * Minor-unit digits of the only currencies converted here; any other currency is unknown. TWD has 2 under ISO 4217,
+ * whatever coins circulate: the counter and the threshold both read it in those units.
+ */
+const EXPONENT: Readonly<Record<string, number>> = Object.freeze({ USD: 2, CAD: 2, NOK: 2, CHF: 2, TWD: 2 });
 
 /** One reviewed ceiling rate: 1 unit of `from` is at most `numerator / denominator` units of `to`. */
 export type FxCeiling = Readonly<{
   from: string;
-  to: "CAD" | "NOK" | "CHF";
+  to: "CAD" | "NOK" | "CHF" | "TWD";
   numerator: number;
   denominator: number;
   /** The official page the ceiling was set from, and the UTC days it holds. */
@@ -92,16 +109,25 @@ function own(value: unknown, keys: readonly string[]): Record<string, unknown> |
   }
 }
 
-/** The first UTC millisecond of the day `months` calendar months before `now`'s day: the window `placeTotals` reads. */
-export function otherCountryWindowStart(ruleId: "ca-specified-supplies" | "no-remote-services", now: number): number {
+/**
+ * The first UTC millisecond the rule's window reaches back to: `placeTotals`' `since`. A rolling rule: the day `months`
+ * calendar months before `now`'s day, one day more. A calendar-year rule: 1 January of the first year it counts, one
+ * day more, so a country ahead of UTC never loses the first hours of its year.
+ */
+export function otherCountryWindowStart(ruleId: PlaceCountedRuleId, now: number): number {
   const at = new Date(now);
-  const day = Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - OTHER_COUNTRY_WINDOW_MONTHS[ruleId], at.getUTCDate());
+  if (Object.hasOwn(OTHER_COUNTRY_CALENDAR_YEARS, ruleId)) {
+    // One UTC day before 1 January: a country ahead of UTC (Taiwan, UTC+8) starts its year on 31 December in UTC, and
+    // the counter reads whole UTC months from `since`, so that December is counted whole (Claude 5's LOW on #4912).
+    return Date.UTC(at.getUTCFullYear() - (OTHER_COUNTRY_CALENDAR_YEARS[ruleId as keyof typeof OTHER_COUNTRY_CALENDAR_YEARS] - 1), 0, 1) - 24 * 60 * 60 * 1000;
+  }
+  const day = Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - OTHER_COUNTRY_WINDOW_MONTHS[ruleId as keyof typeof OTHER_COUNTRY_WINDOW_MONTHS], at.getUTCDate());
   // One day more than the window, so a day is never missed at a month's end (the dearer count).
   return day - 24 * 60 * 60 * 1000;
 }
 
 /** `amountMinor` of `from` in `to`, rounded up, at the one reviewed ceiling valid today; null when there is none. */
-function convert(amountMinor: number, from: string, to: "CAD" | "NOK" | "CHF", day: string, fx: readonly FxCeiling[]): number | null {
+function convert(amountMinor: number, from: string, to: "CAD" | "NOK" | "CHF" | "TWD", day: string, fx: readonly FxCeiling[]): number | null {
   if (!Object.hasOwn(EXPONENT, from) || !Object.hasOwn(EXPONENT, to)) return null;
   if (from === to) return amountMinor;
   const valid = fx.filter((rate) => rate.from === from && rate.to === to && DAY.test(rate.checkedOn) && DAY.test(rate.validThrough)
@@ -147,7 +173,7 @@ export function otherCountrySnapshotUnder(
   if (!rule) return UNKNOWN;
   const ruleId = rule.ruleId;
   // A worldwide rule (Switzerland) is not one place's count.
-  if (ruleId !== "ca-specified-supplies" && ruleId !== "no-remote-services") return UNKNOWN;
+  if (!placeCounted(ruleId)) return UNKNOWN;
   const counted = totals === null ? null : own(totals, ["place", "fromMonth", "toMonth", "countingSince", "complete", "currencies"]);
   if (!counted) return UNKNOWN;
   const place = own(counted.place, ["country", "state"]);
@@ -208,7 +234,7 @@ export function otherCountrySnapshot(country: unknown, totals: unknown, proposed
 }
 
 /**
- * One place-counted country's assessment (Canada, Norway): its snapshot under this file's reviewed records, assessed
+ * One place-counted country's assessment (Canada, Norway, Taiwan): its snapshot under this file's reviewed records, assessed
  * under that country's own rule. "unknown" for every country while those records are empty, and always for
  * Switzerland and every country without a rule. "below-threshold" is never permission to sell by itself.
  */

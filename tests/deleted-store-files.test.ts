@@ -88,6 +88,22 @@ async function main(): Promise<void> {
   const tried = await retryStoreForgets(Date.now() + 10_000, Date.now(), async (_stats, _sid, community) => { seen.push(community); });
   is("a try from the line is handed the community the store had", [tried.done, seen], [1, [communityId]]);
 
+  // Codex X6 on #4348 (LOW): a row put in line before its community id was known (an older row, or one queued with
+  // none) gains the id when the store is queued again with it, so a later try can find the community's folder. A row
+  // that already has a community keeps it, and the row's tries and times are never reset by the second queueing.
+  part("A row in line without its community gains it when queued again with one (Codex X6 on #4348)");
+  const fieldOf4348 = `-|${spare.sid}`;
+  await redis.pipeline([["HSET", "nl:forget:q", fieldOf4348, JSON.stringify({ tries: 2, first: 1_000, last: 2_000 })]]);
+  await queueStoreForget(null, spare.sid, Date.now(), communityId);
+  const enriched = JSON.parse(((await redis.pipeline([["HGET", "nl:forget:q", fieldOf4348]]))[0] as string) ?? "{}") as Record<string, unknown>;
+  is("the old row now carries the community, with its tries and times as they were", [enriched.community, enriched.tries, enriched.first, enriched.last], [communityId, 2, 1_000, 2_000]);
+  await queueStoreForget(null, spare.sid, Date.now(), "c".repeat(32));
+  const kept4348 = JSON.parse(((await redis.pipeline([["HGET", "nl:forget:q", fieldOf4348]]))[0] as string) ?? "{}") as Record<string, unknown>;
+  is("a row that already has a community keeps it", kept4348.community, communityId);
+  const seenAgain: (string | null)[] = [];
+  await retryStoreForgets(Date.now() + 10_000, Date.now(), async (_stats, _sid, community) => { seenAgain.push(community); });
+  is("and the next try is handed that community", seenAgain, [communityId]);
+
   // Codex N1's LOW 2 on #4348 (N1-20261119-1017): a given-up entry is never read to walk files again (a kept field
   // puts the store back in line with files: false), so the deleted community's id it carried was an identifier kept
   // for good with no use. The line keeps it while it may still walk the files; the kept record does not.

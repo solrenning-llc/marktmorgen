@@ -146,6 +146,7 @@ async function main(): Promise<void> {
   part("An unknown access answer: never the content, never an offer to buy, said as not checked (review of #3007, M1)");
   const uncheckedPart = (html: string) => html.match(/<section[^>]*id="cm-unchecked"[\s\S]*?<\/section>/)?.[0] ?? "";
   const NOT_CHECKED = "We couldn&#x27;t check your access to these spaces just now. Reload the page to try again.";
+  const GATE_NOT_CHECKED = "We could not check your access just now";
   stripe = "down";
   html = await draw(STRANGER);
   is("Stripe down: the page is drawn, with nothing from inside", [html.startsWith("PAGE_FAILED"), nothingInside(html)], [false, []]);
@@ -154,18 +155,28 @@ async function main(): Promise<void> {
   is("Stripe down: a Hidden space still shows no sign of itself", [html.includes("Secret room"), html.includes(secret)], [false, false]);
   stripe = "empty";
   const original = redis.pipeline.bind(redis);
+  // Rule 23 (the pre-review of 9 November 2026, P1): the spaces are answered from the one kept reading of what the
+  // member holds (lib/community-access.ts holdingsOf, nl:cm:<id>:h:...), the same the door reads, no longer from a
+  // kept answer of their own (:sp:ok:). Its reply lost leaves the door itself not known: the page says so, and
+  // nothing from inside, and no locked list, is drawn.
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "GET" && String(c[1]).includes(":sp:ok:"))) throw new Error("synthetic lost reply");
+    if (commands.some((c) => c[0] === "GET" && /:sp:ok:|:h:/.test(String(c[1])))) throw new Error("synthetic lost reply");
     return original(commands);
   }) as typeof redis.pipeline;
   try {
     html = await draw(OUTSIDER);
     is("the kept answer not read: drawn, nothing from inside, no offer to buy", [html.startsWith("PAGE_FAILED"), nothingInside(html), html.includes("Unlock with")], [false, [], false]);
-    is("and the space is said as not checked", uncheckedPart(html).includes("Inner circle"), true);
+    // Rule 23 (merge of main into #3395): main read each space's kept answer (:sp:ok:) apart from the door's, so a
+    // lost reply left the member in with that one space "not checked". Here the door and the spaces share one kept
+    // reading (:h:), so a lost reply leaves the door itself not known: the gate says it could not check, never an
+    // offer to buy. A space not known while the door is known is held above (Stripe down) and in
+    // tests/community-paid-unknown.test.ts.
+    is("and the door says it could not check", html.includes(GATE_NOT_CHECKED), true);
     html = await draw(INSIDER);
     is("a member who holds the product: never the content", [html.startsWith("PAGE_FAILED"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
     is("and never asked to buy it again, nor told it is locked", [html.includes("Unlock with Guide"), html.includes(guideHref), lockedPart(html).includes("Inner circle")], [false, false, false]);
-    is("but told their access could not be checked just now", [uncheckedPart(html).includes("Inner circle"), uncheckedPart(html).includes(NOT_CHECKED)], [true, true]);
+    // Rule 23, as above: the shared reading lost, the door says it could not check.
+    is("but told their access could not be checked just now", html.includes(GATE_NOT_CHECKED), true);
     html = await draw(INSIDER, { space: inner });
     is("asked for directly: never answered as kept for other buyers, never the content", [html.includes("spacelocked"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
   } finally {

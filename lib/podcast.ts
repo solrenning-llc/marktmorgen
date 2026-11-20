@@ -49,15 +49,20 @@ function listedEpisodes(raw: string): number | null {
  * MAX_EPISODES): parsePodcast would leave them out, and written back they would leave the feed.
  */
 export async function readPodcast(id: string): Promise<Podcast | null> {
-  if (!PODCAST_ID.test(id) || !isRedisConfigured()) return null;
+  return (await readPodcastSized(id)).podcast;
+}
+
+/** readPodcast, with the bytes the record was read as (0 when there is none), for a caller that pays for what it moves. */
+export async function readPodcastSized(id: string): Promise<{ podcast: Podcast | null; bytes: number }> {
+  if (!PODCAST_ID.test(id) || !isRedisConfigured()) return { podcast: null, bytes: 0 };
   const reply = repliesFor(await redisPipeline([["GET", podKey(id)]]), 1);
   const raw = reply?.[0];
-  if (raw === null) return null;
+  if (raw === null) return { podcast: null, bytes: 0 };
   const podcast = typeof raw === "string" ? parsePodcast(raw) : null;
   if (!podcast || podcast.id !== id) throw new UnknownReplyError("a podcast's record");
   // Every listed entry parsed and none was cut at MAX_EPISODES: parsePodcast only filters and slices, so the counts match.
   if (listedEpisodes(raw as string) !== podcast.episodes.length) throw new UnknownReplyError("a podcast's episodes");
-  return podcast;
+  return { podcast, bytes: Buffer.byteLength(raw as string, "utf8") };
 }
 
 /**

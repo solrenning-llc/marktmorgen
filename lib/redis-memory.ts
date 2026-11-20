@@ -551,6 +551,14 @@ export class MemoryRedis {
           this.run(["ZADD", line, due, id]);
           return 1;
         }
+        // lib/host-calendar.ts: compare the exact config and keep the reading in the same operation.
+        if (key.startsWith("-- marktmorgen:host-reading-current:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, config, target, failure, expected, value, seconds, kind] = args;
+          if (this.run(["GET", config]) !== expected) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (kind === "good") this.run(["DEL", failure]);
+          return 1;
+        }
         // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
         if (key.startsWith("-- marktmorgen:license-pool-push:v1\n") && args[0] === "1" && args.length >= 3) {
           const [, pool, bound, ...keys] = args;

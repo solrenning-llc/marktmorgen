@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   try {
     const withStats = store.statsId ? store : await ensureStatsId(guarded.ref);
     if (!withStats?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-    const result = await setChatAddress(withStats.statsId, store.name, body.url);
+    const result = await setChatAddress(withStats.statsId, store.name, body.url, withStats);
     if (result === "invalid" || result === "refused") return Response.json({ ok: false, error: result }, { status: 400 });
     return Response.json({ ok: true, result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

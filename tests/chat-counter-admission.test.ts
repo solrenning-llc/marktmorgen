@@ -11,7 +11,7 @@ async function check(name: string, run: () => Promise<void>) {
 const ask = (body: Record<string, unknown> = { url: CHAT_URL }) => POST(new Request("https://example.com/api/store/chat-summary", {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 }) as NextRequest);
-const settings = () => state.commands.filter(c => ["SET", "DEL"].includes(String(c[0])) && String(c[1]).startsWith("nl:chatsum:"));
+const settings = () => state.commands.map(c => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:chat-address-live:v1") ? ["SET", c[5], c[7]] : c).filter(c => ["SET", "DEL"].includes(String(c[0])) && String(c[1]).startsWith("nl:chatsum:"));
 const counters = () => state.commands.filter(c => String(c[1]).startsWith("nl:rl:chat-summary:"));
 async function refused(expected: 429 | 503 = 503) {
   const response = await ask();

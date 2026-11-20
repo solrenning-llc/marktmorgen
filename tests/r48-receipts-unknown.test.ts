@@ -212,7 +212,7 @@ async function requests(): Promise<void> {
 async function sales(): Promise<void> {
   part("The creator's \"New sale\" line: the amount Stripe charged, or none");
   let store = await freshStore();
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;
   const sale = (n: number, over: Record<string, unknown>): SaleRecord => {

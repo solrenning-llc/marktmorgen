@@ -1,3 +1,4 @@
+import { CHAT_ADDRESS_FENCE_EXTRA_COMMANDS, CHAT_ADDRESS_FENCE_EXTRA_BYTES } from "@/lib/chat-summary";
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
@@ -2176,6 +2177,16 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [{ file: "app/[handle]/certificate/[id]/page.tsx", names: ["const load = cache(", "if (await isResting(store)) return { store, resting: true as const };", "if (found.resting) return <StoreResting store={found.store} />;"] }],
     basis: "A public page of the store: the page and its title share one load, which takes one of the store's public requests before the certificate, or the sample's listing and course, is read, and rests with the public pages. It reads no more than a product's page (the store, a listing, a course), 5 commands measured against COMMANDS.laterPage + COMMANDS.laterCount, so it is inside the visits and public-requests lines (tests/certificate-page-admission.test.ts).",
+  },
+  {
+    id: "chat-address-fence",
+    feature: "Atomic chat webhook setting: only the additional live-store fence",
+    monthlyUsd: () => 10 * 24 * DAY_WINDOWS * (CHAT_ADDRESS_FENCE_EXTRA_COMMANDS * COMMAND + CHAT_ADDRESS_FENCE_EXTRA_BYTES * DB_BYTE),
+    sources: [
+      { file: "lib/chat-summary.ts", names: ["CHAT_ADDRESS_FENCE_EXTRA_COMMANDS", "CHAT_ADDRESS_FENCE_EXTRA_BYTES"] },
+      { file: "app/api/store/chat-summary/route.ts", names: ['essentialLimitState("chat-summary", store.handle, 10, 3600)'] },
+    ],
+    basis: "At most ten first-message attempts per hour; 32 times 24 hours bounds a billing month of at most 31 days and its partial boundary hour. EVAL plus EXISTS, HEXISTS and SET replaces one SET, three extra billed Redis commands. The existing request and provider budgets are not re-certified by this incremental line. Includes 2 KiB of extra script/key/envelope transfer per attempt, above the sealed value already in the SET. No extra retained key.",
   },
   {
     id: "public-requests",

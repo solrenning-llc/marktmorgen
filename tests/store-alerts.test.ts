@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
   await setSubscription(OWNER, { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;
   posted.length = 0;

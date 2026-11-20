@@ -52,27 +52,28 @@ const odd: [string, unknown][] = [
   ["null", null],
 ];
 
+const scope = { sid: "c".repeat(32), email: "chat-fixture@example.test", extra: false, statsId: ID };
 async function main(): Promise<void> {
   part("healthy and confirmed-empty controls");
-  redis.clear();
+  redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
   is("nothing kept: no address", await chatAddress(ID), null);
-  is("stopping with nothing kept (DEL 0): removed", await setChatAddress(ID, "Harbor", ""), "removed");
-  is("saved after a first message", await setChatAddress(ID, "Harbor", SLACK), "saved");
+  is("stopping with nothing kept (DEL 0): removed", await setChatAddress(ID, "Harbor", "", scope), "removed");
+  is("saved after a first message", await setChatAddress(ID, "Harbor", SLACK, scope), "saved");
   is("the kept address opens", await chatAddress(ID), SLACK);
-  is("stopping (DEL 1): removed", await setChatAddress(ID, "Harbor", ""), "removed");
+  is("stopping (DEL 1): removed", await setChatAddress(ID, "Harbor", "", scope), "removed");
   is("stopped: no address", await chatAddress(ID), null);
   answer("GET", ["QUEUED"]);
   is("a kept string that does not open: no address, as before", await chatAddress(ID), null);
   redis.pipeline = real;
-  is("an address of neither kind: invalid, nothing posted", [await setChatAddress(ID, "Harbor", "https://example.com/hook"), posts], ["invalid", 1]);
+  is("an address of neither kind: invalid, nothing posted", [await setChatAddress(ID, "Harbor", "https://example.com/hook", scope), posts], ["invalid", 1]);
 
   part("DEL in an unknown shape: never 'removed'");
   for (const [label, shape] of odd) {
     redis.pipeline = real;
-    redis.clear();
-    await setChatAddress(ID, "Harbor", SLACK);
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
+    await setChatAddress(ID, "Harbor", SLACK, scope);
     answer("DEL", shape);
-    const said = await outcome(() => setChatAddress(ID, "Harbor", ""));
+    const said = await outcome(() => setChatAddress(ID, "Harbor", "", scope));
     redis.pipeline = real;
     is(`DEL answered ${label}: UnknownReplyError, not "removed"`, said, "unknown");
   }
@@ -80,9 +81,9 @@ async function main(): Promise<void> {
   part("SET in an unknown shape: never 'saved'");
   for (const [label, shape] of [...odd, ['["ok"]', ["ok"]], ["[1]", [1]]] as [string, unknown][]) {
     redis.pipeline = real;
-    redis.clear();
-    answer("SET", shape);
-    const said = await outcome(() => setChatAddress(ID, "Harbor", SLACK));
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
+    answer("EVAL", shape);
+    const said = await outcome(() => setChatAddress(ID, "Harbor", SLACK, scope));
     redis.pipeline = real;
     is(`SET answered ${label}: UnknownReplyError, not "saved"`, said, "unknown");
   }
@@ -92,8 +93,8 @@ async function main(): Promise<void> {
   part("GET in an unknown shape: unknown, never read as 'none'");
   for (const [label, shape] of odd.filter(([, shape]) => !(Array.isArray(shape) && shape.length === 1 && (shape[0] === null || typeof shape[0] === "string")))) {
     redis.pipeline = real;
-    redis.clear();
-    await setChatAddress(ID, "Harbor", SLACK);
+    redis.clear(); redis.run(["SET", "nl:store:id:" + scope.sid, scope.email]);
+    await setChatAddress(ID, "Harbor", SLACK, scope);
     answer("GET", shape);
     const read = await outcome(() => chatAddress(ID));
     redis.pipeline = real;

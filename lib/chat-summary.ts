@@ -24,11 +24,20 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { seal, unseal } from "@/lib/secret-box";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 import { type ChatKind, chatKind } from "@/lib/chat-kind";
 
 // The reading of an address lives in lib/chat-kind.ts, browser-safe, so the studio's field checks it the same way.
 export { chatKind, type ChatKind };
+
+/** EVAL plus EXISTS, HEXISTS and SET replaces one SET: three extra billed commands. */
+export const CHAT_ADDRESS_FENCE_EXTRA_COMMANDS = 3;
+/** Extra script/key/envelope bytes, above the sealed value already in the old SET. */
+export const CHAT_ADDRESS_FENCE_EXTRA_BYTES = 2_048;
+const KEEP_ADDRESS_IF_LIVE = `-- marktmorgen:chat-address-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
+return redis.call("SET", KEYS[3], ARGV[2])`;
 
 const key = (statsId: string) => `nl:chatsum:${statsId}`;
 const context = (statsId: string) => `chat-summary|${statsId}`;
@@ -94,7 +103,7 @@ export async function chatAddress(statsId: string | null): Promise<string | null
  * throws UnknownReplyError (CX-123 rule 24), so the creator is never told the
  * posting stopped while the address stays and the jobs keep posting to it.
  */
-export async function setChatAddress(statsId: string, storeName: string, raw: unknown): Promise<"saved" | "removed" | "invalid" | "refused"> {
+export async function setChatAddress(statsId: string, storeName: string, raw: unknown, scope: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<"saved" | "removed" | "invalid" | "refused"> {
   const url = typeof raw === "string" ? raw.trim() : "";
   if (!url) {
     const [deleted] = repliesFor(await redisPipeline([["DEL", key(statsId)]]), 1) ?? [undefined];
@@ -103,9 +112,14 @@ export async function setChatAddress(statsId: string, storeName: string, raw: un
     return "removed";
   }
   if (!chatKind(url)) return "invalid";
+  if (!scope || scope.statsId !== statsId || !scope.email) throw new UnknownReplyError("the chat summary store scope");
+  const ref = storeRef(scope);
+  const live = STORE_ID_PATTERN.test(scope.sid) ? storeIdCommand(scope.sid)[1] : await ownerKey(ref);
+  const erasing = await erasingField(ref);
   const ok = (await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`)) === "sent";
   if (!ok) return "refused";
-  const [kept] = repliesFor(await redisPipeline([["SET", key(statsId), seal(url, context(statsId))]]), 1) ?? [undefined];
+  const [kept] = repliesFor(await redisPipeline([["EVAL", KEEP_ADDRESS_IF_LIVE, 3, live, ERASING_KEY, key(statsId), erasing, seal(url, context(statsId))]]), 1) ?? [undefined];
+  if (kept === 0) return "refused";
   if (kept !== "OK") throw new UnknownReplyError("the chat summary address save");
   return "saved";
 }

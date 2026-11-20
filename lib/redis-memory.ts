@@ -282,6 +282,12 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/chat-summary.ts KEEP_ADDRESS_IF_LIVE: a chat address written only while its store is live and not being erased.
+        if (key.startsWith("-- marktmorgen:chat-address-live:v1\n")) {
+          const n = Number(args[0]), keys = args.slice(1, 1 + n), argv = args.slice(1 + n);
+          if (this.run(["EXISTS", keys[0]]) !== 1 || this.run(["HEXISTS", keys[1], argv[0]]) !== 0) return 0;
+          return this.run(["SET", keys[2], argv[1]]);
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

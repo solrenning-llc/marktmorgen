@@ -94,6 +94,13 @@ is("a given price does not supply a draft percentage", safely(() => unsourcedNum
 is("a given count does not supply a percentage written in words", safely(() => unsourcedNumbers(["19 percent of buyers finish"], "19 buyers", "en")), ["19 percent"]);
 is("a given percentage does not supply a draft count", safely(() => unsourcedNumbers(["19 buyers finished"], "19% finished", "en")), ["19"]);
 is("keeps the unit in \"nineteen percent of buyers finish\"", safely(() => unsourcedNumbers(["nineteen percent of buyers finish"], ["$19"], "en")), ["nineteen percent"]);
+// Claude 6, Codex X6 and N1 on #3437 (LOW): the British "per cent" and a hyphen before "percent" are percentages too.
+is("keeps the unit in \"19 per cent of buyers finish\"", safely(() => unsourcedNumbers(["19 per cent of buyers finish"], ["$19"], "en")), ["19 per cent"]);
+is("keeps the unit in \"nineteen per cent of buyers finish\"", safely(() => unsourcedNumbers(["nineteen per cent of buyers finish"], ["$19"], "en")), ["nineteen per cent"]);
+is("keeps the unit in \"a 19-percent rate\"", safely(() => unsourcedNumbers(["a 19-percent rate"], "19 buyers", "en")), ["19-percent"]);
+is("keeps the unit in \"a nineteen-percent rate\"", safely(() => unsourcedNumbers(["a nineteen-percent rate"], ["$19"], "en")), ["nineteen-percent"]);
+is("a given '20%' supplies \"twenty per cent\"", safely(() => unsourcedNumbers(["twenty per cent of buyers finish"], "20% of buyers", "en")), []);
+is("\"per cento\" stays Italian, not \"per cent\" and an o", safely(() => unsourcedNumbers(["19 per cento"], "19%", "en")), []);
 is("keeps the unit in \"twenty % of buyers finish\"", safely(() => unsourcedNumbers(["twenty % of buyers finish"], "20 buyers", "en")), ["twenty %"]);
 is("keeps the unit in \"veinte por ciento de compradores terminan\"", safely(() => unsourcedNumbers(["veinte por ciento de compradores terminan"], ["€20"], "es")), ["veinte por ciento"]);
 is("keeps the unit in \"vingt pour cent des acheteurs terminent\"", safely(() => unsourcedNumbers(["vingt pour cent des acheteurs terminent"], ["€20"], "fr")), ["vingt pour cent"]);

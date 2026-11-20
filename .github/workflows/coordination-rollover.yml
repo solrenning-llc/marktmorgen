@@ -1,0 +1,41 @@
+# The agents' coordination channel rolls over before GitHub closes it (owner, 20/11/2026, about 03h Fortaleza).
+# GitHub refuses comments on an issue past 2,500; the channel is the one open issue labeled canal-ativo. At 2,250
+# comments on it, scripts/coordination_rollover.mjs opens the next part (or uses one already opened by hand), writes its
+# first comment explaining the change and the label rule, puts a pointer line on top of the previous part's body, changes
+# the PAINEL's first line (comment 6929670678 on #4827) and moves the label last. It never closes or locks an issue and
+# never deletes or edits a comment but that one line. A failure stops before the label moves, so the channel never
+# switches halfway, and the run is red; the next comment on the same part retries the same rollover.
+#
+# It runs only on comments on the issue labeled canal-ativo once it holds 2,250, and by hand: every other comment skips
+# the job, which costs no runner minute (and standard runners are free in public repositories). No comment's text is
+# read. Not a required check and not part of CI: it has no final check (tests/coordination-rollover.test.ts).
+name: Coordination rollover
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: coordination-rollover
+  cancel-in-progress: false
+jobs:
+  rollover:
+    name: Coordination rollover
+    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'canal-ativo') && github.event.issue.comments >= 2250) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/coordination_rollover.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Open the next part and move the canal-ativo label when the active part nears the limit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/coordination_rollover.mjs

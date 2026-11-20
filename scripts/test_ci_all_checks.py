@@ -17,7 +17,7 @@ WORKFLOW_DIR = os.path.join(ROOT, ".github", "workflows")
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7"
 # The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after these complete on
 # main, is never a required check and has no final check (tests/main-red-alarm.test.ts).
-NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
+NOT_CI = {"coordination-rollover.yml", "main-red-alarm.yml", "stale-pr-report.yml"}
 
 
 def scope(result="success", full="true"):

@@ -2,7 +2,7 @@ import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { clientAddress } from "@/lib/request-guard";
-import { onboardingUrl, paypalSalesConfigured } from "@/lib/paypal-sales";
+import { markOnboarding, onboardingUrl, paypalSalesConfigured } from "@/lib/paypal-sales";
 
 /**
  * Sends the creator into PayPal's own onboarding to connect their PayPal
@@ -22,6 +22,8 @@ export async function POST(request: NextRequest) {
     const pin = store.sid ? `?store=${encodeURIComponent(store.sid)}` : "";
     const url = await onboardingUrl(store, `${origin}/api/store/paypal/onboarded${pin}`);
     if (!url) return away(origin, studio("paypal=error#paypal"));
+    // The way back is taken only after a connect started here (lib/paypal-sales.ts, markOnboarding).
+    await markOnboarding(store.statsId);
     return new Response(null, { status: 303, headers: { Location: url, "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("starting PayPal onboarding failed", error);

@@ -1,7 +1,37 @@
 "use client";
 
 import { useId, useState } from "react";
-import { GONE_PRODUCT, PREVIEW_LEAVES_OUT, previewLine, previewName, previewSpaces } from "@/lib/community-gate";
+import { GONE_PRODUCT, PREVIEW_LEAVES_OUT, type Unlock, previewLine, previewLocked, previewName, previewSpaces } from "@/lib/community-gate";
+import { LockedSpaces } from "@/components/community-locked";
+import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+import { type LookPaint, lookStyle } from "@/lib/store-look";
+
+type PreviewSpace = { id: string; name: string; about: string; only: string[]; shown?: true };
+
+/** What the studio page worked out for the locked spaces (unlocksOf), and how the store's pages look and speak. */
+export type LockedPreviewData = { unlocks: Record<string, Unlock> | null; language: LanguageCode; look: LookPaint };
+
+/**
+ * The spaces shown "Visible and locked" (542 [CM1]) that a member holding
+ * exactly the products checked would see locked, drawn by the real
+ * community page's own LockedSpaces, in the store's language and look, from
+ * the way in the studio page worked out with the real page's unlocksOf. So
+ * it is what that member sees, word for word: name, one line, Locked, and
+ * the way in; nothing from inside a space. Only its headings sit one level
+ * deeper, under this preview's own, so the studio's outline stays in order.
+ */
+export function LockedPreview({ spaces, access, chosen, unlocks, language, look }: { spaces: PreviewSpace[]; access: string[]; chosen: string[] } & LockedPreviewData) {
+  const locked = previewLocked(spaces, access, chosen, unlocks);
+  if (locked.length === 0) return null;
+  return (
+    <div className="mt-3">
+      <p className="text-sm font-semibold text-ink">And what they see of the spaces kept from them, as on your community page:</p>
+      <div lang={LANGUAGES[language].locale} className={`st-page st-theme-${look.theme} mt-2 rounded-[var(--r-md)] p-4`} style={lookStyle(look) as React.CSSProperties}>
+        <LockedSpaces spaces={locked} language={language} level={4} />
+      </div>
+    </div>
+  );
+}
 
 /**
  * "Which spaces a member sees" (399 [SL3], unit 2; added 1 November 2026):
@@ -18,10 +48,13 @@ export function MemberPreview({
   spaces,
   access,
   open,
+  locked = null,
 }: {
-  spaces: { id: string; name: string; only: string[] }[];
+  spaces: PreviewSpace[];
   access: string[];
   open: { id: string; title: string }[];
+  /** For the spaces shown locked; without it they are left out of the preview. */
+  locked?: LockedPreviewData | null;
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
   const help = useId();
@@ -59,6 +92,7 @@ export function MemberPreview({
           </ul>
         ) : null}
       </div>
+      {locked ? <LockedPreview spaces={spaces} access={access} chosen={picked} {...locked} /> : null}
     </section>
   );
 }

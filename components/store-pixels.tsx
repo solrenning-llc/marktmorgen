@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
-import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
+import { ADS_COOKIE_SECONDS, adsCookieName, mayClearPlatformCookies, nextAdsCookie, platformCookieExpiries, platformStorageKeys } from "@/lib/ad-consent";
 
 /**
  * The creator's own ad pixels, on their store's pages.
@@ -69,6 +69,20 @@ function readChoice(handle: string): "yes" | "no" | null {
   }
 }
 
+/** Every store's stored choice in this browser, by handle. */
+function storedChoices(): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) ?? "";
+      if (key.startsWith(consentKey(""))) out[key.slice(consentKey("").length)] = localStorage.getItem(key) ?? "";
+    }
+  } catch {
+    // Nothing readable: no other store's yes is known.
+  }
+  return out;
+}
+
 function writeChoice(handle: string, value: "yes" | "no" | null) {
   try {
     if (value) localStorage.setItem(consentKey(handle), value);
@@ -83,12 +97,21 @@ function writeChoice(handle: string, value: "yes" | "no" | null) {
  * the pixels may run, with the ad click this visit came from, and deleted the
  * moment they may not.
  */
-function writeAdsCookie(handle: string, on: boolean) {
+function writeAdsCookie(handle: string, on: boolean, gpc = false) {
   try {
     const name = adsCookieName(handle);
     const secure = location.protocol === "https:" ? "; Secure" : "";
     if (!on) {
       document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+      // What the platforms' scripts kept under the yes goes with it, unless
+      // another store on this site still has this browser's yes.
+      if (mayClearPlatformCookies(handle, storedChoices(), gpc)) {
+        for (const expiry of platformCookieExpiries(document.cookie, location.hostname, secure !== "")) document.cookie = expiry;
+        for (const storage of [localStorage, sessionStorage]) {
+          const all = Array.from({ length: storage.length }, (_, i) => storage.key(i) ?? "");
+          for (const key of platformStorageKeys(all)) storage.removeItem(key);
+        }
+      }
       return;
     }
     const existing = document.cookie.split("; ").find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -442,7 +465,7 @@ export function StorePixels({
   }, [handle, askFirst]);
 
   useEffect(() => {
-    if (state === "on" || state === "off") writeAdsCookie(handle, state === "on");
+    if (state === "on" || state === "off") writeAdsCookie(handle, state === "on", (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true);
   }, [state, handle]);
 
   useEffect(() => {
@@ -493,7 +516,15 @@ export function StorePixels({
     // first, and the form goes on its way a moment later, exactly as pressed.
     const onSubmit = (e: SubmitEvent) => {
       const form = e.target instanceof HTMLFormElement ? e.target : null;
-      if (!form || !form.hasAttribute("data-checkout") || form.dataset.sent === "1") return;
+      if (!form || !form.hasAttribute("data-checkout")) return;
+      // Our own delayed submit, below: it goes.
+      if (form.dataset.going === "1") return;
+      // Pressed again while the first press is on its way: held, so one press is one checkout, never two Stripe
+      // sessions or a second hold on a limited product or a booked time.
+      if (form.dataset.sent === "1") {
+        e.preventDefault();
+        return;
+      }
       if (typeof form.requestSubmit !== "function") {
         track(w, pixels, { type: "checkout" }, restricted);
         return;
@@ -503,7 +534,12 @@ export function StorePixels({
       track(w, pixels, { type: "checkout" }, restricted);
       const submitter = e.submitter instanceof HTMLElement ? e.submitter : undefined;
       window.setTimeout(() => {
-        form.requestSubmit(submitter as HTMLButtonElement | undefined);
+        form.dataset.going = "1";
+        try {
+          form.requestSubmit(submitter as HTMLButtonElement | undefined);
+        } finally {
+          delete form.dataset.going;
+        }
         // Coming back to this page, the button works again.
         window.setTimeout(() => delete form.dataset.sent, 1000);
       }, 300);
@@ -511,6 +547,18 @@ export function StorePixels({
     document.addEventListener("submit", onSubmit, true);
     return () => document.removeEventListener("submit", onSubmit, true);
   }, [state, pixels, event, handle, place]);
+
+  // Focus follows the banner (LOW on #4241, 2.4.3): to its first button when the settings open it, and back to the
+  // settings link once a choice closes it, never left on <body>.
+  const bannerFirst = useRef<HTMLButtonElement>(null);
+  const settingsLink = useRef<HTMLButtonElement>(null);
+  const focusNext = useRef<"banner" | "settings" | null>(null);
+  useEffect(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    if (next === "banner") bannerFirst.current?.focus();
+    if (next === "settings") settingsLink.current?.focus();
+  }, [state]);
 
   if (state === "unknown") return null;
 
@@ -537,11 +585,13 @@ export function StorePixels({
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <button
+            ref={bannerFirst}
             type="button"
             className="btn st-btn"
             onClick={() => {
               const gpc = (navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true;
               writeChoice(handle,gpc ? "no" : "yes");
+              focusNext.current = "settings";
               setState(pixelChoiceState("yes",askFirst,gpc));
             }}
           >
@@ -549,9 +599,11 @@ export function StorePixels({
           </button>
           <button
             type="button"
-            className="btn st-option !w-auto !py-2.5 font-semibold"
+            // As prominent as "Allow": saying no is exactly as easy as saying yes.
+            className="btn st-btn"
             onClick={() => {
               writeChoice(handle, "no");
+              focusNext.current = "settings";
               setState("off");
             }}
           >
@@ -565,6 +617,7 @@ export function StorePixels({
   return (
     <p lang={locale} className="mt-3 text-center">
       <button
+        ref={settingsLink}
         type="button"
         className="st-footer-link text-xs font-semibold"
         onClick={() => {
@@ -574,7 +627,9 @@ export function StorePixels({
             // page this store opens loads none.
             window.location.reload();
           } else {
-            writeChoice(handle, null);
+            // Only the question again: a no stays a no until "Allow" is pressed,
+            // so looking at the settings and leaving never turns the pixels on.
+            focusNext.current = "banner";
             setState("ask");
           }
         }}

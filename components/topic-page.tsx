@@ -3,7 +3,7 @@ import Link from "next/link";
 import { RevealOnScroll } from "@/components/home-parts";
 import { Icon, iconFor } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { FeatureVisual } from "@/components/feature-visuals";
 import { FeatureCapture, hasFeatureCapture } from "@/components/feature-captures";
 import { JsonLd } from "@/components/structured-data";

@@ -16,9 +16,9 @@ import { photoUrl } from "@/lib/photo-limits";
 import { canUseDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
 import { saleClock } from "@/lib/store-sale";
-import { EMPTY_PAGE, type SalesPage, livePage } from "@/lib/sales-page";
+import { type SalesPage, livePage } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
-import { type SitePage, siteKey } from "@/lib/site-page-rules";
+import { type SitePage, pageOut, siteKey } from "@/lib/site-page-rules";
 import { featuredCards } from "@/lib/featured-cards";
 import { productPath } from "@/components/store-product";
 import { type BlockContext, HeroView, PageSections } from "@/components/sales-blocks";
@@ -39,15 +39,20 @@ type Params = {
  * One of a store's own pages (lib/site-page-rules.ts): /@chef/about, and
  * chef.com/about on the creator's own domain (proxy.ts). Drawn by the same
  * blocks as a product's page, in the store's look, with the store's menu at
- * the top. A page with no blocks, or one kept back, is not there.
+ * the top. A page with no blocks, or one kept back, is not there. One whose
+ * read is not known is "unread": said so, out of search, never taken for a
+ * page with no blocks (C4-20261106-2610-C6-153, unit B part 2).
  */
-const load = cache(async (raw: string, slug: string): Promise<{ store: Store; page: SitePage; blocks: SalesPage } | null> => {
+const load = cache(async (raw: string, slug: string): Promise<{ store: Store; page: SitePage; blocks: SalesPage | "unread" } | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const store = await storeForPage(normaliseHandle(decoded));
   const page = store?.sitePages.find((p) => p.slug === slug.toLowerCase()) ?? null;
   if (!store || !page || store.suspended) return null;
-  const blocks = livePage(await readPage(store.statsId, siteKey(page.id)).catch(() => ({ ...EMPTY_PAGE, blocks: [] })), saleClock());
+  const read = await readPage(store.statsId, siteKey(page.id)).catch(() => "unread" as const);
+  // A page the store record keeps back or schedules is not there, read or not: its title is never shown (review of #2853, L1).
+  if (read === "unread") return pageOut(page, saleClock()) ? { store, page, blocks: read } : null;
+  const blocks = livePage(read, saleClock());
   return blocks.blocks.length ? { store, page, blocks } : null;
 });
 
@@ -56,6 +61,7 @@ export async function generateMetadata({ params }: Pick<Params, "params">): Prom
   const found = await load(handle, slug);
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, page, blocks } = found;
+  if (blocks === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const title = blocks.seoTitle || `${page.title} — ${store.name}`;
   const hero = blocks.blocks[0]?.kind === "hero" ? blocks.blocks[0] : null;
   const description = blocks.seoDescription || hero?.sub || store.bio || `${page.title}, from ${store.name}.`;
@@ -81,6 +87,18 @@ export default async function StoreOwnPage({ params, searchParams }: Params) {
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) redirect(`${SITE_URL}/@${store.handle}/${page.slug}`);
 
   const { w } = speech(store);
+  // Its page could not be read: said so, with no blocks, as a product's page that cannot be read is (unit B).
+  if (blocks === "unread") {
+    return (
+      <div lang={speech(store).lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{page.title}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.backTo(store.name)}</Link>
+        </main>
+      </div>
+    );
+  }
   const bw = blockWords(store.language);
   // Where its buttons lead: the product the creator chose for it, while it is published, or the store.
   const target = page.target ? await readListing(store, page.target).catch(() => null) : null;

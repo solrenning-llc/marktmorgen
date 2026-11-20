@@ -340,7 +340,9 @@ async function main(): Promise<void> {
   const libraryRead = log;
   log = null;
   is("a card view reads the store's address key once", cardRead.filter(handleKeyOf).length, 1);
-  is("a card view sends at most 5 commands", cardRead.length <= 5 ? "at most 5" : `${cardRead.length}: ${cardRead.map((c) => c[0]).join(", ")}`, "at most 5");
+  // Seven since #4634: the two of the store's public request (isResting: the window's traffic, then its count), which
+  // put every view of the card under the store's requests instead of none.
+  is("a card view sends at most 7 commands", cardRead.length <= 7 ? "at most 7" : `${cardRead.length}: ${cardRead.map((c) => c[0]).join(", ")}`, "at most 7");
   is("a sign-up form view reads the store's address key once", joinRead.filter(handleKeyOf).length, 1);
   is("a sign-up form view sends at most 7 commands", joinRead.length <= 7 ? "at most 7" : `${joinRead.length}: ${joinRead.map((c) => c[0]).join(", ")}`, "at most 7");
   is("a library view reads each store's id key once", libraryRead.filter(getOf(`nl:store:id:${store.sid}`)).length, 1);

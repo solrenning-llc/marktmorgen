@@ -482,7 +482,9 @@ type NoteAccess = { state: string; learner: { email: string; scope: "all" | stri
  * cannot read them.
  */
 export async function notesDownloadAfterAccess(statsId: string, access: NoteAccess, courseId: string, admit: () => Promise<boolean>): Promise<boolean> {
-  if (access.state === "open") return false;
+  // Not while access could not be checked ("unknown", lib/course-door.ts): the box says their access has ended, which
+  // is not known then; the course's page says it could not check instead.
+  if (access.state === "open" || access.state === "unknown") return false;
   const who = noteReaderOf(access, courseId);
   if (!who) return false;
   if (!(await admit())) return true;

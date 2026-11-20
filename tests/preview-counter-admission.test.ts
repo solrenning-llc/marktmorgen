@@ -18,8 +18,8 @@ async function refused() {
   assert.equal(state.commands.length, 2, "one counter attempt; no retry or readback");
 }
 async function main() {
-  const sparse = new Array(2); sparse[1] = 1;
-  for (const [name, reply] of [["missing", undefined], ["empty", []], ["partial", sparse], ["extra", ["OK", 1, "extra"]], ["text", ["OK", "1"]], ["null", ["OK", null]], ["zero", ["OK", 0]], ["negative", ["OK", -1]], ["fractional", ["OK", 0.5]], ["unknown SET", [false, 1]]] as [string, unknown][]) {
+  const sparse = new Array(2); sparse[0] = 1;
+  for (const [name, reply] of [["missing", undefined], ["empty", []], ["partial", sparse], ["extra", [1, 1, "extra"]], ["text", ["1", 1]], ["null", [null, 1]], ["zero", [0, 1]], ["negative", [-1, 1]], ["fractional", [0.5, 1]], ["unknown EXPIRE", [1, false]]] as [string, unknown][]) {
     await check(`preview refuses ${name} counter before lookup and file work`, async () => { reset(); state.override = true; state.reply = reply; await refused(); });
   }
   await check("counter timeout refuses before lookup and file work", async () => { reset(); state.throws = true; await refused(); });
@@ -30,7 +30,7 @@ async function main() {
     assert.deepEqual(downstream(), [30, 30, 30, 30, 30]);
     assert.equal(state.commands.length, 62);
     assert.match(String(state.commands[0][1]), /^nl:rl:preview:[0-9a-f]{32}$/);
-    assert.deepEqual(state.commands[0].slice(2), ["0", "EX", 60, "NX"]);
+    assert.deepEqual([state.commands[0][0], ...state.commands[1]], ["INCR", "EXPIRE", state.commands[0][1], 60, "NX"]);
   });
   await check("public quota refusal still stops listing and file work", async () => {
     reset(); state.publicAllowed = false; const response = await ask(); assert.equal(response.status, 429);

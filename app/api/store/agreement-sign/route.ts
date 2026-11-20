@@ -39,6 +39,8 @@ export async function POST(request: NextRequest) {
   const back = (notice: string) =>
     new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/sign/${fields.id}${notice ? `?notice=${notice}` : ""}`, "Cache-Control": "no-store" } });
 
+  // Nothing is signed for a store switched off after a report (lib/takedown.ts) until it is back.
+  if (store.suspended) return back("closed");
   // Ten tries a connection in ten minutes per store: far past one person signing, short of a script guessing.
   const ip = clientAddress(request);
   if (!(await withinStore("agreement-sign", `${ip}|${store.handle}`, 10, 600, store, "buyer"))) return back("limited");

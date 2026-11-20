@@ -1,5 +1,6 @@
 import { MemoryRedis } from "@/lib/redis-memory";
-export const store = new MemoryRedis();
+import { withTakeScripts } from "./redis-take-scripts";
+export const store = withTakeScripts(new MemoryRedis());
 let configured = true;
 export const isRedisConfigured = () => configured;
 /** Only for a test of the "Redis not configured" branch; always put back to true in a finally. */

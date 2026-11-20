@@ -54,7 +54,7 @@ import { sellsMemberships } from "@/lib/membership-manage";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { CARD_NOTICE_DAYS, cardNoticeDue, reminderDue } from "@/lib/dunning-rules";
-import { cardLink, finishCardUpdate, openKey } from "@/lib/card-update";
+import { cardLink, finishCardUpdate, openKey, waitingCardPage } from "@/lib/card-update";
 import { countSent, sentKey } from "@/lib/dunning-keys";
 
 const CURSOR_KEY = "nl:dun:cursor";
@@ -234,6 +234,12 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     // Only an invoice still open, with money on it, a page to pay it on and an
     // address to write to. Anything else is Stripe's to settle, not ours.
     if (!subId || !invoiceId || invoice?.status !== "open" || amount <= 0 || !payUrl.startsWith("https://") || !to) continue;
+    // A partial invoice is unknown (CX-123 rule 24, as cameBack reads its rows): when Stripe tries the card again is a
+    // time, or null for never, and the money is in the currency Stripe names. Missing or of another shape, the email
+    // would guess both ("won't be tried again", the store's currency): nothing is claimed, changed or sent on it.
+    const retry = invoice.next_payment_attempt;
+    const currency = invoice.currency;
+    if ((retry !== null && typeof retry !== "number") || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) continue;
 
     // Which email is due: the first, or a later one the creator chose, on
     // its day. A first email from before reminders existed holds "1", not a
@@ -284,11 +290,11 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
       const isPlan = sub.metadata?.kind === "plan";
       const language = parseLanguage(store.language);
       const locale = LANGUAGES[language].locale;
-      const next = typeof invoice?.next_payment_attempt === "number" && invoice.next_payment_attempt > 0 ? invoice.next_payment_attempt : 0;
+      const next = typeof retry === "number" && retry > 0 ? retry : 0;
       const mail = failedPaymentEmail({
         storeName: store.name,
         title: titles.get(sub.metadata?.product ?? "") || null,
-        amount: formatMoney(amount, typeof invoice?.currency === "string" ? invoice.currency : store.currency, locale),
+        amount: formatMoney(amount, currency, locale),
         payUrl,
         manageUrl: `${storeBase(store)}/manage`,
         isPlan,
@@ -391,8 +397,10 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const rows = listed.data as RunningSub[];
     for (const sub of rows) {
       if (!handles.has(sub.metadata?.store ?? "")) continue;
-      // Ending, or paused: no payment for a card to miss.
-      if (sub.cancel_at_period_end === true || typeof sub.cancel_at === "number" || sub.pause_collection) continue;
+      // Ending, or paused: no payment for a card to miss. Running is only what Stripe says exactly (CX-123 rule 24): not
+      // ending at the period's end (false), no day it ends (null) and no pause (null). A row missing any of them, or
+      // with another shape, is unknown, never "running with a payment ahead", and no notice goes on it.
+      if (sub.cancel_at_period_end !== false || sub.cancel_at !== null || sub.pause_collection !== null) continue;
       const payAt = nextPaymentOf(sub);
       const customer = sub.customer && typeof sub.customer === "object" ? sub.customer : null;
       const email = typeof customer?.email === "string" ? customer.email.trim() : "";
@@ -436,10 +444,12 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const open = repliesFor(await redisPipeline([["GET", openKey(account, subId)]]), 1);
     // Unknown whether a card update is waiting: no notice on a guess.
     if (!open || (open[0] !== null && typeof open[0] !== "string")) continue;
-    const pending = open[0];
+    // A page already finished is not waiting (lib/card-update.ts, waitingCardPage).
+    const pending = waitingCardPage(open[0]);
     if (typeof pending === "string") {
       const finished = await finishCardUpdate(store, pending);
-      if (finished === "updated" || finished === "paid" || finished === "declined") continue;
+      // Unsure whether the card was set: no notice on a guess either way; the page stays open and is finished again.
+      if (finished === "updated" || finished === "paid" || finished === "declined" || finished === "unsure") continue;
     }
     const key = cardKey(account, subId, card.id);
     const value = claimValue();

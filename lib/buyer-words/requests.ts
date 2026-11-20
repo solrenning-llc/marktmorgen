@@ -21,6 +21,7 @@ const en = {
   due: (date: string) => `Due ${date}`,
   until: (date: string) => `This link takes payment until ${date}.`,
   pay: (amount: string) => `Pay ${amount}`,
+  billingCountry: "Country you're buying from",
   secure: (store: string) => `You pay on Stripe's secure page, straight to ${store}'s own Stripe account. Nothing is added to the amount for paying by link.`,
   tax: "Sales tax or VAT, where it applies, is worked out on the payment page and shown before you pay.",
   testMode: "Test mode: no real money is taken.",
@@ -49,6 +50,8 @@ const en = {
     error: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a moment." },
     limited: { title: "Too many tries for now", body: "Wait a few minutes and try again." },
     busy: { title: "The payment page is already opening", body: "Wait a moment and try again." },
+    abroad: { title: "This can't be paid from the EU or the UK yet", body: "We can't yet charge the VAT the European Union and the United Kingdom require on this payment, so nothing was charged. If you are outside them, choose your country and try again." },
+    country: { title: "Choose the country you're buying from", body: "Nothing was charged. Pick your country above the pay button, then press it again." },
   } as Record<string, Notice>,
   subject: (store: string, amount: string) => `${store}: payment request for ${amount}`,
   reminderSubject: (store: string, amount: string) => `Reminder from ${store}: payment request for ${amount}`,
@@ -63,6 +66,8 @@ const en = {
   receiptSubject: (store: string, amount: string) => `Receipt from ${store}: ${amount}`,
   receiptLead: (store: string, amount: string, date: string) => `Thank you. You paid ${store} ${amount} on ${date}, for:`,
   receiptLink: "Your receipt, to print or save:",
+  /** Sales tax added on top of a request's lines, on its receipt (audit R48). */
+  receiptTax: (amount: string) => `Sales tax or VAT: ${amount}`,
   statement: (store: string) => `The charge shows on your statement under the name of ${store}'s business.`,
 };
 
@@ -80,6 +85,7 @@ const es: RequestWords = {
   due: (date) => `Vence el ${date}`,
   until: (date) => `Este enlace acepta el pago hasta el ${date}.`,
   pay: (amount) => `Pagar ${amount}`,
+  billingCountry: "País desde el que compras",
   secure: (store) => `Pagas en la página segura de Stripe, directamente a la cuenta de Stripe de ${store}. No se añade nada al importe por pagar con un enlace.`,
   tax: "El IVA o el impuesto sobre ventas, cuando corresponde, se calcula en la página de pago y se muestra antes de pagar.",
   testMode: "Modo de prueba: no se cobra dinero real.",
@@ -107,6 +113,8 @@ const es: RequestWords = {
     error: { title: "No se pudo abrir la página de pago", body: "No se cobró nada. Inténtalo de nuevo en un momento." },
     limited: { title: "Demasiados intentos por ahora", body: "Espera unos minutos y vuelve a intentarlo." },
     busy: { title: "La página de pago ya se está abriendo", body: "Espera un momento y vuelve a intentarlo." },
+    abroad: { title: "Aún no se puede pagar desde la UE ni el Reino Unido", body: "Todavía no podemos cobrar el IVA que la Unión Europea y el Reino Unido exigen sobre este pago, así que no se cobró nada. Si estás fuera de ellos, elige tu país y vuelve a intentarlo." },
+    country: { title: "Elige el país desde el que compras", body: "No se cobró nada. Elige tu país encima del botón de pago y vuelve a pulsarlo." },
   },
   subject: (store, amount) => `${store}: solicitud de pago de ${amount}`,
   reminderSubject: (store, amount) => `Recordatorio de ${store}: solicitud de pago de ${amount}`,
@@ -121,6 +129,7 @@ const es: RequestWords = {
   receiptSubject: (store, amount) => `Recibo de ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Gracias. Pagaste ${amount} a ${store} el ${date}, por:`,
   receiptLink: "Tu recibo, para imprimirlo o guardarlo:",
+  receiptTax: (amount) => `IVA o impuesto sobre ventas: ${amount}`,
   statement: (store) => `El cargo aparece en tu extracto con el nombre del negocio de ${store}.`,
 };
 
@@ -136,6 +145,7 @@ const fr: RequestWords = {
   due: (date) => `À régler le ${date}`,
   until: (date) => `Ce lien accepte le paiement jusqu'au ${date}.`,
   pay: (amount) => `Payer ${amount}`,
+  billingCountry: "Pays depuis lequel vous achetez",
   secure: (store) => `Vous payez sur la page sécurisée de Stripe, directement sur le compte Stripe de ${store}. Rien n'est ajouté au montant pour un paiement par lien.`,
   tax: "La TVA ou la taxe de vente, le cas échéant, est calculée sur la page de paiement et affichée avant que vous payiez.",
   testMode: "Mode test : aucun argent réel n'est prélevé.",
@@ -163,6 +173,8 @@ const fr: RequestWords = {
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été prélevé. Réessayez dans un instant." },
     limited: { title: "Trop de tentatives pour le moment", body: "Patientez quelques minutes et réessayez." },
     busy: { title: "La page de paiement est déjà en train de s'ouvrir", body: "Patientez un instant et réessayez." },
+    abroad: { title: "Pas encore payable depuis l'UE ni le Royaume-Uni", body: "Nous ne pouvons pas encore facturer la TVA que l'Union européenne et le Royaume-Uni exigent sur ce paiement, donc rien n'a été prélevé. Si vous êtes en dehors de ces pays, choisissez votre pays et réessayez." },
+    country: { title: "Choisissez le pays depuis lequel vous achetez", body: "Rien n'a été prélevé. Choisissez votre pays au-dessus du bouton de paiement, puis cliquez de nouveau dessus." },
   },
   subject: (store, amount) => `${store} : demande de paiement de ${amount}`,
   reminderSubject: (store, amount) => `Rappel de ${store} : demande de paiement de ${amount}`,
@@ -177,6 +189,7 @@ const fr: RequestWords = {
   receiptSubject: (store, amount) => `Reçu de ${store} : ${amount}`,
   receiptLead: (store, amount, date) => `Merci. Vous avez payé ${amount} à ${store} le ${date}, pour :`,
   receiptLink: "Votre reçu, à imprimer ou à enregistrer :",
+  receiptTax: (amount) => `TVA ou taxe de vente : ${amount}`,
   statement: (store) => `Le débit apparaît sur votre relevé sous le nom de l'entreprise de ${store}.`,
 };
 
@@ -192,6 +205,7 @@ const de: RequestWords = {
   due: (date) => `Fällig am ${date}`,
   until: (date) => `Über diesen Link kann bis zum ${date} bezahlt werden.`,
   pay: (amount) => `${amount} bezahlen`,
+  billingCountry: "Land, aus dem du kaufst",
   secure: (store) => `Du bezahlst auf der sicheren Seite von Stripe, direkt auf das eigene Stripe-Konto von ${store}. Für die Zahlung per Link wird nichts aufgeschlagen.`,
   tax: "Umsatzsteuer, wo sie anfällt, wird auf der Zahlungsseite berechnet und vor dem Bezahlen angezeigt.",
   testMode: "Testmodus: Es wird kein echtes Geld abgebucht.",
@@ -219,6 +233,8 @@ const de: RequestWords = {
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts abgebucht. Versuche es gleich noch einmal." },
     limited: { title: "Gerade zu viele Versuche", body: "Warte ein paar Minuten und versuche es dann noch einmal." },
     busy: { title: "Die Zahlungsseite wird schon geöffnet", body: "Warte einen Moment und versuche es dann noch einmal." },
+    abroad: { title: "Aus der EU und dem Vereinigten Königreich noch nicht bezahlbar", body: "Wir können die Mehrwertsteuer, die die Europäische Union und das Vereinigte Königreich auf diese Zahlung verlangen, noch nicht berechnen, deshalb wurde nichts abgebucht. Wenn du dich außerhalb davon befindest, wähle dein Land und versuche es erneut." },
+    country: { title: "Wähle das Land, aus dem du kaufst", body: "Es wurde nichts abgebucht. Wähle dein Land über der Schaltfläche zum Bezahlen und klicke sie dann noch einmal an." },
   },
   subject: (store, amount) => `${store}: Zahlungsanforderung über ${amount}`,
   reminderSubject: (store, amount) => `Erinnerung von ${store}: Zahlungsanforderung über ${amount}`,
@@ -233,6 +249,7 @@ const de: RequestWords = {
   receiptSubject: (store, amount) => `Quittung von ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Danke. Du hast ${store} am ${date} ${amount} bezahlt, für:`,
   receiptLink: "Deine Quittung zum Drucken oder Speichern:",
+  receiptTax: (amount) => `Umsatzsteuer: ${amount}`,
   statement: (store) => `Die Abbuchung steht auf deinem Kontoauszug unter dem Namen des Unternehmens von ${store}.`,
 };
 
@@ -248,6 +265,7 @@ const it: RequestWords = {
   due: (date) => `Scadenza ${date}`,
   until: (date) => `Questo link accetta il pagamento fino al ${date}.`,
   pay: (amount) => `Paga ${amount}`,
+  billingCountry: "Paese da cui acquisti",
   secure: (store) => `Paghi sulla pagina sicura di Stripe, direttamente sul conto Stripe di ${store}. Non viene aggiunto nulla all'importo per il pagamento tramite link.`,
   tax: "L'IVA o l'imposta sulle vendite, dove si applica, viene calcolata nella pagina di pagamento e mostrata prima che tu paghi.",
   testMode: "Modalità di prova: non viene addebitato denaro reale.",
@@ -275,6 +293,8 @@ const it: RequestWords = {
     error: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
     limited: { title: "Troppi tentativi per ora", body: "Aspetta qualche minuto e riprova." },
     busy: { title: "La pagina di pagamento si sta già aprendo", body: "Aspetta un momento e riprova." },
+    abroad: { title: "Non ancora pagabile dall'UE o dal Regno Unito", body: "Non possiamo ancora addebitare l'IVA che l'Unione europea e il Regno Unito richiedono su questo pagamento, quindi non è stato addebitato nulla. Se ti trovi fuori da questi paesi, scegli il tuo paese e riprova." },
+    country: { title: "Scegli il paese da cui acquisti", body: "Non è stato addebitato nulla. Scegli il tuo paese sopra il pulsante di pagamento, poi premilo di nuovo." },
   },
   subject: (store, amount) => `${store}: richiesta di pagamento di ${amount}`,
   reminderSubject: (store, amount) => `Promemoria da ${store}: richiesta di pagamento di ${amount}`,
@@ -289,6 +309,7 @@ const it: RequestWords = {
   receiptSubject: (store, amount) => `Ricevuta da ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Grazie. Hai pagato ${amount} a ${store} il ${date}, per:`,
   receiptLink: "La tua ricevuta, da stampare o salvare:",
+  receiptTax: (amount) => `IVA o imposta sulle vendite: ${amount}`,
   statement: (store) => `L'addebito compare sul tuo estratto conto con il nome dell'attività di ${store}.`,
 };
 
@@ -304,6 +325,7 @@ const nl: RequestWords = {
   due: (date) => `Te betalen op ${date}`,
   until: (date) => `Via deze link kun je betalen tot ${date}.`,
   pay: (amount) => `${amount} betalen`,
+  billingCountry: "Land waaruit je koopt",
   secure: (store) => `Je betaalt op de beveiligde pagina van Stripe, rechtstreeks op de eigen Stripe-rekening van ${store}. Er komt niets bij het bedrag omdat je via een link betaalt.`,
   tax: "Btw of omzetbelasting, waar die geldt, wordt op de betaalpagina berekend en getoond voordat je betaalt.",
   testMode: "Testmodus: er wordt geen echt geld afgeschreven.",
@@ -331,6 +353,8 @@ const nl: RequestWords = {
     error: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het zo opnieuw." },
     limited: { title: "Te veel pogingen voor nu", body: "Wacht een paar minuten en probeer het opnieuw." },
     busy: { title: "De betaalpagina wordt al geopend", body: "Wacht even en probeer het opnieuw." },
+    abroad: { title: "Nog niet te betalen vanuit de EU of het Verenigd Koninkrijk", body: "We kunnen de btw die de Europese Unie en het Verenigd Koninkrijk over deze betaling vragen nog niet berekenen, dus er is niets afgeschreven. Ben je daarbuiten, kies dan je land en probeer het opnieuw." },
+    country: { title: "Kies het land waaruit je koopt", body: "Er is niets afgeschreven. Kies je land boven de betaalknop en druk er dan opnieuw op." },
   },
   subject: (store, amount) => `${store}: betaalverzoek van ${amount}`,
   reminderSubject: (store, amount) => `Herinnering van ${store}: betaalverzoek van ${amount}`,
@@ -345,6 +369,7 @@ const nl: RequestWords = {
   receiptSubject: (store, amount) => `Ontvangstbewijs van ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Bedankt. Je hebt op ${date} ${amount} aan ${store} betaald, voor:`,
   receiptLink: "Je ontvangstbewijs, om af te drukken of op te slaan:",
+  receiptTax: (amount) => `Btw of omzetbelasting: ${amount}`,
   statement: (store) => `De afschrijving staat op je afschrift onder de naam van het bedrijf van ${store}.`,
 };
 
@@ -360,6 +385,7 @@ const pt: RequestWords = {
   due: (date) => `Vence a ${date}`,
   until: (date) => `Este link aceita o pagamento até ${date}.`,
   pay: (amount) => `Pagar ${amount}`,
+  billingCountry: "País a partir do qual compra",
   secure: (store) => `Paga na página segura da Stripe, diretamente na conta Stripe de ${store}. Nada é acrescentado ao valor por pagar através de um link.`,
   tax: "O IVA ou o imposto sobre vendas, quando se aplica, é calculado na página de pagamento e mostrado antes de pagar.",
   testMode: "Modo de teste: não é cobrado dinheiro real.",
@@ -387,6 +413,8 @@ const pt: RequestWords = {
     error: { title: "Não foi possível abrir a página de pagamento", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
     limited: { title: "Demasiadas tentativas por agora", body: "Aguarde alguns minutos e tente novamente." },
     busy: { title: "A página de pagamento já está a abrir", body: "Aguarde um momento e tente novamente." },
+    abroad: { title: "Ainda não é possível pagar a partir da UE nem do Reino Unido", body: "Ainda não conseguimos cobrar o IVA que a União Europeia e o Reino Unido exigem sobre este pagamento, por isso nada foi cobrado. Se estiver fora destes países, escolha o seu país e tente de novo." },
+    country: { title: "Escolha o país a partir do qual compra", body: "Nada foi cobrado. Escolha o seu país acima do botão de pagamento e carregue nele novamente." },
   },
   subject: (store, amount) => `${store}: pedido de pagamento de ${amount}`,
   reminderSubject: (store, amount) => `Lembrete de ${store}: pedido de pagamento de ${amount}`,
@@ -401,6 +429,7 @@ const pt: RequestWords = {
   receiptSubject: (store, amount) => `Recibo de ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Obrigado. Pagou ${amount} a ${store} a ${date}, por:`,
   receiptLink: "O seu recibo, para imprimir ou guardar:",
+  receiptTax: (amount) => `IVA ou imposto sobre vendas: ${amount}`,
   statement: (store) => `A cobrança aparece no seu extrato com o nome da empresa de ${store}.`,
 };
 

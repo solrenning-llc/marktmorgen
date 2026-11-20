@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { createHash } from "node:crypto";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
@@ -6,7 +7,6 @@ import { MAX_KEY_LENGTH, checkKey } from "@/lib/licence-keys";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { clientIp } from "@/lib/visit";
 import { readListing } from "@/lib/catalog";
-import { countOf, repliesFor } from "@/lib/redis-reply";
 
 /**
  * The public check a creator's own software can make: is this licence key
@@ -56,11 +56,7 @@ export async function GET(request: NextRequest) {
   // nothing of the store and says the check could not be made.
   let count: number | null = null;
   try {
-    const replies = repliesFor(await redisPipeline([
-      ["SET", bucket, "0", "EX", WINDOW_SECONDS, "NX"],
-      ["INCR", bucket],
-    ]), 2);
-    if (replies && (replies[0] === "OK" || replies[0] === null)) count = countOf(replies[1]);
+    count = windowCountOf(await redisPipeline(windowCount(bucket, WINDOW_SECONDS)));
   } catch (error) {
     console.error("counting license checks failed", error);
   }

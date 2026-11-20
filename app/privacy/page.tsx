@@ -62,7 +62,7 @@ export default function PrivacyPage() {
           <strong className="text-black">Payment information.</strong> Payments
           are processed by Stripe, our payment processor. We do not store your
           full credit or debit card number, CVC, or equivalent payment
-          credentials. Stripe asks for your billing address when you pay on
+          credentials. Stripe may ask for your billing address when you pay on
           its checkout page (see{" "}
           <a href="#billing-address" className="underline">
             how we use your billing address

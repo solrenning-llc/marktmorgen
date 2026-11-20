@@ -172,6 +172,42 @@ async function main(): Promise<void> {
   await settlePayPal(store);
   is("the same request is sent once more", posts.length - liveBefore, 1);
 
+  // Codex P on #4963 (MEDIUM, 7050684301): a store from before ids (sid "") is fenced on its owner's record. After its
+  // erasure finishes, its owner may make a new store under the same key; that record's being there must not let the
+  // erased store's open batch back in. The record's statsId, which never changes for a store, tells the two apart
+  // (the v2 identity of #4964, lib/store-live-cache.ts).
+  part("Settling: a store from before ids, erased and its owner key reused by a new store, does not get its batch back");
+  const legacy = { ...shop(), sid: "", email: "legacy-race@example.com" } as Store;
+  const owner = await ownerKey(storeRef(legacy));
+  redis.clear();
+  posts.length = 0;
+  await redis.pipeline([
+    ["HSET", `nl:aff:${STATS}:people`, "a00000000000", JSON.stringify({ id: "a00000000000", email: "p0@example.com", code: "code0", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
+    ...[1, 2].map((n) => ["HSET", `nl:aff:${STATS}:sales`, `cs_0_${n}`, JSON.stringify({ ref: `cs_0_${n}`, pi: `pi_0_${n}`, aff: "a00000000000", at: Math.floor(Date.now() / 1000) - 86_400, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })]),
+    ["SET", owner, JSON.stringify({ statsId: STATS, handle: "raceharbor" })],
+  ]);
+  if (!(await connectPayPal(legacy, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept for the legacy store");
+  const paidLegacy = await payWithPayPal(legacy);
+  is("setup: the legacy store pays and keeps its batch on its way", [paidLegacy.ok, await openLeft()], [true, 1]);
+  during = {
+    path: "batch",
+    run: async () => {
+      const field = await erasingField(storeRef(legacy));
+      // The erasure runs to its end (its mark cleared with it), then the owner makes a new store under the same key.
+      await redis.pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", owner], ["DEL", `nl:pp:open:${STATS}`]]);
+      await redis.pipeline([["HDEL", ERASING_KEY, field], ["SET", owner, JSON.stringify({ statsId: "statsnew0001", handle: "newharbor" })]]);
+    },
+  };
+  await settlePayPal(legacy);
+  is("the erased legacy store's batch is not written back under the new store's owner key", await openLeft(), 0);
+
+  part("Settling: a live store from before ids, its own record there, keeps a PENDING batch on its way");
+  await redis.pipeline([["SET", owner, JSON.stringify({ statsId: STATS, handle: "raceharbor" })]]);
+  posts.length = 0;
+  await payWithPayPal(legacy);
+  await settlePayPal(legacy);
+  is("its batch is still on its way", await openLeft(), 1);
+
   part("The erasure's mark waits for the press's own lock (lib/closed-store-data.ts)");
   const source = (await import("node:fs")).readFileSync("lib/closed-store-data.ts", "utf8");
   const marker = /const markErasing = async \(\) => \{[^}]*"HSET", ERASING_KEY/.test(source);

@@ -804,9 +804,11 @@ return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
  * the person's tasks are no longer what was read (a lock that ran out let
  * another change in); 1 once written; 2 once written when a count that was
  * not a whole number was dropped or replaced, whose room goes back. A count
- * that is there is moved by the change.
+ * that is there is moved by the change. KEYS[2] is the tasks lock, ARGV[7] its token: -2 means the
+ * lease was lost and nothing was written. The existing unconfirmed-write path retains the prior room reservation.
  */
-export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v1
+export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v2
+if redis.call("GET", KEYS[2]) ~= ARGV[7] then return -2 end
 local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
 if before ~= ARGV[2] then return -1 end
 if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
@@ -826,9 +828,11 @@ return 1`;
 /**
  * The store's count saved on its own, once every task was read to make it:
  * 0 when a whole number is there already (nothing written), 1 when written
- * where there was none, 2 when written over one that was not a whole number.
+ * where there was none, 2 when written over one that was not a whole number. KEYS[2] is the tasks lock,
+ * ARGV[3] its token; -1 refuses a lost lease before any read/write of the tasks hash.
  */
-export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v1
+export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v2
+if redis.call("GET", KEYS[2]) ~= ARGV[3] then return -1 end
 local kept = redis.call("HGET", KEYS[1], ARGV[1])
 if kept and string.match(kept, "^%d+$") then return 0 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
@@ -1041,7 +1045,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
       if (!(await holdLock(held))) throw new LockBusyError();
       let saved: unknown;
       try {
-        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 1, tasksKey(statsId), TASK_COUNT_FIELD, String(count)]]);
+        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 2, tasksKey(statsId), held.key, TASK_COUNT_FIELD, String(count), held.token]]);
       } catch {
         throw new CrmValueWriteUnconfirmed();
       }
@@ -1067,7 +1071,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
   let written: unknown;
   try {
-    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 1, tasksKey(statsId), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD]]);
+    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 2, tasksKey(statsId), held.key, person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD, held.token]]);
     if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
     written = response[0];
   } catch {

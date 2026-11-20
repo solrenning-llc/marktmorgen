@@ -440,6 +440,13 @@ export class MemoryRedis {
           for (const k of keys.slice(0, n)) this.run(["RPUSH", pool, k]);
           return n;
         }
+        // lib/winback-send.ts WINBACK_CLAIM: a come-back offer's once-mark, only while the address has no deletion print.
+        if (key.startsWith("-- marktmorgen:winback-claim:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, prints, once, print, onceValue, onceSeconds] = args;
+          if (this.run(["HEXISTS", prints, print]) === 1) return 2;
+          if (this.run(["SET", once, onceValue, "NX", "EX", onceSeconds]) !== "OK") return 0;
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
         if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {

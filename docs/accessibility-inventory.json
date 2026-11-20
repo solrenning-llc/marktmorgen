@@ -1110,6 +1110,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/devices/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/devices",
+      "parameters": []
+    },
+    {
       "source": "app/studio/discord/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/discord",
@@ -1642,6 +1648,7 @@
     "components/plan-dispute-notice.tsx",
     "components/plan-invoices-list.tsx",
     "components/podcast-editor.tsx",
+    "components/podcast-public-feed.tsx",
     "components/podcast-toggle.tsx",
     "components/post-cover.tsx",
     "components/preview-frame.tsx",
@@ -1809,6 +1816,7 @@
     "app/api/auth/request/route.ts",
     "app/api/auth/rescue/route.ts",
     "app/api/auth/signout-all/route.ts",
+    "app/api/auth/signout-others/route.ts",
     "app/api/auth/signout/route.ts",
     "app/api/auth/two-step/route.ts",
     "app/api/backup/files/route.ts",
@@ -2072,6 +2080,7 @@
     "app/api/store/podcast/link/route.ts",
     "app/api/store/podcast/open/route.ts",
     "app/api/store/podcast/play/[token]/[episode]/route.ts",
+    "app/api/store/podcast/public-settings/route.ts",
     "app/api/store/podcast/public/[handle]/[product]/route.ts",
     "app/api/store/podcast/route.ts",
     "app/api/store/preorder/route.ts",
@@ -2244,6 +2253,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 153
+    "pageTemplates": 154
   }
 }

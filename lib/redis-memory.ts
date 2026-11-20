@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
@@ -566,6 +567,44 @@ export class MemoryRedis {
           return 1;
         }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        // lib/checkout-ask.ts ASK_AGAIN: a retried ask put back only while the entry it was taken with waits in its index.
+        if (key.startsWith("-- marktmorgen:ask-again:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, index, was, at, member] = args;
+          if (this.run(["ZSCORE", index, was]) === null) return -1;
+          const added = this.run(["ZADD", queue, at, member]);
+          this.run(["ZREM", index, was]);
+          this.run(["ZADD", index, at, member]);
+          this.run(["PERSIST", index]);
+          return added;
+        }
+        // lib/checkout-ask.ts ASK_FORGET: validate, then remove the current own index and its global members atomically.
+        if (key.startsWith("-- marktmorgen:ask-forget:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, queue, index, statsId, email, rawMost] = args;
+          const most = Number(rawMost);
+          if (!Number.isSafeInteger(most) || most < 0) return [-1, -1];
+          const members = this.run(["ZRANGEBYSCORE", index, "-inf", "+inf"]) as string[];
+          if (members.length > most) return [-1, -1];
+          for (const member of members) {
+            let ask: unknown;
+            try { ask = JSON.parse(member); } catch { return [-1, -1]; }
+            if (!Array.isArray(ask) || ask[0] !== statsId || typeof ask[1] !== "string" || !ask[1]
+              || typeof ask[2] !== "string" || !ask[2] || ask[3] !== email || typeof ask[4] !== "number" || !Number.isFinite(ask[4])) return [-1, -1];
+          }
+          if (!members.length) return [0, 0];
+          let taken = 0;
+          for (let i = 0; i < members.length; i += ASK_ERASE_BATCH) taken += Number(this.run(["ZREM", queue, ...members.slice(i, i + ASK_ERASE_BATCH)]));
+          this.run(["DEL", index]);
+          return [taken, members.length];
+        }
+        // lib/checkout-ask.ts ASK_KEEP: an ask kept, with its index, only while its person is not erased from the store.
+        if (key.startsWith("-- marktmorgen:ask-keep:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, queue, index, erased, at, member, print] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          this.run(["ZADD", queue, at, member]);
+          this.run(["ZADD", index, at, member]);
+          this.run(["PERSIST", index]);
+          return 1;
+        }
         // lib/outreach.ts PITCH_IF_READ: a pitch written only over the exact record read.
         if (key.startsWith("-- marktmorgen:outreach-pitch-if-read:v1\n") && args[0] === "1" && args.length === 5) {
           const [, pitches, id, before, after] = args;

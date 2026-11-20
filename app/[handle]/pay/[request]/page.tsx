@@ -66,13 +66,16 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
   const status = statusOf(request, now);
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
-  const notice = typeof query.notice === "string" ? w.notices[query.notice] : undefined;
-  // The EU VAT gate's answers (app/api/store/pay-request): the billing-country field is then marked invalid and
-  // described by the notice, so a screen reader names the problem on reaching it (WCAG 3.3.1, 3.3.3).
-  const countryProblem = notice && (query.notice === "abroad" || query.notice === "country") ? "pay-request-notice" : undefined;
+  const payable = status === "open" && requestsOpen(store);
+  // The EU VAT gate's answers (app/api/store/pay-request) ask the buyer to choose a country and try again: said only
+  // while the request can still be paid here, never beside "Payment received" or "withdrawn". The billing-country field
+  // is then marked invalid and described by the notice, so a screen reader names the problem on reaching it (WCAG
+  // 3.3.1, 3.3.3).
+  const countryAnswer = query.notice === "abroad" || query.notice === "country";
+  const notice = typeof query.notice === "string" && (payable || !countryAnswer) ? w.notices[query.notice] : undefined;
+  const countryProblem = notice && countryAnswer ? "pay-request-notice" : undefined;
   const day = (d: string) => said.date(Date.parse(`${d}T12:00:00Z`));
   const total = said.money(request.total);
-  const payable = status === "open" && requestsOpen(store);
   const rehearsal = payable && sellsInTestMode(store);
   const reportUrl = `/report?url=${encodeURIComponent(`${SITE_URL}/@${store.handle}`)}`;
 
@@ -148,7 +151,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
               <input type="hidden" name="request" value={request.id} />
               {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */}
               <div className="mb-5">
-                <BillingCountryField id={`bc-request-${request.id}`} locale={said.lang.locale} label={said.w.billingCountry} choose={said.w.chooseCountry} problem={countryProblem} />
+                <BillingCountryField id={`bc-request-${request.id}`} locale={said.lang.locale} label={w.billingCountry} choose={said.w.chooseCountry} problem={countryProblem} />
               </div>
               <button type="submit" className="btn st-btn w-full">{w.pay(total)}</button>
               <p className="st-muted mt-3 text-sm">{w.secure(store.name)}</p>

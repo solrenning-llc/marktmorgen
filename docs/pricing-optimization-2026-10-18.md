@@ -11,7 +11,7 @@
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
 | Store | **$159 / $1,590** | every #553 figure, none cut | 60.68% / 60.55% | 12.24% | 137 | $69 / $690 |
-| Studio | **$819 / $8,190** | every #553 figure, none cut | 61.19% / 60.89% | 12.44% | 17 | $449 / $4,490 |
+| Studio | **$819 / $8,190** | every #553 figure, none cut | 61.18% / 60.89% | 12.44% | 17 | $449 / $4,490 |
 | Scale | **$1,769 / $17,690** | every #553 figure, none cut | 61.28% / 60.95% | 12.48% | 8 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).

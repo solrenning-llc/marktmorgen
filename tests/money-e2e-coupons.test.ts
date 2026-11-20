@@ -423,7 +423,7 @@ async function main(): Promise<void> {
     discounts: [{ coupon: null, promotion_code: "promo_1Spring0001" }],
     metadata: { store: HANDLE, product: guideId, upsell_key: browser.fingerprint, code: "SPRING" },
     customer_details: { email: BUYER, address: { country: "US" } },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
   });
   sessions.cs_test_codeorder000001 = paidWithCode("cs_test_codeorder000001");
   const take = async (session: string) => takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });

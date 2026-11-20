@@ -23,6 +23,7 @@ import { affiliates as apiAffiliates } from "@/lib/api-read";
 import { affiliatesTool } from "@/lib/mcp-tools";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidul01";
@@ -103,6 +104,7 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, "bbbbbbbbbbbb", JSON.stringify({ id: "bbbbbbbbbbbb", email: "ben@example.com", code: "ben", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
   ]);
   const store = shop();
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
   // The readers count the program before reading it (chargeBook), which needs the store's product list.
   const listed = { ...store, catalog: { items: [] } } as unknown as Store;

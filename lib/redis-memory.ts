@@ -1800,6 +1800,16 @@ export class MemoryRedis {
           const kept = this.run(["GET", receipt]);
           return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
         }
+        // lib/paypal-payouts.ts, KEEP_LINK_IF_LIVE: the PayPal link written only while its store's key exists and it is
+        // not being erased; 1 written, 0 not.
+        if (key.startsWith("-- marktmorgen:paypal-link-live:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, live, erasing, link, field, value] = args;
+          this.scriptCalls += 2;
+          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", link, value]);
+          return 1;
+        }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
         if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {

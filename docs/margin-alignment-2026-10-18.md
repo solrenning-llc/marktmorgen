@@ -17,12 +17,12 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Store monthly ($69) | $69.00 | $69.00 | $9.02 | $5.95 | $8.32 | $45.71 | 66.24% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $690.00 | $84.49 | $67.97 | $82.69 | $454.85 | 65.92% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $449.00 | $55.21 | $27.66 | $56.32 | $309.81 | 69.00% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $4,490.00 | $546.26 | $315.98 | $557.96 | $3,069.80 | 68.36% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $999.00 | $122.04 | $58.14 | $125.95 | $692.87 | 69.35% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $9,990.00 | $1,214.62 | $667.30 | $1,247.04 | $6,861.04 | 68.67% | $1.00 | positive | no |
+| Store monthly ($69) | $69.00 | $69.00 | $9.02 | $5.96 | $8.32 | $45.70 | 66.23% | $0.25 | positive | no |
+| Store yearly ($690) | $690.00 | $690.00 | $84.49 | $67.98 | $82.68 | $454.85 | 65.92% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $449.00 | $55.21 | $27.67 | $56.32 | $309.80 | 68.99% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $4,490.00 | $546.26 | $316.02 | $557.95 | $3,069.77 | 68.36% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $999.00 | $122.04 | $58.15 | $125.95 | $692.86 | 69.35% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $9,990.00 | $1,214.62 | $667.43 | $1,247.02 | $6,860.93 | 68.67% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $69.00 | $9.02 | $2.48 | $8.85 | $48.65 | 70.50% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $36.00 | $5.00 | $1.20 | $4.59 | $25.21 | 70.02% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $36.00 | $5.00 | $0.90 | $4.64 | $25.46 | 70.72% | $0.00 | positive | no |
@@ -36,8 +36,8 @@ A month's receipts after every fee and reserve (netOf), less every cost line at 
 
 | Interval | Store | Studio | Scale |
 | --- | --- | --- | --- |
-| Monthly plan | US$45.97 | US$311.03 | US$695.21 |
-| A month of a yearly plan | US$37.91 | US$255.91 | US$571.94 |
+| Monthly plan | US$45.97 | US$311.03 | US$695.20 |
+| A month of a yearly plan | US$37.91 | US$255.91 | US$571.93 |
 
 ## LLC fixed costs — owner decision22 October2026
 

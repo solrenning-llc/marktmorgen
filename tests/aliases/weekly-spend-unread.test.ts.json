@@ -1,0 +1,10 @@
+{
+  "@/lib/request-guard": "weekly-spend-unread-world.ts",
+  "@/lib/email": "weekly-spend-unread-world.ts",
+  "@/lib/traffic": "weekly-spend-unread-world.ts",
+  "@/lib/usage-billing": "weekly-spend-unread-world.ts",
+  "@/lib/numbers-ask": "weekly-spend-unread-world.ts",
+  "@/lib/ai": "weekly-spend-unread-world.ts",
+  "@/lib/team": "weekly-spend-unread-world.ts",
+  "@/lib/stats": "weekly-spend-unread-world.ts"
+}

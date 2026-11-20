@@ -38,7 +38,7 @@ async function percentCoupon(account: string, percent: number, id: string, key: 
   const [known] = await redisPipeline([["GET", key]]).catch(() => [null]);
   if (known === "1") return id;
   try {
-    await onAccount(
+    const made: unknown = await onAccount(
       "POST",
       account,
       "/coupons",
@@ -51,6 +51,11 @@ async function percentCoupon(account: string, percent: number, id: string, key: 
         "metadata[purpose]": purpose,
       }),
     );
+    // Used and kept as made only when the answer is the coupon asked for (Codex X8-20261119-0917): an empty answer,
+    // another coupon's or an id that is not that text proves nothing was made, so nothing is kept and the checkout fails.
+    if (!made || typeof made !== "object" || Array.isArray(made) || !Object.hasOwn(made, "id") || (made as { id?: unknown }).id !== id) {
+      throw new Error(`Stripe did not confirm the ${what} coupon it was asked to make`);
+    }
   } catch (error) {
     // Made already, by an earlier checkout whose note was lost: it is used only
     // if it takes off what this one should.

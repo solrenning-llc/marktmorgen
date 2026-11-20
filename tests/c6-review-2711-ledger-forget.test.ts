@@ -36,6 +36,8 @@ const BAD: [string, unknown][] = [
   ["true", [true]],
   ["empty reply", []],
   ["second reply", [1, 1]],
+  // One key deleted can answer only 0 or 1 (Claude 5, a sibling of Codex V-20261116-1249 and G-20261119-0431).
+  ["a count above one key", [2]],
   ["not a list", { result: 1 }],
 ];
 

@@ -131,13 +131,18 @@ export function monthsStarted(periodStartSeconds: number, nowSeconds: number): n
   return n;
 }
 
+/** A known payment time is a whole Unix second no later than this reading. */
+export function isPaidAt(value: unknown, nowSeconds: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= nowSeconds;
+}
+
 export function planRefund(input: PlanRefundInput): PlanRefund {
   const c = input.charge;
   if (!cents(c.amountCents) || !cents(c.refundedCents) || !cents(c.taxCents) || !cents(c.invoiceTotalCents) || c.taxCents > c.invoiceTotalCents) return { kind: "unknown", reason: "unreadable" };
   if (c.feeCents !== null && !cents(c.feeCents)) return { kind: "unknown", reason: "unreadable" };
   if (c.disputedCents !== null && !cents(c.disputedCents)) return { kind: "unknown", reason: "unreadable" };
   if (typeof c.billingReason !== "string" || typeof c.succeeded !== "boolean") return { kind: "unknown", reason: "unreadable" };
-  if (!Number.isFinite(c.paidAtSeconds) || !Number.isFinite(input.nowSeconds) || !Number.isFinite(input.periodStartSeconds)) return { kind: "unknown", reason: "unreadable" };
+  if (!Number.isFinite(input.nowSeconds) || !isPaidAt(c.paidAtSeconds, input.nowSeconds) || !Number.isFinite(input.periodStartSeconds)) return { kind: "unknown", reason: "unreadable" };
 
   if (!c.succeeded) return { kind: "none", reason: "not_paid" };
   if (c.invoiceTotalCents !== c.amountCents) return { kind: "unknown", reason: "split_payment" };

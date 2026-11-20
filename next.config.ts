@@ -27,12 +27,14 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   /**
    * The letters a certificate's PDF is drawn with (lib/certificate-pdf.ts),
-   * read from disk by the one route that needs them, so only its function
-   * carries them.
+   * read from disk by the routes that need them (the certificate, and the
+   * download that stamps a PDF), so only their functions carry them.
    */
   outputFileTracingIncludes: {
     "/\\[handle\\]/certificate/\\[id\\]/pdf": ["./lib/fonts/**/*"],
     "/**/certificate/**": ["./lib/fonts/**/*"],
+    // The buyer's line stamped on a PDF is drawn with Noto Sans, embedded (lib/pdf-stamp.ts; PDF/UA 7.21.4.1).
+    "/api/store/download": ["./lib/fonts/**/*"],
   },
   experimental: {
     /**

@@ -214,6 +214,7 @@ function TasksAgendaWaiting() {
  * the creator's may be and the browser shows its own (components/tasks-agenda.tsx).
  */
 async function TasksAgenda({ store, included }: { store: Store; included: IncludedBytes }) {
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const today = new Date().toISOString().slice(0, 10);
   const data = await agendaData(store, today, included);
   const title = <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>;
@@ -435,28 +436,33 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         </section>
       ) : null}
 
-      {profile.courses.length ? (
+      {profile.courses.length || profile.unread.includes("courses") ? (
         <section aria-labelledby="courses-title" className="card mt-8 p-6 sm:p-8">
           <h2 id="courses-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Their courses</h2>
-          <ul className="mt-4 space-y-4">
-            {profile.courses.map((c, i) => {
-              const share = c.lessons ? Math.round((c.done / c.lessons) * 100) : 0;
-              return (
-                <li key={i} className="text-sm">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-semibold text-ink">{c.title}</span>
-                    <span className="tabular-nums text-ink-soft">{`${c.done} of ${c.lessons} ${c.lessons === 1 ? "lesson" : "lessons"} done`}</span>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-sand" role="img" aria-label={`${share}% of the lessons done`}>
-                    <div className="h-full rounded-full bg-violet-brand" style={{ width: `${share}%` }} />
-                  </div>
-                  <p className="mt-1 text-xs text-ink-soft">
-                    {c.lastSeen ? `Last opened ${day(c.lastSeen)}` : "Not opened yet"}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
+          {profile.unread.includes("courses") ? (
+            <p className="mt-2 text-sm text-ink-soft" role="status">How far they are in some of their courses could not be loaded just now, so those courses are missing here. Nothing was changed. Open this page again in a moment.</p>
+          ) : null}
+          {profile.courses.length ? (
+            <ul className="mt-4 space-y-4">
+              {profile.courses.map((c, i) => {
+                const share = c.lessons ? Math.round((c.done / c.lessons) * 100) : 0;
+                return (
+                  <li key={i} className="text-sm">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-semibold text-ink">{c.title}</span>
+                      <span className="tabular-nums text-ink-soft">{`${c.done} of ${c.lessons} ${c.lessons === 1 ? "lesson" : "lessons"} done`}</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-sand" role="img" aria-label={`${share}% of the lessons done`}>
+                      <div className="h-full rounded-full bg-violet-brand" style={{ width: `${share}%` }} />
+                    </div>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      {c.lastSeen ? `Last opened ${day(c.lastSeen)}` : "Not opened yet"}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
         </section>
       ) : null}
 
@@ -511,6 +517,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         <h2 id="tasks-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks</h2>
         <p className="mt-1 text-sm text-ink-soft">What you still owe this person, beside any deal. For you and your team only.</p>
         {profile.person && tasks ? (
+          // oxlint-disable-next-line react/purity -- server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
           <PersonTasks key={profile.person} person={profile.person} initial={tasks} owner={store.email.toLowerCase()} assignees={assignees} today={new Date().toISOString().slice(0, 10)} />
         ) : profile.person ? (
           <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s tasks could not be read just now. Open this page again in a moment.</p>

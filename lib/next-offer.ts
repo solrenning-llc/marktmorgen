@@ -26,7 +26,7 @@ import { deliveryWords, priceWords } from "@/lib/answers";
 import { readListing, readListings, readProduct, visibleIds } from "@/lib/catalog";
 import { isHouseStore } from "@/lib/house-store";
 import { onAccount } from "@/lib/stripe-account";
-import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { type StripePage, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import { bundleFromMeta, deliveredIds } from "@/lib/bundle-rules";
 import { importedFor } from "@/lib/imported-purchases";
@@ -169,6 +169,16 @@ const sessionLegible = (row: Record<string, unknown>) => {
 const intentLegible = (row: Record<string, unknown>) => stringMap(ownField(row, "metadata")) && oneOf(INTENT_STATUSES, ownField(row, "status"));
 
 /**
+ * A Stripe list page in its whole shape (review of #3530): Stripe's own `object: "list"` on top of what
+ * readStripePage already demands (a plain object, `data` an array, `has_more` a boolean). Any other answer,
+ * a search result or a 200 without `object` included, throws StripeListUnreadable, so what is owned stays unknown.
+ */
+function listPage(page: unknown, legible: (row: Record<string, unknown>) => boolean): StripePage {
+  if (!plainObject(page) || ownField(page, "object") !== "list") throw new StripeListUnreadable("object is not \"list\"");
+  return readStripePage(page, legible);
+}
+
+/**
  * Every product this address has from this store, by id: what its completed
  * checkouts handed over (each box ticked and each bundle's products too, a
  * gift or a place bought for others included: they chose it), what it added
@@ -192,7 +202,7 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`), sessionLegible);
+      const listed = listPage(await onAccount("GET", account, `/checkout/sessions?${query}`), sessionLegible);
       if (listed.hasMore || listed.unreadable) return null;
       for (const session of listed.rows as Record<string, unknown>[]) {
         const meta = (session.metadata ?? {}) as Record<string, string>;
@@ -205,7 +215,7 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
     }
     if (customers.size > 3) return null;
     for (const customer of customers) {
-      const listed = readStripePage(await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`), intentLegible);
+      const listed = listPage(await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`), intentLegible);
       if (listed.hasMore || listed.unreadable) return null;
       for (const intent of listed.rows) {
         const meta = (intent.metadata ?? {}) as Record<string, string>;

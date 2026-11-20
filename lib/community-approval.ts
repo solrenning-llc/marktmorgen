@@ -28,11 +28,23 @@
  *                            and comments ("<who>:c") were approved (hash)
  *   nl:cm:<id>:ap:f          the picture of each held post still on the
  *                            queue: item -> its author and path (hash)
+ *   nl:cm:<id>:ap:t:<day>    the creator was told today that items wait
+ *                            (lib/community-held-notice.ts), two days
  *
  * A held post's picture is listed apart from its record, which runs out by
  * itself: an item swept, removed or erased after its record ran out still
  * has its picture deleted (review of #3020, finding 3). A line goes when its
  * item leaves the queue, so the list is never longer than the queue.
+ *
+ * And one list for the company (unit 2): nl:cm:ap:stores, the stores whose
+ * community held something lately, by the time of the last hold, so the
+ * daily notice reads only those. A store leaves it by itself a day after
+ * nothing it held could still wait (storesWithHeld). Beside it, the line the
+ * notice reads them in, nl:cm:ap:turns (review of #3033): a store joins at
+ * the back with its first hold, keeps its place on later ones, and goes to
+ * the back once a run answered for it (passHeldTurn), so a run that stops for
+ * time never takes the same stores every day; it leaves the line when it
+ * leaves the list.
  *
  * Bounded: at most MAX_HELD waiting in a community and MAX_MINE items and
  * notes per member; a hold past either is refused, and nothing of it stays.
@@ -55,7 +67,7 @@
  * includes it (lib/person-copy.ts).
  */
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { CREATOR, type Comment, type CommunityImage, type NewPost, type Post, addComment, createPost, newItemId, readComment, readPost } from "@/lib/community";
 import { type Poll, parsePoll } from "@/lib/community-polls";
 import { ITEM_ID, MAX_COMMENT_TEXT, MAX_POST_TEXT, MAX_POST_TITLE, cleanLine } from "@/lib/community-text";
@@ -123,6 +135,14 @@ const itemKey = (id: string, item: string) => `${base(id)}:ap:i:${item}`;
 const mineKey = (id: string, who: string) => `${base(id)}:ap:w:${who}`;
 const countKey = (id: string) => `${base(id)}:ap:n`;
 const picturesKey = (id: string) => `${base(id)}:ap:f`;
+/** The day's mark of the creator's notice (lib/community-held-notice.ts): `day` is YYYY-MM-DD. */
+export const heldNoticeKey = (id: string, day: string) => `${base(id)}:ap:t:${day}`;
+/** The company's list of stores whose community held something lately: store id -> last hold, in seconds. */
+const HELD_STORES = "nl:cm:ap:stores";
+/** The line the daily notice reads the listed stores in: store id -> its place, the smallest first (the time it joined, or of its last turn). */
+const HELD_TURNS = "nl:cm:ap:turns";
+/** A store's id as lib/store.ts makes it (STORE_ID_PATTERN); a room without one lists nothing. */
+const STORE_SID = /^[0-9a-f]{32}$/;
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -326,20 +346,24 @@ async function hold(id: string, held: Held, room: DataStore, now: number): Promi
   await needData(room, [{ until: (now + KEEP_SECONDS) * 1000, bytes: dataBytes([json, picture], picture ? 4 : 3) }]);
   const written = repliesFor(await redisPipeline([["SET", itemKey(id, held.id), json, "EX", KEEP_SECONDS, "NX"]]), 1);
   if (!written || written[0] !== "OK") throw new UnknownReplyError("writing a held community item");
-  const replies = repliesFor(
-    await redisPipeline([
-      // Its picture is listed before the item is on the queue, so nothing on the queue has a picture nobody can find.
-      ...(picture ? [["HSET", picturesKey(id), held.id, picture]] : []),
-      ["ZREMRANGEBYSCORE", mineKey(id, held.a), "-inf", now - KEEP_SECONDS],
-      ["ZADD", queueKey(id), held.at, held.id],
-      // Only what still waits takes the community's room: what expired was already refused (finding 4).
-      ["ZCOUNT", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf"],
-      ["ZADD", mineKey(id, held.a), held.at, held.id],
-      ["ZCARD", mineKey(id, held.a)],
-      ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
-    ]),
-    picture ? 7 : 6,
-  );
+  const placing: (string | number)[][] = [
+    // Its picture is listed before the item is on the queue, so nothing on the queue has a picture nobody can find.
+    ...(picture ? [["HSET", picturesKey(id), held.id, picture]] : []),
+    ["ZREMRANGEBYSCORE", mineKey(id, held.a), "-inf", now - KEEP_SECONDS],
+    ["ZADD", queueKey(id), held.at, held.id],
+    // Only what still waits takes the community's room: what expired was already refused (finding 4).
+    ["ZCOUNT", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf"],
+    ["ZADD", mineKey(id, held.a), held.at, held.id],
+    ["ZCARD", mineKey(id, held.a)],
+    ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
+  ];
+  // Unit 2: the store goes on the list the daily notice reads, by the time of this hold, and joins the back of
+  // its line unless already in it (NX: a later hold keeps the store's place). The list is written first, so a
+  // run that lets the store go and then looks again finds this hold (storesWithHeld).
+  if (typeof room.sid === "string" && STORE_SID.test(room.sid)) {
+    placing.push(["ZADD", HELD_STORES, now, room.sid], ["ZADD", HELD_TURNS, "NX", now, room.sid]);
+  }
+  const replies = repliesFor(await redisPipeline(placing), placing.length);
   const counts = replies?.slice(picture ? 1 : 0).map(countOf);
   if (!replies || !counts || counts.some((n) => n === null) || counts[1] !== 1 || counts[3] !== 1 || (picture && countOf(replies[0]) === null)) {
     throw new UnknownReplyError("placing a held community item");
@@ -515,32 +539,129 @@ export async function sweepHeld(id: string, now = nowSeconds(), limit = SWEEP_BA
   return swept;
 }
 
+/** A ZSCORE reply: no score, or a whole number of seconds; anything else is unknown. */
+const scoreOf = (reply: unknown): "none" | "listed" | null =>
+  reply === null ? "none" : typeof reply === "string" && /^\d{1,15}$/.test(reply) ? "listed" : null;
+
+/**
+ * The stores whose community held something lately, in their turn (543 [CM2]
+ * unit 2; review of #3033): the store that has waited its turn longest first,
+ * at most `limit`. A store whose last hold is more than a day past HELD_DAYS
+ * has nothing that can still wait, so it is let go from the list here first,
+ * and from the line when it comes up in it. An unknown reply is thrown, so a
+ * run never reads the list as empty.
+ */
+export async function storesWithHeld(now = nowSeconds(), limit = 500): Promise<string[]> {
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZREMRANGEBYSCORE", HELD_STORES, "-inf", now - (HELD_DAYS + 1) * DAY],
+      // A listed store missing from the line (let go by a run while it held again, and not put back: Codex X6's LOW
+      // on #3033) joins it at the front, as lib/call-meetings.ts does; a store already in line keeps its place.
+      ["ZUNIONSTORE", HELD_TURNS, 2, HELD_TURNS, HELD_STORES, "WEIGHTS", 1, 0, "AGGREGATE", "MAX"],
+      ["ZRANGEBYSCORE", HELD_TURNS, "-inf", "+inf", "LIMIT", 0, Math.max(1, limit)],
+    ]),
+    3,
+  );
+  const line = replies && countOf(replies[0]) !== null && countOf(replies[1]) !== null ? stringList(replies[2]) : null;
+  if (!line || line.some((sid) => !STORE_SID.test(sid))) throw new UnknownReplyError("the stores with held community items");
+  if (!line.length) return [];
+  const listed = repliesFor(await redisPipeline(line.map((sid) => ["ZSCORE", HELD_STORES, sid])), line.length)?.map(scoreOf);
+  if (!listed || listed.some((state) => state === null)) throw new UnknownReplyError("the stores with held community items");
+  const gone = line.filter((_, at) => listed[at] === "none");
+  if (gone.length) await leaveLine(gone, now);
+  return line.filter((_, at) => listed[at] === "listed");
+}
+
+/**
+ * Takes stores let go from the list out of the line, then looks at the list
+ * again: a hold that landed meanwhile wrote the list before the line, so it is
+ * found here and its store is put back. An unknown answer puts them all back,
+ * so a store is never dropped on one (it comes up again on the next run); and
+ * when even the put-back fails, the next run's union of the list into the line
+ * (storesWithHeld) brings back every store still listed.
+ */
+async function leaveLine(gone: string[], now: number): Promise<void> {
+  const replies = repliesFor(
+    await redisPipeline([["ZREM", HELD_TURNS, ...gone], ...gone.map((sid) => ["ZSCORE", HELD_STORES, sid])]),
+    gone.length + 1,
+  );
+  const again = replies && countOf(replies[0]) !== null ? replies.slice(1).map(scoreOf) : null;
+  const known = again !== null && again.every((state) => state !== null);
+  const back = known ? gone.filter((_, at) => again[at] === "listed") : gone;
+  if (back.length) {
+    const put = repliesFor(await redisPipeline([["ZADD", HELD_TURNS, "NX", ...back.flatMap((sid) => [now, sid])]]), 1);
+    if (!put || countOf(put[0]) === null) throw new UnknownReplyError("putting a store back in the held notice line");
+  }
+  if (!known) throw new UnknownReplyError("the stores let go from the held notice line");
+}
+
+/**
+ * The daily notice answered for this store (told, already told, nothing
+ * waiting, refused, or nothing to tell it): it goes to the back of the line.
+ * False when the answer is unknown; the store then keeps its place, and so
+ * goes first again on the next run, which is never a turn lost.
+ */
+export async function passHeldTurn(sid: string, now = nowSeconds()): Promise<boolean> {
+  if (!STORE_SID.test(sid)) return false;
+  const replies = repliesFor(await redisPipeline([["ZADD", HELD_TURNS, now, sid]]).catch(() => null), 1);
+  return replies !== null && countOf(replies[0]) !== null;
+}
+
+/**
+ * What waits, oldest first, read only: the items sent less than HELD_DAYS ago
+ * whose record still says "held", and the entries whose record is gone or no
+ * longer waits (stale), which this read does not touch. One ZRANGEBYSCORE and
+ * one MGET of at most MAX_HELD records; nothing is written.
+ */
+async function readHeld(id: string, now: number): Promise<{ held: Held[]; stale: string[] }> {
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf", "LIMIT", 0, MAX_HELD]]), 1);
+  const ids = replies ? stringList(replies[0]) : null;
+  if (!ids) throw new UnknownReplyError("the held community queue");
+  if (!ids.length) return { held: [], stale: [] };
+  if (ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError("the held community queue");
+  const rows = repliesFor(await redisPipeline([["MGET", ...ids.map((item) => itemKey(id, item))]]), 1);
+  const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], ids.length) : null;
+  if (!values) throw new UnknownReplyError("the held community items");
+  const held: Held[] = [];
+  const stale: string[] = [];
+  ids.forEach((item, i) => {
+    const one = itemOf(values[i], item);
+    if (one?.state === "held") held.push(one);
+    else stale.push(item);
+  });
+  return { held, stale };
+}
+
 /**
  * The creator's queue: what waits, oldest first. Only what was sent less than
  * HELD_DAYS ago, however many expired ones the sweep has not reached yet.
  */
 export async function heldQueue(id: string, now = nowSeconds()): Promise<Held[]> {
   await sweepHeld(id, now);
-  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf", "LIMIT", 0, MAX_HELD]]), 1);
-  const ids = replies ? stringList(replies[0]) : null;
-  if (!ids) throw new UnknownReplyError("the held community queue");
-  if (!ids.length) return [];
-  if (ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError("the held community queue");
-  const rows = repliesFor(await redisPipeline([["MGET", ...ids.map((item) => itemKey(id, item))]]), 1);
-  const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], ids.length) : null;
-  if (!values) throw new UnknownReplyError("the held community items");
-  const out: Held[] = [];
-  const stale: string[] = [];
-  ids.forEach((item, i) => {
-    const held = itemOf(values[i], item);
-    if (held?.state === "held") out.push(held);
-    else stale.push(item);
-  });
+  const { held, stale } = await readHeld(id, now);
   // An entry whose record is gone, or no longer waits, is not waiting: taken
   // off by whoever takes it, with the picture it may have left (finding 3).
   for (const item of stale) if (await claim(id, item)) await dropListedPicture(id, item);
-  return out;
+  return held;
 }
+
+/**
+ * How many posts and comments wait, for the daily notice (543 [CM2] unit 2;
+ * Claude 2's MEDIUM on #3033): the same items heldQueue answers, read only.
+ * No sweep and no claim: an item that waited HELD_DAYS is refused by the
+ * sweeps that already run (a member's hold, the creator's queue), so the
+ * daily job adds no note, no picture deletion and no write to the queue.
+ * Its commands are HELD_WAITING_COMMANDS: one ZRANGEBYSCORE and, when
+ * something is listed, one MGET of at most MAX_HELD records.
+ */
+export async function heldWaiting(id: string, now = nowSeconds()): Promise<{ posts: number; comments: number }> {
+  const { held } = await readHeld(id, now);
+  const posts = held.filter((one) => one.kind === "post").length;
+  return { posts, comments: held.length - posts };
+}
+
+/** The commands heldWaiting sends at the most. */
+export const HELD_WAITING_COMMANDS = 2;
 
 /**
  * One member's own items, newest first: what waits, and the notes about what
@@ -777,16 +898,15 @@ export async function forgetHeldPerson(id: string, who: string): Promise<number>
     }
   }
   const kept = items.length ? 4 : 2;
-  const done = repliesFor(
-    await redisPipeline([
-      ...(items.length ? [["ZREM", queueKey(id), ...items], ["DEL", ...items.map((item) => itemKey(id, item))]] : []),
-      ["DEL", mineKey(id, who)],
-      ["HDEL", countKey(id), `${who}:p`, `${who}:c`],
-      ...unlisted.map(([item, path]) => ["HSET", picturesKey(id), item, JSON.stringify({ a: who, p: path })]),
-    ]),
-    kept + unlisted.length,
-  );
-  const counts = done?.map(countOf);
+  const erase: (string | number)[][] = [
+    ...(items.length ? [["ZREM", queueKey(id), ...items], ["DEL", ...items.map((item) => itemKey(id, item))]] : []),
+    ["DEL", mineKey(id, who)],
+    ["HDEL", countKey(id), `${who}:p`, `${who}:c`],
+    ...unlisted.map(([item, path]) => ["HSET", picturesKey(id), item, JSON.stringify({ a: who, p: path })]),
+  ];
+  const done = repliesFor(await redisPipeline(erase), kept + unlisted.length);
+  // Each count only within what its command could remove or write (#4798): a DEL of one record answering 2 is unknown.
+  const counts = done?.map((reply, i) => countWithin(reply, erase[i]));
   if (!counts || counts.some((n) => n === null)) throw new Error("Community held items erasure was not confirmed");
   // The pictures last, each file before its line (Codex G on #3020, 6751455863): one that could not be deleted keeps
   // its line, and the erasure says it did not finish, so the next one deletes it.

@@ -15,7 +15,7 @@
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { ENDING_KEY, MAX_NOTES, SETTLE_SECONDS, finishPlanRefunds } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, MAX_NOTES, OUR_STOP_MARK, SETTLE_SECONDS, finishPlanRefunds } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
 import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
 
@@ -25,6 +25,9 @@ let k = 0;
 
 async function noted(o: { unread: boolean }) {
   const s = await paidShop({ stopSet: true });
+  // Our stop carries its mark on the subscription since #3740 (OUR_STOP_MARK, set with the note's time).
+  const row = world.subs.get(s.subId)!;
+  row.metadata = { ...((row.metadata as Record<string, string> | undefined) ?? {}), [OUR_STOP_MARK]: String(NOW) };
   const sid = (await s.store()).sid;
   const charge = String(world.charges[world.charges.length - 1].id);
   if (o.unread) {

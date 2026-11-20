@@ -126,6 +126,10 @@ const en = {
       title: "This link has expired",
       body: "A confirmation link works for 7 days. Join again from the product's page; it takes a few seconds.",
     },
+    busy: {
+      title: "We could not confirm your spot just now",
+      body: "Your link still works. Press it again in a little while.",
+    },
   } as Record<string, Notice>,
   confirmSpotTitle: "Confirm your spot",
   /** `title` is empty when the product is gone. */
@@ -357,6 +361,8 @@ const en = {
   recoverLead: (title: string, store: string) => `You started buying ${title} from ${store} and did not finish, so nothing was charged.`,
   recoverHere: "If you still want it, it is here:",
   recoverPrice: (price: string) => `The price: ${price}. The checkout opens at today's price.`,
+  /** Under the price, when the product offers a payment plan (630 [HN6](15)): the plan as the page says it. */
+  recoverPlan: (plan: string) => `You can also pay in parts: ${plan}. Choose it on the same page before you pay.`,
   youChoosePrice: (price: string) => `you choose it, from ${price}`,
   recoverOnly: (why: string) => `This is the only reminder about that checkout. ${why}`,
   recoverWhyCheckout: (store: string) => `It reached you because you agreed, on the checkout page, to hear from ${store}.`,
@@ -489,6 +495,10 @@ const es: GivingWords = {
     expired: {
       title: "Este enlace ha caducado",
       body: "Un enlace de confirmación funciona durante 7 días. Vuelve a apuntarte desde la página del producto; solo tarda unos segundos.",
+    },
+    busy: {
+      title: "No pudimos confirmar tu plaza ahora mismo",
+      body: "Tu enlace sigue funcionando. Vuelve a pulsarlo dentro de un rato.",
     },
   },
   confirmSpotTitle: "Confirma tu plaza",
@@ -701,6 +711,7 @@ const es: GivingWords = {
   recoverLead: (title, store) => `Empezaste a comprar ${title} en ${store} y no terminaste, así que no se ha cobrado nada.`,
   recoverHere: "Si todavía lo quieres, está aquí:",
   recoverPrice: (price) => `El precio: ${price}. El pago se abre con el precio de hoy.`,
+  recoverPlan: (plan) => `También puedes pagar en partes: ${plan}. Elígelo en la misma página antes de pagar.`,
   youChoosePrice: (price) => `lo eliges tú, desde ${price}`,
   recoverOnly: (why) => `Este es el único recordatorio sobre ese pago. ${why}`,
   recoverWhyCheckout: (store) => `Te ha llegado porque aceptaste, en la página de pago, recibir noticias de ${store}.`,
@@ -828,6 +839,10 @@ const fr: GivingWords = {
     expired: {
       title: "Ce lien a expiré",
       body: `Un lien de confirmation fonctionne pendant 7 jours. Inscrivez-vous de nouveau depuis la page du produit${S}; cela ne prend que quelques secondes.`,
+    },
+    busy: {
+      title: "Nous n'avons pas pu confirmer votre place pour le moment",
+      body: "Votre lien fonctionne toujours. Réessayez un peu plus tard.",
     },
   },
   confirmSpotTitle: "Confirmez votre place",
@@ -1036,6 +1051,7 @@ const fr: GivingWords = {
   recoverLead: (title, store) => `Vous avez commencé à acheter ${title} chez ${store} sans aller au bout, donc rien n'a été débité.`,
   recoverHere: `Si vous le voulez toujours, c'est ici${S}:`,
   recoverPrice: (price) => `Le prix${S}: ${price}. Le paiement s'ouvre au prix du jour.`,
+  recoverPlan: (plan) => `Vous pouvez aussi payer en plusieurs fois${S}: ${plan}. Choisissez-le sur la même page avant de payer.`,
   youChoosePrice: (price) => `vous le choisissez, à partir de ${price}`,
   recoverOnly: (why) => `C'est le seul rappel concernant ce paiement. ${why}`,
   recoverWhyCheckout: (store) => `Il vous parvient parce que vous avez accepté, sur la page de paiement, de recevoir des nouvelles de ${store}.`,
@@ -1163,6 +1179,10 @@ const de: GivingWords = {
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Bestätigungslink funktioniert 7 Tage lang. Tragen Sie sich auf der Seite des Produkts erneut ein; das dauert nur wenige Sekunden.",
+    },
+    busy: {
+      title: "Wir konnten Ihren Platz gerade nicht bestätigen",
+      body: "Ihr Link funktioniert weiterhin. Versuchen Sie es etwas später noch einmal.",
     },
   },
   confirmSpotTitle: "Bestätigen Sie Ihren Platz",
@@ -1371,6 +1391,7 @@ const de: GivingWords = {
   recoverLead: (title, store) => `Sie haben begonnen, ${title} bei ${store} zu kaufen, und nicht abgeschlossen, daher wurde nichts berechnet.`,
   recoverHere: "Falls Sie es noch möchten, hier ist es:",
   recoverPrice: (price) => `Der Preis: ${price}. Die Kasse öffnet zum heutigen Preis.`,
+  recoverPlan: (plan) => `Sie können auch in Raten zahlen: ${plan}. Wählen Sie das auf derselben Seite, bevor Sie bezahlen.`,
   youChoosePrice: (price) => `Sie wählen ihn selbst, ab ${price}`,
   recoverOnly: (why) => `Dies ist die einzige Erinnerung an diesen Kaufvorgang. ${why}`,
   recoverWhyCheckout: (store) => `Sie erhalten sie, weil Sie auf der Zahlungsseite zugestimmt haben, von ${store} zu hören.`,
@@ -1498,6 +1519,10 @@ const it: GivingWords = {
     expired: {
       title: "Questo link è scaduto",
       body: "Un link di conferma funziona per 7 giorni. Iscriviti di nuovo dalla pagina del prodotto; bastano pochi secondi.",
+    },
+    busy: {
+      title: "Non siamo riusciti a confermare il tuo posto in questo momento",
+      body: "Il tuo link funziona ancora. Riprova tra poco.",
     },
   },
   confirmSpotTitle: "Conferma il tuo posto",
@@ -1710,6 +1735,7 @@ const it: GivingWords = {
   recoverLead: (title, store) => `Hai iniziato ad acquistare ${title} da ${store} e non hai finito, quindi non è stato addebitato nulla.`,
   recoverHere: "Se lo vuoi ancora, è qui:",
   recoverPrice: (price) => `Il prezzo: ${price}. Il pagamento si apre al prezzo di oggi.`,
+  recoverPlan: (plan) => `Puoi anche pagare a rate: ${plan}. Sceglilo nella stessa pagina prima di pagare.`,
   youChoosePrice: (price) => `lo scegli tu, a partire da ${price}`,
   recoverOnly: (why) => `Questo è l'unico promemoria su quel pagamento. ${why}`,
   recoverWhyCheckout: (store) => `Ti è arrivato perché hai accettato, nella pagina di pagamento, di ricevere notizie da ${store}.`,
@@ -1836,6 +1862,10 @@ const nl: GivingWords = {
     expired: {
       title: "Deze link is verlopen",
       body: "Een bevestigingslink werkt 7 dagen. Meld je opnieuw aan via de pagina van het product; dat duurt een paar seconden.",
+    },
+    busy: {
+      title: "We konden je plek nu niet bevestigen",
+      body: "Je link werkt nog. Probeer het over een tijdje opnieuw.",
     },
   },
   confirmSpotTitle: "Bevestig je plek",
@@ -2042,6 +2072,7 @@ const nl: GivingWords = {
   recoverLead: (title, store) => `Je begon ${title} bij ${store} te kopen en hebt het niet afgerond, dus er is niets afgeschreven.`,
   recoverHere: "Wil je het nog steeds, dan staat het hier:",
   recoverPrice: (price) => `De prijs: ${price}. Het afrekenen opent tegen de prijs van vandaag.`,
+  recoverPlan: (plan) => `Je kunt ook in delen betalen: ${plan}. Kies het op dezelfde pagina voordat je betaalt.`,
   youChoosePrice: (price) => `je kiest hem zelf, vanaf ${price}`,
   recoverOnly: (why) => `Dit is de enige herinnering over die betaling. ${why}`,
   recoverWhyCheckout: (store) => `Je krijgt dit omdat je op de betaalpagina hebt aangegeven van ${store} te willen horen.`,
@@ -2169,6 +2200,10 @@ const pt: GivingWords = {
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação de confirmação funciona durante 7 dias. Volte a inscrever-se a partir da página do produto; demora apenas alguns segundos.",
+    },
+    busy: {
+      title: "Não conseguimos confirmar o seu lugar neste momento",
+      body: "A sua ligação continua a funcionar. Tente novamente daqui a pouco.",
     },
   },
   confirmSpotTitle: "Confirme o seu lugar",
@@ -2381,6 +2416,7 @@ const pt: GivingWords = {
   recoverLead: (title, store) => `Começou a comprar ${title} a ${store} e não terminou, por isso nada foi cobrado.`,
   recoverHere: "Se ainda o quiser, está aqui:",
   recoverPrice: (price) => `O preço: ${price}. O pagamento abre com o preço de hoje.`,
+  recoverPlan: (plan) => `Também pode pagar em prestações: ${plan}. Escolha-o na mesma página antes de pagar.`,
   youChoosePrice: (price) => `escolhido por si, desde ${price}`,
   recoverOnly: (why) => `Este é o único lembrete sobre esse pagamento. ${why}`,
   recoverWhyCheckout: (store) => `Recebeu-o porque aceitou, na página de pagamento, receber notícias de ${store}.`,

@@ -140,7 +140,7 @@ async function spend(key: string): Promise<string | null> {
     // Where GETDEL is missing, only the caller whose DEL removed the key wins.
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
-    raw = Number(removed) === 1 ? read : null;
+    raw = countOf(removed) === 1 ? read : null;
   }
   return typeof raw === "string" && raw ? raw : null;
 }

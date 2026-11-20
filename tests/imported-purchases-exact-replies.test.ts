@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   forgetImportedPerson,
   grantImported,
+  grantImportedOutcomes,
   importedBuyers,
   importedFrom,
   importedKey,
@@ -103,6 +104,7 @@ async function main(): Promise<void> {
     const answer = await withReplies([
       [[1, 0]],
       [1, 0],
+      [[1, 0]],
     ], () => grantImported("a".repeat(24), "api:key", [
       { email: "a@example.com", productId: "course_1", items: null },
       { email: "b@example.com", productId: "course_1", items: null },
@@ -110,23 +112,23 @@ async function main(): Promise<void> {
     assert.deepEqual(answer, [true, false]);
   });
 
-  await check("a partial grant reply is unknown, never a shorter success list", async () => {
-    await assert.rejects(() => withReplies([
+  await check("a partial grant reply stays explicitly unknown, never a shorter success list", async () => {
+    assert.deepEqual(await withReplies([
       [[1, 0]],
       [1],
-    ], () => grantImported("a".repeat(24), "api:key", [
+    ], () => grantImportedOutcomes("a".repeat(24), "api:key", [
       { email: "a@example.com", productId: "course_1", items: null },
       { email: "b@example.com", productId: "course_1", items: null },
-    ], undefined, "", ROOM)));
+    ], undefined, "", ROOM)), ["unknown", "unknown"]);
   });
 
-  await check("a string grant acknowledgement is unknown, never success", async () => {
-    await assert.rejects(() => withReplies([
+  await check("a string grant acknowledgement stays explicitly unknown, never success", async () => {
+    assert.deepEqual(await withReplies([
       [[1, 0]],
       ["1"],
-    ], () => grantImported("a".repeat(24), "api:key", [
+    ], () => grantImportedOutcomes("a".repeat(24), "api:key", [
       { email: "a@example.com", productId: "course_1", items: null },
-    ], undefined, "", ROOM)));
+    ], undefined, "", ROOM)), ["unknown"]);
   });
 
   await check("control: an exact take-back acknowledgement is accepted", async () => {
@@ -138,11 +140,11 @@ async function main(): Promise<void> {
   });
 
   await check("control: exact erasure replies are counted", async () => {
-    assert.equal(await withReplies([[1, 1]], () => forgetImportedPerson("a".repeat(24), "a@example.com")), 2);
+    assert.equal(await withReplies([[["course_1", valid()], 1]], () => forgetImportedPerson("a".repeat(24), "a@example.com")), 2);
   });
 
   await check("a partial erasure reply is unknown, never reported as completed work", async () => {
-    await assert.rejects(() => withReplies([[1]], () => forgetImportedPerson("a".repeat(24), "a@example.com")));
+    await assert.rejects(() => withReplies([[["course_1", valid()]]], () => forgetImportedPerson("a".repeat(24), "a@example.com")));
   });
 
   await check("a malformed kept purchase is unknown at the real course-access caller", async () => {

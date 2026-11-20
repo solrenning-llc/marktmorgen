@@ -795,6 +795,14 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "This store is closing",
     body: `Its plan has ended, so it closes on its own and you do not need to delete it. Everyone who bought from it is emailed at least ${BUYER_NOTICE_DAYS} days before its closing day, which is at least ${CLOSING_DAYS} days after the plan ended. On that day, each member's renewal ends and they get back the part of their last payment they did not use. The store and its records are then removed within ${ERASE_WITHIN_DAYS} days. Your studio shows its closing day. Nothing was deleted.`,
   },
+  assistant: {
+    title: "This store still has the Store assistant running",
+    body: "The assistant would keep billing you after the store is gone. Under Store assistant, press \u201cStop at the end of this month\u201d. Then you can delete the store. Nothing was deleted.",
+  },
+  assistant_due: {
+    title: "The Store assistant on this store may still be charged",
+    body: "A payment for the Store assistant did not go through, and Stripe may still try it again. You can delete this store once Stripe has ended the assistant, or write to support to end it now. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",

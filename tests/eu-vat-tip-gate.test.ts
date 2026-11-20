@@ -78,6 +78,9 @@ async function main(): Promise<void> {
   is("outside, another amount typed with nothing chosen (Enter in the box): that amount", amountSent(), 800);
   is("three checkouts opened", sessions.length - before, 3);
   is("another amount chosen but left empty: asked for an amount", where(await tip("US", { amount: "other", other: "", [BILLING_COUNTRY_FIELD]: "US" })), back("amount"));
+  before = sessions.length;
+  is("an amount chosen AND another typed: asked to choose one, never the chosen one silently", where(await tip("US", { amount: "500", other: "20", [BILLING_COUNTRY_FIELD]: "US" })), back("amount"));
+  is("nothing opened for it", sessions.length - before, 0);
 
   part("One form: the amount, the country and one button");
   const plain = await html(StoreTipBox({ store, problem: "", rehearsal: false }));
@@ -90,6 +93,11 @@ async function main(): Promise<void> {
   is("the billing-country field, required", new RegExp(`<select[^>]*name="${BILLING_COUNTRY_FIELD}"[^>]*required`).test(form), true);
   is("one button", (form.match(/<button/g) ?? []).length, 1);
   is("no field marked invalid on a first visit", /aria-invalid="true"/.test(form), false);
+  is("the amounts stack on a narrow screen (WCAG 1.4.10)", /class="[^"]*\bgrid-cols-1\b[^"]*\bsm:grid-cols-3\b/.test(form), true);
+  const amountBack = await html(StoreTipBox({ store, problem: "amount", rehearsal: false }));
+  const otherBox = /<input[^>]*name="other"[^>]*>/.exec(amountBack)?.[0] ?? "";
+  is("amount: the box for another amount is marked invalid", /aria-invalid="true"/.test(otherBox), true);
+  is("amount: and described by the notice", /aria-describedby="[^"]*support-notice/.test(otherBox), true);
   for (const problem of ["abroad", "country"] as const) {
     const drawn = await html(StoreTipBox({ store, problem, rehearsal: false }));
     is(`${problem}: the notice is shown`, drawn.includes(TIPS_WORDS.en.notices[problem]?.title.replace(/'/g, "&#x27;") ?? "\u0000"), true);

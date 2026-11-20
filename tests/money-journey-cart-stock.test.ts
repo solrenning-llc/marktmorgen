@@ -179,7 +179,8 @@ async function main(): Promise<void> {
 
   const cart = [ids["Glaze Guide"], ids["Mug Print"], ids["Bowl Print"]];
   const pay = async (products: string[]) => {
-    const form = new URLSearchParams({ handle: HANDLE, dc: "yes", dc_v: TEST_CONSENT.version });
+    // The billing country the art. 9a gate asks of every paid cart (lib/eu-vat-gate.ts consumerGate).
+    const form = new URLSearchParams({ handle: HANDLE, billing_country: "US", dc: "yes", dc_v: TEST_CONSENT.version });
     for (const id of products) form.append("id", id);
     const before = opened.length;
     const answer = await payCart(

@@ -60,6 +60,7 @@ import { sellsInTestMode } from "@/lib/stripe-connect";
 import { DemoNote } from "@/components/demo-notes";
 import { lookStyle } from "@/lib/store-look";
 import { canUse } from "@/lib/plan";
+import { badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { photoUrl } from "@/lib/photo-limits";
 import { canManage } from "@/lib/membership-manage";
 import { canRecover, sellsDeliverables } from "@/lib/buyer-orders";
@@ -193,7 +194,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   const selling = canSell(store);
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   // Sold through the creator's own PayPal as well, or instead (lib/paypal-sales.ts).
   const byPayPal = sellsThroughPayPal(store);
   // A buyer standing in front of a checkout deserves to know it is a rehearsal
@@ -310,8 +311,14 @@ export default async function StorePage({ params, searchParams }: Params) {
     community: store.community?.on === true,
   };
 
+  // The badge at the foot of the page, and where it leads: the creator's invite code only while the invite programme and
+  // sales are both open (lib/badge-link.ts, 14 [D11]); read, never made, and only when the badge is shown. Its read
+  // starts here, beside recentSales, so it adds no serial round trip (badgeInviteCode never rejects).
+  const showBadge = store.look.badge || !canUse(store, "branding");
+  const badgeRead = showBadge ? badgeInviteCode(store.sid) : null;
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
   const recent = await recentSales(store);
+  const badgeLink = badgeHref(badgeRead ? await badgeRead : null);
 
   return (
     <div
@@ -763,8 +770,8 @@ export default async function StorePage({ params, searchParams }: Params) {
                 {bw.deleteMyData}
               </Link>
             </p>
-            {store.look.badge || !canUse(store, "branding") ? (
-              <Link href="/" prefetch={false} className="st-footer-link text-sm font-semibold">
+            {showBadge ? (
+              <Link href={badgeLink} prefetch={false} className="st-footer-link text-sm font-semibold">
                 {w.madeWith}
               </Link>
             ) : null}

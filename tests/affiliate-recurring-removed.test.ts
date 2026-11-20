@@ -38,6 +38,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const invoice = (id: string, paidAt: number, meta: Record<string, string>) => ({
   id,
+  object: "invoice",
   status: "paid",
   amount_paid: 2000,
   currency: "usd",
@@ -46,7 +47,9 @@ const invoice = (id: string, paidAt: number, meta: Record<string, string>) => ({
   status_transitions: { paid_at: paidAt },
   total_taxes: [],
   parent: { subscription_details: { metadata: { store: "harbor", ...meta } } },
-  payments: { data: [{ payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
+  // Changed on the merge of main (rule 23): main reads an invoice's payments only as a whole Stripe list (has_more
+  // false, each a paid invoice_payment), as tests/affiliate-recurring-complete.test.ts builds them.
+  payments: { object: "list", has_more: false, data: [{ object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
 });
 
 const person = (status: string, decidedAt: number) =>

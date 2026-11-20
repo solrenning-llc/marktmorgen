@@ -111,8 +111,10 @@ export function orderDataBytes(items: number): number {
  * and copies sold, when its buyers were last written to and the latest send,
  * the prices made for a tier or yearly switch (four each), its team event
  * type and round-robin counts, the Discord roles it gives, its introductory
- * coupon, its waitlist and pre-order flags, its reviews' summary and the
- * email platform's tags for it, each at its largest with its key. Once the
+ * coupon, its waitlist and pre-order flags, its reviews' summary, the
+ * email platform's tags for it and the note that it ever had a private
+ * podcast feed (lib/podcast-access.ts, nl:pod:pids:, one set member of 96
+ * bytes, #4471), each at its largest with its key. Once the
  * product is deleted they stay counted for as long as the store is
  * (lib/store.ts): some are kept until they expire, some are never let go.
  */

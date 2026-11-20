@@ -81,7 +81,7 @@ function paidCheckout(id: string, product: string, fingerprint: string, over: Re
     customer: "cus_TestBuyer01",
     currency: "usd",
     metadata: { store: "harbor", product, upsell_key: fingerprint },
-    customer_details: { email: BUYER },
+    customer_details: { email: BUYER, address: { country: "US" } },
     payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
     ...over,
   };
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   const browser = newUpsellKey();
 
   const take = async (session: string, step: string, answer: "yes" | "no") =>
-    takeUpsell({ store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
+    takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
 
   let order = 20;
   {

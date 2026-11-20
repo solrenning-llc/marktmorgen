@@ -53,6 +53,11 @@ export const PRODUCT_CARD_MAX_BYTES = 1200 * 630 * 4 + 630 + 65_536;
 export const PRODUCT_CARD_PICTURE_PIXELS = 1600 * 1600;
 /** Each page of the creator's Stripe account read for the book, its body up to a megabyte worked through: one request each. */
 export const AFFILIATE_STRIPE_PAGES_PER_UNIT = 1;
+/**
+ * The paid invoices the book keeps between readings (lib/affiliates.ts, audit A1), read and written back whole, and
+ * their lines in the kept book: requests a working out takes whenever it reads the creator's Stripe account.
+ */
+export const AFFILIATE_KEPT_INVOICES_UNITS = 9;
 /** Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per request. */
 export const AFFILIATE_FIELDS_PER_UNIT = 150;
 /** Records read one command each (PayPal refunds, moved bookings), per request. */
@@ -82,6 +87,7 @@ export function listingUnits(listings: number): number {
 export function affiliatePageUnits(size: AffiliatePageSize): number {
   const units = AFFILIATE_PAGE_UNITS
     + whole(size.stripePages / AFFILIATE_STRIPE_PAGES_PER_UNIT)
+    + (size.stripePages > 0 ? AFFILIATE_KEPT_INVOICES_UNITS : 0)
     + whole(size.fields / AFFILIATE_FIELDS_PER_UNIT + Math.min(size.rows, AFFILIATE_ROW_CAP) / AFFILIATE_ROWS_PER_UNIT + size.listings / PUBLIC_LISTINGS_PER_UNIT);
   return Math.min(MAX_UNITS, units);
 }

@@ -20,7 +20,8 @@ import { STORE_PAGE, answersOn, deliveryWords, keepAnswer, keptAnswer, priceWord
 import { MAX_FACTS_CHARS, questionKey, readQuestion } from "@/lib/answers-rules";
 import { heldToFacts } from "@/lib/store-assistant-rules";
 import type { Listing, Store } from "@/lib/store";
-import { isDemoStore, DEMO_EXAMPLE_LABEL, DEMO_EXAMPLE_PICK_WHY } from "@/lib/demo-ai-rules";
+import { DEMO_EXAMPLE_LABEL, DEMO_EXAMPLE_PICK_WHY } from "@/lib/demo-ai-rules";
+import { isDemoStore } from "@/lib/house-store";
 
 const GUIDE_TIMEOUT_MS = 20_000;
 /** How many products the model is shown at most: the store's first ones, in its own order. */

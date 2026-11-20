@@ -81,6 +81,12 @@ export function isHouseStore(store: { email: string }): boolean {
   return isHouseAddress(store.email);
 }
 
+/** Whether a store is the demo store, for the demo's own AI allowance (lib/demo-ai-rules.ts): false for anything
+ * without an owner's address, never a throw. */
+export function isDemoStore(store: { email?: unknown } | null | undefined): boolean {
+  return !!store && typeof store.email === 'string' && isHouseAddress(store.email);
+}
+
 /** Whether buyers of this store may leave a review. Every store but the demo. */
 export function takesReviews(store: { email: string }): boolean {
   return !isHouseStore(store);

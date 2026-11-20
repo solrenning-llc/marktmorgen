@@ -13,12 +13,9 @@
  * Pure and browser-safe: no environment, no network, no database.
  */
 import { AI_ENTITLEMENT_RULES, AI_SLOT_MICRO_USD } from '@/lib/ai-entitlement-rules';
-import { isHouseAddress } from '@/lib/house-store';
 
-/** Whether a store is the demo store; false for anything without an owner's address, never a throw. */
-export function isDemoStore(store: { email?: unknown } | null | undefined): boolean {
-  return !!store && typeof store.email === 'string' && isHouseAddress(store.email);
-}
+// Which store is the demo is isDemoStore in lib/house-store.ts, kept out of this file: lib/llc-fixed-costs.ts reads
+// the ceiling below, it reaches pages drawn in the browser, and lib/house-store.ts reads the environment when loaded.
 
 /** Visitor answers and store-guide replies the demo store may give in a month (Studio publishes 250). */
 export const DEMO_AI_ANSWERS_MONTHLY = 250;

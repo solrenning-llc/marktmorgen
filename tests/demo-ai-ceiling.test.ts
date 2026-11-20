@@ -125,3 +125,9 @@ test('example picks are never shown under "These fit best", and the example labe
   assert.match(readFileSync('components/ask-box.tsx', 'utf8'), /lang="en">\{answer\.example\}/);
   assert.doesNotMatch(DEMO_EXAMPLE_LABEL, /used up/);
 });
+
+test('the demo rules import nothing that reads the environment, since the fixed costs reach pages drawn in the browser', () => {
+  const imports = [...readFileSync('lib/demo-ai-rules.ts', 'utf8').matchAll(/from '([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(imports, ['@/lib/ai-entitlement-rules']);
+  assert.doesNotMatch(readFileSync('lib/demo-ai-rules.ts', 'utf8'), /process\./);
+});

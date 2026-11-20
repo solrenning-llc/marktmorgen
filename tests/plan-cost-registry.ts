@@ -2004,6 +2004,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/ai-steps.ts", names: ["AI_STOP_COMMANDS", "AI_STEP_EXTRA_BYTES"] },
       { file: "lib/ai-rules.ts", names: ["AI_MONTHLY", "AI_PER_MINUTE"] },
       { file: "lib/answers-rules.ts", names: ["ANSWERS_MONTHLY", "ASKS_PER_DAY"] },
+      // The demo store's own allowance (owner, 20/11/2026): never above its plan's (min with AI_MONTHLY and ANSWERS_MONTHLY), so no plan's worst month grows; its month is a fixed cost of the LLC (tests/demo-ai-ceiling.test.ts).
+      { file: "lib/demo-ai-rules.ts", names: ["DEMO_AI_ANSWERS_MONTHLY", "DEMO_AI_WRITING_JOBS_MONTHLY"] },
       { file: "lib/ai-request-rules.ts", names: ["AI_REQUEST_LIMITS"] },
       { file: "lib/funnel-ai.ts", names: ["askModel"] },
       // An AI explanation of one funnel check (26 [E9]): one writing job (FUNNEL_EXPLAIN_JOBS), taken before its one bounded request (tests/funnel-explain.test.ts).

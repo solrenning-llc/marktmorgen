@@ -122,6 +122,14 @@ Pedido do dono, nas palavras dele: "resolve!!!!!!!!!!! gera regras para nao ocor
 
 (t) **Número derivado de custo.** Quando uma linha do registro de custos traz números calculados a partir de outros (comandos de uma execução, execuções em 30 dias, comandos e dólares no mês), toda junção que muda uma das parcelas recalcula todos os números derivados pelo modelo, e não só a frase que conflitou; o teste que confere esses números como texto passa a calculá-los pelas constantes quando for mexido, como em (n). Em 20/11/2026, no #3062, o script da base (Codex N1 no #2921) passou uma construção do diretório de 12.074 para 12.076 comandos, o que mudou também os comandos e os dólares de 30 dias e de uma hora, sem nenhum teste falhar.
 
+(ii) **Minutos de envio: nenhuma sessão sem vaga.** Decisão do dono (DONO-20261120-0253-C4-5BC-MINUTOS, 20/11/2026, 02h53 Fortaleza, redigida pelo Claude 5 `idD7g`), depois de a sessão 5BC do Claude 4 ficar cerca de 3 horas sem enviar, à espera de um minuto. A letra é a seguinte às que o coordenador reservou: (r) a (bb) para #4850 e #4864, (cc) a (ee) para este PR e as seguintes para as complementações da 3Rj.
+1. **Tabela fixa.** Toda sessão nova de qualquer agente recebe minutos próprios de envio antes do primeiro envio. A tabela de minutos de todas as sessões fica numa linha fixa do PAINEL DA FILA e é repetida no primeiro comentário de cada canal novo, para ninguém perder a atribuição quando um canal lota e fecha.
+2. **Prazo de resposta.** Quem coordena uma família responde a um pedido de minuto em até 30 minutos.
+3. **Silêncio não para ninguém.** Sem resposta em 30 minutos, a sessão escolhe minutos que ninguém usou nas últimas 2 horas do canal, anuncia no canal e passa a usá-los. O coordenador pode trocá-los depois.
+4. **Vagas divididas.** Uma família com mais sessões do que vagas divide as vagas entre elas na hora em que a sessão nova começa, e nunca deixa uma sessão sem vaga.
+
+Cada envio continua com todas as conferências de (m), MV (a) e CV.
+
 **Depende do dono** (divergências entre esta seção e o #4640, fechado como duplicado; até a decisão, nenhuma das duas versões vale nesses dois pontos, e o resto desta seção vale):
 - intervalo da varredura (c): esta seção dizia "a cada 30 minutos (pela tarefa agendada da ALL-211; sem ela, a cada 2 horas)"; o #4640, regra 1, "a cada 60 minutos". As duas cumprem "pelo menos a cada 60 minutos", que fica em (c); se o mínimo deve ser 30 minutos, decide o dono;
 - colisão com outro PR aberto em código de produto (e): esta seção dizia "combinar no canal quem vai primeiro; o segundo espera a incorporação do primeiro ou trabalha em cima dele"; o #4640, regra 5, "sem travar; quem entrar depois junta". As duas avisam no canal, o que fica em (e); se o segundo espera ou segue, decide o dono.

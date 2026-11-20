@@ -558,6 +558,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
         <div className="mt-5" role="group" aria-label="Pipelines">
           <div className="flex flex-wrap items-center gap-2">
             {allTotals.map(t => (
+              /* Full-strength words on the button: a faded count fell to 5.6:1 on the chosen pipeline (WCAG 1.4.6 asks 7:1). */
               <button key={t.pipeline.id} id={`pipeline-tab-${t.pipeline.id}`} type="button" aria-pressed={t.pipeline.id === pipeline.id} {...offProps(editing && t.pipeline.id !== pipeline.id, WHY_ID)} className={`btn btn-sm ${t.pipeline.id === pipeline.id ? "btn-primary" : "btn-secondary"}`} onClick={() => { if (editing || t.pipeline.id === pipeline.id) return; setPipelineId(t.pipeline.id); setError(null); setConfirming(null); }}>
                 {nameOf(t.pipeline)}
                 <span className="tabular-nums">{` · ${t.open.count} open`}</span>
@@ -579,6 +580,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             ) : null}
           </div>
           {shared ? <p className="mt-2 text-sm text-ink-soft">{`Some of these pipelines share a name, so each one made later shows a number after it, such as “${shared} (2)”. Rename one to tell them apart.`}</p> : null}
+          {/* Scrolls sideways on a narrow screen, so a keyboard can reach and scroll it too (WCAG 2.1.1). */}
           <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Totals by pipeline, as a table">
             <table className="w-full min-w-[32rem] text-left text-sm">
               <caption className="sr-only">What each pipeline&apos;s deals add up to</caption>

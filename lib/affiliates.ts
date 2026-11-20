@@ -3018,12 +3018,14 @@ export async function attributedAffiliate(
   const inWindow = (c: { at: number }) => c.at <= now + 60 && now - c.at <= store.affiliates.days * 86_400;
   const first = store.affiliates.rule === "first";
   const click = first ? via.first : via.last;
-  // On first click, a first click past its window no longer holds the buyer: the cookie keeps it for as long as the
-  // browser keeps the cookie (up to 400 days), so stopping there would leave every later link unpaid for good.
-  let affiliate = inWindow(click) ? await approvedByCode(store, click.code) : null;
-  // On first click, somebody the creator has since declined or removed, or a
-  // first click past its window, leaves the sale to the affiliate who actually
-  // brought the buyer back, rather than taking it away from everyone.
+  // A click past its window credits nobody, on either rule. On first click the sale is not moved to a later affiliate:
+  // that changes who is paid a commission and needs the owner's decision (Codex X3 7004858529 and Codex L 7029564415
+  // on #4413), so the rule before stays until then.
+  if (!inWindow(click)) return null;
+  let affiliate = await approvedByCode(store, click.code);
+  // On first click, somebody the creator has since declined or removed leaves
+  // the sale to the affiliate who actually brought the buyer back, rather than
+  // taking it away from everyone.
   if (!affiliate && first && (via.last.code !== click.code || via.last.at !== click.at)) {
     const back = via.last;
     if (inWindow(back)) {

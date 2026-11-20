@@ -12,13 +12,20 @@
  *   goes back at once; the earlier door is left as it was.
  * - A path already in a post (its door used): a failed request for it again
  *   never makes the sweep delete the post's picture (Codex Z on #3305, M1).
+ *
+ * Rule 23 (merge of main into #3414, 11/11/2026): the note and its listing are
+ * one script on #3414 (NOTE_PICTURE: both written, or neither), so the
+ * injections below answer its one reply, and "landed" is the script run or
+ * not. A path that is already a file is refused before a place is taken (its
+ * name is free only when the file store says it is not there), so a request
+ * for a picture already in a post is 400 "invalid", with no place taken.
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/community/upload/route";
 import { noteCommunityUpload, picturesKept, sweepCommunityUploads, takeCommunityUpload, takePicturePlace } from "@/lib/community-files";
 import { communityFolder } from "@/lib/community-image";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { COMMUNITY_ID, MEMBER, deleted, files, tokens } from "./community-upload-door-exact-world";
 
@@ -28,7 +35,7 @@ const folder = communityFolder(COMMUNITY_ID);
 const DAY = 86_400_000;
 let n = 0;
 const freshPath = () => `community/${folder}/${(++n).toString(16).padStart(32, "0")}.jpg`;
-const isNote = (commands: Command[]) => commands.length === 2 && commands[0][0] === "SET" && commands[1][0] === "ZADD";
+const isNote = (commands: Command[]) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:community-picture-note:");
 const listed = async (path: string) => (await original([["ZSCORE", "nl:cimg:doors", path]]))[0] !== null;
 const throwsBeforeSending = () =>
   ((async (commands: Command[]) => {
@@ -67,17 +74,19 @@ async function ask(path: string): Promise<{ status: number; error: string | null
   return { status: response.status, error: body.error ?? null, door: tokens.includes(path) };
 }
 
-/** The note's pipeline answered as `answer` says, after it ran in full (`landed`) or with only its SET. */
-function answerNote(answer: (replies: unknown[]) => unknown, landed: "both" | "set only" | "none" = "both"): void {
+/** The note's script answered as `answer` says, after it ran (`ran`) or not. */
+function answerNote(answer: (replies: unknown[]) => unknown, ran: "ran" | "not run" = "ran"): void {
   redis.pipeline = (async (commands: Command[]) => {
     if (!isNote(commands)) return original(commands);
-    const ran = landed === "both" ? await original(commands) : landed === "set only" ? [...(await original([commands[0]])), null] : [null, null];
-    return answer(ran);
+    return answer(ran === "ran" ? await original(commands) : [null]);
   }) as typeof redis.pipeline;
 }
 
 async function sweptADayOn(): Promise<number> {
   redis.pipeline = original;
+  // Rule 23 (merge of main into #3414): the sweep deletes a door's picture only once its note is gone, so the
+  // database's clock moves on too, and the note's day runs out there as well.
+  advance(2 * DAY);
   return sweepCommunityUploads(Date.now() + 2 * DAY);
 }
 
@@ -96,19 +105,17 @@ async function main(): Promise<void> {
     }
 
     part("A note answered in another shape gives no door; the place comes back through the sweep");
-    const odd: [string, (replies: unknown[]) => unknown, "both" | "set only" | "none"][] = [
-      ["ZADD landed, answered as text", (r) => [r[0], "1"], "both"],
-      ["ZADD landed, answered true", (r) => [r[0], true], "both"],
-      ["ZADD landed, answered 2", (r) => [r[0], 2], "both"],
-      ["ZADD not carried out, answered as text", (r) => [r[0], "1"], "set only"],
-      ["ZADD not carried out, answered null", (r) => [r[0], null], "set only"],
-      ["SET landed, answered 1", (r) => [1, r[1]], "both"],
-      ["SET landed, answered true", (r) => [true, r[1]], "both"],
-      ["SET landed, answered lowercase", (r) => ["ok", r[1]], "both"],
-      ["one reply for two commands", (r) => [r[0]], "both"],
-      ["three replies", (r) => [...r, 1], "both"],
-      ["not a list", () => null, "both"],
-      ["nothing carried out, answered empty", () => [], "none"],
+    const odd: [string, (replies: unknown[]) => unknown, "ran" | "not run"][] = [
+      ["noted and listed, answered as text", () => ["1"], "ran"],
+      ["noted and listed, answered true", () => [true], "ran"],
+      ["noted and listed, answered 2", () => [2], "ran"],
+      ["noted and listed, answered OK", () => ["OK"], "ran"],
+      ["not run, answered as text", () => ["1"], "not run"],
+      ["not run, answered null", () => [null], "not run"],
+      ["not run, answered -1", () => [-1], "not run"],
+      ["two replies for one script", (r) => [r[0], 1], "ran"],
+      ["not a list", () => null, "ran"],
+      ["nothing carried out, answered empty", () => [], "not run"],
     ];
     for (const [label, answer, landed] of odd) {
       reset();
@@ -210,6 +217,7 @@ async function main(): Promise<void> {
         }
         return original(commands);
       }) as typeof redis.pipeline;
+      advance(2 * DAY); // the note's day runs out by the database's clock as well (rule 23, as sweptADayOn)
       for (let run = 0; run < 4; run++) await sweepCommunityUploads(Date.now() + 2 * DAY, most);
       redis.pipeline = original;
       is(`${label}: its place came back once; the post's picture and place are kept`, [await picturesKept(folder), files.has(kept), await listed(path)], [1, true, false]);
@@ -224,9 +232,9 @@ async function main(): Promise<void> {
           ((async (commands: Command[]) => (isNote(commands) ? [] : original(commands))) as typeof redis.pipeline),
       ],
       [
-        "only the note's SET carried out, answered in another shape",
+        "the note's script run, answered in another shape",
         () =>
-          ((async (commands: Command[]) => (isNote(commands) ? [(await original([commands[0]]))[0], "1"] : original(commands))) as typeof redis.pipeline),
+          ((async (commands: Command[]) => (isNote(commands) ? [String((await original(commands))[0])] : original(commands))) as typeof redis.pipeline),
       ],
     ];
     for (const [label, pipeline] of again) {
@@ -235,11 +243,12 @@ async function main(): Promise<void> {
       redis.pipeline = pipeline();
       const result = await ask(path);
       redis.pipeline = original;
-      is(`${label}: no door`, [result.status, result.error, result.door], [500, "server_error", false]);
-      is(`${label}: the post's place and this request's are counted`, await picturesKept(folder), 2);
+      // Rule 23: refused as a name that is already a file, before any place is taken or the note is tried.
+      is(`${label}: no door`, [result.status, result.error, result.door], [400, "invalid", false]);
+      is(`${label}: only the post's place is counted`, await picturesKept(folder), 1);
       await sweptADayOn();
       is(`${label}: a day on, the post's picture is still there`, [files.has(path), deleted.includes(path)], [true, false]);
-      is(`${label}: only this request's place came back`, await picturesKept(folder), 1);
+      is(`${label}: and the post's place is still counted`, await picturesKept(folder), 1);
     }
 
     part("A path that already had a door: no door, and this request's place goes back at once");
@@ -256,18 +265,19 @@ async function main(): Promise<void> {
       is("and this member cannot use it", await takeCommunityUpload(path, MEMBER), false);
     }
 
-    part("noteCommunityUpload reads its two replies exactly");
+    part("noteCommunityUpload reads its script's one reply exactly");
     const shapes: [string, unknown, boolean | "unknown"][] = [
-      ["noted and listed", ["OK", 1], true],
-      ["noted, already listed", ["OK", 0], true],
-      ["a door there already", [null, 0], false],
-      ["a door there already, listed now", [null, 1], false],
-      ["SET as text", ["1", 1], "unknown"],
-      ["ZADD as text", ["OK", "1"], "unknown"],
-      ["ZADD negative", ["OK", -1], "unknown"],
-      ["ZADD fraction", ["OK", 0.5], "unknown"],
-      ["ZADD missing", ["OK"], "unknown"],
-      ["an object", { 0: "OK", 1: 1, length: 2 }, "unknown"],
+      ["noted and listed", [1], true],
+      ["a note or a mark there already", [0], false],
+      ["as text", ["1"], "unknown"],
+      ["OK", ["OK"], "unknown"],
+      ["null", [null], "unknown"],
+      ["negative", [-1], "unknown"],
+      ["2", [2], "unknown"],
+      ["a fraction", [0.5], "unknown"],
+      ["two replies", [1, 1], "unknown"],
+      ["none", [], "unknown"],
+      ["an object", { 0: 1, length: 1 }, "unknown"],
     ];
     for (const [label, reply, expected] of shapes) {
       reset();

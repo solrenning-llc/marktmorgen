@@ -11,7 +11,8 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * takes away, by their keys, the kept entries that cannot be read (their
  * amounts unknown, never guessed). For whoever may see the numbers. Answers
  * the list as it is after; a list that cannot be read answers 503 `unread`,
- * with `unreadable` set to how many kept entries could not be read.
+ * with `unreadable` set to how many kept entries could not be read. A removal
+ * it cannot confirm answers `{ ok: false, error: "unconfirmed" }` with status 503.
  */
 export async function POST(request: NextRequest) {
   // Removing the entries that cannot be read deletes, so a session let in without its second step may not do it,
@@ -29,8 +30,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, spends: added.spends, spendsUnread: added.metaUnread }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "remove") {
-      const read = await removeSpend(store.statsId, body.id);
-      return Response.json({ ok: true, spends: read.spends, spendsUnread: read.metaUnread }, { headers: { "Cache-Control": "no-store" } });
+      const removed = await removeSpend(store.statsId, body.id);
+      // An unconfirmed removal is an error the owner can retry, never ok over a line that may still count.
+      if (!removed.ok) return Response.json({ ok: false, error: removed.reason }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      return Response.json({ ok: true, spends: removed.spends, spendsUnread: removed.metaUnread }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "remove-unreadable") {
       const read = await removeUnreadableSpends(store.statsId);

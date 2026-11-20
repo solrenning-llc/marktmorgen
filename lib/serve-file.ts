@@ -17,6 +17,7 @@ import {
 } from "@/lib/product-file";
 import { folderFromPathname, freeDeliveryPause, recordDelivery } from "@/lib/delivery";
 import { fileHeaders } from "@/lib/request-guard";
+import type { StampedDelivery } from "@/lib/pdf-stamp";
 
 /** A short answer in plain text, never cached and never indexed. */
 export function plain(status: number, message: string): Response {
@@ -120,4 +121,33 @@ export async function serveFile(
     console.error("serving a file failed", error);
     return plain(502, "We could not fetch the file right now.");
   }
+}
+
+/**
+ * What a paid download of a file the product stamps answers (lib/pdf-stamp.ts stampedDelivery): the kept copy, the
+ * file as uploaded only where stamping does not apply to it, a copy stamped on the fly sent from here without being
+ * kept anywhere, or, when that copy could not be made now, `notReady` with a request to try again. Never the original
+ * in place of a stamped copy.
+ */
+export async function serveStamped(delivery: StampedDelivery, original: ProductFile, notReady: string): Promise<Response> {
+  if (delivery.kind === "kept") return serveFile(delivery.copy);
+  if (delivery.kind === "original") return serveFile(original);
+  if (delivery.kind === "retry") {
+    return new Response(notReady, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "120", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
+    });
+  }
+  const { bytes } = delivery;
+  // Counted against the store's month as every delivery is; a paid one goes out whatever the counter says.
+  await recordDelivery(original.pathname, bytes.byteLength).catch(() => false);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+  const headers = new Headers(fileHeaders(delivery.contentType, delivery.name));
+  headers.set("Content-Length", String(bytes.byteLength));
+  return new Response(body, { headers });
 }

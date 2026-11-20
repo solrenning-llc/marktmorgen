@@ -24,7 +24,7 @@ import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest, touchFrom } from "@/lib/visit-channel";
 import { parseTogether, togetherFrom } from "@/lib/also-bought";
 import { parsePaths, pathsFrom } from "@/lib/next-bought";
-import { readDepth } from "@/lib/page-depth";
+import { reachShares, readDepth } from "@/lib/page-depth";
 import { shareProblem } from "@/lib/partner-share";
 import { readAllTimeSales, readSales, readStats, recordHit, renewalsFrom, resultsByCampaign, studioStats } from "@/lib/stats";
 import { weeklyMessage } from "@/lib/stats-report";
@@ -138,9 +138,10 @@ test("ordinary product ids still give the same plain records as before", () => {
 
 const WRITTEN = ["played", "quarter", "half", "threeQuarters", "end", "sales", "cents", "d7", "d30", "d90", "refunds"];
 
+// Changed (rule 23, Claude 5 on #3005): no longer a todo. readDepth and reachShares read only the record's own
+// fields (Object.hasOwn), so this now holds and runs; the assertions themselves are unchanged.
 test(
   "page-depth: a visitor's block id \"constructor\" is its own block and writes nothing onto the Object function",
-  { todo: "lib/page-depth.ts is held by #2571 (Claude 3, claude3/gl7-time-on-page), which rewrites readDepth" },
   async () => {
     redis.clear();
     const statsId = "0".repeat(32);
@@ -157,6 +158,11 @@ test(
     }
   },
 );
+
+test("page-depth: a page block id \"constructor\" with no visitor counted reads as nobody, never as the Object function", () => {
+  // The page's own order can hold the id; reachShares used to add `stopped.constructor` (the Object function) as text.
+  assert.deepEqual(reachShares(["abcd1234", "constructor"], { abcd1234: 3 }, 3).shares, { constructor: 0, abcd1234: 100 });
+});
 
 test(
   "partner-share: a share on a product id \"constructor\" is weighed as an ordinary product, never as Object",

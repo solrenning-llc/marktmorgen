@@ -96,7 +96,8 @@ test("finishMeta: the new connection's SET answered in no known shape does not g
   const before = redis.run(["GET", connKey(statsId)]);
   let used = false;
   redis.pipeline = (async (commands: Command[]) => {
-    if (!used && commands[0]?.[0] === "SET" && commands[0][1] === connKey(statsId)) {
+    // Main writes it with a SET first; this PR with one EVAL whose first key is the connection (FINISH_UNLESS_GONE).
+    if (!used && ((commands[0]?.[0] === "SET" && commands[0][1] === connKey(statsId)) || (commands[0]?.[0] === "EVAL" && commands[0][3] === connKey(statsId)))) {
       used = true;
       return []; // no reply for the four commands: whether the SET landed is unknown (here it did not)
     }
@@ -105,7 +106,7 @@ test("finishMeta: the new connection's SET answered in no known shape does not g
   let done: { ok: boolean } | undefined;
   let error: unknown;
   try {
-    done = await finishMeta({ statsId, sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: OWNER, handle }, currency: "usd" });
+    done = await finishMeta({ statsId, sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: OWNER, handle }, currency: "usd", startedAt: Date.now() });
   } catch (e) {
     error = e;
   } finally {
@@ -121,7 +122,8 @@ test("finishMeta: the new connection's SET answered other than OK keeps the old 
   const before = redis.run(["GET", connKey(statsId)]);
   let used = false;
   redis.pipeline = (async (commands: Command[]) => {
-    if (!used && commands[0]?.[0] === "SET" && commands[0][1] === connKey(statsId)) {
+    // Main writes it with a SET first; this PR with one EVAL whose first key is the connection (FINISH_UNLESS_GONE).
+    if (!used && ((commands[0]?.[0] === "SET" && commands[0][1] === connKey(statsId)) || (commands[0]?.[0] === "EVAL" && commands[0][3] === connKey(statsId)))) {
       used = true;
       return [null, 0, 0, 0]; // a nil for the SET: not confirmed written
     }
@@ -130,7 +132,7 @@ test("finishMeta: the new connection's SET answered other than OK keeps the old 
   let done: { ok: boolean } | undefined;
   let error: unknown;
   try {
-    done = await finishMeta({ statsId, sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: OWNER, handle }, currency: "usd" });
+    done = await finishMeta({ statsId, sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: OWNER, handle }, currency: "usd", startedAt: Date.now() });
   } catch (e) {
     error = e;
   } finally {
@@ -144,7 +146,7 @@ test("finishMeta: the new connection's SET answered other than OK keeps the old 
 
 test("control: a healthy reconnect gives back the old token and connects", async () => {
   const { statsId, sid, handle } = await fresh();
-  const done = await finishMeta({ statsId, sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: OWNER, handle }, currency: "usd" });
+  const done = await finishMeta({ statsId, sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: OWNER, owner: { email: OWNER, handle }, currency: "usd", startedAt: Date.now() });
   assert.equal(done.ok, true);
   assert.equal(revoked.includes("EAAoldworkingtoken"), true);
 });

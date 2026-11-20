@@ -19,6 +19,7 @@ import { forgetLeadPerson, leadId, recordLead } from "@/lib/affiliate-leads";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReply } from "@/lib/redis-exact";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -32,7 +33,8 @@ async function outcome(run: () => Promise<number>): Promise<string> {
   try {
     return `counted ${await run()}`;
   } catch (error) {
-    return error instanceof UnknownReplyError ? "unknown" : `threw ${String(error)}`;
+    // lib/redis-exact.ts UnknownReply is the exact reads' own unknown (#2576), the same answer for an erasure.
+    return error instanceof UnknownReplyError || error instanceof UnknownReply ? "unknown" : `threw ${String(error)}`;
   }
 }
 
@@ -51,7 +53,8 @@ async function withReply(hit: (command: Command) => boolean, reply: (real: unkno
 }
 
 const bond = (c: Command) => c[0] === "HDEL" && String(c[1]).endsWith(":bond");
-const imported = (c: Command) => c[0] === "DEL" && String(c[1]) === importedKey(STATS, EMAIL);
+// Read and deleted in one step since #2576 (HASH_TAKE_ALL on the person's hash of purchases).
+const imported = (c: Command) => c[0] === "EVAL" && String(c[3]) === importedKey(STATS, EMAIL);
 
 async function main(): Promise<void> {
   part("A person's affiliate bond: deleted only on an exact reply");
@@ -62,13 +65,13 @@ async function main(): Promise<void> {
 
   part("A person's imported purchases: deleted only on an exact reply");
   redis.clear();
-  redis.run(["SET", importedKey(STATS, EMAIL), "[]"]);
+  redis.run(["HSET", importedKey(STATS, EMAIL), "prod_1", "{}"]);
   redis.run(["HSET", importedWhoKey(STATS), EMAIL, "1"]);
   is("a reply cut short is unknown, never 0 deleted", await withReply(imported, (real) => real.slice(0, 1), () => forgetImportedPerson(STATS, EMAIL)), "unknown");
-  redis.run(["SET", importedKey(STATS, EMAIL), "[]"]);
+  redis.run(["HSET", importedKey(STATS, EMAIL), "prod_1", "{}"]);
   redis.run(["HSET", importedWhoKey(STATS), EMAIL, "1"]);
   is("a reply in another shape is unknown", await withReply(imported, () => [null, "x"], () => forgetImportedPerson(STATS, EMAIL)), "unknown");
-  redis.run(["SET", importedKey(STATS, EMAIL), "[]"]);
+  redis.run(["HSET", importedKey(STATS, EMAIL), "prod_1", "{}"]);
   redis.run(["HSET", importedWhoKey(STATS), EMAIL, "1"]);
   is("an exact reply counts both deletions", await outcome(() => forgetImportedPerson(STATS, EMAIL)), "counted 2");
 

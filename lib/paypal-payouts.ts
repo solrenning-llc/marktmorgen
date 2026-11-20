@@ -693,7 +693,14 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
 }
 
 export type FileConfirmed =
-  | { ok: true; written: number; cents: number; skipped: number }
+  /** written: lines written now, cents their amount; held: lines already in the book (a retry after a lost answer). */
+  | { ok: true; written: number; cents: number; held: number }
+  /**
+   * "unrecorded": the file paid a line whose affiliate has no record any more, so it could not go in the book. The
+   * other lines are written (or were already), the file is kept, and the answer says how many lines and how much
+   * could not be written, never whose (Codex N1 on #3906, MEDIUM): a partial confirmation never looks complete.
+   */
+  | { ok: false; reason: "unrecorded"; written: number; cents: number; held: number; unrecorded: number; unrecordedCents: number }
   /**
    * "file": no kept file under that id (never downloaded, already written down, run out or unreadable); "stale": one
    * of its affiliates has a PayPal payment on its way or a payout written after the file was downloaded, so writing
@@ -724,7 +731,9 @@ export async function keepPayFileLocked(store: Store, lines: BatchLine[], readAt
  * automatic PayPal payout reading the same book. Each line is written once under an id named by the file and the
  * affiliate (addPayoutOnce), and the files are let go only after every line is in the book: a double click, a retry
  * after an unknown reply or a second confirmation writes nothing twice, and one that finds the file gone writes
- * nothing at all. A line whose affiliate has no record any more is skipped and counted.
+ * nothing at all. A line whose affiliate has no record any more cannot be written: every other line is, the files
+ * are kept, and the answer is "unrecorded" with how many lines and how much, so the creator compares the file with
+ * the book instead of seeing a success (Codex N1 on #3906, MEDIUM). A retry writes nothing twice and answers the same.
  *
  * A file is refused as "stale", with nothing written, when any of its affiliates has a PayPal payment on its way
  * or a payout written at or after the book read began, other than this file's own lines (a retry): every
@@ -752,19 +761,27 @@ export async function confirmPayFile(store: Store, file: string, input: { date: 
       const reference = payoutReference(input.reference);
       let written = 0;
       let cents = 0;
-      let skipped = 0;
+      let already = 0;
+      let unrecorded = 0;
+      let unrecordedCents = 0;
       for (const [index, line] of kept.lines.entries()) {
         if (index > 0 && index % LINES_PER_HOLD === 0 && !(await holdLock(held))) return { ok: false, reason: "busy" };
         const result = await addPayoutOnce(store, { id: payoutIdForFileLine(file, line.a), aff: line.a, cents: line.c, currency: kept.currency, date: input.date, reference });
         if (result === "gone") {
-          skipped += 1;
-          continue;
+          unrecorded += 1;
+          unrecordedCents += line.c;
+        } else if (result === "held") {
+          // Already in the book under this file's own id (a retry): counted apart, never as written now (Codex N1, LOW 2).
+          already += 1;
+        } else {
+          written += 1;
+          cents += line.c;
         }
-        written += 1;
-        cents += line.c;
       }
+      // Kept while a line the file paid is not in the book: dropping it would erase the only record of that payment.
+      if (unrecorded > 0) return { ok: false, reason: "unrecorded", written, cents, held: already, unrecorded, unrecordedCents };
       await dropPayFiles(statsId);
-      return { ok: true, written, cents, skipped };
+      return { ok: true, written, cents, held: already };
     });
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };

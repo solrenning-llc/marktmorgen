@@ -131,12 +131,17 @@ export async function POST(request: NextRequest) {
       date,
       reference: text(body.reference, MAX_REFERENCE_LENGTH * 2),
     });
+    if (!done.ok && done.reason === "unrecorded") {
+      // Counts and amounts only: the file the creator downloaded names the line; the answer never names a person gone.
+      const { written, cents, held, unrecorded, unrecordedCents } = done;
+      return Response.json({ ok: false, error: "unrecorded", written, cents, held, unrecorded, unrecordedCents }, { status: 409 });
+    }
     if (!done.ok) return fail(done.reason, 409);
 
     // What the next file would pay, from the book read again: shown to the creator, never written anywhere.
     const [book, away] = await Promise.all([readBook(store).catch(() => null), onTheirWay(store).catch(() => null)]);
     const left = book && away ? batchTotal(payableLines(book, away)) : null;
-    return Response.json({ ok: true, written: done.written, cents: done.cents, skipped: done.skipped, left });
+    return Response.json({ ok: true, written: done.written, cents: done.cents, held: done.held, left });
   } catch (error) {
     console.error("writing down the affiliate payout batch failed", error);
     return fail("server_error", 500);

@@ -15,7 +15,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { payoutIdForFileLine } from "@/lib/affiliate-payouts";
-import { readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -79,7 +78,6 @@ async function main(): Promise<void> {
     }
     return paid;
   };
-  const owed = async () => Object.fromEntries((await readBook(store)).rows.map((row) => [row.affiliate.id, row.owed]));
 
   await redis.pipeline([
     ["HSET", `nl:aff:${statsId}:people`, ANA, person(ANA, "ana")],
@@ -130,7 +128,7 @@ async function main(): Promise<void> {
   const studio = readFileSync(join(process.cwd(), "components/affiliate-studio.tsx"), "utf8");
   is("no fallback to the newest of several files", /\?\? files\[0\] \?\? null/.test(studio), false);
   is("one file is taken as it is; several need a choice", studio.includes("files.length === 1 ? files[0] : null"), true);
-  is("the choice is required, with no file picked at first", [studio.includes('<option value="" disabled>'), /id="batch-f"[^>]*required/.test(studio)], [true, true]);
+  is("the choice is required, with no file picked at first", [studio.includes('<option value="" disabled>'), studio.split("\n").some((line) => line.includes('id="batch-f"') && /\brequired>/.test(line))], [true, true]);
   is("the partial answer has its own message", /unrecorded: /.test(studio), true);
   done();
 }

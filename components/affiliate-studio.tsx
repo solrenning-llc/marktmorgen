@@ -85,6 +85,7 @@ const MESSAGES: Record<string, string> = {
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
   file: "This payout file can no longer be checked, so no new payout was recorded. If you already paid it, check each affiliate’s recorded payments and use their payout form to record only any missing amounts from that file. Do not pay it again or confirm a new file for that payment. If you have not paid it, download a new file.",
   busy: "Payments to your affiliates are being written down right now, so nothing was saved. Try again in a minute.",
+  unrecorded: "Not every line of that file could be written down, because an affiliate in it is no longer on your list. The file was kept. Compare it with each affiliate’s recorded payments, and do not pay it again.",
   stale: "That file is out of date, so no new payout was recorded: another payment overlaps the balance in the file. If you paid this file too, check each affiliate’s recorded payments and record only any missing amounts from that file by hand. Otherwise, download a new file.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
@@ -184,19 +185,38 @@ async function postUndo(payload: Record<string, unknown>): Promise<{ ok: true; u
 }
 
 /**
+ * A file written down only in part (Codex N1 on #3906, MEDIUM): what is in the book, what could not go in and why, and
+ * what to do. Counts and an amount only; the downloaded file names the line, so the screen never names a person gone.
+ */
+function unrecordedMessage(inBook: number, unrecorded: number, cents: number, currency: string): string {
+  const lines = (n: number) => `${n} ${n === 1 ? "line" : "lines"}`;
+  return `${lines(unrecorded)} of that file (${money(cents, currency)}) could not be written down, because the affiliate is no longer on your list. ${inBook ? `The other ${lines(inBook)} ${inBook === 1 ? "is" : "are"} in your records. ` : ""}The file was kept. Compare it with each affiliate’s recorded payments, and do not pay it again.`;
+}
+
+/**
  * Writing down a whole batch the creator has just paid in their own provider.
  * Separate from `post` because it answers with how many payouts it wrote, and
  * because it is the one call that touches several affiliates at once.
  */
-async function postBatch(payload: Record<string, unknown>): Promise<{ written: number; left: number | null } | { error: string }> {
+async function postBatch(payload: Record<string, unknown>, currency: string): Promise<{ written: number; held: number; left: number | null } | { error: string }> {
   try {
     const response = await fetch("/api/store/affiliates/payout-batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; written?: number; left?: number | null };
-    if (data.ok) return { written: Number(data.written) || 0, left: typeof data.left === "number" ? data.left : null };
+    const data = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      written?: number;
+      held?: number;
+      unrecorded?: number;
+      unrecordedCents?: number;
+      left?: number | null;
+    };
+    const count = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : 0);
+    if (data.ok) return { written: count(data.written), held: count(data.held), left: typeof data.left === "number" ? data.left : null };
+    if (data.error === "unrecorded" && count(data.unrecorded) > 0) return { error: unrecordedMessage(count(data.written) + count(data.held), count(data.unrecorded), count(data.unrecordedCents), currency) };
     return { error: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error };
   } catch {
     return { error: MESSAGES.server_error };
@@ -336,9 +356,10 @@ export function AffiliateStudio({
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
   const [batchFileId, setBatchFileId] = useState("");
-  // The file being written down: the one picked, or the newest when none was picked or the picked one is gone.
+  // The file being written down: the one picked; a lone file needs no pick, but of several none is taken by default,
+  // so a hurried click never writes down the newest instead of the one paid (Codex N1 on #3906, LOW 1).
   const files = payFiles ?? [];
-  const chosenFile = files.find((file) => file.id === batchFileId) ?? files[0] ?? null;
+  const chosenFile = files.find((file) => file.id === batchFileId) ?? (files.length === 1 ? files[0] : null);
 
   async function act(where: string, payload: Record<string, unknown>, confirmation: string | ((state: string) => string)): Promise<boolean> {
     setBusy(where);
@@ -450,10 +471,13 @@ export function AffiliateStudio({
                   className="mt-4 rounded-xl border-2 border-violet-brand/30 bg-white p-3"
                   onSubmit={async (e) => {
                     e.preventDefault();
-                    if (!chosenFile) return;
+                    if (!chosenFile) {
+                      setError({ where: "batch", text: "Pick the file you paid." });
+                      return;
+                    }
                     setBusy("batch");
                     setError(null);
-                    const done = await postBatch({ date: batchDate, reference: batchReference, file: chosenFile.id });
+                    const done = await postBatch({ date: batchDate, reference: batchReference, file: chosenFile.id }, currency);
                     setBusy(null);
                     if ("error" in done) {
                       setError({ where: "batch", text: done.error });
@@ -462,7 +486,7 @@ export function AffiliateStudio({
                     setBatchOpen(false);
                     setBatchReference("");
                     toast(
-                      `${done.written} ${done.written === 1 ? "payout" : "payouts"} written down.${done.left ? ` ${money(done.left, currency)} is still owed and goes in the next file.` : ""}`,
+                      `${done.written} ${done.written === 1 ? "payout" : "payouts"} written down.${done.held ? ` ${done.held} ${done.held === 1 ? "was" : "were"} already in your records.` : ""}${done.left ? ` ${money(done.left, currency)} is still owed and goes in the next file.` : ""}`,
                     );
                     router.refresh();
                   }}
@@ -493,10 +517,15 @@ export function AffiliateStudio({
                       />
                     </label>
                   </div>
-                  {chosenFile ? (
+                  {files.length > 0 ? (
                     <label className="mt-3 block" htmlFor="batch-f">
                       <span className="field-label">File you paid</span>
-                      <select id="batch-f" value={chosenFile.id} onChange={(e) => setBatchFileId(e.target.value)} className="field">
+                      <select id="batch-f" value={chosenFile?.id ?? ""} onChange={(e) => setBatchFileId(e.target.value)} className="field" required>
+                        {files.length > 1 ? (
+                          <option value="" disabled>
+                            Pick the file you paid
+                          </option>
+                        ) : null}
                         {files.map((file) => (
                           <option key={file.id} value={file.id}>
                             {`Downloaded ${new Date(file.at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC: ${file.people} ${file.people === 1 ? "affiliate" : "affiliates"}, ${money(file.cents, file.currency)}`}
@@ -516,7 +545,7 @@ export function AffiliateStudio({
                     still owed and goes in the next file. It records a payment you already made; no money moves from here.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null || !chosenFile} aria-busy={busy === "batch"}>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null || files.length === 0} aria-busy={busy === "batch"}>
                       Write the batch down
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBatchOpen(false)}>

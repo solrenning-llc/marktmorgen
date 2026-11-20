@@ -17,7 +17,7 @@ export const TIP_PROBLEMS: ReadonlySet<string> = new Set(Object.keys(TIPS_WORDS.
  * typed (app/api/store/tip reads a typed amount when nothing else is chosen).
  * The creator's own heading and line when they wrote one, the store language's
  * words when not. `problem` is what the last try came back with, if anything, and `kept` what was given then, put
- * back so the amount is not typed twice (WCAG 3.3.7; lib/store-tips.ts, tipKept, already checked).
+ * back so nothing is entered twice (WCAG 3.3.7; lib/store-tips.ts, tipKept, already checked).
  */
 export function StoreTipBox({ store, problem, rehearsal, kept }: { store: Store; problem: string; rehearsal: boolean; kept?: TipKept }) {
   const w = tipsWords(store.language);
@@ -81,7 +81,7 @@ export function StoreTipBox({ store, problem, rehearsal, kept }: { store: Store;
           </p>
         </fieldset>
         <div className="mt-4">
-          <BillingCountryField id="support-country" locale={said.lang.locale} label={w.billingCountry} choose={said.w.chooseCountry} problem={countryProblem} />
+          <BillingCountryField id="support-country" locale={said.lang.locale} label={w.billingCountry} choose={said.w.chooseCountry} problem={countryProblem} chosen={kept?.from} />
         </div>
         <button type="submit" className="btn st-btn mt-4 w-full">
           {w.button}

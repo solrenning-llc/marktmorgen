@@ -64,12 +64,12 @@ async function main(): Promise<void> {
   is("the notice and the place on the page are kept", [back.pathname, back.hash], [`/@${SHOP}`, "#support"]);
 
   part("The store page reads it only as the box offers it");
-  is("RED: a known amount, a typed amount and a country", tipKept(store, { chose: preset, other: "20", from: "us" } as never), { chose: preset, other: "20", from: "US" });
-  is("RED: anything else is dropped", tipKept(store, { chose: "99999", other: "javascript:1", from: "us1" } as never), { chose: "", other: "", from: "" });
-  is("RED: a list or nothing is dropped too", tipKept(store, { chose: ["1", "2"], other: undefined, from: ["US"] } as never), { chose: "", other: "", from: "" });
+  is("RED: a known amount, a typed amount and a country", tipKept(store, { chose: preset, other: "20", from: "us" }), { chose: preset, other: "20", from: "US" });
+  is("RED: anything else is dropped", tipKept(store, { chose: "99999", other: "javascript:1", from: "us1" }), { chose: "", other: "", from: "" });
+  is("RED: a list or nothing is dropped too", tipKept(store, { chose: ["1", "2"], other: undefined, from: ["US"] }), { chose: "", other: "", from: "" });
 
   part("The box puts it back");
-  const drawn = await html(StoreTipBox({ store, problem: "amount", rehearsal: false, kept: { chose: preset, other: "20", from: "US" } as never }));
+  const drawn = await html(StoreTipBox({ store, problem: "amount", rehearsal: false, kept: { chose: preset, other: "20", from: "US" } }));
   is("the chosen amount is checked", new RegExp(`<input[^>]*id="support-amount-${preset}"[^>]*checked`).test(drawn), true);
   is("only that one", (drawn.match(/<input[^>]*type="radio"[^>]*checked/g) ?? []).length, 1);
   is("the typed amount is in its box", /<input[^>]*name="other"[^>]*value="20"/.test(drawn), true);

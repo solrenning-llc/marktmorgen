@@ -7,6 +7,7 @@ import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { createTipCheckout, tipsOpen } from "@/lib/store-tip-checkout";
 import { readTipAmount, tipAmounts, tipKept } from "@/lib/store-tips";
 import { consumerGate } from "@/lib/eu-vat-gate";
+import { BILLING_COUNTRY_FIELD } from "@/lib/eu-vat-evidence";
 import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
 /**
@@ -48,14 +49,15 @@ export async function POST(request: NextRequest) {
   }
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
-  // Back to the box with the amount given, so it is not typed twice (WCAG 3.3.7): only what the box itself offers goes
-  // back (lib/store-tips.ts, tipKept). Never the country: it would sit in the address bar, the browser's history and
-  // the access logs, and the field lists it to be chosen again.
+  // Back to the box with what was given, so nothing is entered twice (WCAG 3.3.7, the more accessible reading AX274
+  // asks for): only what the box itself offers goes back (lib/store-tips.ts, tipKept). The country goes back only after
+  // a notice about the amount: after "abroad" it is the one refused, and after "country" none was given.
   const away = (problem: string) => {
     const back = new URLSearchParams({ tip: problem });
-    const kept = tipKept(store, { chose: picked, other });
+    const kept = tipKept(store, { chose: picked, other, from: problem === "amount" ? sent.get(BILLING_COUNTRY_FIELD) : null });
     if (kept.chose) back.set("chose", kept.chose);
     if (kept.other) back.set("other", kept.other);
+    if (kept.from) back.set("from", kept.from);
     return new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}?${back}#support`, "Cache-Control": "no-store" } });
   };
   if (!tipsOpen(store)) return away("closed");

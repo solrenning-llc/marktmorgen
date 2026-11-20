@@ -48,7 +48,6 @@ import {
   ASSISTANT_TIMEOUT_MS,
   ASSISTANT_TURNS_KEPT,
   HANDOFF_WORDS,
-  MAX_ASSISTANT_QUESTION,
   MAX_ASSISTANT_REPLY,
   assistantMessageExtraMicroUsd,
   assistantMessageWorstMicroUsd,

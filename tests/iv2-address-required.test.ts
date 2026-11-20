@@ -20,7 +20,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Product, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing, type Product, type Store } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
@@ -30,6 +30,8 @@ import { createRequest } from "@/lib/payment-request-store";
 import { createRequestCheckout } from "@/lib/payment-requests";
 import { createTipCheckout } from "@/lib/store-tip-checkout";
 import { callCheckoutBody } from "@/lib/calls";
+import { packageCheckoutBody } from "@/lib/call-packages";
+import type { CallPackage } from "@/lib/call-package-rules";
 import { createBillingCheckout } from "@/lib/billing";
 import { createAssistantCheckout } from "@/lib/assistant-billing";
 import { ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
@@ -60,7 +62,7 @@ type Kind = "paid" | "paid-unless-package" | "pending-reserved" | "replay" | "se
 const SITES: Record<string, Kind[]> = {
   "lib/assistant-billing.ts": ["paid", "read"],
   "lib/billing.ts": ["paid", "paid"],
-  "lib/call-packages.ts": ["pending-reserved"],
+  "lib/call-packages.ts": ["paid"],
   "lib/calls.ts": ["paid-unless-package"],
   "lib/card-update.ts": ["setup"],
   "lib/cart-checkout.ts": ["paid"],
@@ -210,6 +212,9 @@ async function main(): Promise<void> {
   is("a paid booking asks the full billing address, and nothing else for it", onlyTheAddress(booking(null)), ["required", false, false]);
   const free = booking({ id: "cs_test_iv2package", coupon: "iv2_session_coupon", email: "buyer@example.com", back: `https://marktmorgen.com/@${SHOP}` });
   is("a session from a package charges nothing and asks no address", [free.get("discounts[0][coupon]"), free.has(FIELD)], ["iv2_session_coupon", false]);
+  // The purchase of the package itself is paid (lib/call-packages.ts, packageCheckoutBody): it asks like every other.
+  const pkgBody = packageCheckoutBody(store, call as unknown as Listing, { sessions: 4, priceCents: 30000, days: 90 } as unknown as CallPackage, "https://marktmorgen.com");
+  is("RED: buying a package of calls asks the full billing address, and nothing else for it", onlyTheAddress(pkgBody), ["required", false, false]);
 
   part("The creator's plan and the store assistant, on the platform");
   before = sessions.length;

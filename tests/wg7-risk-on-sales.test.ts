@@ -61,8 +61,8 @@ async function main(): Promise<void> {
       checkout("cs_test_customerobj", { id: "cus_x", object: "customer", latest_charge: charge("ch_c", { risk_level: "highest" }) }, {}, now - 12),
       checkout("cs_test_noobject", { id: "pi_y", latest_charge: charge("ch_y", { risk_level: "normal" }) }, {}, now - 13),
       // Claude 7 on #3647: Radar's manual review, by the creator in their own Stripe account.
-      checkout("cs_test_review_open", { id: "pi_ro", object: "payment_intent", latest_charge: charge("ch_ro", { type: "manual_review", risk_level: "normal" }, { id: "prv_open", object: "review", open: true }) }, {}, now - 15),
-      checkout("cs_test_review_closed", { id: "pi_rc", object: "payment_intent", latest_charge: charge("ch_rc", { type: "manual_review", risk_level: "elevated" }, { id: "prv_closed", object: "review", open: false }) }, {}, now - 16),
+      checkout("cs_test_review_open", { id: "pi_ro", object: "payment_intent", latest_charge: charge("ch_ro", { type: "manual_review", risk_level: "normal" }, { id: "prv_open", object: "review", open: true, charge: "ch_ro" }) }, {}, now - 15),
+      checkout("cs_test_review_closed", { id: "pi_rc", object: "payment_intent", latest_charge: charge("ch_rc", { type: "manual_review", risk_level: "elevated" }, { id: "prv_closed", object: "review", open: false, charge: "ch_rc" }) }, {}, now - 16),
       checkout("cs_test_review_id", { id: "pi_ri", object: "payment_intent", latest_charge: charge("ch_ri", { type: "manual_review", risk_level: "normal" }, "prv_not_expanded") }, {}, now - 17),
     ] };
     intents = { object: "list", has_more: false, data: [

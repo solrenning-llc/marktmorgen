@@ -385,7 +385,8 @@ export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, targe
  * consumerGate to let the address through with this request's headers, so an EU or UK place in the IP country or the
  * address is still refused, and the card's country to be present and to be the address's, compared trimmed and upper
  * case as lib/eu-vat-evidence.ts reads the address. A card with no country, or one that is not a string, is no second
- * item and is refused. The IP country is no longer compared with the address: it is not one of the two items. The
+ * item and is refused; so is a payment with no card at all, such as Stripe Link (lib/instant-pay.ts), which may be
+ * saved for the offer but carries no card country. The IP country is no longer compared with the address: it is not one of the two items. The
  * aliases consumerGate reads (UK for GB, EL for GR) are not unfolded here, so "UK" against "GB" disagrees and is
  * refused: fail-closed, and both name a place REFUSED_PLACES refuses anyway. Pure; nothing is read, written or kept,
  * the countries included.

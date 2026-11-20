@@ -203,6 +203,19 @@ async function main(): Promise<void> {
     record: null,
   });
   is("a lower-case card country reads as the same country", await buyer("cs_test_eugate0000000015", "US", "US", "us"), { drawn: true, kind: "done", charged: 1, record: "paid" });
+  // Stripe Link may be saved for the offer (lib/instant-pay.ts), but a Link payment method has no card country: with
+  // only the address, there is no second item, so it is refused (fail-closed), never charged.
+  sessions.cs_test_eugate0000000016 = paidCheckout("cs_test_eugate0000000016", front, browser.fingerprint, "US", null);
+  (sessions.cs_test_eugate0000000016.payment_intent as { payment_method: Record<string, unknown> }).payment_method = { id: "pm_test_link0001", type: "link", customer: "cus_TestBuyer01" };
+  const linkBefore = charges.length;
+  const linkDrawn = await drawn("US", "US", "cs_test_eugate0000000016", null);
+  const linkKind = (await take("cs_test_eugate0000000016", "US")).kind;
+  is("a US buyer who paid with Stripe Link: no offer, unavailable, nothing charged or written", {
+    drawn: linkDrawn !== null,
+    kind: linkKind,
+    charged: charges.length - linkBefore,
+    record: (await readUpsell("cs_test_eugate0000000016", ""))?.state ?? null,
+  }, { drawn: false, kind: "unavailable", charged: 0, record: null });
 
   part("(f) Without the IP header (as the checkout reads it), a buyer with address US is offered and charged");
   is("drawn, taken, charged once", await buyer("cs_test_eugate0000000008", "US", null), { drawn: true, kind: "done", charged: 1, record: "paid" });
@@ -227,9 +240,24 @@ async function main(): Promise<void> {
     is("a download is refused for the same EU buyer", offerGate(download, undefined, de), false);
     is("a download for a US buyer goes on", offerGate(download, undefined, { headers: ip("US"), billing: "US", card: "US" }), true);
     is("a billing country that is not a string is no billing country", offerGate(download, undefined, { headers: ip("US"), billing: 840, card: "US" }), false);
-    is("an alias that disagrees with the card is refused (UK vs GB), fail-closed", offerGate(download, undefined, { headers: new Headers(), billing: "UK", card: "GB" }), false);
+    is("an address read as the United Kingdom by its alias (UK) is refused as a UK place", offerGate(download, undefined, { headers: new Headers(), billing: "UK", card: "GB" }), false);
     is("RED: a card country that is not a string is no card country", offerGate(download, undefined, { headers: ip("US"), billing: "US", card: 840 }), false);
     is("RED: a US address with an EU card is refused on the helper too", offerGate(download, undefined, { headers: ip("US"), billing: "US", card: "DE" }), false);
+    // The card's country as the two callers read it (takeUpsell's session and the thanks page's order), from the payment
+    // intent with payment_method expanded; anything else gives nothing, so the offer is refused.
+    const cardCountryOf = (upsell as unknown as { cardCountryOf?: (pi: unknown) => unknown }).cardCountryOf;
+    is("cardCountryOf is exported", typeof cardCountryOf, "function");
+    if (cardCountryOf) {
+      is("an expanded card gives its country", cardCountryOf({ id: "pi_1", payment_method: { type: "card", card: { country: "US" } } }), "US");
+      is("a payment method not expanded (its id) gives nothing", cardCountryOf({ id: "pi_1", payment_method: "pm_1" }), undefined);
+      is("a payment method with no card (Stripe Link) gives nothing", cardCountryOf({ id: "pi_1", payment_method: { type: "link" } }), undefined);
+      is("a null card, a null method, a payment intent not expanded or none give nothing", [
+        cardCountryOf({ payment_method: { type: "card", card: null } }),
+        cardCountryOf({ payment_method: null }),
+        cardCountryOf("pi_1"),
+        cardCountryOf(null),
+      ], [undefined, undefined, undefined, undefined]);
+    }
     const bundle = { ...download, id: "bundle1", bundle: [guide, front] } as Listing;
     const members = new Map<string, EuSupplyFields>([[guide, download], [front, frontListing]]);
     is("a bundle of downloads, read by its members, is refused for an EU buyer", offerGate(bundle, members, de), false);

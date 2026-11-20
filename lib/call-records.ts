@@ -121,7 +121,19 @@ export async function writeMove(session: string, move: Move): Promise<void> {
   const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", keep]]), 1);
   if (replies?.[0] === "OK") return;
   const kept = repliesFor(await redisPipeline([["GET", movedKey(session)]]), 1);
-  if (kept?.[0] !== value) throw new UnknownReplyError("a booking's move");
+  if (kept?.[0] === value) return;
+  // An exact answer that is not this move (no key, or another move that reads as one): this move is surely not written.
+  if (kept && (kept[0] === null || (typeof kept[0] === "string" && parseMove(kept[0]) !== null))) throw new MoveNotWritten();
+  // Any other read-back: the move may be written (Codex V's HIGH on #3490). It throws as unknown, never as "not written".
+  throw new UnknownReplyError("a booking's move");
+}
+
+/** writeMove's refusal when its read-back proves the move was not written (an exact absent key or another move). */
+export class MoveNotWritten extends Error {
+  constructor() {
+    super("A booking's move was not written");
+    this.name = "MoveNotWritten";
+  }
 }
 
 /** A ZADD of one member: 1 added, 0 already there (its score updated); anything else throws (rule 24). */

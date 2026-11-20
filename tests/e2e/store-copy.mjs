@@ -255,13 +255,26 @@ try {
       // cut-off as a rejected fetch ("... due to access control checks") that Next does not catch, so it reached
       // "no page threw" although nothing in the page failed (CV (e), 17 November 2026, #4843 and others). Only such a
       // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
-      // beforeunload marks it for one second only: a leave the page refuses (its own unload protection, which
-      // Playwright's dialog handling answers by staying) must not hide a later failure. pagehide is the real unload;
-      // pageshow (a page restored from the back/forward cache) clears it.
-      let leaving = false, leaveTimer;
-      addEventListener("beforeunload", () => { leaving = true; clearTimeout(leaveTimer); leaveTimer = setTimeout(() => { leaving = false; }, 1000); });
-      addEventListener("pagehide", () => { clearTimeout(leaveTimer); leaving = true; });
-      addEventListener("pageshow", () => { clearTimeout(leaveTimer); leaving = false; });
+      // beforeunload can be canceled (the page's own unload protection, which Playwright's dialog handling answers
+      // by staying): a failure in its grace second waits for the decision. pagehide is the real unload, and drops it;
+      // if the document stays, the failure is thrown once the second ends (Codex V's MEDIUM on #4844). pageshow (a
+      // page restored from the back/forward cache) reports failures again.
+      let leaving = false;
+      let leaveTimer, pendingLeave, resolveLeave;
+      const finishLeave = (didLeave) => {
+        clearTimeout(leaveTimer);
+        leaving = didLeave;
+        resolveLeave?.(didLeave);
+        pendingLeave = undefined;
+        resolveLeave = undefined;
+      };
+      addEventListener("beforeunload", () => {
+        if (leaving || pendingLeave) return;
+        pendingLeave = new Promise((resolve) => { resolveLeave = resolve; });
+        leaveTimer = setTimeout(() => finishLeave(false), 1000);
+      });
+      addEventListener("pagehide", () => finishLeave(true));
+      addEventListener("pageshow", () => finishLeave(false));
       const original = window.fetch;
       window.fetch = async function (...args) {
         const input = args[0], url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, location.href);
@@ -271,7 +284,14 @@ try {
           const response = await original.apply(this,args);
           if (entry) response.clone().text().then(() => {entry.done=true;},() => {entry.done=true;});
           return response;
-        } catch(error) {if(entry){entry.done=true;if(leaving)return new Promise(()=>{});}throw error;}
+        } catch(error) {
+          if (entry) {
+            const didLeave = leaving || (pendingLeave ? await pendingLeave : false);
+            entry.done = true;
+            if (didLeave) return new Promise(() => {});
+          }
+          throw error;
+        }
       };
     });
     const newPage = context.newPage.bind(context);

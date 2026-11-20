@@ -96,7 +96,7 @@ export default async function AffiliateProgramsPage() {
               </Link>
             </div>
           )}
-          <p className="mx-auto mt-8 max-w-3xl text-center text-sm text-ink-soft" id="order">
+          <p className="mx-auto mt-8 max-w-[46ch] text-center text-sm text-ink-soft" id="order">
             {DIRECTORY_ORDER}
           </p>
         </section>
@@ -120,7 +120,7 @@ export default async function AffiliateProgramsPage() {
           <div className="card flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
             <div>
               <h2 className="text-lg font-semibold text-ink">Sell on Marktmorgen?</h2>
-              <p className="mt-1 text-ink-soft">Turn on your affiliate program in your studio and check “List my program in the affiliate directory.” Switch it off and it leaves this page at once.</p>
+              <p className="mt-1 max-w-[46ch] text-ink-soft">Turn on your affiliate program in your studio and check “List my program in the affiliate directory.” Switch it off and it leaves this page at once.</p>
             </div>
             <Link href="/platform/affiliates" className="btn btn-secondary">
               How affiliates work

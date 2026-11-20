@@ -80,14 +80,31 @@ export type ShareProblem =
   /** This product already has as many partners as it may have. */
   | "crowded"
   /** Partners plus the affiliate commission would pass MAX_COMMITTED_SHARE. */
-  | "committed";
+  | "committed"
+  /** More products than one share may name (MAX_SHARED_PRODUCTS): refused whole, never cut to the first ones. */
+  | "many";
+
+/** The most products one partner's share may name. A longer list is refused, never kept in part. */
+export const MAX_SHARED_PRODUCTS = 200;
 
 export const SHARE_PROBLEMS: Record<ShareProblem, string> = {
   percent: `A partner's share is a whole number from ${MIN_PARTNER_SHARE} to ${MAX_PARTNER_SHARE} percent.`,
   products: "Choose at least one product for them to share in.",
   crowded: `A product can have up to ${MAX_PARTNERS_PER_PRODUCT} partners.`,
   committed: `Partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. Lower one of them first.`,
+  many: `A partner can share in up to ${MAX_SHARED_PRODUCTS} products. Nothing was saved. Choose fewer products, then save again.`,
 };
+
+/** The distinct product ids a form or record names, in the shape a share accepts. */
+function sharedIds(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [];
+  return [...new Set(list.filter((id): id is string => typeof id === "string" && /^[a-z0-9]{6,40}$/.test(id)))];
+}
+
+/** Whether a form names more products than one share may hold: refused with SHARE_PROBLEMS.many, never cut. */
+export function sharesTooMany(raw: unknown): boolean {
+  return sharedIds(raw).length > MAX_SHARED_PRODUCTS;
+}
 
 /** Whatever came back from storage or a form, made safe to use, or null. */
 export function parsePartnerShare(raw: unknown): PartnerShare | null {
@@ -96,9 +113,9 @@ export function parsePartnerShare(raw: unknown): PartnerShare | null {
   const percent = typeof value.percent === "string" ? Number(value.percent.trim()) : value.percent;
   if (typeof percent !== "number" || !Number.isInteger(percent)) return null;
   if (percent < MIN_PARTNER_SHARE || percent > MAX_PARTNER_SHARE) return null;
-  const list = Array.isArray(value.products) ? value.products : [];
-  const products = [...new Set(list.filter((id): id is string => typeof id === "string" && /^[a-z0-9]{6,40}$/.test(id)))].slice(0, 200);
-  if (!products.length) return null;
+  const products = sharedIds(value.products);
+  // Past the cap the whole share is refused: keeping the first ones would record an agreement nobody chose.
+  if (!products.length || products.length > MAX_SHARED_PRODUCTS) return null;
   const until = typeof value.until === "number" && Number.isSafeInteger(value.until) && value.until > 0 ? value.until : null;
   return until === null ? { percent, products } : { percent, products, until };
 }

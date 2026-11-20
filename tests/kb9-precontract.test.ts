@@ -44,7 +44,7 @@ import { consentEmailLines } from "@/lib/digital-consent-email";
 import { WITHDRAW_FROM_CONTRACT, withdrawalWindow } from "@/lib/withdrawal-rules";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
 import { BuyBox } from "@/components/store-product";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -166,11 +166,26 @@ async function main(): Promise<void> {
   const pack = await addProduct(OWNER, "Recipe pack", "", "27", null);
   if (!mug.ok || !pack.ok) throw new Error("no products");
   const shippedSet = await setProductShipping(OWNER, mug.product.id, { cents: 600, region: "eu", countries: [], note: "" });
+  // 618 [SZ2] (#3029): a product shipped to the EU/EEA is sold there only once its EU/EEA safety items and its picture
+  // are filled, so the EU-only mug carries them; otherwise it ships nowhere and has no checkout form to hold the line.
+  const legalSet = await setProductLegal(OWNER, mug.product.id, {
+    safety: {
+      manufacturer: { name: "Clay Works Co.", postal: "1 Kiln Rd, Austin, TX 78701", electronic: "safety@claywork.example", country: "US" },
+      responsible: { name: "EU Rep GmbH", postal: "Hafenstr. 1, 20457 Hamburg", electronic: "https://eurep.example/contact", country: "DE" },
+      productType: "Stoneware mug, 350 ml",
+      identifier: "Batch 2026-11",
+      warnings: "",
+      noWarnings: true,
+    },
+    prop65: "",
+    quantities: [],
+  });
+  await setProductImage(OWNER, mug.product.id, { path: `images/${"a".repeat(24)}/${"b".repeat(32)}.jpg`, width: 1200, height: 800, alt: "Clay mug", bytes: 1, small: null });
   await setProductLink(OWNER, pack.product.id, "https://example.com/pack");
   const shop = (await storeForEmail(OWNER))!;
   const shipped = (await readListing(shop, mug.product.id))!;
   const digital = (await readListing(shop, pack.product.id))!;
-  is("a shipped product is set up", [shippedSet.ok, Boolean(shipped.shipping)], [true, true]);
+  is("a shipped product is set up, its EU/EEA safety items filled", [shippedSet.ok, legalSet.ok, Boolean(shipped.shipping)], [true, true, true]);
   const buyBox = (lang: (typeof LANGUAGES)[number], product: typeof shipped) =>
     renderToStaticMarkup(createElement(BuyBox, { store: { ...shop, language: lang as typeof shop.language }, product, related: [], remaining: null, writes: false, selling: true }));
   const formOf = (html: string) => html.slice(html.indexOf("data-checkout"), html.indexOf("</form>"));

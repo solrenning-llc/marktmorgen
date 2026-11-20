@@ -2350,6 +2350,12 @@ export class MemoryRedis {
           this.run(["SET", args[1], text, "EX", seconds]);
           return 1;
         }
+        // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
+        if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
+          const made = this.run(["INCR", args[1]]);
+          this.run(["EXPIRE", args[1], args[2]]);
+          return made;
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;

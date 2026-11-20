@@ -43,7 +43,7 @@ import { type DemoFileName, getDemoFile } from "@/lib/demo-file";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { timed } from "@/lib/fetch-timeout";
 import { configuredDemoStudioAdmin, HOUSE_HANDLE, HOUSE_OWNER } from "@/lib/house-store";
-import { readAbout, writeAbout } from "@/lib/product-about";
+import { readAbout, writeStoreAbout } from "@/lib/product-about";
 import { type ProductFile, fileFolder } from "@/lib/product-file";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, SMALL_LONG_SIDE, type ProductImage, imagePath, imagePaths } from "@/lib/product-image";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -651,7 +651,7 @@ async function ensureAbout(store: Store, product: Listing, pending: string[], te
     pending.push(refused("about", marked.ok ? "no_stats" : marked.reason));
     return store;
   }
-  await writeAbout(marked.store.statsId, product.id, text, marked.store, true);
+  await writeStoreAbout(marked.store, product.id, text, true);
   return marked.store;
 }
 

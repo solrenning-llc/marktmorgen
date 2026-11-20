@@ -188,7 +188,22 @@ async function main(): Promise<void> {
   await later(6);
   is("later runs do not send it again", to("Maybe sent"), ["cleo@example.com"]);
   is("the store's held runs list it", (await listHeld(list)).map((h) => h.flowId), [lostId]);
-  is("the creator says it went through: on to the next step", await resolveHeldRun(store, lostId, personOf("cleo@example.com"), "continue"), "ok");
+  const nextMember = `${list}|${store.handle}|${lostId}|1|cleo@example.com`;
+  const realPipeline = redis.pipeline;
+  let continuationWasQueued = false;
+  redis.pipeline = async (commands) => {
+    const replies = await realPipeline.call(redis, commands);
+    if (commands.some(([operation, script]) => operation === "EVAL" && String(script).startsWith("-- marktmorgen:flow-release-hold:"))) {
+      continuationWasQueued = redis.run(["ZSCORE", "nl:mail:flowq", nextMember]) !== null;
+    }
+    return replies;
+  };
+  try {
+    is("the creator says it went through: on to the next step", await resolveHeldRun(store, lostId, personOf("cleo@example.com"), "continue"), "ok");
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("the guarded release already queued the continuation", continuationWasQueued, true);
   is("a second answer for the same hold is refused", await resolveHeldRun(store, lostId, personOf("cleo@example.com"), "retry"), "not_held");
   await run();
   is("the next step goes out, and the uncertain one was not repeated", [to("Maybe sent"), to("After it")], [["cleo@example.com"], ["cleo@example.com"]]);

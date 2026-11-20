@@ -67,3 +67,28 @@ export async function scrollPositionsOverFrames(page,frames=8){
   return seen;
  },frames);
 }
+
+/**
+ * Applies a draft and waits until the screen holds it: `held` must stay true over `frames` animation frames in a row.
+ * In WebKit a late commit after "networkidle" and after hydration can draw an editor again from its saved values,
+ * so a draft typed a frame earlier is gone and its action button is disabled or does nothing (common cause no. 2:
+ * the waits called from tests/e2e/store-copy.mjs). When the screen drops the draft, it is applied again, up to
+ * `tries` times, and each time is logged as DRAFT_REAPPLIED, so a failure names what the page showed. Returns how many
+ * applications it took. It never changes what the check expects: only when it starts acting.
+ * @param {import("playwright-core").Page} page @param {string} name
+ * @param {() => Promise<void>} apply @param {() => Promise<boolean>} held
+ * @param {{tries?:number,frames?:number}} [options]
+ */
+export async function applyUntilHeld(page,name,apply,held,{tries=5,frames=4}={}){
+ for(let attempt=1;attempt<=tries;attempt++){
+  await apply();
+  let stable=0;
+  for(let frame=0;frame<frames*4&&stable<frames;frame++){
+   await page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>done(undefined))));
+   stable=(await held().catch(()=>false))?stable+1:0;
+  }
+  if(stable>=frames)return attempt;
+  console.log("DRAFT_REAPPLIED "+JSON.stringify({name,attempt}));
+ }
+ throw Error("The screen did not hold the draft of "+name+" after "+tries+" tries");
+}

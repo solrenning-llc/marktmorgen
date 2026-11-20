@@ -23,7 +23,7 @@ import { withCommandCeiling } from "@/lib/redis-ceiling";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { onPlatformAt } from "@/lib/billing";
 import { storeForIdExactly } from "@/lib/store-exact";
-import { type Credit, creditKey, parseCredit } from "@/lib/creator-invites";
+import { type Credit, OWED_KEY, creditKey, parseCredit } from "@/lib/creator-invites";
 import { INVITE_STRIPE_VERSION, customerFor } from "@/lib/creator-invite-credit";
 import { type InviteTerms, inviteShare } from "@/lib/creator-invite-rules";
 
@@ -43,6 +43,8 @@ export const CLAWBACK_COMMANDS = 24;
 export const CLAWBACK_STRIPE_CALLS = 2 * (HISTORY_PAGES + 4);
 const DEBIT_MARK = "nimbus_invite_clawback";
 const FIX_MARK = "nimbus_invite_clawback_fix";
+/** The mark lib/creator-invite-credit.ts puts on the credit it sends (putOnPlan). */
+const SEND_MARK = "nimbus_invite_credit";
 
 /**
  * The most one payment lost in a late dispute can cost the company in invite credit already used: the share it earned
@@ -65,9 +67,11 @@ async function balanceOf(customer: string, currency: string): Promise<number | n
   return read.balance;
 }
 
-/** The debit and its correction already on a customer's balance for one credit, by their marks, read exactly. */
-async function marksFor(customer: string, creditId: string): Promise<{ debit?: number; fix?: number }> {
-  const found: { debit?: number; fix?: number } = {};
+type Marks = { debit?: number; fix?: number; sent?: { id: string; amount: number } };
+
+/** The credit's send, its debit and its correction already on a customer's balance, by their marks, read exactly. */
+async function marksFor(customer: string, creditId: string): Promise<Marks> {
+  const found: Marks = {};
   let after = "";
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
@@ -84,12 +88,16 @@ async function marksFor(customer: string, creditId: string): Promise<{ debit?: n
       if (typeof id !== "string" || !id) throw new UnknownReplyError("invite clawback: a balance history row");
       if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) throw new UnknownReplyError("invite clawback: a balance history row");
       const marks = (metadata ?? {}) as Record<string, unknown>;
-      for (const [mark, key] of [[DEBIT_MARK, "debit"], [FIX_MARK, "fix"]] as const) {
+      for (const [mark, key] of [[DEBIT_MARK, "debit"], [FIX_MARK, "fix"], [SEND_MARK, "sent"]] as const) {
         if (marks[mark] === undefined) continue;
         if (typeof marks[mark] !== "string") throw new UnknownReplyError("invite clawback: a balance history row");
         if (marks[mark] !== creditId) continue;
         if (!whole(amount) || found[key] !== undefined) throw new UnknownReplyError("invite clawback: a debit read back");
-        found[key] = amount;
+        // A send is a credit: a negative amount. Anything else does not read as the credit sent.
+        if (key === "sent") {
+          if (amount >= 0) throw new UnknownReplyError("invite clawback: a credit read back");
+          found.sent = { id, amount };
+        } else found[key] = amount;
       }
       last = id;
     }
@@ -110,21 +118,36 @@ async function post(customer: string, cents: number, currency: string, mark: str
   return cents;
 }
 
-/** One credit already sent: what is unused comes off the balance, once. Answers what was taken back. */
+/**
+ * One credit already sent: what is unused comes off the balance, once. Answers what was taken back. A credit still
+ * owed here may have reached Stripe all the same (a send whose receipt did not read stays owed, issue #4422): its own
+ * send mark in the balance history decides (Claude 4's MEDIUM on #4514). Landed, it is taken back like one marked done
+ * and written done, so the invite job leaves it; not landed, nothing is taken here, and the invite job, which reads its
+ * invoice again before sending (stillOwed), writes it as earning nothing.
+ */
 async function clawOne(credit: Credit, nowSeconds: number): Promise<number> {
-  if (credit.state !== "done" || credit.clawedAt !== undefined) return credit.clawed ?? 0;
+  if (credit.clawedAt !== undefined) return credit.clawed ?? 0;
+  if (credit.state !== "done" && credit.state !== "owed") return 0;
   const found = await storeForIdExactly(credit.to);
   if (found === "unknown") throw new UnknownReplyError(`invite clawback: the store ${credit.id} went to`);
+  if (found === "none" && credit.state === "owed") return 0;
   let taken = 0;
+  let sent = credit;
   if (found !== "none") {
     const customer = await customerFor(found);
+    // An owed credit on a store not paying yet was never sent: nothing to take.
+    if (!customer && credit.state === "owed") return 0;
     // A credit marked done went on a customer: one that does not read now is unknown, never "nothing to take".
     if (!customer) throw new UnknownReplyError(`invite clawback: the customer ${credit.id} went to`);
     const marks = await marksFor(customer, credit.id);
+    if (credit.state === "owed") {
+      if (!marks.sent) return 0;
+      sent = { ...credit, cents: -marks.sent.amount, state: "done", txn: marks.sent.id, doneAt: nowSeconds };
+    }
     if (marks.debit === undefined) {
       const balance = await balanceOf(customer, credit.cur);
       const left = balance === null ? 0 : Math.max(0, -balance);
-      const take = Math.min(credit.cents, left);
+      const take = Math.min(sent.cents, left);
       marks.debit = take > 0
         ? await post(customer, take, credit.cur, DEBIT_MARK, credit.id, "Marktmorgen invite credit taken back: the payment it was earned on was lost in a dispute")
         : 0;
@@ -137,8 +160,12 @@ async function clawOne(credit: Credit, nowSeconds: number): Promise<number> {
     }
     taken = marks.debit + (marks.fix ?? 0);
   }
-  const wrote = repliesFor(await redisPipeline([["SET", creditKey(credit.id), JSON.stringify({ ...credit, clawed: taken, clawedAt: nowSeconds })]]), 1);
-  if (!wrote || wrote[0] !== "OK") throw new UnknownReplyError(`invite clawback: ${credit.id} written down`);
+  // Written done (a send found here included) and off the owed list, so the invite job never sends it again.
+  const wrote = repliesFor(await redisPipeline([
+    ["SET", creditKey(credit.id), JSON.stringify({ ...sent, clawed: taken, clawedAt: nowSeconds })],
+    ["SREM", OWED_KEY, credit.id],
+  ]), 2);
+  if (!wrote || wrote[0] !== "OK" || (wrote[1] !== 0 && wrote[1] !== 1)) throw new UnknownReplyError(`invite clawback: ${credit.id} written down`);
   return taken;
 }
 

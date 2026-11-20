@@ -244,7 +244,19 @@ async function main(): Promise<void> {
   bonusId = `bonus_${await sent({ anaPays: false })}`;
   balances.set("cus_AnaClaw01", -5_000);
   await quiet(() => clawBackInviteCredits(INVOICE, nowS));
-  is("nothing debited, the share still owed and not marked", [posts.get("cus_AnaClaw01") ?? [], recordOf(INVOICE)?.state, clawed(INVOICE)], [[], "owed", undefined]);
+  is("no customer yet: nothing debited, the share still owed and not marked", [posts.get("cus_AnaClaw01") ?? [], recordOf(INVOICE)?.state, clawed(INVOICE)], [[], "owed", undefined]);
+  // She starts paying, with other credit on her balance; the share was still never sent.
+  await setSubscription("ana-claw@example.com", { customerId: "cus_AnaClaw01", subscriptionId: "sub_AnaClaw01", active: true, period: paidPeriod() });
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("paying now: nothing debited from her other credit, the share still owed and not marked", [posts.get("cus_AnaClaw01") ?? [], balances.get("cus_AnaClaw01"), recordOf(INVOICE)?.state, clawed(INVOICE)], [[], -5_000, "owed", undefined]);
+
+  part("A share written as earning nothing is never debited, whatever amount its record carries");
+  bonusId = `bonus_${await sent({ anaPays: false })}`;
+  await setSubscription("ana-claw@example.com", { customerId: "cus_AnaClaw01", subscriptionId: "sub_AnaClaw01", active: true, period: paidPeriod() });
+  redis.run(["SET", creditKey(INVOICE), JSON.stringify({ ...recordOf(INVOICE), state: "none" })]);
+  balances.set("cus_AnaClaw01", -5_000);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("nothing debited, the record left as it was", [posts.get("cus_AnaClaw01") ?? [], balances.get("cus_AnaClaw01"), clawed(INVOICE)], [[], -5_000, undefined]);
 
   part("A bonus earned with another payment is not taken back for this one");
   bonusId = `bonus_${await sent()}`;

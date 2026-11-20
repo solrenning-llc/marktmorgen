@@ -34,7 +34,8 @@ import { windowCountBy } from "@/lib/window-count";
 import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
-import { type Store, ensureListId, storeRef } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, type Store, ensureListId, erasingField, ownerKey, storeIdCommand, storeRef } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipCacheKey, membershipNumbersNamed, withoutMemberWords } from "@/lib/membership-numbers";
 
@@ -185,6 +186,33 @@ export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; 
  * SALES_READ_SHAPE); lib/redis-memory.ts runs it the same way.
  */
 export const READING_COPY = KEEP_UNLESS_ERASED;
+/**
+ * READING_COPY for a whole store, fenced on its erasure in the same step (Codex L-20261119-2235): a reading begun
+ * while the store was live and finished after its erasure began or ended would write its family back after the
+ * closing walk passed it, naming its biggest buyers or what its members wrote. KEYS[1] the store's own key (its id
+ * key, or for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3]
+ * the copy, KEYS[4] the store's prints; ARGV[1] the store's erasing field, ARGV[2] the copy, ARGV[3] its seconds,
+ * ARGV[4..] the prints of who it names. The store gone or erasing: the copy goes and {0} is answered, never a
+ * place, so the caller shows the reading naming nobody and keeps nothing. Otherwise as READING_COPY. Billed 1 + 2
+ * more than it (EXISTS, HGET; lib/read-ceilings.ts, READING_LIVE_FENCE_COMMANDS); lib/redis-memory.ts runs it the
+ * same way.
+ */
+export const READING_COPY_LIVE = `-- marktmorgen:reading-copy-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then
+  redis.call("DEL", KEYS[3])
+  return {0}
+end
+local found = redis.call("HMGET", KEYS[4], unpack(ARGV, 4))
+local gone = {}
+for i = 1, #found do
+  if found[i] then gone[#gone + 1] = i end
+end
+if #gone > 0 then
+  redis.call("DEL", KEYS[3])
+  return gone
+end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return gone`;
 
 /**
  * Who a reading names by their address, for keeping it (READING_COPY): the
@@ -208,7 +236,21 @@ export type ReadingGuard<T> = {
  * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
  * kept by READING_COPY, never over someone deleted since `read` looked.
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
+/** A store as a reading is kept for: a whole one is fenced on its erasure; one given by its statsId alone is not. */
+type ReadingStore = Pick<Store, "statsId"> & Partial<Pick<Store, "email" | "sid" | "extra">>;
+const fenced = (store: ReadingStore): store is Pick<Store, "statsId" | "email" | "sid" | "extra"> =>
+  typeof store.email === "string" && typeof store.sid === "string" && typeof store.extra === "boolean";
+
+/**
+ * A copy written only while the store is live, the copy otherwise left as it was (lib/store-live-cache.ts); a
+ * store given by its statsId alone, a plain SET.
+ */
+async function keepCopy(store: ReadingStore, key: string, text: string): Promise<void> {
+  if (fenced(store)) await setWhileStoreLive(store, key, text, READING_KEEP_SECONDS).catch(() => "unknown");
+  else await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
+}
+
+export async function keptReading<T>(store: ReadingStore, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -242,7 +284,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
   const names = guard ? [...new Set(guard.names(value))] : [];
   if (!guard || !names.length) {
-    await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    await keepCopy(store, key, text);
     return { value, at: now, stale: false };
   }
   // No list to look them up in: kept and shown naming nobody (review of 2c1af02e0). Safe: an erasure always gives
@@ -250,7 +292,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   // is never one an erasure has to undo.
   if (!guard.listId) {
     const unnamed = guard.without(value, new Set(names));
-    await redisPipeline([["SET", key, JSON.stringify({ at: now, value: unnamed, unnamed: true }), "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    await keepCopy(store, key, JSON.stringify({ at: now, value: unnamed, unnamed: true }));
     return { value: unnamed, at: now, stale: false, unnamed: true };
   }
   // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
@@ -263,7 +305,14 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     return { value: guard.without(value, new Set(names)), at: now, stale: false };
   };
   try {
-    const replies = repliesFor(await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]), 1);
+    const prints = names.map((e) => suppressionPrint(listId, e));
+    let command: (string | number)[] = ["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...prints];
+    if (fenced(store)) {
+      const ref = storeRef(store);
+      const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+      command = ["EVAL", READING_COPY_LIVE, 4, live, ERASING_KEY, key, suppressedKey(listId), await erasingField(ref), text, READING_KEEP_SECONDS, ...prints];
+    }
+    const replies = repliesFor(await redisPipeline([command]), 1);
     // Each place read from the list's own slots (lib/redis-reply.ts), as keepUnlessErased does: a hole or a getter is
     // not a place, where Array#every would skip a hole (review of #2865).
     const list = replies ? replyList(replies[0]) : null;

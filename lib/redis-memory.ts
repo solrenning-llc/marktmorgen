@@ -1595,6 +1595,24 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
+        // lib/store-readings.ts, READING_COPY_LIVE: READING_COPY for a whole store, fenced on its erasure in the same
+        // step: the store's key gone or its erasing mark set, the copy goes and [0] is answered.
+        if (key.startsWith("-- marktmorgen:reading-copy-live:v1\n") && args[0] === "4" && args.length >= 9) {
+          const [, live, erasing, copy, erased, field, value, seconds, ...prints] = args;
+          this.scriptCalls += 2;
+          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) {
+            this.scriptCalls += 1;
+            this.run(["DEL", copy]);
+            return [0];
+          }
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
+        }
         // lib/paypal-delivery.ts, KEEP_RECEIPT: a receipt kept and noted for the person's deletion, unless their print
         // says they were deleted at or after the payment (0, nothing written); else [1 when this SET kept it or 0, the
         // receipt kept], the second dropped when nothing is kept, as Redis ends a Lua table at its first nil.

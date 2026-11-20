@@ -210,8 +210,16 @@ export const TOTALS_STORE_SHAPE: ReadShape = {
  */
 /** The commands a reading takes beside what it reads (above): GET, the count, SET. */
 export const READING_COUNT_COMMANDS = { light: 1 + 3 + 1, heavy: 1 + 5 + 1 } as const;
+/**
+ * Every reading is kept only while its store is live, looked at where it is written (lib/store-readings.ts,
+ * keepCopy and READING_COPY_LIVE; Codex L-20261119-2235): the store's key (EXISTS) and its erasing mark (HGET),
+ * billed one by one beside the write. A reading kept by a plain SET also takes the EVAL that runs them (+1, the
+ * visits'); one kept by a script already counts its EVAL (READING_COPY_EXTRA_COMMANDS, MEMBER_WORDS_COMMANDS),
+ * and when it names nobody its HMGET is not run, which covers that EVAL.
+ */
+export const READING_LIVE_FENCE_COMMANDS = 2;
 export const STATS_READ_SHAPE: ReadShape = {
-  seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 0,
+  seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + READING_COUNT_COMMANDS.light + 1 + READING_LIVE_FENCE_COMMANDS, outBytes: 0, stripePages: 0,
   dbBytes: STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32 + LIFE_WRITE_MAX * STATS_FIELD_BYTES + READING_COPY_MAX_BYTES,
 };
 /**
@@ -227,7 +235,7 @@ export const ERASED_LOOKUP_BYTES = 10 * (64 + 64);
  */
 export const READING_COPY_EXTRA_COMMANDS = 2;
 export const SALES_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS + LIST_TRY_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS + READING_LIVE_FENCE_COMMANDS + LIST_TRY_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
   dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES + 2 * ERASED_LOOKUP_BYTES,
 };
 /**
@@ -246,7 +254,7 @@ export const MEMBER_WORDS_NAMES = 70 * (1 + 2);
  */
 export const MEMBER_WORDS_COMMANDS = 1 + 2 + 2 + LIST_TRY_COMMANDS;
 export const MEMBERS_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light + MEMBER_WORDS_COMMANDS, outBytes: 0, stripePages: 2 * 20,
+  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light + MEMBER_WORDS_COMMANDS + READING_LIVE_FENCE_COMMANDS, outBytes: 0, stripePages: 2 * 20,
   dbBytes: 2 * 65_536 + READING_COPY_MAX_BYTES + 3 * MEMBER_WORDS_NAMES * (64 + 64),
 };
 export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SALES_READ_SHAPE, MEMBERS_READ_SHAPE];

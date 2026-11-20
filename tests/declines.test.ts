@@ -72,6 +72,9 @@ async function main(): Promise<void> {
   is("three full pages of payments that went through: no decline found, partial, how many read and the oldest read", await readDeclines({ stripeAccountId: ACCOUNT }, since), { rows: [], partial: true, charges: DECLINE_PAGES * 2, oldest: 1_790_000_095 - (DECLINE_PAGES - 1) * 10 });
   pages = [{ object: "list", has_more: false, data: [charge("ch_c1", { created: 1_790_000_300 }), charge("ch_c2", { status: "succeeded", created: 1_790_000_200 })] }];
   is("a complete read says so, with the same counts", await readDeclines({ stripeAccountId: ACCOUNT }, since), { rows: [{ reason: "", cents: 4900, currency: "usd", created: 1_790_000_300 }], partial: false, charges: 2, oldest: 1_790_000_200 });
+  // Only a failed charge is a decline: one still pending, or one that went through, is not (Claude 4's LOW on #1913).
+  pages = [{ object: "list", has_more: false, data: [charge("ch_p1", { status: "pending", created: 1_790_000_300 }), charge("ch_p2", { status: "succeeded", created: 1_790_000_200 })] }];
+  is("a pending charge is never counted as declined", await readDeclines({ stripeAccountId: ACCOUNT }, since), { rows: [], partial: false, charges: 2, oldest: 1_790_000_200 });
   pages = [{ object: "list", has_more: true, data: [] }];
   is("Stripe saying there is more with nothing on the page is unknown, never \"none\"", await readDeclines({ stripeAccountId: ACCOUNT }, since), null);
 

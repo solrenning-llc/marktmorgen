@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   redis.clear();
   const made = await shop("live-cache-a@example.com", "live-cache-a");
   const legacy: Store = { ...made, sid: "", extra: false };
-  is("the store has a statsId", legacy.statsId.length > 0, true);
+  is("the store has a statsId", (legacy.statsId ?? "").length > 0, true);
   is("kept", await setWhileStoreLive(legacy, "nl:test:cache:a", "one", 60), "kept");
   is("and written", await read("nl:test:cache:a"), "one");
 
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   part("a store from before ids with no statsId cannot be told from another: unknown, nothing written");
   redis.clear();
   const bare = await shop("live-cache-c@example.com", "live-cache-c");
-  const noId: Store = { ...bare, sid: "", extra: false, statsId: "" };
+  const noId: Store = { ...bare, sid: "", extra: false, statsId: null };
   is("unknown", await setWhileStoreLive(noId, "nl:test:cache:c", "x", 60), "unknown");
   is("and nothing written", await read("nl:test:cache:c"), null);
 

@@ -5,6 +5,7 @@ import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
+import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 
 type Kind = "download" | "course" | "call" | "membership";
 type Setup = { bios: string[]; products: { title: string; summary: string; kind: Kind; price: string }[]; faq: { q: string; a: string }[]; questions?: { q: string; options: string[] }[] };
@@ -105,11 +106,16 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bio, products: rows.filter((r) => r.keep).map(({ title, summary, kind, price }) => ({ title, summary, kind, price })), faq: keepFaq ? setup.faq : [] }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; done?: { bio: boolean; products: number; pages?: number; faq: boolean; refused: string[] } };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; done?: { bio: boolean; products: number; pages?: number; faq: boolean; refused: string[]; long?: string[] } };
       if (data.ok && data.done) {
         const parts = [data.done.bio ? "the line under your name" : "", data.done.products ? `${data.done.products} draft product${data.done.products === 1 ? "" : "s"}${data.done.pages ? `, ${data.done.pages === data.done.products ? (data.done.products === 1 ? "with its sales page" : "each with its sales page") : `${data.done.pages} with a sales page`}` : ""}` : "", data.done.faq ? "your questions and answers" : ""].filter(Boolean);
         toast(parts.length ? `Kept: ${parts.join(", ")}.` : "Nothing was kept.");
-        if (data.done.refused.length) setNote(`Not kept, because it has no price this store can charge yet: ${data.done.refused.join(", ")}. Type its price above and keep it again, or add it from Products.`);
+        const long = data.done.long ?? [];
+        const notes = [
+          data.done.refused.length ? `Not kept, because it has no price this store can charge yet: ${data.done.refused.join(", ")}. Type its price above and keep it again, or add it from Products.` : "",
+          long.length ? `Not kept, because its name is longer than ${MAX_TITLE_LENGTH} characters: ${long.join(", ")}. Make the name shorter above and keep it again.` : "",
+        ].filter(Boolean);
+        if (notes.length) setNote(notes.join(" "));
         else setSetup(null);
         router.refresh();
         return;
@@ -218,7 +224,7 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
                     <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_8rem]">
                       <div>
                         <label htmlFor={`setup-title-${i}`} className="text-xs font-semibold text-ink-soft">Name</label>
-                        <input id={`setup-title-${i}`} value={row.title} maxLength={120} onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, title: e.target.value } : r)))} className="field mt-1" />
+                        <input id={`setup-title-${i}`} value={row.title} maxLength={MAX_TITLE_LENGTH} onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, title: e.target.value } : r)))} className="field mt-1" />
                       </div>
                       <div>
                         <label htmlFor={`setup-price-${i}`} className="text-xs font-semibold text-ink-soft">{`Price, ${currency.toUpperCase()}`}</label>

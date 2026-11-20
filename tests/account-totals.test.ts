@@ -19,8 +19,8 @@ const store = (name: string, read: StoreFigures["read"]): StoreFigures => ({ sid
 function main(): void {
   part("Counts add, money only within one currency");
   const sum = sumStores([
-    store("Bread", { state: "ok", data: data("usd", [100, 10, 4, 4_000]), members: { currency: "usd", paying: 3, trialing: 1, mrr: 2_700 } }),
-    store("Pasta", { state: "ok", data: data("USD", [50, 5, 2, 1_000]), members: { currency: "usd", paying: 2, trialing: 0, mrr: 1_800 } }),
+    store("Bread", { state: "ok", data: data("usd", [100, 10, 4, 4_000]), members: { currency: "usd", paying: 3, trialing: 1, mrr: 2_700, complete: true, elsewhere: 0 } }),
+    store("Pasta", { state: "ok", data: data("USD", [50, 5, 2, 1_000]), members: { currency: "usd", paying: 2, trialing: 0, mrr: 1_800, complete: true, elsewhere: 0 } }),
     store("Brot", { state: "ok", data: data("eur", [20, 2, 1, 900]), members: null }),
   ]);
   is("visitors, checkouts and sales add up", [sum.windows.d30.visitors, sum.windows.d30.checkouts, sum.windows.d30.sales], [170, 17, 7]);
@@ -50,6 +50,9 @@ function main(): void {
   is("each other store is read inside its own studio allowance", page.includes("countStudio(store, null, STUDIO_PAGE_UNITS)"), true);
   is("only where the role includes the numbers", page.includes('can(entry.role, "stats")'), true);
   is("a table with a caption and headers, and one h1", [page.includes("<caption"), page.includes('scope="col"'), page.split("<h1").length - 1], [true, true, 1]);
+  // Found walking the studio at 320 px (Claude 1, 14/11/2026): axe scrollable-region-focusable on the "Visits and sales" table.
+  const sums = /<section aria-labelledby="sums-title"[^>]*>/.exec(page)?.[0] ?? "";
+  is("the table that scrolls sideways on a phone is reached and scrolled by keyboard (WCAG 2.1.1)", sums.includes("overflow-x-auto") && sums.includes("tabIndex={0}"), true);
   is("reached from the store menu when there are two or more", header.includes("stores.length > 1") && header.includes("/studio/totals?store="), true);
   done();
 }

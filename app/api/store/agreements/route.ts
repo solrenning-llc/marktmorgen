@@ -6,6 +6,7 @@ import { agreementOf, createAgreement, deleteAgreement, readVersion, reviseAgree
 import { moneyField } from "@/lib/money";
 import { resendSignedCopy, sendAgain, sendAgreementEmail } from "@/lib/agreements";
 import { requestOf } from "@/lib/payment-request-store";
+import { LockBusyError } from "@/lib/redis-lock";
 import { statusOf as requestStatus } from "@/lib/payment-request-rules";
 
 /**
@@ -86,7 +87,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true });
     }
     if (action === "delete") {
-      const done = await deleteAgreement(store, id);
+      // Someone else holds the agreement's lock (a signature, a send written down): busy, not a failure; an unknown reply stays a failure below (500, logged).
+      const done = await deleteAgreement(store, id).catch((error: unknown) => {
+        if (error instanceof LockBusyError) return "busy" as const;
+        throw error;
+      });
+      // Only an agreement no longer open is deleted, so the lock's holder is rarely a signer: a second click, or a signed
+      // copy being noted. Words true whoever it is (Claude 1 on #3467).
+      if (done === "busy") return refuse("busy", "This agreement is being changed right now. Try again in a moment.", 409);
       if (done === null) return refuse("gone", "That agreement is gone. Reload the page.", 404);
       if (done === "open") return refuse("open", "Withdraw it before deleting it.", 409);
       return Response.json({ ok: true });

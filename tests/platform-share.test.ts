@@ -132,6 +132,15 @@ async function main(): Promise<void> {
     leastPaid(10_000, [{ kind: "percent", percent: 100 }]),
     leastPaid(10_000, [{ kind: "unknown" }]),
   ], [10_000, 8_000, 7_000, 0, 0]);
+  // A code made in the creator's Stripe dashboard can take 33.3% off (lib/discount.ts readOff reads percent_off as
+  // Stripe sends it). 33.3% of $15.00 is 499.5 cents, which Stripe takes off as 500; in floating point
+  // 1500 × 33.3 / 100 is 499.49999999999994, and rounding that took 499 off, so the least the buyer pays read
+  // $10.01 for a payment of $10.00, and the fee was set on a cent the buyer never pays.
+  is("a decimal percentage comes off to the nearest cent, a half cent up, as Stripe takes it", [
+    leastPaid(1_500, [{ kind: "percent", percent: 33.3 }]),
+    leastPaid(1_004, [{ kind: "percent", percent: 12.5 }]),
+    leastPaid(999, [{ kind: "percent", percent: 0.5 }]),
+  ], [1_000, 878, 994]);
   const once = new URLSearchParams();
   is("a payment: the share of the least, as a fixed fee, and the rate written on it", [
     applyShare(once, paying, { recurring: false, least: 8_000 }, NOW, ON),

@@ -3,7 +3,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { FORM_ID, badPoints, newFormId, parseForm, tierIssueText, tierIssues } from "@/lib/forms";
 import { SENSITIVE_WHY, sensitiveFieldOf } from "@/lib/form-sensitive";
 import { dropForm, readForm, writeForm } from "@/lib/form-store";
-import { setSitePages } from "@/lib/store";
+import { ensureStatsId } from "@/lib/store";
 
 /** Twelve questions of eight options each, and six results, as JSON. */
 const MAX_BODY_BYTES = 60_000;
@@ -28,10 +28,11 @@ export async function POST(request: NextRequest) {
   let store = guarded.store;
   try {
     if (!store.statsId) {
-      // A store written before it had one is given its id with its pages.
-      const marked = await setSitePages(ref, store.sitePages);
-      if (!marked.ok || !marked.store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
-      store = marked.store;
+      // A store written before it had one is given its id, and nothing else is written with it: writing back the pages
+      // read at the start would undo a page added or changed in another tab meanwhile (tests/site-page-latest.test.ts).
+      const marked = await ensureStatsId(ref);
+      if (!marked?.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+      store = marked;
     }
     const statsId = store.statsId as string;
 

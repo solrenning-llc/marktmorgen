@@ -14,14 +14,15 @@ type Row = FaqItem & { key: number };
  * and given to search engines. Written by hand, or drafted with AI from what
  * the store says about itself; nothing shows until it is saved.
  */
-export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left: number } }) {
+export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left: number; known?: false } }) {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>(() => faq.map((item, key) => ({ ...item, key })));
   const [next, setNext] = useState(faq.length);
   const [saving, setSaving] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [note, setNote] = useState("");
-  const [left, setLeft] = useState(ai.left);
+  // null: the allowance could not be read (rule 24), said so and the draft button off until a reload.
+  const [left, setLeft] = useState<number | null>(ai.known === false ? null : ai.left);
   const questionFields = useRef(new Map<number, HTMLInputElement>());
   const addButton = useRef<HTMLButtonElement>(null);
   const pendingFocus = useRef<number | "add" | null>(null);
@@ -124,11 +125,11 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
       </p>
       {ai.on ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button type="button" onClick={draft} disabled={saving || drafting || rows.length >= MAX_FAQ} aria-busy={drafting} className="btn btn-secondary btn-sm">
+          <button type="button" onClick={draft} disabled={saving || drafting || rows.length >= MAX_FAQ || left === null} aria-busy={drafting} className="btn btn-secondary btn-sm">
             <Icon name="sparkle" size={16} />
             {drafting ? "Drafting…" : "Draft them with AI"}
           </button>
-          <span className="text-sm text-ink-soft">{`Only from what your store says. ${left} drafts left this month.`}</span>
+          <span className="text-sm text-ink-soft">{left === null ? "We could not check your AI allowance just now. Reload the page in a minute to try again." : `Only from what your store says. ${left} drafts left this month.`}</span>
         </div>
       ) : null}
       <ol className="mt-5 space-y-3">

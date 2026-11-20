@@ -8,7 +8,7 @@
  * permission and keeps the count on the store's record.
  */
 import { readFileSync } from "node:fs";
-import { MAX_POSTS, POSTS_PER_PAGE, allPosts, cleanPost, deletePost, postBlocks, postIdFrom, postSegment, publishedPosts, readPost, savePost } from "@/lib/store-blog";
+import { MAX_POSTS, POSTS_PER_PAGE, allPosts, cleanPost, deletePost, postBlocks, postIdFrom, postSegment, publishedPosts, publishedTotal, readPost, savePost } from "@/lib/store-blog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
@@ -20,6 +20,57 @@ async function main(): Promise<void> {
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   const S = "stats1";
+
+  part("Unknown counts never authorize a post or invent an empty blog");
+  const pipeline=redis.pipeline;
+  let visited=0;
+  const unknownCounts:[string,()=>unknown][]=[
+    ["null",()=>[null]],["string",()=>["0"]],["empty",()=>[""]],["boolean",()=>[false]],
+    ["negative",()=>[-1]],["fraction",()=>[0.5]],["unsafe",()=>[9007199254740992]],
+    ["missing",()=>[]],["extra",()=>[0,0]],["extra field",()=>Object.assign([0],{extra:true})],
+    ["inherited",()=>{const a=new Array(1);Object.setPrototypeOf(a,{0:0});return a;}],
+    ["getter",()=>{const a=[0];Object.defineProperty(a,"0",{get(){visited++;return 0;}});return a;}],
+    ["proxy",()=>new Proxy([0],{get(t,p,r){if(p!=="then")visited++;return Reflect.get(t,p,r);}})],
+  ];
+  for(const [label,shape] of unknownCounts){
+    let calls=0;
+    redis.pipeline=async commands=>{calls++;return commands[0][0]==="HLEN"?shape() as never:pipeline(commands);};
+    try{
+      let state="threw";
+      try{const saved=await savePost("evidence-"+label,null,{title:"Count evidence",body:"Synthetic words.",product:null,draft:true},nextId,ROOM);state=saved.ok?"saved":saved.reason;}catch{}
+      is("unknown admission refused: "+label,state,"unknown");
+      is("no data reservation or write after unreadable count: "+label,calls,1);
+    }finally{redis.pipeline=pipeline;}
+    redis.pipeline=async()=>shape() as never;
+    try{is("unknown sitemap count: "+label,await publishedTotal(S),null);}finally{redis.pipeline=pipeline;}
+  }
+  for(const count of [null,"0",false,-1,0.5,9007199254740992]){
+    redis.pipeline=async()=>[[],count] as never;
+    try{let refused=false;try{await publishedPosts(S,1);}catch{refused=true;}is("unknown page count refuses: "+String(count),refused,true);}finally{redis.pipeline=pipeline;}
+  }
+  redis.pipeline=async()=>[0];
+  try{is("confirmed empty sitemap",await publishedTotal(S),0);}finally{redis.pipeline=pipeline;}
+  is("no count getter observed",visited,0);
+
+  part("Unconfirmed mutation never releases room or reports a count");
+  const input={title:"Mutation evidence",body:"Synthetic words.",product:null,draft:false};
+  for(const count of [null,"1",false]){
+    redis.pipeline=async commands=>{
+      const reply=await pipeline(commands);
+      return commands[0][0]==="HSET"&&String(commands[0][1]).startsWith("nl:blog:")?[reply[0],reply[1],reply[2],count] as never:reply;
+    };
+    try{const saved=await savePost("mutation-evidence",null,input,nextId,ROOM);is("confirmed save keeps its id with unknown total: "+String(count),saved.ok?[saved.published,typeof saved.post.id]:saved.reason,[null,"string"]);}finally{redis.pipeline=pipeline;}
+  }
+  const kept=await savePost("delete-evidence",null,input,nextId,ROOM);
+  if(!kept.ok)throw Error("synthetic fixture failed");
+  let releases=0;
+  redis.pipeline=async commands=>{
+    if(commands[0][0]==="HDEL"&&String(commands[0][1]).startsWith("nl:blog:"))return [null,null,null,null];
+    if(commands.some(c=>c[0]==="EVAL"))releases++;
+    return pipeline(commands);
+  };
+  try{let outcome:unknown;try{outcome=await deletePost("delete-evidence",kept.post.id,ROOM);}catch(error){outcome=error instanceof Error?error.name:"failed";}is("unconfirmed delete has an explicit retry-check outcome",outcome,"BlogWriteUnconfirmed");is("unconfirmed delete never releases data room",releases,0);}finally{redis.pipeline=pipeline;}
+  is("unconfirmed deletion leaves fixture content intact",(await readPost("delete-evidence",kept.post.id))?.body,input.body);
 
   part("What is kept");
   const clean = cleanPost({ title: "  Bread   on Sundays  ", body: "Line one\r\n\r\n\r\n- a point", product: "../evil", draft: "yes" });

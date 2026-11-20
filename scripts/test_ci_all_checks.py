@@ -8,7 +8,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from ci_all_checks import decide, SCOPE  # noqa: E402
+from ci_all_checks import decide, SCOPE, QUEUE_SKIPPED_JOB  # noqa: E402
 from ci_full_tree_proof import NEVER_REUSED, WORKFLOWS  # noqa: E402
 from ci_documentation_scope import MERGE_GROUP_ONLY  # noqa: E402
 
@@ -30,7 +30,7 @@ def deferred_scope(result="success", full="true", deferred="true"):
 
 def clean_env(**extra):
     """The command's environment without the runner's own event and switch, then the given ones."""
-    env = {k: v for k, v in os.environ.items() if k not in ("CI_EVENT", "CI_MERGE_GROUP_ONLY", "NEEDS")}
+    env = {k: v for k, v in os.environ.items() if k not in ("CI_EVENT", "CI_MERGE_GROUP_ONLY", "CI_ANALYSIS_OUTSIDE_QUEUE", "NEEDS")}
     env.update(extra)
     return env
 
@@ -136,6 +136,70 @@ class DecisionRules(unittest.TestCase):
             self.assertEqual(subprocess.run([sys.executable, script], env=env, capture_output=True).returncode, 1)
 
 
+class CodeQLAnalysisOutsideTheMergeQueue(unittest.TestCase):
+    """CodeQL's analyze job is skipped on purpose under merge_group (.github/workflows/codeql.yml): there it
+    uploaded nothing (upload: never), so it could fail only on an execution error, never on a finding, and no
+    rule of the main ruleset reads code scanning results. Its real run is on the pull request and on the push
+    to main, both uploaded. The skip passes only there, only for that job, only with the switch."""
+
+    def needs(self, result="skipped", scope_value=None, **other):
+        needs = {SCOPE: scope_value or scope(), QUEUE_SKIPPED_JOB: {"result": result}}
+        needs.update(other)
+        return needs
+
+    def test_the_skipped_job_is_analyze(self):
+        self.assertEqual(QUEUE_SKIPPED_JOB, "analyze")
+
+    def test_analyze_skipped_in_the_merge_queue_passes_only_with_the_switch(self):
+        self.assertEqual(decide(self.needs(), "merge_group", False, True), (True, []))
+        self.assertFalse(decide(self.needs(), "merge_group")[0])
+        self.assertFalse(decide(self.needs(), "merge_group", False, False)[0])
+        for flag in ("true", 1, None, "True"):
+            with self.subTest(flag=flag):
+                self.assertFalse(decide(self.needs(), "merge_group", False, flag)[0])
+
+    def test_the_skip_never_passes_outside_the_merge_queue(self):
+        for event in ("pull_request", "push", "schedule", "workflow_dispatch", "", None, "MERGE_GROUP",
+                      "merge_group_x", "pull_request_target"):
+            with self.subTest(event=event):
+                self.assertFalse(decide(self.needs(), event, False, True)[0])
+                self.assertFalse(decide(self.needs(), event, True, True)[0])
+
+    def test_only_analyze_may_be_skipped(self):
+        for name in ("verify", "matrix", "Analyze", "analyze ", "codeql"):
+            with self.subTest(job=name):
+                needs = {SCOPE: scope(), name: {"result": "skipped"}}
+                self.assertFalse(decide(needs, "merge_group", False, True)[0])
+                needs = self.needs(**{name: {"result": "skipped"}})
+                self.assertFalse(decide(needs, "merge_group", False, True)[0])
+
+    def test_analyze_that_ran_must_still_pass(self):
+        self.assertTrue(decide(self.needs("success"), "merge_group", False, True)[0])
+        for result in ("failure", "cancelled", None, "", "neutral", "timed_out", "SUCCESS", "Skipped"):
+            with self.subTest(result=result):
+                self.assertFalse(decide(self.needs(result), "merge_group", False, True)[0])
+
+    def test_the_scope_must_have_succeeded(self):
+        for scope_value in (scope(result="failure"), scope(result="cancelled"), scope(result="skipped"),
+                            scope(result=None), scope(result="failure", full="false")):
+            with self.subTest(scope=scope_value):
+                self.assertFalse(decide(self.needs(scope_value=scope_value), "merge_group", False, True)[0])
+
+    def test_command_reads_the_event_and_the_codeql_switch(self):
+        script = os.path.join(HERE, "ci_all_checks.py")
+        needs = json.dumps(self.needs())
+        cases = [({"CI_EVENT": "merge_group", "CI_ANALYSIS_OUTSIDE_QUEUE": "true"}, 0),
+                 ({"CI_EVENT": "merge_group"}, 1),
+                 ({"CI_EVENT": "merge_group", "CI_ANALYSIS_OUTSIDE_QUEUE": "True"}, 1),
+                 ({"CI_EVENT": "pull_request", "CI_ANALYSIS_OUTSIDE_QUEUE": "true"}, 1),
+                 ({"CI_EVENT": "push", "CI_ANALYSIS_OUTSIDE_QUEUE": "true"}, 1),
+                 ({"CI_ANALYSIS_OUTSIDE_QUEUE": "true"}, 1)]
+        for extra, code in cases:
+            with self.subTest(env=extra):
+                env = clean_env(NEEDS=needs, **extra)
+                self.assertEqual(subprocess.run([sys.executable, script], env=env, capture_output=True).returncode, code)
+
+
 def jobs_of(text):
     """Top-level jobs of a workflow file: {job id: its lines}."""
     lines = text.splitlines()
@@ -194,6 +258,13 @@ class EveryWorkflowEndsWithTheFinalCheck(unittest.TestCase):
                 else:
                     self.assertNotIn("CI_MERGE_GROUP_ONLY", text)
                     self.assertNotIn("deferred", text)
+                # Only CodeQL may skip its analysis in the merge queue, and only its final check is told so.
+                if stem == "codeql":
+                    self.assertIn("          CI_EVENT: ${{ github.event_name }}\n", body + "\n")
+                    self.assertIn("          CI_ANALYSIS_OUTSIDE_QUEUE: \"true\"\n", body + "\n")
+                    self.assertEqual(text.count("CI_ANALYSIS_OUTSIDE_QUEUE: \"true\""), 1)
+                else:
+                    self.assertNotIn("CI_ANALYSIS_OUTSIDE_QUEUE", text)
                 # The required check name must be unique across the repository.
                 self.assertEqual(text.count("All checks ("), 1)
 

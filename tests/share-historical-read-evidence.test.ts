@@ -24,7 +24,7 @@ async function world(options:{events?:unknown;pages?:(number:number)=>unknown;in
   redis.pipeline=async commands=>{
    if(options.indexes!==undefined&&commands.length===2&&commands[0][0]==='SMEMBERS'&&commands[0][1]===SHARING_INDEX)return options.indexes;
    if(options.cursor!==undefined&&commands.length===1&&commands[0][0]==='HGET'&&commands[0][1]==='nl:share:read-until')return options.cursor;
-   if(options.cursorWrite!==undefined&&commands.length===1&&commands[0][0]==='HSET'&&commands[0][1]==='nl:share:read-until')return options.cursorWrite;
+   if(options.cursorWrite!==undefined&&commands.length===1&&commands[0][0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:share-marker-live:v1\n')&&commands[0][5]==='nl:share:read-until')return options.cursorWrite;
    return base(commands);
   };
   globalThis.fetch=async(input,init)=>{

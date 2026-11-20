@@ -74,6 +74,15 @@ const SCRIPTS: Record<string, Script> = {
     run(["SET", feed, json, "EX", seconds]);
     return 1;
   },
+  // lib/recent-sales.ts KEEP_SALE_IF_LIVE: a purchase written down (and the feed dropped) only while the store is live.
+  "recent-sale-live:v1": (run, [live, erasing, list, feed], [field, json, last, seconds]) => {
+    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+    run(["LPUSH", list, json]);
+    run(["LTRIM", list, 0, last]);
+    run(["EXPIRE", list, seconds]);
+    run(["DEL", feed]);
+    return 1;
+  },
 };
 
 /** Makes `store` run the named scripts above, and everything else as before. */

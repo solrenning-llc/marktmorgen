@@ -36,7 +36,7 @@
 import { CALENDAR_LIST_PAUSED, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
@@ -93,10 +93,10 @@ const lockKey = (host: string) => `nl:hostcal:lock:${host}`;
 /** How long a host's reading holds its lock. */
 const HOST_LOCK_SECONDS = 20;
 /**
- * What the lock costs beyond the plain SET NX and DEL it was: the GET that reads an uncertain SET back
- * (claimMark), and the compare-and-delete script's EVAL and GET (releaseMark).
+ * What the lock costs beyond the plain SET NX and DEL it was: the compare-and-delete script's EVAL and GET
+ * (releaseMark) in place of the DEL. The SET NX is the same one command, under a value of its own.
  */
-export const HOST_LOCK_OWNER_COMMANDS = 3;
+export const HOST_LOCK_OWNER_COMMANDS = 2;
 /** Every key a host's calendar keeps, by the host: for a store that closes, when it was the host's last (lib/closed-store-data.ts). */
 export const hostCalendarKeys = (host: string): string[] => [cfgKey(host), goodKey(host), errKey(host), lockKey(host)];
 const icsContext = (host: string) => `hostcal|${host}|ics`;
@@ -328,10 +328,17 @@ export async function hostSync(
   // Failed automatic reads share the same host-wide retry interval as good reads.
   // A kept failure must not turn each booking-page view into another provider call.
   if (!options.force && failure && Number.isFinite(failure.at) && failure.at <= now && now - failure.at < SYNC_SECONDS * 1000) return fallback();
-  // The lock under a value only this reading writes (lib/claim-mark.ts), let go only while it still holds it: a
+  // The lock under a value only this reading writes (claimValue, lib/claim-mark.ts), let go only while it still holds it: a
   // reading that outlived its twenty seconds never deletes the lock a later reading took (Claude 4, 20/11).
+  // Only an exact "OK" is the lock; any other reply sends nothing more (tests/host-calendar-read-evidence.test.ts).
   const lock = claimValue();
-  if ((await claimMark(lockKey(host), HOST_LOCK_SECONDS, lock)) !== "ours") return fallback();
+  let mine: string | null;
+  try {
+    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), lock, "NX", "EX", HOST_LOCK_SECONDS]]), 1);
+  } catch {
+    return fallback();
+  }
+  if (mine !== "OK") return fallback();
   try {
     let busy: [number, number][];
     try {

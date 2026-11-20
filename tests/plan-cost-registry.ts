@@ -1719,7 +1719,7 @@ export function walkRead(commands: number, bytes: number): number {
 
 /** One host's calendar read: its commands, and the wait for the calendar, held at 2 GB inside the page that asked. */
 // The fence before a reading is kept (HOST_READING_FENCE_COMMANDS) and its lock under a value of its own, let go by
-// compare-and-delete (HOST_LOCK_OWNER_COMMANDS): 7 + 2 + 3 = 12 commands (lib/host-calendar.ts).
+// compare-and-delete (HOST_LOCK_OWNER_COMMANDS): 7 + 2 + 2 = 11 commands (lib/host-calendar.ts).
 export const TEAM_READING = (7 + HOST_READING_FENCE_COMMANDS + HOST_LOCK_OWNER_COMMANDS) * COMMAND + 1 * MEMORY_SECOND + 0.05 * CPU_SECOND;
 /** Commands a view of a team call's page costs: each host's claims, and one MGET of every host's calendar state and connection plus the round-robin counts (lib/team-booking.ts). */
 export const TEAM_COMMANDS_PER_HOST_VIEW = 1;
@@ -2272,7 +2272,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/team-booking.ts", names: ["prefetchHosts", "readClaims", "rrKey"] },
       { file: "lib/team.ts", names: ["MAX_TEAM"] },
     ],
-    basis: "Each host's calendar read at most once a sync interval all month (twelve commands: nine including EVAL plus the exact config GET before keeping a reading, and HOST_LOCK_OWNER_COMMANDS more for its lock taken under its own value and let go by compare-and-delete; and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
+    basis: "Each host's calendar read at most once a sync interval all month (eleven commands: nine including EVAL plus the exact config GET before keeping a reading, and HOST_LOCK_OWNER_COMMANDS more for its lock taken under its own value and let go by compare-and-delete; and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
   },
   {
     id: "own-call-host-claims",

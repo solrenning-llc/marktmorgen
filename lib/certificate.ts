@@ -634,16 +634,18 @@ export async function certificateCount(courseIds: string[]): Promise<number> {
 }
 
 /**
- * How many students hold this course's certificate now (93 [D2-VERIFIED-SOCIAL], unit 1): one HLEN of the course's
- * standing certificates, one per student. A withdrawn certificate and a deleted person are taken out of that hash,
- * so neither is counted; an expired one was still earned and is. A reply that is not a count throws UnknownReply
- * (CX-123 rule 24), so a page says nothing rather than a number it did not read.
+ * The standing index contains slot claims, including claims whose record was
+ * removed after an unknown write reply. Its HLEN is not a verified count of
+ * certificates. Until an exact, bounded reader is available, a nonempty index
+ * is unknown and sales/preview callers omit this optional fact.
  */
-/** What earnedCount sends: one HLEN (a course's sales page, tests/sq3-course-facts.test.ts). */
+/** One HLEN; no extra public-page reads while verification is unavailable. */
 export const FINISHED_FACT_COMMANDS = 1;
 export async function earnedCount(courseId: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const what = "the certificates earned in a course";
   const [raw] = exactReplies(await redisPipeline([["HLEN", indexKey(courseId)]]), 1, what);
-  return replyCount(raw, what);
+  const count = replyCount(raw, what);
+  if (count !== 0) throw new UnknownReply("the verified certificates earned in a course");
+  return 0;
 }

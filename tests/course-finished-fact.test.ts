@@ -3,17 +3,17 @@
  * docs/verified-social-proof.md; lib/certificate.ts earnedCount, lib/page-facts.ts, lib/page-facts-read.ts,
  * lib/sales-page.ts, lib/buyer-words/finished.ts and the product page; added 12 November 2026). Checked:
  *
- *   - the number is how many students hold the course's certificate: one per student, a withdrawn one and a
- *     deleted person's taken out, read with one command; a reply that is not a count is unknown, never zero;
+ *   - a slot index is not a verified certificate count: while verification is unavailable, a nonempty
+ *     index is unknown; one command, never a fabricated zero or a public figure;
  *   - it is said only for a course and only from ten up, with words that say exactly what was counted
  *     ("students earned the certificate"), never "students", "happy customers" or "graduates";
  *   - a new block does not start with it checked, and a saved block keeps it when the creator checked it;
- *   - the studio's preview reads it for a course, and names it as unread when the read fails;
+ *   - the studio names an unverified nonempty index as unread; a failed issuance never becomes a fact;
  *   - the product page reads it only when a "By the numbers" block of the page asks for it (read in its source);
  *   - every language has the words.
  */
 import { readFileSync } from "node:fs";
-import { earnedCount, withdrawCertificate } from "@/lib/certificate";
+import { earnedCount, issueCertificate, withdrawCertificate } from "@/lib/certificate";
 import { FINISHED_SHOWN_FROM, pageFacts } from "@/lib/page-facts";
 import { readPageFacts } from "@/lib/page-facts-read";
 import { FACT_KEYS, FACTS_ON_BY_DEFAULT, emptyBlock, parsePage } from "@/lib/sales-page";
@@ -34,11 +34,29 @@ const index = `nl:course:${COURSE}:certs`;
 let commands = 0;
 const real = redis.pipeline.bind(redis);
 let broken = false;
+let loseSlotReplyFor: string | null = null;
+let lostSlotId: string | null = null;
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   commands += list.length;
+  const slot = list.find((c) => c[0] === "HSETNX" && c[1] === loseSlotReplyFor);
+  if (slot) {
+    loseSlotReplyFor = null;
+    lostSlotId = String(slot[3]);
+    return real(list).then(() => { throw new Error("synthetic: slot applied, reply lost"); });
+  }
   if (broken && list.some((c) => c[0] === "HLEN")) return Promise.resolve(list.map(() => "twelve")) as ReturnType<typeof redis.pipeline>;
   return real(list);
 }) as typeof redis.pipeline;
+
+async function unverified(courseId: string): Promise<boolean> {
+  try {
+    await earnedCount(courseId);
+    return false;
+  } catch (error) {
+    if (!(error instanceof UnknownReply)) throw error;
+    return true;
+  }
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -55,11 +73,11 @@ async function main(): Promise<void> {
     ]);
   }
   commands = 0;
-  is("twelve standing certificates: twelve, in one command", [await earnedCount(COURSE), commands], [12, 1]);
+  is("a nonempty slot index is unverified, in one command", [await unverified(COURSE), commands], [true, 1]);
   // withdrawCertificate looks the student up by the address's key (lib/learn.ts emailKey); the slot is that key here.
   const { emailKey } = await import("@/lib/learn");
   await redis.pipeline([["HDEL", index, "who3"], ["HSET", index, emailKey("s3@example.com"), "cert000000000003"]]);
-  is("a withdrawn certificate is not counted", [await withdrawCertificate(COURSE, "cert000000000003"), await earnedCount(COURSE)], [true, 11]);
+  is("withdrawal succeeds but does not certify the remaining index", [await withdrawCertificate(COURSE, "cert000000000003"), await unverified(COURSE)], [true, true]);
   broken = true;
   let threw: unknown = null;
   try {
@@ -69,6 +87,42 @@ async function main(): Promise<void> {
   }
   broken = false;
   is("a reply that is not a count is unknown, never zero", threw instanceof UnknownReply, true);
+
+  part("A failed issuance is not proof of a certificate");
+  const uncertainCourse = { ...emptyCourse(), certificate: true };
+  await saveCourse(uncertainCourse, ROOM);
+  const uncertainIndex = `nl:course:${uncertainCourse.id}:certs`;
+  for (let i = 0; i < 9; i += 1) {
+    const id = `cert${String(100 + i).padStart(12, "0")}`;
+    await redis.pipeline([
+      ["HSET", uncertainIndex, `who${i}`, id],
+      ["SET", `nl:cert:${id}`, JSON.stringify({
+        id, store: "s", productId: "p", courseId: uncertainCourse.id,
+        name: `Student ${i}`, title: "T", creator: "C",
+        email: `u${i}@example.com`, issuedAt: 1, withdrawnAt: 0,
+      })],
+    ]);
+  }
+  // Execute the real issue path: HSETNX takes the tenth slot, its reply is
+  // lost, then issueCertificate's catch removes the just-written record.
+  lostSlotId = null;
+  loseSlotReplyFor = uncertainIndex;
+  const failedIssue = await issueCertificate({
+    store: "s", productId: "p", course: uncertainCourse,
+    title: "T", creator: "C", email: "u9@example.com", who: "who9",
+    name: "Student Nine", room: ROOM,
+  }).then(() => false, () => true);
+  loseSlotReplyFor = null;
+  is("control: the issue failed after claiming its slot", [failedIssue, lostSlotId !== null], [true, true]);
+  const [slots, gone] = await redis.pipeline([
+    ["HLEN", uncertainIndex], ["GET", `nl:cert:${lostSlotId}`],
+  ]);
+  is("control: ten slots but no tenth certificate", [slots, gone], [10, null]);
+  const uncertainStore = { statsId: "st_uncertain_finished", language: "en", look: { sold: false } } as unknown as Store;
+  const uncertainProduct = { id: "p", course: { id: uncertainCourse.id, lessons: 8 }, bundle: null } as unknown as Listing;
+  const missing = await readPageFacts(uncertainStore, uncertainProduct);
+  is("nine certificates and a failed tenth issue never advertise ten",
+    [missing.facts.finished, missing.factsUnread.includes("finished")], [undefined, true]);
 
   part("What the block says");
   const course = { course: { lessons: 8 } };
@@ -94,7 +148,7 @@ async function main(): Promise<void> {
   const store = { statsId: "st_finished", language: "en", look: { sold: false } } as unknown as Store;
   const product = { id: "p1", course: { id: COURSE, lessons: 8 }, bundle: null } as unknown as Listing;
   const read = await readPageFacts(store, product);
-  is("a course: read and shown", [read.facts.finished?.value, read.factsUnread.includes("finished")], ["11", false]);
+  is("an unverified index is omitted and named as unread", [read.facts.finished?.value, read.factsUnread.includes("finished")], [undefined, true]);
   broken = true;
   const failed = await readPageFacts(store, product);
   broken = false;

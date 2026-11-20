@@ -16,7 +16,7 @@ import { offeredItems } from "@/lib/bundles";
 import { LANGUAGES } from "@/lib/store-language";
 import { type PageFacts, pageFacts } from "@/lib/page-facts";
 import { earnedCount } from "@/lib/certificate";
-import { readCourse } from "@/lib/course";
+import { readCourseExact } from "@/lib/course";
 
 export type ReadPageFacts = {
   facts: PageFacts;
@@ -27,13 +27,14 @@ export type ReadPageFacts = {
 const UNREAD = "unread" as const;
 
 export async function readPageFacts(store: Store, product: Listing): Promise<ReadPageFacts> {
+  const courseId = product.course?.id ?? null;
   const [summary, sold, inside, finished] = await Promise.all([
     summaryOf(store.statsId, product.id).catch(() => UNREAD),
     readSoldCounts(store).catch(() => UNREAD),
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => UNREAD) : Promise.resolve(null),
     // How many earned the course's certificate (93 [D2-VERIFIED-SOCIAL]), for a course that gives one now only.
-    product.course
-      ? readCourse(product.course.id).then((course) => (course?.certificate === true ? earnedCount(course.id) : null)).catch(() => UNREAD)
+    courseId
+      ? readCourseExact(courseId).then((course) => (course?.certificate === true ? earnedCount(courseId) : null)).catch(() => UNREAD)
       : Promise.resolve(null),
   ]);
   const factsUnread: FactKey[] = [];

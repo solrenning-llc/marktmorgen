@@ -41,6 +41,7 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** What the switch page and the form ask for, in place of another plan's id. */
 export const YEARLY_TARGET = "yearly";
@@ -124,7 +125,8 @@ export async function yearlyPrice(store: Store, product: Listing, cents: number)
   const made = await onAccount("POST", account, "/prices", yearlyPriceBody(store, product, cents));
   const id = typeof made.id === "string" ? made.id : "";
   if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
-  await redisPipeline([["SET", key, id, "EX", 400 * 86_400]]);
+  // Kept only while the store is live: a Stripe answer that comes after its erasure began writes nothing back (L-1446).
+  await setWhileStoreLive(store, key, id, 400 * 86_400);
   return id;
 }
 

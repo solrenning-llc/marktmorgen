@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeIdGone } from "@/lib/store";
+import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeForRefExact, storeIdGone } from "@/lib/store";
 import { readMoney } from "@/lib/money";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -14,6 +14,7 @@ import {
   idleRemovalAllowed,
   acceptPartnership,
   addPayout,
+  approveUnconfirmed,
   MAX_BULK_DECISIONS,
   decideWhy,
   decideMany,
@@ -63,6 +64,8 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
  * `{ action: "approve" | "decline" | "remove" | "restore", id }`;
  * `{ action: "payout", id, amount: "25.50", date: "2026-09-26", reference }`,
  *   which only writes down a payment the creator made themselves;
+ * `{ action: "tier-confirm", ref }`, the creator vouching for the buyer of one second-tier line shown as "buyer not confirmed",
+ *   which puts it in the next payment batch;
  * `{ action: "unpay", payout }`, to take back one written down by mistake;
  * `{ action: "rate", id, rate: 1-90 | null }`, a share for this affiliate
  *   alone, or back to the program's own shares;
@@ -175,6 +178,15 @@ export async function POST(request: NextRequest) {
     if (action === "release") {
       const done = await releaseHold(store, text(body.id, 20));
       return done ? Response.json({ ok: true }) : fail("unknown");
+    }
+    // The creator vouches for the buyer of one sale whose second tier waited as "buyer not confirmed" (lib/affiliates.ts
+    // approveUnconfirmed): the studio asks them to confirm before it sends this.
+    if (action === "tier-confirm") {
+      const done = await approveUnconfirmed(store, text(body.ref, 300));
+      if (done === "approved") return Response.json({ ok: true });
+      if (done === "not-waiting") return fail("not_waiting", 409);
+      if (done === "gone") return fail("gone", 404);
+      return fail("unknown");
     }
     if (action === "leads") {
       const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_LEAD_DECISIONS).map((id) => text(id, 30)) : [];
@@ -326,7 +338,11 @@ export async function POST(request: NextRequest) {
       // Somebody who already has a store here is asked in their own studio
       // instead of an inbox (lib/partner-invites.ts). The agreement moves; it
       // is not skipped. Their own store is never offered a partnership.
-      const theirs = to ? await storeForEmail(to).catch(() => null) : null;
+      // Read exactly (storeForRefExact): only Redis's nil is "no store here". A record that cannot be read is not
+      // (rule 24): nothing is sent, and the creator is asked to try again, rather than the offer going to an inbox
+      // that has a studio.
+      const theirs = to ? await storeForRefExact(to).catch(() => undefined) : null;
+      if (theirs === undefined) return fail("server_error", 503);
       const alreadyHere = Boolean(theirs && theirs.sid !== store.sid);
       const sent = await invitePartner({ store, email: to, share, titles, origin, alreadyHere });
       if (sent === "sent" || sent === "waiting") return Response.json({ ok: true, waiting: sent === "waiting" });
@@ -385,7 +401,10 @@ export async function POST(request: NextRequest) {
       return (await giveCode(store, promo, id)) ? Response.json({ ok: true }) : fail("unknown");
     }
     if (action === "unpay") {
-      return (await removePayout(store, text(body.payout, 20))) ? Response.json({ ok: true }) : fail("unknown");
+      // A payout PayPal sent stays on the book (#4606): undoing it would pay the affiliate twice.
+      const removed = await removePayout(store, text(body.payout, 20));
+      if (removed === "sent") return fail("sent", 409);
+      return removed ? Response.json({ ok: true }) : fail("unknown");
     }
     return fail("unknown");
   } catch (error) {

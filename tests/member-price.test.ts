@@ -416,6 +416,11 @@ async function main(): Promise<void> {
   const alone = route.indexOf("if (memberAsked && (plan || bumps.length > 0 || giftTo.trim() || people.trim() || wantsPreorder)) return away(");
   is("the route refuses a claim on anything but the member's own purchase alone, before a gift or a group is written down", alone > 0 && alone < route.indexOf("startGift(") && alone < route.indexOf("startGroup("), true);
   is("the route passes only what memberClaim proved", route.includes("member = { percent: claim.member, email: claim.email };"), true);
+  // Codex P's MEDIUM on #3021: the buyer's request (address, user agent, page, cookies) is kept for advertising only
+  // once the member claim has passed, so a checkout the claim refuses keeps nothing of it.
+  const claimDenied = route.indexOf("if (!claim.ok) return away(");
+  const adContext = route.indexOf("const ads = await adsCheckout(request, store);");
+  is("the route checks the member claim before keeping advertising context", claimDenied >= 0 && adContext > claimDenied, true);
   is("a member price never opens the closed single-file category", charge_.includes('!(body.has("discounts[0][coupon]") && !body.has("metadata[member]"))'), true);
 
   part("Never below the currency's smallest charge, as a sale or a fair price (DISC-S-1, #4550)");

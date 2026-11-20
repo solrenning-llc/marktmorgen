@@ -8,6 +8,13 @@ import { openWinBack } from "@/lib/winback-send";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
+/**
+ * A press ends by this time at the most: no longer than the claim it opens the checkout under (OPENING_SECONDS in
+ * lib/winback-send.ts, taken after this request's first reads), so the claim never runs out while the press still
+ * works and a second press never opens a second discounted checkout beside it (Claude 4's LEVE 1 on #3482,
+ * tests/winback-open-claim-outlives.test.ts).
+ */
+export const maxDuration = 60;
 
 /**
  * "Come back": the button on the page a come-back email's link opens

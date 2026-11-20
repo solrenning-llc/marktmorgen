@@ -1,4 +1,5 @@
 import { EmailField } from "@/components/email-field";
+import { ACCESS_END_FIELD } from "@/lib/course-access-end";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
 import { lengthList, listedLengths } from "@/lib/call-lengths";
@@ -12,7 +13,8 @@ import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { activeBumps, activePlan, planFor } from "@/lib/product-extras";
-import { activeShipping, shipsToWords } from "@/lib/shipping";
+import { shipsToWords } from "@/lib/shipping";
+import { shippingNow } from "@/lib/physical-legal-ship";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { IMAGE_SIZES } from "@/lib/product-image";
@@ -39,6 +41,7 @@ import { assistReminderOffered } from "@/lib/assistant-reminder";
 import { type AskWhen, isAskWhen } from "@/lib/ask-when";
 import { type UnitLine, unitLines } from "@/lib/option-units";
 import { hasDateOnSale } from "@/lib/call-on-sale";
+import { BillingCountryField } from "@/components/billing-country-field";
 
 /**
  * How many price options are drawn as cards before they become a list to pick
@@ -174,6 +177,7 @@ export function ProductFacts({
   linkCourse = true,
   bundleItems = null,
   videoLine = null,
+  accessEndLine = null,
 }: {
   store: Store;
   product: Listing;
@@ -186,6 +190,11 @@ export function ProductFacts({
    * and null when any video's length is unknown.
    */
   videoLine?: string | null;
+  /**
+   * For a course: when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays;
+   * only the page that read the course passes it.
+   */
+  accessEndLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -245,6 +254,7 @@ export function ProductFacts({
           ) : null}
         </p>
       ) : null}
+      {course && accessEndLine ? <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>{accessEndLine}</p> : null}
     </>
   );
 }
@@ -332,6 +342,7 @@ export function GiftBox({ store, product, problem = "", consentAgain = false }: 
           <span className="st-label">{w.messageOptional}</span>
           <textarea className="st-field mt-2" name="gift_message" rows={3} maxLength={500} />
         </label>
+        <CountryAsk store={store} product={product} id={`bc-gift-${product.id}`} />
         {deliversDigitally(product) ? <DigitalConsentBox id={`dc-gift-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : <WithdrawalWhere lang={store.language} />}
         <button type="submit" className="btn st-btn btn-block">
           {product.options.length > 0 ? w.buyAsGift : w.buyAsGiftFor(money(salePrice(product.priceCents, offNow(store, product))))}
@@ -446,6 +457,7 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
             inputMode="numeric"
           />
         </label>
+        <CountryAsk store={store} product={product} id={`bc-group-${product.id}`} />
         {deliversDigitally(product) ? <DigitalConsentBox id={`dc-group-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : <WithdrawalWhere lang={store.language} />}
         <button type="submit" className="btn st-btn btn-block">
           {product.options.length > 0 ? w.buyForTeam : w.buyForTeamEach(each)}
@@ -511,6 +523,7 @@ export function PreorderForm({ store, product, day, writes = false, consentAgain
         <input type="hidden" name="product" value={product.id} />
         <input type="hidden" name="preorder" value="yes" />
         <p className="text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>{p.expected(expected)}</p>
+        <CountryAsk store={store} product={product} id={`bc-pre-${product.id}`} />
         {deliversDigitally(product) ? <DigitalConsentBox id={`dc-pre-${product.id}`} lang={store.language} refused={consentAgain} /> : <WithdrawalWhere lang={store.language} />}
         <button type="submit" className="btn st-btn btn-block">
           {p.button(price)}
@@ -569,7 +582,10 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  member = 0,
+  accessEnd = null,
   chosenOption = null,
+  countryProblem = false,
 }: {
   store: Store;
   product: Listing;
@@ -615,10 +631,24 @@ export function BuyBox({
    */
   stepped?: boolean;
   /**
+   * A member price the server proved for this visitor (components/member-price.tsx, 620 [SZ4]), as a percentage; 0
+   * for none. Given by the product page only where the checkout takes it (one price, paid in full, nothing to check):
+   * the form sends it for the checkout to prove again, and the button says its amount.
+   */
+  member?: number;
+  /**
+   * For a course on its own sales page (24 [E7]): the end that page says ("none" or the end in seconds), sent with the
+   * form so the checkout refuses a sale whose end changed and stamps the one shown. Null everywhere else: a card that
+   * draws no date sells with no end.
+   */
+  accessEnd?: string | null;
+  /**
    * The price option a link to this page named (630 [HN6](27), lib/option-link-rules.ts linkedOption): drawn chosen,
    * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
    */
   chosenOption?: string | null;
+  /** The product page shows the refused-country notice (#country-notice): the main form's field points to it. */
+  countryProblem?: boolean;
 }) {
   // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
   // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
@@ -651,15 +681,17 @@ export function BuyBox({
   };
   const pwyw = activePwyw(product);
   // Shipped by the creator (lib/shipping.ts): said under the button.
-  const shipping = activeShipping(product);
+  // Where it ships now: without the EU/EEA while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  const shipping = shippingNow(product);
   const sw = shippingWords(store.language);
   const trial = product.recurring && product.recurring.trialDays > 0 ? product.recurring.trialDays : 0;
   // A membership's introductory price (lib/intro-price.ts): what the button and the line under it say.
   const intro = activeIntro(product, store.tiers);
   // Or a yearly price beside the monthly one (lib/yearly-price.ts): picked here, before paying.
   const yearly = activeYearly(product, store.tiers);
-  // A store-wide sale on this product right now (lib/store-sale.ts): its price everywhere below.
-  const off = offNow(store, product);
+  // A store-wide sale on this product right now (lib/store-sale.ts): its price everywhere below. A member price
+  // replaces it only where it takes off more (memberShown), as the checkout does.
+  const off = member || offNow(store, product);
 
   if (isFree(product)) {
     return canGiveProduct(store, product) ? (
@@ -750,6 +782,7 @@ export function BuyBox({
         again={pickAgain}
         place={place}
         consentAgain={consentAgain}
+        country={{ label: speech(store).w.billingCountry, choose: speech(store).w.chooseCountry }}
       />
     );
   }
@@ -770,8 +803,11 @@ export function BuyBox({
     <form id={formId} action="/api/store/checkout" method="post" target="_top" className="mt-4" data-checkout="">
       <input type="hidden" name="handle" value={store.handle} />
       <input type="hidden" name="product" value={product.id} />
+      {accessEnd !== null ? <input type="hidden" name={ACCESS_END_FIELD} value={accessEnd} /> : null}
       {embed?.site ? <input type="hidden" name="site" value={embed.site} /> : null}
       {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
+      {/* The member price this page showed: proved again at checkout before Stripe (lib/member-price.ts, memberClaim). */}
+      {member ? <input type="hidden" name="member" value={String(member)} /> : null}
       {/*
         target="_top", here and on every form that opens a payment page:
         Stripe and PayPal refuse to be drawn inside a frame, and the home
@@ -930,6 +966,7 @@ export function BuyBox({
       ) : null}
       {/* Starts unchecked: one reminder if this checkout is left unpaid, only when asked for here (lib/assistant-reminder.ts). */}
       {assistReminderOffered(store, product) ? <AssistReminderBox id={`r-${place}${product.id}`} lang={store.language} store={store.name} className="mb-4" /> : null}
+      <CountryAsk store={store} product={product} id={`bc-${place}${product.id}`} className="mb-4" problem={countryProblem && !place ? "country-notice" : undefined} />
       {digitalHere || digitalAdded ? <DigitalConsentBox id={`dc-${place}${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain} required={digitalHere} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
       <button type="submit" className="btn st-btn btn-block">
         <span className="bump-off">
@@ -977,7 +1014,7 @@ export function BuyBox({
           );
         })}
       </button>
-      {shipping ? (
+      {shipping && shipping.countries.length > 0 ? (
         /* A product the creator ships (lib/shipping.ts): what shipping costs and where it goes, before anybody pays. */
         <p className="st-muted mt-2 text-center text-xs" data-shipping="">
           {[
@@ -1011,10 +1048,26 @@ export function BuyBox({
       {product.recurring && store.tiers.includes(product.id) ? (
         <p className="st-muted mt-2 text-center text-xs">{w.switchPlansNote}</p>
       ) : null}
-      <SaleNote store={store} product={product} />
+      {/* A member price says its own note beside the buy box (components/member-price.tsx), not a sale's. */}
+      {member ? null : <SaleNote store={store} product={product} />}
     </form>
     {withPayPal ? <PayPalButton store={store} product={product} alone={false} formId={formId} /> : null}
     </>
+  );
+}
+
+/**
+ * Where the buyer is buying from, asked beside every paid checkout (EU VAT art. 9a: lib/eu-vat-gate.ts consumerGate
+ * refuses a paid sale to the EU or the UK until the VAT there is collected). Nothing for a free product, which is
+ * no sale and goes on wherever the buyer is.
+ */
+function CountryAsk({ store, product, id, className = "", problem }: { store: Store; product: Listing; id: string; className?: string; problem?: string }) {
+  if (product.priceCents === 0 && !product.pwyw) return null;
+  const { w, lang } = speech(store);
+  return (
+    <div className={className}>
+      <BillingCountryField id={id} locale={lang.locale} label={w.billingCountry} choose={w.chooseCountry} problem={problem} />
+    </div>
   );
 }
 
@@ -1042,6 +1095,7 @@ function PayPalButton({ store, product, alone, formId = "", consentAgain = false
       <input type="hidden" name="handle" value={store.handle} />
       <input type="hidden" name="product" value={product.id} />
       {/* Everything PayPal sells here is handed over digitally (lib/paypal-sales.ts, sellsWithPayPal). */}
+      <CountryAsk store={store} product={product} id={`bc-pp-${product.id}`} className="mb-4" />
       <DigitalConsentBox id={`dc-pp-${product.id}`} lang={store.language} refused={consentAgain} className="mb-4" />
       <button type="submit" className={`btn btn-block ${alone ? "st-btn" : "st-btn-ghost"}`}>
         {w.payPal(alone, money(payPalPrice(store, product)))}

@@ -20,6 +20,7 @@ import * as recovery from "@/lib/checkout-recovery";
 import * as asking from "@/lib/checkout-ask";
 import * as hooks from "@/lib/webhooks";
 import { ASK_WHENS } from "@/lib/ask-when";
+import { LATE_TELL_KEEP_DAYS } from "@/lib/plan-late-notice";
 import { store as redis } from "./redis-stub";
 import { namesAddress } from "@/lib/address-match";
 import { done, is, part } from "./check";
@@ -58,6 +59,15 @@ async function main(): Promise<void> {
   const ask = ALSO["lib/checkout-ask.ts"];
   const askMost = Math.max(...Object.values(ASK_WHENS)) + Number((asking as Record<string, unknown>).ASK_STALE_SECONDS ?? Infinity);
   is("a reminder asked for waits as long as the code can keep it: three days and the hours a late try may still go", (ask?.days ?? 0) * 86_400 >= askMost, true);
+  // Claude 6's review of #3367 (MEDIUM, GDPR arts. 15/20): whether a buyer was emailed about a late plan payment's refund
+  // is kept 400 days under the payment's invoice, and the copy said nothing of it. It is said, as long as the code keeps it,
+  // and that the address is not kept there.
+  const late = ALSO["lib/plan-late-notice.ts"];
+  is(
+    "a late plan payment's refund email: in the copy, as long as the store is told and the code keeps it, saying the address is not kept",
+    [late?.how, (late?.days ?? 0) >= Math.max(told("lib/plan-late-notice.ts"), LATE_TELL_KEEP_DAYS), /not kept/.test(late?.what ?? "")],
+    ["passing", true, true],
+  );
   is("webhook deliveries: the store is told a week, and the code keeps them a week", [told("lib/webhooks.ts") * 86_400, (hooks as Record<string, unknown>).WEBHOOK_DELIVERY_KEEP_SECONDS], [7 * 86_400, 7 * 86_400]);
 
   part("The copy reads them");

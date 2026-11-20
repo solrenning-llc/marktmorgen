@@ -6,14 +6,14 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { affiliateLink, readBook } from "@/lib/affiliates";
+import { UNCONFIRMED_DAYS, affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
 import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
-import { PayPalPayouts } from "@/components/paypal-payouts";
-import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { PayPalPayouts, PayPalUnread } from "@/components/paypal-payouts";
+import { onTheirWay, paypalChecks, paypalLeftOut, paypalLeftOutText, paypalPayableLines, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
@@ -45,9 +45,13 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
   const { store } = view;
 
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
-  await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
+  await settlePayPal(store, { paced: true }).catch((error) => console.error("settling PayPal payouts failed", error));
   const [paypal, away, owners, codeList, checks] = await Promise.all([
-    readPayPal(store).catch(() => null),
+    // Not known is never shown as "not connected" (rule 24): undefined, and the panel says it could not be read.
+    readPayPal(store).catch((error) => {
+      console.error("reading the PayPal link failed", error);
+      return undefined;
+    }),
     onTheirWay(store).catch(() => null),
     codeOwners(store).catch(() => new Map<string, string>()),
     // The creator's own codes, so one of them can be given to an affiliate
@@ -81,7 +85,8 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           .filter((code) => code.active && code.off !== null)
           .map((code) => ({ id: code.id, code: code.code, label: offLabel(code.off as NonNullable<typeof code.off>) }))
       : [];
-  const book = await readBook(store).catch((error) => {
+  // The studio draws Undo, so it alone asks which payouts PayPal sent (payoutUndo).
+  const book = await readBook(store, undefined, { payoutUndo: true }).catch((error) => {
     console.error("reading the affiliate book failed", error);
     return null;
   });
@@ -193,9 +198,29 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
             why: line.lead!.why,
           }))}
           leadsTotal={book ? book.lines.filter((line) => line.how === "lead").length : 0}
+          unconfirmed={(book?.lines ?? [])
+            .filter((line) => line.unconfirmed === 1 && line.commission > 0 && line.how !== "lead" && line.how !== "bonus")
+            .sort((a, b) => b.at - a.at)
+            .slice(0, 50)
+            .map((line) => ({
+              ref: line.ref,
+              at: line.at,
+              title: line.title || titles.get(line.product) || "A product that is no longer listed",
+              aff: line.aff,
+              base: line.base,
+              rate: line.rate,
+              commission: line.commission,
+              currency: line.currency,
+              second: line.how === "tier2",
+            }))}
+          unconfirmedTotal={(book?.lines ?? []).filter((line) => line.unconfirmed === 1 && line.commission > 0 && line.how !== "lead" && line.how !== "bonus").length}
+          unconfirmedDays={UNCONFIRMED_DAYS}
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}
+          invoicesPastCeiling={book?.invoicesPastCeiling ?? false}
+          unlinkedInvoices={book?.unlinkedInvoices ?? 0}
+          // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
           today={new Date().toISOString().slice(0, 10)}
           currency={store.currency}
           elsewhere={book?.elsewhere ?? 0}
@@ -204,11 +229,14 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           codes={codes}
           codeOwners={Object.fromEntries(owners)}
           payPanel={
-            book && away !== null && checks !== null ? (
+            paypal === undefined ? (
+              <PayPalUnread />
+            ) : book && away !== null && checks !== null ? (
               <PayPalPayouts
                 initial={paypal}
-                people={payableLines(book, away).length}
-                cents={batchTotal(payableLines(book, away))}
+                people={paypalPayableLines(book, away).length}
+                cents={batchTotal(paypalPayableLines(book, away))}
+                leftOutNote={paypalLeftOut(book, away) > 0 ? paypalLeftOutText(paypalLeftOut(book, away)) : ""}
                 currency={store.currency}
                 onTheirWay={away.size}
                 checking={checks.checking}

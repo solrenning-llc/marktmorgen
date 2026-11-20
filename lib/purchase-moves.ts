@@ -147,25 +147,31 @@ export async function askPurchaseMove(input: MoveAskInput & { links?: "both" | "
   const json = JSON.stringify(record);
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
-  if (input.day) {
-    if (input.day[DAY_TAKEN] !== true || input.day.from !== made.from || input.day.now !== now) return { ok: false, reason: "unknown" };
-  } else {
-    const day = await takePurchaseMoveDay(made.from, now);
-    if (!day.ok) return { ok: false, reason: day.reason === "email" ? "unknown" : day.reason };
-  }
+  // An unreadable Redis envelope while asking answers "unknown", no link (Codex V's LOW on #3608).
+  try {
+    if (input.day) {
+      if (input.day[DAY_TAKEN] !== true || input.day.from !== made.from || input.day.now !== now) return { ok: false, reason: "unknown" };
+    } else {
+      const day = await takePurchaseMoveDay(made.from, now);
+      if (!day.ok) return { ok: false, reason: day.reason === "email" ? "unknown" : day.reason };
+    }
 
-  const id = randomBytes(16).toString("hex");
-  const fromToken = input.links === "to" ? null : randomBytes(24).toString("hex");
-  const toToken = randomBytes(24).toString("hex");
-  const writes: (string | number)[][] = [
-    ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
-    ...(fromToken ? [["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]] : []),
-    ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-  ];
-  const wrote = repliesFor(await redisPipeline(writes), writes.length);
-  // Not exactly written: no link goes out.
-  if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
-  return fromToken ? { ok: true, id, fromToken, toToken } : { ok: true, id, fromToken: null, toToken };
+    const id = randomBytes(16).toString("hex");
+    const fromToken = input.links === "to" ? null : randomBytes(24).toString("hex");
+    const toToken = randomBytes(24).toString("hex");
+    const writes: (string | number)[][] = [
+      ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
+      ...(fromToken ? [["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]] : []),
+      ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+    ];
+    const wrote = repliesFor(await redisPipeline(writes), writes.length);
+    // Not exactly written: no link goes out.
+    if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
+    return fromToken ? { ok: true, id, fromToken, toToken } : { ok: true, id, fromToken: null, toToken };
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
+    throw error;
+  }
 }
 
 /**

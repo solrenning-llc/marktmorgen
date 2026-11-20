@@ -11,6 +11,12 @@ type Command = (string | number)[];
 type Script = (run: (command: Command) => unknown, keys: string[], argv: string[]) => unknown;
 
 const SCRIPTS: Record<string, Script> = {
+  // lib/card-update.ts KEEP_CARD_OPEN_IF_LIVE: a setup page kept only while its store (id key, or record before ids) is live.
+  "card-open-live:v1": (run, [storeId, erasing, open], [erasingField, session, seconds]) => {
+    if (run(["EXISTS", storeId]) !== 1 || run(["HEXISTS", erasing, erasingField]) === 1) return "gone";
+    run(["SET", open, session, "EX", seconds]);
+    return 1;
+  },
   "hash-take-all:v1": (run, [hash]) => {
     const held = run(["HGETALL", hash]) as string[];
     // Deleted either way: reading a missing hash in the stand-in leaves an empty one behind, which Redis never has.

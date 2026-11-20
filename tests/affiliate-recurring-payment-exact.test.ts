@@ -26,6 +26,7 @@ import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidrp01";
@@ -118,6 +119,7 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", JSON.stringify({ id: "aaaaaaaaaaaa", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
   ]);
   const store = shop();
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
 
   part("The payment an invoice was paid by, in each shape Stripe gives it: its refund in full is matched, nothing is paid");

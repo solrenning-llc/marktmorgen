@@ -401,7 +401,10 @@ export async function POST(request: NextRequest) {
       return (await giveCode(store, promo, id)) ? Response.json({ ok: true }) : fail("unknown");
     }
     if (action === "unpay") {
-      return (await removePayout(store, text(body.payout, 20))) ? Response.json({ ok: true }) : fail("unknown");
+      // A payout PayPal sent stays on the book (#4606): undoing it would pay the affiliate twice.
+      const removed = await removePayout(store, text(body.payout, 20));
+      if (removed === "sent") return fail("sent", 409);
+      return removed ? Response.json({ ok: true }) : fail("unknown");
     }
     return fail("unknown");
   } catch (error) {

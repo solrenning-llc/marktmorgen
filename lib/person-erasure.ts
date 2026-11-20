@@ -46,8 +46,8 @@ import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, learnerProbes, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
-import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { ownErasureCommand, suppressCommand, suppressionPrint } from "@/lib/suppression";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
@@ -134,20 +134,25 @@ export const ERASERS: Eraser[] = [
   { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
-  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
+  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person, s.store) },
   { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
   },
   { module: "lib/course-finish.ts", run: (s) => forgetFinishPerson(s.courses.map((c) => c.courseId), s.email) },
-  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner) },
+  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner, s.store) },
   {
     module: "lib/assignment.ts",
     run: async (s, files) => {
       let records = 0;
       for (const c of s.courses) {
-        const done = await forgetTasksPerson(c.courseId, c.lessonIds, s.learner, storeKey(s.store));
+        // The files handed in are kept for a repeat before their records go (#4808): once deleted, nothing else leads
+        // to them. Kept from the eraser's own read, so a record that does not read, whose file only forgetTasksPerson
+        // finds in the assignment's files hash, is kept too (Codex X4). Not kept: nothing is deleted and this part fails.
+        const done = await forgetTasksPerson(c.courseId, c.lessonIds, s.learner, storeKey(s.store), async (paths) => {
+          if (!(await keepFiles(s.listId as string, s.email, paths))) throw new Error("the paths of a student's files could not be kept before their records are deleted");
+        });
         records += done.records;
         files.push(...done.files);
       }
@@ -165,10 +170,10 @@ export const ERASERS: Eraser[] = [
   },
   { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
-  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
+  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email, s.store) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
-  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email) },
+  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email, s.store) },
   { module: "lib/podcast-access.ts", run: (s) => forgetPodcastPerson(s.store, s.productIds, s.email) },
   { module: "lib/welcome-offer-send.ts", run: (s) => forgetWelcomePerson(s.statsId, s.email) },
   { module: "lib/winback-send.ts", run: (s) => forgetWinbackPerson(s.statsId, s.productIds, s.email) },
@@ -205,7 +210,13 @@ export const ERASERS: Eraser[] = [
       // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it. Their
       // name and words leave the store page's quotes before the reviews go (lib/store-quotes.ts); when that fails, this
       // part fails and the reviews are kept for the retry.
-      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, (reviews) => dropReviewQuotes(s.store, reviews));
+      // Their photos' paths are kept for a repeat first, before any review goes (#4808, 3rjdf): once a review is deleted
+      // nothing else leads to its photo. Not kept: nothing is deleted and this part fails, the reviews kept for the retry.
+      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, async (reviews) => {
+        const photos = reviews.flatMap((review) => (review.photo?.path ? [review.photo.path] : []));
+        if (!(await keepFiles(s.listId as string, s.email, photos))) throw new Error("the paths of a person's review photos could not be kept before their reviews are deleted");
+        await dropReviewQuotes(s.store, reviews);
+      });
       // Then the quotes are kept again from the reviews as they now stand, under the store's lock, even when this run
       // found none: a review an earlier run deleted is not found again, a refresh that read one before its delete has
       // written by now, and other buyers' quotes taken off above come back. When they cannot be kept, they are all
@@ -218,7 +229,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
-  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
+  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email, s.store) },
 ];
 
 export type ErasureResult =
@@ -308,6 +319,28 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   };
 }
 
+/** The part an erasure names when the person's files could be neither deleted nor queued, or their kept paths read. */
+const FILES_PART = "lib/person-erasure.ts#files";
+/**
+ * Where the paths of a person's files not yet deleted are kept for a repeat (#4808): under the person's deletion print
+ * for the store, never the address. With no expiry (Codex L on #4871): once the records that named the files are gone,
+ * these paths are the last reference to them, so each stays until its file is deleted or queued for the daily cleanup,
+ * and only then is it let go (SREM). The person's copy reads them (lib/person-copy.ts).
+ */
+export const filesKeyOf = (listId: string, email: string) => `nl:erase:files:${listId}:${suppressionPrint(listId, email)}`;
+
+/**
+ * Keeps these paths for a repeat erasure, confirmed exactly (an SADD of at most their count), before anything that leads
+ * to them is deleted (#4808): false when that is not confirmed, and then nothing is deleted. No expiry (filesKeyOf).
+ */
+async function keepFiles(listId: string, email: string, paths: string[]): Promise<boolean> {
+  if (!paths.length) return true;
+  const key = filesKeyOf(listId, email);
+  const replies = await redisPipeline([["SADD", key, ...paths]]).then((r) => repliesFor(r, 1), () => null);
+  const added = replies ? countOf(replies[0]) : null;
+  return added !== null && added <= paths.length;
+}
+
 /**
  * Deletes one person from one store. `by` says which door: the team, with
  * who pressed it and their role for the activity log, or the person.
@@ -364,15 +397,41 @@ export async function erasePerson(
       failed.push(eraser.module);
     }
   }
-  if (files.length) {
-    const unique = [...new Set(files)];
-    // Deleted now; if the file store does not answer, handed to the daily job
-    // that deletes uploads nobody kept (app/api/cron/courses), so they go
-    // within a day by themselves.
-    await deleteFile(unique).catch(async (error: unknown) => {
+  // The person's files (#4808). The paths a step found are kept, under the person's deletion print (never the address),
+  // until each is deleted or queued for the daily job: a repeat erasure finds nothing more through the records already
+  // deleted, so it reads them from there first. Deleted now; if the file store does not answer, handed to the daily
+  // job that deletes uploads nobody kept (app/api/cron/courses), each path on its own and a failed one tried again at
+  // once. Any path neither deleted nor queued, or kept paths that cannot be read, say the erasure is incomplete (never
+  // thrown, so the team's log says "not complete"), and the paths stay kept for the next try.
+  const pendingKey = filesKeyOf(scope.listId as string, email);
+  const keptReply = await redisPipeline([["SMEMBERS", pendingKey]]).then((replies) => repliesFor(replies, 1), () => null);
+  const kept = keptReply ? stringList(keptReply[0]) : null;
+  if (!kept) failed.push(FILES_PART);
+  const unique = [...new Set([...files, ...(kept ?? [])])];
+  if (unique.length) {
+    // Paths found this run and not kept yet (a review's photo, a file a record did not say): kept before the file store
+    // is asked, so a repeat finds them if neither the deletion nor the queue takes them.
+    const fresh = files.filter((path) => !(kept ?? []).includes(path));
+    const keptNow = await keepFiles(scope.listId as string, email, [...new Set(fresh)]);
+    let lost = 0;
+    await deleteFile(unique, "privacy_request").catch(async (error: unknown) => {
       console.error("deleting a person: their files go with the daily job instead", error);
-      for (const path of unique) await noteTaskUpload(path, 0);
+      const queue = (paths: string[]) => Promise.allSettled(paths.map((path) => noteTaskUpload(path, 0)));
+      const first = await queue(unique);
+      const again = unique.filter((_, i) => first[i].status === "rejected");
+      const second = again.length ? await queue(again) : [];
+      lost = again.filter((_, i) => second[i].status === "rejected").length;
     });
+    if (lost) {
+      console.error(`deleting a person: ${lost} of their files could be neither deleted nor queued for deletion${keptNow ? "; kept for a repeat" : ""}`);
+      if (!failed.includes(FILES_PART)) failed.push(FILES_PART);
+    } else {
+      // Every path deleted or queued: only those are let go (SREM), so a deletion of the same person running at the
+      // same time keeps what it added. Read exactly.
+      const gone = await redisPipeline([["SREM", pendingKey, ...unique]]).then((replies) => repliesFor(replies, 1), () => null);
+      const count = gone ? countOf(gone[0]) : null;
+      if ((count === null || count > unique.length) && !failed.includes(FILES_PART)) failed.push(FILES_PART);
+    }
   }
   const records = parts.reduce((sum, p) => sum + p.records, 0);
   // The team's own deletions go in its activity log; a person's own is told to the owner by email (lib/erasure-request.ts).

@@ -487,6 +487,11 @@ export async function takeUpsell(input: {
   const items = members ? deliverableItems(target, [...members.values()]).map((p) => p.id) : null;
   const extra = items ? { items } : {};
 
+  // EU VAT art. 9a (offerGate): refused before anything is written, held, reserved or charged, on the offered
+  // product's own supply, with the billing country of the order paid and this request's IP country. A no is refused
+  // the same: an offer the page never drew has no answer, and the funnel never moves on past it.
+  if (!offerGate(target, members, { headers: input.headers, billing: view.customer_details?.address?.country })) return { kind: "unavailable" };
+
   if (answer === "no") {
     // Nothing is charged; the answer is written once, like a yes.
     await redisPipeline([
@@ -495,10 +500,6 @@ export async function takeUpsell(input: {
     ]);
     return { kind: "declined" };
   }
-
-  // EU VAT art. 9a (offerGate): refused before anything is written, held, reserved or charged, on the offered
-  // product's own supply, with the billing country of the order paid and this request's IP country.
-  if (!offerGate(target, members, { headers: input.headers, billing: view.customer_details?.address?.country })) return { kind: "unavailable" };
 
   // Handed over digitally at once: not without this offer's own yes, asked
   // before anything is written or charged, so the buyer can check it and

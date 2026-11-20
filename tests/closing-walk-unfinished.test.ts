@@ -15,6 +15,8 @@
  * others are finished, the walk goes back to idle, the store set aside is
  * finished again on the next runs, and a later walk never deletes by its ids
  * again (by then another store may hold them). Synthetic data only.
+ * Store D is closed the way the closing job leaves it (closeForErasure): a store
+ * only marked due is taken for a live one and never erased (#3156).
  */
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_KEY, eraseClosed, markDue, type Batched } from "@/lib/closed-store-data";
@@ -22,6 +24,7 @@ import { finishClosed } from "@/lib/plan-closing";
 import { leadsKey } from "@/lib/contacts";
 import { claimHandle, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 const HOUR = 3_600_000;
@@ -70,6 +73,7 @@ async function main(): Promise<void> {
     ["SET", stateKey(c.ref), '{"of":5,"removed":6}'],
   ]);
   await claimHandle("walk-d@example.test", "walkd", "Walk D", "");
+  await closeForErasure("walk-d@example.test");
   const d = storeRef((await storeForEmail("walk-d@example.test"))!);
   await markDue(d, now - 1);
 

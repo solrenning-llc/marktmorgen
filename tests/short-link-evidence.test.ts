@@ -4,6 +4,7 @@ import { addLink, countLinks, findLink, linkKey, readLinks, removeLink, retarget
 import { GET } from "@/app/l/[code]/route";
 import { store as redis } from "./redis-stub";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 
 /** True when `work` did not report a save: it threw, or answered { ok: false }. */
 async function refused(work: () => Promise<unknown>): Promise<boolean> {
@@ -20,7 +21,9 @@ const pipeline = redis.pipeline.bind(redis);
 const owner = { sid: "store-evidence", statsId: "stats-evidence" };
 const kept = { ...owner, code: "abcxyz", name: "post", place: "other", target: { kind: "store" }, made: 1000 };
 const index = `nl:slink:store:${owner.statsId}`;
-beforeEach(() => { redis.clear(); });
+// #3330's per-instance memory (a code remembered as ended, a store resting) is cleared with Redis, so each case reads
+// what its own stand-in answers and never what an earlier case left in the process.
+beforeEach(() => { redis.clear(); forgetShortLinkOpenMemory(); });
 afterEach(() => { redis.pipeline = pipeline; });
 function inject(command: string, reply: unknown[]) {
   redis.pipeline = async commands => commands[0][0] === command ? reply : pipeline(commands);

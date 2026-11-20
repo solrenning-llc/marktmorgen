@@ -33,14 +33,15 @@ import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { listingKeysRead } from "./listing-reads";
 import { answering } from "./security/next-headers";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 let listingReads = 0;
 redis.pipeline = (async (batch: Command[]) => {
-  const gets = batch.filter((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1])));
-  listingReads += gets.length;
+  // Every product record read, alone (GET) or LISTINGS_PER_MGET at one MGET (lib/catalog.ts getMany): keys, not commands.
+  listingReads += batch.reduce((sum, c) => sum + listingKeysRead(c).length, 0);
   return real(batch);
 }) as typeof redis.pipeline;
 globalThis.fetch = (async () => {

@@ -42,6 +42,20 @@ const room = (tier: "creator" | "pro" | "scale") => PAID_STORAGE_BYTES[tier] + T
 const ownerKey = (n: number) => `nl:store:owner:${n.toString(16).padStart(40, "0")}`;
 const cursorOf = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
+// The deletions page reads a day to its end and goes on to the next only BACKUP_DELETION_CLOSE_MS after midnight UTC
+// (lib/backup-deletions.ts), so records written "today" in those first minutes are read only once yesterday closes.
+// The parts below that write today's records run on a clock pinned within the current UTC day; the real clock gave 7
+// failures on #4894 and #4238 at 00:00:55 UTC (C5-20261120-2205-medicao). `restore` puts the real clock back.
+const realNow = Date.now;
+function pinClock(msIntoDay: number): () => void {
+  const shift = dayOf(realNow()) * DAY + msIntoDay - realNow();
+  Date.now = () => realNow() + shift;
+  return () => {
+    Date.now = realNow;
+  };
+}
+const RED_PIN_MS = 54_000;
+
 let commands: unknown[][] = [];
 let inject: ((list: unknown[][]) => unknown) | null = null;
 const realPipeline = redis.pipeline.bind(redis);
@@ -163,6 +177,7 @@ async function main(): Promise<void> {
 
   part("the deletions page: the records the site keeps, in order, resumed by its cursor");
   reset();
+  const restoreClock = pinClock(RED_PIN_MS);
   const now = Date.now();
   const today = dayOf(now);
   answer = await call("?page=deletions");
@@ -228,6 +243,7 @@ async function main(): Promise<void> {
   inject = (list) => (list[0][0] === "LRANGE" ? list.map(() => "not a list") : undefined);
   answer = await call("?page=deletions");
   is("an LRANGE that does not answer a list: 503", [answer.status, errorOf(answer)], [503, "deletions_unavailable"]);
+  restoreClock();
 
   part("both pages: the same secret, the day's reviewed pages, and nothing else in the request");
   reset();

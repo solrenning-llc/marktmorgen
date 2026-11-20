@@ -20,8 +20,8 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
 | Store | $98.80 | $967.30 | $69 / $690 |
-| Studio | $237.00 | $2,599.93 | $449 / $4,490 |
-| Scale | $454.75 | $5,169.25 | $999 / $9,990 |
+| Studio | $237.53 | $2,601.50 | $449 / $4,490 |
+| Scale | $454.85 | $5,171.53 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -56,7 +56,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $299 / $2,990 | 8.3% | 60.40% | 60.02% | $180.61 | 1.47 |
+| $299 / $2,990 | 8.2% | 60.40% | 60.02% | $180.61 | 1.47 |
 | $449 / $4,490 **(recommended)** | 51.4% | 60.40% | 60.02% | $271.22 | 0.98 |
 
 ### Scale
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.08% | 60.02% | 60.04% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.07% | 12.14% | 12.17% |
 | Net a customer, a month, at full included use | $77.68 | $271.22 | $604.22 |
-| The same at #553's price | $39.15 | $265.50 | $593.78 |
+| The same at #553's price | $39.15 | $265.50 | $593.77 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

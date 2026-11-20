@@ -91,7 +91,7 @@ function paidCheckout(id: string, product: string, fingerprint: string, over: Re
     currency: "usd",
     metadata: { store: "harbor", product, upsell_key: fingerprint },
     customer_details: { email: BUYER, address: { country: "US" } },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
     ...over,
   };
 }

@@ -74,6 +74,7 @@ import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
 import { MAX_DRAFTS } from "@/lib/mail-drafts";
 import { MAX_MAIL_BODY } from "@/lib/mail";
 import { MAX_SEGMENTS } from "@/lib/segments-rules";
+import { HOLDINGS_RECORD_BYTES } from "@/lib/community-access";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
@@ -501,7 +502,13 @@ export const FAMILIES: Record<string, Family> = {
   "nl:imports:cf:lock:@lib/clickfunnels-funnel.ts": short("One move at a time", "studio", 1, 128),
 
   // community
-  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered, the welcome sent", parts: [per("request", 1, 512, "Stripe's answer cached for minutes.", REQ("page")), item(MARK, "The welcome's mark, once per member.", "membership")] },
+  // Since #3395 the search (lib/community-found.ts) reads what the member holds once, through holdingsOf here (`:h:`), so
+  // its search request's part moved to this file with it. A course's, a space's or an event's own answer (`:sg:`,
+  // `:sp:ok:`, `:ev:...:ok:`) is written here too (doorAnswer, courseDoorKey) only when that shared reading ran out of
+  // refund questions for its products (Claude 1 cloud's review of #3395), 512 bytes kept minutes, as before the shared
+  // reading, and deleted with the person here (forgetAccessPerson). The shared reading itself is counted at its bound,
+  // HOLDINGS_RECORD_BYTES (Codex X6 on #3395, LOW: it was 512 bytes), which also covers a door's own answer.
+  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered (also for the community search), the welcome sent", parts: [per("request", 1, HOLDINGS_RECORD_BYTES, "Stripe's answer cached for minutes.", REQ("page")), per("request", 1, HOLDINGS_RECORD_BYTES, "What a member holds, read once for a community search, cached for minutes.", REQ("search")), item(MARK, "The welcome's mark, once per member.", "membership")] },
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),
@@ -527,7 +534,6 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts; a posted picture's mark, in its post's data room", line: "community-pictures" },
   "nl:cimg:doors@lib/community-files.ts": company("Picture doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's."),
   "nl:cimg:n:@lib/community-files.ts": { what: "A community's pictures counted", parts: [capped(KEY, "One count a store.")] },
-  "nl:cm:@lib/community-found.ts": short("A member's ticket for a course in the search, answered", "request", 1, 512, REQ("search")),
   "nl:cm:mail:@lib/community-mail.ts": { what: "An announcement's emails, and who they go to", parts: [per("monthly", 30, 512, "Each reader's place in a send, thirty days.", MAIL("announcement"))] },
   "nl:cm:mailq@lib/community-mail.ts": company("Announcements under way", "One set, members gone when sent."),
   "nl:cm:unsub:@lib/community-mail.ts": { what: "A member's stop link, made once and kept", parts: [item(KEY, "One a member.", "membership")] },
@@ -1217,6 +1223,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:watch:monthly:@lib/usage-billing.ts": company("A subscription's monthly watching billed", "The company's billing of its own plan."),
   "nl:vault:fresh:@lib/vault.ts": short("A vault upload finished and not yet attached", "upload", 7, KEY),
   "nl:vault:up:@lib/vault.ts": short("A vault upload in progress", "upload", 1, 512),
+  "nl:vault:ctl:@lib/vault.ts": short("A vault upload's finish and cancel count and first answers", "upload", 1, 512),
   "nl:verified:@lib/verified-numbers.ts": { what: "The store's verified numbers, cached", parts: [capped(16 * KB, "One a store.")] },
   "nl:verified:cursor@lib/verified-numbers.ts": company("Where the verification job stopped", "One key, the company's job."),
   "nl:wl:@lib/waitlist.ts": { what: "Waitlists: who is waiting, launches", room: ["lib/waitlist.ts", "lib/store.ts"], parts: [per("store", 120, KEY, "A launch's record and each address's place in it.", MAIL("launch"))] },

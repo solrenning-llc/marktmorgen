@@ -35,6 +35,10 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   plan_ended: "Your store's plan is not running, so this upload is paused. Try again once a plan is running. What is already uploaded is not changed by this.",
   upload_budget_unavailable: "New uploads are paused right now. Existing files and downloads are not changed by this pause.",
   uploads_pending: "Other uploads are using the remaining space. Finish or cancel them before trying again. If an earlier upload stopped, try again later.",
+  // One upload's finish and cancel requests are spent (lib/vault.ts, VAULT_CONTROL_CALLS_PER_UPLOAD).
+  upload_tries: "This upload was already finished or stopped, so it can't be changed again. To upload the file, choose it again.",
+  // The upload's first finish or cancel is still running in another request.
+  upload_busy: "This upload is still being finished. Wait a minute, then reload this page to see if your file is there.",
   upload_stopped: "The upload stopped before it finished. Check your connection, then choose the file again.",
   // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
   slow_down: "Uploads can't start just now. Try again later.",

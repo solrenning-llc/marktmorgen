@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, SHOP, "Pay VAT Gate Studio", "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPayVatGate1", true);
+  await setStripeAccount(OWNER, "acct_1PayVatGate01", true);
   await setSubscription(OWNER, { customerId: "cus_PayVatGate01", subscriptionId: "sub_PayVatGate01", active: true, period: paidPeriod() });
   const store = (await storeForEmail(OWNER)) as Store;
   const made = await createRequest(store, { email: "client@example.com", name: "Sam", lines: [{ text: "Coaching, December", quantity: 1, cents: 12000 }], note: "", dueDate: "", autoReminders: 0, total: 12000 } as Parameters<typeof createRequest>[1]);

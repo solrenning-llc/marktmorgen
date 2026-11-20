@@ -33,7 +33,10 @@ test("no report script writes a file; each prints its report", () => {
   assert.doesNotMatch(read("scripts/pricing-optimization-milp.py"), /write_text|open\([^)]*["']w/, "the solver reads stdin and prints to stdout");
 });
 
-test("running each command prints its report and leaves the stored text unchanged", () => {
+test("running each command prints its report, leaves the stored text unchanged, and keeps the rules that read docs/", () => {
+  // tests/tax-gate.test.ts read every file under docs/ for "accountant" (owner, 18 October 2026: no accountant). The reports
+  // are no longer there, so the same rule is held here on what each script prints.
+  const allowed = /\b(no|not to use an|uses no|without an?)\s+accountant\b/i;
   for (const report of ON_DEMAND_REPORTS) {
     const [, script, ...flags] = report.command.split(" ");
     const run = spawnSync(process.execPath, [script, ...flags], { cwd: root, encoding: "utf8", env: process.env, maxBuffer: 64 * 1024 * 1024 });
@@ -43,6 +46,8 @@ test("running each command prints its report and leaves the stored text unchange
       assert.ok(report.file.includes("input") ? Array.isArray(parsed.tiers) && typeof parsed.plans === "object" : Array.isArray(parsed.solutions) && parsed.solutions.length > 0, `${report.command} prints the ${report.file.includes("input") ? "solver's input" : "solver's solutions"}`);
     } else {
       assert.ok(run.stdout.length > 1_000 && /^# /m.test(run.stdout), `${report.command} prints the report`);
+      const said = run.stdout.split("\n").filter((line) => /accountant/i.test(line) && line.replace(new RegExp(allowed.source, "gi"), "").match(/accountant/i));
+      assert.deepEqual(said, [], `${report.command} leaves no doubt for an accountant to close`);
     }
     assert.equal(read(report.file), onDemandText(report), `${report.command} leaves ${report.file} as its fixed text`);
   }

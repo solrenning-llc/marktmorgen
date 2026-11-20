@@ -31,16 +31,17 @@ test("it changes nothing in force: today's prices, and nothing on sale", () => {
 test("the program's input is what the repository's margin code gives today (node scripts/pricing-optimization.mjs --milp-input)", () => {
   // Numbers are compared to a part in a billion: floating-point functions may differ in their last bit between Node versions.
   const close = (a: unknown, b: unknown, path: string): void => {
-    if (typeof a === "number" && typeof b === "number") { assert.ok(Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a)), `milpInput() is not the same twice at ${path}: ${a} against ${b}`); return; }
+    if (typeof a === "number" && typeof b === "number") { assert.ok(Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a)), `the solver would not read milpInput() as computed at ${path}: ${a} against ${b}`); return; }
     if (a && b && typeof a === "object" && typeof b === "object") {
-      assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), `milpInput() is not the same twice at ${path}`);
+      assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), `the solver would not read milpInput() as computed at ${path}`);
       for (const k of Object.keys(a)) close((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`);
       return;
     }
-    assert.equal(a, b, `milpInput() is not the same twice at ${path}`);
+    assert.equal(a, b, `the solver would not read milpInput() as computed at ${path}`);
   };
-  // Generated on demand (owner, 20/11/2026): two computations of the input agree, so the solver always sees the code of today.
-  close(JSON.parse(JSON.stringify(milpInput())), JSON.parse(JSON.stringify(milpInput())), "input");
+  // Generated on demand (owner, 20/11/2026): the solver reads milpInput() as JSON, so the JSON it receives must be the
+  // input itself. A NaN, an Infinity or an undefined would turn into null or vanish in silence on the way.
+  close(JSON.parse(JSON.stringify(milpInput())), milpInput(), "input");
   assert.ok(SAFETY_CENTS >= 5, "the actual solver deducts at least five cents on both intervals");
   assert.ok(linearityGap() < SAFETY_CENTS, "the linear usage stays strictly inside the deducted safety reserve");
   assert.ok(cornerGap() < SAFETY_CENTS, "at every share the program may choose, the linear usage stays strictly inside the reserve");

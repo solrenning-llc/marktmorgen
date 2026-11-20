@@ -170,7 +170,20 @@ async function main(): Promise<void> {
   is("a membership canceled: not let in", await paidForAny(store, "gus@example.com", ids), false);
   sessions["hal@example.com"] = [member("cs_test_hal000000001", club, "active")];
   is("a membership running: let in", await paidForAny(store, "hal@example.com", ids), true);
-  sessions["ivy@example.com"] = [paid("cs_test_ivy000000001", "otherproduct1", { customer: "cus_TestIvy000001" })];
+  // Main's #4859 (rule 24) on this door, after the merge into #3395: a membership in a shape Stripe never sends is not
+  // "ended" and not "no", and asking again may tell (not lasting); another purchase may still open the door.
+  sessions["kim@example.com"] = [paid("cs_test_kim000000001", club, { mode: "subscription", payment_intent: null, subscription: [] })];
+  const unreadMember = await paidForAny(store, "kim@example.com", ids).then(String, (error: unknown) => (error instanceof Error ? `${error.name}:${String((error as { lasting?: unknown }).lasting)}` : String(error)));
+  is("a membership in a shape Stripe never sends: unknown, never \"not let in\"", unreadMember, "UnreadPurchasesError:false");
+  sessions["kim@example.com"].push(paid("cs_test_kim000000002", once));
+  is("and another purchase still lets in", await paidForAny(store, "kim@example.com", ids), true);
+  sessions["lia@example.com"] = [paid("cs_test_lia000000001", club, { mode: "subscription", payment_intent: null, subscription: [] })];
+  is("a door kept for it lets nobody in on that guess", await holdsProducts(store, [club], "lia@example.com", "nl:test:access:lia", "1"), false);
+  sessions["lia@example.com"] = [member("cs_test_lia000000001", club, "active")];
+  is("and keeps no \"no\": once Stripe answers in its shape, the next request lets in", await holdsProducts(store, [club], "lia@example.com", "nl:test:access:lia", "1"), true);
+  // Rule 23 (the pre-review of 9 November 2026, round 2): the checkout carried the offers after paying (upsell_key),
+  // as every real parent of a one-click addition does (lib/upsell.ts); only such a checkout's customer is read.
+  sessions["ivy@example.com"] = [paid("cs_test_ivy000000001", "otherproduct1", { customer: "cus_TestIvy000001", metadata: { store: "school", product: "otherproduct1", upsell_key: "offers1" } })];
   intents.cus_TestIvy000001 = [{ id: "pi_ivyup1", status: "succeeded", metadata: { kind: "upsell", store: "school", product: once }, latest_charge: charge(1900, 0) }];
   is("bought in one click after paying for something else: let in", await paidForAny(store, "ivy@example.com", ids), true);
   intents.cus_TestIvy000001 = [{ id: "pi_ivyup1", status: "succeeded", metadata: { kind: "upsell", store: "school", product: once }, latest_charge: charge(1900, 1900) }];

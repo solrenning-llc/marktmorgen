@@ -26,6 +26,7 @@ import { INVOICE_PAGES, readBook } from "@/lib/affiliates";
 import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidul01";
@@ -130,6 +131,7 @@ async function main(): Promise<void> {
   redis.clear();
   await redis.pipeline([["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", JSON.stringify({ id: "aaaaaaaaaaaa", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })]]);
   const store = shop();
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
   const unlinkedOf = (book: Awaited<ReturnType<typeof readBook>>) => (book as { unlinkedInvoices?: unknown }).unlinkedInvoices;
   const reset = () => {

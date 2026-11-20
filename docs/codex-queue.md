@@ -23853,3 +23853,34 @@ REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 
 Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, o tax gate, a revisão comercial ou stripePlatformEligibilityReady; preencher DEEMED_SUPPLIER_RECORDS ou os registros fiscais sem o registro real do dono; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados (a parte do imposto devido pela LLC, recebida na própria cobrança, é a exceção da seção IV de AGENTS.md); propor de novo o crédito pré-pago ou a fatura posterior; criar contas, aceitar termos, contratar (inclusive o intermediário de importação), pagar ou contatar terceiros, inclusive a Stripe; usar dados reais nos testes.
 
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## IV2 — Endereço de cobrança em toda compra paga (20/11/2026)
+
+Etiqueta: [IV2], item 790.
+
+Solicitação do dono (20/11/2026, por volta da 00h20, horário de Fortaleza), na sessão do Claude 4. O texto literal está em docs/eu-uk-us-tax-collection-decision-2026-11-19.md, seção "Complemento: endereço de cobrança em toda compra paga", e a regra está em AGENTS.md, seção IV, item (i). Complementa o 789 [IV1].
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. A busca no main e nos PRs abertos, por `billing_address_collection`, pela data e pela etiqueta [IV2] (livre), não achou registro equivalente.
+
+Estado inicial: na fila. Posição: condição do Bloco de abertura, junto do 789 [IV1]. A ordem dos outros itens não muda.
+
+Problema concreto que resolve (VR, item 3):
+- a oferta de um clique ficava escondida quando a Stripe não guardava o endereço, inclusive fora da UE;
+- faltava a segunda prova de localização exigida pelos arts. 24b e 24f;
+- faltava o local do comprador para o sales tax americano.
+
+Como se confere: fluxo completo sintético, com a sessão de checkout pedindo o endereço e os testes da oferta e dos registros. Como traz lucro: a oferta de um clique volta a aparecer para todo comprador, e o imposto da abertura fica correto.
+
+O que fazer, em unidades pequenas:
+1. **Checkouts pagos:** `billing_address_collection=required` em todo checkout pago da Stripe, como cartão, carrinho, pedidos de pagamento, gorjetas, chamadas e renovação. Compra gratuita fica sem endereço. Um teste lista cada lugar que abre uma cobrança e prova que todos pedem o endereço.
+2. **Oferta de um clique (`offerGate`, lib/upsell.ts):** as provas passam a ser o endereço e o país do cartão (`payment_intent.payment_method.card.country`, já lido). Uma contradição recusa, como hoje.
+3. **Privacidade:** a política de privacidade (app/privacy/page.tsx, arquivo compartilhado) e lib/person-data.ts dizem para que serve o endereço e por quanto tempo fica guardado (10 anos nas vendas da UE, art. 63c; nas demais, o prazo legal), e que nunca é usado para marketing. As regras de apagar dados continuam onde a lei permite.
+4. **Sales tax americano:** o local do comprador vem desse endereço, com os contadores por estado do 9 [C-US].
+
+Acessibilidade (AX274, Parte A, integral): o formulário de endereço é o da própria Stripe. Cada PR registra o que muda para o comprador. Os passos aumentam com os campos do endereço, preenchidos automaticamente quando possível.
+
+Custo: nenhum fornecedor novo. Custo desconhecido reprova, nunca é zero.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, a revisão comercial ou stripePlatformEligibilityReady; usar o endereço para marketing; pedir telefone ou outro dado; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.

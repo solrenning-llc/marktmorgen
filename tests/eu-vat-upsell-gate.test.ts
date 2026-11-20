@@ -161,6 +161,11 @@ async function main(): Promise<void> {
   });
   is("RED: the same for the United Kingdom (address GB, IP GB)", await buyer("cs_test_eugate0000000002", "GB", "GB"), { drawn: false, kind: "unavailable", charged: 0, record: null });
 
+  part("(a2) RED: a no from the EU or the UK is refused the same, with nothing written (the funnel never moves on)");
+  sessions.cs_test_eugate0000000019 = paidCheckout("cs_test_eugate0000000019", front, browser.fingerprint, "DE");
+  const no = await takeUpsell({ store, session: "cs_test_eugate0000000019", secret: browser.secret, origin, step: await shownRef(store, "kit001"), answer: "no", headers: ip("DE") } as Parameters<typeof takeUpsell>[0]);
+  is("RED: unavailable, and no declined record is written", [no.kind, (await readUpsell("cs_test_eugate0000000019", ""))?.state ?? null], ["unavailable", null]);
+
   part("(b) A buyer in the United States (address US, IP US) is offered and charged as before");
   is("drawn, taken, charged once and written paid", await buyer("cs_test_eugate0000000003", "US", "US"), { drawn: true, kind: "done", charged: 1, record: "paid" });
   is("charged the offer's own price", charges[charges.length - 1]?.get("amount"), "1900");

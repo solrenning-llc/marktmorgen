@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   const delivery = {
     ...both,
     options: [
-      option({ id: "d1", file: { path: "stores/off-sale.pdf" } as ProductOption["file"], link: null, offSale: true }),
+      option({ id: "d1", file: { pathname: "stores/off-sale.pdf", name: "off-sale.pdf", bytes: 1_000, contentType: "application/pdf", addedAt: "2026-11-01T00:00:00.000Z" }, link: null, offSale: true }),
       option({ id: "d2", label: "Link", file: null, link: "https://example.com/live" }),
     ],
   } as Listing;

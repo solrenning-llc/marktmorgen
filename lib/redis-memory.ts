@@ -444,6 +444,16 @@ export class MemoryRedis {
           this.run(["HSET", pitches, id, after]);
           return 1;
         }
+        // lib/outreach.ts SAVE_SENDER_IF_LIVE: the two guards and SET are one operation, billed inside the EVAL.
+        if (key.startsWith("-- marktmorgen:outreach-sender-save:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, identity, erasing, sender, field, record] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", identity]) !== 1) return "gone";
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return "gone";
+          this.scriptCalls += 1;
+          return this.run(["SET", sender, record]);
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);
@@ -698,6 +708,19 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           if (this.run(["EXISTS", link]) === 0) return 0;
           this.scriptCalls += 1;
+          if (this.run(["HGET", list, email]) !== read) return 0;
+          this.run(["HSET", list, email, entry]);
+          this.scriptCalls += 1;
+          return 1;
+        }
+        // lib/waitlist.ts WAIT_JOIN: a join's place written only while its product is still coming soon (#4462).
+        // -1 when no longer coming soon; "" as the place read writes only if still absent (HSETNX), else only over it.
+        if (key.startsWith("-- marktmorgen:waitlist-join:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, soon, list, product, email, read, entry] = args;
+          this.scriptCalls += 1;
+          if (this.run(["SISMEMBER", soon, product]) === 0) return -1;
+          this.scriptCalls += 1;
+          if (read === "") return this.run(["HSETNX", list, email, entry]);
           if (this.run(["HGET", list, email]) !== read) return 0;
           this.run(["HSET", list, email, entry]);
           this.scriptCalls += 1;
@@ -1163,6 +1186,16 @@ export class MemoryRedis {
           this.run(["ZREM", queue, id]);
           this.run(["DEL", record]);
           return 1;
+        }
+        // lib/share-settle.ts KEEP_MARKER_IF_LIVE: no owner ref is restored after store erasure.
+        if (key.startsWith("-- marktmorgen:share-marker-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, identity, erasing, target, field, ref, value] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", identity]) === 0) return -1;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          this.scriptCalls += 1;
+          return this.run(["HSET", target, ref, value]);
         }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
         if (key.startsWith("-- marktmorgen:sns-receipt-swap:v1\n") && args[0] === "1" && args.length === 5) {
@@ -1917,9 +1950,10 @@ export class MemoryRedis {
           }
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
+        if (key.startsWith("-- marktmorgen:crm-tasks-write:v2\n") && args[0] === "2" && args.length === 10) {
           // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
-          const [, target, person, read, value, added, start, field] = args;
+          const [, target, lock, person, read, value, added, start, field, token] = args;
+          if (this.run(["GET", lock]) !== token) return -2;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
@@ -1935,9 +1969,10 @@ export class MemoryRedis {
           if (hash.size === 0) this.data.delete(target);
           return n === null && kept !== undefined ? 2 : 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v1\n") && args[0] === "1" && args.length === 4) {
+        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v2\n") && args[0] === "2" && args.length === 6) {
           // lib/crm.ts SAVE_TASK_COUNT: the count saved once made, never over a whole number.
-          const [, target, field, value] = args;
+          const [, target, lock, field, value, token] = args;
+          if (this.run(["GET", lock]) !== token) return -1;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
@@ -2767,7 +2802,10 @@ export class MemoryRedis {
           if (!Number.isSafeInteger(count) || count < 3 || argv.length < 2 || argv.at(-1) === "") return [-1];
           const [storeId, erasing] = keys.slice(-2);
           const field = argv.at(-1) as string;
-          if (this.run(["EXISTS", storeId]) !== 1 || this.run(["HEXISTS", erasing, field]) === 1) return [-3];
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", storeId]) !== 1) return [-3];
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return [-3];
           return this.orderWrite([String(count - 2), ...keys.slice(0, -2), ...argv.slice(0, -1)]);
         }
         // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.

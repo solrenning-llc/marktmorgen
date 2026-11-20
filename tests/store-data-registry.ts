@@ -263,6 +263,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:export:@lib/list-download.ts": { what: "A store's list downloads since its plan ended", parts: [capped(() => KEY, "One count of list downloads since the plan ended, sixty days.")] },
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
   "nl:pod:@app/api/store/podcast/route.ts": short("A podcast's lock while the studio changes it", "studio", 1),
+  "nl:pod:@app/api/store/podcast/public-settings/route.ts": short("A podcast's lock while the studio changes its public feed (33 [F2] part 3)", "studio", 1),
+  "nl:pod:@app/api/store/product/route.ts": short("A podcast's lock while a removed product drops its public feed settings (33 [F2] part 3)", "studio", 1),
 
   // ---------------------------------------------------------------- lib/ a–b
   "nl:adsrv:@lib/ad-events.ts": { what: "The store's server-side ad settings, its sealed tokens", parts: [capped(8 * KB, "Four platforms' sealed tokens and a test code: one record a store.")] },
@@ -517,8 +519,20 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/community-approval.ts": {
     what: "Posts and comments waiting for the creator's approval, the notes left to their authors, and each member's approved count (543 [CM2])",
     room: ["lib/community-approval.ts"],
-    parts: [capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES"))],
+    parts: [
+      capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES")),
+      // Unit 2: the day's mark of the creator's notice (lib/community-held-notice.ts), kept two days, so at most two at once.
+      capped(2 * KEY, "The daily notice's mark: one key a day, kept two days.", src("lib/community-held-notice.ts", "MARK_SECONDS")),
+    ],
   },
+  "nl:cm:ap:stores@lib/community-approval.ts": company(
+    "Stores whose community held a post or comment for approval lately, for the creator's daily notice (543 [CM2] unit 2)",
+    "One sorted set for every store, a member a store id with the time of its last hold; a store is let go a day after nothing it held can still wait (HELD_DAYS), so it is never larger than the number of stores.",
+  ),
+  "nl:cm:ap:turns@lib/community-approval.ts": company(
+    "The order the creator's daily notice reads those stores in, so every one gets its turn (543 [CM2] unit 2, review of #3033)",
+    "One sorted set for every store, a member a store id with its place in line (when it joined or had its last turn); a store leaves it when it comes up after leaving nl:cm:ap:stores, so it is never larger than the number of stores.",
+  ),
   "nl:cm:@lib/community-chat.ts": {
     what: "The live room: its messages, their counter, each speaker's cooldown",
     parts: [capped(MAX_CHAT_KEPT * (MAX_CHAT_TEXT * 3 + 512), "MAX_CHAT_KEPT messages, the oldest let go.", src("lib/community-chat-rules.ts", "MAX_CHAT_KEPT", "MAX_CHAT_TEXT")), per("buyer", 1, KEY, "A speaker's cooldown, minutes.")],
@@ -966,8 +980,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pod:ok:@lib/podcast-access.ts": short("A listener's access, answered", "request", 1, KEY, REQ("page")),
   "nl:pod:t:@lib/podcast-access.ts": { what: "A listener's feed token", parts: [item(KEY, "One a buyer.", "membership")] },
   "nl:pod:@lib/podcast.ts": { what: "A podcast's episodes", parts: [capped((tier) => 0 * MAX_PRODUCTS + (tier ? 0 : 0), "Kept on the product's record (lib/store.ts, setPodcastEpisodes): counted with products.")], room: ["lib/store.ts"] },
-  // 33 [F2] part 2 (9 November 2026): the public feed's settings, only read; the studio unit that writes them counts them in the room.
-  "nl:pod:@lib/podcast-public-show.ts": { what: "A podcast's public feed settings, read for its public feed", parts: [capped(0, "Read only: nothing writes it yet, so no store keeps one; a record is read at most PUBLIC_SHOW_MAX_BYTES.", src("lib/podcast-public-show.ts", "PUBLIC_SHOW_MAX_BYTES = 768_000", "nl:pod:${id}:public"))] },
+  // 33 [F2] parts 2 and 3 (9 and 10 November 2026): the public feed's settings, written by the studio, each counted in the store's data room before it is written and given back when the feed is turned off.
+  "nl:pod:@lib/podcast-public-show.ts": room("A podcast's public feed settings: its category, explicit flag, and each public episode's audio address", "lib/podcast-public-show.ts"),
   // Read-only alias of the existing retained family below; no storage or TTL write.
   "nl:pre:@lib/dispute-preorder-review.ts": { what: "One retained pre-order row read with its existing PTTL; storage and 400-day retention priced by nl:pre:@lib/preorders.ts, with no duplicate bytes", line: "database-storage" },
   "nl:pre:@lib/preorders.ts": { what: "Pre-orders: who paid, the refunds read", parts: [per("order", 430, KB, "A pre-order and its payment, 400 days after its last change.", KIND("preorder")), capped(4 * KEY + 64 * KB + 512 + 100 * 2 * KEY, "The store's marks, the refunds already handled (thirty days from the last one marked), where an unfinished pass over them stands (lib/preorders.ts passKey, a JSON of under 300 bytes, a week) the refunds to try again (lib/preorders.ts retryKey, at most REFUND_RETRY_CAP = 100 refund ids to payment ids, 400 days from the last one put on it) and the last of them read again (lib/preorders.ts retryFromKey, one refund id, as long as the list).")] },

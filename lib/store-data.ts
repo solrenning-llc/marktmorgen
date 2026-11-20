@@ -26,9 +26,10 @@
  * scripts/test_store_data_redis.py runs the script on a real Redis.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { replyList, repliesFor } from "@/lib/redis-reply";
 import { StoreFullError } from "@/lib/store-full";
 import { largerPlanFor } from "@/lib/larger-plan";
-import { type DataFields, contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
+import { type DataFields, besidePoolFor, contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 
 /** What a store is kept under, and what its room is measured by. */
 export type DataStore = DataFields & { sid?: string; statsId?: string | null; handle?: string };
@@ -216,15 +217,16 @@ export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.
   return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
 }
 
-async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number): Promise<DataTaken> {
+async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number, pool = false): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
   if (changes.length === 0) return { ok: true, used: 0 };
-  const key = dataKey(store);
+  const key = pool ? besideKey(store) : dataKey(store);
   const args = argsOf(changes, nowSeconds * 1000);
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
-    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, contentRoomFor(store, nowSeconds), always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
+    const limit = pool ? besidePoolFor(store, nowSeconds) : contentRoomFor(store, nowSeconds);
+    const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, limit, always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
     return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
@@ -298,6 +300,65 @@ export async function giveData(store: DataStore, changes: DataChange[], now = Da
  */
 export async function noteData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
   await run(store, changes, true, now / 1000).catch(() => undefined);
+}
+
+/**
+ * The store's beside pool (lib/store-data-rules.ts, BESIDE_POOL_BYTES): the same TAKE_DATA count as its room, under
+ * a key of its own, a slot "b:<product>" a product whose share it holds.
+ */
+export function besideKey(store: Pick<DataStore, "sid" | "statsId" | "handle">): string | null {
+  const key = dataKey(store);
+  return key ? `${key}:b` : null;
+}
+
+/**
+ * What one TAKE_DATA on the beside pool bills at the most: Upstash bills a script's inner commands beside its EVAL
+ * (lib/receipt-number.ts). The pool key never lists expiring months, so the script reaches its EVAL, HGET "#",
+ * HGET "~", an HGET and a write a slot, and HSET "#" (held in tests/beside-pool-commands.test.ts).
+ */
+export function poolTakeCommands(slots: number): number {
+  return 4 + 2 * slots;
+}
+
+/**
+ * What a product save while the store pays adds at the most: the pool's fields read (one HMGET), the new share taken,
+ * and, when the room then refuses the write, given back (lib/store.ts, commit). Priced on every studio request in
+ * tests/plan-cost-registry.ts (besideSaveUsd); a store copy's step, a studio request at least COPY_MIN_UNITS times
+ * over, adds 1 + 2 * poolTakeCommands(COPY_STEP_PRODUCTS) for its units, under this a unit.
+ */
+export const BESIDE_SAVE_COMMANDS = 1 + 2 * poolTakeCommands(1);
+
+/** Which of these products have their share in the pool; null when it cannot be read. */
+export async function besideHeld(store: DataStore, ids: string[]): Promise<Set<string> | null> {
+  if (ids.length === 0) return new Set();
+  const key = besideKey(store);
+  if (!key || !isRedisConfigured()) return null;
+  try {
+    // Slot by slot (rule 24; Claude 5's LOW on #4846): a hole, an inherited slot or a getter is not a reply either.
+    const reply = replyList(repliesFor(await redisPipeline([["HMGET", key, ...ids.map((id) => `b:${id}`)]]), 1)?.[0]);
+    if (!reply || reply.length !== ids.length) return null;
+    // Read exactly (Codex P on #4846, MEDIUM): HMGET answers a share the pool's script wrote as a decimal whole number
+    // of bytes (it writes only above zero) and nothing for a slot without one. Any other value is not a share the pool
+    // wrote: the pool is unreadable, never "not held" (a share taken twice) nor "held" (a product counted nowhere).
+    const shares = reply.map((value) => (value === null ? 0 : typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null));
+    if (shares.some((share) => share === null)) return null;
+    return new Set(ids.filter((_, i) => (shares[i] ?? 0) > 0));
+  } catch {
+    return null;
+  }
+}
+
+/** Puts these products' shares in the pool, all or nothing: false when it is full, when it cannot be read, or when the store does not pay. */
+export async function takeBeside(store: DataStore, ids: string[], bytes: number, now = Date.now()): Promise<boolean> {
+  if (ids.length === 0) return true;
+  if (besidePoolFor(store, now / 1000) <= 0) return false;
+  return (await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes, set: true })), false, now / 1000, true)).ok;
+}
+
+/** Gives these products' shares back to the pool, after a write that took them failed. Never refuses and never throws. */
+export async function giveBeside(store: DataStore, ids: string[], now = Date.now()): Promise<void> {
+  if (ids.length === 0) return;
+  await run(store, ids.map((id) => ({ slot: `b:${id}`, bytes: 0, set: true })), true, now / 1000, true).catch(() => undefined);
 }
 
 /**

@@ -43,6 +43,7 @@ import { takeData } from "@/lib/store-data";
 import { sendEmail } from "@/lib/email";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { speechFor } from "@/lib/buyer-words";
+import { isCurrency } from "@/lib/money";
 // Kept apart from the lock and reply helpers other work imports above, so the two never collide by name.
 import * as exactReply from "@/lib/redis-reply";
 import * as fencedLock from "@/lib/redis-lock";
@@ -488,7 +489,7 @@ export async function letGo(held: Held): Promise<void> {
 }
 
 /** A checkout as Stripe returns it, with what is read here. */
-export type PaidSession = { id?: unknown; amount_total?: unknown; payment_intent?: unknown; created?: unknown };
+export type PaidSession = { id?: unknown; amount_total?: unknown; currency?: unknown; payment_intent?: unknown; created?: unknown };
 
 const intentOf = (value: unknown): string =>
   typeof value === "string" ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : "";
@@ -506,6 +507,10 @@ export async function markPaid(store: Store, id: string, session: PaidSession, n
     // else is unknown and throws, never the request's total before tax: nothing is written, the lock is let go, the
     // request stays open and its confirmation is tried again on the next pass.
     if (!Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0) throw new UnknownReplyError("a paid request's amount");
+    // Cents are comparable only in the currency this request was issued in.
+    if (!isCurrency(session.currency) || session.currency !== request.currency) {
+      throw new UnknownReplyError("a paid request's currency");
+    }
     const paid: PaymentRequest = {
       ...request,
       state: "paid",

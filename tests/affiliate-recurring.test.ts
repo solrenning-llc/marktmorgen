@@ -69,7 +69,10 @@ const invoice = (id: string, paidAt: number, cents: number, meta: Record<string,
   status_transitions: { paid_at: paidAt },
   total_taxes: [],
   parent: { subscription_details: { metadata: { store: "harbor", ...meta } } },
-  payments: { data: [{ payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
+  // Rule 23: was { data: [{ payment }] } with no has_more and no status; recurringReferrals now reads the expanded
+  // list as Stripe gives it (whole, each row an invoice payment with its status) and leaves an invoice whose payment
+  // cannot be named uncounted (tests/affiliate-recurring-payment-exact.test.ts), so the fixture carries both.
+  payments: { object: "list", has_more: false, data: [{ object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
   ...over,
 });
 

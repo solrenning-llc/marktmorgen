@@ -137,19 +137,20 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
     await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
     assert.equal(await abortReservedVault(opened.upload.pathname), false);
     await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = true;
-    assert.equal(await abortReservedVault(opened.upload.pathname), false);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = false;
+    // An unconfirmed cancel is not written down (lib/vault.ts): a retry,
+    // inside the requests one upload is priced for, asks the provider again,
+    // and once it confirms, the bytes come back at once.
     cancel = true;
     assert.equal(await abortReservedVault(opened.upload.pathname), true);
     const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));
     assert.equal(reopened.ok, true);
     if (!reopened.ok) throw new Error("reopen failed");
+    // A session R2 no longer has, with the object there, is a finish that won the race, never a cancel (Codex X6's
+    // MEDIUM on #3502): the cancel is not confirmed and its reservation stays held for the finish or the expiry.
     missingSession = true;
     completedObject = true;
-    assert.equal(await abortReservedVault(reopened.upload.pathname), true);
-    await assert.rejects(reserveStorage(input.folder, 1, 10, async () => 10), /storage_limit/);
+    assert.equal(await abortReservedVault(reopened.upload.pathname), false);
+    await assert.rejects(reserveStorage(input.folder, 1, 10, async () => 10), /storage_(limit|pending)/);
     const openedBefore = openedSessions;
     await assert.rejects(openReservedVault({ ...input, folder: folder(9) }, 10, async () => ({ bytes: 0, brake: 10, left: 0, full: false, available: false })), /storage_unknown/);
     assert.equal(openedSessions, openedBefore);

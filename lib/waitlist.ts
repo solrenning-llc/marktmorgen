@@ -225,7 +225,7 @@ export async function joinWaitlist(input: {
       if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
       if (!(await links(t))) {
         // Not proved: this request's two tokens go (best effort), and so does the room it took for the place.
-        await redisPipeline([["DEL", tokenKey(confirm), tokenKey(t)]]).catch(() => {});
+        await redisPipeline([["DEL", tokenKey(confirm), tokenKey(t)]]).catch((error: unknown) => console.error("an unproved waitlist join's link tokens could not be deleted; they expire on their own", error));
         await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
         return "error";
       }
@@ -280,7 +280,7 @@ export async function joinWaitlist(input: {
     if (!(await links(t))) {
       // Not proved: the new link to confirm goes; the place's own link to leave stays, and nothing was written over it,
       // so what was counted for its growth goes back.
-      await redisPipeline([["DEL", tokenKey(confirm)]]).catch(() => {});
+      await redisPipeline([["DEL", tokenKey(confirm)]]).catch((error: unknown) => console.error("an unproved waitlist join's link token to confirm could not be deleted; it expires on its own", error));
       await settleEntryWrite(store, product.id, grown, 0);
       return "error";
     }

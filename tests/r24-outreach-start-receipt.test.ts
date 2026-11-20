@@ -55,7 +55,7 @@ function answer(match: (commands: Command[]) => boolean, reply: unknown[]) {
 }
 const restore = () => { redis.pipeline = real; };
 const isDraftWrite = (commands: Command[]) => commands[0]?.[0] === "HSET" && commands.some((c) => c[0] === "INCR");
-const isSenderWrite = (commands: Command[]) => commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).endsWith(":me");
+const isSenderWrite = (commands: Command[]) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:outreach-sender-save:v1\n");
 
 for (const [label, reply] of [["no receipt", []], ["a receipt in another shape", ["QUEUED", "QUEUED", "QUEUED", "QUEUED"]], ["a stop link not set", [1, 1, 1, null]]] as const) {
   test(`startPitch: ${label} is never a draft said written`, async () => {

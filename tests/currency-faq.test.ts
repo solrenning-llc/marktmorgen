@@ -31,11 +31,15 @@ is("the Stripe link only once Stripe is connected", [panel.includes(`ways.state 
 // lib/earnings-read.ts only lists checkout sessions already paid (426 [BX2]), it never makes one.
 // lib/stripe-account.ts is the transport: since #1732 it names the path only to mark that Stripe was asked to open a
 // checkout (watchCheckoutOpening), and builds none itself, which the line after the scan holds.
-// Merge of #3022 with main: the scan leaves out both files, each held by its own check below (rule 23).
-const checkouts = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "card-update.ts" && f !== "earnings-read.ts" && f !== "stripe-account.ts").map((f) => [f, read(`lib/${f}`)] as const).filter(([, t]) => t.includes("onAccount(") && /["`]\/checkout\/sessions["`]/.test(t));
+// Rule 23 (#3395): the scan counts a file as a checkout only where it asks Stripe to create one (onAccount("POST", ...,
+// "/checkout/sessions")). lib/community-access.ts names the path only to list a buyer's past sessions with a GET, which
+// creates nothing; the line after the scan holds that every file left out this way builds no checkout of its own, so a
+// real POST written another way still fails here instead of being hidden.
+const namesThePath = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "card-update.ts" && f !== "stripe-account.ts").map((f) => [f, read(`lib/${f}`)] as const).filter(([, t]) => t.includes("onAccount(") && /["`]\/checkout\/sessions["`]/.test(t));
+const createsOne = (t: string) => /onAccount\(\s*"POST",[^;]*?["`]\/checkout\/sessions["`]/.test(t);
+const checkouts = namesThePath.filter(([, t]) => createsOne(t));
 is("every buyer checkout on the creator's account asks Stripe not to convert", [checkouts.length > 4, checkouts.filter(([, t]) => !t.includes("inTheCurrencyShown(body);")).map(([f]) => f), read("lib/instant-pay.ts").includes('body.set("adaptive_pricing[enabled]", "false");')], [true, [], true]);
-const earningsCalls = read("lib/earnings-read.ts").match(/onAccount\(\s*[^,]*,/g) ?? [];
-is("the earnings reading left out above only reads from the creator's account", [earningsCalls.length > 0, earningsCalls.filter((c) => !/^onAccount\(\s*"GET",$/.test(c))], [true, []]);
+is("a file that names the path without creating a session builds no checkout of its own (no line items, no buyer page)", namesThePath.filter(([, t]) => !createsOne(t) && /line_items|success_url|inTheCurrencyShown|"POST"/.test(t)).map(([f]) => f), []);
 is("the transport left out of the scan builds no checkout of its own (no line items, no buyer page)", /line_items|success_url|inTheCurrencyShown/.test(read("lib/stripe-account.ts")), false);
 is("a payment request keeps the currency it was sent in", read("lib/payment-requests.ts").includes("request.currency"), true);
 

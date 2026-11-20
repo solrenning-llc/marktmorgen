@@ -69,6 +69,8 @@ import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_M
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
 import { BLOB_LIST_PAGE, FLY_BASE, FLY_BYTE, FLY_CPU_MS, STORAGE_MEASURE_READ } from "./plan-cost-registry";
 import { FLY_BASE_UNITS, FLY_BYTES_PER_UNIT, FLY_CPU_MS_PER_UNIT, FLY_CPU_PER_WALL_MS, FLY_HOLD_SECONDS, FLY_MAX_BYTES, MEASURE_LIST_PAGES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
+import { VAULT_LIST_PAGES } from "@/lib/vault-rules";
 import { MAX_STAMP_BYTES } from "@/lib/product-file";
 
 /** What an opening of the orders page, a bundle's products and a batch of older purchases keep above what they cost: a tenth (C3-83, 4 November 2026). */
@@ -391,8 +393,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(STORAGE_MEASURE_UNITS * laterPageCost() >= ORDERS_SPARE * STORAGE_MEASURE_READ, `${STORAGE_MEASURE_UNITS} x ${laterPageCost()} < ${ORDERS_SPARE} x ${STORAGE_MEASURE_READ}`);
   assert.ok((STORAGE_MEASURE_UNITS - 1) * laterPageCost() < ORDERS_SPARE * STORAGE_MEASURE_READ, `${STORAGE_MEASURE_UNITS} units, one more than needed`);
   assert.ok(BLOB_LIST_PAGE >= 2 * (5 / 1e6), "a Blob listing page is priced at no less than twice $5.00 per million");
-  for (const file of ["lib/file-store.ts", "lib/vault.ts"]) {
-    assert.ok(read(file).includes(`for (let page = 0; page < ${MEASURE_LIST_PAGES}; page += 1)`), `${file} lists at most MEASURE_LIST_PAGES pages`);
+  // The listing loops name their page bound (BLOB_LIST_PAGES, VAULT_LIST_PAGES, #3502); each is the MEASURE_LIST_PAGES
+  // the measurement is priced at.
+  for (const [file, name, pages] of [["lib/file-store.ts", "BLOB_LIST_PAGES", BLOB_LIST_PAGES], ["lib/vault.ts", "VAULT_LIST_PAGES", VAULT_LIST_PAGES]] as const) {
+    assert.ok(read(file).includes(`for (let page = 0; page < ${name}; page += 1)`), `${file} lists at most ${name} pages`);
+    assert.equal(pages, MEASURE_LIST_PAGES, `${name} is MEASURE_LIST_PAGES`);
   }
   for (const route of ["app/api/store/download/route.ts", "app/api/store/preview/route.ts"]) {
     assert.ok(read(route).includes(`export const maxDuration = ${FLY_HOLD_SECONDS};`), `${route} is held no longer than FLY_HOLD_SECONDS`);

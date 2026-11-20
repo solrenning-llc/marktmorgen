@@ -25,7 +25,7 @@
  * given to. What the store wrote to or about the person (a note, a reply,
  * feedback on their work) is in, because it is data about them.
  */
-import { type Store } from "@/lib/store";
+import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type ErasureScope } from "@/lib/erasure-rules";
@@ -38,6 +38,7 @@ import { VersionUnreadError, listAgreements, readVersionExact } from "@/lib/agre
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
+import { submissionsCopyOf } from "@/lib/submission-store";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
 import { notesOf } from "@/lib/lesson-notes";
@@ -116,6 +117,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
+  "lib/submission-store.ts": { how: "copied", what: "Files you sent the store for review, your note, its reply, and any upload still open" },
   "lib/backup-deletions.ts": { how: "marks", what: "Built but off: notes that the backup must delete its copy of a file already deleted, naming only the file (a hand-in's name holds a one-way fingerprint of your address, never the address)" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
@@ -409,6 +411,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       });
     }
     return out;
+  },
+  "lib/submission-store.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return submissionsCopyOf(await storeFolder(storeRef(s.store)), s.learner, (courseId) => productOf.get(courseId) ?? null);
   },
   // Withdrawn ones too: the erasure deletes them, so they are kept about the person.
   "lib/certificate.ts": async (s) => certificatesOf(s.courses.map((c) => c.courseId), s.email),

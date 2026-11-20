@@ -649,6 +649,34 @@ export class MemoryRedis {
           }
           return queued;
         }
+        // A creator's reply and the removal of its buyer's waiting place are one atomic step.
+        if (key.startsWith("-- marktmorgen:submission-reply-write:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, lock, record, live, token, expected, id, json, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 2;
+          const current = this.run(["GET", record]);
+          if (current === null) return 0;
+          if (current !== expected) return 2;
+          this.run(["ZREM", live, id]);
+          this.run(["SET", record, json, "XX", "EX", seconds]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_TAKE: a slot's turn taken off only while still at the score read.
+        if (key.startsWith("-- marktmorgen:submission-slot-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, score] = args;
+          const held = this.run(["ZSCORE", list, member]);
+          if (held === null || held === undefined || Number(held) !== Number(score)) return 0;
+          this.run(["ZREM", list, member]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_STORE_NEXT: the store's turn taken off when its list is empty, else
+        // set to the soonest turn on it.
+        if (key.startsWith("-- marktmorgen:submission-slot-store-next:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, list, stores, store] = args;
+          const first = this.zset(list)[0];
+          if (first === undefined) this.run(["ZREM", stores, store]);
+          else this.run(["ZADD", stores, String(first.score), store]);
+          return 1;
+        }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back,
         // and one of another generation (started again meanwhile) is left as it is.
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v2\n") && args[0] === "3" && args.length === 10) {
@@ -1400,6 +1428,35 @@ export class MemoryRedis {
           const [, lock, target, token, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", target, value]);
+          return 1;
+        }
+        // A submission door put back after a refused vault step (lib/submission-store.ts, SUBMISSION_DOOR_PUT_BACK): only
+        // while the buyer's index entry and the lesson's live entry are still there, then SET NX.
+        if (key.startsWith("-- marktmorgen:submission-door-put-back:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, door, who, live, entry, id, json, seconds] = args;
+          if (this.run(["ZSCORE", who, entry]) === null || this.run(["ZSCORE", live, id]) === null) return 0;
+          if (Number(this.run(["EXISTS", door])) === 1) return 2;
+          if (this.run(["SET", door, json, "EX", seconds]) !== "OK") throw new Error("a submission door was not put back");
+          return 1;
+        }
+        // A submission's close (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE): written only while the buyer's place and
+        // entry are still there, and only when no record is.
+        if (key.startsWith("-- marktmorgen:submission-close-write:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 15))) {
+          const five = args[0] === "5";
+          const [live, who, due, record, list] = args.slice(1, five ? 6 : 5);
+          const [id, entry, keepUntil, until, liveSeconds, dueMember, json, seconds, listMember] = args.slice(five ? 6 : 5);
+          if (this.run(["ZSCORE", live, id]) === null || this.run(["ZSCORE", who, entry]) === null) return 0;
+          if (Number(this.run(["EXISTS", record])) === 1) return -1;
+          this.run(["ZADD", live, "XX", keepUntil, id]);
+          this.run(["EXPIRE", live, liveSeconds]);
+          this.run(["ZADD", who, "XX", until, entry]);
+          this.run(["EXPIRE", who, liveSeconds]);
+          this.run(["ZADD", due, keepUntil, dueMember]);
+          this.run(["SET", record, json, "EX", seconds]);
+          if (five) {
+            this.run(["ZADD", list, until, listMember]);
+            this.run(["EXPIRE", list, liveSeconds]);
+          }
           return 1;
         }
         // An agreement's record, written with its expiry only while the agreement's lock is the writer's (lib/agreement-store.ts, AGREEMENT_SAVE).

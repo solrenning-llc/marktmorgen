@@ -242,6 +242,28 @@ const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
 const statsKey = (flowId: string) => `nl:mail:flowstats:${flowId}`;
+/** A person's start of a sequence, kept 400 days once it is queued (FLOW_QUEUED). */
+const ENROLLED_KEEP_SECONDS = 400 * 86_400;
+/** A start claimed and not yet queued: it lapses within the hour if it never is, so a failed start is never lost for 400 days. */
+const PENDING_START = "pending";
+const PENDING_START_SECONDS = 3_600;
+/**
+ * Queues the first step of each claimed start and keeps its claim 400 days, in one step: a claim still pending for
+ * this start (ARGV[3]) is turned into the mark; one that is gone (erased meanwhile) is neither queued nor recreated.
+ * KEYS: the queue, the sequence's stats, then each person's claim; ARGV: the step's time, the mark's lifetime, the
+ * pending value, then each queue member. Answers how many were queued.
+ */
+const FLOW_QUEUED = `-- marktmorgen:flow-queued:v1
+local queued = 0
+for i = 3, #KEYS do
+  if redis.call('GET', KEYS[i]) == ARGV[3] then
+    redis.call('SET', KEYS[i], '1', 'EX', ARGV[2])
+    redis.call('ZADD', KEYS[1], ARGV[1], ARGV[i + 1])
+    queued = queued + 1
+  end
+end
+if queued > 0 then redis.call('HINCRBY', KEYS[2], 'started', queued) end
+return queued`;
 export const FLOW_ID = /^[0-9a-f]{16}$/;
 
 const newId = () => randomBytes(8).toString("hex");
@@ -780,11 +802,15 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
 
 /**
  * Starts whichever sequences this event begins, for this person. Never
- * throws: the list must never cost anyone what they asked for.
+ * throws: the list must never cost anyone what they asked for. Answers false
+ * when it failed on its way (logged), so a caller that holds a once-only mark
+ * for the moment can let it go and the moment can start them again
+ * (lib/course-finish.ts); each start is claimed per person and sequence
+ * (startFlows), so trying again never starts anybody twice.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<boolean> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
+    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return true;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
@@ -806,15 +832,29 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "paid_request" && event.paidRequest) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
-    if (!flows.length) return;
+    if (!flows.length) return true;
     const address = normaliseEmail(email);
     // Only someone who may be written to starts one; their one start is not
     // spent on a moment they could not have received it.
-    if (!(await isMailable(store.listId, address))) return;
+    if (!(await mailableExactly(store.listId, address))) return true;
     await startFlows(store, flows, [address]);
+    return true;
   } catch (error) {
     console.error("starting a sequence failed", error);
+    return false;
   }
+}
+
+/**
+ * Whether this address may be written to now, read exactly: the contact's own record or nil (nobody); any other reply
+ * (a number, a list, a lost reply) throws, so enroll says it failed and a once-only moment is not spent on an unread contact (Claude 7 on #4301).
+ */
+async function mailableExactly(listId: string, address: string): Promise<boolean> {
+  const [raw] = repliesFor(await redisPipeline([["HGET", leadsKey(listId), address]]), 1) ?? [undefined];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a contact's record for a sequence's start");
+  // A record read whole that is not a contact stays "not mailable", as isMailable reads it (lib/contacts.ts).
+  const contact = parseContact(raw);
+  return contact !== null && mailable(contact);
 }
 
 /**
@@ -834,13 +874,24 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
     // person is neither restarted nor sent anything, and the whole call says so once the definite starts are done
     // (CX-123 rule 24).
-    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400])), addresses.length);
+    // The claim is only "pending" for an hour: it becomes the 400-day mark in the same atomic step that puts the run
+    // in the queue (FLOW_QUEUED), so a failure on the way (the run's record or its place in the queue not written)
+    // never leaves a 400-day claim with no run behind it (Codex G and X5 on #4301).
+    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), PENDING_START, "NX", "EX", PENDING_START_SECONDS])), addresses.length);
     if (!claims) {
       unknown = true;
       continue;
     }
     const claimed = addresses.filter((_, i) => claims[i] === "OK");
     if (claims.some((claim) => claim !== "OK" && claim !== null)) unknown = true;
+    // Already claimed: only a confirmed start ("1") is "in it already". A pending claim is a start that is on its way
+    // or failed on its way; it is not a start, so the call says it is unknown and a caller holding a once-only mark for
+    // the moment lets it go (lib/course-finish.ts). It lapses within the hour, and the moment then starts it once.
+    const taken = addresses.filter((_, i) => claims[i] === null);
+    if (taken.length) {
+      const held = repliesFor(await redisPipeline(taken.map((address) => ["GET", enrolledKey(flow.id, address)])), taken.length);
+      if (!held || held.some((value) => value !== "1")) unknown = true;
+    }
     if (!claimed.length) continue;
     // The store's runs a day (lib/flow-limits.ts): past it, nobody more is
     // started today, and their start is given back so a later moment can.
@@ -860,18 +911,18 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     }
     // The run's record first, so its first step always finds it.
     await openRuns(flow.id, fresh, now);
-    // The first step's place in the queue, read exactly (CX-123 rule 24): each ZADD 0 or 1, the count a whole number.
+    // Its place in the queue and its 400-day mark in one atomic step: both or neither. A start whose claim is gone
+    // (the person was erased meanwhile) is not queued. Exactly the number queued, from 0 to all, confirms it.
     const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
-    const queued = await redisPipeline([
-      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, member(address)]),
-      ["HINCRBY", statsKey(flow.id), "started", fresh.length],
-    ]).then((replies) => repliesFor(replies, fresh.length + 1), () => null);
-    if (!queued || !queued.slice(0, fresh.length).every((r) => r === 0 || r === 1) || countOf(queued[fresh.length]) === null) {
-      // Not confirmed: the write may still have landed, its answer lost. The once-only start is given back, with the
-      // day's place, only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued),
-      // so the same event starts it again; a mark kept with nothing queued would hold the run at step 0 for 400 days.
-      // Anywhere else the start stays: a start given back after its step went out would send that step twice
-      // (Codex X5 and Codex P on #4307).
+    const queued = await redisPipeline([[
+      "EVAL", FLOW_QUEUED, 2 + fresh.length, QUEUE, statsKey(flow.id), ...fresh.map((address) => enrolledKey(flow.id, address)),
+      now + flow.steps[0].delayHours * 3600, ENROLLED_KEEP_SECONDS, PENDING_START, ...fresh.map(member),
+    ]]).then((replies) => countOf(repliesFor(replies, 1)?.[0]), () => null);
+    if (queued === null || queued < 0 || queued > fresh.length) {
+      // Not confirmed: the script may still have run, its answer lost. The start is given back, with the day's place,
+      // only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued), so the same
+      // event starts it again at once instead of after the pending claim lapses. Anywhere else the start stays: a start
+      // given back after its step went out would send that step twice (Codex X5 and Codex P on #4307).
       const never = await firstStepNeverQueued(flow.id, QUEUE, fresh.map((address) => ({ email: address, member: member(address) })));
       const back = fresh.filter((_, i) => never[i] === true);
       if (back.length) {
@@ -879,10 +930,10 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
         await giveBackRuns(store.listId, back.length, now);
       }
       started += never.filter((answer) => answer === false).length;
-      if (back.length || never.some((answer) => answer === null)) unknown = true;
+      unknown = true;
       continue;
     }
-    started += fresh.length;
+    started += queued;
   }
   if (unknown) throw new UnknownReplyError("a sequence's once-only start");
   return started;

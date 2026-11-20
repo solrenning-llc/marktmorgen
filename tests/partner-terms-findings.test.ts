@@ -154,6 +154,20 @@ async function main(): Promise<void> {
   is("an offer with no time at all near the end: unknown, never the clock", await offerAt(paidOffer("pi_offer_no_time", undefined, "ch_only_id")), "UnknownReplyError");
   is("and nothing of them was credited", (await earned()).filter((key) => key.startsWith("pi_offer_unk") || key.startsWith("pi_offer_no_time")).length, 0);
   is("an offer made after the end, its charge not read: no share and no wait", [await offerAt(paidOffer("pi_offer_late", end + 60, "ch_only_id")), (await earned()).includes(`pi_offer_late:${q}`)], ["noted", false]);
+  // Claude 4 on #3485 (MEDIUM): an offer whose order's link is still pending (no `via`, kind "upsell", a parent order)
+  // leaves noteCharge to follow that order (notePendingOffer); a partner's step that failed before it is thrown there
+  // too, so the job credits it again, never only logged.
+  {
+    const failing = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c.some((w) => String(w).includes(`nl:aff:${statsId}:shares`)))) throw new Error("synthetic: the share's write failed");
+      return failing(commands);
+    }) as typeof redis.pipeline;
+    const pending = { ...paidOffer("pi_offer_pending_failed", end - 7000, settledCharge("pi_offer_pending_failed", end - 3600, end - 6000)), metadata: { product: A, title: "Book", kind: "upsell", parent: "cs_test_pending_parent" } };
+    const failed = await offerAt(pending);
+    redis.pipeline = failing;
+    is("an offer whose order's link is pending: a partner's step that fails is thrown, so the job credits it again", failed, "Error");
+  }
   {
     const failing = redis.pipeline;
     redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -165,6 +179,39 @@ async function main(): Promise<void> {
     is("a partner's step that fails is thrown, so the job credits it again", failed, "Error");
     is("and the next try credits it once", [await offerAt(paidOffer("pi_offer_failed", end - 7000, settledCharge("pi_offer_failed", end - 3600, end - 6000))), (await earned()).filter((key) => key === `pi_offer_failed:${q}`).length], ["noted", 1]);
   }
+  part("Missing partner settlement evidence does not delay an independently known affiliate referral");
+  const linked = (id: string, payment: unknown) => {
+    const sale = session(id, end - 7200, payment);
+    return { ...sale, metadata: { ...sale.metadata, via: p, via_rate: "12" } };
+  };
+  const linkedOffer = (id: string, charge: unknown) => {
+    const offer = paidOffer(id, end - 7200, charge);
+    return { ...offer, metadata: { ...offer.metadata, via: p, via_rate: "12" } };
+  };
+  const recorded = async (id: string) => {
+    const [raw] = await redis.pipeline([["HGET", `nl:aff:${statsId}:sales`, id]]);
+    return typeof raw === "string" ? raw : null;
+  };
+  const linkedSessionId = "cs_test_linked_partner_wait";
+  const linkedOfferId = "pi_linked_partner_wait";
+  const graph = [
+    { id: linkedSessionId, first: async () => noteSession(await store(), linked(linkedSessionId, "pi_missing_linked")),
+      retry: async () => noteSession(await store(), linked(linkedSessionId, charged("pi_missing_linked", end - 7000, end - 3600))) },
+    { id: linkedOfferId, first: async () => noteCharge(await store(), linkedOffer(linkedOfferId, "ch_missing_linked")),
+      retry: async () => noteCharge(await store(), linkedOffer(linkedOfferId, settledCharge(linkedOfferId, end - 3600, end - 7000))) },
+  ];
+  for (const { id, first, retry } of graph) {
+    is(`${id}: the unsettled partner share still asks for retry`, await first().then(() => "noted", (error: Error) => error.name), "UnknownReplyError");
+    const before = await recorded(id);
+    const referral = before ? JSON.parse(before) as { aff: string; rate: number; base: number } : null;
+    is(`${id}: the affiliate's checkout evidence already records the original referral`,
+      referral && [referral.aff, referral.rate, referral.base], [p, 12, 1000]);
+    is(`${id}: the partner has no credit without the settlement time`, (await earned()).some((key) => key.startsWith(id + ":")), false);
+    await retry();
+    is(`${id}: reconciliation records the partner once without rewriting the referral`,
+      [(await earned()).filter((key) => key === id + ":" + q).length, await recorded(id)], [1, before]);
+  }
+
   is("the job reads the offer's payment with its settled charge, so the time is there", readFileSync("lib/upsell.ts", "utf8").includes("expand[]=latest_charge.balance_transaction"), true);
 
 

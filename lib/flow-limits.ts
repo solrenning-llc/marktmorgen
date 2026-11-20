@@ -94,7 +94,11 @@ export const MAX_WAIT_DAYS_PER_STEP = 35;
 export const MAX_RETRIES_BY_YOU = 1;
 
 /** Ceilings for the margin review's per-run arithmetic. */
-export const RUN_START_COMMANDS = 8;
+// A run's own start for one person, measured (tests/flow-run-start-commands.test.ts, 17 November 2026): the run's record
+// (openRuns: DEL, HSET, EXPIRE of the run, RPUSH and EXPIRE of its log, ZADD of the index, ZREMRANGEBYSCORE and EXPIRE of
+// the index: 8) and its first step queued with the start's 400-day mark (FLOW_QUEUED in lib/flows.ts: the EVAL, and the
+// GET, SET, ZADD and HINCRBY inside it: 5). 8 until then, which left out the first step's queueing.
+export const RUN_START_COMMANDS = 13;
 export const HISTORY_COMMANDS_PER_STEP = 9;
 // The queue's own commands for one person's step: the scan, the take from the queue, the lease, the person's row, the lease entry read with
 // it (since 4 November 2026: a stop step of another workflow may have removed it), the next step queued while leased, and the lease let go: 7.

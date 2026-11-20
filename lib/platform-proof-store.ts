@@ -29,20 +29,28 @@ const validWindow = (days: unknown): days is number => typeof days === "number" 
  */
 async function readKept(): Promise<{ snapshot: PlatformProofSnapshot; validDays: number | null } | null> {
   if (!isRedisConfigured()) return null;
+  // A failed or unreadable read is still unknown (null), never zero, but it leaves one fixed line in the logs, so it
+  // is never mistaken for a snapshot that is simply not there (Codex X6 on #3509). An absent key logs nothing.
+  const unknown = (why: string) => {
+    console.error(`the platform proof could not be read (${why}); nothing is shown`);
+    return null;
+  };
   const replies = repliesFor(await redisPipeline([["GET", PROOF_KEY]]).catch(() => null), 1);
-  const raw = replies?.[0];
-  if (typeof raw !== "string" || !raw || !keptWithinCeiling(raw)) return null;
+  if (!replies) return unknown("the database did not answer exactly");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw || !keptWithinCeiling(raw)) return unknown("the kept value is not one");
   try {
     const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return unknown("the kept value is not one");
     const { validDays, ...rest } = value as Record<string, unknown>;
-    if (validDays !== undefined && !validWindow(validDays)) return null;
+    if (validDays !== undefined && !validWindow(validDays)) return unknown("the kept window is not 30 or 40 days");
     // The snapshot itself is still held to its own ceiling; only the window's field may add to the kept value.
-    if (!withinCeiling(JSON.stringify(rest))) return null;
+    if (!withinCeiling(JSON.stringify(rest))) return unknown("the kept value is not one");
     const snapshot = parseProofSnapshot(rest);
-    return snapshot ? { snapshot, validDays: validDays === undefined ? null : validDays } : null;
+    return snapshot ? { snapshot, validDays: validDays === undefined ? null : validDays } : unknown("the kept value is not one");
   } catch {
-    return null;
+    return unknown("the kept value is not one");
   }
 }
 
@@ -61,15 +69,24 @@ export async function keptPlatformProof(now = Date.now(), minimum = PLATFORM_PRO
   return kept ? platformProof(kept.snapshot, minimum, now, kept.validDays) : null;
 }
 
-/** Keeps `snapshot` for `validDays` (30 or 40) days; throws when it is not one or the write is not confirmed. */
-export async function writePlatformProof(snapshot: PlatformProofSnapshot, validDays: number): Promise<void> {
+/**
+ * Keeps `snapshot` until `validDays` (30 or 40) days after its `asOf`, the moment it stops being shown, never a full
+ * window from the write (Codex X6 on #3509); throws when it is not one, is already past its window or from the
+ * future at `now`, or the write is not confirmed.
+ */
+export async function writePlatformProof(snapshot: PlatformProofSnapshot, validDays: number, now = Date.now()): Promise<void> {
   const kept = parseProofSnapshot(snapshot);
-  if (!kept || !(PROOF_VALID_DAYS as readonly number[]).includes(validDays)) throw new Error("not a platform proof snapshot");
+  if (!kept || !(PROOF_VALID_DAYS as readonly number[]).includes(validDays) || !Number.isFinite(now)) throw new Error("not a platform proof snapshot");
+  const at = Date.parse(kept.asOf);
+  if (at > now) throw new Error("a platform proof snapshot from the future is never kept");
+  // Whole seconds left in its window, rounded down, so the key never outlives the last moment it may be shown.
+  const seconds = Math.floor((at + validDays * 86_400_000 - now) / 1_000);
+  if (seconds < 1) throw new Error("a platform proof snapshot already past its window is never kept");
   // Kept with its window, so whoever reads it shows it for exactly as long as it was written for.
   if (!withinCeiling(JSON.stringify(kept))) throw new Error(`a platform proof snapshot over ${PROOF_SNAPSHOT_MAX_BYTES} bytes is never kept`);
   const json = JSON.stringify({ ...kept, validDays });
   if (!keptWithinCeiling(json)) throw new Error(`a platform proof snapshot over ${PROOF_SNAPSHOT_MAX_BYTES} bytes is never kept`);
   if (!isRedisConfigured()) throw new Error("the platform proof cannot be kept (no database)");
-  const replies = repliesFor(await redisPipeline([["SET", PROOF_KEY, json, "EX", validDays * 86_400]]), 1);
+  const replies = repliesFor(await redisPipeline([["SET", PROOF_KEY, json, "EX", seconds]]), 1);
   if (replies?.[0] !== "OK") throw new Error("keeping the platform proof could not be confirmed");
 }

@@ -1,7 +1,7 @@
 import type { Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { TIPS_WORDS, tipsWords } from "@/lib/buyer-words/tips";
-import { tipAmounts, tipBounds } from "@/lib/store-tips";
+import { type TipKept, tipAmounts, tipBounds } from "@/lib/store-tips";
 import { moneyField } from "@/lib/money";
 import { BillingCountryField } from "@/components/billing-country-field";
 
@@ -16,9 +16,10 @@ export const TIP_PROBLEMS: ReadonlySet<string> = new Set(Object.keys(TIPS_WORDS.
  * and one button to Stripe's page. Pressing Enter in the box sends what was
  * typed (app/api/store/tip reads a typed amount when nothing else is chosen).
  * The creator's own heading and line when they wrote one, the store language's
- * words when not. `problem` is what the last try came back with, if anything.
+ * words when not. `problem` is what the last try came back with, if anything, and `kept` what was given then, put
+ * back so the amount is not typed twice (WCAG 3.3.7; lib/store-tips.ts, tipKept, already checked).
  */
-export function StoreTipBox({ store, problem, rehearsal }: { store: Store; problem: string; rehearsal: boolean }) {
+export function StoreTipBox({ store, problem, rehearsal, kept }: { store: Store; problem: string; rehearsal: boolean; kept?: TipKept }) {
   const w = tipsWords(store.language);
   const said = speech(store);
   const amounts = tipAmounts(store.tips, store.currency);
@@ -49,7 +50,7 @@ export function StoreTipBox({ store, problem, rehearsal }: { store: Store; probl
             {amounts.map((amount) => (
               <label key={amount} htmlFor={`support-amount-${amount}`} className="st-option">
                 <span className="flex items-center gap-3">
-                  <input id={`support-amount-${amount}`} type="radio" name="amount" value={String(amount)} className="h-4 w-4" />
+                  <input id={`support-amount-${amount}`} type="radio" name="amount" value={String(amount)} defaultChecked={kept?.chose === String(amount)} className="h-4 w-4" />
                   <span className="font-bold tabular-nums">{said.money(amount)}</span>
                 </span>
               </label>
@@ -57,7 +58,7 @@ export function StoreTipBox({ store, problem, rehearsal }: { store: Store; probl
           </div>
           <label htmlFor="support-amount-other" className="st-option mt-2">
             <span className="flex items-center gap-3">
-              <input id="support-amount-other" type="radio" name="amount" value="other" className="h-4 w-4" />
+              <input id="support-amount-other" type="radio" name="amount" value="other" defaultChecked={kept?.chose === "other"} className="h-4 w-4" />
               <span id="support-other-label" className="font-bold">{w.other}</span>
             </span>
           </label>
@@ -68,6 +69,7 @@ export function StoreTipBox({ store, problem, rehearsal }: { store: Store; probl
             inputMode="decimal"
             autoComplete="off"
             maxLength={12}
+            defaultValue={kept?.other || undefined}
             placeholder={moneyField(amounts[amounts.length - 1] * 2 <= max ? amounts[amounts.length - 1] * 2 : max, store.currency)}
             aria-labelledby="support-other-label"
             aria-describedby={amountProblem ? "support-notice support-range" : "support-range"}

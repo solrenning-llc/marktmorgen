@@ -5,7 +5,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { createTipCheckout, tipsOpen } from "@/lib/store-tip-checkout";
-import { readTipAmount, tipAmounts } from "@/lib/store-tips";
+import { readTipAmount, tipAmounts, tipKept } from "@/lib/store-tips";
 import { consumerGate } from "@/lib/eu-vat-gate";
 import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
@@ -48,8 +48,16 @@ export async function POST(request: NextRequest) {
   }
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
-  const away = (problem: string) =>
-    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}?tip=${problem}#support`, "Cache-Control": "no-store" } });
+  // Back to the box with the amount given, so it is not typed twice (WCAG 3.3.7): only what the box itself offers goes
+  // back (lib/store-tips.ts, tipKept). Never the country: it would sit in the address bar, the browser's history and
+  // the access logs, and the field lists it to be chosen again.
+  const away = (problem: string) => {
+    const back = new URLSearchParams({ tip: problem });
+    const kept = tipKept(store, { chose: picked, other });
+    if (kept.chose) back.set("chose", kept.chose);
+    if (kept.other) back.set("other", kept.other);
+    return new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}?${back}#support`, "Cache-Control": "no-store" } });
+  };
   if (!tipsOpen(store)) return away("closed");
 
   // A chosen amount is taken only when the box offers it; "another amount", or nothing chosen, reads what was typed,

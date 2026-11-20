@@ -89,3 +89,22 @@ export function parseTips(raw: unknown): StoreTips {
     : [];
   return { on: value.on === true, heading: words(value.heading, MAX_TIPS_HEADING), line: words(value.line, MAX_TIPS_LINE), amounts };
 }
+
+/** What the support box puts back after a notice (WCAG 3.3.7): the amount chosen and the amount typed, never the country. */
+export type TipKept = { chose: string; other: string };
+
+const KEPT_TYPED = /^\d{1,7}(?:[.,]\d{1,2})?$/;
+
+/**
+ * Only what the box itself offers, so nothing else is ever drawn back (app/api/store/tip sends it, the store page reads
+ * it): one of the store's amounts or "other", and a plain typed amount. Anything else, a list or nothing is dropped.
+ */
+export function tipKept(store: { tips: StoreTips; currency: Currency }, given: { chose?: unknown; other?: unknown }): TipKept {
+  const text = (value: unknown) => (typeof value === "string" ? value.slice(0, 20).trim() : "");
+  const chose = text(given.chose);
+  const other = text(given.other);
+  return {
+    chose: chose === "other" || tipAmounts(store.tips, store.currency).map(String).includes(chose) ? chose : "",
+    other: KEPT_TYPED.test(other) ? other : "",
+  };
+}

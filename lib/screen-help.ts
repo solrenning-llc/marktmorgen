@@ -45,6 +45,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   copy: ["Can I copy a whole store into another of my stores?"],
   course: ["Can I sell a course?"],
   deals: ["Can I keep my own details about people, and track deals?"],
+  declines: ["Who handles refunds and disputes?"],
   devices: [],
   discord: ["Can my buyers get into my Discord server?"],
   disputes: ["Who handles refunds and disputes?"],

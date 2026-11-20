@@ -1,3 +1,5 @@
+import {waitForReactHandler,waitForReactHydrated} from "./react-hydration.mjs";
+
 export async function checkTemplateLibrary({browser,LOCAL,fixture,axeSource,is}){
  for(const width of [390,1280]){
  const context=await browser.newContext({viewport:{width,height:1000}});try{
@@ -34,7 +36,11 @@ export async function checkTemplateLibrary({browser,LOCAL,fixture,axeSource,is})
  await page.goto(LOCAL+"/studio/pages?store="+fixture.sid+"&product="+fixture.preservedProduct+"&template=course");
  await preservedEditorHydrated;
  await page.getByText("Your saved page was preserved. Library templates only start an empty page; use the editor to change existing content.",{exact:true}).waitFor();
- await page.getByRole("button",{name:/Keep my creator headline/}).click();
+ const keepHeadline=page.getByRole("button",{name:/Keep my creator headline/});
+ // Press only once React has hydrated the editor and owns this button: a press on the server-drawn button selects
+ // nothing, and the wait below then ran out in WebKit (common cause no. 2, #4000's merge group, template-library.mjs:40).
+ await waitForReactHydrated(page,keepHeadline);await waitForReactHandler(page,keepHeadline,"onClick");
+ await keepHeadline.click();
  // The editor selection renders asynchronously; assert the preserved value after
  // that state is observable, without changing the exact content requirement.
  await page.waitForFunction(()=>[...document.querySelectorAll("input,textarea")].some(node=>node.value==="Keep my creator headline"));

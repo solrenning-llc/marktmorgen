@@ -47,6 +47,7 @@ export const PERSON_DATA: PersonData[] = [
   // ---------------------------------------------------------------- the list and email
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
   { file: "lib/contacts.ts", how: "erased", what: "The link in your emails that unsubscribes them" },
+  { file: "lib/person-erasure.ts", how: "kept", what: "While a deletion is not finished: the names of the person's uploaded files that could not be deleted yet, under the one-way fingerprint, never the address.", why: "So deleting the same person again finds those files and deletes them. Each one goes as soon as its file is deleted or handed to the daily cleanup, and not before, so no file is left with nothing pointing to it." },
   { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. When they asked for the deletion themselves, it also notes that it was their request. Only the person can lift it, by joining your list again themselves." },
   { file: "lib/joined-stores.ts", how: "erased", via: "lib/buyer-library.ts", what: "The note that they joined your list, used to find them when they ask to be deleted everywhere" },
   { file: "lib/mail-clicks.ts", how: "erased", what: "Which links in your sequences' emails they used" },
@@ -59,7 +60,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/review-requests.ts", how: "suppression", what: "If they had pressed stop on review requests, that one-way mark stays, as their own no" },
   { file: "lib/checkout-recovery.ts", how: "suppression", what: "If they had pressed stop on checkout reminders or on the emails about a moved membership, that one-way mark stays, as their own no" },
   { file: "lib/checkout-recovery.ts", how: "erased", what: "The marks that they heard a checkout reminder about a product this week" },
-  { file: "lib/checkout-ask.ts", how: "expires", days: 1, what: "A checkout reminder they asked for in the last hour waits in its queue; it is not sent to a deleted address" },
+  { file: "lib/checkout-ask.ts", how: "erased", what: "A checkout reminder they asked for and that still waits for its time (up to three days), with their address" },
   { file: "lib/review-ask.ts", how: "none", what: "Review requests wait for their day by the order's reference, never by address, and are not sent to a deleted address" },
   { file: "lib/welcome-offer-send.ts", how: "erased", what: "When their welcome offer began, that its reminder was set, and the reminder still waiting for its hour, with their address" },
   { file: "lib/winback-send.ts", how: "erased", what: "The marks that they heard a come-back offer about a product" },

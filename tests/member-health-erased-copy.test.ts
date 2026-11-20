@@ -153,7 +153,8 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const shown = await memberHealth(store4, true);
   redis.pipeline = original;
-  is("the refresh still answers the studio", shown !== null, true);
+  // #4749: prints that do not read certify no member list, so the refresh answers nothing rather than names.
+  is("the refresh does not expose an uncertified member list", shown, null);
   is("but keeps no copy it could not check", kept(store4), null);
 
   done();

@@ -11,7 +11,8 @@
  * - forgetAssistReminderPerson (lib/assistant-reminder.ts): the checkout
  *   reminder consents, which hold the address the buyer typed. An unknown
  *   SMEMBERS also became "no checkouts", so only the index went and the
- *   consents stayed, with nothing left to find them by.
+ *   consents stayed, with nothing left to find them by. It is now one EVAL
+ *   (read, check and delete in one step, #4483), read as {deleted, members}.
  * - forgetLibraryPerson (lib/buyer-library.ts): the note that this address
  *   bought from or joined the store, in every quarter.
  * - forgetCommunityUnsub (lib/community-mail.ts): the member's unsubscribe token.
@@ -80,28 +81,31 @@ const whoKey = (statsId: string, email: string) =>
   `nl:assist:remindwho:${statsId}:${createHash("sha256").update(`nimbus-assist-remind:${statsId}:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
 
 void (async () => {
-  // forgetAssistReminderPerson: the DEL of the index and its consents.
-  for (const [label, bad] of [...BAD_ONE, ["more than the keys asked", [3]] as [string, unknown]]) {
-    replies = { SMEMBERS: () => [[SESSION]], DEL: () => bad };
-    is(`forgetAssistReminderPerson, DEL ${label}: never a finished count`, rejected(await outcome(() => forgetAssistReminderPerson(STATS, EMAIL))), true);
+  // forgetAssistReminderPerson: one EVAL reads the index, checks every member and deletes the index with its consents
+  // (#4483, so a keep landing between a read and a delete is never lost). Its {deleted, members} answer is read exactly:
+  // anything else, or a member that is not a session ({-1, members}), is never a finished count.
+  for (const [label, bad] of [
+    ...BAD_ONE,
+    ["a pair of text", [["1", "1"]]],
+    ["a pair with a fraction", [[0.5, 1]]],
+    ["a negative pair", [[-2, 1]]],
+    ["one number only", [[1]]],
+    ["three numbers", [[1, 1, 1]]],
+    ["more deleted than the index and its members", [[3, 1]]],
+    ["a member that is not a session", [[-1, 1]]],
+  ] as [string, unknown][]) {
+    replies = { EVAL: () => bad };
+    is(`forgetAssistReminderPerson, EVAL ${label}: never a finished count`, rejected(await outcome(() => forgetAssistReminderPerson(STATS, EMAIL))), true);
   }
-  for (const n of [0, 1, 2]) {
-    replies = { SMEMBERS: () => [[SESSION]], DEL: () => [n] };
+  for (const [n, members] of [[0, 0], [1, 0], [2, 1]]) {
+    replies = { EVAL: () => [[n, members]] };
     is(`forgetAssistReminderPerson: ${n} removed is ${n}`, await forgetAssistReminderPerson(STATS, EMAIL), n);
   }
-  // Its SMEMBERS: an unknown list is not "no checkouts", and nothing is deleted on it (the index is the way back).
-  for (const [label, bad] of [
-    ["null", [null]],
-    ["a number among the members", [[SESSION, 7]]],
-    ["an object", [{ 0: SESSION }]],
-    ["empty reply", []],
-  ] as [string, unknown][]) {
-    replies = { SMEMBERS: () => bad, DEL: () => [1] };
-    sent.length = 0;
-    const got = await outcome(() => forgetAssistReminderPerson(STATS, EMAIL));
-    is(`forgetAssistReminderPerson, SMEMBERS ${label}: rejected`, rejected(got), true);
-    is(`forgetAssistReminderPerson, SMEMBERS ${label}: no DEL sent`, sent.includes("DEL"), false);
-  }
+  // No separate read and delete are sent: the index, the way back to the consents, goes only inside that one step.
+  replies = { EVAL: () => [[-1, 1]] };
+  sent.length = 0;
+  await outcome(() => forgetAssistReminderPerson(STATS, EMAIL));
+  is("forgetAssistReminderPerson: no SMEMBERS or DEL of its own", sent.some((name) => name === "SMEMBERS" || name === "DEL"), false);
   // With the real stub: the index and the consent go, counted.
   replies = {};
   await redis.pipeline([["SADD", whoKey(STATS, EMAIL), SESSION], ["SET", assistRemindKey(SESSION), "{}"]]);

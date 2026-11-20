@@ -8,6 +8,7 @@ import {
   DELIVERY_ALLOWANCE_BYTES,
   FREE_PAUSE_ABOVE_BYTES,
   bytesWords,
+  monthKey,
   ownersOf,
   storesOverAllowance,
 } from "@/lib/delivery";
@@ -71,7 +72,22 @@ async function foldersOfTwoMonths(read: (month: string) => Promise<string[]>): P
  */
 export const maxDuration = 60;
 
-const TOLD = "nl:usage-watch:told";
+/**
+ * Who was told about the delivery allowance, one list per calendar month (TOLD followed by the month, YYYY-MM, the month of the
+ * over list it answers, lib/delivery.ts overKey). It was one key for all months, rewritten with every notice and its
+ * expiry renewed each time, so a store told in one month was not told the next while another store was told within
+ * 40 days (webhooks/cron audit, Claude 1, 12/11/2026).
+ */
+const TOLD = "nl:usage-watch:told:";
+const toldKey = (month: string) => `${TOLD}${month}`;
+const TOLD_SECONDS = 40 * 86_400;
+/**
+ * The one told list of all months the watch wrote before the lists were per month. It says nothing of the month a
+ * store was told in, so a store it names may already have been told this month: the first run after the change
+ * copies it into the month's own list, confirms that write, and only then deletes it (readTold). Nothing writes it
+ * any more; left alone it expires 40 days after its last write.
+ */
+const LEGACY_TOLD = "nl:usage-watch:told";
 /** One run at a time; kept past the function's time limit (maxDuration) and let go at the end. */
 const LOCK = "nl:usage-watch:lock";
 const LOCK_SECONDS = 120;
@@ -265,9 +281,12 @@ async function watchUsage(): Promise<Response> {
   // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
   // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
   // other parts above have run whatever it does, and the run answers an error only here, at the end.
+  // One date for the month's over list and the month's told list, so a run across midnight UTC reads both alike.
+  const today = new Date();
+  const toldList = toldKey(monthKey(today));
   let over: Awaited<ReturnType<typeof storesOverAllowance>>;
   try {
-    over = await storesOverAllowance();
+    over = await storesOverAllowance(today);
   } catch (error) {
     console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
     return Response.json(
@@ -288,7 +307,7 @@ async function watchUsage(): Promise<Response> {
   // was, and the part is said as unknown, as above.
   let seen: Set<string>;
   try {
-    seen = await readTold();
+    seen = await readTold(toldList);
   } catch (error) {
     console.error("usage-watch: who was already told about the delivery allowance is unknown today; nobody was written to about it", error);
     return Response.json(
@@ -328,7 +347,7 @@ async function watchUsage(): Promise<Response> {
   // time limit, a crash) wrote to some owners and recorded none, so the next day wrote to them again. Under the lock.
   // True only on exactly "OK" (CX-123 rule 24).
   const record = async (): Promise<boolean> => {
-    const replies = await redisPipeline([["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400]]).catch(() => null);
+    const replies = await redisPipeline([["SET", toldList, JSON.stringify([...new Set([...seen, ...given])]), "EX", TOLD_SECONDS]]).catch(() => null);
     return repliesFor(replies, 1)?.[0] === "OK";
   };
   // Stores not written to today because their place on the told list could not be written first: tried next run.
@@ -442,11 +461,31 @@ async function watchUsage(): Promise<Response> {
   );
 }
 
-/** The stores already told about the delivery allowance this month: nil is none; any other shape throws. */
-async function readTold(): Promise<Set<string>> {
-  const replies = repliesFor(await redisPipeline([["GET", TOLD]]), 1);
+/**
+ * The stores already told about the delivery allowance this month: the month's own list, joined with the old list of
+ * all months while that one is still there (LEGACY_TOLD), each read in its own call. The join is written to the month's list and that write is
+ * confirmed before the old list is deleted, each in its own call, and before anyone is written to: an unconfirmed
+ * write or delete throws, so the delivery part sends nothing that run and the old list is still read the next run
+ * (Codex X4 and N4 on #4502). There is no separate "migrated" mark that could be kept while the copy was lost.
+ * Nil is none; any other shape throws.
+ */
+async function readTold(key: string): Promise<Set<string>> {
+  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
   if (!replies) throw new UnknownReplyError("the stores told about the delivery allowance");
-  const raw = replies[0];
+  const month = toldNames(replies[0]);
+  const legacy = repliesFor(await redisPipeline([["GET", LEGACY_TOLD]]), 1);
+  if (!legacy) throw new UnknownReplyError("the old told list of all months");
+  if (legacy[0] === null) return month;
+  const joined = new Set([...month, ...toldNames(legacy[0])]);
+  const wrote = repliesFor(await redisPipeline([["SET", key, JSON.stringify([...joined]), "EX", TOLD_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") throw new UnknownReplyError("the copy of the old told list into this month's");
+  const removed = repliesFor(await redisPipeline([["DEL", LEGACY_TOLD]]), 1);
+  if (!removed || (removed[0] !== 0 && removed[0] !== 1)) throw new UnknownReplyError("the removal of the old told list");
+  return joined;
+}
+
+/** One told list as Redis answered it: nil is none; any other shape than a JSON list of strings throws. */
+function toldNames(raw: unknown): Set<string> {
   if (raw === null) return new Set();
   if (typeof raw !== "string") throw new UnknownReplyError("the stores told about the delivery allowance");
   let parsed: unknown;

@@ -117,6 +117,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   privacy: "The person's own data, logins and deleting, gathered for their account, not a part of the store.",
   notifications: "Which optional alert emails the owner gets, the owner's own setting, opened from the studio home.",
   companies: "The companies your buyers work at, a part of Buyers opened from its page rather than a part of the store on its own.",
+  declines: "The payments that did not go through, read from the store's Stripe account: a report for the owner, opened from the disputes review, not a part of the store.",
 };
 
 /** What the page knows about the person, the store and the deployment. */

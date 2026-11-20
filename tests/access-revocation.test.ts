@@ -27,6 +27,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAcco
 import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import { paidCourses, recordEnrollment, setBlocked } from "@/lib/learn";
 import { holdsProducts, paidForAny } from "@/lib/community-access";
+import { soldAMembership } from "@/lib/membership-access";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -143,6 +144,21 @@ async function main(): Promise<void> {
     sessions[email] = [member(`cs_test_${email.slice(0, 2)}00000000001`, club, status, email === "m3@example.com" ? NOW + 86_400 : null)];
     is(`${status}: ${opens ? "open" : "shut"}`, await open(email), opens ? [club] : []);
   }
+
+  part("A course once sold as a membership, now sold once");
+  // The creator turned the membership into a one-off sale (editProduct takes recurring: null): what was sold as a
+  // membership is still judged by its membership, never reopened to a member who left because of the product's new kind.
+  const archive = await make("Bookkeeping Archive", "99", null, "c".repeat(32));
+  const later = (await storeForEmail(OWNER))!;
+  const openLater = async (email: string) => [...(await paidCourses(later, email)).keys()].sort();
+  sessions["kim@example.com"] = [member("cs_test_kim000000001", archive, "canceled")];
+  await recordEnrollment(later, "kim@example.com", archive, NOW - 86_400);
+  is("a member who left stays shut, though the thanks page wrote it down", await openLater("kim@example.com"), []);
+  sessions["lou@example.com"] = [member("cs_test_lou000000001", archive, "active")];
+  is("a member still paying stays open", await openLater("lou@example.com"), [archive]);
+  is("the checkout is still read as a membership", soldAMembership({ recurring: null } as Parameters<typeof soldAMembership>[0], { mode: "subscription", metadata: { store: "school", product: archive } }), true);
+  is("and a payment plan is not one", soldAMembership({ recurring: null } as Parameters<typeof soldAMembership>[0], { mode: "subscription", metadata: { kind: "plan" } }), false);
+  is("nor a one-off sale", soldAMembership({ recurring: null } as Parameters<typeof soldAMembership>[0], { mode: "payment", metadata: {} }), false);
 
   part("A community");
   const ids = new Set([once, club]);

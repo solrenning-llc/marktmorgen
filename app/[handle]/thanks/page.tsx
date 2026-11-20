@@ -26,7 +26,7 @@ import { unpaidNotice } from "@/lib/checkout-return";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, chargedIn, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { canMove, chargedIn, confirmBooking, moveLink, packageOf, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
@@ -78,7 +78,8 @@ import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
-import { speech } from "@/lib/buyer-words";
+import { everyPhrase, speech } from "@/lib/buyer-words";
+import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
@@ -117,6 +118,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   declined: { always: true },
   failed: { always: false },
   checking: { always: false },
+  busy: { always: true },
   unavailable: { always: true },
   changed: { always: true },
 };
@@ -450,6 +452,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       currency: order.record.currency,
       lead: order.call.lead,
       pi: order.call.pi,
+      // A session from a package is written down with it (lib/call-packages.ts).
+      fromPackage: packageOf(order.record.metadata),
       due,
       cancel,
       origin: SITE_URL,
@@ -589,6 +593,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           cart: (order.record.metadata as Record<string, string> | null)?.cart === "yes"
             ? { offerFrom: cartOfferFrom(order.record.metadata as Record<string, string> | null), email: order.email }
             : undefined,
+          // The EU VAT gate's evidence (lib/upsell.ts, offerGate): this request's IP country and the order's billing
+          // country, read here only to decide whether the offer is drawn; never shown or kept.
+          evidence: { headers: await headers(), billing: (order.record.customer_details as { address?: { country?: unknown } } | null)?.address?.country },
         })
       : null;
   // A store switched off after a report (lib/takedown.ts) sells nothing: no offer after paying, no next step of a funnel,
@@ -633,6 +640,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const ended = order.state === "paid" && order.membership === "ended";
   // The creator's own note after paying, read only for a product that has one (lib/thanks-note.ts).
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
+  // How often a membership charges as it was bought, read from the order: a monthly one may have been paid yearly
+  // (lib/yearly-price.ts), and one charged every few months is said so, "every 3 months" (609 [WP8]), even if the
+  // product changed while the checkout was open.
+  const paidAs = order.state === "paid" && order.product.recurring ? paidEveryOf((order.record.metadata ?? {}) as Record<string, string>, order.product.recurring) : null;
+  const paidPhrase = paidAs ? everyPhrase(store, paidAs.interval, paidAs.count) : speech(store).w.every("month");
   // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
   // The first charge after a free trial or a move, as the checkout made it: the year's price when paid yearly.
@@ -843,9 +855,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                               money(introPaid.cents, order.currency),
                               introPaid.count,
                               order.product.recurring.interval,
-                              t.priceEvery(money(introPaid.regular, order.currency), speech(store).w.every(paidEvery)),
+                              t.priceEvery(money(introPaid.regular, order.currency), paidPhrase),
                             )
-                          : t.priceEvery(money(order.amount, order.currency), speech(store).w.every(paidEvery))
+                          : t.priceEvery(money(order.amount, order.currency), paidPhrase)
                         : order.plan
                           ? t.priceToday(money(order.amount, order.currency))
                           : money(order.amount, order.currency),
@@ -901,8 +913,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {canManage(store) ? (
                     <>
                       {order.endsAfter > 0
-                        ? t.renewsForSelf(speech(store).w.every(paidEvery), order.endsAfter)
-                        : t.renewsUntilSelf(speech(store).w.every(paidEvery))}
+                        ? t.renewsForSelf(paidPhrase, order.endsAfter)
+                        : t.renewsUntilSelf(paidPhrase)}
                       <Link href={`/@${store.handle}/manage`} className="font-semibold underline underline-offset-4">
                         {t.manageMembership}
                       </Link>
@@ -910,8 +922,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     </>
                   ) : (
                     order.endsAfter > 0
-                      ? t.renewsForReply(speech(store).w.every(paidEvery), order.endsAfter, store.name)
-                      : t.renewsUntilReply(speech(store).w.every(paidEvery), store.name)
+                      ? t.renewsForReply(paidPhrase, order.endsAfter, store.name)
+                      : t.renewsUntilReply(paidPhrase, store.name)
                   )}
                 </p>
               ) : null}

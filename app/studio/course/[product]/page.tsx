@@ -14,7 +14,8 @@ import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
-import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { activePlan } from "@/lib/product-extras";
+import { accessEndAhead, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
 import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
@@ -23,7 +24,7 @@ import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
-  CertificateSwitch, CourseStart,
+  CertificateSwitch, CourseAccessEnd, CourseStart,
   CourseEditor,
   GiveTriesBack,
   StudentAccess,
@@ -31,9 +32,12 @@ import {
 } from "@/components/course-editor";
 import { readListing, readTitles, visibleIds } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
+import { CourseNextStep } from "@/components/course-next-step";
+import { MAX_NEXT_STEP_LINE } from "@/lib/course-next-step-rules";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
+import { CaptionsRefundsOwed } from "@/components/captions-refunds-owed";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
@@ -84,12 +88,12 @@ export default async function StudioCoursePage({
   const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
   const streams = await streamStates(videoPaths).catch(() => ({}));
   // And the languages each one has captions in.
-  const captions = await streamCaptions(videoPaths).catch(() => ({}));
+  const captions = await streamCaptions(videoPaths).catch(() => null);
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card. A read that
-  // failed is null and is said on the page, never shown as no refund owed (CX-123 rule 30).
+  const writing = await autoWriting(videoPaths).catch(() => null);
+  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card; null when they
+  // could not be read (rule 24), so the section says so instead of hiding as if nothing were owed.
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
@@ -109,6 +113,13 @@ export default async function StudioCoursePage({
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
+  // The store's products by title, read once for both pickers below, the "Next step" (560 [AS1]) and the "More from"
+  // shelf (628 [HN4](b)) (lib/catalog.ts readTitles). Null when they could not be read: each section says so, never
+  // offering an empty list as if the store sold nothing else (rule 24).
+  const storeTitles = await readTitles(store).catch(() => null);
+  const nextChoices = storeTitles
+    ? [...storeTitles].filter(([pid]) => pid !== product.id).map(([pid, title]) => ({ id: pid, title })).sort((a, b) => a.title.localeCompare(b.title, "en"))
+    : null;
   // An unread allowance is said as unknown by every AiOn reader, never as 0 left (rule 24; lib/ai-on-value.ts).
   const aiState = aiAvailableFor(store) ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
@@ -128,7 +139,7 @@ export default async function StudioCoursePage({
   const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
   // The "More from" shelf (628 [HN4](b)): the store's listed products to pick from, the course left out, by name.
   // Null when the names could not be read: the section says so instead of an empty list (rule 24).
-  const shelfTitles = await readTitles(store).catch(() => null);
+  const shelfTitles = storeTitles;
   const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const byId = new Map(recent.comments.map((c) => [c.id, c]));
@@ -197,22 +208,9 @@ export default async function StudioCoursePage({
               We could not read whether a refund for AI captions is still waiting for Stripe. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
             </p>
           </section>
-        ) : owedRows.length ? (
-          <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
-            <h2 id="captions-refunds" className="text-base font-bold text-ink">
-              Refunds for AI captions not confirmed yet
-            </h2>
-            <ul className="mt-2 space-y-1 text-sm text-ink">
-              {owedRows.map((row) => (
-                <li key={row.id}>
-                  {row.stuck
-                    ? `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was not confirmed by Stripe, and we have stopped checking it on our own. Write to ${SUPPORT_EMAIL} about it.`
-                    : `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was asked for, and Stripe has not confirmed it yet. We check it again on our own; you do not need to do anything.`}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+        ) : (
+          <CaptionsRefundsOwed rows={owedRows} />
+        )}
         <CourseAccessCheck
           check={lessonCaptionCheck(course, streams, captions, writing)}
           productId={product.id}
@@ -228,8 +226,9 @@ export default async function StudioCoursePage({
           draft={product.hidden === true}
           folder={folder}
           streams={streams}
-          captions={captions}
-          writing={writing}
+          // The editor's own lesson Captions part still reads a missing entry as none (a leftover; the check above says unknown).
+          captions={captions ?? {}}
+          writing={writing ?? {}}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}
@@ -289,6 +288,7 @@ export default async function StudioCoursePage({
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
+            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} membership={product.recurring !== null} planOffered={activePlan(product) !== null} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
             {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (
@@ -355,6 +355,23 @@ export default async function StudioCoursePage({
               </table>
             </div>
             </>
+          )}
+        </section>
+
+        <section className="card mt-8 p-6 sm:p-8" aria-labelledby="next-step-title" data-next-step="">
+          <h2 id="next-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Next step</h2>
+          <p className="mt-2 max-w-2xl text-ink-soft">
+            Suggest one of your products for students who are ready for more. They see it on the course&apos;s page, with its
+            price and your line, and can say &quot;No thanks&quot;.
+          </p>
+          {nextChoices === null ? (
+            <p className="notice notice-error mt-4" role="status">
+              Your products could not be read just now, so the next step cannot be changed. Reload this page in a moment.
+            </p>
+          ) : nextChoices.length === 0 && !course.nextStep ? (
+            <p className="mt-4 text-sm text-ink-soft">Add another product to your store to suggest it here.</p>
+          ) : (
+            <CourseNextStep productId={product.id} current={course.nextStep ?? null} choices={nextChoices} maxLine={MAX_NEXT_STEP_LINE} />
           )}
         </section>
 

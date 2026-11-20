@@ -76,12 +76,13 @@ function centralAliases(file,root,here){
   aliases['@/lib/account-notice']=join(here,'meeting-disabled-world.ts');
  }
  if(file==='letter-members.test.ts'||file==='bv1-letter-preview.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
- if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','course-preview-free-pause.test.ts','preview-video-free-pause.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','course-preview-free-pause.test.ts','preview-video-free-pause.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts','short-link-open-avail.test.ts','short-link-open-prerev2.test.ts','short-link-open-prerev3.test.ts','short-link-open-prerev4.test.ts','short-link-open-prerev5.test.ts','short-link-open-rest-cap.test.ts','short-link-open-rest-cap2.test.ts','short-link-open-rest-cap3.test.ts','short-link-open-rest-cap4.test.ts','short-link-open-rest-cap5.test.ts','short-link-open-rest-cap6.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='numbers-link-busy.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='picture-owner-followup.test.ts'||file==='picture-door-replies.test.ts'||file==='encanto-tone-route.test.ts'||file==='picture-door-ceiling.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(file==='alt-ai-order.test.ts'||file==='alt-ai-order-page.test.ts')aliases['@/lib/blob']=join(here,'alt-ai-order-world.ts');
- if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts','studio-calendar-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(file==='deals-page-hidden-channels.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='plan-invoices.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
@@ -96,11 +97,16 @@ function centralAliases(file,root,here){
  if(file==='cron-checks-exact.test.ts')for(const name of ['email','verify-mail','verify-stripe'])aliases['@/lib/'+name]=join(here,'cron-checks-exact-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='numbers-email-claim.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats'])aliases['@/lib/'+name]=join(here,'numbers-email-claim-world.ts');
+ if(file==='numbers-email-retry.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats','chat-summary','ad-spend'])aliases['@/lib/'+name]=join(here,'numbers-email-retry-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
  if(file==='affiliate-payout-batch-route.test.ts')aliases['@/lib/studio-route']=join(here,'affiliate-payout-batch-route-world.ts');
  if(file==='plan-refund-page.test.ts'||file==='kb9-plan-withdrawal.test.ts'||file==='n-2849-plan-recovery.test.ts'||file==='kb9-plan-withdrawal-honest.test.ts'){
   aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
+  for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
+ }
+ if(file==='notify-prefs-page.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
  }
@@ -264,6 +270,7 @@ function centralAliases(file,root,here){
  if(file==='eu-who-answers.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-keys-pages-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
+ if(file==='places-totals-unknown.test.ts'){aliases['@/lib/community-page']=join(here,'places-totals-unknown-world.ts');for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'places-totals-unknown-world.ts');}
  if(file==='embed-library-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='a8-stock-unknown.proof.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-soon-pages-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}

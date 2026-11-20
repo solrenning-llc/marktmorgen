@@ -58,7 +58,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 // The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
-import { isLiveSub } from "@/lib/membership-access";
+import { liveExpanded } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { type Learner, TOKEN_PATTERN, emailKey, learnerFrom, storeKey } from "@/lib/learn";
@@ -171,6 +171,8 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   const customers = new Set<string>();
   // Whether every list read here was read to its end: a "no" is only a "no" when it was.
   let complete = true;
+  // Whether a membership came back in a shape Stripe never sends (rule 24): a "no" is not a "no" then either.
+  let unread = false;
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
@@ -195,9 +197,17 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
       // A membership opens the door while it is being paid for; a payment
       // plan is a one-off paid in parts, and counts like one.
       if (session.mode === "subscription" && meta.kind !== "plan") {
-        const sub = session.subscription as { status?: unknown } | null;
-        // The same rule as every other door a membership opens (lib/membership-access.ts).
-        if (!sub || typeof sub !== "object" || !isLiveSub(sub)) continue;
+        // The same rule as every other door a membership opens (lib/membership-access.ts): one that cannot be read is
+        // not ended, and another purchase may still open the door.
+        let live: boolean;
+        try {
+          live = liveExpanded(session.subscription);
+        } catch (error) {
+          if (!(error instanceof UnknownReplyError)) throw error;
+          unread = true;
+          continue;
+        }
+        if (!live) continue;
       }
       return true;
     }
@@ -223,6 +233,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   }
   // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
   // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
+  if (unread) throw new UnreadPurchasesError("a membership in a shape that cannot be read");
   if (!complete) throw new UnreadPurchasesError("more than one page", true);
   return false;
 }
@@ -350,6 +361,8 @@ export async function maySeeSpace(
   config: CommunityConfig,
   space: { id: string; only: string[] },
   viewer: { owner: boolean; email: string },
+  /** `strict` as holdsTicket's, for deciding who an email goes to: an answer that could not be had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
   if (viewer.owner) return true;
   // The same rule the creator's "View as a member" uses (lib/community-gate.ts).
@@ -358,7 +371,7 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v));
+  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v), options);
 }
 
 const spaceOkKey = (community: string, space: string, email: string) => `nl:cm:${community}:sp:ok:${space}:${emailKey(email)}`;
@@ -636,5 +649,10 @@ export async function forgetAccessPerson(id: string, email: string, spaceIds: st
     ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
     ["HDEL", `nl:cm:${id}:wel`, key],
   ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // DEL's and HDEL's own counts only (CX-123 rule 24): any other answer throws, so the erasure is never reported done on it.
+  const exact = repliesFor(replies, 2);
+  const removed = countOf(exact?.[0]);
+  const welcomed = countOf(exact?.[1]);
+  if (removed === null || welcomed === null) throw new UnknownReplyError("the community access answers forgotten");
+  return removed + welcomed;
 }

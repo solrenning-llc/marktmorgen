@@ -22,6 +22,8 @@ import { readReport } from "@/lib/takedown-rules";
 import { type Report, sendOwedNotice, takeDown } from "@/lib/takedown";
 import { imageUrl, type ProductImage } from "@/lib/product-image";
 import { funnelView, newUpsellKey } from "@/lib/upsell";
+import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
+import { PICTURE_DROP_QUEUE, type PictureR2Config } from "@/lib/picture-r2-copy";
 import { calls, faults, hooks, kept } from "./picture-takedown-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -31,8 +33,15 @@ type Sent = { to: string[] | string; subject: string; text: string };
 const sent: Sent[] = [];
 /** How many of the next emails the email provider refuses. */
 let mailDown = 0;
+/** The pictures' own bucket, stood in for (#4357): each DELETE sent, and the answers for the next ones (then 204). */
+const r2Deletes: string[] = [];
+const r2Answers: number[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
+  if (url.hostname.endsWith(".r2.cloudflarestorage.com")) {
+    r2Deletes.push(`${init?.method ?? "GET"} ${url.pathname.split("/").slice(-3).join("/")}`);
+    return new Response(null, { status: r2Answers.shift() ?? 204 });
+  }
   if (url.hostname === "api.resend.com" && mailDown > 0) {
     mailDown -= 1;
     return new Response(JSON.stringify({ message: "refused" }), { status: 422 });
@@ -273,7 +282,7 @@ async function main(): Promise<void> {
   const browser = newUpsellKey();
   const offerImage = async (session: string) => {
     const { store, listing } = await now(front);
-    const view = await funnelView({ store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     return [view.offer?.target.id ?? null, view.offer?.image?.path ?? null];
   };
   is("control: the offer shows that product's picture", await offerImage("cs_test_picturefunnel0001"), [target, cover.image.path]);
@@ -291,7 +300,7 @@ async function main(): Promise<void> {
   is("the funnel is accepted, its picture from a draft", draftFunnel.ok, true);
   const draftView = async (session: string) => {
     const { store, listing } = await now(draftFront);
-    const view = await funnelView({ store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     return [view.offer?.target.id ?? null, view.offer?.image?.path ?? null];
   };
   is("the offer shows the draft's picture, as before", await draftView("cs_test_picturefunnel0003"), [draftTarget, sketch.image.path]);
@@ -321,6 +330,26 @@ async function main(): Promise<void> {
   is("the owed email goes out", owed !== null && owed !== "unconfirmed", true);
   is("the published product keeps its picture's address", (await now(back.id)).listing.image?.path, back.image.path);
   is("which is still served", servedYear(await fetchPicture(back.image.path)), year);
+
+  part("The pictures' own bucket on, its delete of an old name failing: the takedown is not done until it is gone");
+  // Codex X5 and Claude 7 on #4357: a takedown said "moved" while the old name still answered from the bucket.
+  const bucket: PictureR2Config = { endpoint: "https://acc.r2.cloudflarestorage.com", bucket: "mm-pictures", origin: "https://images.example.com", key: { accessKeyId: "k".repeat(20), secretAccessKey: "s".repeat(40) } };
+  is("every press above, with the bucket off as today, sent nothing to it", r2Deletes.length, 0);
+  const mirrored = await pictured("Sticker sheet", 6);
+  await setProductHidden(OWNER, mirrored.id, true);
+  let remembered: PictureNames | null = null;
+  const remember = async (olds: PictureNames) => { remembered = olds; };
+  r2Answers.push(500);
+  const first = await withdrawProductPicture(OWNER, mirrored.id, null, remember, { r2: bucket }).then((v) => v, () => "threw");
+  is("the press throws, never says moved", first, "threw");
+  is("both old names were sent a delete, the picture's failing", r2Deletes.splice(0), [`DELETE ${mirrored.image.path}`, `DELETE ${mirrored.image.small!.path}`]);
+  is("the old names are kept for the next press", remembered, { path: mirrored.image.path, small: mirrored.image.small!.path });
+  is("and the failed one is on the bucket's list to be tried again", (await redis.pipeline([["SMEMBERS", PICTURE_DROP_QUEUE]]))[0], [mirrored.image.path]);
+  is("the file store's old names already answer not found", servedYear(await fetchPicture(mirrored.image.path)), gone);
+  const second = await withdrawProductPicture(OWNER, mirrored.id, remembered, remember, { r2: bucket }).then((v) => v, () => "threw");
+  is("the next press deletes it and says moved", second, "moved");
+  is("the list tried first, then both old names again", r2Deletes.splice(0), [`DELETE ${mirrored.image.path}`, `DELETE ${mirrored.image.path}`, `DELETE ${mirrored.image.small!.path}`]);
+  is("the list is empty", (await redis.pipeline([["SMEMBERS", PICTURE_DROP_QUEUE]]))[0], []);
 
   done();
 }

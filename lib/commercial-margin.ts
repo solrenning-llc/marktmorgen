@@ -16,6 +16,7 @@ import { CUSTOMER_TAX_REVIEW_POLICY, customerTaxScenarioMatches, customerTaxColl
 import { AI_SPEND_RULES, AUTOMATIC_AI_SPEND_CEILINGS, currentAiSpendPolicy, aiStoreCostCents, isAiSpendPolicyValid } from "@/lib/ai-spend-policy";
 import { AI_REQUEST_LIMITS, SUPPORTED_AI_MODELS } from "@/lib/ai-request-rules";
 import { AI_MONTHLY, AI_PER_MINUTE, MAX_AI_NOTES, READ_PDF_PAGES, READ_PDF_JOBS } from "@/lib/ai-rules";
+import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { VIDEO_HOURS_INCLUDED, VIDEO_CENTS_PER_HOUR_OVER } from "@/lib/watch-rules";
 import { PAID_VIDEO_HOURS, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
 import { BUYER_RESERVE_BPS, VISITS_INCLUDED, VISIT_CENTS_PER_THOUSAND_OVER, SETUP_VISITS, TRIAL_VISITS, ROOM_LIVE_PARTS, ROOM_IDLE_PARTS } from "@/lib/traffic-rules";
@@ -254,7 +255,13 @@ export function commercialMarginDataReady(review:CommercialMarginReview):boolean
  }
  // Until an authenticated plan mix is bound to this review, fund enough
  // upload allocations for any mix of the reviewed paid customer base.
- if((["creator","pro","scale"] as const).some(tier=>uploadPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.storeMicroUsd[tier]<Math.max(...SUPPORTED_AI_MODELS.map(model=>aiPolicy.requestMicroUsd[model]))))return false;
+ // A plan that publishes an AI right needs a ceiling of at least one largest
+ // request. A plan that publishes none (Store: no writing jobs, no answers)
+ // needs none: its ceiling, computed by the cost model, is 0, and every
+ // reservation against it refuses before the provider is asked (owner,
+ // 20/11/2026, decision 3 (a)).
+ const publishesAi=(tier:"creator"|"pro"|"scale")=>AI_MONTHLY[tier]+ANSWERS_MONTHLY[tier]>0;
+ if((["creator","pro","scale"] as const).some(tier=>uploadPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || (publishesAi(tier)&&aiPolicy.storeMicroUsd[tier]<Math.max(...SUPPORTED_AI_MODELS.map(model=>aiPolicy.requestMicroUsd[model])))))return false;
  return REQUIRED_MARGIN_SCENARIOS.every(key=>{
   const scenario=review.scenarios[key]??null;
   const ceiling=BASE_PLAN_REVENUE_CEILINGS[key];

@@ -14,6 +14,7 @@ import { idleSweep, readAffiliate, readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "c5b0c5b0c5b0c5b0c5b0c5b0c5b0c5b0";
@@ -82,6 +83,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", SALES, "cs_1", sale("cs_1", AFF, 10000)],
     ["SET", `nl:store:owner:${OWNER}`, JSON.stringify(store)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
 }

@@ -22,6 +22,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import type { Store } from "@/lib/store";
 import { UNIT_COST, perMegabyte, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidkept01";
@@ -100,6 +101,7 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", JSON.stringify({ id: "aaaaaaaaaaaa", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
   ]);
   const store = shop();
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
   const units = Number((rules as Record<string, unknown>).KEPT_INVOICES_STUDIO_UNITS);
 

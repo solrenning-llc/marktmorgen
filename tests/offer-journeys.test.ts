@@ -209,7 +209,7 @@ async function main(): Promise<void> {
     customer: "cus_Buyer0001",
     metadata: { store: "harbor", product: ids.Course, upsell_key: fingerprint(SECRET) },
     customer_details: { email: "buyer@example.com", address: { country: "US" } },
-    payment_intent: { id: "pi_front0001", payment_method: { id: "pm_card0001", type: "card", customer: "cus_Buyer0001" } },
+    payment_intent: { id: "pi_front0001", payment_method: { id: "pm_card0001", type: "card", customer: "cus_Buyer0001", card: { country: "US" } } },
   };
   const take = async (step: string, answer: "yes" | "no", secret = SECRET, at: Store = store) => takeUpsell({ headers: new Headers(), store: at, session: SESSION, secret, origin: "https://marktmorgen.com", step: await shownRef(at, step), answer, consent: TEST_CONSENT });
   is("another browser, without the buyer's secret, can charge nothing", (await take("offerone", "yes", "someone-else")).kind, "unavailable");

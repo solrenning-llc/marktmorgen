@@ -21,8 +21,10 @@ async function main(){
  for(const [paid,total] of [[1000,5000],[5000,1000]] as const){
   part(`Invoice paid ${paid}, expanded charge ${total}: allocation unknown`);
   invoicePaid=paid;charged=total;refunded=0;posted.length=0;
-  const answer=await refundLatePayments('acct_x8synthetic',subscription,100).then(()=> 'settled',()=> 'unknown');
-  is('the invoice is not settled on a charge with another total',answer,'unknown');
+  // Left owed and tried again, never settled (Claude 3's LOW on #4867: it no longer throws, so the plan's other late
+  // payments are still given back; tests/plan-late-refund-one-mismatch.test.ts).
+  const answer=await refundLatePayments('acct_x8synthetic',subscription,100).then((o)=> o.state,()=> 'unknown');
+  is('the invoice is not settled on a charge with another total',answer,'owed');
   is('no refund is attempted without exact allocation',posted,[]);
  }
  part('Matching charge: refund only what remains');

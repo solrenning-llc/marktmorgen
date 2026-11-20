@@ -280,7 +280,10 @@ export function assistantPlanOf(subscription: Record<string, unknown>, disputedA
   const cancelAt = typeof subscription.cancel_at === "number" ? subscription.cancel_at : 0;
   const cancelsAtEnd = subscription.cancel_at_period_end === true || cancelAt > 0;
   const period = typeof start === "number" && typeof end === "number" && end > start ? { start, end: cancelAt && cancelAt < end ? cancelAt : end, renews: !cancelsAtEnd } : null;
-  return { subscriptionId: id, active: subscription.status === "active" && !disputedAt, period, cancelsAtEnd, disputedAt };
+  // Ended only on Stripe's own word: canceled, incomplete_expired, or a dispute that ends it here (Codex T on #4202).
+  // past_due, unpaid and any other state stay not ended, so a store holding one is not deleted under it.
+  const terminal = Boolean(disputedAt) || subscription.status === "canceled" || subscription.status === "incomplete_expired";
+  return { subscriptionId: id, active: subscription.status === "active" && !disputedAt, ...(terminal ? { terminal: true } : {}), period, cancelsAtEnd, disputedAt };
 }
 
 /** Reads a returning checkout session: it must be an add-on for this very store, on this store's own customer. */
@@ -393,7 +396,8 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     return (await setAssistantPlan(storeRef(store), plan)) ?? store;
   } catch (error) {
     if (error instanceof BillingError && error.status === 404) {
-      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false })) ?? store;
+      // Gone at Stripe: ended for good, so it no longer holds its store.
+      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false, terminal: true })) ?? store;
     }
     console.error("reading a store's add-on failed", error);
     return store;

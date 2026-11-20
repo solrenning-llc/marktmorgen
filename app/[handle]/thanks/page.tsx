@@ -593,6 +593,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           cart: (order.record.metadata as Record<string, string> | null)?.cart === "yes"
             ? { offerFrom: cartOfferFrom(order.record.metadata as Record<string, string> | null), email: order.email }
             : undefined,
+          // The EU VAT gate's evidence (lib/upsell.ts, offerGate): this request's IP country and the order's billing
+          // country, read here only to decide whether the offer is drawn; never shown or kept.
+          evidence: { headers: await headers(), billing: (order.record.customer_details as { address?: { country?: unknown } } | null)?.address?.country },
         })
       : null;
   // A store switched off after a report (lib/takedown.ts) sells nothing: no offer after paying, no next step of a funnel,

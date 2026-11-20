@@ -294,7 +294,8 @@ async function erasedOf(store: Store, members: MemberRow[]): Promise<Set<string>
 async function keepCopy(snapshot: Store, health: Health): Promise<Health | null> {
   // A snapshot with no list id (a store from before lists, or one read before an erasure in another request gave it
   // one) has its list read fresh (lib/store-readings.ts, listForNaming: the record read again, a list made for a
-  // store that truly has none, tried at most once a UTC day and priced in the store-readings line), so the prints are
+  // store that truly has none, tried at most once a UTC day and priced in the store-readings line; the day's try mark,
+  // one SET NX whether or not the try is this refresh's, LIST_TRY_COMMANDS in the studio line), so the prints are
   // checked against the namespace an erasure would have written (Claude 3's and Claude 2's LOW on #4914). None to be
   // had: no print can be checked, so no copy naming a person is kept or answered from this snapshot.
   let store = snapshot;

@@ -14,8 +14,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "@/lib/store";
-import { HELD_DAYS, approveHeld, holdComment, holdPost, removeHeld, storesWithHeld } from "@/lib/community-approval";
-import { NOTICE_STORES_PER_RUN, heldNoticeEmail, noticeHeldStores } from "@/lib/community-held-notice";
+import { HELD_DAYS, HELD_WAITING_COMMANDS, approveHeld, holdComment, holdPost, removeHeld, storesWithHeld } from "@/lib/community-approval";
+import { NOTICE_STORES_PER_RUN, NOTICE_VISIT_COMMANDS, heldNoticeEmail, noticeHeldStores } from "@/lib/community-held-notice";
 import { createPost, CREATOR } from "@/lib/community";
 import { EMAIL_SITES } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -307,6 +307,61 @@ async function main(): Promise<void> {
   is("the run that could not put the store back throws", lostThrew, true);
   is("the next run finds the store again, from the list", await storesWithHeld(t5Late + 60), [turn[0].sid]);
   is("and its creator is told", await shortRun(t5Late + 120), "creator0@example.test");
+
+  part("The daily visit only reads the queue: a fixed handful of commands, nothing swept or written there");
+  // Claude 2's MEDIUM on #3033: the visit counted the queue with heldQueue, which first swept up to 50 expired items
+  // (each a note and maybe a picture deleted) and claimed stale entries, none of it priced. It now reads only.
+  redis.clear();
+  stores = new Map<string, Store>([[SID, creatorStore()]]);
+  const t6 = t0 + 200 * DAY;
+  const due = await holdPost(id, post(ada, "Waited too long"), room, t6);
+  // Held two days later, so the later holds' own sweep (HOLD_SWEEP) finds nothing due yet.
+  const live = await holdPost(id, post(bob, "Waiting"), room, t6 + 2 * DAY);
+  const madeLive = await createPost(id, { space: SPACE, author: CREATOR, title: "", text: "Hello", img: null, kind: "post", poll: null }, ROOM);
+  if (!madeLive.ok) throw new Error("not published");
+  const liveComment = await holdComment(id, { post: madeLive.post.id, space: SPACE, parent: "", author: ada, text: "A comment" }, room, t6 + 2 * DAY);
+  if (!due.ok || !live.ok || !liveComment.ok) throw new Error("not held");
+  const visitAt = t6 + (HELD_DAYS + 1) * DAY;
+  const queueKey = `nl:cm:${id}:ap:q`;
+  const queuedBefore = await redis.pipeline([["ZCARD", queueKey]]);
+  let sentCommands: string[][] = [];
+  const realVisit = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    sentCommands.push(...commands.map((c) => c.map(String)));
+    return realVisit(commands);
+  };
+  outbox = [];
+  const visited = await noticeHeldStores({ now: ms(visitAt), until: ms(visitAt) + 60_000, load, sendEmail: sendEmail as never }).finally(() => {
+    redis.pipeline = realVisit;
+  });
+  is("the creator is told what still waits, the expired one left out", [visited.sent, outbox[0]?.subject], [1, "1 post and 1 comment are waiting for your approval"]);
+  const onQueue = sentCommands.filter((c) => c[1] === queueKey || c[0] === "MGET");
+  is("the queue is read with one ZRANGEBYSCORE and one MGET, and nothing else", onQueue.map((c) => c[0]), ["ZRANGEBYSCORE", "MGET"]);
+  is("that is HELD_WAITING_COMMANDS", onQueue.length, HELD_WAITING_COMMANDS);
+  const perStore = sentCommands.filter((c) => !["nl:cm:ap:stores", "nl:cm:ap:turns"].includes(c[1]) || (c[0] === "ZADD" && c[1] === "nl:cm:ap:turns"));
+  is("the store's whole visit is NOTICE_VISIT_COMMANDS: the count, the day's mark and its turn passed", [perStore.length, perStore.length <= NOTICE_VISIT_COMMANDS], [NOTICE_VISIT_COMMANDS, true]);
+  is("no sweep, claim, note or deletion from the daily job", sentCommands.some((c) => ["ZREM", "DEL", "HDEL", "LPUSH", "RPUSH"].includes(c[0])), false);
+  is("the expired item is still on the queue, for the sweeps that already run", (await redis.pipeline([["ZCARD", queueKey]]))[0], queuedBefore[0]);
+  sentCommands = [];
+
+  part("A hold, with the two list writes of unit 2 and its own sweep at its most, stays inside one buyer action");
+  // Claude 2's note on #3033: a hold adds two ZADDs (the store on the list and in the line). The buyer-actions line
+  // prices each action at 100 commands besides its own take (tests/plan-cost-registry.ts, UNIT_COST.buyer).
+  redis.clear();
+  const t7 = t0 + 300 * DAY;
+  for (let n = 0; n < 6; n += 1) await holdPost(id, post(n % 2 ? ada : bob, `Old ${n}`), room, t7 + n);
+  const holdAt = t7 + (HELD_DAYS + 1) * DAY;
+  let holdCommands = 0;
+  const realHold = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    holdCommands += commands.length;
+    return realHold(commands);
+  };
+  const afterOld = await holdPost(id, post(ada, "After the old ones ran out"), room, holdAt).finally(() => {
+    redis.pipeline = realHold;
+  });
+  is("held", afterOld.ok, true);
+  is("its commands, sweep and list writes included, are inside one buyer action's 100", [holdCommands > 0, holdCommands <= 100], [true, true]);
 
   part("Wired into the daily job, and its email registered");
   const cron = read("app/api/cron/courses/route.ts");

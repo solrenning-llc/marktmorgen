@@ -73,7 +73,7 @@ test("a country without a reviewed rule is unknown, which refuses, whatever its 
     assert.deepEqual(assessOtherCountry(country, swiss(0), NOW), UNKNOWN, String(country));
     assert.deepEqual(assessOtherCountry(country, ledgerEvidence("ca-specified-supplies", "CA", "CAD", 0), NOW), UNKNOWN, String(country));
   }
-  assert.deepEqual(Object.keys(OTHER_COUNTRY_RULES).sort(), ["CA", "CH", "NO"]);
+  assert.deepEqual(Object.keys(OTHER_COUNTRY_RULES).sort(), ["CA", "CH", "NO", "TW"]);
 });
 
 test("the evidence's rule is read from own data once, and an accessor is never executed", () => {
@@ -105,7 +105,7 @@ test("the rules cannot be changed at run time, and each names its official sourc
     assert.ok(Object.isFrozen(rule), country);
     const threshold = TAX_THRESHOLD_RULES[rule.ruleId];
     assert.ok(Object.isFrozen(threshold), country);
-    assert.match(threshold.source, /^https:\/\/www\.(canada\.ca|skatteetaten\.no|estv\.admin\.ch)\//, country);
+    assert.match(threshold.source, /^https:\/\/(www\.canada\.ca|www\.skatteetaten\.no|www\.estv\.admin\.ch|law-out\.mof\.gov\.tw)\//, country);
     assert.match(threshold.checkedOn, /^\d{4}-\d{2}-\d{2}$/, country);
   }
   // Reflect.set answers false on a frozen object in strict and sloppy code alike (Codex X5's LOW on #4890).

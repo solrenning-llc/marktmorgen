@@ -22,6 +22,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import type { Store } from "@/lib/store";
 import { UNIT_COST, perMegabyte, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidkept01";
@@ -100,14 +101,17 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", JSON.stringify({ id: "aaaaaaaaaaaa", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
   ]);
   const store = shop();
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
   const units = Number((rules as Record<string, unknown>).KEPT_INVOICES_STUDIO_UNITS);
 
   part("What reading and writing back the kept invoices costs, in studio requests");
   const kept = 2 * BOOK_INVOICES_KEPT_BYTES;
-  const cost = request("heavy", 2, kept) + perMegabyte(kept);
+  // The GET of the kept invoices, and their write back: one script of four commands (EVAL, EXISTS, HGET, SET) since
+  // it is fenced by the store's erasure (Codex L-20261119-1003, lib/store-live-cache.ts setWhileStoreLive).
+  const cost = request("heavy", 5, kept) + perMegabyte(kept);
   is("a whole number of studio requests, at least one", Number.isSafeInteger(units) && units >= 1, true);
-  is("worth at least the two commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
+  is("worth at least the five commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

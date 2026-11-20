@@ -79,6 +79,8 @@ export async function POST(request: NextRequest) {
     if (action === "abort") {
       if (!who) return no("signed_out", 401);
       const given = await abortSubmissionDoor({ ...where, data: store }, text(body.pathname, 400), undefined, now);
+      if (given === "tries") return no("upload_tries", 409);
+      if (given === "busy") return no("upload_busy", 409);
       return given === "done" ? yes({}) : given === "unknown" ? no("unknown", 404) : no("files_unavailable", 503);
     }
 
@@ -134,6 +136,9 @@ export async function POST(request: NextRequest) {
     if (!(await takeBuyerAction(store))) return no("resting", 503);
     const closed = await closeSubmissionDoor({ ...where, data: store, note: body.note }, pathname, etags, now);
     if (!closed.ok) {
+      // The vault's refusals (lib/vault.ts, as app/api/store/vault/route.ts answers them): the upload is still open.
+      if (closed.reason === "tries") return no("upload_tries", 409);
+      if (closed.reason === "busy") return no("upload_busy", 409);
       const status = { unknown: 404, invalid: 400, unavailable: 503, off: 404, note: 400, full: 409 }[closed.reason];
       return no(closed.reason === "unavailable" ? "files_unavailable" : closed.reason, status);
     }

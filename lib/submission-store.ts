@@ -548,7 +548,7 @@ export type KeptSubmission = Submission & { path: string; who: string; folder: s
 
 export type DoorClosed =
   | { ok: true; submission: KeptSubmission }
-  | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" | "note" | "full" };
+  | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" | "note" | "full" | "tries" | "busy" };
 
 /**
  * Closes the buyer's upload: the pieces joined and the file measured by the
@@ -667,10 +667,15 @@ export async function abortSubmissionDoor(
   pathname: string,
   steps: DoorSteps = VAULT_STEPS,
   nowSeconds = Math.floor(Date.now() / 1000),
-): Promise<"done" | "unknown" | "unavailable"> {
+): Promise<"done" | "unknown" | "unavailable" | "tries" | "busy"> {
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return "unknown";
-  if (!(await steps.abortReservedVault(pathname))) return "unavailable";
+  // Only the vault's own true is a cancel (lib/vault.ts abortVaultUpload): "busy" (another finish or cancel of the
+  // upload under way) and "tries" (past the requests one upload may make) cancelled nothing, so the place and the
+  // door stay, as they do when the vault could not confirm.
+  const aborted = await steps.abortReservedVault(pathname);
+  if (aborted === "busy" || aborted === "tries") return aborted;
+  if (aborted !== true) return "unavailable";
   const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
   await givePlace(live, door.id);
   const replies = repliesFor(await redisPipeline([["DEL", doorKey(pathname)]]), 1);

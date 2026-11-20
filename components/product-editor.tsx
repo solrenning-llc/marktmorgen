@@ -47,6 +47,7 @@ import {
 import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
+import { ProductIdeas } from "@/components/product-ideas";
 import {
   ACCEPT_ATTRIBUTE,
   MAX_FILE_BYTES,
@@ -232,7 +233,7 @@ type Draft = {
   about: string;
 };
 
-const EMPTY: Draft = {
+export const EMPTY: Draft = {
   title: "",
   summary: "",
   price: "",
@@ -340,8 +341,8 @@ async function send(
   }
 }
 
-/** The form used both for adding something and for changing it. */
-function ProductForm({
+/** The form used both for adding something and for changing it (exported for tests/product-form-ai-holds.test.ts). */
+export function ProductForm({
   draft,
   setDraft,
   busy,
@@ -373,8 +374,14 @@ function ProductForm({
   const id = product?.id ?? "new";
   // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
   const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
-  // The checks under an AI draft of the descriptions (756 [STN3]): null while no draft is waiting.
-  const [aiChecks, setAiChecks] = useState<boolean[] | null>(null);
+  // The checks under each AI draft (756 [STN3]), one set per source, null while that source has no draft waiting: the
+  // description assist's (short and long description) and the ideas box's (name and short description). Kept apart, so
+  // neither source's checks release the other's draft, and putting an idea back clears only the idea's own (Claude 1's
+  // MEDIUM on #3441).
+  const [describeChecks, setDescribeChecks] = useState<boolean[] | null>(null);
+  const [ideaChecks, setIdeaChecks] = useState<boolean[] | null>(null);
+  // The save waits while any drawn review is incomplete.
+  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks);
   const [aiHeld, setAiHeld] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
@@ -440,7 +447,7 @@ function ProductForm({
         event.preventDefault();
         if (busy) return;
         // An AI draft is saved only once the creator has checked it; the focus goes to the first check left.
-        const held = aiDraftHold(aiChecks);
+        const held = aiHold;
         setAiHeld(held);
         if (held) {
           const first = formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)");
@@ -476,6 +483,16 @@ function ProductForm({
         />
       </div>
 
+      {!product ? (
+        <ProductIdeas
+          title={draft.title}
+          summary={draft.summary}
+          titleFieldId={`product-title-${id}`}
+          onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
+          onReviewChange={setIdeaChecks}
+        />
+      ) : null}
+
       <AiAssist<{ summary: string; about: string }>
         title="Write the description with AI"
         hint="A few words in your own voice: what it is, who it is for, what is inside. A draft of both descriptions below is written from them."
@@ -497,7 +514,7 @@ function ProductForm({
                     : "download",
         })}
         onResult={(value) => setDraft({ ...draft, summary: value.summary, about: value.about })}
-        onReviewChange={(checked) => setAiChecks(checked ? [true, true, true] : freshChecks())}
+        onReviewChange={(checked) => setDescribeChecks(checked ? [true, true, true] : freshChecks())}
         done="Both descriptions below are filled in. Read them, change anything, then save."
       />
 
@@ -918,7 +935,7 @@ function ProductForm({
           {error}
         </p>
       ) : null}
-      {aiHeld && aiDraftHold(aiChecks) ? (
+      {aiHeld && aiHold ? (
         <p className="notice notice-error" role="alert">
           {aiHeld}
         </p>
@@ -1936,10 +1953,10 @@ export function ProductEditor({
   ai?: { on: boolean; left: number };
   /** Per course product, the comments under its lessons since its studio page was last opened. */
   newComments?: Record<string, number>;
-  /** Per product with a waitlist, where it stands (lib/waitlist.ts). */
-  waitlists?: Record<string, WaitlistView>;
-  /** Each product's pre-orders, when it takes or took any (lib/preorders.ts). */
-  preorders?: Record<string, PreorderView>;
+  /** Per product with a waitlist, where it stands (lib/waitlist.ts); null when they could not be read. */
+  waitlists?: Record<string, WaitlistView> | null;
+  /** Each product's pre-orders, when it takes or took any (lib/preorders.ts); null when they could not be read. */
+  preorders?: Record<string, PreorderView | "unread"> | null;
   /** The store's postal address for email, offered for a launch email's foot. */
   mailAddress?: string;
   /** The store's color, letters, name and language, for the cover maker (components/cover-maker.tsx). */
@@ -1973,6 +1990,32 @@ export function ProductEditor({
     else if (was !== null && !adding) requestAnimationFrame(() => document.getElementById(`product-edit-${was}`)?.focus());
   }, [editingId, adding]);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // A card's Remove gives way to its question (WCAG 2.4.3, 4.1.3), as the options editor's does: the focus goes onto
+  // the question, read at once; back to that product's Remove on Keep it; once the product is removed, to Add
+  // something to sell when it can take it, else to the next product's Edit.
+  const productRemoveAsked = useRef<HTMLParagraphElement>(null);
+  const productRemovedLast = useRef<string | null>(null);
+  const productRemoveKept = useRef(false);
+  useEffect(() => {
+    const was = productRemovedLast.current;
+    productRemovedLast.current = removingId;
+    if (was === removingId) return;
+    if (removingId !== null) {
+      productRemoveAsked.current?.focus();
+      return;
+    }
+    if (was === null) return;
+    if (productRemoveKept.current) {
+      productRemoveKept.current = false;
+      requestAnimationFrame(() => document.getElementById(`product-remove-${was}`)?.focus());
+      return;
+    }
+    requestAnimationFrame(() => {
+      const add = document.getElementById("product-add") as HTMLButtonElement | null;
+      if (add && !add.disabled) add.focus();
+      else document.querySelector<HTMLElement>(`[id^="product-edit-"]:not(#product-edit-${was})`)?.focus();
+    });
+  }, [removingId]);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   // The form as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
   const [opened, setOpened] = useState<Draft>(EMPTY);
@@ -2250,6 +2293,7 @@ export function ProductEditor({
         </div>
       ) : (
         <button
+          id="product-add"
           type="button"
           disabled={full || !editorReady}
           onClick={startAdding}
@@ -2555,6 +2599,7 @@ export function ProductEditor({
                   ) : null}
                   {removingId === product.id ? null : (
                     <button
+                      id={`product-remove-${product.id}`}
                       type="button"
                       onClick={() => {
                         setRemovingId(product.id);
@@ -2569,7 +2614,7 @@ export function ProductEditor({
 
                 {removingId === product.id ? (
                   <div className="mt-3 rounded-2xl border-2 border-pink-brand/30 bg-white p-4">
-                    <p className="text-sm text-ink-soft">
+                    <p ref={productRemoveAsked} tabIndex={-1} className="text-sm text-ink-soft">
                       Remove{" "}
                       <strong className="text-ink">{product.title}</strong> from
                       your store. Its files, picture, description, page, reviews
@@ -2577,24 +2622,37 @@ export function ProductEditor({
                       brought back; sales already made stay in your Stripe account.
                       {product.hidden ? null : " To take it off your store but keep it, unpublish it instead."}
                     </p>
+                    {/* A removal the server refused is said here, where the question stays open: the page's own error line
+                        is drawn only while no question is open (WCAG 3.3.1, 4.1.3). */}
+                    {error ? (
+                      <p className="notice notice-error mt-3" role="alert">
+                        {error}
+                      </p>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        aria-busy={busy} disabled={busy}
-                        onClick={() =>
+                        aria-busy={busy}
+                        // Never turned off under the focus while it sends (WCAG 2.4.3): a press then does nothing.
+                        aria-disabled={busy || undefined}
+                        onClick={() => {
+                          if (busy) return;
                           run(
                             { action: "remove", id: product.id },
                             () => setRemovingId(null),
                             "Product removed.",
-                          )
-                        }
+                          );
+                        }}
                         className="btn btn-danger-solid btn-sm"
                       >
                         {busy ? "Removing…" : "Yes, remove it"}
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRemovingId(null)}
+                        onClick={() => {
+                          productRemoveKept.current = true;
+                          setRemovingId(null);
+                        }}
                         className="btn btn-ghost btn-sm"
                       >
                         Keep it
@@ -2623,9 +2681,11 @@ export function ProductEditor({
                 {product.priceCents > 0 && !product.hidden ? (
                   <WaitlistPanel
                     productId={product.id}
-                    initial={waitlists[product.id] ?? null}
+                    initial={waitlists?.[product.id] ?? null}
+                    waitlistUnread={waitlists === null}
                     suggestedAddress={mailAddress}
-                    preorders={preorders[product.id] ?? null}
+                    preorders={((view) => (view === "unread" ? null : view ?? null))(preorders?.[product.id])}
+                    preordersUnread={preorders === null || preorders?.[product.id] === "unread"}
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}

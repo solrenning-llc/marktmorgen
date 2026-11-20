@@ -1242,6 +1242,42 @@ export async function storeForEmailSeen(
 }
 
 /**
+ * Whether an address has a store under it, by one EXISTS of its owner key and
+ * nothing read: true, false, or null when the answer could not be read
+ * (lib/inbound-mail.ts, the announcements' reserve for a From that has a store).
+ */
+export async function ownsAStore(email: string): Promise<boolean | null> {
+  if (!email || !isRedisConfigured()) return null;
+  try {
+    const [found] = await redisPipeline([["EXISTS", await ownerKey(email)]]);
+    return found === 1 ? true : found === 0 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The most store names one inbound announcement is looked up by, in its one MGET (lib/inbound-mail.ts). */
+export const STORE_NAMES_LOOKED_UP = 20;
+
+/**
+ * Whether any of these names is a store's, by one MGET of their name keys and no store record read (lib/inbound-mail.ts:
+ * support@ announced beside an address on the creators' domain; Codex P's review of #3481, HIGH). A name that is no
+ * store name at all (handleProblem) is not looked up; a name let go (RELEASED_PREFIX) leads to no store. At most
+ * STORE_NAMES_LOOKED_UP names, the first ones. False with nothing to look up, and then no command. Any reply not in
+ * MGET's exact shape (one reply, a list of one string or nil per name) throws UnknownReplyError (rule 24): unknown is
+ * never "no store".
+ */
+export async function anyStoreNamed(handles: readonly string[]): Promise<boolean> {
+  const names = [...new Set(handles.map((one) => one.toLowerCase()))].filter((one) => !handleProblem(one)).slice(0, STORE_NAMES_LOOKED_UP);
+  if (names.length === 0) return false;
+  if (!isRedisConfigured()) throw new UnknownReplyError("store names (no database)");
+  const read = repliesFor(await redisPipeline([["MGET", ...names.map(handleKey)]]), 1);
+  const values = read ? repliesFor(read[0], names.length) : null;
+  if (!values || !values.every((value) => value === null || typeof value === "string")) throw new UnknownReplyError("store names (MGET)");
+  return values.some((value) => typeof value === "string" && value !== "" && !value.startsWith(RELEASED_PREFIX));
+}
+
+/**
  * A store's record read exactly (rule 24): the store, or null only on Redis's
  * own nil. Any other reply, or a record that does not parse, throws
  * UnknownReplyError, never "no store": the closing walk never takes a deleted

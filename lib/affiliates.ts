@@ -4456,7 +4456,6 @@ export async function noteSession(
   const opened = exactSeconds(session.created);
   const at = opened ?? Math.floor(Date.now() / 1000);
   const orderProducts = [meta.product ?? "", ...bumpsFromMeta(meta).map((b) => b.id)].filter(Boolean);
-  const paidAt = await paidForPartners(store, session, opened, at, base, orderProducts, partners);
 
   // Partners first, and whatever happens next. A partner shares in the
   // product, so how the buyer arrived is beside the point — and this is the
@@ -4472,6 +4471,7 @@ export async function noteSession(
     if (partnerFailure) throw partnerFailure.error;
   };
   try {
+    const paidAt = await paidForPartners(store, session, opened, at, base, orderProducts, partners);
     const lines = orderLines(meta, session.amount_subtotal);
     const shipping = lines ? shippingOf(session.total_details, base, meta.ship === "yes") : undefined;
     await notePartners(
@@ -4600,30 +4600,31 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
   // is unknown and thrown, so the five-minute job reads its payment again with the charge (lib/upsell.ts creditAgain).
   // The partners are read once, for both the end's check and the shares, and only when that check needs them.
   const paid = { payment_intent: pi } as SessionLike;
-  const partners = paidAtOf(paid) === null && amount > 0 && meta.product && store.statsId && isRedisConfigured() ? await listPartners(store) : undefined;
-  const paidAt = await paidForPartners(store, paid, made, at, amount, meta.product ? [meta.product] : [], partners);
-
   // A partner shares in the product whether or not an affiliate's link was
   // involved, and an offer taken after paying is a sale of a product. A partner step that fails is thrown once the
   // affiliate's step is done, so the job credits the offer again (creditCharge); both writes are once (HSETNX).
   let partnerFailure: { error: unknown } | null = null;
-  await notePartners(store, {
-    ref: pi.id,
-    pi: pi.id,
-    at: paidAt,
-    product: meta.product ?? "",
-    title: `${(meta.title ?? "").slice(0, 180)} (added after paying)`,
-    // A one-click charge never carries tax: the whole amount is the base.
-    base: amount,
-    total: amount,
-    currency,
-    buyer,
-  }, partners).catch((error) => {
+  try {
+    const partners = paidAtOf(paid) === null && amount > 0 && meta.product && store.statsId && isRedisConfigured() ? await listPartners(store) : undefined;
+    const paidAt = await paidForPartners(store, paid, made, at, amount, meta.product ? [meta.product] : [], partners);
+    await notePartners(store, {
+      ref: pi.id,
+      pi: pi.id,
+      at: paidAt,
+      product: meta.product ?? "",
+      title: `${(meta.title ?? "").slice(0, 180)} (added after paying)`,
+      // A one-click charge never carries tax: the whole amount is the base.
+      base: amount,
+      total: amount,
+      currency,
+      buyer,
+    }, partners);
+  } catch (error) {
     console.error("noting a partner's share failed; the offer is credited again by the job", error);
     partnerFailure = { error };
-  });
+  }
   const settle = (): void => {
-    if (partnerFailure) throw (partnerFailure as { error: unknown }).error;
+    if (partnerFailure) throw partnerFailure.error;
   };
 
   // An offer on an order whose link was pending follows that order once it is credited (owner's decision 6).

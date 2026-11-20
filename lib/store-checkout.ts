@@ -11,10 +11,11 @@ import { everyOf } from "@/lib/product-recurring";
 import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
+import { askBillingAddress } from "@/lib/billing-address";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
 import { rememberPlan } from "@/lib/plan-remember";
 import { currentMeta } from "@/lib/tier-rules";
@@ -58,11 +59,13 @@ import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments }
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
 import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
 import { readMoves } from "@/lib/call-records";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { isLive, membershipStatus, soldAMembership } from "@/lib/membership-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { purchaseRefunded } from "@/lib/refunds";
 import { BUMP_KEYS, type BumpKey, MIN_BUNDLE_ITEMS, bumpsFromMeta, bundleFromMeta, bundleMeta, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf } from "@/lib/bundles";
@@ -72,6 +75,7 @@ import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
+import { type RiskLevel, riskLevelOf } from "@/lib/payment-risk";
 import { type UnpaidProof, unpaidProof } from "@/lib/checkout-return";
 
 /**
@@ -413,6 +417,9 @@ export async function createCheckout(
   });
 
   if (recurring) body.set("subscription_data[billing_mode][type]", "classic");
+  // Every sale here charges (a free product is never sold, canSellProduct; a trial still keeps the card for the
+  // payments): the buyer's full billing address, 790 [IV2]. Set before the confirmation digest below binds the body.
+  askBillingAddress(body);
 
   // Which option was bought decides which file is handed over later, so it
   // travels with the charge rather than being worked out again afterward.
@@ -906,7 +913,8 @@ export async function createCheckout(
       for (const key of [...body.keys()]) {
         if (key.startsWith("line_items[0][price_data]")) body.delete(key);
       }
-      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh));
+      // Kept only while the store is live (lib/store-live-cache.ts, Codex G-1346).
+      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh, (key, id, seconds) => setWhileStoreLive(store, key, id, seconds)));
       body.set("metadata[pwyw]", "yes");
     }
     // Set just before the request, because Stripe counts its minimum from then.
@@ -984,6 +992,8 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
+  // Our record that this checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+  await holdCheckout(store, session.id, admitted);
   // A payment plan, or a membership that ends after a set number of payments, is written down before the buyer
   // leaves, so the plans job gives it its end whether or not they come back from paying: here, whichever door opened
   // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
@@ -1229,6 +1239,8 @@ export async function readOrder(
   let membership: "live" | "ended" | null = null;
   if (soldAMembership(product, { mode: session.mode, metadata })) {
     try {
+      // A paid subscription checkout always has its subscription: none at all is an answer not understood (rule 24).
+      if (session.subscription === null || session.subscription === undefined) throw new UnknownReplyError("a checkout's membership");
       membership = isLive(await membershipStatus(store, session.subscription)) ? "live" : "ended";
     } catch (error) {
       console.error("reading a membership failed", error);
@@ -1306,6 +1318,12 @@ export type Sale = {
   shipTo?: ShipAddress | null;
   /** And when it was marked as shipped (lib/shipments.ts); null while it has not been. */
   shipped?: Shipped | null;
+  /**
+   * The risk Stripe gave the charge (lib/payment-risk.ts), read off the charge
+   * expanded on the same read; "not_available" when it cannot be read, never
+   * "normal". Null only for a free trial, which charged nothing at checkout.
+   */
+  risk: RiskLevel | null;
 };
 
 // Each state is its own member so a check on one narrows the rest away;
@@ -1326,7 +1344,20 @@ type SessionRecord = {
   metadata?: Record<string, string> | null;
   customer_details?: { email?: unknown } | null;
   custom_fields?: unknown;
+  payment_intent?: unknown;
 };
+
+/**
+ * The charge on an expanded payment, or null when the payment was not
+ * expanded or is not one: only an object that says it is a payment_intent
+ * (rule 24; Codex C2 on #3647).
+ */
+function chargeOfPayment(paymentIntent: unknown): unknown {
+  return paymentIntent && typeof paymentIntent === "object" && !Array.isArray(paymentIntent)
+    && (paymentIntent as { object?: unknown }).object === "payment_intent"
+    ? (paymentIntent as { latest_charge?: unknown }).latest_charge
+    : null;
+}
 
 /**
  * What this store has sold.
@@ -1348,7 +1379,8 @@ export async function listSales(store: Store): Promise<SaleList> {
     page = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}`,
+      // Each payment's charge comes on the same read, for its risk (647 [WG7]).
+      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&expand[]=data.payment_intent.latest_charge&expand[]=data.payment_intent.latest_charge.review`,
     );
   } catch (error) {
     console.error("listing orders failed", error);
@@ -1377,6 +1409,7 @@ export async function listSales(store: Store): Promise<SaleList> {
       const paidAt = typeof row.created === "number" ? row.created : 0;
       const known = row.metadata?.product ? { title: titles.get(row.metadata.product) } : null;
       const email = row.customer_details?.email;
+      const trial = Number(row.metadata?.trial_days) > 0;
       return {
         reference: typeof row.id === "string" ? row.id : "",
         // The title recorded on the charge wins, because it is what the buyer
@@ -1395,8 +1428,9 @@ export async function listSales(store: Store): Promise<SaleList> {
         isCall: row.metadata?.kind === "call",
         oneTime: row.mode === "payment",
         answers: readAnswers(row),
-        trial: Number(row.metadata?.trial_days) > 0,
+        trial,
         isTip: row.metadata?.kind === "tip",
+        risk: trial ? null : riskLevelOf(chargeOfPayment(row.payment_intent)),
         shipTo: wasShipped(row) ? (shippingAddressOf(row as Record<string, unknown>) ?? { name: "", lines: [], country: "" }) : null,
         shipped: null,
       };
@@ -1423,7 +1457,7 @@ export async function listSales(store: Store): Promise<SaleList> {
     const intents = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/payment_intents?limit=${ORDERS_PAGE_SIZE}`,
+      `/payment_intents?limit=${ORDERS_PAGE_SIZE}&expand[]=data.latest_charge&expand[]=data.latest_charge.review`,
     );
     const page = readStripePage(intents, (pi) => plainObject(ownField(pi, "metadata")) && typeof ownField(pi, "status") === "string");
     if (page.unreadable > 0) return { state: "error" };
@@ -1452,6 +1486,8 @@ export async function listSales(store: Store): Promise<SaleList> {
         answers: [],
         trial: false,
         isTip: false,
+        // The same test as a checkout's payment (Codex G on #3647): only a row that says it is a payment_intent.
+        risk: riskLevelOf(chargeOfPayment(pi)),
       };
     });
   } catch (error) {

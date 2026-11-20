@@ -67,6 +67,11 @@ export class CrmSchemaReadUnavailable extends Error {
 export class CrmSchemaWriteUnconfirmed extends Error {
   constructor() { super("CRM configuration change could not be confirmed"); this.name = "CrmSchemaWriteUnconfirmed"; }
 }
+/** Somebody else changed (or removed) the deal between this change's read and its write: nothing was written. */
+export class CrmDealConflict extends Error {
+  constructor() { super("CRM deal changed meanwhile"); this.name = "CrmDealConflict"; }
+}
+
 /** A field would be taken away, with its answers, by a write that may not take any. */
 export class CrmFieldsKept extends Error {
   constructor() { super("CRM fields may not be taken away here"); this.name = "CrmFieldsKept"; }
@@ -293,6 +298,12 @@ export async function readStages(statsId: string | null): Promise<Stage[]> {
   return allStages(await readPipelines(statsId));
 }
 
+/**
+ * The pipelines as saved, for a change made from them (639 [GL7](7), a teammate's access). Since main's
+ * readPipelines reads exactly too (CX-123 rules 24 and 30), this is the same reader under the name its callers use.
+ */
+export const readPipelinesExact = readPipelines;
+
 /** The pipelines exactly as saved, for a change: an unreadable or malformed record never stands in for the defaults. */
 async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelines: Pipeline[] }> {
   try {
@@ -301,7 +312,7 @@ async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelin
     const [pipes, legacy] = response;
     if (pipes !== null) {
       if (typeof pipes !== "string") throw new CrmSchemaReadUnavailable();
-      const pipelines = parsePipelines(json(pipes));
+      const pipelines = parsePipelines(json(pipes), true);
       if (!pipelines) throw new CrmSchemaReadUnavailable();
       return { raw: pipes, pipelines };
     }
@@ -385,17 +396,22 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
  * `moves` says. A refusal writes nothing. Moves made here start no
  * workflow: a stage removed is not a deal entering a stage.
  */
-export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
+export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, mayEdit: (pipelineId: string) => boolean = () => true, sees: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   const counts = new Map<string, number>();
   for (const d of deals) counts.set(String(d.record.stage), (counts.get(String(d.record.stage)) ?? 0) + 1);
-  const result = changePipeline(current, change, moves, counts, limit);
+  const result = changePipeline(current, change, moves, counts, limit, sees);
   if (!result.ok) return result;
   const kept = new Set(allStages(result.pipelines).map((s) => s.id));
   const fallback = result.pipelines[0].stages.find((s) => s.kind === "open")!.id;
-  // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first pipeline's first open stage.
-  const moved = deals.filter((d) => !kept.has(String(d.record.stage))).map((d) => ({ ...d, record: { ...d.record, stage: result.moves[String(d.record.stage)] ?? fallback } }));
+  // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first
+  // pipeline's first open stage, only by someone who may change that pipeline (`mayEdit`, 639 [GL7](7));
+  // anyone else leaves it where it is.
+  const adopt = mayEdit(result.pipelines[0].id);
+  const moved = deals
+    .filter((d) => !kept.has(String(d.record.stage)) && (Object.hasOwn(result.moves, String(d.record.stage)) || adopt))
+    .map((d) => ({ ...d, record: { ...d.record, stage: Object.hasOwn(result.moves, String(d.record.stage)) ? result.moves[String(d.record.stage)] : fallback } }));
   await writePipelines(statsId, raw, result.pipelines, moved, room);
   return result;
 }
@@ -421,14 +437,18 @@ return 1`;
 /**
  * Saves the first pipeline's stages, as the board did before pipelines (the
  * studio's older "stages" request): a deal in a stage that is gone moves to
- * the first open one of them.
+ * the first open one of them. With `firstId` (the pipeline whose access was
+ * checked), the stages are written only while that pipeline is still the
+ * first one, in the same snapshot that is written over: otherwise
+ * CrmSchemaConflict and nothing is written.
  */
-export async function writeStages(statsId: string, stages: Stage[], room: DataStore): Promise<Stage[]> {
+export async function writeStages(statsId: string, stages: Stage[], room: DataStore, firstId?: string): Promise<Stage[]> {
   const first = stages.find(s => s.kind === "open");
   if (!first) throw new CrmSchemaReadUnavailable();
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
-  const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)]);
+  if (firstId !== undefined && current[0].id !== firstId) throw new CrmSchemaConflict();
+  const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)], true);
   if (!next) throw new CrmSchemaReadUnavailable();
   const kept = new Set(allStages(next).map(s => s.id));
   // Preserve every saved field; moving stages must not normalize away unrelated data.
@@ -474,7 +494,7 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
     let pipelines: Pipeline[] | null = null;
     if (replies[2] !== null) {
       if (typeof replies[2] !== "string") return unavailable;
-      pipelines = parsePipelines(json(replies[2]));
+      pipelines = parsePipelines(json(replies[2]), true);
       if (!pipelines) return unavailable;
       stages = allStages(pipelines);
     } else if (replies[0] === null) stages = DEFAULT_STAGES;
@@ -594,12 +614,26 @@ export async function readDeal(statsId: string, id: string, stages: readonly Sta
   return parseDeal(json(raw), stages);
 }
 
-export async function dropDeal(statsId: string, id: string, room: DataStore): Promise<boolean> {
+/** Removes a deal only while it is the exact record read when the removal was checked: 1 removed, 0 already gone, -1 changed meanwhile. */
+export const DROP_CRM_DEAL = `-- marktmorgen:crm-deal-drop:v1
+local current = redis.call("HGET", KEYS[1], ARGV[1])
+if not current then return 0 end
+if current ~= ARGV[2] then return -1 end
+redis.call("HDEL", KEYS[1], ARGV[1])
+return 1`;
+
+/**
+ * Removes a deal. With `expected` (the record read when the removal was
+ * checked with readDealExact, 639 [GL7](7)), one changed since, moved into a pipeline the
+ * person may not change for instance, is never removed: CrmDealConflict.
+ */
+export async function dropDeal(statsId: string, id: string, room: DataStore, expected?: string): Promise<boolean> {
   if (!DEAL_ID.test(id)) return false;
   let removed: unknown;
   try {
-    removed = await redisPipeline([["HDEL", dealsKey(statsId), id]]);
+    removed = await redisPipeline([expected === undefined ? ["HDEL", dealsKey(statsId), id] : ["EVAL", DROP_CRM_DEAL, 1, dealsKey(statsId), id, expected]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
+  if (Array.isArray(removed) && removed.length === 1 && removed[0] === -1 && expected !== undefined) throw new CrmDealConflict();
   if (!Array.isArray(removed) || removed.length !== 1 || (removed[0] !== 0 && removed[0] !== 1)) throw new CrmDealWriteUnconfirmed();
   if (removed[0] === 1) await giveData(room, [{ slot: dealSlot(id), bytes: 0, set: true }]);
   return removed[0] === 1;
@@ -770,9 +804,11 @@ return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
  * the person's tasks are no longer what was read (a lock that ran out let
  * another change in); 1 once written; 2 once written when a count that was
  * not a whole number was dropped or replaced, whose room goes back. A count
- * that is there is moved by the change.
+ * that is there is moved by the change. KEYS[2] is the tasks lock, ARGV[7] its token: -2 means the
+ * lease was lost and nothing was written. The existing unconfirmed-write path retains the prior room reservation.
  */
-export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v1
+export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v2
+if redis.call("GET", KEYS[2]) ~= ARGV[7] then return -2 end
 local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
 if before ~= ARGV[2] then return -1 end
 if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
@@ -792,9 +828,11 @@ return 1`;
 /**
  * The store's count saved on its own, once every task was read to make it:
  * 0 when a whole number is there already (nothing written), 1 when written
- * where there was none, 2 when written over one that was not a whole number.
+ * where there was none, 2 when written over one that was not a whole number. KEYS[2] is the tasks lock,
+ * ARGV[3] its token; -1 refuses a lost lease before any read/write of the tasks hash.
  */
-export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v1
+export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v2
+if redis.call("GET", KEYS[2]) ~= ARGV[3] then return -1 end
 local kept = redis.call("HGET", KEYS[1], ARGV[1])
 if kept and string.match(kept, "^%d+$") then return 0 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
@@ -1007,7 +1045,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
       if (!(await holdLock(held))) throw new LockBusyError();
       let saved: unknown;
       try {
-        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 1, tasksKey(statsId), TASK_COUNT_FIELD, String(count)]]);
+        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 2, tasksKey(statsId), held.key, TASK_COUNT_FIELD, String(count), held.token]]);
       } catch {
         throw new CrmValueWriteUnconfirmed();
       }
@@ -1033,7 +1071,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
   let written: unknown;
   try {
-    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 1, tasksKey(statsId), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD]]);
+    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 2, tasksKey(statsId), held.key, person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD, held.token]]);
     if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
     written = response[0];
   } catch {

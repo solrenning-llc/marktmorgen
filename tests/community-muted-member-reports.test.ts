@@ -55,6 +55,9 @@ async function main(): Promise<void> {
   const mutedKey = memberKey(MUTED);
   await redis.pipeline([
     ["SET", `nl:cm:${cid}:ok:${emailKey(MUTED)}`, JSON.stringify({ v: 1, ok: true })],
+    // The shared reading of what they hold (lib/community-access.ts holdingsOf, #3395), which the community's doors
+    // read first: the pass held, kept at the settings' version.
+    ["SET", `nl:cm:${cid}:h:${emailKey(MUTED)}`, JSON.stringify({ v: (await readConfig(cid))!.v, ids: [ticket.product.id], held: [ticket.product.id] })],
     ["HSET", `nl:cm:${cid}:m`, mutedKey, JSON.stringify({ k: mutedKey, e: MUTED, n: "Muted", h: "muted", dir: false, mail: false, at: 1, seen: 1, muted: true, removed: false, t: "", q: [], qa: 0, qq: [], s: [] } satisfies Member)],
   ]);
   const memberCookie = `${passCookieName(club)}=${await mintPass(club, MUTED, "all")}`;

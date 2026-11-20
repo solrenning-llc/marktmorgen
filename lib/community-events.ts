@@ -55,7 +55,7 @@
  * oldest one that is over makes room for a new one. Every limit is in
  * lib/community-text.ts, where the studio reads it too.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
@@ -65,7 +65,7 @@ import { type MeetProvider, cleanRoom, isMeetProvider, isTimeZone, partsIn, read
 import { isVideoRoom, newVideoRoom } from "@/lib/call-rooms";
 import { type Video, parseVideo, readVideo } from "@/lib/sales-page";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
-import { holdsAnyOf } from "@/lib/community-access";
+import { type Holdings, type Ticket, doorAnswer, holdingsOf, holdsAnyOf } from "@/lib/community-access";
 import { type CommunityConfig, newItemId } from "@/lib/community";
 import { LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { indexEvent, unindexEvent } from "@/lib/community-index";
@@ -451,10 +451,11 @@ export type CreateResult = { ok: true; event: CommunityEvent } | { ok: false; re
  * The slot an event and everyone coming to it is counted in, in the store's
  * data room (lib/store-data.ts): its record, its place in the calendar, its
  * three reminders in the queue, the words it is found by, and each place
- * taken (RSVP_BYTES).
+ * taken (RSVP_BYTES: 96 until a place's value carried its attempt mark, 17 bytes more, ":" and 16 hex; Codex V on
+ * #2992).
  */
 const EVENT_SLOT = (event: string) => `cm:e:${event}`;
-export const RSVP_BYTES = 96;
+export const RSVP_BYTES = 113;
 function eventBytes(event: CommunityEvent): number {
   return dataBytes([JSON.stringify(event)], 5) + indexBytes([event.title, event.about]);
 }
@@ -662,21 +663,44 @@ export async function deleteEvent(store: Store, eventId: string, now = Date.now(
  * Whether somebody the community let in may come to this event: the creator
  * always; a member when the event is for everyone, or when their address
  * holds one of its products — among those that still open the community.
+ *
+ * "unknown" when what they hold could not be read (CX-123 rule 24; the
+ * pre-review of 9 November 2026, P4): never let in on it, and never told the
+ * event is not for them. Answered from the one reading the community's doors
+ * share (holdingsOf), or the viewer's own, so a page of twenty events asks
+ * Stripe once. `strict`, for deciding who a reminder goes to
+ * (lib/community-event-mail.ts), keeps its own answer: one not had throws.
  */
 export async function mayAttend(
   store: Store,
   config: CommunityConfig,
   event: CommunityEvent,
-  viewer: { owner: boolean; email: string },
-  /** `strict`, for deciding who a reminder goes to (lib/community-event-mail.ts): an answer not had throws, never a no. */
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
+  options: { strict: true },
+): Promise<boolean>;
+export async function mayAttend(
+  store: Store,
+  config: CommunityConfig,
+  event: CommunityEvent,
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
+  options?: { strict?: false },
+): Promise<Ticket>;
+export async function mayAttend(
+  store: Store,
+  config: CommunityConfig,
+  event: CommunityEvent,
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
   options: { strict?: boolean } = {},
-): Promise<boolean> {
+): Promise<Ticket> {
   if (viewer.owner) return true;
   if (!event.only.length) return true;
   const ids = event.only.filter((p) => config.access.includes(p));
   if (!ids.length) return false;
   const id = store.community?.id as string;
-  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
+  if (options.strict) return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
+  // The event's own key when the shared reading ran out of refund questions for its products (doorAnswer).
+  const holdings = viewer.holdings ?? (await holdingsOf(store, config, viewer.email));
+  return doorAnswer(store, holdings, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, viewer.pay);
 }
 
 export type JoinWindow = {
@@ -737,24 +761,60 @@ export type RsvpResult = "added" | "already" | "full" | "closed";
  * itself, so a request that dies halfway cannot leave a count that says
  * "full" when it is not.
  */
+/**
+ * A place's value is "seconds:attempt": when it was taken, and a random mark of the request that wrote it. A place
+ * taken back (an unknown answer, a list over the cap) is deleted only while it still holds that request's own mark,
+ * so a concurrent request's place for the same member is never deleted (Codex V on #2992). One EVAL, as the HDEL was.
+ */
+export const RELEASE_RSVP = `-- marktmorgen:event-rsvp-release:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+/**
+ * Deletes this request's own place, never another request's for the same member. True only when it deleted it now: the
+ * room is given back only then, since a deletion in between (a cancel) gave it back already. An unknown reply keeps
+ * the room taken, never given back twice.
+ */
+async function releaseOwnRsvp(list: string, member: string, mark: string): Promise<boolean> {
+  return repliesFor(await redisPipeline([["EVAL", RELEASE_RSVP, 1, list, member, mark]]), 1)?.[0] === 1;
+}
+/** When a place was taken, from its value: plain seconds (before the attempt mark) or "seconds:attempt". */
+export function rsvpSeconds(value: unknown): number {
+  return Number(String(value ?? "").split(":", 1)[0]) || 0;
+}
+
 export async function rsvp(id: string, event: CommunityEvent, member: string, room: DataStore, now = Date.now()): Promise<RsvpResult> {
   if (event.cancelled || isOver(event, now)) return "closed";
-  const [already] = await redisPipeline([["HEXISTS", rsvpKey(id, event.id), member]]);
-  if (Number(already) === 1) return "already";
+  // Each answer read exactly (sweep app5, finding 2; CX-123 rules 24 and 30): an unknown one fails (the page says the
+  // RSVP did not go through), never "already going", and never leaves somebody over the cap.
+  const already = repliesFor(await redisPipeline([["HEXISTS", rsvpKey(id, event.id), member]]), 1)?.[0];
+  if (already !== 0 && already !== 1) throw new UnknownReplyError("whether a member has a place");
+  if (already === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-  const [added, length] = await redisPipeline([
-    ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
-    ["HLEN", rsvpKey(id, event.id)],
-  ]);
-  if (Number(added) !== 1) {
+  const mark = `${Math.floor(now / 1000)}:${randomBytes(8).toString("hex")}`;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HSETNX", rsvpKey(id, event.id), member, mark],
+      ["HLEN", rsvpKey(id, event.id)],
+    ]),
+    2,
+  );
+  const added = replies?.[0];
+  const length = countOf(replies?.[1]);
+  if (added === 0) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }
-  if (event.cap > 0 && Number(length) > event.cap) {
-    const [removed] = await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+  if (added !== 1 || length === null) {
+    // Whether the place was written, or how many now hold one, is unknown: it is taken back, never kept over the cap,
+    // and only if it is this request's own (another request's place for the same member is kept). Its room is given
+    // back only when this deleted it.
+    if (await releaseOwnRsvp(rsvpKey(id, event.id), member, mark)) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    throw new UnknownReplyError("a place taken at an event");
+  }
+  if (event.cap > 0 && length > event.cap) {
     // Given back only when this took the place away: a deletion of the member in between gave it back already.
-    if (Number(removed) === 1) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    if (await releaseOwnRsvp(rsvpKey(id, event.id), member, mark)) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
   }
   return "added";
@@ -767,13 +827,29 @@ export async function cancelRsvp(id: string, event: CommunityEvent, member: stri
   return Number(removed) === 1;
 }
 
-/** How many are coming to each event, and whether this member is. */
-export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number; mine: boolean }>> {
-  const out = new Map<string, { going: number; mine: boolean }>();
+/**
+ * How many are coming to an event, and whether this member is; null where it could not be read.
+ * Each is read exactly and on its own (sweep app5, finding 2; CX-123 rules 24 and 30): a count in another shape is
+ * unknown, never "nobody is coming" with places left, and the member's own place is read apart from the count, so an
+ * unknown count never hides a place they hold nor withholds the way in, and an unknown place is never "not going".
+ */
+export type RsvpNumbers = { going: number | null; mine: boolean | null };
+
+/** How many are coming to each event, and whether this member is, each null when unknown; an unreachable Redis is all unknown. */
+export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, RsvpNumbers>> {
+  const out = new Map<string, RsvpNumbers>();
   if (!events.length) return out;
-  const rows = await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]));
+  const commands = events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]);
+  const rows = repliesFor(
+    await redisPipeline(commands).catch((error: unknown) => {
+      console.error("reading an event's places failed", error);
+      return null;
+    }),
+    commands.length,
+  );
   events.forEach((e, i) => {
-    out.set(e.id, { going: Number(rows[i * 2]) || 0, mine: Number(rows[i * 2 + 1]) === 1 });
+    const there = rows?.[i * 2 + 1];
+    out.set(e.id, { going: countOf(rows?.[i * 2]), mine: there === 1 ? true : there === 0 ? false : null });
   });
   return out;
 }
@@ -800,7 +876,7 @@ export async function rsvpList(id: string, eventId: string, limit = 100_000): Pr
     // A hash answers field and value: an odd page is not one.
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
     const flat = read.items;
-    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], Number(flat[i + 1]) || 0);
+    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], rsvpSeconds(flat[i + 1]));
     cursor = read.next;
     if (cursor === "0" || seen.size >= limit) break;
   }
@@ -986,9 +1062,9 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
   return events.flatMap((event, i) => {
     const reply = replies[i];
     if (reply === null) return [];
-    // Written as whole seconds (HSETNX above).
-    if (typeof reply !== "string" || !/^\d{1,15}$/.test(reply)) throw new UnknownReplyError(what);
-    return [{ event, at: Number(reply) }];
+    // Written as whole seconds (HSETNX above), with the attempt mark since #2992 ("seconds:attempt", RELEASE_RSVP).
+    if (typeof reply !== "string" || !/^\d{1,15}(:[0-9a-f]{16})?$/.test(reply)) throw new UnknownReplyError(what);
+    return [{ event, at: rsvpSeconds(reply) }];
   });
 }
 

@@ -25,7 +25,7 @@
 import { mock } from "node:test";
 import { MAX_PAYDAY, NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
-import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
+import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES, monthKey } from "@/lib/delivery";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { GET as usage } from "@/app/api/cron/usage/route";
 import { BUSY_FLOOR, claimMonth, claimWeek, maybeBusyAlert, setWeeklyOff, weeklyOff } from "@/lib/stats-report";
@@ -101,18 +101,20 @@ async function payday(): Promise<void> {
   const month = `${PAYNOW.getUTCFullYear()}-${String(PAYNOW.getUTCMonth() + 1).padStart(2, "0")}`;
   const claim = `nl:aff:payday:${statsId}:${month}`;
   const isClaim = (c: (string | number)[]) => c[0] === "SET" && c[1] === claim;
-  // What a run did for the store: the emails it counts as sent, and whether it went past the claim (the next
-  // step reads whether the creator pays from their PayPal by itself, then writes the email).
+  // What a run did for the store: the emails it counts as sent, and whether it went past the claim, that is took
+  // it (its SET NX answered "OK"). The PayPal link is read before the claim since Claude 5's MEDIUM on 91815567,
+  // so a read of it no longer tells.
   const run = async () => {
-    const seen: string[] = [];
+    let took = false;
     const watch = redis.pipeline;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      for (const c of commands) seen.push(`${c[0]} ${c[1]}`);
-      return watch(commands);
+      const replies = await watch(commands);
+      if (commands.length === 1 && isClaim(commands[0]) && Array.isArray(replies) && replies.length === 1 && replies[0] === "OK") took = true;
+      return replies;
     }) as typeof redis.pipeline;
     try {
       const counts = await sendPaydayEmails(Date.now() + 20_000, PAYNOW);
-      return { sent: counts.sent, pastTheClaim: seen.includes(`GET nl:pp:${statsId}`) };
+      return { sent: counts.sent, pastTheClaim: took };
     } finally {
       redis.pipeline = watch;
     }
@@ -143,7 +145,7 @@ async function told(): Promise<void> {
   const owner = "heavy@example.com";
   await rememberFolderOwner(folder, owner);
   await recordDelivery(`stores/${folder}/prod01/file.zip`, DELIVERY_ALLOWANCE_BYTES + 1024);
-  const TOLD = "nl:usage-watch:told";
+  const TOLD = `nl:usage-watch:told:${monthKey()}`;
   const isTold = (c: (string | number)[]) => c[0] === "GET" && c[1] === TOLD;
   const toldWrites: unknown[] = [];
   const run = async () => {

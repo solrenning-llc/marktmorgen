@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } from "@/lib/inbound-mail";
-import { HEALTH_ID, LIST_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
+import { HEALTH_ID, LIST_TAG, MOVE_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 401 });
   }
 
-  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
+  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; from?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
   try {
     notice = JSON.parse(body) as typeof notice;
   } catch {
@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
           to,
           store,
           list: tagOf(notice.data?.tags, LIST_TAG),
+          move: tagOf(notice.data?.tags, MOVE_TAG),
         });
       }
       const event: MailReportEvent = notice.type === "email.delivered"
@@ -165,7 +166,8 @@ export async function POST(request: NextRequest) {
 
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
-  const result = await forwardInbound(emailId);
+  // The addresses the announcement names, so support's daily count is taken before the message is read.
+  const result = await forwardInbound(emailId, Date.now(), notice.data?.to, notice.data?.from);
   if (result === "retry") {
     await letGo(seenKey);
     return Response.json({ ok: false }, { status: 500 });

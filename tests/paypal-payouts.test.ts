@@ -19,6 +19,7 @@ import { autoPayEmail } from "@/lib/affiliate-payday";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 import { skipWaits } from "./skip-waits";
 // The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
@@ -109,15 +110,19 @@ async function main(): Promise<void> {
   const store = shop();
 
   part("Connecting the creator's own PayPal app");
+  await markLive(store);
   is("not a Client ID", (await connectPayPal(store, "short", SECRET)).ok ? "kept" : "refused", "refused");
   tokenStatus = 401;
+  await markLive(store);
   const wrong = await connectPayPal(store, CLIENT, SECRET);
   is("PayPal refuses it", wrong.ok ? "kept" : wrong.reason, "refused");
   tokenStatus = 200;
   scope = "https://uri.paypal.com/services/invoicing openid";
+  await markLive(store);
   const noPayouts = await connectPayPal(store, CLIENT, SECRET);
   is("an app without Payouts on", noPayouts.ok ? "kept" : noPayouts.reason, "no-payouts");
   scope = "https://uri.paypal.com/services/invoicing https://uri.paypal.com/payments/payouts openid";
+  await markLive(store);
   is("an app with Payouts on", (await connectPayPal(store, CLIENT, SECRET)).ok, true);
   const [raw] = await redis.pipeline([["GET", `nl:pp:${STATS}`]]);
   is("the Secret is not stored readable", String(raw).includes(SECRET), false);
@@ -199,6 +204,7 @@ async function main(): Promise<void> {
   is("and when nothing could be sent, why", [failedEmail.subject, failedEmail.text.includes("did not cover it")], ["Your affiliates were not paid today", true]);
 
   part("Taken away");
+  await markLive(store);
   await disconnectPayPal(store);
   const gone = await payWithPayPal(store);
   is("nothing is sent without it", [await readPayPal(store), gone.ok ? "sent" : gone.reason], [null, "not-connected"]);

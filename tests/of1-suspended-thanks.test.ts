@@ -110,8 +110,8 @@ async function main(): Promise<void> {
       currency: "usd",
       amount_total: 3900,
       metadata: { store: HANDLE, product, ...meta },
-      customer_details: { email: BUYER },
-      payment_intent: { id: `pi_test_${id.slice(-10)}`, amount_received: 3900, latest_charge: { id: `ch_test_${id.slice(-10)}`, amount_refunded: 0, refunded: false }, payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_OfOneBuyer01" } },
+      customer_details: { email: BUYER, address: { country: "US" } },
+      payment_intent: { id: `pi_test_${id.slice(-10)}`, amount_received: 3900, latest_charge: { id: `ch_test_${id.slice(-10)}`, amount_refunded: 0, refunded: false }, payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_OfOneBuyer01", card: { country: "US" } } },
       ...more,
     };
   };

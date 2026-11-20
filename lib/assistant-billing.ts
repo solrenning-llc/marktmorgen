@@ -19,6 +19,7 @@
 import { ADD_ON_MARK, BillingError, onPlatform, onPlatformAt, setCancelAtPeriodEnd } from "@/lib/billing";
 export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
+import { askBillingAddress } from "@/lib/billing-address";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
 import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, type AssistantPlan } from "@/lib/store-assistant-rules";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
@@ -138,6 +139,8 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
     success_url: `${origin}/api/billing/assistant?session_id={CHECKOUT_SESSION_ID}${store.sid ? `&store=${store.sid}` : ""}`,
     cancel_url: `${origin}/studio?${store.sid ? `store=${store.sid}&` : ""}assistant=canceled#assistant`,
   });
+  // The add-on is paid: the creator's full billing address (790 [IV2]).
+  askBillingAddress(body);
   // Two tabs at the same moment send the same key, and Stripe gives both the same page (startAssistant gives an open
   // page again afterward, and reads the open pages again when Stripe answers that the key is still in progress). The
   // price is in the key: a request with other values under a used key is refused by Stripe. The store is named by its
@@ -280,7 +283,10 @@ export function assistantPlanOf(subscription: Record<string, unknown>, disputedA
   const cancelAt = typeof subscription.cancel_at === "number" ? subscription.cancel_at : 0;
   const cancelsAtEnd = subscription.cancel_at_period_end === true || cancelAt > 0;
   const period = typeof start === "number" && typeof end === "number" && end > start ? { start, end: cancelAt && cancelAt < end ? cancelAt : end, renews: !cancelsAtEnd } : null;
-  return { subscriptionId: id, active: subscription.status === "active" && !disputedAt, period, cancelsAtEnd, disputedAt };
+  // Ended only on Stripe's own word: canceled, incomplete_expired, or a dispute that ends it here (Codex T on #4202).
+  // past_due, unpaid and any other state stay not ended, so a store holding one is not deleted under it.
+  const terminal = Boolean(disputedAt) || subscription.status === "canceled" || subscription.status === "incomplete_expired";
+  return { subscriptionId: id, active: subscription.status === "active" && !disputedAt, ...(terminal ? { terminal: true } : {}), period, cancelsAtEnd, disputedAt };
 }
 
 /** Reads a returning checkout session: it must be an add-on for this very store, on this store's own customer. */
@@ -307,21 +313,50 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
   return assistantPlanOf(await readSubscription(subscriptionId));
 }
 
+/** A charge's own id, as lib/refunds.ts reads it: only an expanded charge that names itself decides a dispute. */
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+
+/** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */
+const idOf = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (!plainObject(value)) return "";
+  const id = ownField(value, "id");
+  return typeof id === "string" ? id : "";
+};
+
+/**
+ * Whether an invoice of the list is proven to be this add-on's own (rule 30, as lib/closing-holds.ts isOwnInvoice):
+ * its subscription, as a string id or an expanded object's id, on the invoice or under its parent in newer API
+ * versions, is the one asked for, and nothing on it names another. A row that names another subscription, or none,
+ * says nothing about this add-on (issue #4440: another subscription's dispute once ended this one).
+ */
+function isOwnInvoice(row: Record<string, unknown>, subscriptionId: string): boolean {
+  const parent = ownField(row, "parent");
+  const details = plainObject(parent) ? ownField(parent, "subscription_details") : undefined;
+  const named = [idOf(ownField(row, "subscription")), plainObject(details) ? idOf(ownField(details, "subscription")) : ""].filter(Boolean);
+  return named.length > 0 && named.every((one) => one === subscriptionId);
+}
+
 /**
  * Whether any of the add-on's last payments was disputed. The page is read in its exact shape (lib/stripe-list.ts):
  * a disputed charge on any readable row is a yes; "none disputed" is said only when every row of the page is readable
  * (each with its charge, or none, and that charge's own disputed true or false). Otherwise it throws, and nothing is
  * written on it this run (syncAssistant leaves the store as it is). The page is the last three payments by design, so
- * more invoices after them do not make it incomplete.
+ * more invoices after them do not make it incomplete. A row is readable only when it is proven this add-on's own
+ * (isOwnInvoice): another subscription's dispute is never a yes, and a row not proven own makes "none disputed"
+ * unknown, so it throws and the next pass reads again, rather than setting a stop on a list that is not this add-on's.
  */
 async function disputed(subscriptionId: string): Promise<boolean> {
   const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
   const read = readStripePage(
     await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`),
     (row) => {
+      if (!isOwnInvoice(row, subscriptionId)) return false;
       if (!hasOwnField(row, "charge")) return false;
       const charge = chargeOf(row);
-      return charge === null || (plainObject(charge) && typeof ownField(charge, "disputed") === "boolean");
+      // A charge decides only with its own valid id beside a boolean disputed (Codex T on #4443): { disputed: true } with
+      // no id, or another object's id, is a partial answer, so the row is unreadable and nothing is canceled this round.
+      return charge === null || (plainObject(charge) && CHARGE_ID.test(idOf(charge)) && typeof ownField(charge, "disputed") === "boolean");
     },
   );
   if (read.rows.some((row) => { const charge = chargeOf(row); return plainObject(charge) && ownField(charge, "disputed") === true; })) return true;
@@ -364,7 +399,8 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     return (await setAssistantPlan(storeRef(store), plan)) ?? store;
   } catch (error) {
     if (error instanceof BillingError && error.status === 404) {
-      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false })) ?? store;
+      // Gone at Stripe: ended for good, so it no longer holds its store.
+      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false, terminal: true })) ?? store;
     }
     console.error("reading a store's add-on failed", error);
     return store;

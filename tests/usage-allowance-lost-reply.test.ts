@@ -5,7 +5,7 @@
  * again. A notice that went out or may have gone out holds the store on the told list; only a certain refusal takes
  * it off, so it is tried again. Synthetic only: the Redis stub and the SES mail fixture.
  */
-import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
+import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES, monthKey } from "@/lib/delivery";
 import { GET } from "@/app/api/cron/usage/route";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
@@ -20,7 +20,7 @@ const request = { headers: new Headers(), nextUrl: new URL("https://marktmorgen.
 const run = async () => ((await (await GET(request)).json()) as Record<string, unknown>);
 const triedTo = (address: string) => fixture.sesAttempts.filter((m) => m.to.includes(address)).length;
 async function toldList(): Promise<string[]> {
-  const [raw] = await redis.pipeline([["GET", "nl:usage-watch:told"]]);
+  const [raw] = await redis.pipeline([["GET", `nl:usage-watch:told:${monthKey()}`]]);
   return typeof raw === "string" ? (JSON.parse(raw) as string[]) : [];
 }
 const folder = (c: string) => c.repeat(32);

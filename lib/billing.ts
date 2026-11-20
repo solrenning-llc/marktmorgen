@@ -1,4 +1,6 @@
 import {activateRestartContract,type RestartContractActivation} from "@/lib/contract-restart-activation";
+import { stripeJson } from "@/lib/stripe-http-error";
+import { askBillingAddress } from "@/lib/billing-address";
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
 import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
@@ -131,7 +133,8 @@ export async function onPlatform(
       cache: "no-store",
       signal,
     });
-    return { response, data: (await response.json()) as Record<string, unknown> };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts).
+    return { response, data: await stripeJson(response) };
   });
   if (!response.ok) {
     const error = data.error as
@@ -442,6 +445,8 @@ export async function createBillingCheckout(
   // judgement, so the usual sign-up keeps its one-page checkout.
   if (cycle === "year") body.set("payment_method_options[card][request_three_d_secure]", "any");
   inTheCurrencyShown(body);
+  // The plan is paid, a trial included (the card is kept for it): the creator's full billing address (790 [IV2]).
+  askBillingAddress(body);
 
   let price: string | null = null;
   try {
@@ -807,6 +812,8 @@ export function periodOf(subscription: Record<string, unknown>, trialing: boolea
 export async function readSubscription(
   subscriptionId: string,
   fundingStore?:Store,
+  /** Told why Stripe could not be asked, for a caller that must tell no answer from an unknown one (lib/stripe-silence.ts). */
+  failed?: (error: unknown) => void,
 ): Promise<SubscriptionState> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
@@ -823,6 +830,7 @@ export async function readSubscription(
       return { state: "inactive", reason: "missing" };
     }
     console.error("reading the subscription failed", error);
+    failed?.(error);
     return { state: "unknown" };
   }
 

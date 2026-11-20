@@ -36,6 +36,15 @@ test("the line is refused, never cut or rewritten, when it presses, promises a d
     ["Only a few spots left", "pressure"],
     ["Ahora es el momento", "pressure"],
     ["Over 300 students took it next", "number"],
+    ["Ten students completed it", "number"],
+    ["Diez estudiantes lo completaron", "number"],
+    ["Dix étudiants l’ont terminé", "number"],
+    ["Zehn Teilnehmer haben es abgeschlossen", "number"],
+    ["Dieci studenti lo hanno completato", "number"],
+    ["Tien studenten hebben het voltooid", "number"],
+    ["Dez alunos concluíram", "number"],
+    ["Tres estudiantes lo completaron", "number"],
+    ["Save ½ on the next level", "number"],
     ["“The best course I took” says Ana", "quote"],
     ["See it at example.com", "link"],
     ["Write to me at hello@example.test", "link"],
@@ -46,6 +55,11 @@ test("the line is refused, never cut or rewritten, when it presses, promises a d
     assert.deepEqual(readNextStep({ productId: NEXT, line }, context), { ok: false, why }, line);
     assert.equal(lineProblem(line), why, line);
     assert.ok(NEXT_STEP_PROBLEMS[why].length > 0 && !/[!]/.test(NEXT_STEP_PROBLEMS[why]), "each refusal says why, calmly");
+  }
+  // A word that only looks like a number once its accents are taken off is not one (Codex X7 on #3530): the French
+  // "très" ("very") is never read as the Spanish "tres" (3).
+  for (const line of ["Très utile pour la suite", "Très helpful next", "C’est très clair"]) {
+    assert.equal(lineProblem(line), null, line);
   }
   // Characters that draw nothing never carry a word past the checks (review of #3523, MEDIUM): refused when they hide,
   // read through when they only join.

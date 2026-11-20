@@ -59,7 +59,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
-import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
+import { BATCH_SIZE, CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
 import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
@@ -755,8 +755,9 @@ export async function advanceEventJob(
         const outcome = await sendBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
         if (outcome !== "sent") {
           const failures = job.failures + 1;
-          if (outcome === "refused" || failures >= 5) return await finish("failed", "The email service would not take it. Nothing more was sent.");
-          job = { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
+          // Only a refusal ends it: a provider that is down keeps the notice waiting, never abandoned (outage drill).
+          if (outcome === "refused") return await finish("failed", "The email service would not take it. Nothing more was sent.");
+          job = { ...job, failures, note: SENDER_RETRY_NOTE };
           break;
         }
       }
@@ -833,14 +834,15 @@ export async function runEventQueue(
         counts.dropped += 1;
       } else if (due.mark === "p") {
         if (Date.now() < event.start) {
-          const going = (await rsvpNumbers(due.community, [event], null)).get(event.id)?.going ?? 0;
+          // A count that could not be read is left out of the push, never said as 0 (sweep app5, finding 2).
+          const going = (await rsvpNumbers(due.community, [event], null)).get(event.id)?.going ?? null;
           const time = new Intl.DateTimeFormat("en-US", { timeZone: event.tz, hour: "numeric", minute: "2-digit" }).format(new Date(event.start));
           const sent = await alertCreator(
             store,
             "live",
             {
               title: "Live in 15 minutes",
-              body: `${event.title} starts at ${time}. ${going} ${going === 1 ? "person has" : "people have"} RSVP'd. Get there a few minutes early.`,
+              body: `${event.title} starts at ${time}. ${going === null ? "" : `${going} ${going === 1 ? "person has" : "people have"} RSVP'd. `}Get there a few minutes early.`,
               url: store.sid ? `/studio/community?store=${store.sid}` : "/studio/community",
             },
             { seed: `event:${event.id}:${event.start}` },

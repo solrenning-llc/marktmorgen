@@ -677,9 +677,19 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         counts.dropped += 1;
         continue;
       }
-      const store = note ? await storeForId(sid) : null;
-      if (!note || !store) {
-        if (!note) console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);
+      if (!note) {
+        console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);
+        await dropNote(sid);
+        counts.dropped += 1;
+        continue;
+      }
+      const store = await storeForIdExactly(sid);
+      if (store === "unknown") {
+        console.error(`plan-refund: store ${sid}'s recovery note is retained: its store could not be read exactly`);
+        counts.left += 1;
+        continue;
+      }
+      if (store === "none") {
         await dropNote(sid);
         counts.dropped += 1;
         continue;
@@ -702,8 +712,12 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
           counts.left += 1;
           continue;
         }
+        // The note is the only way to retry this notice. Keep it until the sender confirms, as for a damaged note.
+        if (!(await mail(store, planRefundPartLetter({ store: store.name || store.handle }), `plan-refund-part:${sid}:${note.at}`))) {
+          counts.left += 1;
+          continue;
+        }
         await dropNote(sid);
-        await mail(store, planRefundPartLetter({ store: store.name || store.handle }), `plan-refund-part:${sid}:${note.at}`);
         counts.dropped += 1;
         continue;
       }

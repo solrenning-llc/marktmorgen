@@ -13,7 +13,8 @@ import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { activeBumps, activePlan, planFor } from "@/lib/product-extras";
-import { activeShipping, shipsToWords } from "@/lib/shipping";
+import { shipsToWords } from "@/lib/shipping";
+import { shippingNow } from "@/lib/physical-legal-ship";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { IMAGE_SIZES } from "@/lib/product-image";
@@ -581,6 +582,7 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  member = 0,
   accessEnd = null,
   chosenOption = null,
   countryProblem = false,
@@ -629,6 +631,12 @@ export function BuyBox({
    */
   stepped?: boolean;
   /**
+   * A member price the server proved for this visitor (components/member-price.tsx, 620 [SZ4]), as a percentage; 0
+   * for none. Given by the product page only where the checkout takes it (one price, paid in full, nothing to check):
+   * the form sends it for the checkout to prove again, and the button says its amount.
+   */
+  member?: number;
+  /**
    * For a course on its own sales page (24 [E7]): the end that page says ("none" or the end in seconds), sent with the
    * form so the checkout refuses a sale whose end changed and stamps the one shown. Null everywhere else: a card that
    * draws no date sells with no end.
@@ -673,15 +681,17 @@ export function BuyBox({
   };
   const pwyw = activePwyw(product);
   // Shipped by the creator (lib/shipping.ts): said under the button.
-  const shipping = activeShipping(product);
+  // Where it ships now: without the EU/EEA while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  const shipping = shippingNow(product);
   const sw = shippingWords(store.language);
   const trial = product.recurring && product.recurring.trialDays > 0 ? product.recurring.trialDays : 0;
   // A membership's introductory price (lib/intro-price.ts): what the button and the line under it say.
   const intro = activeIntro(product, store.tiers);
   // Or a yearly price beside the monthly one (lib/yearly-price.ts): picked here, before paying.
   const yearly = activeYearly(product, store.tiers);
-  // A store-wide sale on this product right now (lib/store-sale.ts): its price everywhere below.
-  const off = offNow(store, product);
+  // A store-wide sale on this product right now (lib/store-sale.ts): its price everywhere below. A member price
+  // replaces it only where it takes off more (memberShown), as the checkout does.
+  const off = member || offNow(store, product);
 
   if (isFree(product)) {
     return canGiveProduct(store, product) ? (
@@ -796,6 +806,8 @@ export function BuyBox({
       {accessEnd !== null ? <input type="hidden" name={ACCESS_END_FIELD} value={accessEnd} /> : null}
       {embed?.site ? <input type="hidden" name="site" value={embed.site} /> : null}
       {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
+      {/* The member price this page showed: proved again at checkout before Stripe (lib/member-price.ts, memberClaim). */}
+      {member ? <input type="hidden" name="member" value={String(member)} /> : null}
       {/*
         target="_top", here and on every form that opens a payment page:
         Stripe and PayPal refuse to be drawn inside a frame, and the home
@@ -1002,7 +1014,7 @@ export function BuyBox({
           );
         })}
       </button>
-      {shipping ? (
+      {shipping && shipping.countries.length > 0 ? (
         /* A product the creator ships (lib/shipping.ts): what shipping costs and where it goes, before anybody pays. */
         <p className="st-muted mt-2 text-center text-xs" data-shipping="">
           {[
@@ -1036,7 +1048,8 @@ export function BuyBox({
       {product.recurring && store.tiers.includes(product.id) ? (
         <p className="st-muted mt-2 text-center text-xs">{w.switchPlansNote}</p>
       ) : null}
-      <SaleNote store={store} product={product} />
+      {/* A member price says its own note beside the buy box (components/member-price.tsx), not a sale's. */}
+      {member ? null : <SaleNote store={store} product={product} />}
     </form>
     {withPayPal ? <PayPalButton store={store} product={product} alone={false} formId={formId} /> : null}
     </>

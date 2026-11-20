@@ -8,7 +8,8 @@
  * again. The buyer kept the product and the money (Claude 7, Redis race hunt).
  *
  * Now the refund pass takes the same giving mark the hand-over holds: while a hand-over runs, the refund is left
- * unread and the next run takes back what the hand-over gave.
+ * unread and the next run takes back what the hand-over gave. A refund Stripe finished whose row was left so goes on
+ * the list to try again (#3302), and comes off it once taken back.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -34,6 +35,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (path === "/refunds") return answer({ object: "list", data: refunds, has_more: false });
+  // One refund read again by itself, from the list to try again (lib/preorders.ts, reread).
+  if (path.startsWith("/refunds/")) {
+    const one = refunds.find((r) => r.id === path.split("/")[2]);
+    return one ? answer(one) : answer({ error: { message: "no such refund" } }, 404);
+  }
   if (path === "/events") return answer({ object: "list", data: [], has_more: false });
   if (path.startsWith("/payment_intents/")) {
     return answer({ id: path.split("/")[2], object: "payment_intent", latest_charge: { object: "charge", refunded: false, amount: 2500, amount_refunded: 0 } });
@@ -95,6 +101,10 @@ async function main(): Promise<void> {
   // The buyer is refunded in full meanwhile, and the refund pass runs to its end.
   refunds = [{ id: "re_racepre000001", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: PI, charge: { object: "charge", refunded: true } }];
   await revoke();
+  // The hand-over holds the giving mark, so this run did not handle the row: Stripe finished the refund, so it went on
+  // the list to try again (#3302) rather than holding the anchor.
+  const retryKey = `nl:pre:${store.statsId}:refunds:retry`;
+  is("the row whose mark the hand-over holds goes on the list to try again", (await redis.pipeline([["HGET", retryKey, "re_racepre000001"]]))[0], PI);
 
   // The hand-over goes on and finishes.
   gate = null;
@@ -106,6 +116,7 @@ async function main(): Promise<void> {
   const entry = await readPreorder(store, product.id, session.id);
   is("the refunded pre-order is marked revoked", Boolean(entry?.revoked), true);
   is("the refunded buyer no longer holds the product", await holds(), false);
+  is("and the row is off the list to try again", (await redis.pipeline([["HGET", retryKey, "re_racepre000001"]]))[0], null);
   done();
 }
 

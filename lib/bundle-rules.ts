@@ -91,13 +91,16 @@ export function whyNotInBundle(product: Listing): string | null {
  * of its own would be one more thing the buyer is promised; take them off
  * first, as for a call or a course.
  */
-export type OwnerProblem = "free" | "recurring" | "call" | "course" | "delivery" | "options" | "pwyw";
+export type OwnerProblem = "free" | "recurring" | "call" | "course" | "shipped" | "delivery" | "options" | "pwyw";
 
 export function bundleOwnerProblem(product: Listing): OwnerProblem | null {
   if (product.priceCents <= 0) return "free";
   if (product.recurring) return "recurring";
   if (product.call) return "call";
   if (product.course) return "course";
+  // A shipped product is a thing of its own sent to an address: as a bundle its checkout would ask for no address and
+  // charge no shipping while the studio still showed it (tests/bundle-physical-owner.test.ts).
+  if (product.shipping) return "shipped";
   if (product.file || product.link) return "delivery";
   if (product.options.length > 0) return "options";
   if (product.pwyw) return "pwyw";

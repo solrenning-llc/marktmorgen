@@ -85,10 +85,11 @@ export function StoreGuideBox({ handle, storeName, lang }: { handle: string; sto
           <div className="mt-4">
             <p className="st-muted text-xs font-semibold">{result.asked}</p>
             {/* The demo store's month of AI answers is used up: picks made in advance, said so above them (lib/demo-ai-rules.ts). */}
-            {result.example ? <p className="st-note mt-2 text-sm font-semibold">{result.example}</p> : null}
+            {result.example ? <p className="st-note mt-2 text-sm font-semibold" lang="en">{result.example}</p> : null}
             {result.picks.length ? (
               <>
-                <p className="mt-2 text-sm font-bold">{w.picks}</p>
+                {/* Example picks were not chosen for this visitor: never "These fit best" above them (VR, item 2). */}
+                {result.example ? <p className="mt-2 text-sm font-bold" lang="en">Products in this demo store</p> : <p className="mt-2 text-sm font-bold">{w.picks}</p>}
                 <ol className="mt-2 space-y-2">
                   {result.picks.map((pick) => (
                     <li key={pick.href}>

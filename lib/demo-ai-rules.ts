@@ -35,8 +35,10 @@ if (!Number.isSafeInteger(DEMO_AI_CEILING_MICRO_USD) || DEMO_AI_CEILING_MICRO_US
   throw new Error("The demo store's AI allowance costs more than the owner's cap");
 }
 
-/** Drawn by the page above an example answer or example picks, never by a model. */
-export const DEMO_EXAMPLE_LABEL = "Example answer, written in advance. This demo store's AI answers are used up for this month.";
+/** Drawn by the page above an example answer or example picks, never by a model. It says "not available right now",
+ * not "used up": the same closed answer also comes from an unreadable count (lib/answers.ts takeAnswer), and the label
+ * must be true in both cases. English, as the demo store is, and marked lang="en" where it is drawn (AX274, 3.1.1). */
+export const DEMO_EXAMPLE_LABEL = "Example answer, written in advance: this demo store's AI answers are not available right now.";
 
 /** What the demo shows in place of a visitor answer once the month's are used up: true of the demo, never generated. */
 export const DEMO_EXAMPLE_ANSWER =

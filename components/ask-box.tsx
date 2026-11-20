@@ -101,7 +101,7 @@ export function AskBox({ handle, product, words }: { handle: string; product: st
           <div className="st-ask-answer mt-3">
             <p className="st-muted text-xs font-semibold">{answer.asked}</p>
             {/* The demo store's month of AI answers is used up: an answer written in advance, said so above it (lib/demo-ai-rules.ts). */}
-            {answer.example ? <p className="st-note mt-1 text-sm font-semibold">{answer.example}</p> : null}
+            {answer.example ? <p className="st-note mt-1 text-sm font-semibold" lang="en">{answer.example}</p> : null}
             <p className="mt-1 leading-relaxed">{answer.text}</p>
           </div>
         ) : null}

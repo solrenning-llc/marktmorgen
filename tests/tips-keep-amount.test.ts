@@ -1,8 +1,8 @@
 /**
  * The support box keeps what the supporter already gave when it comes back with a notice (WCAG 3.3.7, redundant
- * entry; follow-up of 789 [IV1] unit 1, B): the amount chosen and the amount typed. Never the billing country, which
- * would sit in the address bar, the history and the access logs; its field lists it to be chosen again. Only values the
- * box itself offers are put back; anything else is dropped, never shown.
+ * entry; follow-up of 789 [IV1] unit 1, B, asked by Claude 3 and Codex X6 on #4919): the amount chosen, the amount
+ * typed and, after a notice about the amount, the billing country. Never the country refused ("abroad") or missing
+ * ("country"). Only values the box itself offers are put back; anything else is dropped, never shown.
  */
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
@@ -50,32 +50,32 @@ async function main(): Promise<void> {
     return new URL(response.headers.get("location") ?? "", "https://marktmorgen.com");
   };
 
-  part("The route sends back the amount given, beside the notice, never the country");
+  part("The route sends back what was given, beside the notice");
   let back = await tip("US", { amount: preset, other: "20", [BILLING_COUNTRY_FIELD]: "US" });
-  is("amount: the chosen amount and the typed one go back", [back.searchParams.get("tip"), back.searchParams.get("chose"), back.searchParams.get("other")], ["amount", preset, "20"]);
+  is("RED: amount: the chosen amount, the typed one and the country go back", [back.searchParams.get("tip"), back.searchParams.get("chose"), back.searchParams.get("other"), back.searchParams.get("from")], ["amount", preset, "20", "US"]);
   back = await tip("US", { amount: "other", other: "", [BILLING_COUNTRY_FIELD]: "CA" });
-  is("amount: another amount chosen and left empty", [back.searchParams.get("chose"), back.searchParams.get("other")], ["other", null]);
+  is("RED: amount: another amount chosen and left empty, with the country", [back.searchParams.get("chose"), back.searchParams.get("other"), back.searchParams.get("from")], ["other", null, "CA"]);
   back = await tip("US", { amount: preset });
-  is("country: the amount goes back", [back.searchParams.get("tip"), back.searchParams.get("chose")], ["country", preset]);
+  is("country: the amount goes back, and no country (none was given)", [back.searchParams.get("tip"), back.searchParams.get("chose"), back.searchParams.get("from")], ["country", preset, null]);
   back = await tip("DE", { amount: "other", other: "7.50", [BILLING_COUNTRY_FIELD]: "DE" });
-  is("abroad: the amount goes back", [back.searchParams.get("tip"), back.searchParams.get("chose"), back.searchParams.get("other")], ["abroad", "other", "7.50"]);
-  back = await tip("US", { amount: "99999", other: "<b>1</b>", [BILLING_COUNTRY_FIELD]: "US" });
-  is("nothing the box does not offer goes back: an amount it does not offer, markup typed", [back.searchParams.get("chose"), back.searchParams.get("other")], [null, null]);
-  is("the country never goes back (address bar, history, access logs)", [...back.searchParams.keys()].some((key) => /country|from/.test(key)), false);
+  is("abroad: the amount goes back, the refused country never", [back.searchParams.get("tip"), back.searchParams.get("chose"), back.searchParams.get("other"), back.searchParams.get("from")], ["abroad", "other", "7.50", null]);
+  back = await tip("US", { amount: "99999", other: "<b>1</b>", [BILLING_COUNTRY_FIELD]: "ZZ" });
+  is("nothing the box does not offer goes back: an amount it does not offer, markup typed, an unknown country", [back.searchParams.get("chose"), back.searchParams.get("other"), back.searchParams.get("from")], [null, null, null]);
   is("the notice and the place on the page are kept", [back.pathname, back.hash], [`/@${SHOP}`, "#support"]);
 
   part("The store page reads it only as the box offers it");
-  is("a known amount and a typed amount", tipKept(store, { chose: preset, other: "20" }), { chose: preset, other: "20" });
-  is("anything else is dropped", tipKept(store, { chose: "99999", other: "javascript:1" }), { chose: "", other: "" });
-  is("a list or nothing is dropped too", tipKept(store, { chose: ["1", "2"], other: undefined }), { chose: "", other: "" });
+  is("RED: a known amount, a typed amount and a country", tipKept(store, { chose: preset, other: "20", from: "us" } as never), { chose: preset, other: "20", from: "US" });
+  is("RED: anything else is dropped", tipKept(store, { chose: "99999", other: "javascript:1", from: "us1" } as never), { chose: "", other: "", from: "" });
+  is("RED: a list or nothing is dropped too", tipKept(store, { chose: ["1", "2"], other: undefined, from: ["US"] } as never), { chose: "", other: "", from: "" });
 
   part("The box puts it back");
-  const drawn = await html(StoreTipBox({ store, problem: "amount", rehearsal: false, kept: { chose: preset, other: "20" } }));
+  const drawn = await html(StoreTipBox({ store, problem: "amount", rehearsal: false, kept: { chose: preset, other: "20", from: "US" } as never }));
   is("the chosen amount is checked", new RegExp(`<input[^>]*id="support-amount-${preset}"[^>]*checked`).test(drawn), true);
   is("only that one", (drawn.match(/<input[^>]*type="radio"[^>]*checked/g) ?? []).length, 1);
   is("the typed amount is in its box", /<input[^>]*name="other"[^>]*value="20"/.test(drawn), true);
+  is("RED: the country is chosen, and only that one", [/<option[^>]*value="US"[^>]*selected/.test(drawn), (drawn.match(/<option[^>]*selected/g) ?? []).length], [true, 1]);
   const fresh = await html(StoreTipBox({ store, problem: "", rehearsal: false }));
-  is("a first visit chooses nothing", /type="radio"[^>]*checked/.test(fresh), false);
+  is("a first visit chooses nothing", [/type="radio"[^>]*checked/.test(fresh), /<option[^>]*value="[A-Z]{2}"[^>]*selected/.test(fresh)], [false, false]);
 
   done();
 }

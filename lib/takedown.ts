@@ -631,9 +631,11 @@ async function keepNoticePage(token: string, until: number): Promise<void> {
   const want = Math.ceil((until + NOTICE_PAGE_AFTER_HOLD_DAYS * 86_400_000 - Date.now()) / 1000);
   const replies = repliesFor(await redisPipeline([["TTL", tokenKey(token)]]), 1);
   const ttl = replies && typeof replies[0] === "number" && Number.isSafeInteger(replies[0]) ? replies[0] : null;
-  if (ttl === null) throw new UnknownReplyError("a notice page's lifetime");
-  // -2: the page is gone already; -1: it never expires, so it already lasts long enough.
-  if (ttl === -2 || ttl === -1 || ttl >= want) return;
+  if (ttl === null || ttl < -2) throw new UnknownReplyError("a notice page's lifetime");
+  // -2: the page is gone, so nothing could record a counter-notice for a hold; refuse before anything is held.
+  if (ttl === -2) throw new Error("the notice's page is gone, so it cannot keep a hold");
+  // -1: it never expires, so it already lasts long enough.
+  if (ttl === -1 || ttl >= want) return;
   const set = repliesFor(await redisPipeline([["EXPIRE", tokenKey(token), want]]), 1);
   if (!set || set[0] !== 1) throw new UnknownReplyError("a notice page's lifetime write");
 }

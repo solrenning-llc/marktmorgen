@@ -152,7 +152,7 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
               <span className="field-label">Your note (only you and your team see it, optional)</span>
               <input className="field" maxLength={NOTE_MAX} value={note} onChange={(event) => setNote(event.target.value)} />
             </label>
-            <button type="submit" className={control} disabled={busy} aria-busy={busy}>
+            <button type="submit" className={control} aria-disabled={busy} aria-busy={busy}>
               Block
             </button>
           </form>
@@ -162,7 +162,7 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
         <>
           <p className="text-sm font-semibold">You blocked this person. They cannot write to you from your store.</p>
           {state.reason ? <p className="mt-1 text-sm text-ink-soft">Your note: {state.reason}</p> : null}
-          <button ref={undo} type="button" className={`${control} mt-2`} disabled={busy} aria-busy={busy} onClick={() => void unblock()}>
+          <button ref={undo} type="button" className={`${control} mt-2`} aria-disabled={busy} aria-busy={busy} onClick={() => void unblock()}>
             Let them write again
           </button>
         </>

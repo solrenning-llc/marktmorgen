@@ -26,7 +26,7 @@ const bundle=await build({stdin:{contents:[
  'import {createRoot} from "react-dom/client";',
  'import {InboxBlock} from "@/components/inbox-block";',
  'window.__calls=[];',
- 'const post=async (body)=>{window.__calls.push(body);const answer=window.__answers.shift();return answer??{ok:false,error:"network"};};',
+ 'const post=async (body)=>{window.__calls.push(body);const answer=window.__answers.shift();if(answer==="hold"){await new Promise((r)=>{window.__release=r;});window.__release=null;return window.__answers.shift()??{ok:false,error:"network"};}return answer??{ok:false,error:"network"};};',
  'createRoot(document.getElementById("root")).render(React.createElement(InboxBlock,{id:"abcdefabcdef",post}));'
 ].join('\n'),loader:'tsx',resolveDir:root},bundle:true,platform:'browser',write:false,alias:{'@':root},define:{'process.env.NODE_ENV':JSON.stringify('production')},logLevel:'error'});
 async function launch() {
@@ -101,6 +101,32 @@ try {
   await until(page,()=>Boolean(document.querySelector('summary')));
   await until(page,()=>document.activeElement?.tagName==='SUMMARY');
   out.focusAfterUnblock=await active();
+  await page.close();
+ }
+ // Codex X6 on #3840 (LOW, 2.4.3/2.1.1): while Block or Let them write again waits on its answer, the control keeps
+ // the focus (aria-disabled, not the native disabled that drops it from the tab order) and a second press sends nothing.
+ {
+  const page=await open([{ok:true,blocked:false},'hold',{ok:true,blocked:true},{ok:true,blocked:true,reason:'',at:1},'hold',{ok:true,blocked:false}]);
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  const busyState=()=>page.evaluate(()=>{const a=document.activeElement;return {active:a?(a.tagName+':'+(a.textContent??'').trim()):'',disabled:a instanceof HTMLButtonElement?a.disabled:null,aria:a?.getAttribute('aria-disabled')??null,busy:a?.getAttribute('aria-busy')??null};});
+  await page.focus('summary');
+  await page.keyboard.press('Enter');
+  await page.focus('[data-inbox-block] button[type=submit]');
+  await page.keyboard.press('Enter');
+  await until(page,()=>typeof window.__release==='function');
+  out.busyBlock=await busyState();
+  await page.keyboard.press('Enter');
+  out.busyBlockCalls=await page.evaluate(()=>window.__calls.filter((c)=>c.action==='block').length);
+  await page.evaluate(()=>window.__release());
+  await until(page,()=>(document.activeElement?.textContent??'').includes('Let them write again'));
+  await page.keyboard.press('Enter');
+  await until(page,()=>typeof window.__release==='function');
+  out.busyUnblock=await busyState();
+  await page.keyboard.press('Enter');
+  out.busyUnblockCalls=await page.evaluate(()=>window.__calls.filter((c)=>c.action==='unblock').length);
+  await page.evaluate(()=>window.__release());
+  await until(page,()=>document.activeElement?.tagName==='SUMMARY');
+  out.afterBusyUnblock=await page.evaluate(()=>document.activeElement?.tagName??'');
   await page.close();
  }
  {
@@ -191,6 +217,11 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   focusAfterBlock: string;
   focusAfterUnblock: string;
   focusAfterCheck: string;
+  busyBlock: { active: string; disabled: boolean | null; aria: string | null; busy: string | null };
+  busyBlockCalls: number;
+  busyUnblock: { active: string; disabled: boolean | null; aria: string | null; busy: string | null };
+  busyUnblockCalls: number;
+  afterBusyUnblock: string;
   keptNoteText: string;
   unblockedDuringReadback: string;
   lostBlockText: string;
@@ -219,6 +250,11 @@ is("review: the note's label says the team sees it too", /only you and your team
 is("review of #3840: after Block, the focus is on Let them write again", result.focusAfterBlock, "BUTTON:Let them write again");
 is("after Let them write again, the focus is on the summary", result.focusAfterUnblock, "SUMMARY:Block this person");
 is("after Check again, the focus is on what replaced it", result.focusAfterCheck, "SUMMARY:Block this person");
+is("Codex X6: while Block waits, the focus stays on it, marked busy and aria-disabled, never natively disabled", result.busyBlock, { active: "BUTTON:Block", disabled: false, aria: "true", busy: "true" });
+is("a second press while Block waits sends nothing more", result.busyBlockCalls, 1);
+is("while Let them write again waits, the focus stays on it the same way", result.busyUnblock, { active: "BUTTON:Let them write again", disabled: false, aria: "true", busy: "true" });
+is("a second press while it waits sends nothing more", result.busyUnblockCalls, 1);
+is("once it answers, the focus moves on as before", result.afterBusyUnblock, "SUMMARY");
 is("review of #3840: the note shown is the one kept, never the one typed here", [result.keptNoteText.includes("Spam, from a teammate"), result.keptNoteText.includes("Typed here")], [true, false]);
 is("and the person stays not blocked", [result.refusedText.includes("You blocked this person"), result.refusedText.includes("Block this person")], [false, true]);
 is("Codex G on #3840: a known concurrent unblock is never shown as blocked", [result.unblockedDuringReadback.includes("Block this person"), result.unblockedDuringReadback.includes("You blocked this person")], [true, false]);

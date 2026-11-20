@@ -287,7 +287,9 @@ async function main(): Promise<void> {
   is("a whole wait with looks in no known shape is not room for one more", (await countWaits(flowId, ["odd@example.com"], 0, nowS())).get("odd@example.com"), null);
   await redisPipeline([["HDEL", odd, "offLooks"], ["HSET", odd, "waits", "x"]]);
   is("a look with waits in no known shape is not room for one more", (await countWaits(flowId, ["odd@example.com"], 0, nowS(), true)).get("odd@example.com"), null);
-  await redisPipeline([["DEL", odd]]);
+  // The run is there with neither field: since #4234 a wait is counted only while its run is there (a run that is gone
+  // makes no record again and reads as unknown, tests/flow-settle-after-erase.test.ts).
+  await redisPipeline([["DEL", odd], ["HSET", odd, "email", "odd@example.com"]]);
   is("a run with neither field yet counts from nothing", [(await countWaits(flowId, ["odd@example.com"], 0, 1_800_000_000, true)).get("odd@example.com")], [{ waits: 0, offLooks: 1, since: 1_800_000_000 }]);
 
   part("The studio says so while the store is switched off");

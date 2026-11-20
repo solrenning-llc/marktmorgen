@@ -173,7 +173,7 @@ async function offers(): Promise<void> {
       amount_total: 3900,
       metadata: { store: "harbor", product: front, upsell_key: browser.fingerprint },
       customer_details: { email: buyerOf(n), address: { country: "US" } },
-      payment_intent: { id: `pi_test_r48front${n}`, payment_method: { id: "pm_test_r48card01", type: "card", customer: "cus_TestR48Buyer" } },
+      payment_intent: { id: `pi_test_r48front${n}`, payment_method: { id: "pm_test_r48card01", type: "card", customer: "cus_TestR48Buyer", card: { country: "US" } } },
     };
     return id;
   };

@@ -81,7 +81,7 @@ import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
-import { SYNC_SECONDS } from "@/lib/host-calendar";
+import { HOST_LOCK_OWNER_COMMANDS, SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM, MEMBER_STORES_READ } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -1718,7 +1718,8 @@ export function walkRead(commands: number, bytes: number): number {
 }
 
 /** One host's calendar read: its commands, and the wait for the calendar, held at 2 GB inside the page that asked. */
-export const TEAM_READING = 7 * COMMAND + 1 * MEMORY_SECOND + 0.05 * CPU_SECOND;
+// Its lock under a value of its own, let go by compare-and-delete: HOST_LOCK_OWNER_COMMANDS more (lib/host-calendar.ts).
+export const TEAM_READING = (7 + HOST_LOCK_OWNER_COMMANDS) * COMMAND + 1 * MEMORY_SECOND + 0.05 * CPU_SECOND;
 /** Commands a view of a team call's page costs: each host's claims, and one MGET of every host's calendar state and connection plus the round-robin counts (lib/team-booking.ts). */
 export const TEAM_COMMANDS_PER_HOST_VIEW = 1;
 export const TEAM_COMMANDS_PER_VIEW = 2;
@@ -2266,11 +2267,11 @@ export const COST_LINES: CostLine[] = [
     },
     sources: [
       { file: "lib/team-scheduling-rules.ts", names: ["TEAM_LIMITS", "TRIAL_TEAM_LIMITS", "SETUP_TEAM_LIMITS"] },
-      { file: "lib/host-calendar.ts", names: ["SYNC_SECONDS", "STALE_SECONDS", "prefetchHosts"] },
+      { file: "lib/host-calendar.ts", names: ["SYNC_SECONDS", "STALE_SECONDS", "prefetchHosts", "HOST_LOCK_OWNER_COMMANDS"] },
       { file: "lib/team-booking.ts", names: ["prefetchHosts", "readClaims", "rrKey"] },
       { file: "lib/team.ts", names: ["MAX_TEAM"] },
     ],
-    basis: "Each host's calendar read at most once a sync interval all month (about seven commands and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
+    basis: "Each host's calendar read at most once a sync interval all month (about seven commands, and HOST_LOCK_OWNER_COMMANDS more for its lock taken under its own value and let go by compare-and-delete, and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
   },
   {
     id: "own-call-host-claims",

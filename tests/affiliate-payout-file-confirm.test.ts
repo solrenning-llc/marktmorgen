@@ -177,6 +177,24 @@ async function main(): Promise<void> {
   await redis.pipeline([["HDEL", payoutsKey, "edededededed"]]);
   is("the existing recorded amounts are unchanged", await paidTo(), paidBefore);
   is("the file remains available once the book can be checked", (await confirm({ date: "2026-11-12", reference: "x", file: f5.file })).status, 200);
+
+  // Codex L on #3906 @7c02e69d1d (MEDIUM, money): another payout made at the kept file's exact millisecond overlaps the
+  // balance the file was read from, and strict ">" let the confirmation write the file's line on top of it.
+  part("A file overlapping a payout made at the very millisecond the file was kept is refused");
+  // The payout written by hand above is dated a second ahead; it is moved to the past, its amount unchanged, so only the
+  // payout at the same millisecond can make this file stale.
+  await redis.pipeline([["HSET", payoutsKey, "abcdefabcdef", JSON.stringify({ id: "abcdefabcdef", aff: BEA, cents: 3_000, currency: "usd", date: "2026-11-12", reference: "cash", at: 1 })]]);
+  await redis.pipeline([["HSET", sales, "cs_bea3", sale("cs_bea3", BEA, 10_000)]]);
+  const f6 = await download();
+  is("f6 pays Bea thirty dollars", [f6.status, f6.body.includes(",30.00,USD,")], [200, true]);
+  const keptAt = (JSON.parse(String((await redis.pipeline([["HGET", `nl:affpay:${statsId}`, f6.file]]))[0])) as { at: number }).at;
+  await redis.pipeline([["HSET", payoutsKey, "fafafafafafa", JSON.stringify({ id: "fafafafafafa", aff: BEA, cents: 3_000, currency: "usd", date: "2026-11-12", reference: "cash", at: keptAt })]]);
+  const paidSame = await paidTo();
+  const sameMs = await confirm({ date: "2026-11-12", reference: "x", file: f6.file });
+  is("refused as out of date, nothing written", [sameMs.status, sameMs.data.error, await paidTo()], [409, "stale", paidSame]);
+  is("the file is kept, not used up", (await redis.pipeline([["HEXISTS", `nl:affpay:${statsId}`, f6.file]]))[0], 1);
+  await redis.pipeline([["HDEL", payoutsKey, "fafafafafafa"]]);
+  is("control: without that payout the same file is written down", (await confirm({ date: "2026-11-12", reference: "x", file: f6.file })).status, 200);
   done();
 }
 

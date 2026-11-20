@@ -3,19 +3,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { settleShares } from "@/lib/share-settle";
 import { SHARING_INDEX } from "@/lib/platform-share";
-import { claimHandle, ERASING_KEY, erasingField, setStripeAccount, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { claimHandle, ERASING_KEY, erasingField, ownerKey, setStripeAccount, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = Math.floor(Date.now() / 1000);
-async function world(phase: "history" | "membership", erase: "gone" | "erasing" | null) {
+async function world(phase: "history" | "membership", erase: "gone" | "erasing" | null, legacy = false) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_share_marker_synthetic";
   const owner = "share-marker-erasure@example.test";
   assert.equal((await claimHandle(owner, "share-marker-erasure", "Synthetic shop", "")).ok, true);
   assert.equal((await setStripeAccount(owner, "acct_ShareMarker0001", true)).ok, true);
   if (phase === "membership") await setSubscription(owner, { customerId: "cus_ShareMarker0001", subscriptionId: "sub_ShareMarker0001", active: true, tier: "creator", cycle: "month", trialEnds: NOW - 864000, shared: true, period: paidPeriod() });
+  if (legacy) {
+    // A store from before ids (Claude 3's LOW on #4928): its record carries no sid, so it has no identity key.
+    const key = await ownerKey(owner);
+    const [raw] = await redis.pipeline([["GET", key]]);
+    const record = JSON.parse(String(raw)) as Record<string, unknown>;
+    await redis.pipeline([["DEL", storeIdCommand(String(record.sid))[1]], ["SET", key, JSON.stringify({ ...record, sid: undefined })]]);
+  }
   const shop = (await storeForEmail(owner))!, ref = storeRef(shop);
+  assert.equal(shop.sid === "", legacy, legacy ? "the legacy store reads back with no id" : "the store has an id");
   assert.equal(ref, owner, "this first store's marker names its owner's address");
   await redis.pipeline([["SADD", SHARING_INDEX, ref], ["HDEL", "nl:share:applied", ref]]);
   const originalFetch = globalThis.fetch;
@@ -26,7 +34,7 @@ async function world(phase: "history" | "membership", erase: "gone" | "erasing" 
     if (!erase) return;
     // The identity/fence and index state left by the eraser; the provider is still answering the old snapshot.
     await redis.pipeline([
-      erase === "gone" ? ["DEL", storeIdCommand(shop.sid)[1]] : ["HSET", ERASING_KEY, await erasingField(ref), String(NOW)],
+      erase === "gone" ? ["DEL", legacy ? await ownerKey(ref) : storeIdCommand(shop.sid)[1]] : ["HSET", ERASING_KEY, await erasingField(ref), String(NOW)],
       ["HDEL", "nl:share:read-until", ref], ["HDEL", "nl:share:applied", ref], ["SREM", SHARING_INDEX, ref],
     ]);
     erased = true;
@@ -76,4 +84,23 @@ for (const phase of ["history", "membership"] as const) {
     assert.equal(out.counts.complete, true);
     assert.ok(out.billed.includes(4));
   });
+}
+
+// Claude 3's LOW on #4928: a store from before ids is fenced on its owner record, so it still records its progress
+// while live, and a late answer still never restores its owner's address once the record is gone or being erased.
+for (const phase of ["history", "membership"] as const) {
+  test(`${phase}: a live store from before ids still saves confirmed progress`, async () => {
+    const out = await world(phase, null, true);
+    assert.equal(typeof out.marker, "string");
+    assert.equal(out.counts.complete, true);
+    assert.ok(out.billed.includes(4));
+  });
+  for (const erase of ["gone", "erasing"] as const) {
+    test(`${phase}: a store from before ids never has its erased owner's marker restored (${erase})`, async () => {
+      const out = await world(phase, erase, true);
+      assert.equal(out.erased, true);
+      assert.equal(out.marker, null);
+      assert.equal(out.counts.complete, false);
+    });
+  }
 }

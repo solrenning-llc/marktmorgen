@@ -1,5 +1,5 @@
 import {waitForReactChangeHandler} from "./react-hydration.mjs";
-import {waitForReactHydrated} from "./react-hydration.mjs";
+import {applyUntilHeld,waitForReactHydrated} from "./react-hydration.mjs";
 
 /** Only synthetic intercepted allowlist settings; never visits the listed origins or opens checkout. */
 export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){
@@ -34,7 +34,13 @@ export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){
    await waitForReactHydrated(page,field);await waitForReactChangeHandler(page,field);
    for(const clear of [false,true]){
     const raw=clear?"":draft,sites=clear?[]:expected;
-    const filledNode=await field.elementHandle();await field.fill(raw);
+    const filledNode=await field.elementHandle();
+    // A late commit can draw the editor again from its saved sites, dropping the draft and disabling "Save sites"
+    // (WebKit, common cause no. 2): act only once the screen holds the draft with "Save sites" enabled.
+    await applyUntilHeld(page,"sites "+clear+"/"+width,()=>field.fill(raw),()=>section.evaluate((root,raw)=>{
+     const node=root.querySelector("textarea"),button=[...root.querySelectorAll("button")].find(b=>b.textContent.trim()==="Save sites");
+     return node?.value===raw&&button?.disabled===false;
+    },raw));
     // WebKit twice left "Save sites" disabled after this fill at 1280 (not reproduced in Chromium).
     // Record what the page holds when that happens, so the next failure names its cause.
     const afterFill=await section.evaluate((root,raw)=>{

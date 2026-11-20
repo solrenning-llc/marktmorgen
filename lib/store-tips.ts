@@ -17,6 +17,7 @@
  * sales as "Support", with whatever message the visitor left.
  */
 import { type Currency, currencyRule, readMoney } from "@/lib/money";
+import { SHIP_COUNTRIES } from "@/lib/shipping";
 
 export type StoreTips = {
   on: boolean;
@@ -88,4 +89,27 @@ export function parseTips(raw: unknown): StoreTips {
     ? value.amounts.filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0).slice(0, MAX_TIP_AMOUNTS)
     : [];
   return { on: value.on === true, heading: words(value.heading, MAX_TIPS_HEADING), line: words(value.line, MAX_TIPS_LINE), amounts };
+}
+
+/** What the support box puts back after a notice (WCAG 3.3.7): the amount chosen, the amount typed and the country. */
+export type TipKept = { chose: string; other: string; from: string };
+
+const KEPT_COUNTRIES: ReadonlySet<string> = new Set(SHIP_COUNTRIES);
+const KEPT_TYPED = /^\d{1,7}(?:[.,]\d{1,2})?$/;
+
+/**
+ * Only what the box itself offers, so nothing else is ever drawn back (app/api/store/tip sends it, the store page reads
+ * it): one of the store's amounts or "other", a plain typed amount, and a country the billing field lists (a two-letter
+ * code, nothing more about the person). Anything else, a list or nothing is dropped.
+ */
+export function tipKept(store: { tips: StoreTips; currency: Currency }, given: { chose?: unknown; other?: unknown; from?: unknown }): TipKept {
+  const text = (value: unknown) => (typeof value === "string" ? value.slice(0, 20).trim() : "");
+  const chose = text(given.chose);
+  const other = text(given.other);
+  const from = text(given.from).toUpperCase();
+  return {
+    chose: chose === "other" || tipAmounts(store.tips, store.currency).map(String).includes(chose) ? chose : "",
+    other: KEPT_TYPED.test(other) ? other : "",
+    from: KEPT_COUNTRIES.has(from) ? from : "",
+  };
 }

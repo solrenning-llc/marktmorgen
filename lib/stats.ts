@@ -215,7 +215,7 @@ export async function recordHit(
     // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
     let opened: number | null = null;
     try {
-      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
     } catch (error) {
       console.error("counting a product page's view failed", error);
     }
@@ -232,7 +232,7 @@ export async function recordHit(
   ];
   let replies: unknown[];
   try {
-    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
   } catch (error) {
     // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
     await redisPipeline(unknownExpiries()).catch(() => null);
@@ -274,21 +274,17 @@ export async function recordHit(
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
  * item seen and the one clicked, on the day's record. A reading may come
  * on a day with no view yet (its token is good for two hours, so a page shown
- * at 23:30 UTC may be read at 00:30), so it gives the day's record its expiry
- * itself (Claude 5 on #2571). Two commands, and only for the visitors the
- * page chose to measure.
+ * at 23:30 UTC may be read at 00:30, Claude 5 on #2571; or a page left open
+ * past midnight), so it may create the record: the capped count gives it its
+ * expiry then, inside the same script (lib/capped-count.ts, version 3), so the
+ * count and the expiry are written together or not at all. One command, and
+ * only for the visitors the page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  const counts = countsKey(statsId, dayKey(now));
-  try {
-    // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
-    // keep their room.
-    await cappedCount(counts, REACH_FIELDS_MAX, [{ field, by: 1 }]);
-  } finally {
-    // Sent whatever the count answered: an answer lost after the write leaves the record as it would be.
-    await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
-  }
+  // At most REACH_FIELDS_MAX fields when a reach beacon adds one (#4608), so views, sources, countries and answers
+  // keep their room.
+  await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }], TTL_SECONDS);
 }
 
 /** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
@@ -317,7 +313,7 @@ export async function countHeard(statsId: string, answer: string, cents: number,
   if (!isRedisConfigured()) return;
   const counts = countsKey(statsId, dayKey(now));
   await redisPipeline([
-    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [
+    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [
       { hash: 0, field: `h:${answer}`, by: 1 },
       ...(cents > 0 ? [{ hash: 0, field: `hc:${answer}`, by: Math.round(cents) }] : []),
       // A sale no link credited to any channel: what its buyer said is the only
@@ -346,7 +342,7 @@ export async function countSearchMiss(statsId: string, words: string[], now = Da
   const counts = countsKey(statsId, dayKey(now));
   try {
     await redisPipeline([
-      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
+      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
       ["EXPIRE", counts, TTL_SECONDS],
     ]);
   } catch (error) {
@@ -1256,10 +1252,11 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * Why a reading of paid sales is partial, so what says so names the source
  * truly (lib/store-export.ts, its orders' note): the PayPal sales not all read
  * ("paypal"), more pages on the Stripe account than were read
- * ("stripe-pages"), or a Stripe sale whose currency was not named, kept with
- * its currency blank ("currency").
+ * ("stripe-pages"), a Stripe sale whose currency was not named, kept with
+ * its currency blank ("currency"), or a paid Stripe sale whose amount was not
+ * whole minor units, left out rather than written as zero ("amount").
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "amount";
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1333,6 +1330,14 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     if (row.status !== "complete" || row.payment_status !== "paid") return;
     const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
     const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
+    // A paid checkout whose amount is not whole minor units is no sale of zero: it is left out and the reading is
+    // incomplete (issue #4386). A known zero, such as a fully discounted order, is a sale of zero.
+    const cents = minorUnits(row.amount_total);
+    if (cents === null) {
+      partial = true;
+      gaps.add("amount");
+      return;
+    }
     const currency = currencyOf(row);
     // A sale in a currency the answer does not name cannot be counted anywhere: the reading is incomplete.
     if (!currency) {
@@ -1342,7 +1347,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     sales.push({
       created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
       product: meta.product ?? "",
-      cents: typeof row.amount_total === "number" ? row.amount_total : 0,
+      cents,
       currency,
       row: raw,
       upsell: false,
@@ -1355,6 +1360,14 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   const extras = walk("/payment_intents?limit=100", (pi) => {
     const meta = (pi.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
+    // A succeeded charge always took money, so a missing, zero or unreadable amount is not a sale of zero: it is left
+    // out and the reading is incomplete (issue #4386).
+    const cents = minorUnits(pi.amount);
+    if (!cents) {
+      partial = true;
+      gaps.add("amount");
+      return;
+    }
     if (!currencyOf(pi)) {
       partial = true;
       gaps.add("currency");
@@ -1362,7 +1375,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     sales.push({
       created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
       product: meta.product ?? "",
-      cents: typeof pi.amount === "number" ? pi.amount : 0,
+      cents,
       currency: currencyOf(pi),
       row: pi,
       upsell: true,
@@ -1406,6 +1419,19 @@ function paidAfterCheckout(invoice: Record<string, unknown>): boolean {
   return invoice.status === "paid" && typeof invoice.billing_reason === "string" && AFTER_CHECKOUT_REASONS.has(invoice.billing_reason);
 }
 
+/** A money amount Stripe gives in whole minor units: a safe integer, zero or more. Anything else is unreadable (null), never zero. */
+function minorUnits(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Whether an invoice is a paid payment after the checkout of one of this store's subscriptions: the invoices
+ * renewalsFrom and renewalEntries count (paidAfterCheckout, this store's handles).
+ */
+function isStoreRenewal(handles: Set<string>, invoice: Record<string, unknown>): boolean {
+  return paidAfterCheckout(invoice) && handles.has(invoiceMeta(invoice).store ?? "");
+}
+
 /**
  * The payments after the first of this store's memberships and payment plans
  * since `since` (seconds): paid invoices after the checkout's own
@@ -1433,8 +1459,9 @@ export function renewalsFrom(
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     if (currencyOf(invoice) !== currency) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
+    // An amount that is not whole minor units is counted nowhere; readRenewals marks the reading partial for it.
+    const cents = minorUnits(invoice.amount_paid);
+    if (cents === null || cents === 0) continue;
     const day = dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000);
     const windows: ("d7" | "d30" | "d90")[] = ["d90", ...(day >= cut30 ? (["d30"] as const) : []), ...(day >= cut7 ? (["d7"] as const) : [])];
     for (const w of windows) {
@@ -1470,15 +1497,16 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
     if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
+    // An unreadable amount is no entry here and makes readRenewals partial; a known zero is no cash entry.
+    const cents = minorUnits(invoice.amount_paid);
+    if (cents === null || cents === 0) continue;
     const source = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
     out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents, currency: currencyOf(invoice), source });
   }
   return out;
 }
 
-async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[] }> {
+async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[]; paymentIntents: Set<string>; invoiceIds: Set<string> }> {
   const invoices: Record<string, unknown>[] = [];
   let after = "";
   const seen = new Set<string>();
@@ -1500,7 +1528,37 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   const entries = renewalEntries(store, invoices);
   // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
   if (entries.some((entry) => !entry.currency)) partial = true;
-  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries };
+  // A paid renewal of this store whose amount is missing, negative, fractional or not a safe integer is in no total
+  // either: the reading is incomplete, never a renewal of zero (issue #4388).
+  const handles = saleHandles(store);
+  if (invoices.some((invoice) => isStoreRenewal(handles, invoice) && minorUnits(invoice.amount_paid) === null)) partial = true;
+  // The store's own renewal invoices, to find a payment the invoice does not name among the account's invoice payments.
+  const invoiceIds = new Set(invoices.filter((invoice) => invoice.status === "paid" && isStoreRenewal(handles, invoice) && typeof invoice.id === "string").map((invoice) => invoice.id as string));
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, paymentIntents: renewalPaymentIntents(store, invoices), invoiceIds };
+}
+
+/**
+ * The payments of this store's paid renewals that the invoices name (the
+ * same invoices renewalEntries counts): on the invoice itself in older API
+ * versions, or among its payments when they come with it. These ids identify
+ * invoice-backed candidates; the invoice alone does not prove all allocations. Pure.
+ */
+export function renewalPaymentIntents(store: Store, invoices: Record<string, unknown>[]): Set<string> {
+  const handles = saleHandles(store);
+  const out = new Set<string>();
+  for (const invoice of invoices) {
+    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
+    if (typeof invoice.payment_intent === "string" && invoice.payment_intent) out.add(invoice.payment_intent);
+    const payments = (invoice.payments as { data?: unknown } | null | undefined)?.data;
+    for (const p of Array.isArray(payments) ? payments : []) {
+      const intent = (p as { status?: unknown; payment?: { payment_intent?: unknown } | null } | null)?.status === "paid"
+        ? (p as { payment?: { payment_intent?: unknown } | null }).payment?.payment_intent
+        : undefined;
+      if (typeof intent === "string" && intent) out.add(intent);
+    }
+  }
+  return out;
 }
 
 /** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
@@ -1531,11 +1589,18 @@ export type RenewalPayment = {
  * read 2 November 2026), so a refund of a membership's or a payment plan's
  * payment can be matched whatever API version the account answers in. At
  * most `pages` pages of a hundred, stopping at `deadline`; `partial` when
- * there was more (270 [GR1], unit 3a).
+ * there was more or a payment cannot be identified (270 [GR1], unit 3a).
+ * A row that names a payment but has an unreadable status, or is paid with no readable invoice,
+ * leaves that intent unconfirmed.
  */
-export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ byInvoice: Map<string, string[]>; partial: boolean }> {
+export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{
+  byInvoice: Map<string, string[]>;
+  unconfirmedIntents: Set<string>;
+  partial: boolean;
+}> {
   // Every paid payment of an invoice (one paid in parts has several); a paid one with no payment intent (a charge) is kept as "", a miss.
   const byInvoice = new Map<string, string[]>();
+  const unconfirmedIntents = new Set<string>();
   let after = "";
   const seen = new Set<string>();
   let partial = false;
@@ -1547,9 +1612,19 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
+      if (row.status === "open" || row.status === "canceled") continue;
       const invoice = typeof row.invoice === "string" ? row.invoice : "";
-      const intent = (row.payment as { payment_intent?: unknown } | null | undefined)?.payment_intent;
-      if (row.status !== "paid" || !invoice) continue;
+      const payment = row.payment as { type?: unknown; payment_intent?: unknown; charge?: unknown; payment_record?: unknown } | null | undefined;
+      const intent = payment?.payment_intent;
+      // Without an intent id this may be another allocation of any intent in the page. Only an identified
+      // non-intent variant can be excluded from that proof; otherwise the bounded individual lookup must decide.
+      const nonIntent = (payment?.type === "charge" && typeof payment.charge === "string" && payment.charge.length > 0) ||
+        (payment?.type === "payment_record" && typeof payment.payment_record === "string" && payment.payment_record.length > 0);
+      if ((typeof intent !== "string" || !intent) && !nonIntent) partial = true;
+      if (row.status !== "paid" || !invoice) {
+        if (typeof intent === "string" && intent) unconfirmedIntents.add(intent);
+        continue;
+      }
       byInvoice.set(invoice, [...(byInvoice.get(invoice) ?? []), typeof intent === "string" ? intent : ""]);
     }
     if (!list.has_more) break;
@@ -1558,7 +1633,58 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
     if (!after) { partial = true; break; }
     if (page === pages - 1 || Date.now() > deadline) { partial = true; break; }
   }
-  return { byInvoice, partial };
+  return { byInvoice, unconfirmedIntents, partial };
+}
+
+/**
+ * Payments whose invoice one reading of a store's numbers may look up one by one (GET /v1/invoice_payments filtered by
+ * the payment, the invoice expanded): a refund or dispute of a membership payment older than the invoices the reading
+ * reads otherwise could not be confirmed as the store's (#4549). Past it, the rest stay unconfirmed and the kept total
+ * reads unknown, never reduced on a guess.
+ */
+export const OLD_PAYMENT_LOOKUPS_PER_READING = 10;
+
+/**
+ * Whether a payment paid one of this store's membership or payment plan invoices, by its own invoice payment
+ * (GET /v1/invoice_payments?payment[type]=payment_intent&payment[payment_intent]=, the invoice expanded): read exactly
+ * (CX-123 rule 24). True only when Stripe lists exactly that payment, alone (has_more false: a payment intent can pay
+ * more than one invoice, so one row with more behind it proves nothing; Codex X7 on #4549), paid, on a paid invoice of a subscription this
+ * store opened (its checkout's or a later one, its metadata naming one of the store's handles). Anything else,
+ * an answer in another shape included, is false: the refund or dispute stays unconfirmed.
+ */
+export async function paymentOfStoreInvoice(store: Store, paymentIntent: string): Promise<boolean> {
+  if (!store.stripeAccountId || !/^pi_[A-Za-z0-9]{6,200}$/.test(paymentIntent)) return false;
+  const listed = (await onAccount(
+    "GET",
+    store.stripeAccountId,
+    `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": paymentIntent, limit: "1", "expand[]": "data.invoice" })}`,
+  )) as { object?: unknown; data?: unknown; has_more?: unknown } | null;
+  if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length !== 1 || listed.has_more !== false) return false;
+  const row = listed.data[0] as Record<string, unknown> | null;
+  if (!row || typeof row !== "object" || row.status !== "paid") return false;
+  const payment = row.payment as { type?: unknown; payment_intent?: unknown } | null | undefined;
+  if (!payment || payment.type !== "payment_intent" || payment.payment_intent !== paymentIntent) return false;
+  const invoice = row.invoice as Record<string, unknown> | null | undefined;
+  if (!invoice || typeof invoice !== "object" || typeof invoice.id !== "string" || !/^in_/.test(invoice.id)) return false;
+  const opened = invoice.status === "paid" && invoice.billing_reason === "subscription_create";
+  if (!opened && !paidAfterCheckout(invoice)) return false;
+  return saleHandles(store).has(invoiceMeta(invoice).store ?? "");
+}
+
+/**
+ * The payments among `payments` confirmed as this store's by their own invoice payment (paymentOfStoreInvoice): each
+ * asked once, at most OLD_PAYMENT_LOOKUPS_PER_READING of them, in order; a lookup that fails proves nothing.
+ */
+export async function confirmOldPayments(store: Store, payments: string[]): Promise<Set<string>> {
+  const confirmed = new Set<string>();
+  for (const pi of [...new Set(payments)].slice(0, OLD_PAYMENT_LOOKUPS_PER_READING)) {
+    const ours = await paymentOfStoreInvoice(store, pi).catch((error) => {
+      console.error("reading a refunded payment's invoice failed", error);
+      return false;
+    });
+    if (ours) confirmed.add(pi);
+  }
+  return confirmed;
 }
 
 /**
@@ -1625,8 +1751,9 @@ const DISPUTE_PAGES = 3;
 /**
  * The disputes opened on the creator's account since `since` (seconds) that
  * the bank is holding or gave back to the buyer (disputeTakes). At most
- * DISPUTE_PAGES pages of a hundred; `partial` when there were more, or when a
- * prevented dispute's money could not be read.
+ * DISPUTE_PAGES pages of a hundred; `partial` when there were more, when a
+ * dispute's status or a prevented dispute's money could not be read, or when
+ * a dispute that takes the money has no readable amount.
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1648,8 +1775,12 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
-      if (!cents) continue;
+      const cents = typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
+      // A dispute that takes the money is never for nothing: an amount not read is a gap, not zero (CX-123 rule 24).
+      if (!cents) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });
@@ -1680,12 +1811,22 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (row.status !== "succeeded" && row.status !== "pending") continue;
+      // Stripe's documented refund states (https://docs.stripe.com/api/refunds/object).
+      // A status outside them is unknown, never "nothing given back", so the
+      // reading is partial (CX-123 rule 24, #4370). Failed, canceled and
+      // requires_action give nothing back and are skipped as before.
+      if (row.status === "failed" || row.status === "canceled" || row.status === "requires_action") continue;
+      if (row.status !== "succeeded" && row.status !== "pending") { partial = true; continue; }
       const currency = currencyOf(row);
       if (!currency) partial = true;
+      // Money given back needs a positive whole number of cents; without one
+      // the row is kept (the refund and its sale are known) but its amount is
+      // not, so the reading is partial rather than a confirmed $0 (#4370).
+      const amountRead = typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0;
+      if (!amountRead) partial = true;
       out.push({
         created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        cents: amountRead ? (row.amount as number) : 0,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });
@@ -1950,15 +2091,67 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     // What each currency kept (lib/retained-revenue.ts): every reading as entries with its channel.
     const byPayment = new Map(read.filter((sale) => sale.paymentIntent).map((sale) => [sale.paymentIntent, sale]));
     const placed = (paymentIntent: string) => (paymentIntent ? byPayment.get(paymentIntent)?.source : undefined) ?? UNRECORDED;
+    // Channel attribution is separate from proof that a payment belongs to this store.
+    // A renewal or invoice-backed checkout can name a payment shared with other invoices.
+    const invoiceBacked = new Set(renewalRead?.paymentIntents ?? []);
+    const confirmedPayments = new Set<string>();
+    const checkoutInvoices = new Map<string, (typeof read)[number]>();
+    for (const sale of read) {
+      const invoice = sale.row.invoice;
+      if (typeof invoice === "string" && invoice) checkoutInvoices.set(invoice, sale);
+      if (!sale.paymentIntent) continue;
+      if (sale.row.mode === "subscription" || (invoice !== undefined && invoice !== null)) invoiceBacked.add(sale.paymentIntent);
+      else confirmedPayments.add(sale.paymentIntent);
+    }
+    for (const intent of invoiceBacked) confirmedPayments.delete(intent);
+    const known = (pi: string) => confirmedPayments.has(pi);
+    const adjustments = [...(refundRead?.rows ?? []), ...(disputeRead?.rows ?? [])];
+    const storeInvoices = new Set([...(renewalRead?.invoiceIds ?? []), ...checkoutInvoices.keys()]);
+    if (store.stripeAccountId && storeInvoices.size > 0 && adjustments.some((row) => row.paymentIntent && !known(row.paymentIntent))) {
+      const paid = await readInvoicePayments(store, sinceBefore, 5).catch((error) => {
+        console.error("reading invoice payments failed", error);
+        return null;
+      });
+      // The bulk read only places a payment's channel: it is filtered by created[gte], so it cannot list an allocation
+      // made before its window, and never proves a payment the store's alone (Codex N1 on #4549). A read whole whose
+      // invoices for that payment are all the store's lets its single checkout name the channel; the proof is left to
+      // the one-by-one lookup below, which lists every allocation of the payment, at most OLD_PAYMENT_LOOKUPS_PER_READING.
+      const invoicesOf = new Map<string, Set<string>>();
+      if (paid && !paid.partial) {
+        for (const [invoice, intents] of paid.byInvoice) {
+          for (const intent of intents) {
+            if (intent && !paid.unconfirmedIntents.has(intent)) {
+              invoicesOf.set(intent, (invoicesOf.get(intent) ?? new Set<string>()).add(invoice));
+            }
+          }
+        }
+      }
+      for (const [intent, paidInvoices] of invoicesOf) {
+        if (![...paidInvoices].every((invoice) => storeInvoices.has(invoice))) continue;
+        const [only] = paidInvoices;
+        const sale = paidInvoices.size === 1 ? checkoutInvoices.get(only) : undefined;
+        if (sale) byPayment.set(intent, sale);
+      }
+    }
+    // A payment still unconfirmed (a membership payment older than the invoices read above) is looked up by its own
+    // invoice payment, at most OLD_PAYMENT_LOOKUPS_PER_READING a reading (#4549); a lookup that fails proves nothing.
+    if (store.stripeAccountId) {
+      for (const pi of await confirmOldPayments(store, adjustments.map((row) => row.paymentIntent).filter((pi) => pi && !known(pi)))) confirmedPayments.add(pi);
+    }
+    const adjustment = (row: { created: number; cents: number; currency: string; paymentIntent: string }): Entry => {
+      const entry: Entry = { day: dayKey(row.created), cents: row.cents, currency: row.currency, source: placed(row.paymentIntent) };
+      const confirmed = known(row.paymentIntent);
+      return confirmed ? entry : { ...entry, unconfirmed: true };
+    };
     out.keptIn = keptByCurrency(
       {
         sales: { entries: sales.map((sale) => ({ day: dayKey(sale.created), cents: sale.cents, currency: sale.currency, source: sale.source })), complete: !readPartial },
         renewals: store.stripeAccountId ? { entries: renewalEntryRows, complete: Boolean(renewals && !renewals.partial) } : null,
         refunds: refundRead
-          ? { entries: refundRead.rows.map((r) => ({ day: dayKey(r.created), cents: r.cents, currency: r.currency, source: placed(r.paymentIntent) })), complete: !refundRead.partial }
+          ? { entries: refundRead.rows.map(adjustment), complete: !refundRead.partial }
           : null,
         disputes: disputeRead
-          ? { entries: disputeRead.rows.map((d) => ({ day: dayKey(d.created), cents: d.cents, currency: d.currency, source: placed(d.paymentIntent) })), complete: !disputeRead.partial }
+          ? { entries: disputeRead.rows.map(adjustment), complete: !disputeRead.partial }
           : null,
       },
       dayKey(now),
@@ -1973,7 +2166,10 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   const refundedIntents = new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean));
   out.discounts = {
     rows: discountImpact(read, refundedIntents, store.currency, now, STATS_DAYS),
-    refundsRead: refundRows !== null,
+    // A partial refund reading (a page limit hit, or PayPal read in part) may
+    // have missed the refund of a discounted sale, so the Refunded share is
+    // only offered when every refund page was read (#4372).
+    refundsRead: refundRead !== null && !refundRead.partial,
     // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
     elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
     // The same checkouts by the code they used (760 [STN7], unit 2), from the same sales: nothing more is read.

@@ -27,6 +27,7 @@
  */
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { applyShare } from "@/lib/platform-share";
+import { askBillingAddress } from "@/lib/billing-address";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -330,6 +331,8 @@ export async function createRequestCheckout(store: Store, request: PaymentReques
   body.set("expires_at", String(Math.max(closes, Math.floor(now / 1000) + MIN_OPEN_SECONDS)));
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
+  // A request is paid: the buyer's full billing address (790 [IV2]).
+  askBillingAddress(body);
   // Sales tax and the business buyer's documents, where the creator switched them on, as on any sale (lib/tax.ts).
   applyTax(store, body);
   applyTaxDocuments(store, body, false);

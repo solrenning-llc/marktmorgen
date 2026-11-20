@@ -18,7 +18,8 @@ import { linkIcon } from "@/lib/store-socials";
 import { imageUrl } from "@/lib/product-image";
 import { type PagePart, drawnOrder } from "@/lib/store-order";
 import { tipsOpen } from "@/lib/store-tip-checkout";
-import { StoreTipBox } from "@/components/store-tip-box";
+import { StoreTipBox, TIP_PROBLEMS } from "@/components/store-tip-box";
+import { tipKept } from "@/lib/store-tips";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
@@ -60,6 +61,7 @@ import { sellsInTestMode } from "@/lib/stripe-connect";
 import { DemoNote } from "@/components/demo-notes";
 import { lookStyle } from "@/lib/store-look";
 import { canUse } from "@/lib/plan";
+import { badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { photoUrl } from "@/lib/photo-limits";
 import { canManage } from "@/lib/membership-manage";
 import { canRecover, sellsDeliverables } from "@/lib/buyer-orders";
@@ -82,9 +84,6 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
-
-/** What a try at "Support my work" may come back with (app/api/store/tip). */
-const TIP_PROBLEMS = new Set(["amount", "limited", "closed", "error"]);
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -310,8 +309,14 @@ export default async function StorePage({ params, searchParams }: Params) {
     community: store.community?.on === true,
   };
 
+  // The badge at the foot of the page, and where it leads: the creator's invite code only while the invite programme and
+  // sales are both open (lib/badge-link.ts, 14 [D11]); read, never made, and only when the badge is shown. Its read
+  // starts here, beside recentSales, so it adds no serial round trip (badgeInviteCode never rejects).
+  const showBadge = store.look.badge || !canUse(store, "branding");
+  const badgeRead = showBadge ? badgeInviteCode(store.sid) : null;
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
   const recent = await recentSales(store);
+  const badgeLink = badgeHref(badgeRead ? await badgeRead : null);
 
   return (
     <div
@@ -665,7 +670,12 @@ export default async function StorePage({ params, searchParams }: Params) {
               ) : null}
               {/* "Support my work": an amount given with nothing bought, paid on Stripe's page (lib/store-tips.ts). */}
               {part === "tips" ? (
-                <StoreTipBox store={store} problem={typeof query.tip === "string" && TIP_PROBLEMS.has(query.tip) ? query.tip : ""} rehearsal={rehearsal} />
+                <StoreTipBox
+                  store={store}
+                  problem={typeof query.tip === "string" && TIP_PROBLEMS.has(query.tip) ? query.tip : ""}
+                  rehearsal={rehearsal}
+                  kept={typeof query.tip === "string" && TIP_PROBLEMS.has(query.tip) ? tipKept(store, query) : undefined}
+                />
               ) : null}
               {/* The sign-up box: an address joins only once its owner confirms by email (lib/store-join.ts). */}
               {part === "signup" ? <StoreJoinBox store={store} /> : null}
@@ -763,8 +773,8 @@ export default async function StorePage({ params, searchParams }: Params) {
                 {bw.deleteMyData}
               </Link>
             </p>
-            {store.look.badge || !canUse(store, "branding") ? (
-              <Link href="/" prefetch={false} className="st-footer-link text-sm font-semibold">
+            {showBadge ? (
+              <Link href={badgeLink} prefetch={false} className="st-footer-link text-sm font-semibold">
                 {w.madeWith}
               </Link>
             ) : null}

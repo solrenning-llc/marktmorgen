@@ -198,7 +198,7 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
               setNext(next + 1);
             }
           }}
-          className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
+          className="mt-2 inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
         >
           {ready ? controlLabel : "Loading…"}
         </button>

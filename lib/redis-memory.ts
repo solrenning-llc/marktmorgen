@@ -1907,11 +1907,25 @@ export class MemoryRedis {
           return 1;
         }
         // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
-        // store is live; -1, nothing written, when it is gone or being erased.
-        if (key.startsWith("-- marktmorgen:paypal-open-live:v1\n") && args[0] === "4" && args.length === 9) {
-          const [, live, erasing, open, stores, field, batch, value, sid] = args;
+        // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
+        // another store's.
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v2\n") && args[0] === "4" && args.length === 10) {
+          const [, live, erasing, open, stores, field, batch, value, sid, statsId] = args;
           this.scriptCalls += 2;
-          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return -1;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record) || (record as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
           this.scriptCalls += sid === "" ? 1 : 2;
           const held = this.run(["HSET", open, batch, value]);
           return [held, sid === "" ? 0 : this.run(["SADD", stores, sid])];

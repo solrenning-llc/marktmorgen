@@ -102,13 +102,25 @@ return 1`;
  * family, and, before a send, let the money be asked for after the erasure began. KEYS[1] the store's own key (its id
  * key, or for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the
  * open batches, KEYS[4] the settling's set of stores; ARGV[1] the store's erasing field, ARGV[2] the batch's field,
- * ARGV[3] the batch, ARGV[4] the store's id to put in the settling's set, or "" for none. Answers -1, nothing written,
- * when the store is gone or being erased; otherwise { HSET's answer, SADD's answer or 0 }. Billed 1 + 2 + the writes:
+ * ARGV[3] the batch, ARGV[4] the store's id to put in the settling's set, or "" for none, ARGV[5] "" for a store with
+ * an id (its id key fenced on with EXISTS) or, for a store from before ids, its statsId, compared with its owner's
+ * record's own: after that store's erasure its owner may make a new store under the same key, and that record's being
+ * there must not let the erased store's batch back in (Codex P on #4963; the v2 identity of #4964,
+ * lib/store-live-cache.ts). A record that does not parse is not this store. Answers -1, nothing written, when the
+ * store is gone, being erased or no longer its owner's; otherwise { HSET's answer, SADD's answer or 0 }. Billed 1 + 2 + the writes:
  * three more than the plain writes it replaces (tests/plan-cost-registry.ts, PAYPAL_PRESS_COMMANDS). lib/redis-memory.ts
  * runs it the same way.
  */
-export const KEEP_OPEN_IF_LIVE = `-- marktmorgen:paypal-open-live:v1
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
+export const KEEP_OPEN_IF_LIVE = `-- marktmorgen:paypal-open-live:v2
+if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
+if ARGV[5] == "" then
+  if redis.call("EXISTS", KEYS[1]) ~= 1 then return -1 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" or record["statsId"] ~= ARGV[5] then return -1 end
+end
 local held = redis.call("HSET", KEYS[3], ARGV[2], ARGV[3])
 local added = 0
 if ARGV[4] ~= "" then added = redis.call("SADD", KEYS[4], ARGV[4]) end
@@ -515,7 +527,7 @@ async function keepOpenCommand(store: Store, field: string, value: string, watch
   // The store's id key; for a store from before ids (sid ""), its record under its owner, as connectPayPal reads it.
   const ref = storeRef(store);
   const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
-  return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : ""];
+  return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : "", store.sid ? "" : (store.statsId as string)];
 }
 
 /** Takes one open-batch entry away: true only when Redis answers the HDEL with exactly 0 or 1 (rule 24). */

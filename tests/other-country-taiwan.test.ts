@@ -33,7 +33,7 @@ const REVIEWS: OtherCountryReviews = {
   fx: [{ from: "USD", to: "TWD", numerator: 33, denominator: 1, source: "https://example.test/synthetic-rate", checkedOn: "2026-11-01", validThrough: "2026-11-30" }],
   scopes: [{ ruleId: TW, evidence: "synthetic review", reviewedOn: "2026-11-01", validThrough: "2026-12-31" }],
 };
-const totals = (settledMinor: number, reservedMinor = 0, currency = "TWD", fromMonth = "2025-01") => ({
+const totals = (settledMinor: number, reservedMinor = 0, currency = "TWD", fromMonth = "2024-12") => ({
   place: { country: "TW", state: null }, fromMonth, toMonth: "2026-11", countingSince: "2024-06", complete: true,
   currencies: { [currency]: { settledMinor, reservedMinor } },
 });
@@ -48,15 +48,20 @@ test("Taiwan's rule: NT$600,000 a year, reached at exactly 600,000 (the stricter
   assert.deepEqual([...PLACE_COUNTED_COUNTRIES].sort(), ["CA", "NO", "TW"]);
 });
 
-test("the window is the previous and the current calendar year, from 1 January of the previous year", () => {
+test("the window is the previous and the current calendar year, from Taiwan's 1 January of the previous year, one UTC day more", () => {
   assert.equal(OTHER_COUNTRY_CALENDAR_YEARS[TW], 2);
   assert.ok(Object.isFrozen(OTHER_COUNTRY_CALENDAR_YEARS));
-  assert.equal(new Date(otherCountryWindowStart(TW, NOW)).toISOString(), "2025-01-01T00:00:00.000Z");
-  assert.equal(new Date(otherCountryWindowStart(TW, Date.parse("2026-01-01T00:00:00Z"))).toISOString(), "2025-01-01T00:00:00.000Z");
-  assert.equal(new Date(otherCountryWindowStart(TW, Date.parse("2025-12-31T23:59:59Z"))).toISOString(), "2024-01-01T00:00:00.000Z");
-  // A count that starts after that 1 January does not cover the window: unknown, which refuses.
-  assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "TW", totals(1, 0, "TWD", "2025-02"), { currency: "TWD", amountMinor: 1 }, NOW), { status: "unknown" });
-  assert.equal("status" in otherCountrySnapshotUnder(REVIEWS, "TW", totals(1, 0, "TWD", "2025-01"), { currency: "TWD", amountMinor: 1 }, NOW), false);
+  // Taiwan's 1 January 2025 starts at 31 December 2024, 16:00 UTC (UTC+8): the window starts that UTC day, so its
+  // first 8 hours are counted (Claude 5's LOW on #4912; Codex V-20261119-2116 on the UTC month boundary).
+  assert.equal(new Date(otherCountryWindowStart(TW, NOW)).toISOString(), "2024-12-31T00:00:00.000Z");
+  assert.ok(otherCountryWindowStart(TW, NOW) <= Date.parse("2024-12-31T16:00:00Z"));
+  assert.equal(new Date(otherCountryWindowStart(TW, Date.parse("2026-01-01T00:00:00Z"))).toISOString(), "2024-12-31T00:00:00.000Z");
+  // 31 December 2025, 17:00 UTC is already 1 January 2026 in Taiwan; the UTC clock still reads 2025, so the window
+  // reaches back further than it needs to, never less.
+  assert.equal(new Date(otherCountryWindowStart(TW, Date.parse("2025-12-31T17:00:00Z"))).toISOString(), "2023-12-31T00:00:00.000Z");
+  // A count that starts after that UTC December does not cover the window: unknown, which refuses.
+  assert.deepEqual(otherCountrySnapshotUnder(REVIEWS, "TW", totals(1, 0, "TWD", "2025-01"), { currency: "TWD", amountMinor: 1 }, NOW), { status: "unknown" });
+  assert.equal("status" in otherCountrySnapshotUnder(REVIEWS, "TW", totals(1, 0, "TWD", "2024-12"), { currency: "TWD", amountMinor: 1 }, NOW), false);
 });
 
 test("the boundary: one minor unit under NT$600,000 is below; exactly NT$600,000 requires treatment", () => {
@@ -108,7 +113,7 @@ test("at checkout, Taiwan sells below 90% of the threshold with the sale reserve
   assert.deepEqual(await thresholdCheckoutDecisionUnder(REVIEWS, { ipCountry: "TW", billingCountry: "TW" }, SALE, below.port, RECORDS, NOW), {
     allowed: true, jurisdictions: ["other"], reservation: { ledger: "store-sales", ref: "cs_synthetic_tw" },
   });
-  assert.deepEqual(below.calls[1], ["totals", "store-sales", { country: "TW", state: null }, Date.parse("2025-01-01T00:00:00Z"), NOW]);
+  assert.deepEqual(below.calls[1], ["totals", "store-sales", { country: "TW", state: null }, Date.parse("2024-12-31T00:00:00Z"), NOW]);
   const at90 = counter(totals(53_999_900, 100));
   assert.deepEqual(await thresholdCheckoutDecisionUnder(REVIEWS, { ipCountry: "TW", billingCountry: "TW" }, SALE, at90.port, RECORDS, NOW), refused);
   assert.deepEqual(at90.calls.map((call) => call[0]), ["reserve", "totals", "release"]);

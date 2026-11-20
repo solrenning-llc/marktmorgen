@@ -749,7 +749,7 @@ export const FAMILIES: Record<string, Family> = {
   // checks are at most MAIL_GAP_CHECKS_PER_EMAIL a monthly email in a calendar month, and a billing month touches two.
   "nl:mgap:last:@lib/mail-frequency.ts": short("When a person was last sent one of the store's emails, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
   "nl:mgap:gate:@lib/mail-frequency.ts": short("The one claim on a person's next email from the store, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
-  "nl:mgap:checks:@lib/mail-frequency.ts": { what: "The store's count of gap checks in a calendar month, forty days", parts: [capped(2 * MARK, "One count a calendar month, forty days: the current and the last alive at once.", src("lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS = 40 * 86_400"))] },
+  "nl:mgap:checks:@lib/mail-frequency.ts": { what: "The store's count of gap checks in a calendar month, forty days", parts: [capped(windowsOver(40) * MARK, "One count a calendar month, forty days from its first check: up to three calendar months alive at once.", src("lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS = 40 * 86_400"))] },
   "nl:mail:health:@lib/mail-health.ts": { what: "Sent, bounced and complained, by the day; addresses already counted", parts: [per("day", 33, 128, "A day's counts."), per("monthly", 33, MARK, "An address counted this week.", MAIL("list"))] },
   "nl:mail:paused:@lib/mail-health.ts": { what: "Why sending is paused", parts: [capped(KB, "One a store.")] },
   "nl:mail:ramp:@lib/mail-health.ts": { what: "The portion being sent", parts: [capped(KB, "One a store.")] },

@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     metadata: { store: "harbor", product: "nope", title: "Weeknight Club", channel: "instagram", ...meta },
   });
   sessions = [paid("cs_test_goal0000000001", 0, 60_000)];
-  await setSalesGoal(store.statsId!, 50_000, "usd");
+  await setSalesGoal(store, 50_000, "usd");
   const first = await checkAlerts(store);
   is("the goal reached, said once", first.said, 1);
   is("by email", emails.map((e) => [e.to, e.subject.startsWith("Harbor Kitchen reached its $500 goal")]), [[OWNER, true]]);

@@ -8,10 +8,18 @@
  *
  *   nl:goal:<statsId>   JSON { cents, currency, since: "2026-10" }
  */
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { GOAL_UNAVAILABLE_LINE, UNKNOWN_SALES_GOAL_CENTS, readGoal } from "@/lib/sales-goal-rules";
 
 const key = (statsId: string) => `nl:goal:${statsId}`;
+export const SALES_GOAL_WRITE_COMMANDS = 4;
+const WRITE_IF_LIVE = `-- marktmorgen:sales-goal-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 then return -1 end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return -1 end
+if ARGV[2] == "" then return redis.call("DEL", KEYS[3]) end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export type SalesGoal = { cents: number; since: string };
@@ -54,12 +62,16 @@ export async function readSalesGoal(statsId: string | null, currency: string): P
 }
 
 /** Sets the goal from this month on, or takes it away with 0. Null when the figure is not one a goal can be. */
-export async function setSalesGoal(statsId: string, raw: unknown, currency: string, now = Date.now()): Promise<number | null> {
+export async function setSalesGoal(store: Pick<Store, "sid" | "email" | "extra" | "statsId">, raw: unknown, currency: string, now = Date.now()): Promise<number | null> {
   const cents = readGoal(raw);
-  if (cents === null || !isRedisConfigured()) return null;
+  if (cents === null || !store.statsId || !isRedisConfigured()) return null;
   const since = new Date(now).toISOString().slice(0, 7);
-  const reply = await redisPipeline([cents ? ["SET", key(statsId), JSON.stringify({ cents, currency, since })] : ["DEL", key(statsId)]]);
-  if (!Array.isArray(reply) || reply.length !== 1 || (cents ? reply[0] !== "OK" : reply[0] !== 0 && reply[0] !== 1)) throw new Error("Goal update could not be confirmed");
+  const ref = storeRef(store);
+  const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  // Identity, erasure mark and mutation share one atomic step. Keep the goal persistent, as before.
+  const reply = await redisPipeline([["EVAL", WRITE_IF_LIVE, 3, live, ERASING_KEY, key(store.statsId),
+    await erasingField(ref), cents ? JSON.stringify({ cents, currency, since }) : ""]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (cents ? reply[0] !== 1 : reply[0] !== 0 && reply[0] !== 1)) throw new Error("Goal update could not be confirmed");
   return cents;
 }
 

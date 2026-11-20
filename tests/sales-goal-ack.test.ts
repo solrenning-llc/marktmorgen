@@ -5,6 +5,7 @@ import { POST } from "@/app/api/store/goal/route";
 import { SalesGoalCard } from "@/components/sales-goal-card";
 import { readGoal } from "@/lib/sales-goal-rules";
 import { readSalesGoal } from "@/lib/sales-goal";
+import { storeIdCommand } from "@/lib/store";
 import * as salesGoalModule from "@/lib/sales-goal";
 import { goalStore } from "./sales-goal-ack-world";
 import { store as redis } from "./redis-stub";
@@ -15,8 +16,10 @@ const original = redis.pipeline;
 let fault: { command: string; reply: unknown[]; apply?: boolean } | null = null;
 let mutations = 0;
 redis.pipeline = async commands => {
-  const command = commands[0]?.[0];
-  if (command === "SET" || command === "DEL") mutations += 1;
+  const first = commands[0];
+  const isGoalWrite = first?.[0] === "EVAL" && String(first[1]).includes("sales-goal-live:v1");
+  const command = isGoalWrite ? (first[first.length - 1] === "" ? "DEL" : "SET") : first?.[0];
+  if (isGoalWrite) mutations += 1;
   if (fault?.command === command) {
     if (fault.apply) await original(commands);
     return fault.reply;
@@ -25,6 +28,7 @@ redis.pipeline = async commands => {
 };
 async function seed() {
   redis.clear(); fault = null; mutations = 0;
+  await original([["SET", storeIdCommand(goalStore.sid)[1], goalStore.email]]);
   await original([["SET", key, JSON.stringify({ cents: 5000, currency: "usd", since: "2026-10" })]]);
 }
 async function submit(cents: unknown) {
@@ -46,7 +50,7 @@ async function main() {
   }
   part("Unknown SET and DEL replies are never saved success");
   for (const [command, cents, replies] of [
-    ["SET", 4000, [[], [undefined], [null], [1], ["ok"], ["OK", "extra"]]],
+    ["SET", 4000, [[], [undefined], [null], [0], ["OK"], ["ok"], ["OK", "extra"]]],
     ["DEL", 0, [[], [undefined], [null], ["OK"], ["1"], [-1], [2], [1, 0]]],
   ] as [string, number, unknown[][]][]) {
     for (const reply of replies) {

@@ -1,6 +1,6 @@
 import type { Store } from "@/lib/store";
 
-export const goalStore = { statsId: "6".repeat(32), currency: "usd", email: "owner@example.com" } as Store;
+export const goalStore = { statsId: "6".repeat(32), sid: "7".repeat(32), extra: false, currency: "usd", email: "owner@example.com" } as Store;
 
 /** Exercise the real goal POST after its existing authorization barrier. */
 export async function guardStoreWrite(request: Request) {

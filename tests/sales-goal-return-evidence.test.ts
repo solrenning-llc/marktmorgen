@@ -35,7 +35,7 @@ test("explicit absence or a confirmed other currency remains no target", async (
 
 test("writer never evaluates conversion objects", async () => {
   let calls = 0;
-  assert.equal(await setSalesGoal(stats, { valueOf() { calls += 1; return 0; } }, "usd"), null);
+  assert.equal(await setSalesGoal({ statsId: stats, sid: "", email: "goal@example.test", extra: false }, { valueOf() { calls += 1; return 0; } }, "usd"), null);
   assert.equal(calls, 0);
 });
 

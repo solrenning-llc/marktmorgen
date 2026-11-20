@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   try {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-    const goal = await setSalesGoal(store.statsId, guarded.body.cents, store.currency);
+    const goal = await setSalesGoal(store, guarded.body.cents, store.currency);
     if (goal === null) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
     return Response.json({ ok: true, goal }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

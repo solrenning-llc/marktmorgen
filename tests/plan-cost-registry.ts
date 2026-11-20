@@ -2527,6 +2527,8 @@ export const COST_LINES: CostLine[] = [
     // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier),
     sources: [
+      // Key creation: at most nine commands including rollback; the studio request already admits the write.
+      { file: "lib/api-keys.ts", names: ["MAKE_KEY_LIVE_MAX_COMMANDS", "CREATE_KEY_IF_LIVE", "makeKeyForStore"] },
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },

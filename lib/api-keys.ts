@@ -55,6 +55,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { type Member, parseTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
+import { ERASING_KEY, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
 export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
@@ -189,14 +190,48 @@ export async function listKeys(sid: string): Promise<ApiKey[]> {
   return (await keyRecords(sid, true)).map(({ id, name, hint, madeAt, usedAt, write, agent }) => ({ id, name, hint, madeAt, usedAt, write, agent })).sort((a, b) => b.madeAt - a.madeAt);
 }
 
+type Creation = { lookup: string; list: string; id: string; row: string; link: string };
+type CreationWriter = (creation: Creation) => Promise<unknown[]>;
+
+/** Initial HLEN + EVAL + five inner calls + two rollback deletes for an unknown reply. */
+export const MAKE_KEY_LIVE_MAX_COMMANDS = 9;
+const CREATE_KEY_IF_LIVE = `-- marktmorgen:api-key-create-live:v1
+local ref = redis.call("GET", KEYS[1])
+if not ref or string.lower(ref) ~= ARGV[1] then return {0, 0, -1} end
+if redis.call("HEXISTS", KEYS[2], ARGV[2]) == 1 then return {0, 0, -1} end
+local n = redis.call("HLEN", KEYS[3])
+if n >= tonumber(ARGV[3]) then return {0, 0, tonumber(ARGV[3]) + 1} end
+local added = redis.call("HSET", KEYS[3], ARGV[4], ARGV[5])
+redis.call("SET", KEYS[4], ARGV[6])
+return {"OK", added, n + added}`;
+
+/** Production admission boundary: identity and erasure checked atomically with both records. */
+export async function makeKeyForStore(store: Store, rawName: unknown, now = Date.now(), write = false, agentRaw: AgentScope = "none", makerRaw?: KeyMaker): Promise<MakeResult> {
+  const ref = storeRef(store).toLowerCase();
+  const field = await erasingField(ref);
+  return makeKey(store.sid, rawName, now, write, agentRaw, makerRaw, async (creation) => {
+    const response = repliesFor(await redisPipeline([["EVAL", CREATE_KEY_IF_LIVE, 4,
+      storeIdCommand(store.sid)[1], ERASING_KEY, creation.list, creation.lookup,
+      ref, field, MAX_KEYS, creation.id, creation.row, creation.link,
+    ]]), 1);
+    const receipt = response?.[0];
+    if (!Array.isArray(receipt) || receipt.length !== 3) return [];
+    if (receipt[0] === 0 && receipt[1] === 0 && (receipt[2] === -1 || receipt[2] === MAX_KEYS + 1)) return receipt;
+    const count = countOf(receipt[2]);
+    return receipt[0] === "OK" && receipt[1] === 1 && count !== null && count >= 1 && count <= MAX_KEYS ? receipt : [];
+  });
+}
+
 export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; reason: "full" | "name" | "unavailable" };
 
 /**
+ * Low-level persistence, also used by standalone SID fixtures. Production callers
+ * must use makeKeyForStore for the atomic store/erasure boundary.
  * Makes a key and returns it — the only time it is ever seen whole. `agent`
  * (631 [AA1] (c)) says what an AI agent holding it may prepare for the
  * creator to confirm; left out, nothing.
  */
-export async function makeKey(sid: string, rawName: unknown, now = Date.now(), write = false, agentRaw: AgentScope = "none", makerRaw?: KeyMaker): Promise<MakeResult> {
+export async function makeKey(sid: string, rawName: unknown, now = Date.now(), write = false, agentRaw: AgentScope = "none", makerRaw?: KeyMaker, writer?: CreationWriter): Promise<MakeResult> {
   const maker = makerOf(makerRaw);
   const agent = agentScopeOf(agentRaw);
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
@@ -212,11 +247,12 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   const id = randomBytes(6).toString("hex");
   const hash = hashOf(key);
   const stored: Stored = { id, hash, name, hint: key.slice(KEY_PREFIX.length, KEY_PREFIX.length + 6), madeAt: Math.floor(now / 1000), usedAt: 0, write, agent, ...(maker ? { maker } : {}) };
-  const [, , after] = await redisPipeline([
-    ["SET", lookupKey(hash), JSON.stringify({ sid, id })],
-    ["HSET", listKey(sid), id, JSON.stringify(stored)],
-    ["HLEN", listKey(sid)],
-  ]);
+  const creation = { lookup: lookupKey(hash), list: listKey(sid), id, row: JSON.stringify(stored), link: JSON.stringify({ sid, id }) };
+  const [, , after] = await (writer ? writer(creation) : redisPipeline([
+    ["SET", creation.lookup, creation.link],
+    ["HSET", creation.list, id, creation.row],
+    ["HLEN", creation.list],
+  ]));
   // Two tabs pressing "Make a key" at once can both pass the count above.
   // Counted again after writing, and the one just made is taken back if it
   // went over, or if the count cannot be read, so the limit is the limit.

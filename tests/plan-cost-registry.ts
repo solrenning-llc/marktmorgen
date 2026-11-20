@@ -103,7 +103,7 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
-import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
@@ -155,6 +155,7 @@ import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POL
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { SUPPORT_ANNOUNCED_DAILY, SUPPORT_DAILY, SUPPORT_FILE_BYTES_DAILY, SUPPORT_HELD_NOTICES_DAILY } from "@/lib/inbound-mail";
 import { UNWRITTEN_LINKS_PER_RUN, UNWRITTEN_LINK_COMMANDS } from "@/lib/winback-send";
 
 export const GB = 1024 * 1024 * 1024;
@@ -1747,6 +1748,59 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
 }
 
 
+/**
+ * ALTO 1 of Claude 5's email audit (9 November 2026) and its pre-review: mail
+ * written to our own support addresses is sent on through SES as a company
+ * email (lib/inbound-mail.ts, forwardInbound), a company fixed cost under MR
+ * item 2, never a plan's. Every UTC day of a 31-day month, at the most:
+ * SUPPORT_ANNOUNCED_DAILY announcements read at Resend, each at
+ * SUPPORT_HELD_READ_COMMANDS commands and a call waited on for the read's
+ * RESEND_TIMEOUT_MS and a second more; of them SUPPORT_DAILY forwards plus
+ * SUPPORT_HELD_NOTICES_DAILY notice, each at PER_EMAIL (Resend's overage,
+ * dearer than SES's $0.10 a thousand), the route's whole maxDuration (60 s)
+ * of CPU and memory and SUPPORT_FORWARD_COMMANDS commands (the route's 3, the
+ * announcement's SUPPORT_ANNOUNCEMENT_COMMANDS, the counts and their marks 18, four for each of up to 100
+ * files, the sender's own 64); files SUPPORT_FILE_BYTES_DAILY bytes (before
+ * base64, sent as base64). Both command figures are held by
+ * tests/support-forward-ceiling.test.ts against what the code sends.
+ * Attachments at SES's $0.12 a GB, read 18 October 2026
+ * (docs/pack-cost-decomposition-2026-10-18.md), not read again on
+ * 9 November 2026 (aws.amazon.com blocked in that session). Not in the
+ * figure, so the complete one stays unknown, never zero: announcements past
+ * SUPPORT_ANNOUNCED_DAILY (a call and the route's 3 commands each, no counter
+ * after the first on an instance, one EXISTS more with a From and one MGET of
+ * store names more beside a creators'-domain address, no read at Resend;
+ * bounded only by the webhook's per-connection
+ * limit and Resend's receiving quota), transfer
+ * out of the function to SES, and Resend's count of received mail.
+ */
+/**
+ * The announcement's worst path, a paying store owner's (cloud J's review of #3481, MEDIUM): the MGET of the store
+ * names it shows beside support@ (anyStoreNamed, Codex P's review of #3481, HIGH), the EXISTS of ownsAStore, the
+ * owner's own share of the reserve (SET and INCR), the reserve and then the public share (SET and INCR each):
+ * 1 + 1 + 2 + 2 + 2.
+ */
+export const SUPPORT_ANNOUNCEMENT_COMMANDS = 8;
+export const SUPPORT_FORWARD_COMMANDS = 3 + SUPPORT_ANNOUNCEMENT_COMMANDS + 18 + 100 * 4 + 64;
+/**
+ * A message held after its read, at its worst: a paying store owner's, the reserve spent, held by the company's day
+ * with the day's notice, measured at 32 by tests/support-forward-ceiling.test.ts (the route's 3 included; 24 before
+ * cloud J's review of #3481 counted only a sender with no store).
+ */
+export const SUPPORT_HELD_READ_COMMANDS = 32;
+export const SES_ATTACHMENT_PER_GB = 0.12;
+export function supportForwardMonthlyUsd(): { perForwardUsd: number; perReadUsd: number; modeledUsd: number; completeUsd: null } {
+  const perForwardUsd = PER_EMAIL + SUPPORT_FORWARD_COMMANDS * COMMAND + CALL + 60 * (CPU_SECOND + MEMORY_SECOND);
+  const perReadUsd = SUPPORT_HELD_READ_COMMANDS * COMMAND + CALL + (RESEND_TIMEOUT_MS / 1000 + 1) * (CPU_SECOND + MEMORY_SECOND);
+  const forwards = UTC_DAYS * (SUPPORT_DAILY + SUPPORT_HELD_NOTICES_DAILY);
+  const reads = UTC_DAYS * SUPPORT_ANNOUNCED_DAILY;
+  const fileGb = (UTC_DAYS * SUPPORT_FILE_BYTES_DAILY * 4) / 3 / GB;
+  // Each announcement read also reads the sender's store record to tell a paid plan (one GET), at the record's
+  // largest size, whatever the answer (2nd pre-review of 9 November 2026).
+  const storeReadsUsd = reads * MAX_STORE_BYTES * DB_BYTE;
+  return { perForwardUsd, perReadUsd, modeledUsd: forwards * perForwardUsd + reads * perReadUsd + storeReadsUsd + fileGb * SES_ATTACHMENT_PER_GB, completeUsd: null };
+}
+
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
  * This is not a verified bound on provider bytes, replay, invoice rates or taxes. */
 export function hourCost(): number {
@@ -3294,6 +3348,7 @@ export const NOT_A_COST: Record<string, string> = {
   MOVES_PER_MONTH_PAID: "The company's moves of the sign-in address in a calendar month (UTC) for stores with a running paid plan, all together (lib/auth.ts takeMoveRoom): one of the two parts of MOVES_PER_MONTH, kept apart so stores made for free never use up the paying stores' moves (Claude 5's focal review of #2271). Priced with MOVES_PER_MONTH.",
   MOVES_PER_MONTH_UNPAID: "The same for every other store (no plan, in a trial, or a plan that ended), all together: the other part of MOVES_PER_MONTH. Priced with MOVES_PER_MONTH.",
   MOVES_PER_MONTH: "The company's ceiling on moves of the sign-in address in a calendar month (UTC), all stores together (MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID: lib/auth.ts takeMoveRoom, one SET NX EX and one INCR of the store's kind's room taken at the tap before anything moves, after main's per-store pace (lib/move-pace.ts takeMove; the owner's decision of 18 November 2026 on #2271); a count that does not read refuses): the move's own work, its NOTE_MOVE_COPY EVAL (five commands at the most) and the rest of the tap, is never done past it (Codex G2's MEDIUM on #2271, Claude 1's decision). Not a plan's cost: a company cost, priced in dollars by MOVES_MONTH_COST (MOVES_PER_MONTH taps at MOVE_TAP_COST, every command counted with each EVAL's own, every byte, every lock's whole wait, for an account at every bound the code keeps, tests/move-cost.test.ts; and the records they keep, MOVES_MONTH_KEPT), the \"account-moves\" line of the LLC fixed costs (lib/llc-fixed-costs.ts, FX275), whose reviewed ceiling stays unknown, never zero, while MOVE_COST_UNKNOWNS are open (Codex G's MEDIUM on #2271). The two emails of the ask before it are company emails of the address-change request (app/api/store/address/route.ts, MOVE_ASKS_PER_HOUR), named among those unknowns.",
+  SPIKE_ALERTS_PER_DAY: "At most this many emails a UTC day, for the whole site, telling the operator that a store used a mark of its window of requests early (TODOS-51 D, lib/traffic-spike.ts): no store's cost and no plan's; a company cost under MR item 2, one Resend email each at most SPIKE_ALERTS_PER_DAY a day, and none without the operator configured. It only ever tells; no count, store or page changes.",
   HOLDS_PER_ADDRESS: "lib/stock.ts: how many limited units one connection may hold on a store within one hold's time, an abuse bound that keeps a never-paying connection from holding a drop. Not a plan allowance; each press is still counted by the checkout's own lines.",
   TURN_LIMITS: "lib/studio-agent-rules.ts (631 [AA1], studio assistant, unit 1): the byte, step and token ceilings of one turn of the studio's assistant, pure rules. Nothing calls the model yet. They bound turnHoldMicroUsd, the whole turn at its most, which a turn reserves from the store's monthly AI budget (line ai, AUTOMATIC_AI_STORE_MICRO_USD) before its first call once a later unit wires it. Not a monthly figure of its own; unknown cost is not zero, and the wiring unit must cite its route here.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",
@@ -3314,6 +3369,14 @@ export const NOT_A_COST: Record<string, string> = {
   BACKUP_DAYS_PER_MONTH: "The UTC days a billing month touches for the daily backup, a company cost (273 [BK1], inbox C4-49): its worst month is priced by lib/backup-cost.ts among the LLC fixed costs (lib/llc-fixed-costs.ts, line backup, 100% Marktmorgen under FX275), never a plan's allowance.",
   BACKUP_RUNS_PER_DAY: "The backup's runs a UTC day at the most, a run and one new try after a failure, counted before any cost (lib/backup-run.ts, 273 [BK1], inbox C4-49); priced in the company's backup line (lib/backup-cost.ts, lib/llc-fixed-costs.ts line backup), never a plan's allowance.",
   BACKUP_REPORT_READS_PER_DAY: "The daily report's two reads of the backup's outcome, counted in the backup's company cost line (lib/backup-cost.ts, lib/llc-fixed-costs.ts line backup), never a plan's allowance (273 [BK1], inbox C4-44).",
+  SUPPORT_SENDER_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_FILE_BYTES_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_HELD_NOTICES_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_CREATOR_SENDER_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_ANNOUNCED_CREATOR_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_PUBLIC_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_ANNOUNCED_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   HELD_RECHECKS_PER_DAY: "Company recovery work plus separate post_cancellation retention exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
   PAGE_INCLUDED_BYTES: "What one studio request's own price already moves through the database and on to the browser (lib/sent-bytes.ts; UNIT_COST.studio prices fifty kilobytes): spent once a request, whatever its parts (IncludedBytes, made once by the page and handed to each reading and sending; C3-112 (2)): a part that fits in what is left counts nothing beyond the request that asked, and one that does not counts one studio request a megabyte (LEDGER_BYTES_PER_UNIT, STUDIO_UNIT_SENT_BYTES, AGENDA_UNIT_BYTES, held in tests/plan-cost-registry.test.ts). A threshold inside the studio line, not a figure of its own.",
   FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
@@ -3469,6 +3532,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "erase-address": METERED_EMAIL, "erase-ip": METERED_EMAIL,
   "podcast-link-address": METERED_EMAIL, "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
   "remind-store": METERED_EMAIL, "assist-remind-store": METERED_EMAIL, "resend-sale": METERED_EMAIL, "resend-store": METERED_EMAIL, "creator-inbound": METERED_EMAIL,
+  "support-sender-hour": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-sender-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-forward": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-public": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-creator-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced-creator": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced-from": guard("Mail to our own support sent on through SES: one store owner's address's share of the creators' reserve of announcements a day, counted before the message is read (lib/inbound-mail.ts; review of #3481): a company fixed cost inside the announcements' ceilings priced by supportForwardMonthlyUsd, never a plan's."),
   "inbox-reply": METERED_EMAIL, "inbox-tell": METERED_EMAIL,
   // The Store assistant (an add-on, ADD_ON_LINES): its asks are burst limits under its month's pool, the rest public requests.
   assist: guard("A burst limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
@@ -3524,7 +3588,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   // at most MOVES_PER_30_DAYS (10) an account, by its store's id (lib/move-pace.ts, scope move-done; Claude 7's review
   // of #3326): at most 2 x 10 x 2 = 40 end emails an account in any calendar month. The asks are paced by move-ask.
   "app/api/auth/move/route.ts": COMPANY,
-  "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
+  "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/traffic-spike.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],
   "app/api/store/mail/route.ts": MONTHLY, "lib/api-write.ts": MONTHLY, "lib/community-mail.ts": MONTHLY, "lib/flows.ts": MONTHLY,

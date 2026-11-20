@@ -359,6 +359,34 @@ export class MemoryRedis {
           const [, list, member, mark] = args;
           return this.run(["HGET", list, member]) === mark ? this.run(["HDEL", list, member]) : 0;
         }
+        // lib/traffic-reset.ts RESET_SCRIPT: under the caller's own lock token only, the record first, then the people
+        // lowered by the delta, with the live room's parts as they are now; nothing written on a lost lock or a count or
+        // a room read otherwise.
+        if (key.startsWith("-- marktmorgen:traffic-reset:v2\n") && args[0] === "4" && args.length === 11) {
+          const [, visits, log, lock, room, before, delta, entry, token, keep, keepSeconds] = args;
+          if (this.run(["GET", lock]) !== token) return [-2];
+          const held = this.run(["GET", visits]);
+          const current = held === null ? "0" : held;
+          if (typeof current !== "string" || !/^\d+$/.test(current)) return [-3];
+          const roomHeld = this.run(["GET", room]);
+          const parts = roomHeld === null ? "0" : roomHeld;
+          if (typeof parts !== "string" || !/^\d+$/.test(parts)) return [-3];
+          if (Number(current) < Number(before)) return [-1, Number(current)];
+          // Redis stops the script on a record key of another type, before anything is written.
+          this.live(log);
+          const record = this.data.get(log);
+          if (record !== undefined && !Array.isArray(record)) throw new Error("WRONGTYPE");
+          this.run(["LPUSH", log, entry]);
+          this.run(["LTRIM", log, 0, Number(keep) - 1]);
+          this.run(["EXPIRE", log, keepSeconds]);
+          return [1, this.run(["DECRBY", visits, delta]), Number(parts)];
+        }
+        // lib/traffic-reset.ts RELEASE_SCRIPT: the lock let go only by the token that took it.
+        if (key.startsWith("-- marktmorgen:traffic-reset-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, lock, token] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          return this.run(["DEL", lock]);
+        }
         // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
         if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
           const [, pass, token] = args;
@@ -678,6 +706,13 @@ export class MemoryRedis {
           if (!mark || typeof mark !== "object") return -1;
           if ((mark as { d?: unknown }).d === 1) return 0;
           this.run(["HSET", members, field, json]);
+          return 1;
+        }
+        // lib/ad-events.ts KEEP_LAST_IF_LIVE: the ad platforms' last answers kept only while the store is live and not being erased.
+        if (key.startsWith("-- marktmorgen:ads-last-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, storeId, erasing, last, field, json, seconds] = args;
+          if (Number(this.run(["EXISTS", storeId])) !== 1 || Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          this.run(["SET", last, json, "EX", seconds]);
           return 1;
         }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
@@ -1661,6 +1696,16 @@ export class MemoryRedis {
           const written = this.run(["SET", receipt, value, "NX", "EX", seconds]);
           const kept = this.run(["GET", receipt]);
           return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
+        }
+        // lib/paypal-payouts.ts, KEEP_LINK_IF_LIVE: the PayPal link written only while its store's key exists and it is
+        // not being erased; 1 written, 0 not.
+        if (key.startsWith("-- marktmorgen:paypal-link-live:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, live, erasing, link, field, value] = args;
+          this.scriptCalls += 2;
+          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", link, value]);
+          return 1;
         }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.

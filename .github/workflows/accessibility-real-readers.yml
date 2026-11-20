@@ -23,7 +23,8 @@ jobs:
   documentation-scope:
     name: Documentation scope (accessibility-real-readers)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10 min: on 16/11/2026 a full-history checkout alone passed 5 min on main and froze the queue (#4826).
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.scope.outputs.full }}
       deferred: ${{ steps.scope.outputs.deferred }}

@@ -280,7 +280,7 @@ async function main(): Promise<void> {
   // The browser's PUT, the hand-in's delete and the sweep's: each an Advanced Operation of the file store.
   is("its upload and every delete of it are priced", typeof advancedPriced === "number" && 1 + deletes <= advancedPriced, true);
   const handInLine = registry.COST_LINES.flatMap((line) => line.sources).find((source) => source.file === "app/api/store/course/task/route.ts");
-  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path)"].every((name) => handInLine?.names.includes(name)), true);
+  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path, \"site_cleanup\")"].every((name) => handInLine?.names.includes(name)), true);
   const workBytes = (registry as Record<string, unknown>).TASK_WORK_BYTES;
   is("the sweep's read of the work is counted in bytes", typeof workBytes === "number" && workBytes >= rules.MAX_ANSWER_TEXT + rules.MAX_FEEDBACK, true);
 

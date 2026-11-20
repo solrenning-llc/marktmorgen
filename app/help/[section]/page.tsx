@@ -8,6 +8,9 @@ import { HelpTopics } from "@/components/help-topics";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { answerSummary, helpAnswerPath, helpSection, helpTopics } from "@/lib/help-pages";
 
+// All help sections are known at build time.
+export const dynamicParams = false;
+
 /** One section of the help center on a page of its own (564 [HC1]): its answers, each with its first line and its own page. */
 export function generateStaticParams() {
   return HELP_SECTIONS.map((section) => ({ section: section.id }));

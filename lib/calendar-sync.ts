@@ -60,7 +60,7 @@ import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/c
 import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR, CALENDAR_RETRIES_PER_DAY } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
-import { MEET_STORES } from "@/lib/meet-links";
+import { keepMeetStore } from "@/lib/meet-links";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -1028,7 +1028,10 @@ export async function forgetStoreCalendar(statsId: string | null | undefined): P
   } catch {
     parsed = null;
   }
-  await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
+  const keys = [cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)];
+  // Confirmed only on a count from 0 up to the keys named (as forgetRecentSales, #4752).
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a store's calendar feeds");
 }
 
 export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null; token?: string }, make: () => Promise<MadeFeed>, now = Date.now()): Promise<FeedAnswer> {
@@ -1162,13 +1165,9 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
   // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.
-  // Never lowered: a meeting further ahead keeps the score its booking gave (lib/meet-links.ts).
-  if (owner.callsId) {
-    const storeEntry = `${owner.callsId}|${owner.handle}`;
-    const until = now + FEED_REFUNDS_SECONDS * 1000;
-    await redisPipeline([["ZSCORE", MEET_STORES, storeEntry]])
-      .then(([score]) => (Number(score) >= until ? undefined : redisPipeline([["ZADD", MEET_STORES, until, storeEntry]])))
-      .catch(() => {});
-  }
+  // Never lowered: a meeting further ahead keeps the score its booking gave, in one ZADD GT (lib/meet-links.ts,
+  // keepMeetStore), where a ZSCORE then a ZADD could lower it when a booking came in between (pre-review of
+  // claude5/call-refund-stores-cursor).
+  if (owner.callsId) await keepMeetStore({ callsId: owner.callsId, handle: owner.handle }, now + FEED_REFUNDS_SECONDS * 1000);
   return { state: "made", ics };
 }

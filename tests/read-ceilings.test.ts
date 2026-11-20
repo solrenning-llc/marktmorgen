@@ -29,17 +29,19 @@ import {
   CALENDAR_CONFIG_SWAP, FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
+import { ROOM_KEYS_PER_MGET as ROOM_KEYS_READ, isVideoRoom, roomsFor } from "@/lib/call-rooms";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, MEMBER_WORDS_NAMES, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, MEMBER_WORDS_NAMES, LIST_MADE_HEAD_COMMANDS, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { TOP_BUYERS } from "@/lib/stats";
 import { COMMENT_ADDRESSES, SHOWN_COMMENTS } from "@/lib/membership-numbers";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { createHash } from "node:crypto";
-import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
 import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
 import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
@@ -310,9 +312,37 @@ async function main(): Promise<void> {
     is(`each booking adds what the count gives it (${perBooking.toFixed(2)} <= ${CALENDAR_BUILD_PER_BOOKING})`, perBooking <= CALENDAR_BUILD_PER_BOOKING, true);
     is(`forty bookings, measured (${forty}), within the count for forty (${calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands})`, forty <= calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands, true);
     // Measured, not the shape's own expression again (review C4-33 (c)): the fixed part measured here, with every
-    // listing (one GET each) and every booking at the measured rate, is within the shape.
+    // listing (LISTINGS_PER_MGET at one MGET, measured in tests/catalog-listings-mget.test.ts) and every booking at the
+    // measured rate, is within the shape.
     const fixedMeasured = forty - 40 * perBooking - CALENDAR_POLL_SHAPE.commands;
-    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
+    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + listingReads(MAX_PRODUCTS) + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
+  }
+
+  part("Each booking's room is read in shared MGETs, not four GETs a booking: the feed's making at its worst (calendar-feed room, 10 November 2026)");
+  {
+    // A one-to-one call that makes a video room for every booking: the most a booking's room asks of the database.
+    const ROOM_KEYS_PER_MGET = 100;
+    const setup = { kind: "weekly", minutes: 30, tz: "UTC", weekly: [], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "", video: true, meet: null, inPerson: false, place: null, seats: 1, sessions: [] } as never;
+    const start = Date.UTC(2034, 0, 2, 10);
+    const n = 40;
+    const asks = Array.from({ length: n }, (_, i) => ({ product: "pv", setup, session: `cs_test_room${String(i).padStart(4, "0")}`, start: start + i * 3_600_000, end: start + i * 3_600_000 + 1_800_000 }));
+    const roomsCalls = "r".repeat(32);
+    const reads = Math.ceil((4 * n) / ROOM_KEYS_PER_MGET);
+    const made = await counted(() => roomsFor(roomsCalls, asks));
+    is(`${n} rooms made: each a room, read in ${reads} MGETs and each made once (SET NX, GET): measured ${made.commands}`, [made.value.every(isVideoRoom), made.commands <= reads + 2 * n], [true, true]);
+    const again = await counted(() => roomsFor(roomsCalls, asks));
+    is(`read again: the same rooms in ${reads} MGETs, nothing made: measured ${again.commands}`, [again.value.join() === made.value.join(), again.commands <= reads], [true, true]);
+    const perBooking = (calendarBuildCommands(0, 500) - calendarBuildCommands(0, 0)) / 500;
+    is(`a making prices each booking at its room's making and its share of the moves' and rooms' MGETs (${perBooking.toFixed(2)} <= ${(2 + 0.01 + 0.04).toFixed(2)})`, perBooking <= 2 + 1 / 100 + 4 / ROOM_KEYS_PER_MGET, true);
+    // Rule 24: an MGET answered off its shape is unknown, never a booking without a room (nor one made in its place).
+    const real = redis.pipeline;
+    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map(() => ["only one"]) : real(batch));
+    const off = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
+    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map(() => Array.from({ length: ROOM_KEYS_PER_MGET }, () => 7)) : real(batch));
+    const wrongType = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
+    redis.pipeline = real;
+    is("an MGET answered short, or with a value that is neither text nor nothing, is unknown and throws", [off, wrongType], ["unknown", "unknown"]);
+    is("the lot measured here is roomsFor's own", ROOM_KEYS_READ, ROOM_KEYS_PER_MGET);
   }
 
   part("A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)");
@@ -323,10 +353,10 @@ async function main(): Promise<void> {
     const made = await counted(() => ensureListId(OWNER));
     const again = await counted(() => ensureListId(OWNER));
     // Uncontended, with no product on its first page: what is left of the shape is the lock's whole wait and the head's reads.
-    const room = LIST_MADE_SHAPE.commands - (STORE_LOCK_TRIES - 1) - LIST_MADE_HEAD_READS;
+    const room = LIST_MADE_SHAPE.commands - (STORE_LOCK_TRIES - 1) - LIST_MADE_HEAD_COMMANDS;
     is(`made, measured (${made.commands}), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (${room})`, [typeof made.value?.listId, made.commands <= room], ["string", true]);
     is("once there is one, nothing is written: one read", again.commands, 1);
-    is("the figures the shape is built from are the code's own", [read("lib/store.ts").includes("const LOCK_WAIT_MS = 8_000;"), read("lib/redis-lock.ts").includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), LIST_MADE_HEAD_READS === STORE_PAGE_SIZE * (1 + MAX_BUMPS)], [true, true, true]);
+    is("the figures the shape is built from are the code's own", [read("lib/store.ts").includes("const LOCK_WAIT_MS = 8_000;"), read("lib/redis-lock.ts").includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), LIST_MADE_HEAD_READS === STORE_PAGE_SIZE * (1 + MAX_BUMPS), LIST_MADE_HEAD_COMMANDS === listingReads(STORE_PAGE_SIZE) + listingReads(STORE_PAGE_SIZE * MAX_BUMPS)], [true, true, true, true]);
     const readingsLine = COST_LINES.find((l) => l.id === "store-readings");
     is("priced every day of the month, once a day a store, in the store-readings line", (readingsLine?.monthlyUsd("creator") ?? 0) >= DAY_WINDOWS * readShapeCost(LIST_MADE_SHAPE), true);
     is("and no longer as a one-time line beside it", PER_PAYMENT_LINES.some((l) => l.id === "reading-list-made"), false);
@@ -346,14 +376,15 @@ async function main(): Promise<void> {
   is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && STORE_READING_SHAPES.length === 3, true);
   is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
   {
-    // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
-    // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
-    // and one more heavy reading a day would pass it. Computed as that test computes it.
+    // Inbox C4-33 (1): the day's heavy readings are the most the margin allowed, with the room that existed: the first
+    // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
+    // The ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), US$ 65 before. The dollar more
+    // is room for any honest cost up to US$ 66, not only the picture uploads (coordinator's decision 6934185062, option (a)).
+    // History: the readings figure was sized under US$ 65, where one more heavy reading a day would have passed it; that
+    // sizing is kept as a note, not as a second ceiling under the owner's.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
-    const oneMore = 32 * (heavyWorst - lightWorst);
-    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
-    is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
+    is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

@@ -36,8 +36,8 @@ export const PLANS_ON_SALE: boolean = commercialPlansMayOpen(OPENING_REQUESTED) 
  * Whether the Store assistant add-on can be bought (lib/assistant-billing.ts):
  * only when the plans are on sale, behind the same review, and only while
  * the add-on alone keeps positive net with the existing cost room at full use
- * (lib/store-assistant-rules.ts, assistantMeetsFloor). Under the most-tax
- * reading, all other release conditions still apply; positive arithmetic alone opens nothing.
+ * (lib/store-assistant-rules.ts, assistantMeetsFloor). Under the TX reading
+ * (IRPF 15% and IOF 0.38% on profit), all other release conditions still apply; positive arithmetic alone opens nothing.
  */
 export const ASSISTANT_ON_SALE: boolean = PLANS_ON_SALE && assistantMeetsFloor();
 

@@ -12,7 +12,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TaxSalesLedger } from "@/lib/tax-sales-counter";
-import { assessUsSalesTaxNexus, usSalesTaxLookback, usSalesTaxSaleDecision, usSalesTaxWindows } from "@/lib/us-sales-tax-nexus";
+import { US_SALES_TAX_COUNTS_EVERYWHERE, assessUsSalesTaxNexus, usSalesTaxLookback, usSalesTaxSaleDecision, usSalesTaxWindows } from "@/lib/us-sales-tax-nexus";
+import { US_SALES_TAX_RULES } from "@/lib/us-sales-tax-rules";
 
 const NOW = Date.parse("2026-11-20T15:00:00Z");
 const LOOKBACK = usSalesTaxLookback(NOW);
@@ -118,6 +119,26 @@ test("Claude 2's MEDIUM on #4961: a December supply still pending in January is 
   // A pending supply dated before the trailing twelve months is counted nowhere: unknown, never zero.
   const early = at([{ on: "2025-12-01", cents: 100, position: "reserved" }]);
   assert.deepEqual([early.status, early.reasons], ["unknown", ["pending-before-trailing-twelve-months"]]);
+});
+
+test("Codex C2's MEDIUM on #4961: where sales everywhere count, the state's own sales never show below the limit", () => {
+  // The set is the table's: every rule whose threshold counts sales to buyers wherever they are, and no other.
+  const everywhere = US_SALES_TAX_RULES.filter((rule) => rule.threshold.known && typeof rule.threshold.value === "object" && /wherever located|worldwide|all purchasers/i.test(rule.threshold.value.counts)).map((rule) => rule.state);
+  assert.deepEqual([...US_SALES_TAX_COUNTS_EVERYWHERE].sort(), everywhere.sort());
+  assert.deepEqual(everywhere, ["CT"]);
+  // Codex's probe: a complete CT ledger whose one sale, $260,000, went to a buyer in California. The CT subtotal is 0,
+  // but Connecticut counts that sale: unknown and refused, never "below" and never sold untreated.
+  const away = ledger("CT", [{ on: "2026-06-15", cents: 26_000_000 }]);
+  away.entries = away.entries.map((entry) => ({ ...entry, state: "CA" }));
+  const probe = assessUsSalesTaxNexus({ state: "CT", ledger: away, applicableScopeReviewed: true }, NOW);
+  assert.deepEqual([probe.status, probe.reasons], ["unknown", ["sales-everywhere-ledger-required"]]);
+  assert.equal(usSalesTaxSaleDecision(probe, false), "refuse");
+  assert.equal(status("CT"), "unknown");
+  // Over or near the limit on Connecticut's sales alone still stands: the count everywhere is at least that.
+  assert.equal(status("CT", [{ on: "2026-06-15", cents: 26_000_000 }]), "treatment-required");
+  assert.equal(status("CT", [{ on: "2026-06-15", cents: 23_000_000 }]), "approaching");
+  // A state that counts only its own sales is unchanged: Texas under its limit is still below.
+  assert.equal(status("TX", [{ on: "2026-06-15", cents: 100 }]), "below-threshold");
 });
 
 test("dollars or transactions (Arkansas, $100,000 or 200): either one is enough", () => {

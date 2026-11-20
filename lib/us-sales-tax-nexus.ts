@@ -99,6 +99,14 @@ export function usSalesTaxWindows(now: number): UsSalesTaxWindow[] {
   return windows;
 }
 
+/**
+ * The states whose threshold, as read in lib/us-sales-tax-rules.ts, counts sales to buyers wherever they are, not only
+ * in the state: Connecticut, for a marketplace facilitator ("sales to all purchasers wherever located count", OCG-8).
+ * The ledger here is the state's own, so under the limit is unknown for them, never below (Codex C2's MEDIUM on #4961).
+ * tests/us-sales-tax-nexus.test.ts holds this set to every rule whose `counts` says so.
+ */
+export const US_SALES_TAX_COUNTS_EVERYWHERE: ReadonlySet<string> = new Set(["CT"]);
+
 /** The one ledger interval that holds every window: from the earliest start to today. */
 export function usSalesTaxLookback(now: number): { start: string; end: string } {
   const windows = usSalesTaxWindows(now);
@@ -175,6 +183,10 @@ export function assessUsSalesTaxNexus(value: unknown, now = Date.now()): UsSales
     const peakTransactions = Math.max(...counted.map((window) => window.count));
     if (met.length) return { status: "treatment-required", state, peakMinor, peakTransactions, reasons: met };
     if (near.length) return { status: "approaching", state, peakMinor, peakTransactions, reasons: near };
+    // A state whose rule counts sales to buyers wherever they are (US_SALES_TAX_COUNTS_EVERYWHERE): the ledger holds this
+    // state's sales only, so a total under the limit cannot show the state's own count is (Codex C2's MEDIUM on #4961).
+    // Met or near on the state's sales alone still stands: the count everywhere is at least that.
+    if (US_SALES_TAX_COUNTS_EVERYWHERE.has(state)) return stop("unknown", state, ["sales-everywhere-ledger-required"]);
     return { status: "below-threshold", state, peakMinor, peakTransactions, reasons: [] };
   } catch {
     return stop("unknown", null, ["evidence"]);

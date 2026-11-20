@@ -49,6 +49,7 @@ import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { WAITLIST_DROP_UNITS, dropWaitlist, finishWaitlistDrop, holdWaitlistDrop } from "@/lib/waitlist";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { giveAllowance } from "@/lib/store-allowance";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -178,6 +179,9 @@ export async function POST(request: NextRequest) {
   // A removal's fixed studio units are admitted together: its ordinary request, its waitlist's (WAITLIST_DROP_UNITS)
   // and its invitations' first page (REMOVE_INVITES_FIRST_UNITS). With room for fewer, none is consumed (Codex U and P
   // on #4462). Other product writes keep their one ordinary request.
+  // The moment before the admission: a give-back below goes to the window the units were taken in (or the one before,
+  // if a window turned during the admission: the new one then stays counted higher, never lower).
+  const tookAt = Date.now();
   const guarded = await guardStoreWrite(request, "products", 40_000, undefined,
     (body) => (text(body.action, 10) === "remove" ? 1 + WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS : 1));
   if (!guarded.ok) return guarded.response;
@@ -330,6 +334,13 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (action === "remove") {
+      // Refused before anything is held or dropped: the units taken for the waitlist's and the invitations' fixed work
+      // are given back, so a creator who tries again pays only each request itself (Claude 5's LOW on #4462). Best
+      // effort: a give-back that fails leaves the figure counted higher, never lower.
+      const early = async (response: Response): Promise<Response> => {
+        await giveAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS, tookAt);
+        return response;
+      };
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
       // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
@@ -338,10 +349,10 @@ export async function POST(request: NextRequest) {
         waiting = await waitingCount(guarded.store, id);
       } catch (error) {
         console.error("could not read a product's pre-orders before removing it", error);
-        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        return early(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
       }
       if (waiting > 0) {
-        return Response.json({ ok: false, error: "preorders" }, { status: 409 });
+        return early(Response.json({ ok: false, error: "preorders" }, { status: 409 }));
       }
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
@@ -359,7 +370,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
-        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        return early(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
       }
       // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
       // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
@@ -367,8 +378,8 @@ export async function POST(request: NextRequest) {
       // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
       if (before && guarded.store.stripeAccountId) {
         const running = await runningSubscriptions(guarded.store, id);
-        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
-        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
+        if (running === null) return early(Response.json({ ok: false, error: "stripe" }, { status: 502 }));
+        if (running > 0) return early(Response.json({ ok: false, error: "memberships", running }, { status: 409 }));
       }
       // guardStoreWrite admitted this request and its WAITLIST_DROP_UNITS together before anything went (#4462).
       // Noted as dropping its waitlist before the product goes (lib/waitlist.ts holdWaitlistDrop): whatever its coming-soon

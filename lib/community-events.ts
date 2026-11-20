@@ -72,6 +72,7 @@ import { indexEvent, unindexEvent } from "@/lib/community-index";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { communityWords } from "@/lib/buyer-words/community";
 import { eventFileWords } from "@/lib/buyer-words/event-file";
 import { LANGUAGES } from "@/lib/store-language";
@@ -770,6 +771,21 @@ export const RELEASE_RSVP = `-- marktmorgen:event-rsvp-release:v1
 if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
 return 0`;
 /**
+ * Takes a place only while this address has not been erased from the store, in the same Redis step as the write
+ * (issue #4786): an RSVP that passed its first checks before the person's erasure cannot write them back after the
+ * eraser ran, since erasePerson writes the store's one-way erasure print before any eraser.
+ * KEYS: the event's RSVP hash and the store's erased-address hash. ARGV: member key, one-way erasure print, mark.
+ * Returns {-1, 0} when erased, or {HSETNX, HLEN}; malformed/lost replies are unknown and keep no unconfirmed place.
+ * Billed 1 + 1 when erased, or 1 + 3 on the healthy path. MemoryRedis runs and counts the same calls.
+ */
+export const KEEP_RSVP_IF_NOT_ERASED = `-- marktmorgen:event-rsvp-add:v1
+if redis.call('HEXISTS', KEYS[2], ARGV[2]) == 1 then return {-1, 0} end
+local added = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[3])
+return {added, redis.call('HLEN', KEYS[1])}`;
+
+/** The store's stable list id and the member's address, for the erasure fence of an RSVP write. */
+export type RsvpErasureGuard = { listId: string; email: string };
+/**
  * Deletes this request's own place, never another request's for the same member. True only when it deleted it now: the
  * room is given back only then, since a deletion in between (a cancel) gave it back already. An unknown reply keeps
  * the room taken, never given back twice.
@@ -782,7 +798,14 @@ export function rsvpSeconds(value: unknown): number {
   return Number(String(value ?? "").split(":", 1)[0]) || 0;
 }
 
-export async function rsvp(id: string, event: CommunityEvent, member: string, room: DataStore, now = Date.now()): Promise<RsvpResult> {
+export async function rsvp(
+  id: string,
+  event: CommunityEvent,
+  member: string,
+  room: DataStore,
+  now = Date.now(),
+  guard?: RsvpErasureGuard,
+): Promise<RsvpResult> {
   if (event.cancelled || isOver(event, now)) return "closed";
   // Each answer read exactly (sweep app5, finding 2; CX-123 rules 24 and 30): an unknown one fails (the page says the
   // RSVP did not go through), never "already going", and never leaves somebody over the cap.
@@ -792,15 +815,29 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
   const mark = `${Math.floor(now / 1000)}:${randomBytes(8).toString("hex")}`;
-  const replies = repliesFor(
-    await redisPipeline([
-      ["HSETNX", rsvpKey(id, event.id), member, mark],
-      ["HLEN", rsvpKey(id, event.id)],
-    ]),
-    2,
-  );
+  // With the guard, the erasure print is read in the same step as the write (KEEP_RSVP_IF_NOT_ERASED).
+  const outer = guard
+    ? repliesFor(
+        await redisPipeline([
+          ["EVAL", KEEP_RSVP_IF_NOT_ERASED, 2, rsvpKey(id, event.id), suppressedKey(guard.listId), member, suppressionPrint(guard.listId, guard.email), mark],
+        ]),
+        1,
+      )
+    : repliesFor(
+        await redisPipeline([
+          ["HSETNX", rsvpKey(id, event.id), member, mark],
+          ["HLEN", rsvpKey(id, event.id)],
+        ]),
+        2,
+      );
+  const replies = guard ? (outer ? repliesFor(outer[0], 2) : null) : outer;
   const added = replies?.[0];
   const length = countOf(replies?.[1]);
+  if (added === -1) {
+    // Erased from the store: nothing was written, and the room taken for it is given back.
+    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    return "closed";
+  }
   if (added === 0) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";

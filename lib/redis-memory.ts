@@ -355,6 +355,17 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+        // lib/community-events.ts KEEP_RSVP_IF_NOT_ERASED: an RSVP is admitted only while its person is not erased.
+        if (key.startsWith("-- marktmorgen:event-rsvp-add:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, list, erased, member, print, mark] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HEXISTS", erased, print]) === 1) return [-1, 0];
+          const added = call(["HSETNX", list, member, mark]);
+          return [added, call(["HLEN", list])];
+        }
         // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
         if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, mark] = args;

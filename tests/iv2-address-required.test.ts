@@ -140,6 +140,9 @@ async function main(): Promise<void> {
   is("RED: the policy no longer says every paid checkout without its exceptions", privacy.includes("asks for your billing address on every paid checkout,"), false);
   is("RED: it names the two that do not ask yet", [privacy.includes("except, for now, when you buy a package of calls"), privacy.includes("PayPal asks for what it needs on its own page")], [true, true]);
   is("RED: both places say the same (the payment paragraph points to #billing-address)", privacy.includes('href="#billing-address"'), true);
+  // Claude 2's LOW on #4946: the payment paragraph claims nothing the package checkout does not do; the exception is in
+  // #billing-address, where it links.
+  is("RED: the payment paragraph says Stripe may ask, not that it always asks", [privacy.includes("Stripe may ask for your billing address when you pay on its checkout page"), privacy.includes("Stripe asks for your billing address when you pay on its checkout page")], [true, false]);
   is("and that it is never used for marketing", privacy.includes("never used for marketing"), true);
   // Claude 2's review of #4938: the creator's plan and the store assistant are paid to Marktmorgen, so their address
   // sits on Marktmorgen's own Stripe account, not on a creator's.

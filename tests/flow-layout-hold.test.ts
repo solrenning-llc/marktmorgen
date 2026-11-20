@@ -109,7 +109,12 @@ async function main(): Promise<void> {
   let erasedDuringRead = false;
   redis.pipeline = async (commands) => {
     const replies = await pipeline(commands);
-    if (!erasedDuringRead && commands.some(([verb, key, member]) => verb === "ZSCORE" && key === "nl:mail:flowq:lease" && String(member).endsWith(`|${erasedEmail}`))) {
+    // The step's read of this person's lease entry: a ZSCORE before main's run generations (#4234), now the
+    // LEASE_AND_GEN script (lib/flow-runs.ts leaseAndGenCommand: KEYS the lease and the run, ARGV[1] the member).
+    const leaseRead = (c: (string | number)[]) =>
+      (c[0] === "ZSCORE" && c[1] === "nl:mail:flowq:lease" && String(c[2]).endsWith(`|${erasedEmail}`)) ||
+      (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-lease-gen:") && c[3] === "nl:mail:flowq:lease" && String(c[5]).endsWith(`|${erasedEmail}`));
+    if (!erasedDuringRead && commands.some(leaseRead)) {
       erasedDuringRead = true;
       await forgetWorkflowPerson(store, erasedEmail);
     }

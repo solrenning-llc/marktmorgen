@@ -36,6 +36,7 @@ type Outcome = "paid" | "declined" | "voidFails" | "voidFailsPaid" | "applied-op
 let outcome: Outcome = "paid";
 /** What each read of the yearly invoice says, in order; "open" once they run out. */
 let invoiceReads: string[] = [];
+let yearAutoAdvance = true;
 
 /**
  * The first API version at which Stripe takes `metadata` with `payment_behavior=pending_if_incomplete`, keeps it in
@@ -75,10 +76,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "GET" && path === "/subscriptions/sub_Year00000001") return json(subscription());
   if (method === "GET" && path === "/invoices/in_Year00000001") {
     const status = invoiceReads.shift() ?? "open";
-    return json({ id: "in_Year00000001", status, billing_reason: "subscription_cycle", amount_due: 20000, currency: "usd", parent: { subscription_details: { subscription: "sub_Year00000001" } } });
+    return json({ id: "in_Year00000001", status, amount_paid: 0, auto_advance: yearAutoAdvance, billing_reason: "subscription_cycle", amount_due: 20000, currency: "usd", parent: { subscription_details: { subscription: "sub_Year00000001" } } });
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
-  if (method === "POST" && path === "/invoices/in_Year00000001") return json({ id: "in_Year00000001" });
+  if (method === "POST" && path === "/invoices/in_Year00000001") {
+    yearAutoAdvance = body.get("auto_advance") === "true";
+    return json({ id: "in_Year00000001" });
+  }
   if (method === "POST" && path === "/subscriptions/sub_Year00000001") {
     const metadata = metadataOf(body);
     // As Stripe: metadata on a change made only if paid is refused before 2026-05-27.dahlia; from it, kept on the
@@ -106,6 +110,7 @@ const members = async (key: string) => ((await redisPipeline([["SMEMBERS", key]]
 const clear = async () => {
   calls.length = 0;
   invoiceReads = [];
+  yearAutoAdvance = true;
   await redisPipeline([["DEL", FALLBACK_VOID_KEY, FALLBACK_CHECK_KEY, FALLBACK_BOTH_KEY]]);
 };
 

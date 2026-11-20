@@ -22,8 +22,10 @@ async function main(){
  for(const currency of ['jpy',null,undefined,42]){
   part('Invoice currency '+String(currency)+' cannot authorize USD money');
   invoiceCurrency=currency;posted.length=0;
-  const result=await refundLatePayments('acct_x8synthetic',subscription,100).then(()=> 'settled',()=> 'unknown');
-  is('currency must be confirmed against the charge',result,'unknown');
+  // A currency that reads but is not the charge's is left owed and tried again (Claude 3's LOW on #4867); one that does
+  // not read at all is still unknown. Never settled either way.
+  const result=await refundLatePayments('acct_x8synthetic',subscription,100).then((o)=> o.state,()=> 'unknown');
+  is('currency must be confirmed against the charge',result,currency==='jpy'?'owed':'unknown');
   is('no money request on incompatible or missing currency',posted,[]);
  }
  invoiceCurrency='usd';posted.length=0;

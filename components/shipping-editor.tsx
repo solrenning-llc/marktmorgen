@@ -16,7 +16,7 @@ import { vatShipCloses } from "@/lib/eu-vat-goods";
  * studio never shows a country the checkout leaves out as open (VR, item 2).
  */
 const VAT_LOCK_NOTE =
-  "For now, buyers can't have it shipped to the European Union or the United Kingdom, because we can't charge the VAT those countries require on goods yet. Your other countries keep selling.";
+  "For now, buyers can't have it shipped to the European Union, the United Kingdom, Monaco or the Isle of Man, because we can't charge the VAT those countries require on goods yet. Your other countries keep selling.";
 
 const UNKNOWN_SAVE = "Shipping was not confirmed. Reload to check its status before trying again.";
 

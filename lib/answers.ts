@@ -103,9 +103,9 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
     // Everywhere but the closed countries: said in a few words, so this first-tier fact never fills an input cap with
     // ~200 codes. The EU and the UK are closed until the opening (lib/eu-vat-goods.ts); the EEA too while not filled.
     const where = shipping.except === "eea-uk"
-      ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Iceland, Liechtenstein and Norway"
+      ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway"
       : shipping.except === "eu-uk"
-        ? "everywhere Stripe can ship to, except for now the European Union and the United Kingdom"
+        ? "everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco and the Isle of Man"
       : shipping.region === "custom"
         ? shipping.countries.join(", ")
         : SHIP_REGIONS[shipping.region].label;

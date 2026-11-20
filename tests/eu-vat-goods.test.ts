@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { vatShipCloses } from "@/lib/eu-vat-goods";
 import { REFUSED_PLACES, consumerGate } from "@/lib/eu-vat-gate";
-import { TERRITORY_UNSETTLED, type EuSupplyFields } from "@/lib/eu-vat-supply";
+import { EU_VAT_COUNTRIES, TERRITORY_UNSETTLED, type EuSupplyFields } from "@/lib/eu-vat-supply";
 import { SHIP_COUNTRIES, shipsToWords } from "@/lib/shipping";
 import { gpsrCloses } from "@/lib/physical-legal";
 import { type PhysicalLegal } from "@/lib/physical-legal-record";
@@ -81,8 +81,8 @@ test("a world product is said in a few words, in every buyer language", () => {
   const bare = shippingNow(world(false))!;
   assert.deepEqual([bare.except, bare.countries.some(gpsrCloses), bare.countries.includes("GB")], ["eea-uk", false, false]);
   assert.deepEqual([everywhereBut(filled.countries), everywhereBut(bare.countries), everywhereBut(["US"])], ["eu-uk", "eea-uk", null]);
-  assert.equal(shipsToWords(filled, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union and the United Kingdom");
-  assert.equal(shipsToWords(bare, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, the United Kingdom, Iceland, Liechtenstein and Norway");
+  assert.equal(shipsToWords(filled, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, the United Kingdom, Monaco and the Isle of Man");
+  assert.equal(shipsToWords(bare, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway");
   for (const code of LANGUAGE_CODES) {
     const words = SHIPPING_WORDS[code];
     assert.notEqual(words.everywhereElse, words.everywhereElseEu, code);
@@ -93,8 +93,8 @@ test("a world product is said in a few words, in every buyer language", () => {
 });
 
 test("the store's answers say the same", () => {
-  assert.match(deliveryWords(world(true)), /to: everywhere Stripe can ship to, except for now the European Union and the United Kingdom\./);
-  assert.match(deliveryWords(world(false)), /except for now the European Union, the United Kingdom, Iceland, Liechtenstein and Norway\./);
+  assert.match(deliveryWords(world(true)), /to: everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco and the Isle of Man\./);
+  assert.match(deliveryWords(world(false)), /except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway\./);
   assert.match(deliveryWords(custom(["US", "GB", "DE"])), /to: US\./);
   assert.match(deliveryWords(custom(["GB"])), /not shipped anywhere right now/);
 });
@@ -118,4 +118,27 @@ test("both checkouts and the cart route read shippingNow, and nothing else names
   assert.match(readFileSync("app/api/store/cart/route.ts", "utf8"), /except: everywhereBut\(sending\.countries\) \?\? undefined/);
   // PayPal sells nothing shipped, so it never asks an address (lib/paypal-sales.ts, sellsWithPayPal).
   assert.match(readFileSync("lib/paypal-sales.ts", "utf8"), /if \(product\.shipping\) return false;/);
+});
+
+// Claude 3's LOW on #4955: "the European Union and the United Kingdom" left out Monaco and the Isle of Man, which the
+// lock closes too, so a buyer there read that the product ships to them. Every closed place outside the Union (its
+// own outermost regions, Åland and the Spanish territories coded apart are inside it) must be named by its English
+// name in every short form the buyer and the creator read; a place the lock closes later fails here until it is.
+test("every place the lock closes outside the EU is named wherever the closing is said in short", () => {
+  const INSIDE_THE_UNION = new Set([...EU_VAT_COUNTRIES, "AX", "GF", "GP", "MF", "MQ", "RE", "YT", "EA", "IC"]);
+  const outside = SHIP_COUNTRIES.filter((code) => vatShipCloses(code) && !INSIDE_THE_UNION.has(code));
+  assert.deepEqual([...outside].sort(), ["GB", "IM", "MC"]);
+  const names = new Intl.DisplayNames(["en-US"], { type: "region" });
+  const said = {
+    buyerEu: SHIPPING_WORDS.en.everywhereElseEu,
+    buyerEea: SHIPPING_WORDS.en.everywhereElse,
+    answersEu: deliveryWords(world(true)),
+    answersEea: deliveryWords(world(false)),
+    studio: readFileSync("components/shipping-editor.tsx", "utf8").match(/const VAT_LOCK_NOTE =\s*"([^"]+)"/)?.[1] ?? "",
+  };
+  for (const code of outside) {
+    const name = names.of(code)!;
+    for (const [where, words] of Object.entries(said)) assert.equal(words.includes(name), true, `${where}: ${name}`);
+  }
+  for (const code of LANGUAGE_CODES) assert.match(SHIPPING_WORDS[code].everywhereElseEu, /Monaco|Mónaco/, code);
 });

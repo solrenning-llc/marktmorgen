@@ -103,9 +103,10 @@ async function main(): Promise<void> {
   is("a manufacturer on Svalbard, outside the EEA, still needs one", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "SJ" }, responsible: null }, true).includes("responsible"), true);
   const worldWords = deliveryWords(listingOf(world));
   is("the delivery fact of a world product not filled stays short", [worldWords.length < 400, worldWords.includes("AD, AE")], [true, false]);
-  // Changed assertions, noted (789 [IV1] unit 1): the United Kingdom is left out too, until the opening.
-  is("it names the region and what is left out", worldWords.includes("to: everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Iceland, Liechtenstein and Norway."), true);
-  is("the buy box says it in a few words", shipsToWords(worldNow, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, the United Kingdom, Iceland, Liechtenstein and Norway");
+  // Changed assertions, noted (789 [IV1] unit 1): the United Kingdom, Monaco and the Isle of Man are left out too, until
+  // the opening.
+  is("it names the region and what is left out", worldWords.includes("to: everywhere Stripe can ship to, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway."), true);
+  is("the buy box says it in a few words", shipsToWords(worldNow, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway");
   for (const code of LANGUAGE_CODES) is(`${code}: said, not listed`, shipsToWords(worldNow, code, SHIPPING_WORDS[code]).length < 160, true);
   is("a custom list stays a list", shipsToWords(shippingNow(bare)!, "en-US", SHIPPING_WORDS.en), "United States");
   const cartRoute = readFileSync("app/api/store/cart/route.ts", "utf8");
@@ -324,7 +325,7 @@ async function main(): Promise<void> {
   }
   is("the form shows the closing in the studio's notice style, from the same rule", /safetyClosed\(product\.shipping\.countries, /.test(editor) && /notice notice-warn/.test(editor), true);
   const shippingEditor = readFileSync("components/shipping-editor.tsx", "utf8");
-  is("the shipping editor says the VAT lock's closing, from the same rule", [/\.some\(vatShipCloses\) \?/.test(shippingEditor), /\{VAT_LOCK_NOTE\}/.test(shippingEditor), shippingEditor.includes("can't have it shipped to the European Union or the United Kingdom")], [true, true, true]);
+  is("the shipping editor says the VAT lock's closing, from the same rule", [/\.some\(vatShipCloses\) \?/.test(shippingEditor), /\{VAT_LOCK_NOTE\}/.test(shippingEditor), shippingEditor.includes("can't have it shipped to the European Union, the United Kingdom, Monaco or the Isle of Man")], [true, true, true]);
 
   done();
 }

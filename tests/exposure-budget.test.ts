@@ -1,9 +1,17 @@
-import test from 'node:test';
+import test,{afterEach,mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {exposureBudgetConfiguration} from '@/lib/exposure-budget-policy';
 import {reserveFundedExposure} from '@/lib/exposure-budget';
 import {exposureFixture} from './exposure-budget-fixture';
 import {reset,seed,ledger,calls,settings} from './exposure-budget-redis';
+// exposureFixture() names the review month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again at every reservation (lib/exposure-budget.ts): a run crossing 00:00 UTC on a month's last
+// day failed "two full allocations survive 64 concurrent stores without overspending". Only Date is stopped, for the
+// whole run; the test that moves the clock moves this one, and it is put back after each test. Timers and
+// performance.now() run as usual.
+const STARTED=Date.now();
+mock.timers.enable({apis:['Date'],now:STARTED});
+afterEach(()=>{mock.timers.setTime(STARTED);});
 function start(){reset();const f=exposureFixture();const c=exposureBudgetConfiguration(f.policy,f.context)!;const key='nl:exposure:v1:'+c.month;seed(key,c);return {...f,key,c};}
 test('direct exposure reservation refuses original TX presence before snapshots or Redis',async()=>{
  let reads=0;
@@ -50,10 +58,10 @@ test('allocation changes after dispatch leave the existing reservation held',asy
  f.policy.review.cases.trial.worstCase!.costCeilings.other=5;
  assert.equal(await pending,false);assert.equal(ledger.get(f.key)?.get('reserved'),'100');
 });
-test('a month rollover before acknowledgement refuses new work but retains the receipt',async t=>{
- t.mock.timers.enable({apis:['Date'],now:Date.UTC(2026,9,31,23,59,59)});
+test('a month rollover before acknowledgement refuses new work but retains the receipt',async()=>{
+ mock.timers.setTime(Date.UTC(2026,9,31,23,59,59));
  const f=start();const pending=reserveFundedExposure('one','trial',f.policy,f.context);
- t.mock.timers.setTime(Date.UTC(2026,10,1));
+ mock.timers.setTime(Date.UTC(2026,10,1));
  assert.equal(await pending,false);assert.equal(ledger.get(f.key)?.get('reserved'),'100');
 });
 

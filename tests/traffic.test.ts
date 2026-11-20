@@ -27,6 +27,7 @@ import { offeredItems } from "@/lib/bundles";
 import { readListings, readPage } from "@/lib/catalog";
 import { monthKey } from "@/lib/delivery";
 import { outOfKeys } from "@/lib/licence-keys";
+import { badgeInviteCode } from "@/lib/badge-link";
 import { PLAN_PRICES } from "@/lib/plan";
 import { readAbout } from "@/lib/product-about";
 import { withinLimit } from "@/lib/request-guard";
@@ -55,7 +56,7 @@ import { centsWords } from "@/lib/watch-rules";
 import { store as redis } from "./redis-stub";
 import { COMMANDS, PAGES_PER_VISIT, STATIC_FILES, visitCost } from "./traffic-cost";
 import { POST as readRoute } from "@/app/api/store/read/route";
-import { STORE_SCOPE, readToken } from "@/lib/page-read";
+import { STORE_SCOPE, noteReadStore, readSampled, readSlot, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { addMonthsMs, allowanceWindow } from "@/lib/allowance-window";
@@ -302,6 +303,7 @@ async function main(): Promise<void> {
     await ratings;
     await bundles;
     await soonProducts(store).catch(() => new Set());
+    await badgeInviteCode(store.sid);
     return listings;
   };
   const listings = await drawFront();
@@ -347,14 +349,35 @@ async function main(): Promise<void> {
   is("and saying it was opened is too, with the product's own visitor", laterCount <= COMMANDS.laterCount, true);
   // How a page was read, sent by one visitor in eight as they leave (lib/page-read.ts):
   // the route, with a block of a sales page counted before and one of the store's page.
+  // Since 639 [GL7](25) each reading is counted once a visit, drawn by the server, in the window's own count of
+  // readings and never as one of its public requests (lib/page-read.ts): the mark, the count of readings with its
+  // expiry, and the reading's count, at most COMMANDS.readBeacon.
   const readStore = (await storeForHandle("joy"))!;
+  let visit = 0;
+  let place = 0;
+  // Each token for a page whose own request is its block's reading slot (lib/page-read.ts, readSlot), as its check leaves it.
+  const drawnToken = (scope: string) => {
+    const window = allowanceWindow(readStore, Date.now())!.id;
+    do place += 1;
+    while (!readSlot(window, place));
+    noteReadStore(readStore.statsId, readStore, Date.now(), place);
+    for (;;) {
+      const nonce = `trafficvisit${String((visit += 1)).padStart(4, "0")}`;
+      if (readSampled(nonce)) return readToken(readStore.statsId, scope, Date.now(), nonce);
+    }
+  };
   const readRequest = (body: Record<string, unknown>) =>
     readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)" }, body: JSON.stringify(body) }) as never);
-  await readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" });
-  const depthCount = await counted(() => readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" }));
-  const reachCount = await counted(() => readRequest({ t: readToken(readStore.statsId, STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
-  // Exactly one each: none would mean nothing was counted, which would pass the model for the wrong reason.
-  is("and how a page was read is too, without reading the store", [depthCount, reachCount], [COMMANDS.readBeacon, COMMANDS.readBeacon]);
+  await readRequest({ t: drawnToken(product.id), k: "d", p: product.id, b: "blok0001" });
+  const depthCount = await counted(() => readRequest({ t: drawnToken(product.id), k: "d", p: product.id, b: "blok0001" }));
+  const reachCount = await counted(() => readRequest({ t: drawnToken(STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
+  const repeat = drawnToken(STORE_SCOPE);
+  await readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" });
+  const repeatCount = await counted(() => readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" }));
+  // More than the mark and the count of readings (one script since Codex G's review of #2571, lib/page-read.ts
+  // ADMIT_READING): none past it would mean nothing was counted, which would pass the model for the wrong reason.
+  is("and how a page was read is inside what a reading is priced at, with no public request", [depthCount > 1, depthCount <= COMMANDS.readBeacon, reachCount > 1, reachCount <= COMMANDS.readBeacon], [true, true, true, true]);
+  is("and the same token again costs no command on the server that spent it (Claude 5 on #2571)", repeatCount, 0);
   is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0002, visitCost() < 0.0003], [3, 13, true, true]);
 
   part("Where it is counted, and where a store rests");
@@ -370,9 +393,14 @@ async function main(): Promise<void> {
   for (const page of ["app/[handle]/p/[product]/page.tsx", "app/[handle]/book/[product]/page.tsx", "app/[handle]/free/page.tsx", "app/[handle]/waitlist/page.tsx"]) {
     is(`${page.split("/")[2]}: somebody who arrives straight at it is counted`, /<StoreTracking[^>]*\bpresence\b/.test(read(page).replace(/\s+/g, " ")), true);
   }
-  for (const page of ["app/[handle]/page.tsx", "app/[handle]/p/[product]/page.tsx"]) {
-    is(`${page.includes("/p/") ? "a product's page" : "the store's page"} rests with the store, before anything else is read for it`, /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/.test(read(page)), true);
-  }
+  is("the store's page rests with the store, before anything else is read for it", /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/.test(read("app/[handle]/page.tsx")), true);
+  // Rule 23 (traffic audit, 9 November 2026): the product page counts itself inside the load its title shares, before
+  // the product is read, and draws the resting page from it (tests/public-admission-before-read.test.ts runs it).
+  const productPage = read("app/[handle]/p/[product]/page.tsx");
+  is("a product's page rests with the store, before anything else is read for it", [
+    /if \(await isResting\(store\)\) return \{ store, asked, resting: true \};\s*\/\/ The id alone[^\n]*\n\s*const product = await readListing\(/.test(productPage),
+    /if \(found\.resting\) return <StoreResting store=\{found\.store\} \/>;/.test(productPage),
+  ], [true, true]);
   const resting = read("components/store-resting.tsx");
   is("a resting page keeps the way back to what a buyer has, and counts nothing", [/\/orders/.test(resting), /\/community/.test(resting), /StoreTracking|StoreBeacon/.test(resting.replace(/\/\*[\s\S]*?\*\//, ""))], [true, true, false]);
   for (const page of ["app/[handle]/orders", "app/[handle]/manage", "app/api/store/download"]) {
@@ -389,7 +417,7 @@ async function main(): Promise<void> {
   ], [true, true, true]);
   is("courses, the community and podcasts rest only at the whole figure", [/isResting\(store, undefined, "buyer"\)/.test(readDir("app/[handle]/course")), /isResting\(store, Date\.now\(\), "buyer"\)/.test(read("lib/community-page.ts")), /isResting\(store, Date\.now\(\), "buyer", \{ shared: true \}\)/.test(read("app/api/store/podcast/feed/[token]/route.ts"))], [true, true, true]);
   const job = read("app/api/cron/usage/route.ts");
-  is("the daily job writes and never bills visits, and it is scheduled", [/settleAllVisits/.test(job), /firstWordOnVisits\(folder, month\)/.test(job), /\/api\/cron\/usage/.test(read("vercel.json"))], [false, true, true]);
+  is("the daily job writes and never bills visits, and it is scheduled", [/settleAllVisits/.test(job), /takeVisitsWord\(folder, month\)/.test(job), /\/api\/cron\/usage/.test(read("vercel.json"))], [false, true, true]);
 
   part("What the pages say");
   const terms = read("app/terms/page.tsx");

@@ -91,13 +91,16 @@ export function whyNotInBundle(product: Listing): string | null {
  * of its own would be one more thing the buyer is promised; take them off
  * first, as for a call or a course.
  */
-export type OwnerProblem = "free" | "recurring" | "call" | "course" | "delivery" | "options" | "pwyw";
+export type OwnerProblem = "free" | "recurring" | "call" | "course" | "shipped" | "delivery" | "options" | "pwyw";
 
 export function bundleOwnerProblem(product: Listing): OwnerProblem | null {
   if (product.priceCents <= 0) return "free";
   if (product.recurring) return "recurring";
   if (product.call) return "call";
   if (product.course) return "course";
+  // A shipped product is a thing of its own sent to an address: as a bundle its checkout would ask for no address and
+  // charge no shipping while the studio still showed it (tests/bundle-physical-owner.test.ts).
+  if (product.shipping) return "shipped";
   if (product.file || product.link) return "delivery";
   if (product.options.length > 0) return "options";
   if (product.pwyw) return "pwyw";
@@ -137,6 +140,17 @@ export function itemsProblem(items: string[], listings: Listing[], ownerId = "")
 export function deliverableItems(bundle: Pick<Listing, "bundle">, listings: Listing[]): Listing[] {
   const byId = new Map(listings.map((p) => [p.id, p]));
   return (bundle.bundle ?? []).map((id) => byId.get(id)).filter((p): p is Listing => Boolean(p && canBeInBundle(p)));
+}
+
+/**
+ * The products among these that a bundle also among them already hands over
+ * (deliverableItems), in their order. A cart or a checkout box holding both
+ * would charge the buyer twice for one copy of the product, so neither may
+ * (found by Claude 7's checkout hunt, 12 November 2026).
+ */
+export function heldByABundle(products: Listing[]): Listing[] {
+  const inside = new Set(products.flatMap((p) => (p.bundle ? deliverableItems(p, products).map((item) => item.id) : [])));
+  return products.filter((p) => inside.has(p.id));
 }
 
 // ---- Chosen by the buyer -------------------------------------------------------

@@ -107,11 +107,12 @@ async function planRefunds(): Promise<void> {
     await setSubscription(email, { customerId: customer, subscriptionId: sub, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
     const at = NOW - 3 * DAY;
     const invoice = { id: `in_${handle}x1`, subscription: sub, status: "paid", created: at, total: 6_900, tax: null, billing_reason: "subscription_create", charge, status_transitions: { paid_at: at }, lines: { data: [{ type: "subscription", period: { start: at }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } };
-    const chargeRow = { id: charge, customer, invoice: invoice.id, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } };
+    const chargeRow = { id: charge, customer, invoice: invoice.id, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { object: "balance_transaction", type: "charge", source: charge, fee: 230, currency: "usd" } };
     handler = (method, path, q) => {
       if (method === "POST" && path === "/refunds") {
         made.push(handle);
-        return Response.json({ id: `re_${handle}made`, object: "refund", amount: 6_900, currency: "usd", status: "succeeded" });
+        // As Stripe answers it, naming the charge and payment intent refunded (a receipt for another payment is not taken, #4420).
+        return Response.json({ id: `re_${handle}made`, object: "refund", charge, payment_intent: chargeRow.payment_intent, amount: 6_900, currency: "usd", status: "succeeded" });
       }
       if (method !== "GET") return null;
       if (path === `/subscriptions/${sub}`) return Response.json({ id: sub, customer: { id: customer, email, balance: 0 }, metadata: { store: handle } });
@@ -169,7 +170,7 @@ async function assistant(): Promise<void> {
     return null;
   };
   const plan = { subscriptionId: "sub_LotOneAssist1", active: true, period, cancelsAtEnd: false, disputedAt: "" };
-  for (const [label, page] of [...GARBLED, ["a row not readable beside a readable one", { object: "list", data: [{ id: "in_ok1", charge: { id: "ch_ok1", disputed: false } }, { id: "in_bad1", charge: "ch_unexpanded" }], has_more: false }] as [string, unknown]]) {
+  for (const [label, page] of [...GARBLED, ["a row not readable beside a readable one", { object: "list", data: [{ id: "in_ok1", subscription: "sub_LotOneAssist1", charge: { id: "ch_TestLotOk0001", disputed: false } }, { id: "in_bad1", subscription: "sub_LotOneAssist1", charge: "ch_unexpanded" }], has_more: false }] as [string, unknown]]) {
     await setAssistantPlan(owner, plan);
     invoices = page;
     writes.length = 0;
@@ -177,7 +178,7 @@ async function assistant(): Promise<void> {
     is(`invoices answered ${label}: nothing written this run`, writes, []);
   }
   await setAssistantPlan(owner, plan);
-  invoices = { object: "list", data: [{ id: "in_bad2", charge: "ch_unexpanded" }, { id: "in_disp1", charge: { id: "ch_disp1", disputed: true } }], has_more: true };
+  invoices = { object: "list", data: [{ id: "in_bad2", subscription: "sub_LotOneAssist1", charge: "ch_unexpanded" }, { id: "in_disp1", subscription: "sub_LotOneAssist1", charge: { id: "ch_TestLotDisp001", disputed: true } }], has_more: true };
   writes.length = 0;
   const after = await syncAssistant((await storeForEmail(owner))!);
   is("a dispute on a readable row ends the add-on at once, whatever the other rows", [writes, Boolean(after.assistantPlan?.disputedAt)], [["DELETE"], true]);

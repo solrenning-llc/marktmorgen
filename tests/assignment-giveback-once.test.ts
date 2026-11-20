@@ -130,15 +130,9 @@ for (const [label, reply] of [["null", null], ["text", "1"], ["2", 2], ["-1", -1
       return batch.map((c, i) => (c[0] === "HDEL" ? reply : answers[i]));
     }) as typeof redis.pipeline;
     try {
-      if (typeof reply === "number" && reply >= 0) {
-        // A count, but not 0 or 1: the erasure finishes and gives nothing back for that file.
-        const { value, lines } = await logged(() => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM));
-        assert.deepEqual(value.files, ["a.pdf"], "the erasure that happened still returns its files");
-        assert.ok(lines.some((l) => l.includes("unknown")), "the unknown answer is said in the log");
-      } else {
-        // Not a count: the erasure is told it could not finish (Codex P on #2847), never "done".
-        await assert.rejects(logged(() => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM)), (e: unknown) => e instanceof UnknownReplyError);
-      }
+      // Not a count, or a count its one-field HDEL could not give (2; #4794, Codex V): the erasure is told it could
+      // not finish (Codex P on #2847), never "done". Before #4794 a count of 2 finished the erasure and only logged.
+      await assert.rejects(logged(() => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM)), (e: unknown) => e instanceof UnknownReplyError);
       assert.equal(counter(), 1100, "an unknown removal is never given back");
     } finally {
       redis.pipeline = original;

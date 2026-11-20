@@ -21,6 +21,7 @@
  */
 import * as route from "@/app/api/backup/files/route";
 import { parseDeletionPage, parseStoresPage } from "@/lib/backup-files-contract";
+import { BACKUP_DELETION_CLOSE_MS } from "@/lib/backup-deletions";
 import * as stores from "@/lib/backup-stores";
 import { admitFilesReview } from "@/lib/backup-files-source";
 import { MAX_STORE_BYTES } from "@/lib/store";
@@ -54,7 +55,8 @@ function pinClock(msIntoDay: number): () => void {
     Date.now = realNow;
   };
 }
-const RED_PIN_MS = 54_000;
+/** Noon UTC: far from both the day's close after midnight and the day's end. */
+const NOON_MS = DAY / 2;
 
 let commands: unknown[][] = [];
 let inject: ((list: unknown[][]) => unknown) | null = null;
@@ -177,7 +179,7 @@ async function main(): Promise<void> {
 
   part("the deletions page: the records the site keeps, in order, resumed by its cursor");
   reset();
-  const restoreClock = pinClock(RED_PIN_MS);
+  const restoreClock = pinClock(NOON_MS);
   const now = Date.now();
   const today = dayOf(now);
   answer = await call("?page=deletions");
@@ -244,6 +246,25 @@ async function main(): Promise<void> {
   answer = await call("?page=deletions");
   is("an LRANGE that does not answer a list: 503", [answer.status, errorOf(answer)], [503, "deletions_unavailable"]);
   restoreClock();
+
+  part("in the first minutes after midnight UTC, yesterday is read to its close before today");
+  reset();
+  const restoreMidnight = pinClock(54_000);
+  const justAfter = Date.now();
+  const newDay = dayOf(justAfter);
+  answer = await call("?page=deletions");
+  const parked = parseDeletionPage(answer.json);
+  await record(newDay - 1, [rec(20, (newDay - 1) * DAY + DAY - 1_000)]);
+  await record(newDay, [rec(21, justAfter)]);
+  answer = await call(`?page=deletions&cursor=${parked.cursor}`);
+  records = parseDeletionPage(answer.json);
+  is("a record written to yesterday in its last second is still read", records.records.map((r) => r.key.slice(-7)), ["f20.pdf"]);
+  is("today's waits: done, with the resume point still on yesterday", [records.complete, records.reason], [true, "done"]);
+  restoreMidnight();
+  const restoreClosed = pinClock(BACKUP_DELETION_CLOSE_MS + 1_000);
+  answer = await call(`?page=deletions&cursor=${records.cursor}`);
+  is("once yesterday closes, the same resume point reads today's", parseDeletionPage(answer.json).records.map((r) => r.key.slice(-7)), ["f21.pdf"]);
+  restoreClosed();
 
   part("both pages: the same secret, the day's reviewed pages, and nothing else in the request");
   reset();

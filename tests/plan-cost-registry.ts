@@ -113,6 +113,7 @@ import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
 import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
+import { REFUND_CHECK_WAITS, TICKET_CUSTOMERS, TICKET_PAYMENT_PAGES, TICKET_PAYMENT_PAGE_BYTES, TICKET_REFUND_CHECKS, TICKET_REFUND_READ_BYTES, TICKET_SESSION_PAGES, TICKET_SESSION_PAGE_BYTES, TICKET_STRIPE_WAITS } from "@/lib/community-read-rules";
 import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
 import { MAX_MENTIONS } from "@/lib/community-mentions";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
@@ -1736,8 +1737,30 @@ export function searchRead(size: { room: boolean; conversations: number }): numb
     + (size.room ? COMMAND + searchBodyWork(MAX_CHAT_KEPT * READ_ROOM_MESSAGE_BYTES) : 0)
     + size.conversations * (COMMAND + searchBodyWork(SEARCH_MESSAGES * READ_DM_MESSAGE_BYTES));
 }
-/** One check of who holds a product or an event: its cached answer read and written, and up to three calls to Stripe waited on at 2 GB. */
-export const ACCESS_CHECK_READ = 4 * COMMAND + 3 * (EXPORT_PAGE_SECONDS * MEMORY_SECOND + searchBodyWork(64_000));
+/**
+ * One reading of what a member holds (lib/community-access.ts, holdingsOf; paidHoldings): its kept reading looked for
+ * and written, and every call to Stripe it may wait on one after another (TICKET_STRIPE_WAITS,
+ * lib/community-read-rules.ts) at 2 GB, with every body it may read: both ways of the address, each
+ * TICKET_SESSION_PAGES pages of checkouts of at most TICKET_SESSION_PAGE_BYTES each (a heavier page is refused as it
+ * streams in, lib/stripe-account.ts); the pages of payments of TICKET_CUSTOMERS customers (only those of a checkout
+ * that carried the offers after paying), TICKET_CUSTOMERS_SIDE_BY_SIDE at a time, each group waited on in turn, of at
+ * most TICKET_PAYMENT_PAGE_BYTES each; TICKET_REFUND_CHECKS refund questions of REFUND_CHECK_WAITS calls of at most TICKET_REFUND_READ_BYTES each, both enforced
+ * (lib/refunds.ts refundReader; a payment plan's question read about twenty-two with no ceiling before Claude 2's review
+ * of #3395). One reading
+ * answers the door, the spaces, the events and the lessons of a page (the pre-review of 9 November 2026, P1). It was
+ * priced at three calls of 64 KB while it read up to twelve pages; then at 24 KB a checkout with nothing holding a page
+ * to it; then for ten customers of 300 KB each, all side by side (round 2 of that pre-review: forty of 60 KB, four
+ * groups, cost the same within a hundredth of a request). A door whose products that reading ran out of refund questions
+ * for (lib/community-access.ts, doorAnswer) reads them on its own, at most one more such reading a set of products in a
+ * view (every door kept for the same products waits on it, as main's events page asked once a set: Claude 6's review of
+ * #3395 measured 150 calls for fifty events before), kept under the first such door's own key, and a "more than is read"
+ * from it kept a minute: paid as one more check (checkUnits(1)) on the search, and on the community's own page as each
+ * set's reading was before the shared one (Claude 1 cloud's review of #3395).
+ */
+export const ACCESS_CHECK_READ = 4 * COMMAND + TICKET_STRIPE_WAITS * EXPORT_PAGE_SECONDS * MEMORY_SECOND
+  + searchBodyWork(2 * TICKET_SESSION_PAGES * TICKET_SESSION_PAGE_BYTES)
+  + searchBodyWork(TICKET_CUSTOMERS * TICKET_PAYMENT_PAGES * TICKET_PAYMENT_PAGE_BYTES)
+  + searchBodyWork(TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS * TICKET_REFUND_READ_BYTES);
 /** One step of the walk of a community's archive: its commands, the bytes it reads, and its round trip waited on. */
 export function walkRead(commands: number, bytes: number): number {
   return commands * COMMAND + searchBodyWork(bytes) + 0.05 * MEMORY_SECOND;
@@ -2384,8 +2407,11 @@ export const COST_LINES: CostLine[] = [
       // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
       { file: "lib/licence-activations.ts", names: ["ACTIVATION_COMMANDS", "ACTIVATION_REQUEST_UNITS", "MAX_ACTIVATION_RECORD_BYTES", "needData(store"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
-      { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
+      { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "TICKET_SESSION_PAGE_BYTES", "TICKET_PAYMENT_PAGE_BYTES", "REFUND_CHECK_WAITS", "TICKET_REFUND_READ_BYTES", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
+      // Each refund question of that reading inside the calls and bytes it is priced at, enforced (Claude 2's review of #3395).
+      { file: "lib/community-access.ts", names: ["const REFUND_READ: RefundReadLimits = { calls: REFUND_CHECK_WAITS, maxBytes: TICKET_REFUND_READ_BYTES }", "purchaseRefunded(account, session, REFUND_READ)", "keptUnlessLost(account, intent, refundReader(account, REFUND_READ))"] },
+      { file: "lib/refunds.ts", names: ["if (left <= 0) throw new RefundReadCapped(", "limits.maxBytes"] },
       { file: "lib/community-walk.ts", names: ["walkUnits(", "indexedWords(", "INDEXED_WORDS_BYTES"] },
       // A member's locked spaces read their products as a collection page reads its cards, paid before they are read (542 [CM1], 6 November 2026);
       // read in rounds since 7 November 2026, each round paying what its first reads add; nothing is read twice (the pre-orders once, every

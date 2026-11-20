@@ -56,6 +56,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import * as exactReply from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
@@ -161,10 +162,26 @@ function parseConnection(raw: unknown, provider: MeetProvider): Connection | nul
   }
 }
 
+/**
+ * A connection from what GET answered at its key (CX-123 rule 24): null for
+ * a confirmed none (the slot answered null), and for text kept there that is
+ * not a connection (damaged: nothing in it can be used, and connecting again
+ * replaces it). Any other reply (a number, true, a list, an object, nothing)
+ * is unknown and throws, so no screen asks to connect again, no booking is
+ * refused as "not connected", and nothing is disconnected, forgotten or
+ * written over a connection that may be there.
+ */
+function connectionFrom(reply: unknown, provider: MeetProvider): Connection | null {
+  if (reply !== null && typeof reply !== "string") throw new exactReply.UnknownReplyError("a meeting connection");
+  return parseConnection(reply, provider);
+}
+
 async function readConnection(statsId: string, provider: MeetProvider, host = ""): Promise<Connection | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", connKey(statsId, provider, host)]]);
-  return parseConnection(raw, provider);
+  // One reply for the one command, or unknown.
+  const replies = exactReply.repliesFor(await redisPipeline([["GET", connKey(statsId, provider, host)]]), 1);
+  if (!replies) throw new exactReply.UnknownReplyError("a meeting connection");
+  return connectionFrom(replies[0], provider);
 }
 
 /** A team host's own Google Calendar connection, as their studio page shows it, with what it was granted. */
@@ -244,17 +261,25 @@ export async function meetSettingsView(statsId: string | null, sid: OfferedTo, r
 /** At most two connection reads and one bounded problem-list read. */
 async function readMeetingView(statsId: string | null, candidates: MeetProvider[], offered: MeetProvider[]): Promise<MeetView> {
   if (!candidates.length || !statsId || !isRedisConfigured()) return { providers: offered, connected: {}, problems: [] };
-  const replies = await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
+  // Read exactly (CX-123 rule 24): a reply of another shape throws, so the
+  // studio says it could not check, never that nothing is connected.
+  const replies = exactReply.repliesFor(
+    await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]),
+    candidates.length + 1,
+  );
+  if (!replies) throw new exactReply.UnknownReplyError("the meeting connections");
   const connected: MeetView["connected"] = {};
   candidates.forEach((p, i) => {
-    const c = parseConnection(replies[i], p);
+    const c = connectionFrom(replies[i], p);
     if (c) connected[p] = viewOf(c);
   });
+  const log = exactReply.stringList(replies[candidates.length]);
+  if (!log) throw new exactReply.UnknownReplyError("the meeting problems");
   const providers = candidates.filter((p) => offered.includes(p) || connected[p]);
   const problems: MeetProblem[] = [];
-  for (const raw of Array.isArray(replies[candidates.length]) ? (replies[candidates.length] as unknown[]) : []) {
+  for (const raw of log) {
     try {
-      const v = JSON.parse(String(raw)) as MeetProblem;
+      const v = JSON.parse(raw) as MeetProblem;
       if (isMeetProvider(v.provider) && typeof v.what === "string" && typeof v.error === "string") problems.push(v);
     } catch {
       // Skipped.
@@ -379,8 +404,11 @@ export async function finishConsent(
     return await withLock(refreshLockKey(input.statsId, provider, input.host ?? ""), 20, 9_000, (held) => keepConnection(provider, input, traded, held));
   } catch (error) {
     // Not kept: what Google or Zoom just gave is given back rather than left
-    // granted with nothing here that knows of it.
-    if (error instanceof LockBusyError) {
+    // granted with nothing here that knows of it. An earlier connection that
+    // could not be read (rule 24) stops the write before it, so that grant is
+    // not kept either. An unknown acknowledgement after the keep may already
+    // have stored the new grant: leave it live, rather than revoke what Redis may hold.
+    if (error instanceof LockBusyError || error instanceof PriorConnectionUnreadError) {
       await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
     }
     throw error;
@@ -406,6 +434,9 @@ redis.call("SADD", KEYS[3], ARGV[4])
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
+/** A malformed prior read stops this attempt before the grant's write. */
+class PriorConnectionUnreadError extends UnknownReplyError {}
+
 async function keepConnection(
   provider: MeetProvider,
   input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; startedAt: number },
@@ -413,7 +444,13 @@ async function keepConnection(
   held: Held,
 ): Promise<ConnectResult> {
   const host = input.host ?? "";
-  const before = await readConnection(input.statsId, provider, host);
+  let before: Connection | null;
+  try {
+    before = await readConnection(input.statsId, provider, host);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) throw new PriorConnectionUnreadError("the prior meeting connection before keeping a new grant");
+    throw error;
+  }
   const connection: Connection = {
     provider,
     account: traded.account,

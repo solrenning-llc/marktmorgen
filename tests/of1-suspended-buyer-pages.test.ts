@@ -207,6 +207,9 @@ async function main(): Promise<void> {
   await redis.pipeline([
     ["SET", `nl:learn:paid:${storeKey(store)}:${emailKey(STUDENT)}`, JSON.stringify({ p: { [courseId]: started, [kilnId]: started }, x: [], r: [] }), "EX", 600],
     ["SET", `nl:cm:${communityId}:ok:${emailKey(STUDENT)}`, JSON.stringify({ v: config.v, ok: true }), "EX", 600],
+    // The same answer as #3395 reads it: what the member holds among the community's products, read once (`:h:`):
+    // the membership, not the event's course.
+    ["SET", `nl:cm:${communityId}:h:${emailKey(STUDENT)}`, JSON.stringify({ v: config.v, ids: [courseId, clubId, kilnId], held: [clubId] }), "EX", 600],
   ]);
 
   const asked = (path: string, who: "visitor" | "student" = "visitor") =>

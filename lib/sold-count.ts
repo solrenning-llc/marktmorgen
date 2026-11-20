@@ -26,6 +26,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { type Together, parseTogether } from "@/lib/also-bought";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** Below this, nothing is said. */
 export const SHOWN_FROM = 10;
@@ -95,7 +96,10 @@ export async function refreshSoldCounts(
     const p: Record<string, number> = {};
     for (const [id, row] of Object.entries(all.byProduct)) if (id && row.sales > 0) p[id] = row.sales;
     const t = parseTogether(all.together);
-    await redisPipeline([["SET", soldKey(store.statsId), JSON.stringify({ at: now, p, t }), "EX", SOLD_KEEP_SECONDS]]);
+    // The read can outlast the store: the erasure walk may have deleted this family meanwhile,
+    // so the write is fenced on the store's life in the same script (Codex L-20261120-0538).
+    const saved = await setWhileStoreLive(store, soldKey(store.statsId), JSON.stringify({ at: now, p, t }), SOLD_KEEP_SECONDS);
+    if (saved !== "kept") return null;
     return { at: now, byProduct: p, together: t };
   } catch (error) {
     console.error("counting what each product sold failed", error);

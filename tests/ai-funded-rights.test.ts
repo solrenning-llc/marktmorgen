@@ -4,7 +4,8 @@
  * never at a figure typed by hand. A writing job's two calls are held at the dearest text request of either fixed model;
  * a visitor answer at the answer model's dearest text request; a PDF read, the only document request, at the answer
  * model's whole context, once per run that took the PDF's jobs. The models are fixed in code, and a document request
- * outside a run that paid for it is refused before any money is reserved or the provider is asked.
+ * outside a run that paid for it never reaches the provider (lib/ai.ts refuses it before the reservation; these tests
+ * count the provider calls). Every caller of the model is held to the kind of call its price assumes (last test).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -55,7 +56,8 @@ test('the price of each kind of call comes from the cost table, at its worst req
 test("every paid plan's AI ceiling funds all its published writing jobs, PDF reads and answers at once", () => {
   for (const tier of ['creator', 'pro', 'scale'] as const) {
     const jobs = AI_MONTHLY[tier], answers = ANSWERS_MONTHLY[tier];
-    const pdfRuns = Math.floor(jobs / (1 + READ_PDF_JOBS));
+    // A PDF run takes 1 + READ_PDF_JOBS jobs and may give one back after reading: a read can net READ_PDF_JOBS jobs.
+    const pdfRuns = jobs >= 1 + READ_PDF_JOBS ? Math.floor((jobs - 1) / READ_PDF_JOBS) : 0;
     const expected = jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob * AI_SLOT_MICRO_USD.writing
       + pdfRuns * (AI_SLOT_MICRO_USD.document - AI_SLOT_MICRO_USD.writing)
       + answers * AI_ENTITLEMENT_RULES.visitorCallsPerAttempt * AI_SLOT_MICRO_USD.answer;
@@ -98,13 +100,55 @@ test('a document request outside a run that paid for it, or on the writing model
   }
 });
 
-test('visitor answers and the store guide ask only the answer model, with text', () => {
-  for (const file of ['lib/answers.ts', 'lib/store-guide.ts']) {
+/** Each top-level function of a file, by name, with its body (a function ends where the next top-level one starts). */
+function functionsOf(source: string): { name: string; body: string }[] {
+  const starts = [...source.matchAll(/\n(?:export )?(?:async )?function (\w+)|\nexport const (\w+) *=/g)].map(m => ({ at: m.index!, name: m[1] ?? m[2] }));
+  return starts.map((start, i) => ({ name: start.name, body: source.slice(start.at, starts[i + 1]?.at ?? source.length) }));
+}
+function sourcesUnder(dir: string): string[] {
+  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs');
+  return readdirSync(join(process.cwd(), dir)).flatMap(name => {
+    const path = join(dir, name);
+    return statSync(join(process.cwd(), path)).isDirectory() ? sourcesUnder(path) : /\.tsx?$/.test(name) ? [path] : [];
+  });
+}
+
+test('every caller of the model is a kind of call its price assumes: a counted writing job, or an answer on the answer model', () => {
+  // A visitor answer and the store guide take one answer each (takeAnswer) and ask the answer model with text. The
+  // affiliate kit's posts take one writing job (lib/affiliate-kit.ts) before writeAffiliatePosts asks. A PDF read runs
+  // inside writePage's counted run, which took its jobs. Every other caller runs inside counted or countedRun.
+  const answerFiles = new Set(['lib/answers.ts', 'lib/store-guide.ts']);
+  const countedElsewhere = new Map([['lib/ai.ts', new Set(['ask', 'askModel', 'readPdfFacts', 'writeAffiliatePosts'])]]);
+  const callers: string[] = [];
+  for (const file of [...sourcesUnder('lib'), ...sourcesUnder('app')]) {
     const source = readFileSync(join(process.cwd(), file), 'utf8');
-    const calls = [...source.matchAll(/askModel\(([\s\S]*?)\);/g)].map(match => match[1]);
-    assert.ok(calls.length > 0, `${file} asks the model`);
-    for (const call of calls) assert.match(call, /answerModel\(\)/, `${file}: an answer slot is priced at the answer model`);
-    assert.doesNotMatch(source, /type:\s*["']document["']/, `${file}: an answer slot sends no document`);
+    for (const fn of functionsOf(source)) {
+      const calls = [...fn.body.matchAll(/\b(askModel|ask)\(store\b([\s\S]*?)\);/g)];
+      if (!calls.length || countedElsewhere.get(file)?.has(fn.name)) continue;
+      callers.push(`${file} ${fn.name}`);
+      if (answerFiles.has(file)) {
+        assert.match(fn.body, /takeAnswer\(/, `${file} ${fn.name}: an answer is taken before the model is asked`);
+        for (const call of calls) assert.match(call[2], /answerModel\(\)/, `${file} ${fn.name}: an answer is priced at the answer model`);
+        assert.doesNotMatch(fn.body, /type:\s*["']document["']/, `${file} ${fn.name}: an answer sends no document`);
+      } else if (/\bdeps\.count\(/.test(fn.body)) {
+        // Injected for tests (lib/csv-map-ai.ts): the live wiring must count the job and ask through askModel.
+        assert.match(source, /count:\s*counted\b/, `${file} ${fn.name}: its live job count is counted`);
+        assert.match(source, /ask:\s*(askModel\b|\([^)]*\)\s*=>\s*askModel\()/, `${file} ${fn.name}: its live call is askModel`);
+      } else {
+        assert.match(fn.body, /\bcounted(Run)?\(/, `${file} ${fn.name}: a call outside a counted writing job is funded by no right`);
+      }
+    }
+  }
+  assert.ok(callers.length > 20, `the sweep found the model's callers (${callers.length})`);
+  // The PDF read is the only document request, inside writePage, which says it reads one.
+  const ai = readFileSync(join(process.cwd(), 'lib/ai.ts'), 'utf8');
+  const documentSenders = functionsOf(ai).filter(fn => /type:\s*["']document["']/.test(fn.body)).map(fn => fn.name);
+  assert.deepEqual(documentSenders, ['readPdfFacts']);
+  const writePage = functionsOf(ai).find(fn => fn.name === 'writePage')!.body;
+  assert.match(writePage, /readPdfFacts\(/);
+  assert.match(writePage, /pdf \? 1 \+ READ_PDF_JOBS : 1, unrun, pdf \? DOCUMENT_READS_PER_PDF_RUN : 0\)/);
+  for (const file of [...sourcesUnder('lib'), ...sourcesUnder('app')].filter(f => f !== 'lib/ai.ts')) {
+    assert.doesNotMatch(readFileSync(join(process.cwd(), file), 'utf8'), /media_type:\s*["']application\/pdf["'][\s\S]{0,400}askModel|askModel[\s\S]{0,400}media_type:\s*["']application\/pdf["']/, `${file} sends a document to the model`);
   }
 });
 

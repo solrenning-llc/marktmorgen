@@ -5,7 +5,7 @@ import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
 import { aiDispatchCount, consumeAiCallBudget, consumeAiDocumentRead, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
-import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
+import { AI_ENTITLEMENT_RULES, DOCUMENT_READS_PER_PDF_RUN } from '@/lib/ai-entitlement-rules';
 /**
  * The writing help in the studio (lib/ai-rules.ts), on the server: asking the
  * model, counting what each store uses, and reading back only what fits.
@@ -436,9 +436,11 @@ type Unrun = { jobs: number; asked: boolean; empty?: boolean };
 
 const givenReason = (unrun: Unrun): AiGivenBack => (unrun.asked ? "stopped" : unrun.empty ? "empty" : "failed");
 
-async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
+async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun, documents = 0): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   if (!Number.isSafeInteger(jobs) || jobs <= 0) return { ok: false, reason: "notes" };
+  // A PDF read is paid for by its own 1 + READ_PDF_JOBS jobs (lib/ai-entitlement-rules.ts); fewer jobs read none.
+  if (!Number.isSafeInteger(documents) || documents < 0 || documents * (1 + READ_PDF_JOBS) > jobs) return { ok: false, reason: "notes" };
   const allowance = aiAllowance(store, now);
   if (!Number.isSafeInteger(allowance) || allowance < 0) return { ok: false, reason: "off" };
   if (jobs > allowance) return { ok: false, reason: "used" };
@@ -459,8 +461,7 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
   let value: T | null = null;
   const calls: AiCallReport = { owned: false, dispatched: 0 };
   try {
-    // A run that took a PDF's jobs (1 + READ_PDF_JOBS) may read that PDF; any other run reads none.
-    const documents = Math.floor(jobs / (1 + READ_PDF_JOBS)) * AI_ENTITLEMENT_RULES.documentReadsPerPdfRun;
+    // Only a run that says it reads a PDF (writePage, which took 1 + READ_PDF_JOBS jobs for it) may send a document.
     value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls, documents);
   } catch (error) {
     console.error("a writing job failed", error);
@@ -1591,7 +1592,7 @@ export async function writePage(
       seoDescription: line(json.seoDescription, 160),
     };
     return draft.headline && draft.benefits.length ? draft : null;
-  }, pdf ? 1 + READ_PDF_JOBS : 1, unrun);
+  }, pdf ? 1 + READ_PDF_JOBS : 1, unrun, pdf ? DOCUMENT_READS_PER_PDF_RUN : 0);
   // Every job is given back by countedRun itself, once: nothing was asked of the model (the merge of main into #2975).
   if (!unread.file) return done;
   return { ok: false, reason: "file" };

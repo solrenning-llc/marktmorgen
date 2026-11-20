@@ -15,17 +15,18 @@ export const AI_ENTITLEMENT_RULES = {
   schema: 3,
   writingCallsPerJob: 2,
   visitorCallsPerAttempt: 1,
-  documentReadsPerPdfRun: 1,
   failedAttempts: 'retained',
   callEnvelope: 'async-job-shared-counter-owner-bound-no-reset-after-completion',
-  callPricing: 'writing-text-either-fixed-model;answer-text-answer-model;document-answer-model-once-per-pdf-run',
   writing: AI_MONTHLY,
   visitor: ANSWERS_MONTHLY,
   request: AI_REQUEST_LIMITS,
   models: SUPPORTED_AI_MODELS,
-  writingModel: WRITING_MODEL,
-  answerModel: ANSWER_MODEL,
 } as const;
+/** A PDF run (lib/ai.ts writePage, 1 + READ_PDF_JOBS jobs) reads one document. Kept out of the rules object on purpose:
+ * that object is bound into the commercial terms snapshot, whose every character a contract restart's encoding repeats
+ * many times under a 1 MiB bound (lib/contract-funding-rules.ts canonicalFinancialSnapshot); the prices it sets are
+ * bound there through AUTOMATIC_AI_SPEND_CEILINGS.slotMicroUsd. */
+export const DOCUMENT_READS_PER_PDF_RUN = 1;
 export function aiEntitlementsSnapshot(): string {
   return JSON.stringify(AI_ENTITLEMENT_RULES);
 }
@@ -52,7 +53,7 @@ export const AI_SLOT_MICRO_USD: Readonly<AiSlotPrices> = Object.freeze({
 
 /** Any allowed model may be selected for any call, so fund the most expensive
  * reviewed request for every permitted call, never an average: the reading of
- * a policy that does not name its price per kind of call (aiSlotPricesOf).
+ * a policy that does not name its price per kind of call (slotMicroUsd).
  */
 export function requiredAiStoreMicroUsd(tier: AiBudgetTier, requestMicroUsd: Readonly<Record<string, number>>): bigint | null {
   // Non-paying scopes can retain any historical plan: fund the largest rights.
@@ -66,15 +67,17 @@ export function requiredAiStoreMicroUsd(tier: AiBudgetTier, requestMicroUsd: Rea
 }
 
 /** Every published right of a tier used in full in one month, each call at the worst request its feature can send:
- * all writing jobs' calls at the writing price, the PDF reads those jobs can pay for (one per 1 + READ_PDF_JOBS jobs)
- * at the document price in place of one writing call each, and every visitor answer at the answer price. */
+ * all writing jobs' calls at the writing price, the most PDF reads those jobs can pay for at the document price in
+ * place of one writing call each, and every visitor answer at the answer price. */
 export function requiredAiRightsMicroUsd(tier: AiBudgetTier, slots: Readonly<AiSlotPrices> = AI_SLOT_MICRO_USD): bigint | null {
   // Non-paying scopes can retain any historical plan: fund the largest rights.
   const rights = tier === 'setup' || tier === 'ended' ? 'scale' : tier;
   if (!Object.hasOwn(AI_MONTHLY,rights) || !Object.hasOwn(ANSWERS_MONTHLY,rights)) return null;
   if (!slots || ![slots.writing, slots.answer, slots.document].every(value => Number.isSafeInteger(value) && value > 0)) return null;
   const jobs = BigInt(AI_MONTHLY[rights]);
-  const pdfRuns = jobs / BigInt(1 + READ_PDF_JOBS) * BigInt(AI_ENTITLEMENT_RULES.documentReadsPerPdfRun);
+  // A PDF run takes 1 + READ_PDF_JOBS jobs and may give back its writing step's one after reading (lib/ai.ts writePage),
+  // so a read can net READ_PDF_JOBS jobs: the month reads at most floor((jobs - 1) / READ_PDF_JOBS) PDFs.
+  const pdfRuns = (jobs >= BigInt(1 + READ_PDF_JOBS) ? (jobs - BigInt(1)) / BigInt(READ_PDF_JOBS) : BigInt(0)) * BigInt(DOCUMENT_READS_PER_PDF_RUN);
   const documentExtra = slots.document > slots.writing ? BigInt(slots.document - slots.writing) : BigInt(0);
   return jobs * BigInt(AI_ENTITLEMENT_RULES.writingCallsPerJob) * BigInt(slots.writing)
     + pdfRuns * documentExtra

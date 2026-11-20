@@ -45,7 +45,7 @@ export const PAID_AI_ALLOCATIONS_PER_TIER = 10_000;
  * enforces: every writing job (lib/ai-rules.ts), every PDF read those jobs can
  * pay for and every visitor answer (lib/answers-rules.ts), each call at the
  * worst request its own feature can send with its model fixed in code, from
- * the cost table (lib/spend-cost-table.ts, requiredAiStoreMicroUsd in
+ * the cost table (lib/spend-cost-table.ts, requiredAiRightsMicroUsd in
  * lib/ai-entitlement-rules.ts). So every published right is funded: the
  * ceiling no longer runs out before the rights do (433 [PV3] (b), 20 November
  * 2026; until then it funded only a reference job and answer, US$3.35 on
@@ -134,8 +134,10 @@ export function isAiSpendPolicyValid(policy: AiSpendPolicy | null, now = new Dat
     || !policy.storeMicroUsd || !AI_BUDGET_TIERS.every(tier => integer(policy.storeMicroUsd[tier]))
     || !policy.fundedStores || !AI_BUDGET_TIERS.every(tier => integer(policy.fundedStores[tier]))
     || !policy.requestMicroUsd || !SUPPORTED_AI_MODELS.every(model => integer(policy.requestMicroUsd[model]) && policy.requestMicroUsd[model] > 0)) return false;
-  // Prices per kind of call, when named, are never below the cost table's worst request of that kind.
-  if (policy.slotMicroUsd !== undefined && (!policy.slotMicroUsd || typeof policy.slotMicroUsd !== 'object'
+  // Prices per kind of call, when named, are never below the cost table's worst request of that kind, and only the
+  // automatic policy names them: it is the one that reserves each request's own hold (lib/ai-spend.ts); a separately
+  // reviewed policy debits its flat per-model ceiling, so it is held to that ceiling for every call.
+  if (policy.slotMicroUsd !== undefined && (policy.reviewId !== AUTOMATIC_AI_SPEND_REVIEW_ID || !policy.slotMicroUsd || typeof policy.slotMicroUsd !== 'object'
     || !(['writing', 'answer', 'document'] as const).every(kind => integer(policy.slotMicroUsd![kind]) && policy.slotMicroUsd![kind] >= AI_SLOT_MICRO_USD[kind]))) return false;
   const total = AI_BUDGET_TIERS.reduce((sum, tier) => sum + BigInt(policy.storeMicroUsd[tier]) * BigInt(policy.fundedStores[tier]), BigInt(0));
   return AI_BUDGET_TIERS.some(tier => policy.fundedStores[tier] > 0) && total <= BigInt(policy.companyMicroUsd);

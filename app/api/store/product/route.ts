@@ -1,4 +1,6 @@
 import { runningSubscriptions } from "@/lib/payment-methods";
+import { dropPublicShow } from "@/lib/podcast-public-show";
+import { withLock } from "@/lib/redis-lock";
 import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
 import { courseIndexes } from "@/lib/certificate";
@@ -505,6 +507,17 @@ export async function POST(request: NextRequest) {
           // before that course identity can be detached.
           const handed = await applyCourseTaskDrops(removedCourse, taskDrops, storeKey(removed.store), removed.store);
           had.push(...handed.map((pathname) => ({ pathname })));
+        }
+        // A podcast's public feed settings, and their room in the store's data (lib/podcast-public-show.ts): best
+        // effort, as the others; one not confirmed gone is erased with the store's closing. Under the podcast's lock,
+        // the one the settings route writes under (app/api/store/podcast/public-settings): a write that read the
+        // listing before this removal lands before this drop, and one that waited reads the listing gone and writes
+        // nothing, so no record is left behind with its room counted.
+        if (going.podcast) {
+          const podcastId = going.podcast.id;
+          await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, () => dropPublicShow(removed.store, podcastId)).catch((error: unknown) => {
+            console.error("could not drop a removed podcast's public feed settings", error);
+          });
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});

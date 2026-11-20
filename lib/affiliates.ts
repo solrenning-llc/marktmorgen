@@ -76,7 +76,8 @@
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, readPaidExact, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
-import { ERASING_KEY, MAX_STORE_BYTES, STORE_ID_PATTERN, erasingField, saleHandles, storeForEmailSeen, storeForId, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, MAX_STORE_BYTES, erasingField, saleHandles, storeForEmailSeen, storeForId, storeIdCommand, storeRef } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -6009,23 +6010,15 @@ async function readInvoiceKeep(statsId: string, account: string, tag: string, si
 
 /**
  * The kept invoices (or the mark of going past their ceiling) written only while the store is live (Codex
- * L-20261119-1003): its id key is there and its erasure has not begun (ERASING_KEY, written before anything of the
- * store is deleted, removed with its record and its id in the same fenced step, lib/store.ts). A reading that started
- * before the erasure and writes after it writes nothing, so the invoice, payment and affiliate ids never come back.
- * EVAL, EXISTS, HEXISTS and SET: four commands in place of the SET. A store with no id yet (one never opened in the
- * studio since ids were given, lib/store.ts ensureStoreId) is fenced by the erasure field alone, so its walk is still
- * kept: its erasure writes that field before deleting anything either way.
+ * L-20261119-1003; lib/store-live-cache.ts setWhileStoreLive): the store's own key is there (its id key, or for a store
+ * kept from before ids its record under its owner's address, Claude 4's MEDIUM on #4951) and its erasure has not begun
+ * (ERASING_KEY, written before anything of the store is deleted, removed with its record and its id in the same fenced
+ * step, lib/store.ts). A reading that started before the erasure and writes after it, or after it has finished, writes
+ * nothing, so the invoice, payment and affiliate ids never come back. EVAL, EXISTS, HGET and SET: four commands in
+ * place of the SET.
  */
-const KEEP_INVOICES = `-- marktmorgen:aff-invoice-keep:v1
-if (ARGV[4] == "1" and redis.call("EXISTS", KEYS[1]) ~= 1) or redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
-if redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3]).ok ~= "OK" then return 0 end
-return 1`;
-
 async function keepIfLive(store: Store, statsId: string, value: string): Promise<boolean> {
-  const hasId = STORE_ID_PATTERN.test(store.sid);
-  const [, idKey] = storeIdCommand(hasId ? store.sid : "none");
-  const [kept] = await redisPipeline([["EVAL", KEEP_INVOICES, 3, idKey, ERASING_KEY, invoiceKeepKey(statsId), await erasingField(storeRef(store)), value, INVOICE_KEEP_SECONDS, hasId ? "1" : "0"]]);
-  return kept === 1;
+  return (await setWhileStoreLive(store, invoiceKeepKey(statsId), value, INVOICE_KEEP_SECONDS)) === "kept";
 }
 
 /**

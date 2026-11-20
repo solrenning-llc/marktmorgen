@@ -271,13 +271,6 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
-        // lib/affiliates.ts KEEP_INVOICES: a store's kept invoices written only while its id is there and its erasure
-        // has not begun (Codex L-20261119-1003).
-        if (key.startsWith("-- marktmorgen:aff-invoice-keep:v1\n") && args[0] === "3" && args.length === 8) {
-          const [, storeId, erasing, target, field, value, seconds, hasId] = args;
-          if ((hasId === "1" && this.run(["EXISTS", storeId]) !== 1) || this.run(["HEXISTS", erasing, field]) !== 0) return 0;
-          return this.run(["SET", target, value, "EX", seconds]) === "OK" ? 1 : 0;
-        }
         // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
         if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
           const [, who, prefix] = args;

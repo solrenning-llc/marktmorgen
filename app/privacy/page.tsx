@@ -428,8 +428,10 @@ export default function PrivacyPage() {
         <p id="billing-address">
           <strong className="text-black">Your billing address.</strong>{" "}
           Stripe asks for your billing address on every paid checkout, and
-          keeps it with the payment on the creator&apos;s Stripe account,
-          under Stripe&apos;s own privacy policy. It is not asked when
+          keeps it with the payment, on the Stripe account of whoever is paid:
+          the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
+          plan or add-on. Stripe&apos;s own privacy policy applies. It is not
+          asked when
           something is free. We read only the country in it, to work out where
           you are buying from: for the VAT or sales tax that applies to the
           sale, and to decide whether an offer after paying can be shown to

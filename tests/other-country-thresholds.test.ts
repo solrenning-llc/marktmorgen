@@ -73,7 +73,7 @@ test("a country without a reviewed rule is unknown, which refuses, whatever its 
     assert.deepEqual(assessOtherCountry(country, swiss(0), NOW), UNKNOWN, String(country));
     assert.deepEqual(assessOtherCountry(country, ledgerEvidence("ca-specified-supplies", "CA", "CAD", 0), NOW), UNKNOWN, String(country));
   }
-  assert.deepEqual(Object.keys(OTHER_COUNTRY_RULES).sort(), ["CA", "CH", "NO"]);
+  assert.deepEqual(Object.keys(OTHER_COUNTRY_RULES).sort(), ["CA", "CH", "NO", "TW"]);
 });
 
 test("the evidence's rule is read from own data once, and an accessor is never executed", () => {

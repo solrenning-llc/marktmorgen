@@ -25,6 +25,10 @@
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readDraft } from "@/lib/payment-request-rules";
 import { cancelRequest, changeRequest, createRequest, deleteRequest, forgetRequestsPerson, readRequest } from "@/lib/payment-request-store";
+import { releaseLock, takeLock } from "@/lib/redis-lock";
+import { NextRequest } from "next/server";
+import { POST } from "@/app/api/store/payment-requests/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -123,19 +127,76 @@ async function main(): Promise<void> {
     is("the change is told it did not save (its lock was lost), never answered as done", said, "lock lost");
   }
 
-  part("A change whose record was deleted under it (the creator's delete, which takes no lock): not written back");
+  part("A change whose record was deleted under it without its lock (removed by hand, or by an older build's delete): not written back");
   {
     const store = await freshStore();
     const id = await make(store, now);
     await cancelRequest(store, id, now + 1_000);
     beforeTheWrite(async () => {
-      is("the delete went through", await deleteRequest(store, id, now + 2_000), "deleted");
+      // The creator's delete now waits for the write lock (issue #4775), so the removals a delete makes are run here
+      // as they are, with no lock: the record, its store and open entries, its reminder and its person entry.
+      const person = redis.keys().filter((k) => k.startsWith(PERSON_PREFIX));
+      const removed = await realPipeline([
+        ["DEL", `${RECORD}${id}`],
+        ["ZREM", `nl:payreq:s:${store.sid}`, id],
+        ["ZREM", `nl:payreq:o:${store.sid}`, id],
+        ["ZREM", "nl:payreq:due", `${store.sid}|${id}`],
+        ...person.map((key) => ["SREM", key, id]),
+      ]);
+      is("the delete went through", removed[0], 1);
     });
     const said = await outcome(() => changeRequest(store, id, (current) => ({ next: { ...current, failed: "late" }, answer: null }), now + 3_000));
     setPipeline(realPipeline);
     is("the record stays deleted", [await readRequest(id), records().length], [null, 0]);
     is("the reminders hold nothing for it", await members("nl:payreq:due"), []);
     is("the change answers that the request is gone", said, "null");
+  }
+
+  part("The creator's delete waits for a change holding the write lock and reads the request again under it (issue #4775)");
+  {
+    const store = await freshStore();
+    const id = await make(store, now);
+    await cancelRequest(store, id, now + 1_000);
+    const held = await takeLock(`nl:payreq:w:${id}`, 10, 0);
+    const deleting = outcome(() => deleteRequest(store, id, now + 2_000));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Under the lock, the record is made open again (a stand-in for any change that holds it).
+    const [raw] = await realPipeline([["GET", `${RECORD}${id}`]]);
+    const reopened = { ...JSON.parse(String(raw)), state: "open", expiresAt: now + 86_400_000 };
+    await realPipeline([["SET", `${RECORD}${id}`, JSON.stringify(reopened)]]);
+    await releaseLock(held);
+    is("the delete answers from the request as the change left it: open, not deleted", await deleting, "answered open");
+    is("the record is still stored", records().length, 1);
+  }
+
+  part("The creator's delete while the write lock stays held: not done, nothing deleted");
+  {
+    const store = await freshStore();
+    const id = await make(store, now);
+    await cancelRequest(store, id, now + 1_000);
+    const held = await takeLock(`nl:payreq:w:${id}`, 10, 0);
+    const said = await outcome(() => deleteRequest(store, id, now + 2_000));
+    await releaseLock(held);
+    is("told the lock is busy, never deleted", said, "lock lost");
+    is("the record is still stored", records().length, 1);
+  }
+
+  part("The studio route answers a delete held up by the lock as busy (503), never a server error");
+  {
+    const store = await freshStore();
+    const id = await make(store, now);
+    await cancelRequest(store, id, now + 1_000);
+    const held = await takeLock(`nl:payreq:w:${id}`, 10, 0);
+    const token = await openSession("payreq-fenced@example.com");
+    const response = await POST(new NextRequest("https://local.example/api/store/payment-requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://local.example", Host: "local.example", Cookie: `${SESSION_COOKIE}=${token}` },
+      body: JSON.stringify({ action: "delete", id }),
+    }));
+    await releaseLock(held);
+    const answer = (await response.json()) as { ok: boolean; error: string };
+    is("503 busy, not ok", [response.status, answer.ok, answer.error], [503, false, "busy"]);
+    is("the record is still stored", records().length, 1);
   }
 
   part("A creation held up past its lock: an erasure of the person ran between its count and its write");

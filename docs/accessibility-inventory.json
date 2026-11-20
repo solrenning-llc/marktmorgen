@@ -1104,6 +1104,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/declines/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/declines",
+      "parameters": []
+    },
+    {
       "source": "app/studio/devices/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/devices",
@@ -1380,11 +1386,13 @@
     "components/affiliate-promotion-results.tsx",
     "components/affiliate-studio.tsx",
     "components/affiliate-summary.tsx",
+    "components/affiliate-unconfirmed.tsx",
     "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
     "components/ai-draft-review.tsx",
     "components/ai-posts.tsx",
+    "components/ai-steps-assist.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
@@ -1453,6 +1461,8 @@
     "components/course-comments-studio.tsx",
     "components/course-day-preview.tsx",
     "components/course-editor.tsx",
+    "components/course-next-step-card.tsx",
+    "components/course-next-step.tsx",
     "components/course-outline.tsx",
     "components/course-shelf-studio.tsx",
     "components/course-template-picker.tsx",
@@ -1585,6 +1595,7 @@
     "components/order-problem-form.tsx",
     "components/orders-bundle.tsx",
     "components/orders-shared.tsx",
+    "components/outreach-results.tsx",
     "components/outreach-studio.tsx",
     "components/package-editor.tsx",
     "components/page-answers.tsx",
@@ -1857,6 +1868,7 @@
     "app/api/mcp/route.ts",
     "app/api/numbers-link/route.ts",
     "app/api/operator/search-console/route.ts",
+    "app/api/operator/traffic-reset/route.ts",
     "app/api/outreach/stop/route.ts",
     "app/api/photo/[id]/route.ts",
     "app/api/privacy/erase/route.ts",
@@ -1936,6 +1948,7 @@
     "app/api/store/course/comment/route.ts",
     "app/api/store/course/file/route.ts",
     "app/api/store/course/link/route.ts",
+    "app/api/store/course/no-thanks/route.ts",
     "app/api/store/course/note/route.ts",
     "app/api/store/course/open/route.ts",
     "app/api/store/course/progress/route.ts",
@@ -2237,6 +2250,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 153
+    "pageTemplates": 154
   }
 }

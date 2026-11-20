@@ -14,6 +14,7 @@ import { PAYPAL_RECEIVER_MAX, connectPayPal, onTheirWay, payWithPayPal, paypalLe
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidlong1";
@@ -61,6 +62,7 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", "aaaaaaaaaaaa")],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_2", sale("cs_2", "bbbbbbbbbbbb")],
   ]);
+  await markLive(store);
   is("the app is connected", (await connectPayPal(store, CLIENT, SECRET)).ok, true);
   is("the long address is a real 130-character address, longer than PayPal takes", LONG.length, 130);
 

@@ -32,7 +32,7 @@ import { seal, unseal } from "@/lib/secret-box";
 import { REDIRECT_URIS, googleAccount, refreshTokens } from "@/lib/meet-providers";
 import { configuredDemoStudioAdmin } from "@/lib/house-store";
 import { SITE_URL } from "@/lib/site-url";
-import { ERASING_KEY, erasingField, type Store, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, type Store, storeIdCommand, storeRef } from "@/lib/store";
 
 export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 /** The property every store lives under: the URL-prefix property verified by public/google*.html. */
@@ -46,11 +46,15 @@ const CONTEXT = "search-console|marktmorgen";
 const STATE = /^gsc\.[A-Za-z0-9_-]{20,64}$/;
 export const SEARCH_ROWS = 25;
 const DAY_MS = 86_400_000;
-/** A delayed supplier answer is cached only while this exact store is still live. */
-const KEEP_SEARCHES_IF_LIVE = `-- marktmorgen:gsc-keep-if-live:v1
-if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-if redis.call("HEXISTS", KEYS[2], ARGV[2]) ~= 0 then return 0 end
-redis.call("SET", KEYS[3], ARGV[3], "EX", ARGV[4])
+/**
+ * A delayed supplier answer is cached only while this store is still live: its own key (the id key, or for a store
+ * kept from before ids its record under its owner's address, as lib/store-live-cache.ts reads it) must exist and its
+ * erasing mark must be absent, in one step with the SET.
+ */
+const KEEP_SEARCHES_IF_LIVE = `-- marktmorgen:gsc-keep-if-live:v2
+if redis.call("EXISTS", KEYS[1]) ~= 1 then return 0 end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 return 1`;
 
 export const isOperator = (email: string | null | undefined) => {
@@ -218,17 +222,21 @@ function keptSearches(raw: string): StoreSearches | null | undefined {
   return { from: v.from as string, to: v.to as string, rows };
 }
 
-/** Cache one answer only while the store id still names this store and its erasure has not begun. */
+/**
+ * Cache one answer only while the store is live and its erasure has not begun. A store kept from before ids (sid "")
+ * has no id key, so its record is the key fenced on (Claude 3's MEDIUM on #4934).
+ */
 async function keepSearchesIfLive(store: Store, value: StoreSearches | null, seconds: number): Promise<boolean> {
+  const ref = storeRef(store);
+  const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
   const replies = repliesFor(await redisPipeline([[
     "EVAL",
     KEEP_SEARCHES_IF_LIVE,
     3,
-    storeIdCommand(store.sid)[1],
+    live,
     ERASING_KEY,
     cacheKey(store.statsId as string),
-    storeRef(store),
-    await erasingField(storeRef(store)),
+    await erasingField(ref),
     JSON.stringify(value),
     seconds,
   ]]), 1);

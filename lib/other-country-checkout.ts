@@ -2,7 +2,7 @@ import { DEEMED_SUPPLIER_RECORDS, type DeemedSupplierJurisdiction } from "@/lib/
 import { REFUSAL_WORDS, checkoutLocationDecision, type CheckoutLocationDecision, type LocationEvidence } from "@/lib/jurisdiction-refusal-rules";
 import {
   PLACE_COUNTED_COUNTRIES, REVIEWED_COUNTRY_SCOPES, REVIEWED_FX_CEILINGS, assessSnapshot, otherCountrySnapshotUnder,
-  otherCountryWindowStart, type OtherCountryReviews,
+  otherCountryWindowStart, placeCounted, type OtherCountryReviews,
 } from "@/lib/other-country-snapshot";
 import { otherCountryRule } from "@/lib/other-country-thresholds";
 import { TAX_THRESHOLD_RULES } from "@/lib/tax-threshold";
@@ -25,7 +25,7 @@ import { TAX_THRESHOLD_RULES } from "@/lib/tax-threshold";
  *      counted; a "threshold" record is a reviewed step for the coordinator and the owner; PLANS_ON_SALE and
  *      OPENING_REQUESTED stay false.
  *
- * Only countries whose rule counts one place are sold to (Canada and Norway, PLACE_COUNTED_COUNTRIES). Switzerland
+ * Only countries whose rule counts one place are sold to (Canada, Norway and Taiwan, PLACE_COUNTED_COUNTRIES). Switzerland
  * counts worldwide turnover, which no place counter shows, and every country without a reviewed rule is refused:
  * "universalization not authorized" (AGENTS.md, TX point 17).
  *
@@ -135,7 +135,7 @@ export async function thresholdCheckoutDecisionUnder(
   const rule = otherCountryRule(country);
   if (!rule || !(PLACE_COUNTED_COUNTRIES as readonly string[]).includes(country)) return no;
   const ruleId = rule.ruleId;
-  if (ruleId !== "ca-specified-supplies" && ruleId !== "no-remote-services") return no;
+  if (!placeCounted(ruleId)) return no;
   const own = ownSale(sale);
   if (!own) return no;
   const place: Place = Object.freeze({ country, state: null });

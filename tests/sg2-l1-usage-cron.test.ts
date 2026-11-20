@@ -28,7 +28,7 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 const request = { headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/usage") } as unknown as Parameters<typeof GET>[0];
 const askedFor = (from: number, pattern: RegExp) =>
   sent.slice(from).some((commands) => commands.some((c) => c[0] === "SMEMBERS" && pattern.test(String(c[1]))));
-const toldWritten = (from: number) => sent.slice(from).some((commands) => commands.some((c) => c[0] === "SET" && c[1] === "nl:usage-watch:told"));
+const toldWritten = (from: number) => sent.slice(from).some((commands) => commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:usage-watch:told:")));
 
 async function run(): Promise<{ status: number; body: Record<string, unknown>; from: number }> {
   const from = sent.length;

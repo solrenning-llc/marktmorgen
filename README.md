@@ -38,7 +38,7 @@ All of them are environment variables set on the host. None has a value in this 
 | Lesson videos in several sizes | `BUNNY_STREAM_LIBRARY_ID`, `BUNNY_STREAM_API_KEY`, `BUNNY_STREAM_TOKEN_KEY`: all three, or lesson videos stay what they were, the file as uploaded, played from the file store. `BUNNY_STREAM_READ_KEY` as well for the service's announcements to be believed at `/api/stream/hook`; without it the five-minute job `/api/cron/stream` does the asking alone. With them a lesson's video goes from the studio straight to Bunny Stream, is kept in sizes up to 1080p, and plays in its player with a token made for each viewing. In the library's own settings: "direct play" off, token authentication on for the player and for the files, sizes up to 1080p, and the address `/api/stream/hook` as its webhook (see `lib/stream.ts`, which says how the library was set up and what it costs) |
 | Video calls | Google: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`; Zoom: `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_WEBHOOK_SECRET_TOKEN`, `ZOOM_LIVE` |
 | Creators' own domains | `VERCEL_API_TOKEN`, `VERCEL_DOMAINS_PROJECT`, `VERCEL_DOMAINS_TEAM` |
-| Drafts written for a creator | `ANTHROPIC_API_KEY`, `AI_MODEL` |
+| Drafts written for a creator | `ANTHROPIC_API_KEY` (the models are fixed in code: `WRITING_MODEL` and `ANSWER_MODEL` in `lib/ai-request-rules.ts`) |
 | Scheduled jobs | `CRON_SECRET` |
 
 The settings ending in `_API_BASE` are for local checks only: each accepts nothing but an address on `127.0.0.1`, so a check can never reach a real service. `PASSKEY_LOCAL_ORIGIN` is for local development and is ignored in production.

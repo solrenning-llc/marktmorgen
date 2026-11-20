@@ -437,7 +437,7 @@ function agentsRule() {
   const p = /\n\(p\) \*\*Dono antes de preparar a junção\.\*\*[^\n]*/.exec(agents)?.[0] ?? "";
   is("one AC (p)", agents.split("(p) **Dono antes de preparar a junção.**").length, 2);
   is("the channel is the issue labeled canal-ativo, in the owner's words",
-    p.includes("canal de coordenação em vigor (a issue com o rótulo canal-ativo (gh issue list --label canal-ativo), conferida antes de cada escrita)"), true);
+    p.includes("canal de coordenação em vigor (o de (y): a issue com o rótulo canal-ativo (gh issue list --label canal-ativo), conferida antes de cada escrita)"), true);
   is("no fixed channel number is left in it", /hoje o #\d+/.test(p), false);
   is("it records the workflow, the one exception and its conditions", [p.includes(".github/workflows/coordination-rollover.yml"), p.includes("com uma única exceção, decidida pelo dono"),
     p.includes("6929670678"), p.includes("\"#N\" ou \"Canal ativo: #N\""), p.includes("o resto do comentário fica idêntico"), p.includes("avisa no canal ativo"),

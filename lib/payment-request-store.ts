@@ -236,7 +236,7 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
  * never the same null as a deleted request, which made a paid checkout's webhook skip the request, left open without
  * its receipt for the buyer to pay again.
  */
-export async function readRequest(id: string): Promise<PaymentRequest | null> {
+async function readRequestSnapshot(id: string): Promise<{ request: PaymentRequest; raw: string } | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
   const replies = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
   if (!replies) throw new UnknownReplyError("a payment request's record");
@@ -250,7 +250,11 @@ export async function readRequest(id: string): Promise<PaymentRequest | null> {
     request = null;
   }
   if (!request) throw new UnknownReplyError("a payment request's record");
-  return request;
+  return { request, raw };
+}
+
+export async function readRequest(id: string): Promise<PaymentRequest | null> {
+  return (await readRequestSnapshot(id))?.request ?? null;
 }
 
 /**
@@ -399,23 +403,60 @@ export async function cancelRequest(store: Store, id: string, now = Date.now()):
   return done.answer === "not_open" ? "not_open" : done.request;
 }
 
-/** Deletes a request that is no longer open from the store's list. Its payment, if any, stays on the creator's Stripe. */
+/**
+ * Deletes a request that is no longer open from the store's list. Its payment, if any, stays on the creator's Stripe.
+ * Done under the request's write lock and read again under it (issue #4775): a change holding the lock is waited for,
+ * and the request is deleted only as it is once that change is done, never as it was read before. A lock still held
+ * after the wait throws LockBusyError, which the route answers as "could not be done right now"; nothing is deleted.
+ */
 export async function deleteRequest(store: Store, id: string, now = Date.now()): Promise<"deleted" | "open" | null> {
-  const request = await requestOf(store, id);
-  if (!request) return null;
-  if (statusOf(request, now) === "open") return "open";
-  await forget(request);
-  return "deleted";
+  if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
+  // Read once without the lock, so a press on a request that is gone or still open costs what it did: the lock (at
+  // most 28 commands more, plus the atomic deletion's seven, in ORDER's basis in tests/plan-cost-registry.ts)
+  // is taken only for a delete that can happen.
+  const seen = await requestOf(store, id);
+  if (!seen) return null;
+  if (statusOf(seen, now) === "open") return "open";
+  return withLock(writeKey(id), 10, 5_000, async (held) => {
+    const observed = await readRequestSnapshot(id);
+    if (!observed || !store.sid || observed.request.sid !== store.sid) return null;
+    const { request, raw } = observed;
+    if (request.id !== id) throw new UnknownReplyError("a payment request's record");
+    if (statusOf(request, now) === "open") return "open";
+    await forget(request, held, raw);
+    return "deleted";
+  });
 }
 
-async function forget(request: PaymentRequest): Promise<void> {
-  await redisPipeline([
-    ["DEL", recordKey(request.id)],
-    ["ZREM", storeKey(request.sid), request.id],
-    ["ZREM", openKey(request.sid), request.id],
-    ["ZREM", DUE, `${request.sid}|${request.id}`],
-    ["SREM", personSet(request.sid, request.email), request.id],
-  ]);
+/**
+ * One deletion for the observed generation, fenced by its write lock. Redis scripts do not roll back errors:
+ * validate every index's kind before any mutation, so a wrong-kind index leaves the record and links intact.
+ * 1 deleted; 0 lock lost; 2 record changed; 3 an index of an unknown kind. Twelve billed commands at most:
+ * EVAL, two GETs, four TYPEs, DEL, three ZREMs and SREM. No extra stored receipt or personal data.
+ */
+const DELETE_REQUEST = `-- marktmorgen:payreq-delete:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call("GET", KEYS[2]) ~= ARGV[2] then return 2 end
+for i = 3, 6 do
+  local kind = redis.call("TYPE", KEYS[i]).ok
+  local expected = i == 6 and "set" or "zset"
+  if kind ~= "none" and kind ~= expected then return 3 end
+end
+redis.call("ZREM", KEYS[3], ARGV[3])
+redis.call("ZREM", KEYS[4], ARGV[3])
+redis.call("ZREM", KEYS[5], ARGV[4])
+redis.call("SREM", KEYS[6], ARGV[3])
+redis.call("DEL", KEYS[2])
+return 1`;
+
+async function forget(request: PaymentRequest, held: Held, raw: string): Promise<void> {
+  const reply = repliesFor(await redisPipeline([[
+    "EVAL", DELETE_REQUEST, 6, held.key, recordKey(request.id), storeKey(request.sid), openKey(request.sid), DUE,
+    personSet(request.sid, request.email), held.token, raw, request.id, `${request.sid}|${request.id}`,
+  ]]), 1)?.[0];
+  if (reply === 1) return;
+  if (reply === 0) throw new LockBusyError();
+  throw new UnknownReplyError("the deletion of a payment request");
 }
 
 /**

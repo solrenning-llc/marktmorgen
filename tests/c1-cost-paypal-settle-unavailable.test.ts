@@ -14,6 +14,7 @@ import { connectPayPal, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts
 import { claimMark, releaseMark } from "@/lib/claim-mark";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsunav01";
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", person("aaaaaaaaaaaa", "sara@example.com", "sara")],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", "aaaaaaaaaaaa", 10000)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
   const paid = await payWithPayPal(store);

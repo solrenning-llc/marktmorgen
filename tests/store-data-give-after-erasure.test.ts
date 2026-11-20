@@ -7,7 +7,7 @@
  * The other "never refuses" counts (noteData, countData, forceData) count what is written, and may grow it: on a
  * room not there yet they still make it, or a record would be kept uncounted.
  */
-import { besideKey, countData, dataKey, giveBeside, giveData, giveDataBytes, noteData, takeBeside, takeData } from "@/lib/store-data";
+import { besideKey, countData, dataKey, forceData, giveBeside, giveData, giveDataBytes, noteData, takeBeside, takeData } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is } from "./check";
@@ -53,6 +53,9 @@ async function main(): Promise<void> {
   const counted = { ...ROOM, sid: "store-data-fresh-count" };
   is("countData still counts on a room not there yet", (await countData(counted, [{ slot: "c:one", bytes: 200 }], NOW)).ok, true);
   is("and the room holds it", Number(redis.run(["HGET", dataKey(counted)!, "#"])), 264);
+  const forced = { ...ROOM, sid: "store-data-fresh-force" };
+  await forceData(forced, [{ slot: "f:one", bytes: 100 }], NOW);
+  is("forceData still counts on a room not there yet", Number(redis.run(["HGET", dataKey(forced)!, "#"])), 164);
   done();
 }
 

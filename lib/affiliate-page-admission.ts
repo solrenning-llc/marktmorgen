@@ -136,7 +136,7 @@ async function ownBook(store: Store, id: string, now: number): Promise<KeptBook 
   if (units === null) return null;
   if (!(await takePublicRequest(store, "buyer", now, units))) return "noRoom";
   // Stripe asked no longer than a refresh is, so the page answers inside its maxDuration.
-  return { book: await readBook(store, id, { deadline: Date.now() + BOOK_READ_SECONDS * 1000 }), at: Math.floor(now / 1000), refresh: null };
+  return { book: await readBook(store, id, { deadline: Date.now() + BOOK_READ_SECONDS * 1000, keptPaid: true }), at: Math.floor(now / 1000), refresh: null };
 }
 
 /** What a load that has paid its own part reads: the refresh when it is due, the kept part, or its own book when none could be kept. */

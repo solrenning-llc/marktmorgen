@@ -118,6 +118,44 @@ Pedido do dono, nas palavras dele: "resolve!!!!!!!!!!! gera regras para nao ocor
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## IV — Impostos das vendas recebidos na própria cobrança, pela taxa da plataforma (dono, 19/11/2026, por volta das 21h30 Fortaleza)
+
+Decisão do dono, item 789 [IV1]; o texto literal, o que ela substitui e as lacunas conhecidas estão em [docs/eu-uk-us-tax-collection-decision-2026-11-19.md](docs/eu-uk-us-tax-collection-decision-2026-11-19.md). Vale para todo agente deste repositório, em toda sessão:
+
+(a) **Consumidores da UE e do Reino Unido desde o primeiro dia**, em produtos digitais, cursos, assinaturas e produtos físicos. Não é recusa na abertura.
+
+(b) **O imposto que a Solrenning LLC deve** entra por fora do preço, visto pelo comprador antes de pagar. Isso vale para o IVA da UE pelo art. 9a, pelo OSS não União; para o IVA britânico, pelo HMRC; para os bens físicos pelo art. 14a, com o IOSS e o intermediário até 150 euros e o Union OSS para bens já na UE de criador não estabelecido; para o Reino Unido até 135 libras e os bens já no país; e para o sales tax dos estados americanos que tratam a LLC como "marketplace facilitator", acima de cada limite. Esse imposto é recebido **na mesma cobrança direta, pela taxa da plataforma** na conta de plataforma Stripe da Solrenning LLC: `application_fee_amount` = parte do plano (hoje 0%) + imposto + custos de receber esse imposto. Nunca sai da receita nem da comissão. O imposto automático do criador fica desligado nessa venda. No reembolso, a parte do imposto volta com o dinheiro do comprador e a declaração é corrigida; na contestação perdida, ela não volta ao criador, salvo devolução do país (leitura usada: não devolve). Acima de 150 euros ou de 135 libras, o comprador é avisado antes de pagar dos impostos e taxas de importação.
+
+(c) **Recusados pelo dono:** o crédito pré-pago, porque guardaria dinheiro do criador antes da venda, e a fatura posterior, porque deixaria a dívida sem receber. Não propor de novo.
+
+(d) **Planos do Marktmorgen:**
+- na UE, o criador com número de IVA válido compra sem IVA (inversão do sujeito passivo); o criador sem número paga IVA pelo OSS, por fora, na fatura da assinatura;
+- no Reino Unido, pelas regras equivalentes;
+- nos EUA, sales tax na fatura da assinatura, nos estados que tributam software por assinatura e acima do limite de cada um.
+
+O código soma as vendas por estado e liga cada registro e cada cobrança antes do limite.
+
+(e) **Abertura só com tudo pronto e testado de ponta a ponta:**
+- a conta de plataforma Stripe da LLC aprovada;
+- os registros no OSS não União, no IOSS (com o intermediário), no Union OSS e no IVA britânico, desde a primeira venda;
+- o registro em cada estado americano, quando a lei exigir;
+- o imposto por fora do preço;
+- as duas provas de localização dos arts. 24b e 24f;
+- os registros do art. 63c guardados por 10 anos;
+- a devolução do imposto no reembolso e as declarações;
+- as obrigações de segurança de produtos de marketplace da UE (GPSR) e do Reino Unido;
+- a conferência do registro de embalagens onde a lei exigir.
+
+Até lá, `PLANS_ON_SALE` continua false e a trava que recusa consumidores da UE e do Reino Unido (`consumerGate`) continua ligada, com os caminhos de `REFUSE_CONSUMERS_OPEN` fechados. Na abertura, os registros da UE e do Reino Unido em `DEEMED_SUPPLIER_RECORDS` são "collect", com o registro fiscal.
+
+(f) **Substitui, só nesses pontos,** a proibição "cobrar taxa do Marktmorgen como application fee" (só para o imposto e os custos de recebê-lo) e a recusa de consumidores ou de envios físicos como tratamento da abertura. A decisão de 29/09/2026 continua: o imposto recebido na própria cobrança é dívida da LLC, não dinheiro do criador guardado.
+
+(g) **Custos.** O intermediário de importação, os registros, as declarações, o câmbio e cada obrigação entram com valor real e fonte, nos custos fixos (FX275) e na base mínima, ou por unidade, no pior caso; desconhecido reprova. Nada é contratado, aceito ou pedido por agente: o dono contrata na abertura.
+
+(h) **Lacunas.** Ainda não está conferido, em fonte oficial datada, se uma plataforma dos EUA pode cobrar `application_fee_amount` em cobrança direta nas contas de criadores do Reino Unido, do EEE e do Canadá. O que não estiver conferido continua recusado, nunca vendido sem imposto.
+
+Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
+
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)
 
 Esta decisão substitui a regra19 e toda instrução anterior conflitante, inclusive MR/SR, Hazelsong, AX274,FX275,VR e Pedidos repetidos. Texto antigo permanece histórico. Usar a interpretação juridicamente mais correta, fundamentada em lei, regulamentação e decisões oficiais, conferidas e citadas com artigo/data; não escolher automaticamente a hipótese que dá mais imposto nem somar regimes/países inaplicáveis. ISS5% não é fato certificado.

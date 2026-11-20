@@ -22,4 +22,11 @@ is("3: silence never stops a session", rule.includes("Sem resposta em 30 minutos
 is("4: no session is left without a slot", rule.includes("nunca deixa uma sessão sem vaga"), true);
 is("every push keeps its checks", rule.includes("(m)") && rule.includes("MV (a)") && rule.includes("CV"), true);
 
+part("AC (cc)-(ee): the letters the coordinator reserved for #4925, apart from #4850's (r)-(bb)");
+for (const [letter, title] of [["cc", "Ajudante de teste compartilhado"], ["dd", "Estado de um fluxo compartilhado"], ["ee", "Número derivado de custo"]]) {
+  is(`(${letter}) ${title}, once`, (ac.match(new RegExp(`\\n\\(${letter}\\) \\*\\*${title}`, "g")) ?? []).length, 1);
+}
+is("this PR's rules no longer take (r)-(t)", /\n\((r|s|t)\) \*\*(Ajudante de teste|Estado de um fluxo|Número derivado)/.test(ac), false);
+is("the new reception is recorded in the provenance", ac.includes("Recebido também em 20/11/2026, à Claude 4"), true);
+
 done();

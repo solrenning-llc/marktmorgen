@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     if (!made.ok) throw new Error(`no store (${label})`);
     await ensureStatsId(OWNER);
     await ensureListId(OWNER);
-    await setStripeAccount(OWNER, "acct_1TestWbMarkErase", true);
+    await setStripeAccount(OWNER, "acct_1TestWbMark", true);
     await setSubscription(OWNER, { customerId: "cus_WbMarkOwner", subscriptionId: "sub_WbMarkOwner", active: true, tier: "pro", period: paidPeriod() });
     const club = await addProduct(OWNER, "The Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });
     if (!club.ok) throw new Error("no product");

@@ -116,6 +116,21 @@ test("a removal never spends the request, the waitlist's unit or the invitations
   });
 });
 
+test("a removal refused before anything is held gives back the units it took beyond its own request (Claude 5's LOW on #4462)", async () => {
+  await quiet(async () => {
+    const { shop, sid, pid } = await world({ soon: true });
+    // A pre-order that does not read counts as waiting: the removal is refused before anything is held or dropped.
+    redis.run(["HSET", `nl:pre:${sid}:${pid}`, "someone", "not a pre-order"]);
+    const at = Date.now();
+    const before = await allowanceUsedExact(shop, "studio", at);
+    assert.notEqual(before, null);
+    const refused = await remove(pid);
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    assert.equal(await allowanceUsedExact(shop, "studio", at), (before ?? 0) + 1, "only the request itself is counted, as for any refused write");
+    assert.equal(redis.run(["EXISTS", `nl:wl:${sid}:${pid}`]), 1, "the waitlist stays while the product stays");
+  });
+});
+
 test("three studio requests left are enough for a whole removal: the product, its waitlist and its invitations' first page", async () => {
   await quiet(async () => {
     const { shop, sid, pid } = await world({ soon: true });

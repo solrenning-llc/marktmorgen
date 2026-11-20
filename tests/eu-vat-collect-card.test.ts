@@ -13,7 +13,9 @@
  */
 import { NextRequest } from "next/server";
 import { readFileSync } from "node:fs";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { refusedBeforeStripe, stockLeft, withStockHold } from "@/lib/stock";
 import { readProduct } from "@/lib/catalog";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { createCheckout } from "@/lib/store-checkout";
@@ -206,6 +208,24 @@ async function main(): Promise<void> {
   is("the request carries the VAT line on top of the product's own amount", [collected.get("line_items[0][price_data][unit_amount]"), collected.get("line_items[1][price_data][unit_amount]")], ["2900", "551"]);
   is("and the fee of the VAT and its cost (the plan's share is 0% today)", collected.get("payment_intent_data[application_fee_amount]"), String(551 + 12));
   is("and no automatic tax from the creator's account", collected.has("automatic_tax[enabled]"), false);
+
+  part("A sale refused for its EU VAT holds nothing (Claude 5's LOW on #4975)");
+  // The route names EuVatCollectRefused among the refusals before Stripe: the unit comes back at once, and so does the
+  // per-address hold count. The real values never hand createCheckout euVat, so the route cannot be driven into it
+  // here; the source is pinned and withStockHold is shown giving the unit back for that refusal.
+  is("withStockHold's refusal names it", /\(error\) => refusedBeforeStripe\(error\) \|\| error instanceof ReturningCodeRefused \|\| error instanceof EuVatCollectRefused,/.test(route), true);
+  is("and so does the hold count given back in the catch", /if \(charged && \([^)]*error instanceof EuVatCollectRefused\)\) await giveBackHold\(/.test(route), true);
+  const limited = await setProductExtras(owner, id, { stock: 1 });
+  if (!limited.ok) throw new Error(`stock fixture: ${limited.reason}`);
+  const now = (await storeForEmail(owner))!;
+  const listing = (await readListing(now, id))!;
+  is("a limited product: one unit left", await stockLeft(now, listing), 1);
+  const refusal = (error: unknown) => refusedBeforeStripe(error) || error instanceof EuVatCollectRefused;
+  const held = await withStockHold(now, listing, async () => {
+    throw new EuVatCollectRefused("the cost of receiving the VAT is unknown");
+  }, refusal).then((value) => value, (error: unknown) => (error instanceof EuVatCollectRefused ? "rethrown" : String(error)));
+  is("the refusal goes on to the route's catch", held, "rethrown");
+  is("and the unit is back at once", await stockLeft(now, (await readListing(now, id))!), 1);
 
   done();
 }

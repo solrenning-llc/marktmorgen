@@ -188,16 +188,16 @@ async function main(): Promise<void> {
     currency: "usd",
     amount_total: 7740,
     metadata: { store: "harbor", product: bread, bump: course, cart: "yes", cart_deal: "10", upsell_key: browser.fingerprint, offer_from: course, ...meta },
-    customer_details: { email },
+    customer_details: { email, address: { country: "US" } },
     payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
     ...more,
   });
   const breadListing = (await readListing(store, bread))!;
   const take = async (session: string, step: string, answer: "yes" | "no", secret: string | undefined = browser.secret) =>
-    takeUpsell({ store, session, secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
+    takeUpsell({ headers: new Headers(), store, session, secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
   // As the thanks page asks: the cart's first line, and every other line of the order (its "bumps").
   const view = (session: string, email: string, offerFrom: string | null = course, secret: string | undefined = browser.secret, alsoOwned: string[] = [course]) =>
-    funnelView({ store, session, product: breadListing, alsoOwned, eligible: true, created: NOW - 60, secret, upsellKey: browser.fingerprint, cart: { offerFrom, email } });
+    funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: breadListing, alsoOwned, eligible: true, created: NOW - 60, secret, upsellKey: browser.fingerprint, cart: { offerFrom, email } });
 
   part("A cart with a product that has offers: the first offer not in it");
   sessions = { cs_test_cartpaid000001: paidCart("cs_test_cartpaid000001", BUYER) };
@@ -247,7 +247,7 @@ async function main(): Promise<void> {
   const charged = charges.length;
   sessions.cs_test_cartpaid000009 = paidCart("cs_test_cartpaid000009", BUYER, {}, { product: rye, bump: bread, offer_from: rye });
   const ryeView = async (secret = browser.secret, eligible = true, created = NOW - 60) =>
-    funnelView({ store, session: "cs_test_cartpaid000009", product: (await readListing(store, rye))!, alsoOwned: [bread], eligible, created, secret, upsellKey: browser.fingerprint, cart: { offerFrom: rye, email: BUYER } });
+    funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session: "cs_test_cartpaid000009", product: (await readListing(store, rye))!, alsoOwned: [bread], eligible, created, secret, upsellKey: browser.fingerprint, cart: { offerFrom: rye, email: BUYER } });
   is("the kit first", (await ryeView()).offer?.step.id, "rkt001");
   is("no thanks to it", (await take("cs_test_cartpaid000009", "rkt001", "no")).kind, "declined");
   is("the same kit for less is passed over: the checklist is next", (await ryeView()).offer?.step.id, "rls001");

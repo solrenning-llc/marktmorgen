@@ -34,7 +34,8 @@ export const RETRY_SECONDS = 300;
  */
 export const STOP_TRIES = 3;
 /**
- * Times the email that a code failed is tried (lib/discount-schedule-notice.ts):
+ * Attempts to notify that a code failed (lib/discount-schedule-notice.ts): a failed enqueue consumes an attempt too.
+ * A successful enqueue does not consume one separately from the send that tellOne counts:
  * one send at the failure, and again after NOTICE_RETRY_SECONDS if it did not
  * go, then never. A send that went is never made again.
  */

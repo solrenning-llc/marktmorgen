@@ -81,7 +81,7 @@ export function CourseToggle({ product, newComments = 0 }: { product: Product; n
             setBusy(false);
           }
         }}
-        className="text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
+        className="inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
       >
         Sell this as a course with lessons
       </button>

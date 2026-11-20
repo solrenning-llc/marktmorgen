@@ -102,6 +102,37 @@ export function countOf(reply: unknown): number | null {
 }
 
 /**
+ * A deletion's or write's count read exactly, and only when the command sent could give it (CX-123 rule 24; #4795,
+ * #4796, #4798, #4794, Codex V): DEL and UNLINK at most their distinct keys; ZREM, SREM and HDEL at most their distinct
+ * members or fields; HSET at most its distinct fields; SADD and ZADD at most their distinct members (ZADD CH without
+ * NX counts changes, including repeated updates, so its bound is the number of score/member pairs). A larger count cannot come from that command, so it does not
+ * prove what was removed or written, and it is null (unknown), as any other shape is. Other commands: countOf alone.
+ */
+export function countWithin(reply: unknown, command: readonly (string | number)[]): number | null {
+  const count = countOf(reply);
+  if (count === null) return null;
+  const op = String(command[0] ?? "").toUpperCase();
+  const args = command.slice(1).map(String);
+  let most: number;
+  if (op === "DEL" || op === "UNLINK") most = new Set(args).size;
+  else if (op === "ZREM" || op === "SREM" || op === "HDEL") most = new Set(args.slice(1)).size;
+  else if (op === "HSET") most = new Set(args.slice(1).filter((_, i) => i % 2 === 0)).size;
+  else if (op === "SADD") most = new Set(args.slice(1)).size;
+  else if (op === "ZADD") {
+    // Its options first (NX, XX, GT, LT, CH), then score and member pairs; INCR answers a score, not a count.
+    let at = 1;
+    while (at < args.length && ["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[at].toUpperCase())) at += 1;
+    const options = args.slice(1, at).map((a) => a.toUpperCase());
+    if (options.includes("INCR")) return count;
+    // CH counts each change, including repeated updates of one member. NX permits only its first addition.
+    most = options.includes("CH") && !options.includes("NX")
+      ? Math.floor((args.length - at) / 2)
+      : new Set(args.slice(at).filter((_, i) => i % 2 === 1)).size;
+  } else return count;
+  return count <= most ? count : null;
+}
+
+/**
  * A pipeline's replies, only when there is exactly one for each command sent,
  * as a fresh plain list. Each reply is read from the list's own data slot:
  * a slot that is missing (a hole), inherited from a prototype or a getter is

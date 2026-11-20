@@ -25,7 +25,7 @@ import { BillingError, onPlatform } from "@/lib/billing";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
-import { storeForHandle, type Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeForHandle, storeIdCommand, type Store } from "@/lib/store";
 import { storeForRefExactly } from "@/lib/store-exact";
 import { SHARING_INDEX, owedOn, percentOf, planShareBps, shareBps, toGiveBack } from "@/lib/platform-share";
 import { disputeMoneyGone } from "@/lib/retained-revenue";
@@ -137,6 +137,23 @@ function confirmedMarkerWrite(reply: unknown): void {
   if (!Array.isArray(reply) || reply.length !== 1) throw new UnknownFeeList("Settlement progress write was not confirmed");
   const slot = Object.getOwnPropertyDescriptor(reply, "0");
   if (!slot || !("value" in slot) || (slot.value !== 0 && slot.value !== 1)) throw new UnknownFeeList("Settlement progress write was not confirmed");
+}
+
+/** A late provider answer must not restore a store's ref (the first store's owner's address) after erasure.
+ * Four billed commands on a live write: EVAL, EXISTS, HEXISTS and HSET, replacing one HSET. Company work, not free. */
+const KEEP_MARKER_IF_LIVE = `-- marktmorgen:share-marker-live:v1
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HEXISTS', KEYS[2], ARGV[1]) == 1 then return -1 end
+return redis.call('HSET', KEYS[3], ARGV[2], ARGV[3])`;
+
+async function keepMarker(store: Store, ref: string, key: string, value: string): Promise<boolean> {
+  // A store from before ids has no identity key: its own record, under its owner's address, is what erasure removes
+  // (Claude 3's LOW on #4928), so it is the fence, and such a store still records its progress while it lives.
+  const identity = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const reply = await redisPipeline([["EVAL", KEEP_MARKER_IF_LIVE, 3, identity, ERASING_KEY, key, await erasingField(ref), ref, value]]);
+  if (Array.isArray(reply) && reply.length === 1 && Object.getOwnPropertyDescriptor(reply, "0")?.value === -1) return false;
+  confirmedMarkerWrite(reply);
+  return true;
 }
 
 function historicalEvent(raw: unknown): { id: string; fee: string | null; charge: string | null } {
@@ -404,8 +421,7 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
   }
   // Progress is committed only after the full reading and all its fees settle.
   if (!completeRead || !allSettled) return false;
-  confirmedMarkerWrite(await redisPipeline([["HSET", READ_UNTIL, ref, String(Math.floor(nowSeconds))]]));
-  return true;
+  return keepMarker(store, ref, READ_UNTIL, String(Math.floor(nowSeconds)));
 }
 
 /** Step 3, for one store: its memberships' percentage, kept to its plan. */
@@ -460,7 +476,8 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
     cursors.add(page);
   }
   if (!completeRead || !allApplied) return false;
-  confirmedMarkerWrite(await redisPipeline([target > 0 ? ["HSET", APPLIED, ref, String(target)] : ["HDEL", APPLIED, ref]]));
+  if (target > 0) return keepMarker(store, ref, APPLIED, String(target));
+  confirmedMarkerWrite(await redisPipeline([["HDEL", APPLIED, ref]]));
   return true;
 }
 

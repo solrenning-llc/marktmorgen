@@ -63,7 +63,7 @@ import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /** Who is reading, said to every site read. */
@@ -221,10 +221,22 @@ export async function saveSender(store: Store, raw: { name?: unknown; address?: 
   if (!store.statsId || !isRedisConfigured()) return null;
   const sender = cleanSender(raw);
   if (!sender.name || !sender.address) return null;
-  // Said saved only on the exact receipt (Claude 1 on #2870, LOW): an unknown answer throws, the route answers 503.
-  wroteSet(await redisPipeline([["SET", key(store.statsId, "me"), JSON.stringify(sender)]]), [["SET"]], "the sender");
+  // A store from before ids has no identity key: its own record, under its owner's address, is what erasure removes,
+  // so it is the fence (as on #4928, Claude 3's LOW), and such a store still saves its sender while it lives.
+  const identity = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(storeRef(store));
+  // The identity and erasure checks share the write: an admitted save cannot put personal data back after erasure.
+  // Said saved only on the exact receipt (Claude 1 on #2870, LOW): an unknown or refused answer gives the route 503.
+  wroteSet(await redisPipeline([[
+    "EVAL", SAVE_SENDER_IF_LIVE, 3, identity, ERASING_KEY, key(store.statsId, "me"),
+    await erasingField(storeRef(store)), JSON.stringify(sender),
+  ]]), [["SET"]], "the sender");
   return sender;
 }
+
+/** The sender is kept only while its store's identity exists and its erasure has not begun. */
+export const SAVE_SENDER_IF_LIVE = `-- marktmorgen:outreach-sender-save:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+return redis.call("SET", KEYS[3], ARGV[2])`;
 
 /**
  * Every pitch a store keeps, the newest first. Read exactly (CX-123 rule 24):

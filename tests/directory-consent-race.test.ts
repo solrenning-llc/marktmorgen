@@ -29,7 +29,7 @@ async function world(numbers = false) {
   redis.clear();
   assert.equal((await claimHandle(OWNER, "dir-consent", "Synthetic Person", "")).ok, true);
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestDirectory01", true);
+  await setStripeAccount(OWNER, "acct_1TestDirect01", true);
   await setSubscription(OWNER, { customerId: "cus_DirectoryFixture", subscriptionId: "sub_DirectoryFixture", active: true, period: paidPeriod() });
   assert.equal((await addProduct(OWNER, "Synthetic private product name", "", "20", null)).ok, true);
   assert.equal((await setAffiliateSetting(OWNER, setting(true, numbers))).ok, true);

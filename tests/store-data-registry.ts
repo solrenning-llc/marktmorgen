@@ -282,7 +282,7 @@ export const FAMILIES: Record<string, Family> = {
     room: ["lib/affiliates.ts"],
     parts: [
       capped(MAX_AFFILIATES * (1_536 + 4 * ENTRY_BYTES), "MAX_AFFILIATES records (an address, a note of MAX_NOTE_LENGTH in any script, the rest), each with its address, code and click counts.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"), src("lib/affiliates.ts", "MAX_NOTE_LENGTH")),
-      kept(512, "A sale credited and up to two partners' shares of it."),
+      kept(512, "A sale credited and up to two partners' shares of it; while its buyer is not confirmed, also its place on the store's list the five-minute job reads again (a reference and a time), taken from the same room in the same write."),
       // Audit A1 (9 November 2026): the paid invoices the book read whole, kept for the next reading.
       capped(BOOK_INVOICES_KEPT_BYTES + KEY, "One record a store of the membership and plan payments the book read whole (an invoice's line, never the buyer's address), INVOICES_KEPT_MAX_BYTES at the most, INVOICE_KEEP_SECONDS after the last reading that wrote it.", src("lib/affiliates.ts", "INVOICES_KEPT_MAX_BYTES", "INVOICE_KEEP_SECONDS")),
       kept(3 * REFUND_MARK_MAX_BYTES, "The refund kept on the sale and on each partner's share when read on the account it was paid into (lib/affiliates.ts AFFILIATE_REFUND_MARK): one field, `rf`, in base 36, the account being the record's own `acct`."),
@@ -296,6 +296,7 @@ export const FAMILIES: Record<string, Family> = {
   // order once its link is decided ("credited", "none" or "told"), two days, past the sweep's day of reading it.
   "nl:aff:pend:@lib/affiliates.ts": short("A pending affiliate link's mark, once an order, two days", "order", 2, KEY),
   "nl:aff:pend:due@lib/affiliates.ts": company("Every store's pending Stripe orders not decided yet, read by the sweep by itself", "One list for the company: a member a pending order (its store's id and its checkout, under 120 bytes), taken out once the order is decided or its two-day mark has expired, the list itself expiring two days after its last write; only an order whose affiliate read did not answer at checkout is on it."),
+  "nl:aff:unc:month:@lib/affiliates.ts": company("Monthly counts of the sales whose second tier waited for their buyer", "Five counts a month (waited, decided, approved, failed, reads), no store or person; at most 14 monthly keys alive for 400 days."),
   // The PayPal orders among them still due a read or a notice: one member an order, the list kept two days from its last write.
   "nl:aff:pend:pp:@lib/affiliates.ts": short("A PayPal order whose affiliate link is still pending, two days", "order", 2, KEY),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
@@ -306,6 +307,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ai-spend:v2:{@lib/ai-spend-policy.ts": company("The company's AI spending ledger, a month", "One key a month with a field a store: the company's ledger, carried by its fixed costs."),
   "nl:ai-spend:v2:{YYYY-MM}@lib/ai-spend-policy.ts": company("The ledger's name, as the policy states it", "The same ledger."),
   "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window", "day", 40, 128),
+  // One a stop: each stop is a studio request, and the mark goes by itself after AI_STOP_KEEP_SECONDS (five minutes), held here at a day.
+  "nl:ai:stop:@lib/ai.ts": short("A stop asked for one run of a page drafted step by step (lib/ai-steps.ts)", "studio", 1),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
   "nl:assist:c:@lib/store-assistant.ts": { what: "A conversation with the Store assistant, a day after its last message", line: "store-assistant" },
   "nl:assist:missed:@lib/store-assistant.ts": { what: "Questions the Store assistant could not answer, for the creator", line: "store-assistant" },
@@ -341,7 +344,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:code-ip:@lib/auth.ts": company("Sign-in code tries from one machine in the hour", "A machine's count under a one-way hash of its address on the internet, an hour (652 [WG12], Claude 3 on #2736)."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
-  "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move."),
+  "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move. One record under each of the two addresses: the two addresses, its time, the move's own token of 64 hex (markBrokenMove) and, once noted, the store copy's fingerprint of 64 hex. The copy is noted by NOTE_MOVE_COPY, one EVAL: five commands when both records still carry the move's token (the EVAL, two GET, two SET), four when one does, three when neither does (Codex H, #2271). Bounded a month: the EVAL runs only after main's per-store pace (lib/move-pace.ts takeMove) and the company's MOVES_PER_MONTH admission (lib/auth.ts takeMoveRoom; nl:auth:move-room:), so at most MOVES_PER_MONTH a month, all stores together (Codex G2 and Claude 5 on #2271). No expiry, on purpose: it keeps a split account from a login without its second step until it is repaired. The month it is written is priced (tests/plan-cost-registry.ts MOVES_MONTH_KEPT); kept unrepaired past it, it is open in MOVE_COST_UNKNOWNS, never zero (Codex G on #2271)."),
+  "nl:auth:move-broken:open@lib/auth.ts": company("The places of the moves left open", "One sorted set for the company: the token of 64 hex of each move whose records are written (markBrokenMove, MARK_BROKEN_MOVE), scored by when it took its place, until its records are cleared (CLEAR_BROKEN_MOVE). Taken in the same script that writes the records, only below MAX_OPEN_BROKEN_MOVES (1,000) places: at most 1,000 members, never an address. Priced with the records in tests/plan-cost-registry.ts MOVES_MONTH_KEPT (#2271)."),
+  "nl:auth:move-room:@lib/auth.ts": company("This month's moves of the sign-in address", "Two counts for the company (paying stores, and the others), each a number for its calendar month (UTC), kept 32 days (MOVE_ROOM_SECONDS); never an address. Since the owner's decision of 18 November 2026 on #2271 there is no per-store count here: the per-store limit is main's (lib/move-pace.ts). Two keys a month."),
   "nl:auth:session:@lib/auth.ts": company("A session", "An account's."),
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),

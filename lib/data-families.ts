@@ -37,11 +37,11 @@ export const COUNTED_FAMILIES: readonly string[] = [
 export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
-  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:", "nl:agent:book:lock:",
-  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:alert:",
+  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:aff:unc:month:", "nl:affhub:", "nl:agent:book:lock:",
+  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:stop:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
-  "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
+  "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:move-broken:open", "nl:auth:move-room:", "nl:auth:moving:", "nl:auth:rec:",
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
@@ -192,7 +192,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- an account's sign-in: a person's, not a store's
   // nl:2fa:lockedset: also holds one shared list of kept accounts, at most KEPT_ANY_MAX tags of 41 bytes (lib/two-step.ts KEEP_ANY).
   "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lock:": C, "nl:2fa:lockedset:": C, "nl:2fa:keptstar:": Cr(400), "nl:2fa:once:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
-  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:bound:": C, "nl:auth:rec:link:": C,
+  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:move-broken:open": C, "nl:auth:move-room:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:bound:": C, "nl:auth:rec:link:": C,
   "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:second:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
   "nl:auth:code:": C, "nl:auth:linkcode:": C, "nl:auth:lastcode:": C, "nl:rl:code-addr:": C, "nl:rl:code-day:": C, "nl:rl:code-ip:": C,
   "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:drop:": C, "nl:pk:lock:": C, "nl:lock:plan-stop:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
@@ -200,13 +200,13 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
   "nl:adsrv:": E, "nl:adsrv:ctx:": X(4), "nl:adsrv:last:": E, "nl:adsrv:sent:": X(3), "nl:adsrv:sub:": X(400),
-  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30),
+  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30), "nl:aff:unc:month:": Cr(400),
   "nl:affhub:": L, "nl:affhub:link:": Cr(1), "nl:affkit:": E,
   // Proposals and agreements (lib/agreement-store.ts): the store's lists go, and each agreement and its versions through them.
   "nl:agree:s:": E, "nl:agree:p:": E, "nl:agree:r:": T("nl:agree:s:", 400), "nl:agree:v:": T("nl:agree:s:", 400), "nl:agree:lock:": X(1),
   // The creator's own notes for their assistant (lib/assistant-memory-store.ts): go with the store.
   "nl:amem:": E, "nl:amem:lock:": X(1),
-  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E,
+  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E, "nl:ai:stop:": X(1),
   "nl:alert:": E, "nl:alert:seen:": Cr(2), "nl:allow:": E,
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,

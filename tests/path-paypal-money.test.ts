@@ -331,7 +331,7 @@ async function main(): Promise<void> {
   {
     // U-20261117-0033 on 4a6f735fe6: the order is due now (not already late), PayPal refuses the capture (403), and every
     // write after PayPal's answer is lost: the blind mark (SET XX of the paid record) and the order's new place in the
-    // watch (ZADD). Nothing the Path reads may then say the sale is known.
+    // watch (PAYPAL_WATCH_IF_LIVE). Nothing the Path reads may then say the sale is known.
     const { store, statsId } = await setup();
     const at = Math.floor(Date.now() / 1000);
     redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, String(at), order(1)]);
@@ -342,7 +342,14 @@ async function main(): Promise<void> {
       if (String(input).includes("/v2/payments/captures/")) asked = true;
       return fetchBefore(input, init);
     }) as typeof fetch;
-    lost = (commands) => asked && commands.some((c) => (c[0] === "SET" && c[1] === `nl:ppsell:paid:${order(1)}`) || (c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${statsId}`));
+    let lostPaid = 0, lostWatch = 0;
+    lost = (commands) => asked && commands.some((c) => {
+      const paid = c[0] === "SET" && c[1] === `nl:ppsell:paid:${order(1)}`;
+      const watch = c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-watch-if-live:v1") && c.includes(`nl:ppsell:watch:${statsId}`) && c[c.length - 1] === order(1);
+      if (paid) lostPaid += 1;
+      if (watch) lostWatch += 1;
+      return paid || watch;
+    });
     try {
       await watchPayPal(store, Date.now() + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
     } finally {
@@ -350,6 +357,8 @@ async function main(): Promise<void> {
       globalThis.fetch = fetchBefore;
     }
     is("PayPal was asked", asked, true);
+    is("the paid record write was actually lost", lostPaid > 0, true);
+    is("the fenced reschedule was actually lost", lostWatch > 0, true);
     is("the blind mark and the new place unconfirmed: the money is unknown, no sale counted as kept", await money(store), [0, null]);
   }
 

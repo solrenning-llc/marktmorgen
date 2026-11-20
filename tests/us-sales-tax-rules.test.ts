@@ -62,6 +62,21 @@ test("thresholds are whole figures as written; a transaction test always says ho
   }
 });
 
+// Claude 5's LOW on #4957: a threshold's own quote must show the figures it backs, not only `counts`, because the next
+// unit wires them into a counter. The dollars as the page writes them (100,000), and the transaction count, in figures or in words.
+test("a known threshold's quote shows its own dollars and its transaction count", () => {
+  for (const rule of US_SALES_TAX_RULES) {
+    const read = rule.threshold;
+    if (!read.known || read.value === "no-state-sales-tax") continue;
+    const quote = read.source.quote;
+    assert.equal(quote.includes(read.value.salesUsd.toLocaleString("en-US")), true, `${rule.state}: ${read.value.salesUsd}`);
+    // The count in figures, or in words as a statute may write it (Hawaii's "two hundred or more separate transactions").
+    const IN_WORDS: Record<number, string> = { 100: "one hundred", 200: "two hundred" };
+    const count = read.value.transactions;
+    if (count !== null) assert.equal(new RegExp(`\\b${count}\\b`).test(quote) || quote.toLowerCase().includes(IN_WORDS[count] ?? "\u0000"), true, `${rule.state}: ${count}`);
+  }
+});
+
 test("the figures the pages give for some states, kept as read", () => {
   const value = (code: string) => {
     const read = usSalesTaxRule(code)!.threshold;

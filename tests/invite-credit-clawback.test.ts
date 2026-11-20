@@ -18,7 +18,8 @@ import { settleInvites } from "@/lib/creator-invite-credit";
 import { clawBackInviteCredits, lateDisputeExposureCeilingCents } from "@/lib/creator-invite-clawback";
 import { INVITE_DISPUTE_WINDOW_DAYS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT, currentInviteTerms, inviteShare } from "@/lib/creator-invite-rules";
 import { REFUND_DAYS } from "@/lib/plan";
-import { syncPlanDisputes } from "@/lib/plan-disputes";
+import { SEEN_KEY, syncPlanDisputes } from "@/lib/plan-disputes";
+import { CLAWBACKS_PER_RUN } from "@/lib/creator-invite-clawback";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -43,6 +44,8 @@ let disputes: unknown = { object: "list", data: [], has_more: false };
 const unreadable = new Set<string>();
 /** Customers whose next balance POST is applied, but answered 500 (a lost reply). */
 const lostReply = new Set<string>();
+/** Customers whose next balance POST is applied, but answered without a receipt (no cbtxn_ id). */
+const noReceipt = new Set<string>();
 /** Spent between a read and a write: taken off a customer's credit right after the next balance POST (an invoice). */
 const spentAfterPost = new Map<string, number>();
 
@@ -97,15 +100,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       lostReply.delete(id);
       return down();
     }
+    if (noReceipt.has(id)) {
+      noReceipt.delete(id);
+      return answer({ object: "customer_balance_transaction", amount });
+    }
     return answer({ id: row.id, object: "customer_balance_transaction", amount });
   }
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
 
 const list = (data: unknown[]) => ({ object: "list", data, has_more: false });
-const dispute = (status: string) => ({
-  id: "du_BeaClaw01", object: "dispute", status, amount: 2900, currency: "usd", payment_intent: PI, created: nowS - 2 * DAY,
-  charge: { id: "ch_bea_claw", invoice: { id: INVOICE, subscription: BEA_SUB, lines: { data: [{ period: { start: nowS - 30 * DAY, end: nowS } }] } } },
+const dispute = (status: string, id = "du_BeaClaw01", invoiceId = INVOICE) => ({
+  id, object: "dispute", status, amount: 2900, currency: "usd", payment_intent: PI, created: nowS - 2 * DAY,
+  charge: { id: "ch_bea_claw", invoice: { id: invoiceId, subscription: BEA_SUB, lines: { data: [{ period: { start: nowS - 30 * DAY, end: nowS } }] } } },
   balance_transactions: status === "lost" ? [{ id: "txn_out", object: "balance_transaction", amount: -2900, currency: "usd" }] : [],
 });
 
@@ -113,11 +120,13 @@ const dispute = (status: string) => ({
  * Ana invited Bea, who paid her first $29 plan invoice INVITE_HOLD_DAYS + 4 days ago with no dispute then: the run
  * sends Ana's share to her balance and Bea's bonus to hers. Answers Bea's store id.
  */
-async function sent(): Promise<string> {
+async function sent(opts: { anaPays?: boolean; anaNoReceipt?: boolean } = {}): Promise<string> {
   redis.clear();
   for (const m of [balances, history, posts, spentAfterPost]) m.clear();
   unreadable.clear();
   lostReply.clear();
+  noReceipt.clear();
+  if (opts.anaNoReceipt) noReceipt.add("cus_AnaClaw01");
   disputes = list([]);
   const made = async (email: string, handle: string) => {
     const r = await claimHandle(email, handle, handle, "");
@@ -128,7 +137,8 @@ async function sent(): Promise<string> {
   const bea = await made("bea-claw@example.com", "beaclaw");
   const code = await inviteCode(ana.sid);
   if (!code || (await recordInvite(bea, code, NOW - INVITED * DAY * 1000)) !== "recorded") throw new Error("no invite");
-  await setSubscription("ana-claw@example.com", { customerId: "cus_AnaClaw01", subscriptionId: "sub_AnaClaw01", active: true, period: paidPeriod() });
+  const anaPays = opts.anaPays ?? true;
+  await setSubscription("ana-claw@example.com", { customerId: anaPays ? "cus_AnaClaw01" : null, subscriptionId: anaPays ? "sub_AnaClaw01" : null, active: anaPays, period: paidPeriod() });
   await setSubscription("bea-claw@example.com", { customerId: "cus_BeaClaw01", subscriptionId: BEA_SUB, active: true, period: paidPeriod() });
   await quiet(() => settleInvites(Date.now() + 60_000, NOW));
   return bea.sid;
@@ -220,6 +230,45 @@ async function main(): Promise<void> {
   is("lost: the share and the bonus are taken back", [clawed(INVOICE), clawed(bonusId), balances.get("cus_AnaClaw01")], [share, bonus, 0]);
   await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
   is("the next day: nothing more", posts.get("cus_AnaClaw01")?.length, 2);
+
+
+  part("A share sent whose receipt was lost (still owed here), then a lost dispute: taken back too (Claude 4's MEDIUM on #4514)");
+  bonusId = `bonus_${await sent({ anaNoReceipt: true })}`;
+  is("control: the send landed, but the share is still owed here", [posts.get("cus_AnaClaw01"), balances.get("cus_AnaClaw01"), recordOf(INVOICE)?.state], [[-share], -share, "owed"]);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("the landed share is taken back, and written done with what was taken", [posts.get("cus_AnaClaw01"), balances.get("cus_AnaClaw01"), recordOf(INVOICE)?.state, clawed(INVOICE)], [[-share, share], 0, "done", share]);
+  await quiet(() => settleInvites(Date.now() + 60_000, NOW));
+  is("the next invite run sends nothing more to Ana, and her balance stays at zero", [posts.get("cus_AnaClaw01")?.length, balances.get("cus_AnaClaw01")], [2, 0]);
+
+  part("A share never sent (its inviter not paying yet): nothing is debited");
+  bonusId = `bonus_${await sent({ anaPays: false })}`;
+  balances.set("cus_AnaClaw01", -5_000);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("nothing debited, the share still owed and not marked", [posts.get("cus_AnaClaw01") ?? [], recordOf(INVOICE)?.state, clawed(INVOICE)], [[], "owed", undefined]);
+
+  part("A bonus earned with another payment is not taken back for this one");
+  bonusId = `bonus_${await sent()}`;
+  const other = recordOf(bonusId)!;
+  redis.run(["SET", creditKey(bonusId), JSON.stringify({ ...other, at: (other.at as number) - DAY })]);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("the share is taken back, the bonus is left", [clawed(INVOICE), clawed(bonusId), posts.get("cus_BeaClaw01")?.length], [share, undefined, 1]);
+
+  part("A clawback that fails keeps its dispute open: the next run takes it back");
+  bonusId = `bonus_${await sent()}`;
+  unreadable.add("cus_AnaClaw01");
+  disputes = list([dispute("lost")]);
+  const failing = await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
+  is("not taken back, the run not clean, the dispute still open", [clawed(INVOICE), failing.failed > 0, String(redis.run(["HGET", SEEN_KEY, "du_BeaClaw01"])).startsWith("open:")], [undefined, true, true]);
+  unreadable.clear();
+  await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
+  is("the next run takes it back", [clawed(INVOICE), balances.get("cus_AnaClaw01")], [share, 0]);
+
+  part("At most CLAWBACKS_PER_RUN lost disputes are taken back in one run; the rest stay open for the next");
+  await sent();
+  disputes = list(Array.from({ length: CLAWBACKS_PER_RUN + 1 }, (_, i) => dispute("lost", `du_BeaMany${String(i).padStart(2, "0")}`, `in_BeaMany${String(i).padStart(5, "0")}`)));
+  const many = await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
+  const marks = Array.from({ length: CLAWBACKS_PER_RUN + 1 }, (_, i) => String(redis.run(["HGET", SEEN_KEY, `du_BeaMany${String(i).padStart(2, "0")}`])));
+  is("one over the ceiling: one left open and counted as failed, the rest final", [many.failed, marks.filter((m) => m.startsWith("open:")).length, marks.filter((m) => m === "final").length], [1, 1, CLAWBACKS_PER_RUN]);
 
   part("The used part is a funded exposure with a calculated ceiling");
   const t = currentInviteTerms();

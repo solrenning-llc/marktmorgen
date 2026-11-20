@@ -4,6 +4,7 @@ import { CLOSING_DAYS } from '@/lib/plan-closing-rules';
 import { LONGEST_PAUSE_MONTHS, PAUSE_EVERY_DAYS, PLAN_BREAKS_ENABLED } from '@/lib/plan-pause-rules';
 import { CUSTOMER_COST_CATEGORIES, assessCustomerWorstCase } from '@/lib/net-margin-rules';
 import { customerTaxCollectionState, customerTaxContractContextState, customerTaxContractContextSupported } from './customer-tax-review';
+import { termsMatchDigest } from '@/lib/commercial-terms-digest';
 import { assessMinimumCustomerBase } from '@/lib/customer-base-rules';
 import { fundedExposureDetails } from '@/lib/funded-exposure-rules';
 import type { CommercialMarginReview, MarginScenario } from '@/lib/commercial-margin';
@@ -154,7 +155,7 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  const reviewEncoded=canonicalFinancialSnapshot(context.review);
  if(!reviewEncoded||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
  const review=parseOwnFinancialJson<CommercialMarginReview|null>(reviewEncoded);
- if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
+ if(!p||!review||p.financialSnapshot!==reviewEncoded||!termsMatchDigest(review.priceAndRightsDigest,context.termsSnapshot)||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
  const boundDisputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
  if(!boundDisputesField||!Object.hasOwn(boundDisputesField,'value')||!boundDisputesField.enumerable)return null;
  const boundDisputes=assessPlanPaymentDisputeCosts(boundDisputesField.value);

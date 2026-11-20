@@ -165,6 +165,33 @@ async function main() {
   pay(f, { at: NOW - 3 * DAY, refunded: 6_900 });
   is("refunded in full already: nothing again", (await f.read()).refund, { kind: "none", reason: "already_refunded" });
 
+  part("An impossible payment date cannot award or silently shrink the guarantee");
+  for (const at of [NOW + 1, NOW - DAY + 0.5, 1e100]) {
+    const first = await shop();
+    const invoice = pay(first, { at: NOW - DAY });
+    world.invoices.find((row) => row.id === invoice.inv)!.status_transitions = { paid_at: at };
+    is(`unreadable first payment date: ${at}`, await first.read(), { refund: { kind: "unknown", reason: "unreadable" } });
+  }
+  const bundle = await shop();
+  pay(bundle, { at: NOW - 2 * DAY });
+  const later = pay(bundle, { at: NOW - DAY, reason: "subscription_cycle" });
+  world.invoices.find((row) => row.id === later.inv)!.status_transitions = { paid_at: -1 };
+  is("a bad date on another paid invoice does not silently drop it from the guarantee",
+    await bundle.read(), { refund: { kind: "unknown", reason: "unreadable" } });
+  const renewal = await shop("year");
+  pay(renewal, { at: NOW - 400 * DAY, cycle: "year" });
+  const yearly = pay(renewal, { at: NOW - 35 * DAY, cycle: "year", reason: "subscription_cycle" });
+  const yearlyInvoice = world.invoices.find((row) => row.id === yearly.inv)!;
+  yearlyInvoice.status_transitions = { paid_at: String(NOW - 35 * DAY) };
+  is("a present but unreadable renewal date does not fall back to the charge's creation date",
+    await renewal.read(), { refund: { kind: "unknown", reason: "unreadable" } });
+  yearlyInvoice.status_transitions = { paid_at: null };
+  is("a legacy renewal with no invoice payment date can use its confirmed charge date",
+    (await renewal.read()).refund.kind, "unstarted_months");
+  const edge = await shop();
+  pay(edge, { at: NOW });
+  is("a payment confirmed in the observation second remains eligible", (await edge.read()).refund, { kind: "guarantee", cents: 6_900 });
+
   part("Once per person");
   const g = await shop();
   const gTwin = `cus_shop${n}twin`;

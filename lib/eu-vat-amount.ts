@@ -75,6 +75,9 @@ export const EU_VAT_RATES: readonly EuVatRate[] = [
 export const EU_VAT_RATES_VALID_UNTIL = "2026-12-31";
 const expired = (table: readonly EuVatRate[], today: Date) => table === EU_VAT_RATES && today.toISOString().slice(0, 10) > EU_VAT_RATES_VALID_UNTIL;
 
+/** Whether the official table is past its review date on `today`: then no EU sale is collected until it is read again. */
+export const euVatRatesExpired = (table: readonly EuVatRate[] = EU_VAT_RATES, today = new Date()): boolean => expired(table, today);
+
 /** The highest standard rate any Member State may set is far below this; anything above is a typing error. */
 const MAX_BASIS_POINTS = 3500;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

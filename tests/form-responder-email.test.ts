@@ -7,8 +7,9 @@
  * Ana's answers in Bob's copy and Bob's erasure deleted Ana's response. Deciding by
  * the form's questions as they stand now failed too once the creator deleted,
  * retyped or reordered the email question (review of #4436). A response kept before
- * `by` existed is still matched by any answer, which erases more rather than leave
- * data behind. Synthetic data only.
+ * `by` existed is the person's only when their address is the only address it names;
+ * one naming a second address keeps, and only the person's address in it is emptied
+ * (Codex X7's review of #4436). Synthetic data only.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,11 +64,25 @@ async function main(): Promise<void> {
   await writeForm(STATS, parseForm({ ...referral, fields: [fields[0]] })!);
   is("with the email questions deleted, Ana's erasure still finds hers", await forgetFormsPerson(STATS, "ana@example.com", ROOM), 1);
 
-  part("A response kept before the address was");
+  // Changed by Codex X7's MEDIUM on #4436 @61f9e61cf4 (rule 23): this part held the defect. A response kept before
+  // `by` existed was matched by any answer, so Ana's legacy referral naming Bob as a friend went whole into Bob's copy
+  // and was deleted by Bob's erasure. With no `by`, a response is a person's only when their address is the only
+  // address it names; when it names another, nothing says whose it is: it stays, and only their address is emptied.
+  part("A response kept before the address was, naming a second address");
   redis.clear();
   await writeForm(STATS, referral);
   await addResponse(STATS, referral.id, answer({ name01: "Old", mine01: "old@example.com", friend: "bob@example.com" }, 1), ROOM);
-  is("is matched by any answer, so nothing about the person stays behind", await forgetFormsPerson(STATS, "bob@example.com", ROOM), 1);
+  is("is not in Bob's copy", ((await copy("bob@example.com")) as Copied[]).length, 0);
+  is("Bob's erasure removes no response", await forgetFormsPerson(STATS, "bob@example.com", ROOM), 0);
+  is("and keeps it, with only his address emptied", (await readResponses(STATS, referral.id)).responses.map((r) => r.answers), [{ name01: "Old", mine01: "old@example.com", friend: "" }]);
+  is("then, naming one address only, it is that person's", await forgetFormsPerson(STATS, "old@example.com", ROOM), 1);
+
+  part("A response kept before the address was, naming only the person's address");
+  redis.clear();
+  await writeForm(STATS, referral);
+  await addResponse(STATS, referral.id, answer({ name01: "Bob", mine01: "Bob@Example.com ", friend: "" }, 1), ROOM);
+  is("is in Bob's copy", ((await copy("bob@example.com")) as Copied[]).map((r) => r.answers["Your name"]), ["Bob"]);
+  is("and Bob's erasure removes it whole, nothing about him left", [await forgetFormsPerson(STATS, "bob@example.com", ROOM), (await readResponses(STATS, referral.id)).responses.length], [1, 0]);
 
   part("The form's page keeps the address with the response");
   const route = readFileSync(join(process.cwd(), "app/api/store/form/route.ts"), "utf8");

@@ -261,8 +261,8 @@ export const MAX_PAY_FILES = 3;
 
 export const payFilesKey = (statsId: string) => `nl:affpay:${statsId}`;
 
-/** One kept file: when it was handed out (ms), its currency and its lines (affiliate id, amount in the smallest unit). */
-export type KeptPayFile = { at: number; currency: string; lines: { a: string; c: number }[] };
+/** One kept file: hand-out and book-read start (ms), currency and lines (affiliate id, amount in the smallest unit). */
+export type KeptPayFile = { at: number; readAt: number; currency: string; lines: { a: string; c: number }[] };
 
 /** A kept file as the studio lists it: never its addresses, only how many it pays and how much. */
 export type HeldPayFile = { id: string; at: number; currency: string; people: number; cents: number };
@@ -279,8 +279,10 @@ export function parsePayFile(raw: unknown): KeptPayFile | null {
     return null;
   }
   if (!value || typeof value !== "object") return null;
-  const { at, currency, lines } = value as Record<string, unknown>;
+  const { at, readAt, currency, lines } = value as Record<string, unknown>;
   if (!Number.isSafeInteger(at) || (at as number) <= 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
+  // Older snapshots have no read-start proof and must be downloaded again, never guessed from their later write time.
+  if (!Number.isSafeInteger(readAt) || (readAt as number) <= 0 || (readAt as number) > (at as number)) return null;
   if (!Array.isArray(lines) || lines.length === 0 || lines.length > MAX_BATCH_ROWS) return null;
   const seen = new Set<string>();
   const read: { a: string; c: number }[] = [];
@@ -290,7 +292,7 @@ export function parsePayFile(raw: unknown): KeptPayFile | null {
     seen.add(a);
     read.push({ a, c: c as number });
   }
-  return { at: at as number, currency, lines: read };
+  return { at: at as number, readAt: readAt as number, currency, lines: read };
 }
 
 /** The same lines, the same currency: the same file. */
@@ -312,10 +314,11 @@ async function readPayFiles(statsId: string): Promise<[string, string][]> {
  * them: a file that could never be confirmed is not handed out (the creator would pay it and the book would go on
  * owing it). Three commands, four when an old file is let go: HGETALL, HSET, EXPIRE (and HDEL).
  */
-export async function keepPayFile(store: Store, lines: BatchLine[], nowMs = Date.now()): Promise<string> {
+export async function keepPayFile(store: Store, lines: BatchLine[], nowMs = Date.now(), readAt = nowMs): Promise<string> {
   if (!store.statsId) throw new Error("a payout file needs the store's statsId");
   const key = payFilesKey(store.statsId);
-  const file: KeptPayFile = { at: nowMs, currency: store.currency, lines: lines.map((line) => ({ a: line.affiliate.id, c: line.cents })) };
+  if (!Number.isSafeInteger(readAt) || readAt <= 0 || !Number.isSafeInteger(nowMs) || readAt > nowMs) throw new Error("a payout file needs a known book read time");
+  const file: KeptPayFile = { at: nowMs, readAt, currency: store.currency, lines: lines.map((line) => ({ a: line.affiliate.id, c: line.cents })) };
   const kept = (await readPayFiles(store.statsId))
     .map(([id, raw]) => ({ id, file: parsePayFile(raw) }))
     .sort((x, y) => (y.file?.at ?? 0) - (x.file?.at ?? 0));

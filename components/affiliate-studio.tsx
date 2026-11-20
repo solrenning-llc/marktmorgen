@@ -83,9 +83,9 @@ const MESSAGES: Record<string, string> = {
   amount: "Type the amount you paid, like 25 or 25.50.",
   date: "Pick the day you paid it.",
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
-  file: "We could not find that payout file, so nothing was written down. It may be written down already, or it was downloaded more than 30 days ago. Reload the page, and download the file again if you still need it.",
+  file: "This payout file can no longer be checked, so no new payout was recorded. If you already paid it, check each affiliate’s recorded payments and use their payout form to record only any missing amounts from that file. Do not pay it again or confirm a new file for that payment. If you have not paid it, download a new file.",
   busy: "Payments to your affiliates are being written down right now, so nothing was saved. Try again in a minute.",
-  stale: "That file is out of date, so nothing was written down: a payment to one of its affiliates was sent through PayPal or written down after you downloaded it. If you paid this file too, write each of those payments down by hand. Otherwise, download a new file.",
+  stale: "That file is out of date, so no new payout was recorded: another payment overlaps the balance in the file. If you paid this file too, check each affiliate’s recorded payments and record only any missing amounts from that file by hand. Otherwise, download a new file.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   invoices:

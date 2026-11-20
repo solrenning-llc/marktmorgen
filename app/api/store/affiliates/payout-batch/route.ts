@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
   const { store } = creator;
   try {
     // The file names no product (batchFile), so nothing is read for the names.
+    // The stale check starts at the book read, before a concurrent payout can enter its snapshot window.
+    const readAt = Date.now();
     const book = await readBook(store, undefined, { titles: false });
     // The file is paid from as it is: while refunds or chargebacks could not
     // be read from Stripe in full, what is owed is not known, so no file is
@@ -70,7 +72,7 @@ export async function GET(request: NextRequest) {
     const { body, filename } = batchFile(provider, lines, store, day);
     let file: string;
     try {
-      file = await keepPayFileLocked(store, lines);
+      file = await keepPayFileLocked(store, lines, readAt);
     } catch (error) {
       if (!(error instanceof LockBusyError)) throw error;
       return new Response("Payments to your affiliates are being written down right now. Download the file again in a minute.", {

@@ -676,11 +676,12 @@ const LINES_PER_HOLD = 20;
 /**
  * Keeps a payout file about to be handed out (keepPayFile) under the store's payout lock, so two downloads at the
  * same moment never both read the kept files before either writes, and the store never keeps more than
- * MAX_PAY_FILES (review of #3906, LEVE 2). LockBusyError when the lock stays taken.
+ * MAX_PAY_FILES (review of #3906, LEVE 2). readAt is taken before reading the book, not after taking this lock.
+ * LockBusyError when the lock stays taken.
  */
-export async function keepPayFileLocked(store: Store, lines: BatchLine[]): Promise<string> {
+export async function keepPayFileLocked(store: Store, lines: BatchLine[], readAt: number): Promise<string> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("Payout records are unavailable");
-  return withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, () => keepPayFile(store, lines));
+  return withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, () => keepPayFile(store, lines, Date.now(), readAt));
 }
 
 /**
@@ -695,7 +696,7 @@ export async function keepPayFileLocked(store: Store, lines: BatchLine[]): Promi
  * nothing at all. A line whose affiliate has no record any more is skipped and counted.
  *
  * A file is refused as "stale", with nothing written, when any of its affiliates has a PayPal payment on its way
- * or a payout written at or after the moment the file was kept, other than this file's own lines (a retry): every
+ * or a payout written at or after the book read began, other than this file's own lines (a retry): every
  * file is a snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and
  * LEVE 4; the same millisecond, Codex L).
  * Once it is written down, every kept file of the store goes, for the same reason. The lock is renewed every
@@ -711,10 +712,10 @@ export async function confirmPayFile(store: Store, file: string, input: { date: 
       const inFile = new Set(kept.lines.map((line) => line.a));
       const away = await onTheirWay(store);
       if ([...inFile].some((id) => away.has(id))) return { ok: false, reason: "stale" };
-      // At or after the file was kept: the download read the book before keeping it, so a payout dated the same
-      // millisecond may overlap the balance the file pays (Codex L on #3906). Only this file's own line is not one.
+      // Read-start proof, not the later keep time: any payout during that reading overlaps its balance (Codex X5).
+      // The same millisecond is ambiguous too. Only this file's own deterministic line is exempt.
       const since = (await readPayoutsExact(store)).some(
-        (payout) => inFile.has(payout.aff) && payout.at >= kept.at && payout.id !== payoutIdForFileLine(file, payout.aff),
+        (payout) => inFile.has(payout.aff) && payout.at >= kept.readAt && payout.id !== payoutIdForFileLine(file, payout.aff),
       );
       if (since) return { ok: false, reason: "stale" };
       const reference = payoutReference(input.reference);

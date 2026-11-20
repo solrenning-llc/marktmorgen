@@ -137,7 +137,9 @@ async function main(): Promise<void> {
 
   part("The erasure's mark waits for the press's own lock (lib/closed-store-data.ts)");
   const source = (await import("node:fs")).readFileSync("lib/closed-store-data.ts", "utf8");
-  is("the mark is written under nl:pp:<statsId>:lock", /withLock\(`nl:pp:\$\{[^}]*statsId\}:lock`[\s\S]{0,400}ERASING_KEY/.test(source), true);
+  const marker = /const markErasing = async \(\) => \{[^}]*"HSET", ERASING_KEY/.test(source);
+  const underLock = /if \(store\.statsId\) await withLock\(`nl:pp:\$\{store\.statsId\}:lock`, 120, 5_000, markErasing\);/.test(source);
+  is("the mark is written under nl:pp:<statsId>:lock", [marker, underLock], [true, true]);
 
   done();
 }

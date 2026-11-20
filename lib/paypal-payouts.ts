@@ -94,6 +94,26 @@ if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) th
 redis.call("SET", KEYS[3], ARGV[2])
 return 1`;
 
+/**
+ * An open batch written only while its store is live, in one step (Codex L-20261120-0448 and -0349): payWithPayPal
+ * writes its batch down before asking PayPal for the money, and settlePayPal writes back the lines still on their way
+ * after PayPal answered a batch's status, which can take seconds; a store's erasure can begin meanwhile. A plain HSET
+ * (and SADD) would write the affiliates' ids, amounts and receiver prints back into nl:pp:open:<statsId>, an erased
+ * family, and, before a send, let the money be asked for after the erasure began. KEYS[1] the store's own key (its id
+ * key, or for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the
+ * open batches, KEYS[4] the settling's set of stores; ARGV[1] the store's erasing field, ARGV[2] the batch's field,
+ * ARGV[3] the batch, ARGV[4] the store's id to put in the settling's set, or "" for none. Answers -1, nothing written,
+ * when the store is gone or being erased; otherwise { HSET's answer, SADD's answer or 0 }. Billed 1 + 2 + the writes:
+ * three more than the plain writes it replaces (tests/plan-cost-registry.ts, PAYPAL_PRESS_COMMANDS). lib/redis-memory.ts
+ * runs it the same way.
+ */
+export const KEEP_OPEN_IF_LIVE = `-- marktmorgen:paypal-open-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
+local held = redis.call("HSET", KEYS[3], ARGV[2], ARGV[3])
+local added = 0
+if ARGV[4] ~= "" then added = redis.call("SADD", KEYS[4], ARGV[4]) end
+return {held, added}`;
+
 type Link = { client: string; secret: string; at: number; auto: boolean };
 export type PayPalView = { client: string; at: number; auto: boolean; broken: boolean };
 type OpenBatch = PendingPayoutBatch;
@@ -490,6 +510,14 @@ async function promoteBatch(statsId: string, field: string, batch: string, entry
   return true;
 }
 
+/** The one command that writes an open batch only while its store is live (KEEP_OPEN_IF_LIVE); `watch` puts it in the settling's set too. */
+async function keepOpenCommand(store: Store, field: string, value: string, watch: boolean): Promise<(string | number)[]> {
+  // The store's id key; for a store from before ids (sid ""), its record under its owner, as connectPayPal reads it.
+  const ref = storeRef(store);
+  const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : ""];
+}
+
 /** Takes one open-batch entry away: true only when Redis answers the HDEL with exactly 0 or 1 (rule 24). */
 async function removedExactly(statsId: string, field: string): Promise<boolean> {
   const gone = repliesFor(await redisPipeline([["HDEL", openKey(statsId), field]]).catch(() => null), 1);
@@ -635,15 +663,19 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
       // The lock was held again a full term just above (#4618), with nothing awaited since: it is still this press's
       // own, so it is not held a second time (one EVAL more that buys nothing; Claude 7 on #4488).
+      // Written only while the store is live (KEEP_OPEN_IF_LIVE, Codex L-20261120-0448): a store whose erasure began is
+      // asked for no money and gets nothing written back. The erasure writes its mark under this same lock
+      // (lib/closed-store-data.ts), so a press that holds it finishes first, and one that comes after is refused here.
       let held: unknown = null;
       try {
-        held = await redisPipeline([
-          ["HSET", openKey(statsId), unknownField, JSON.stringify(open)],
-          ["SADD", STORES, store.sid],
-        ]);
+        held = (await redisPipeline([await keepOpenCommand(store, unknownField, JSON.stringify(open), true)]))?.[0];
       } catch (error) {
         // No answer is not "not written": Redis may have applied it before the answer was lost.
         console.error("writing a PayPal batch down before sending it got no answer", error);
+      }
+      if (held === -1) {
+        console.error("a PayPal batch was not sent: its store is gone or being erased");
+        return { ok: false, reason: "error" };
       }
       if (!Array.isArray(held) || held.length !== 2 || held[0] !== 1 || (held[1] !== 0 && held[1] !== 1)) {
         // Not known to be held: nothing is sent now. The field is taken out again if it was written, and "nothing was
@@ -846,7 +878,9 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
       }
     }
     if (still.length) {
-      await redisPipeline([["HSET", openKey(statsId), batch, JSON.stringify({ ...sent, lines: still })]]);
+      // Written back only while the store is live (Codex L-20261120-0349): PayPal's answer can take seconds, and an
+      // erasure begun meanwhile must not get the batch's affiliates and amounts back. Its people still count as waiting.
+      await redisPipeline([await keepOpenCommand(store, batch, JSON.stringify({ ...sent, lines: still }), false)]);
       out.waiting += still.length;
     } else {
       await redisPipeline([["HDEL", openKey(statsId), batch]]);

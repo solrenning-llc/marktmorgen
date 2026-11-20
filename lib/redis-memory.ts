@@ -1906,6 +1906,16 @@ export class MemoryRedis {
           this.run(["SET", link, value]);
           return 1;
         }
+        // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
+        // store is live; -1, nothing written, when it is gone or being erased.
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v1\n") && args[0] === "4" && args.length === 9) {
+          const [, live, erasing, open, stores, field, batch, value, sid] = args;
+          this.scriptCalls += 2;
+          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return -1;
+          this.scriptCalls += sid === "" ? 1 : 2;
+          const held = this.run(["HSET", open, batch, value]);
+          return [held, sid === "" ? 0 : this.run(["SADD", stores, sid])];
+        }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
         if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {

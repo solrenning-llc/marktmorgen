@@ -13,6 +13,12 @@ export const WORST_MONTH_TIERS = ["creator", "pro", "scale"] as const;
 
 /** Store, Studio and Scale, in dollars to the cent, on a monthly plan or in a month of a yearly one (a twelfth paid). */
 export function worstMonthKept(cycle: Cycle): string[] {
-  const taxShare = (MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000;
-  return WORST_MONTH_TIERS.map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
+  // In whole cents, never above the profit (floor), then IRPF and IOF each rounded up on its own, as
+  // lib/receiving-costs.ts rounds them; no tax on a loss.
+  return WORST_MONTH_TIERS.map((tier) => {
+    const profitCents = Math.floor((netOf(tier, cycle) - worstCost(tier)) * 100 + 1e-9);
+    const taxable = Math.max(0, profitCents);
+    const taxCents = Math.ceil((taxable * MOST_CORRECT_READING.profitTaxBps) / 10_000) + Math.ceil((taxable * MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000);
+    return ((profitCents - taxCents) / 100).toFixed(2);
+  });
 }

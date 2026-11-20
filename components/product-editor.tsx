@@ -1346,7 +1346,7 @@ function OptionsBlock({
                     onClick={() =>
                       run({ action: "move", id: option.id, direction: "up" }, () => {})
                     }
-                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-12 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move up
                   </button>
@@ -1359,7 +1359,7 @@ function OptionsBlock({
                         () => {},
                       )
                     }
-                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-12 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move down
                   </button>
@@ -2203,7 +2203,7 @@ export function ProductEditor({
     }
   }
 
-  const quiet = "inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
+  const quiet = "inline-flex min-h-12 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
 
   return (
     <StoreCurrency value={currency}>

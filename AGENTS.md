@@ -228,6 +228,8 @@ Unknown taxes, unbounded costs and missing reviews do not count as zero: they ke
 
 > **Atualização MR, 27/10/2026 07h42 Fortaleza:** somente o piso histórico de 60% desta seção foi substituído pela [REGRA DE MARGEM vigente](AGENTS.md#mr--regra-de-margem-vigente-27-de-outubro-de-2026). Os textos e números anteriores ficam como histórico, não como trava atual. Nenhum outro requisito, custo, imposto, teto, reserva ou gate é dispensado.
 
+> **Atualização TX, 19/11/2026 (dono, por volta das 21h35 Fortaleza): histórico, substituído pela [política TX](AGENTS.md#tx--política-tributária-vigente-dono27102026-12h34-fortaleza).** No item 1, "the most expensive defensible assumption, never below the 27.5% stress rate" e o fechamento de dúvidas por consulta não valem mais em nenhum cálculo de lucro; vale a leitura juridicamente mais correta (hoje IRPF de 15% e IOF de 0,38% sobre o lucro, sem ISS e sem imposto federal americano), sem consulta (TX). O texto desta seção fica como histórico, sem nada apagado. Taxas de recebimento mais caras, reservas, "custo desconhecido reprova" e todas as travas continuam.
+
 
 The owner's words (Portuguese, verbatim):
 
@@ -256,6 +258,8 @@ Where the law is unclear or has more than one reading, every margin model, revie
 
 ## Marktmorgen as the supplier for tax: EU art. 9a and the rest (18 Oct 2026)
 
+> **Atualização TX, 19/11/2026 (dono, por volta das 21h35 Fortaleza): histórico, substituído pela [política TX](AGENTS.md#tx--política-tributária-vigente-dono27102026-12h34-fortaleza).** A presunção do art. 9º-A na UE continua (TX, ponto 13: validade confirmada pelo TJUE em C-695/20, Fenix). Só "the same is taken, under the reading with more tax" para o Reino Unido, os estados americanos e outros países é histórico: em cada jurisdição vale a lei local, aplicada pela leitura juridicamente mais correta (TX, pontos 11, 14, 15 e 17), e não a hipótese que dá mais imposto. Até cada jurisdição ter registro completo em `DEEMED_SUPPLIER_RECORDS`, `PLANS_ON_SALE` continua false. O texto desta seção fica como histórico, sem nada apagado. Taxas de recebimento mais caras, reservas, "custo desconhecido reprova" e todas as travas continuam.
+
 Council Implementing Regulation (EU) No 282/2011 art. 9a presumes that a platform taking part in a supply of electronically supplied services acts in its own name, and the presumption cannot be rebutted by one that authorises the charge, authorises the delivery or sets the general terms and conditions. Marktmorgen does all three, so for EU VAT it is the supplier of what a store sells electronically to an EU consumer, whatever the terms say and although every sale is a direct charge on the creator's account: VAT at the consumer's rate on the whole price, the non-Union OSS from the first sale, two non-contradictory pieces of location evidence (arts. 24b, 24f) and the art. 63c records kept 10 years. The same is taken, under the reading with more tax, for the UK, US states' marketplace-facilitator laws and other countries' platform rules. The owner's design: the tax is added on top of the buyer's price or taken from the creator's payout, never from Marktmorgen's commission. None of it is built ([docs/eu-vat-article-9a.md](docs/eu-vat-article-9a.md) has the reading per checkout path and the next build). Until each jurisdiction has a complete record in `DEEMED_SUPPLIER_RECORDS` (`lib/deemed-supplier.ts`), `PLANS_ON_SALE` (`lib/opening.ts`) is false, and so no store can sell (`canSell` needs a plan); `tests/tax-gate.test.ts` names art. 9a among the reasons. Never record a treatment that is not built and tested.
 
 ## One receiving model for every unit (18 Oct 2026)
@@ -270,6 +274,8 @@ Council Implementing Regulation (EU) No 282/2011 art. 9a presumes that a platfor
 ## Prices and limits per plan: the owner's decision of 18 October 2026, 11:21 (Marktmorgen only)
 
 > **Atualização MR, 27/10/2026 07h42 Fortaleza:** somente o piso histórico de 60% desta seção foi substituído pela [REGRA DE MARGEM vigente](AGENTS.md#mr--regra-de-margem-vigente-27-de-outubro-de-2026). Os textos e números anteriores ficam como histórico, não como trava atual. Nenhum outro requisito, custo, imposto, teto, reserva ou gate é dispensado.
+
+> **Atualização TX, 19/11/2026 (dono, por volta das 21h35 Fortaleza): histórico, substituído pela [política TX](AGENTS.md#tx--política-tributária-vigente-dono27102026-12h34-fortaleza).** "The tax gate (most-tax reading)" é histórico: a leitura do gate é a juridicamente mais correta (`GATE_READING_ID` "most-correct", `MOST_CORRECT_READING`; hoje IRPF de 15% e IOF de 0,38% sobre o lucro, sem ISS). O gate, o art. 9º-A e a revisão comercial continuam exatamente tão estritos; preços e limites não mudam. O texto desta seção fica como histórico, sem nada apagado. Taxas de recebimento mais caras, reservas, "custo desconhecido reprova" e todas as travas continuam.
 
 
 The owner's words (Portuguese, verbatim): 11:21 "preço: o que maximiza o meu lucro. limites: combinação que potencializa o que maximiza meu lucro + o que cliente percebe alto valor + não remover limites visíveis"; 11:22 "preço e limites = preço e limites de cada plano"; 11:25 "você deve verificar como os melhores concorrentes fazem para ver como o cliente veria alto valor em mim." Hazelsong's prices do not change.

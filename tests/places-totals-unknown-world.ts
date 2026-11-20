@@ -18,7 +18,8 @@ export async function communityVisitor(store: Store): Promise<Viewer> {
   const who = slot.__placesViewer;
   const config = store.community ? await readConfig(store.community.id) : null;
   if (!who || !config) return { state: "off" };
-  return { state: "in", config, email: who.email, key: who.key, owner: who.owner, member: null, canWrite: true };
+  // No reading held for the request (this branch's Viewer.holdings): mayAttend reads the products itself, as before.
+  return { state: "in", config, email: who.email, key: who.key, owner: who.owner, member: null, canWrite: true, holdings: null };
 }
 
 export async function cookies(): Promise<{ get: () => undefined }> {

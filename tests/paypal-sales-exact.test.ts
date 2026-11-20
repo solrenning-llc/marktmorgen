@@ -38,7 +38,8 @@ delete process.env.PAYPAL_ENV;
 delete process.env.PAYPAL_API_BASE;
 
 const sid = "synthetic-paypal-sales-exact";
-const shop = { statsId: sid, handle: "exactshop", paypalSeller: { merchant: SELLER } } as unknown as Store;
+// A store as one is read: its id and owner, so the refund watch can fence its writes against the store's erasure.
+const shop = { sid, statsId: sid, email: "owner@example.com", handle: "exactshop", paypalSeller: { merchant: SELLER } } as unknown as Store;
 const EMAIL = "buyer@example.com";
 let n = 0;
 const nextOrder = () => `5O1901EXACT${String(++n).padStart(4, "0")}`;

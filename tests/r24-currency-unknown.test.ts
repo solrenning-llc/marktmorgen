@@ -183,11 +183,11 @@ async function offers() {
     const id = `cs_test_r24off${String(order).padStart(8, "0")}`;
     sessions[id] = withCurrency({
       id, status: "complete", payment_status: "paid", created: Math.floor(Date.now() / 1000) - 60, customer: "cus_TestBuyer01",
-      metadata: { store: "r24off", product: front, upsell_key: browser.fingerprint }, customer_details: { email: "buyer@example.com" },
+      metadata: { store: "r24off", product: front, upsell_key: browser.fingerprint }, customer_details: { email: "buyer@example.com", address: { country: "US" } },
       payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
     }, currency);
     const before = charged;
-    const result = await takeUpsell({ store, session: id, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+    const result = await takeUpsell({ headers: new Headers(), store, session: id, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
     return [result.kind, charged - before];
   };
 

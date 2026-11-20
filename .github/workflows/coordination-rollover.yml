@@ -5,11 +5,12 @@
 # the change and the label rule (with the PAINEL's old first line, to undo), changes the PAINEL's first line (comment
 # 6929670678 on #4827, the owner's one exception to "never edits comments") and moves the label last. It never closes or
 # locks an issue and never deletes or edits any other comment. Every read and check comes before the first write; a
-# failure leaves the run red and the channel where it was, and the next comment on the same part retries.
+# failure leaves the run red and the channel where it was, and the next comment on the same part retries. A PAINEL it may
+# not edit never stops the rollover: the PAINEL is left as it is, one warning goes to the new channel and the run is red.
 #
 # It is off until the repository variable COORDINATION_ROLLOVER is set (owner, 20/11/2026: tested before it is turned on):
 #   - unset: comments run nothing; a manual run (Actions, Coordination rollover, Run workflow) is a dry run by default,
-#     which only reads and prints what a rollover would do;
+#     which only reads and prints what a rollover would do; a manual run in mode run refuses until the variable is on;
 #   - "dry-run": every comment on the labeled issue runs that dry run and prints the values GitHub evaluated for the
 #     job's condition (labeled, pull request, comment count, at or above 2,250);
 #   - "on": a comment on the labeled issue at 2,250 comments or more rolls the channel over.
@@ -54,6 +55,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.COORDINATION_ROLLOVER }}
+          SWITCH: ${{ vars.COORDINATION_ROLLOVER }}
           EVENT_ISSUE: ${{ github.event.issue.number }}
           EVENT_LABELED: ${{ contains(github.event.issue.labels.*.name, 'canal-ativo') }}
           EVENT_IS_PR: ${{ github.event.issue.pull_request != null }}

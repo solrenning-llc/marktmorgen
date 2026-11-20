@@ -2290,6 +2290,7 @@ Cumprida a regra do dono de registrar impedimento externo superiora1hora eavanç
      - Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis; o selo mantém contraste 7:1, alvo de toque de 44 px, nome acessível que diz para onde leva, foco visível e funcionamento com text-spacing e 390 px; conferir antes e depois com as auditorias automáticas já existentes.
      - Testes automáticos: (1) programa pausado → link sem código; (2) programa aberto e código válido → link com o código e nada mais; (3) código inválido → sem código; (4) nenhuma gravação no navegador ao abrir a loja; (5) selo sem pré-carregamento; (6) loja com o direito "branding" que desligou o selo → nada aparece. Somente dados sintéticos. Cada teste falha no comportamento errado.
      - Custo: nenhuma leitura nova por visita; o código vem com a loja já lida. Se exigir leitura extra, calcular o pior caso com teto antes de construir. Custo desconhecido reprova, nunca é zero.
+     - Lista de abertura (Claude 2, 09/11/2026, nota 1 da revisão do Claude 6 no PR #3429): enquanto INVITE_BADGE_LINK_ON (lib/badge-link.ts) for falso, `COMMANDS.frontPage` fica em 4 e nenhum documento gerado muda. Ligar o selo com convite (INVITE_PROGRAM_OPEN e PLANS_ON_SALE true) soma 1 comando por visita da página da loja, e a cifra do primeiro ano do plano Creator está em US$ 64,972 contra o teto de leitura de US$ 65, então o PR que abrir as vendas precisa, no mesmo PR: (1) regenerar margin-alignment, limits-proposal, pricing-usage-proposal e pricing-optimization (6 verificações em 4 documentos gerados ficam velhas); (2) rodar de novo o teste read-ceilings e conferir que o teto continua respeitado, sem subir o teto nem mexer em preço ou limite visível. Não precificar a leitura antes disso.
      - REGRA DE MARGEM (MR, 27/10/2026): aplicar integralmente; este complemento não pode baixar a margem de nenhum cliente.
      - Proibido: mudar preços, limites visíveis, comissão, recompensa de convite, INVITE_PROGRAM_OPEN, PLANS_ON_SALE, OPENING_REQUESTED, tax gate, art. 9a, revisão comercial ou stripePlatformEligibilityReady; mudar o que cada plano inclui; afrouxar trava; mostrar recurso que não funciona; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores. Somente testes sintéticos.
      - Aplicar a regra VR.
@@ -14498,6 +14499,8 @@ Se uma proposta continuar na situação "sent", sem "replied", "deal" ou "stoppe
 Estado inicial: na fila.
 Na área Outreach, um resumo com os dados do próprio criador: por objetivo (sponsor, partner, business) e por tipo de alvo, quantas propostas foram enviadas, respondidas e fechadas, e a próxima ação sugerida em linguagem simples (por exemplo, "Sponsors in your topic reply more often; write to two more this week"). Só agregados do próprio criador; nunca de outros criadores; nunca rastreamento de abertura de e-mail. Mostrar "not enough data yet" abaixo de 5 propostas.
 
+Andamento (Claude 1, 12/11/2026): **testado num PR** (ramo claude1/ox3-outreach-results; arquivos reservados: lib/outreach-results.ts, components/outreach-results.tsx, tests/outreach-results.test.ts e, em components/outreach-studio.tsx, só a importação e o lugar do cartão). No estúdio de Outreach, acima de "Your pitches", o cartão "What your pitches did": por objetivo (sponsor, partner, business), quantas foram enviadas, respondidas (replied ou deal), viraram negócio e pediram para parar (dito à parte, nunca contado como resposta); rascunho não conta como enviada; abaixo de 5 enviadas, "Not enough data yet" sem taxa nem dica, e objetivo com menos de 5 nunca é comparado; a próxima ação só diz o que os números do próprio criador mostram (rascunhos não enviados; um objetivo respondido estritamente mais vezes que outro, com as duas contagens; ou que nenhuma resposta foi marcada), sem média de outros criadores, promessa nem pressa; o cartão diz que as respostas são as marcadas pelo criador e que nada rastreia abertura. Desenhado da mesma lista que o estúdio mostra, então marcar uma proposta como respondida muda os números na hora. Sem custo novo: a página já lia as propostas. Resta para depois do 499 [OX1]: o recorte por tipo de alvo, que depende das notas de alvo ainda não construídas.
+
 Regra de margem: cada item segue a REGRA DE MARGEM vigente (MR, 27/10/2026, 07h42): nenhum cliente pagante dá prejuízo, usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, com teto automático e reserva antes de cada gasto; a empresa sem prejuízo a partir da base mínima; 60% é meta mensal real, não trava. Política tributária TX. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; taxas de recebimento mais caras de lib/receiving-costs.ts; todos os custos fixos são 100% do Marktmorgen (FX275).
 
 Proibido: mudar preços, cortar limites visíveis, retirar recursos ou direitos de qualquer plano, alterar comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a ou a revisão comercial; afrouxar as regras de lei por país ou de "no solicitations" do Outreach; enviar qualquer e-mail pelo Marktmorgen; comprar ou raspar listas de contatos; escrever a pessoas físicas; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo ou qualquer coisa da Hazelsong. Somente testes sintéticos.
@@ -23805,5 +23808,79 @@ Custo: Sem gasto com fornecedor nos estudos. Custo desconhecido reprova, nunca �
 REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
 
 Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Criar conta em serviço de IA ou de fotos para concluir o estudo.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## IV — Impostos das vendas recebidos na própria cobrança, pela taxa da plataforma (19/11/2026)
+
+Etiqueta: [IV1], item 789.
+
+Solicitação do dono (19/11/2026, por volta das 21h30, horário de Fortaleza), na sessão do Claude 4: "eu quero desde o primeiro dia aceitar consumidores europeus e britânicos..". Em seguida, o dono respondeu às duas perguntas do Claude 4: como o IVA chega à Solrenning LLC e o que fazer com os produtos físicos. As duas respostas estão na íntegra em docs/eu-uk-us-tax-collection-decision-2026-11-19.md, e a regra resumida está em AGENTS.md, seção "IV". Texto do item redigido pelo Claude 4 a partir dessas palavras.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (4dddd54f3) e os 292 PRs abertos (heads lidos só com git), pela data e hora, pela etiqueta [IV] (livre), pelos termos e pelo conteúdo. Nenhum registro equivalente. Itens relacionados, que este item reaproveita sem duplicar:
+- a construção já existente continua dentro dos próprios itens: 7 [C-UE], 8 [C-UK], 9 [C-US], 300–303 [9A-1 a 9A-4], 331 [RC1] (impostos dos planos do próprio Marktmorgen) e 753 [IR1] (recibos do criador; o documento fiscal do comprador segue o registro "collect");
+- os módulos puros já existentes são ligados, não refeitos: lib/eu-vat-*.ts, lib/uk-vat.ts, lib/vat-registrations.ts, lib/deemed-supplier*.ts e o #4573, do OSS trimestral, ainda aberto.
+
+Estado inicial: na fila. Posição: condição do Bloco de abertura, pela decisão do dono, item (e) da seção IV de AGENTS.md. A ordem dos outros itens não muda. Faixa: Codex nos arquivos de impostos e cobrança que lhe pertencem (lib/tax*, lib/deemed-supplier.ts, lib/receiving-costs.ts); as demais unidades são distribuídas pelo Claude 1 conforme docs/reservations.md.
+
+Problema concreto que resolve (VR, item 3): hoje um criador não poderia vender a um consumidor da UE ou do Reino Unido sem que a Solrenning LLC ficasse devendo um imposto que não recebeu, porque a outra opção era recusar esses compradores. Como se confere: fluxo completo com dados sintéticos e provedores simulados, da cobrança à declaração. Como traz lucro: os criadores vendem para a UE e o Reino Unido desde o primeiro dia, o que aumenta o valor dos planos, sem custo de imposto na margem.
+
+O que fazer, em unidades pequenas, cada uma conferida contra o código e a fila antes de começar:
+1. Fechar os caminhos de REFUSE_CONSUMERS_OPEN (lib/deemed-supplier-drafts.ts) enquanto a abertura não chega: pedidos de pagamento, gorjetas, chamadas e pacotes, blocos de venda e checkout embutido, e oferta de um clique depois do pagamento. Também ligar a recusa de envio físico para a UE e o Reino Unido (lib/eu-vat-goods.ts) como trava até a abertura.
+2. A taxa da plataforma do imposto: um módulo puro que compõe application_fee_amount = parte do plano (hoje 0%) + imposto + custos de receber esse imposto (conversão, teto de variação do câmbio até a declaração e transferência, cada um com fonte; desconhecido reprova). No reembolso, a parte do imposto volta junto com o dinheiro do comprador; na contestação perdida, ela é mantida. lib/share-settle.ts separa o imposto da comissão. Antes de ligar: conferir em fonte oficial datada se uma plataforma dos EUA pode cobrar application_fee_amount em cobrança direta nas contas Standard do Reino Unido, do EEE e do Canadá (docs/eu-vat-official-sources-2026-11-13.md, seção 6).
+3. UE, serviços eletrônicos: ligar nos checkouts os módulos já prontos (linha de IVA, provas dos arts. 24b e 24f, registro do art. 63c, reembolso, VIES), atrás de EU_VAT_COLLECT_REVIEWED. O imposto automático do criador fica desligado nessa venda.
+4. Reino Unido: ligar lib/uk-vat.ts do mesmo modo, atrás de UK_VAT_COLLECT_REVIEWED.
+5. Guarda por 10 anos dos registros do art. 63c e dos britânicos, com custo financiado antes (docs/eu-vat-retention-funding.md), inclusive depois que a loja fecha (lib/closed-store-data.ts, lib/data-families.ts).
+6. Declarações: OSS não União trimestral (#4573), Union OSS, IOSS mensal, VAT Return britânico e os estados americanos registrados, com correções de períodos anteriores.
+7. Bens físicos na UE (art. 14a): remessa importada de até 150 euros pelo IOSS, com intermediário; bens já na UE de criador não estabelecido, pelo Union OSS; acima de 150 euros, aviso antes de pagar dos impostos e taxas de importação.
+8. Bens físicos no Reino Unido: até 135 libras e bens já no país de vendedor estrangeiro, pelo HMRC; acima de 135 libras, aviso antes de pagar.
+9. Segurança de produtos para marketplaces na UE (GPSR) e no Reino Unido, e conferência do registro de embalagens do vendedor onde a lei exigir (por exemplo, Alemanha e França), com fontes oficiais datadas.
+10. Venda ao vivo (chamadas e pacotes) a consumidor da UE e do Reino Unido: conferir e gravar o tratamento; até lá, recusada.
+11. Estados Unidos: o mesmo mecanismo da taxa da plataforma para o sales tax das lojas nos estados de "marketplace facilitator", acima do limite de cada um, com os contadores por estado de 9 [C-US].
+12. Planos do Marktmorgen (em 331 [RC1], sem duplicar): inversão do sujeito passivo com VIES para empresa da UE com número válido; OSS para criador sem número; regras britânicas equivalentes; sales tax nos estados que tributam software por assinatura, acima do limite.
+13. Termos, política de privacidade e a frase vista pelo comprador (whoAnswers, nos sete idiomas), mudados juntos, com o texto legal para o dono aprovar.
+14. Margem e custos: imposto e custos de recebimento no modelo de lib/receiving-costs.ts; intermediário, registros, declarações e obrigações nos custos fixos (FX275) e na base mínima, com valor real e fonte.
+15. Na abertura, depois dos registros feitos pelo dono: registros "collect" da UE e do Reino Unido (e dos EUA, quando for o caso) em DEEMED_SUPPLIER_RECORDS, com o registro fiscal, o teste de ponta a ponta e a conferência das fontes oficiais, com data, feita de novo antes de abrir.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar. Inclui o imposto e o aviso de taxas de importação legíveis antes de pagar, com contraste de 7:1, por leitor de tela e por teclado, em inglês americano simples, sem limite de tempo, com reflow em 320 px e zoom de 400%. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa antes e depois.
+
+Testes automáticos: cada unidade com teste que falha antes da mudança, só com provedores simulados e dados sintéticos: imposto por fora; provas de localização em contradição; reembolso total e parcial; contestação perdida; câmbio no teto; venda acima e abaixo de 150 euros e de 135 libras; criador estabelecido e não estabelecido; trava desligada recusando.
+
+Custo: custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação. O imposto recebido pela taxa da plataforma nunca sai da receita nem da comissão. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima. Leitura tributária pela política TX.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, EU_VAT_COLLECT_REVIEWED, UK_VAT_COLLECT_REVIEWED, o tax gate, a revisão comercial ou stripePlatformEligibilityReady; preencher DEEMED_SUPPLIER_RECORDS ou os registros fiscais sem o registro real do dono; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados (a parte do imposto devido pela LLC, recebida na própria cobrança, é a exceção da seção IV de AGENTS.md); propor de novo o crédito pré-pago ou a fatura posterior; criar contas, aceitar termos, contratar (inclusive o intermediário de importação), pagar ou contatar terceiros, inclusive a Stripe; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## IV2 — Endereço de cobrança em toda compra paga (20/11/2026)
+
+Etiqueta: [IV2], item 790.
+
+Solicitação do dono (20/11/2026, por volta da 00h20, horário de Fortaleza), na sessão do Claude 4. O texto literal está em docs/eu-uk-us-tax-collection-decision-2026-11-19.md, seção "Complemento: endereço de cobrança em toda compra paga", e a regra está em AGENTS.md, seção IV, item (i). Complementa o 789 [IV1].
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. A busca no main e nos PRs abertos, por `billing_address_collection`, pela data e pela etiqueta [IV2] (livre), não achou registro equivalente.
+
+Estado inicial: na fila. Posição: condição do Bloco de abertura, junto do 789 [IV1]. A ordem dos outros itens não muda.
+
+Problema concreto que resolve (VR, item 3):
+- a oferta de um clique ficava escondida quando a Stripe não guardava o endereço, inclusive fora da UE;
+- faltava a segunda prova de localização exigida pelos arts. 24b e 24f;
+- faltava o local do comprador para o sales tax americano.
+
+Como se confere: fluxo completo sintético, com a sessão de checkout pedindo o endereço e os testes da oferta e dos registros. Como traz lucro: a oferta de um clique volta a aparecer para todo comprador, e o imposto da abertura fica correto.
+
+O que fazer, em unidades pequenas:
+1. **Checkouts pagos:** `billing_address_collection=required` em todo checkout pago da Stripe, como cartão, carrinho, pedidos de pagamento, gorjetas, chamadas e renovação. Compra gratuita fica sem endereço. Um teste lista cada lugar que abre uma cobrança e prova que todos pedem o endereço.
+2. **Oferta de um clique (`offerGate`, lib/upsell.ts):** as provas passam a ser o endereço e o país do cartão (`payment_intent.payment_method.card.country`, já lido). Uma contradição recusa, como hoje.
+3. **Privacidade:** a política de privacidade (app/privacy/page.tsx, arquivo compartilhado) e lib/person-data.ts dizem para que serve o endereço e por quanto tempo fica guardado (10 anos nas vendas da UE, art. 63c; nas demais, o prazo legal), e que nunca é usado para marketing. As regras de apagar dados continuam onde a lei permite.
+4. **Sales tax americano:** o local do comprador vem desse endereço, com os contadores por estado do 9 [C-US].
+
+Acessibilidade (AX274, Parte A, integral): o formulário de endereço é o da própria Stripe. Cada PR registra o que muda para o comprador. Os passos aumentam com os campos do endereço, preenchidos automaticamente quando possível.
+
+Custo: nenhum fornecedor novo. Custo desconhecido reprova, nunca é zero.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, a revisão comercial ou stripePlatformEligibilityReady; usar o endereço para marketing; pedir telefone ou outro dado; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; usar dados reais nos testes.
 
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.

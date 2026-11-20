@@ -10,17 +10,21 @@
  * other store" either (rule 24; found by Claude 6's money review of #3099):
  * prepareStore took a memberStores/accountStores read that threw as "nothing
  * else", and deleted the host's own calendar although the host still served
- * another, live store. Such a store now waits a walk, its host's calendar kept.
+ * another, live store. Such a host's calendar is now kept; the closing store is erased all the same (Claude 4's
+ * review of #3660: until then it waited a walk, and a host whose read never works, such as one on more stores than
+ * are read, made it unerasable, forever).
  *
  * Synthetic stores, in-memory Redis; the unreadable record is a read that times out. Each store is closed the
  * way the closing job leaves it (tests/closed-for-erasure.ts): the walk erases only a store really due (#3156).
  */
 import { createHash } from "node:crypto";
-import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, walkPage, type Batched } from "@/lib/closed-store-data";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { hostId } from "@/lib/host-claims";
+import { packageKeys, packagesKey } from "@/lib/call-packages";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
@@ -74,6 +78,35 @@ async function main(): Promise<void> {
   await makeStore(B, "readableb");
   if (redis.run(["GET", ownerKey(A)]) === null) throw new Error("setup: the owner key formula does not match lib/store.ts");
 
+  // Codex X5 (X5-20261118-0342): a package record that answers a text with no token is unknown, never an empty record.
+  part("A closing store keeps the package index until the stored token can be read");
+  {
+    const statsId = "a".repeat(40);
+    const checkout = "cs_test_packageClosure123";
+    const token = "a".repeat(48);
+    const [record, , door, used] = packageKeys(checkout, token);
+    const index = packagesKey(statsId);
+    const entry: Batched = {
+      ref: "test-closed-package", email: "", sid: "", statsId, name: "",
+      handle: "closedpackage", handles: [], marks: [statsId], endedAt: 0, at: 0,
+    };
+    const batch = new Map([[entry.ref, entry]]);
+    const owners = {
+      byMark: new Map([[statsId, entry.ref]]),
+      byHandle: new Map<string, string>(),
+      byRef: new Map([[entry.ref, entry.ref]]),
+    };
+    await redis.pipeline([["SADD", index, checkout], ["SET", record, ""], ["SET", door, checkout], ["SADD", used, "u123456789abcdef"]]);
+    const retriable = await walkPage([index], batch, owners).then(() => false, error => error instanceof UnknownReplyError);
+    const keys = [index, record, door, used];
+    is("an unreadable token refuses the page and keeps every lookup key",
+      [retriable, await redis.pipeline(keys.map(key => ["EXISTS", key]))], [true, [1, 1, 1, 1]]);
+    await redis.pipeline([["SADD", index, checkout, "cs_test_expiredHistory123"], ["SET", record, JSON.stringify({ token })]]);
+    await walkPage([index], batch, owners);
+    is("after a healthy read, the index and package keys are removed; an expired record does not block the walk",
+      await redis.pipeline(keys.map(key => ["EXISTS", key])), [0, 0, 0, 0]);
+  }
+
   part("The erasing walk keeps an unreadable store in line");
   const T = Date.now();
   await closeForErasure(A);
@@ -102,7 +135,7 @@ async function main(): Promise<void> {
     for (const key of calendarOf(X)) redis.run(["SET", key, "test"]);
   }
 
-  part("A host whose other stores cannot be read keeps their calendar; the closing store waits");
+  part("A host whose other stores cannot be read keeps their calendar; the closing store is erased all the same");
   await world(true);
   if (redis.run(["SCARD", teamIndexKey(X)]) !== 1) throw new Error("setup: the team index formula does not match lib/team.ts");
   const T2 = Date.now();
@@ -112,8 +145,7 @@ async function main(): Promise<void> {
   unreadableSets.delete(teamIndexKey(X));
   const scoreX = redis.run(["ZSCORE", DUE_KEY, X]);
   is("the host's calendar is still there", kept(X), [1, 1, 1, 1]);
-  is("the closing store is not prepared", [blind.stores, redis.run(["HEXISTS", BATCH_KEY, X])], [0, 0]);
-  is("it is still in line, moved back a walk", scoreX !== null && Number(scoreX) >= T2 + WALK_GAP_MS, true);
+  is("the closing store is prepared and out of line (Claude 4 on #3660)", [blind.stores, scoreX], [1, null]);
 
   part("Control: a host who still serves another store keeps their calendar when the read works");
   await world(true);

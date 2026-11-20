@@ -522,8 +522,22 @@ async function giveBack(id: string, key: string, intent: string, least = 1): Pro
     new URLSearchParams({ payment_intent: intent, amount: String(amount - succeeded), reason: "requested_by_customer", "metadata[closing_plan]": id }),
     { version: AT, idempotencyKey: `closing-plan-refund:${key}:${failed}` },
   );
-  const now = made.status === "succeeded" ? succeeded + (Number(made.amount) || 0) : succeeded;
-  return { settled: made.status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
+  // The creation reply must prove that it is the exact refund just asked for. A successful-looking refund of another
+  // payment or charge must not settle this plan or tell its creator that this payment came back (rules 24 and 30).
+  if (
+    !plainObject(made) ||
+    typeof ownField(made, "id") !== "string" ||
+    !OBJECT_ID.test(ownField(made, "id") as string) ||
+    ownField(made, "payment_intent") !== intent ||
+    ownField(made, "charge") !== charge.id ||
+    ownField(made, "amount") !== amount - succeeded ||
+    !REFUND_STATUSES.has(ownField(made, "status"))
+  ) {
+    throw new Error(`Stripe answered the refund of ${key} in another shape`);
+  }
+  const status = ownField(made, "status");
+  const now = status === "succeeded" ? succeeded + (ownField(made, "amount") as number) : succeeded;
+  return { settled: status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
 }
 
 /**

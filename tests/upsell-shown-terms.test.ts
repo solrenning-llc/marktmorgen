@@ -84,7 +84,7 @@ function paidCheckout(id: string, product: string, fingerprint: string): Record<
     currency: "usd",
     metadata: { store: HANDLE, product, upsell_key: fingerprint },
     customer_details: { email: BUYER, address: { country: "US" } },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
   };
 }
 
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   /** What the thanks page shows this order now, and the step reference its form carries. */
   const page = async (session: string) => {
     const store = (await storeForEmail(OWNER))!;
-    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: (await readListing(store, front))!, alsoOwned: [], eligible: true, created: NOW - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US", card: "US" }, store, session, product: (await readListing(store, front))!, alsoOwned: [], eligible: true, created: NOW - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     const ref = (view.offer as { ref?: unknown } | null)?.ref;
     return { title: view.offer?.target.title ?? null, price: view.offer?.step.priceCents ?? null, ref: typeof ref === "string" ? ref : "" };
   };

@@ -890,6 +890,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:dun:cursor@lib/payment-recovery.ts": company("Where the recovery job stopped", "One key, the company's job."),
   "nl:pp:@lib/paypal-payouts.ts": { what: "The creator's PayPal app, and its lock", parts: [capped(4 * KB, "One a store.")] },
   "nl:pp:item:@lib/paypal-payouts.ts": short("A PayPal payout item written into the book: up to three partners a sale", "order", 400, 3 * MARK),
+  "nl:pp:item:@lib/affiliates.ts": { what: "A PayPal payout item's mark, read exactly to tell an older PayPal payout from a hand-written one (#4606)", parts: [capped(0, "Read only: counted with lib/paypal-payouts.ts.")] },
   "nl:pp:open:@lib/paypal-payouts.ts": { what: "Payout batches not yet settled", parts: [capped((MAX_AFFILIATES + 1) * 512, "A line per affiliate in an open batch.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"))] },
   "nl:pp:press:@lib/paypal-payouts.ts": { what: "The pace of the studio's \"Check with PayPal\" press: one reading a minute", parts: [capped(KEY, "One mark a store, kept one minute.", src("lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"))] },
   "nl:pp:pace:@lib/paypal-payouts.ts": { what: "The pace of reading a store's open PayPal batches from the studio: one read every five minutes", parts: [capped(KEY, "One mark a store, kept five minutes.", src("lib/paypal-payouts.ts", "SETTLE_PACE_SECONDS"))] },

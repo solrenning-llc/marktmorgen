@@ -85,7 +85,8 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           .filter((code) => code.active && code.off !== null)
           .map((code) => ({ id: code.id, code: code.code, label: offLabel(code.off as NonNullable<typeof code.off>) }))
       : [];
-  const book = await readBook(store).catch((error) => {
+  // The studio draws Undo, so it alone asks which payouts PayPal sent (payoutUndo).
+  const book = await readBook(store, undefined, { payoutUndo: true }).catch((error) => {
     console.error("reading the affiliate book failed", error);
     return null;
   });

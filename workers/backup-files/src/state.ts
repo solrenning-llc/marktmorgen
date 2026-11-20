@@ -100,6 +100,14 @@ export type WorkerState = {
   /** For each store, the earliest time a forced deletion (90 days) falls due. */
   forcedDue: Record<string, number>;
   heartbeatDay: number | null;
+  /** Where the next read of the deletion records resumes (the route's cursor from the last complete read); null: from the oldest kept. */
+  recordsFrom: string | null;
+  /**
+   * The days whose deletion records were written into the backup bucket, each with one more than the highest file
+   * index it wrote, until run.ts sweepRecordFiles deletes them: at most one a day of BACKUP_FILES_RECORD_FILE_DAYS
+   * and a few more, each index below the day's page ceiling.
+   */
+  recordFiles: { day: number; upTo: number }[];
 };
 
 const STORE = /^[0-9a-f]{32}$/;
@@ -288,6 +296,8 @@ export const freshWorker = (): WorkerState => ({
   totals: { r2: [], blob: [], bunny: [] },
   forcedDue: {},
   heartbeatDay: null,
+  recordsFrom: null,
+  recordFiles: [],
 });
 
 /** The Worker's state from its JSON text, exactly; fresh only for an absent object. */
@@ -299,7 +309,15 @@ export function parseWorkerState(raw: string | null): WorkerState {
   } catch {
     return fail("the Worker's state is not JSON");
   }
-  const o = exact(value, ["version", "cycle", "inbox", "received", "totals", "forcedDue", "heartbeatDay"], "worker");
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    return fail("worker is not an object");
+  }
+  const hasRecordsFrom = Object.hasOwn(value, "recordsFrom");
+  const hasRecordFiles = Object.hasOwn(value, "recordFiles");
+  if (hasRecordsFrom !== hasRecordFiles) fail("worker has only part of the records cursor migration");
+  const fields = ["version", "cycle", "inbox", "received", "totals", "forcedDue", "heartbeatDay"];
+  if (hasRecordsFrom) fields.push("recordsFrom", "recordFiles");
+  const o = exact(value, fields, "worker");
   if (o.version !== 1) fail("worker.version is not 1");
   const forced: Record<string, number> = {};
   const rawForced = o.forcedDue;
@@ -316,5 +334,10 @@ export function parseWorkerState(raw: string | null): WorkerState {
     totals: bySource(o.totals, "worker.totals", dayCounts),
     forcedDue: forced,
     heartbeatDay: orNull(o.heartbeatDay, (d) => whole(d, "worker.heartbeatDay")),
+    recordsFrom: hasRecordsFrom ? cursor(o.recordsFrom, "worker.recordsFrom") : null,
+    recordFiles: hasRecordFiles ? list(o.recordFiles, "worker.recordFiles").map((f, i) => {
+      const file = exact(f, ["day", "upTo"], `worker.recordFiles[${i}]`);
+      return { day: whole(file.day, `worker.recordFiles[${i}].day`), upTo: whole(file.upTo, `worker.recordFiles[${i}].upTo`, 1) };
+    }) : [],
   };
 }

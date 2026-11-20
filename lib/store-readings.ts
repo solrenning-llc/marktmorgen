@@ -385,7 +385,10 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
  */
 export async function forgetStoreReadings(statsId: string | null | undefined): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId))]]);
+  const keys = READING_KINDS.map((kind) => copyKey(kind, statsId));
+  // Confirmed only on a count from 0 up to the keys named (as forgetRecentSales, #4752).
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a store's kept readings");
 }
 
 /**

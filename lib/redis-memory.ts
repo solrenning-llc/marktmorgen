@@ -444,6 +444,16 @@ export class MemoryRedis {
           this.run(["HSET", pitches, id, after]);
           return 1;
         }
+        // lib/outreach.ts SAVE_SENDER_IF_LIVE: the two guards and SET are one operation, billed inside the EVAL.
+        if (key.startsWith("-- marktmorgen:outreach-sender-save:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, identity, erasing, sender, field, record] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", identity]) !== 1) return "gone";
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return "gone";
+          this.scriptCalls += 1;
+          return this.run(["SET", sender, record]);
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);

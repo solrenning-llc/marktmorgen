@@ -18,7 +18,7 @@
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, setProductHidden, setProductPodcast, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductHidden, setProductPodcast, setSubscription, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { savePodcast } from "@/lib/podcast";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
@@ -29,6 +29,7 @@ import { PUBLIC_SETTINGS_WORST_BYTES } from "@/app/api/store/podcast/public-sett
 import { SITE_URL } from "@/lib/site-url";
 import { dataKey } from "@/lib/store-data";
 import { eraseClosed, markDue } from "@/lib/closed-store-data";
+import { closeForErasure } from "./closed-for-erasure";
 import { GET as feed } from "@/app/api/store/podcast/public/[handle]/[product]/route";
 import { POST as productRoute } from "@/app/api/store/product/route";
 import { turnOnMissing } from "@/components/podcast-public-feed";
@@ -345,10 +346,11 @@ async function main(): Promise<void> {
   redis.run(["SET", `nl:pod:${OTHER_POD}:public`, JSON.stringify({ category: "Arts", explicit: false, episodes: {} })]);
   is("there before the closing", stored() !== null, true);
   const T = Date.now();
-  // A closing store is erased only once its plan has ended: a running plan keeps it (PlanRunsAgainError,
-  // lib/closed-store-data.ts, Claude 5's MEDIUM on #3643, now on main).
-  await setSubscription(OWNER, { active: false });
-  await markDue(OWNER, T - 1000);
+  // A closing store is erased only once its plan has ended and the closing job's record says it was removed for that
+  // ending (dueForErasure, #3156; PlanRunsAgainError, Claude 5's MEDIUM on #3643, both on main): closed as that job leaves
+  // it (tests/closed-for-erasure.ts), and put in line by its store's ref, as the walk reads it.
+  await closeForErasure(OWNER);
+  await markDue(storeRef((await storeForEmail(OWNER))!), T - 1000);
   for (let run = 0; run < 6 && !(await eraseClosed(Date.now() + 30_000, async () => {}, T)).done; run += 1);
   is("the closed store's public feed settings are gone", stored(), null);
   is("another store's are kept", redis.run(["EXISTS", `nl:pod:${OTHER_POD}:public`]), 1);

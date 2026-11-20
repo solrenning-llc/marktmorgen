@@ -135,6 +135,7 @@ function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?
   let panel = options.panel ?? panelWith(panel0(), 4932, 7, new Date("2026-11-20T05:05:00Z"));
   const pageOf = <T,>(items: T[], path: string) => { const page = Number(/[?&]page=(\d+)/.exec(path)?.[1] ?? "1"); return items.slice((page - 1) * 100, page * 100); };
   const api: Api = async (method, path, payload) => {
+    const sent = (payload ?? {}) as Record<string, unknown>;
     calls.push({ method, path, body: payload as Record<string, unknown> });
     const one = /^issues\/(\d+)$/.exec(path);
     if (method === "GET" && path === `issues?labels=${LABEL}&state=all&per_page=100`) return issues.filter((i) => i.labels.some((l) => l.name === LABEL));
@@ -146,19 +147,19 @@ function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?
     }
     if (method === "GET" && one) return issues.find((x) => x.number === Number(one[1])) ?? null;
     if (method === "GET" && path === `issues/comments/${PANEL_COMMENT_ID}`) return { id: PANEL_COMMENT_ID, body: panel };
-    if (method === "PATCH" && path === `issues/comments/${PANEL_COMMENT_ID}`) { panel = String(payload?.body); return { id: PANEL_COMMENT_ID }; }
+    if (method === "PATCH" && path === `issues/comments/${PANEL_COMMENT_ID}`) { panel = String(sent.body); return { id: PANEL_COMMENT_ID }; }
     if (method === "POST" && path === "issues") {
-      const made: Issue = { number: 5000, title: String(payload?.title), body: String(payload?.body), comments: 0, labels: [], state: "open",
+      const made: Issue = { number: 5000, title: String(sent.title), body: String(sent.body), comments: 0, labels: [], state: "open",
         author_association: "NONE", user: { login: "github-actions[bot]" } };
       issues.push(made);
       return made;
     }
-    if (method === "PATCH" && one) { const i = issues.find((x) => x.number === Number(one[1]))!; i.body = String(payload?.body); return i; }
+    if (method === "PATCH" && one) { const i = issues.find((x) => x.number === Number(one[1]))!; i.body = String(sent.body); return i; }
     const thread = /^issues\/(\d+)\/comments(\?sort=created&per_page=100&page=\d+)?$/.exec(path);
     if (thread) {
       const i = issues.find((x) => x.number === Number(thread[1]))!;
       if (method === "GET" && thread[2]) return pageOf((i.posted ?? []).map((body) => ({ body })), path);
-      if (method === "POST" && !thread[2]) { i.posted = [...(i.posted ?? []), String(payload?.body)]; return { id: 1 }; }
+      if (method === "POST" && !thread[2]) { i.posted = [...(i.posted ?? []), String(sent.body)]; return { id: 1 }; }
     }
     const del = /^issues\/(\d+)\/labels\/(.+)$/.exec(path);
     if (method === "DELETE" && del && options.deleteApplied404) {

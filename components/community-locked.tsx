@@ -11,8 +11,11 @@ import { lockedWords } from "@/lib/buyer-words/community-locked";
 export function LockedSpaces({ spaces, language, level = 2 }: { spaces: LockedSpace[]; language: unknown; level?: 2 | 4 }) {
   // A space whose answer for this member could not be read is never drawn locked or with a way in: they may hold
   // its product (review of #3007, M1). It is listed apart, as not checked, with only its name and one line.
-  const locked = spaces.filter((space) => space.unlock !== "unchecked");
-  const unchecked = spaces.filter((space) => space.unlock === "unchecked");
+  // "uncheckedLasting": asking again will not tell either, so the line points to the creator, never to reloading.
+  const isUnchecked = (space: LockedSpace) => space.unlock === "unchecked" || space.unlock === "uncheckedLasting";
+  const locked = spaces.filter((space) => !isUnchecked(space));
+  const unchecked = spaces.filter(isUnchecked);
+  const lasting = unchecked.some((space) => space.unlock === "uncheckedLasting");
   if (locked.length === 0 && unchecked.length === 0) return null;
   const w = lockedWords(language);
   // The list's heading, and each space's under it: one level deeper in the studio's preview, under its own heading.
@@ -56,7 +59,7 @@ export function LockedSpaces({ spaces, language, level = 2 }: { spaces: LockedSp
       {unchecked.length ? (
         <section id="cm-unchecked" aria-labelledby="cm-unchecked-title" className="mb-6">
           <Title id="cm-unchecked-title" className="text-lg font-semibold tracking-[-0.02em]">{w.uncheckedHeading}</Title>
-          <p className="mt-1 text-sm">{w.unchecked}</p>
+          <p className="mt-1 text-sm">{lasting ? w.uncheckedLasting : w.unchecked}</p>
           <ul className="mt-3 space-y-3">
             {unchecked.map((space, i) => (
               <li key={i} className="st-note">

@@ -14,6 +14,7 @@ import { idleSweep, readAffiliate, readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "c5b0c5b0c5b0c5b0c5b0c5b0c5b0c5b0";
@@ -46,14 +47,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const batch = /^\/v1\/payments\/payouts\/(BATCH\d+ABC)$/.exec(url.pathname)?.[1];
   if (batch) {
-    const items = created[Number(batch.slice(5, -3)) - 1].items as { sender_item_id: string }[];
+    const items = created[Number(batch.slice(5, -3)) - 1].items as { sender_item_id: string; receiver: string }[];
     return json({
       batch_header: { payout_batch_id: batch, batch_status: "SUCCESS" },
       total_pages: 1,
       items: items.map((item, i) => ({
         payout_item_id: `ITEM${batch}${i}`,
         transaction_status: itemStatus[item.sender_item_id] ?? "PENDING",
-        payout_item: { sender_item_id: item.sender_item_id },
+        // PayPal names the receiver of each item it read back; since #4682 a SUCCESS is booked only for its own receiver.
+        payout_item: { sender_item_id: item.sender_item_id, receiver: item.receiver },
       })),
     });
   }
@@ -81,6 +83,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", SALES, "cs_1", sale("cs_1", AFF, 10000)],
     ["SET", `nl:store:owner:${OWNER}`, JSON.stringify(store)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
 }

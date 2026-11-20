@@ -44,6 +44,7 @@ const KNOWN: Record<string, { reads: number; why: string }> = {
   "app/api/store/stream/captions/route.ts": { reads: 1, why: "captions' access checks every course" },
   "app/api/store/community/manage/route.ts": { reads: 1, why: "community management lists every course" },
   "app/api/store/calendar/[token]/route.ts": { reads: 1, why: "the booking calendar feed reads every call (CALENDAR_BUILD_SHAPE prices it at MAX_PRODUCTS)" },
+  "app/studio/memberships/page.tsx": { reads: 1, why: "the memberships page lists every membership product, to hand over their benefits by hand (422 [PT2], #3014)" },
   "app/studio/page.tsx": { reads: 2, why: "the studio home reads the call and recurring products" },
   "app/studio/students/page.tsx": { reads: 1, why: "the students page lists every course" },
   "app/studio/calendar/page.tsx": { reads: 1, why: "the studio calendar reads every call" },

@@ -18,6 +18,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
+import { readsKey } from "./listing-reads";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
@@ -77,6 +78,8 @@ Date.now = () => realNow() + ahead;
 const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
 type Commands = (string | number)[][];
 const single = (c: Commands, op: string, key: string) => c.length === 1 && c[0][0] === op && c[0][1] === key;
+/** One read of a product's listing alone: a GET, or the one-key MGET lib/catalog.ts getMany sends since 10 November 2026. */
+const readsListing = (c: Commands, key: string) => c.length === 1 && readsKey(c[0], key);
 
 /** One PayPal purchase through the real return route, with `fault` on while the return runs. */
 async function buy(store: Store, productId: string, buyer: string, fault: (c: Commands) => Promise<unknown[]> | null): Promise<string> {
@@ -131,7 +134,7 @@ async function main(): Promise<void> {
   const timeout = async () => {
     throw new Error("Synthetic: Redis timed out");
   };
-  const slowReturn = (c: Commands) => (single(c, "GET", listingKey) ? timeout() : null);
+  const slowReturn = (c: Commands) => (readsListing(c, listingKey) ? timeout() : null);
 
   part("Control: handed over by the sweep, then refunded: the refund takes it back");
   swept = 0;

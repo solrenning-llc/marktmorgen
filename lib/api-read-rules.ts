@@ -190,6 +190,22 @@ export const BOOK_MOVES = 200;
 export const BOOK_INVOICES = 1_000;
 /** A product's listing, read for its title. */
 export const LISTING_BYTES = 16_384;
+/**
+ * The paid invoices readBook keeps between readings at the most (lib/affiliates.ts, INVOICES_KEPT_MAX_BYTES, audit
+ * A1): read whole and written back whole, once each, by a reading of a store with Stripe and affiliates.
+ */
+export const BOOK_INVOICES_KEPT_BYTES = 2_000_000;
+/** And the most invoices it keeps (lib/affiliates.ts, INVOICES_KEPT_MAX_LINES), each a line of the book at the most. */
+export const BOOK_INVOICES_KEPT_LINES = 5_000;
+/**
+ * The studio requests a reading of the book that was not counted ahead takes before it reads and writes back those
+ * kept invoices (lib/affiliates.ts, readBook): the studio's affiliates page, its spreadsheet, the payout file and its
+ * confirmation, the PayPal press, payday and the PayPal settling. Five commands (the GET, and the write back as one
+ * script of four, fenced by the store's erasure: lib/affiliates.ts keepIfLive, lib/store-live-cache.ts setWhileStoreLive) and BOOK_INVOICES_KEPT_BYTES each way
+ * at a heavy request's price, held in tests/affiliate-kept-invoices-counted.test.ts. The API and MCP readers count
+ * them in bookWork, and the affiliate's own page in affiliatePageCost (AFFILIATE_KEPT_INVOICES_UNITS).
+ */
+export const KEPT_INVOICES_STUDIO_UNITS = 4;
 
 /**
  * A refund kept on a sale's, a share's or a lead's record when it was read on its own account (lib/affiliates.ts,
@@ -208,6 +224,8 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const moves = Math.min(s.leads, BOOK_MOVES);
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
+  // The invoices kept between readings (BOOK_INVOICES_KEPT_BYTES): read, then written back, one command and one trip each.
+  const kept = stripe ? 1 : 0;
   // Up to REFUND_MARKS_PER_READ records could have their refund kept, one script for each of the three hashes: one trip.
   const marks = s.stripe && any ? 3 : 0;
   return {
@@ -215,13 +233,14 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
     // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
     // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
     // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling. Main's refund marks
-    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid.
-    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + marks,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
+    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The invoices kept between readings
+    // (2 * kept, audit A1 on #3378) are counted on top of both.
+    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + 2 * kept + marks,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + 2 * kept * BOOK_INVOICES_KEPT_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + (marks ? 1 : 0),
+    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + 2 * kept + (marks ? 1 : 0),
   };
 }
 
@@ -601,9 +620,9 @@ export function pageTestWork(): ReadWork {
   return { commands: 2, bytes: PAGE_BYTES + TEST_COUNTS_BYTES, sent: TEST_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
 }
 
-/** get_page_reading: the listing, then the page and its depth record in one go. */
+/** get_page_reading: the listing, then the page, its depth record and the time record beside it (639 [GL7](25)) in one go. */
 export function pageReadingWork(): ReadWork {
-  return { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return { commands: 3, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
 }
 
 /** get_page_versions: the listing, how many versions are kept (LLEN), then those versions; one sent whole, or the list. */

@@ -359,8 +359,15 @@ export async function forgetReviewWords(statsId: string | null, text: string, no
     return [...summary.themes, ...(summary.reviewThemes ?? [])].some((theme) => theme.examples.some((example) => example.source === "review" && quoted.has(example.text)));
   });
   if (!gone.length) return 0;
-  await redisPipeline([["DEL", lockKey(statsId)], ["DEL", ...gone]]);
-  return gone.length;
+  // Each DEL read exactly (CX-123 rule 24; Codex U and T): one lock and these summaries can answer at most 1 and
+  // gone.length. Anything else is unknown and throws, so the review route schedules the retry, never "forgotten".
+  const deleted = repliesFor(await redisPipeline([["DEL", lockKey(statsId)], ["DEL", ...gone]]), 2);
+  const unlocked = countOf(deleted?.[0]);
+  const summaries = countOf(deleted?.[1]);
+  if (unlocked === null || unlocked > 1 || summaries === null || summaries > gone.length) {
+    throw new UnknownReplyError("deleting the summaries that quote the deleted review words");
+  }
+  return summaries;
 }
 
 /** This month's summary, or last month's while this month has none yet. */

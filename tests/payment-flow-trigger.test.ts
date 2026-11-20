@@ -50,19 +50,19 @@ async function main(): Promise<void> {
   await upsertContact(list, "ana@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   const forAna = await createRequest(store, draftFor("ana@example.com"));
   const anaId = forAna.ok ? forAna.request.id : "";
-  const first = await markPaid(store, anaId, { id: "cs_test_ana_1", amount_total: 48_000 });
+  const first = await markPaid(store, anaId, { id: "cs_test_ana_1", amount_total: 48_000, currency: "usd" });
   is("the first time it is paid: written down, and started for the person it was sent to", [first?.fresh, await flowsStartedFor(flows, "ana@example.com")], [true, [flowId]]);
-  const again = await markPaid(store, anaId, { id: "cs_test_ana_2", amount_total: 48_000 });
+  const again = await markPaid(store, anaId, { id: "cs_test_ana_2", amount_total: 48_000, currency: "usd" });
   is("written down again (the page after paying and the five-minute job both): not fresh, so nothing is checked", [again?.fresh, await flowsStartedFor(flows, "ana@example.com")], [false, [flowId]]);
   const forBen = await createRequest(store, draftFor("ben@example.com"));
-  await markPaid(store, forBen.ok ? forBen.request.id : "", { id: "cs_test_ben", amount_total: 48_000 });
+  await markPaid(store, forBen.ok ? forBen.request.id : "", { id: "cs_test_ben", amount_total: 48_000, currency: "usd" });
   is("someone not on the list: nothing, and paying never puts them on it", [await flowsStartedFor(flows, "ben@example.com"), await isMailable(list, "ben@example.com")], [[], false]);
   await upsertContact(list, "cy@example.com", { agreed: false, explicit: true, source: "free" }, ROOM);
   const forCy = await createRequest(store, draftFor("cy@example.com"));
-  await markPaid(store, forCy.ok ? forCy.request.id : "", { id: "cs_test_cy", amount_total: 48_000 });
+  await markPaid(store, forCy.ok ? forCy.request.id : "", { id: "cs_test_cy", amount_total: 48_000, currency: "usd" });
   is("someone on the list who did not agree to hear from the creator: nothing", await flowsStartedFor(flows, "cy@example.com"), []);
   const anaAgain = await createRequest(store, draftFor("ana@example.com"));
-  is("the same person paying a second request: started once, still", [(await markPaid(store, anaAgain.ok ? anaAgain.request.id : "", { id: "cs_test_ana_3", amount_total: 48_000 }))?.fresh, await flowsStartedFor(flows, "ana@example.com")], [true, [flowId]]);
+  is("the same person paying a second request: started once, still", [(await markPaid(store, anaAgain.ok ? anaAgain.request.id : "", { id: "cs_test_ana_3", amount_total: 48_000, currency: "usd" }))?.fresh, await flowsStartedFor(flows, "ana@example.com")], [true, [flowId]]);
 
   part("What it costs");
   const original = redis.pipeline;

@@ -161,6 +161,21 @@ test("a deleted store's deletion answered in another shape is not finished", asy
   assert.ok(unknown(await under((b, a) => (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) ? a.slice(1) : a), () => forgetStoreSync(STATS))));
 });
 
+// Claude 6's MEDIUM on #4911: a DEL answered with a count above the keys it names is no proof of anything, in the
+// deleted store's forgetting (its sealed key and its jobs' records holding addresses) as in a job's retiring.
+test("a deleted store's deletion answered with a count above its keys is not finished", async () => {
+  await seed();
+  const over = (b: Batch, a: unknown[]) => (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) ? a.map((reply, i) => (b[i]?.[0] === "DEL" ? b[i].length : reply)) : a);
+  assert.ok(unknown(await under(over, () => forgetStoreSync(STATS))));
+});
+
+test("a retired job's record DEL answered with a count above its key keeps the job on the queue", async () => {
+  await seed("added");
+  redis.run(["LREM", logKey, 0, ID]);
+  await tried((b, a) => (b.length === 1 && b[0]?.[0] === "DEL" && b[0]?.[1] === jobKey(ID) ? [2] : a));
+  assert.equal(await queued(), true);
+});
+
 test("healthy: a due job whose record expired leaves the queue", async () => {
   await seed("queued");
   await redis.pipeline([["DEL", jobKey(ID)]]);

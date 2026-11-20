@@ -45,3 +45,29 @@ test("legacy owner records remain supported; confirmed removals and unknown rece
   }
  }finally{redis.pipeline=original;}
 });
+
+// Claude 6's LOW on #4939: a store gone or being erased is an expected refusal (-1), told apart from a reply that
+// does not read, so the route answers it as "unavailable" (503) with no error logged, as #4933 does for the sender.
+test("a gone or erasing store is refused as such; an unreadable reply stays an error",async()=>{
+ const mod=await import("@/lib/sales-goal") as Record<string,unknown>;
+ const Gone=mod.SalesGoalStoreGoneError as (new (...args:never[])=>Error)|undefined;
+ assert.equal(typeof Gone,"function","SalesGoalStoreGoneError is exported");
+ redis.clear();const owner="goal-gone@example.test";
+ await claimHandle(owner,"goalgone","Synthetic","");await ensureStatsId(owner);
+ const store=(await storeForEmail(owner))!;
+ await redis.pipeline([["HSET",ERASING_KEY,await erasingField(storeRef(store)),""]]);
+ await assert.rejects(setSalesGoal(store,123400,"usd",now),(e:unknown)=>!!Gone&&e instanceof Gone);
+ await redis.pipeline([["HDEL",ERASING_KEY,await erasingField(storeRef(store))]]);
+ await closeStoreRecord(store);
+ await assert.rejects(setSalesGoal(store,123400,"usd",now),(e:unknown)=>!!Gone&&e instanceof Gone);
+ const original=redis.pipeline.bind(redis);
+ try{
+  redis.pipeline=async commands=>commands[0]?.[0]==="EVAL"?[2]:original(commands);
+  await assert.rejects(setSalesGoal(store,123400,"usd",now),(e:unknown)=>e instanceof Error&&!(!!Gone&&e instanceof Gone));
+ }finally{redis.pipeline=original;}
+});
+
+test("the goal route answers a gone store as unavailable, never as a server error",async()=>{
+ const route=(await import("node:fs")).readFileSync("app/api/store/goal/route.ts","utf8");
+ assert.match(route,/instanceof SalesGoalStoreGoneError\) return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\)/);
+});

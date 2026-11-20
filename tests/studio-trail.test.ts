@@ -66,7 +66,6 @@ const FROM_OPEN_PRS = [
   "app/studio/notifications/page.tsx", // #3013
   "app/studio/email/links/page.tsx", // #3034
   "app/studio/students/page.tsx", // #3035
-  "app/studio/devices/page.tsx", // #3459
 ];
 // Pages that still wait for the trail: only the ones open PRs are adding.
 // Every page of the studio here has it, and a new page is made with one.

@@ -22,7 +22,7 @@ import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledger
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
 import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
-  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
+  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
   codesWork, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
@@ -54,7 +54,9 @@ import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./pl
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
+import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
+import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
@@ -65,6 +67,11 @@ import { WINBACK_OPEN_READ } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_PROGRESS_COMMANDS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
+import { BLOB_LIST_PAGE, FLY_BASE, FLY_BYTE, FLY_CPU_MS, STORAGE_MEASURE_READ } from "./plan-cost-registry";
+import { FLY_BASE_UNITS, FLY_BYTES_PER_UNIT, FLY_CPU_MS_PER_UNIT, FLY_CPU_PER_WALL_MS, FLY_HOLD_SECONDS, FLY_MAX_BYTES, MEASURE_LIST_PAGES, NO_ROOM_NOTE_SECONDS, STORAGE_MEASURE_UNITS, flyHoldUnits, flyUnits } from "@/lib/stamp-cost-rules";
+import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
+import { VAULT_LIST_PAGES } from "@/lib/vault-rules";
+import { MAX_STAMP_BYTES } from "@/lib/product-file";
 
 /** What an opening of the orders page, a bundle's products and a batch of older purchases keep above what they cost: a tenth (C3-83, 4 November 2026). */
 const ORDERS_SPARE = 1.1;
@@ -267,7 +274,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   for (const room of [false, true]) for (let conversations = 0; conversations <= SEARCH_CONVERSATIONS; conversations += 1) {
     assert.ok(searchUnits({ room, conversations }) * laterPageCost() >= searchRead({ room, conversations }), `search ${room} ${conversations}`);
   }
-  for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= checks * ACCESS_CHECK_READ, `${checks} checks`);
+  // One reading of what the member holds answers every check of a page (lib/community-access.ts holdingsOf; the
+  // pre-review of 9 November 2026, P1): a page pays for one reading, whatever the number of checks, and none without one.
+  for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= ACCESS_CHECK_READ, `${checks} checks`);
+  assert.equal(checkUnits(0), 0);
   // A member's locked spaces read at most one collection page's products, so the collection's figures above hold them (542 [CM1]).
   assert.ok(MAX_UNLOCK_PRODUCTS <= MAX_COLLECTION_PRODUCTS, `${MAX_UNLOCK_PRODUCTS} unlock products > ${MAX_COLLECTION_PRODUCTS}`);
   // The studio's "View as a member" reads the same products, paid in studio requests (542 [CM1]): each covers what a public one does.
@@ -283,6 +293,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(PRODUCT_CARD_UNITS * laterPageCost() >= PRODUCT_CARD_READ, `${PRODUCT_CARD_UNITS} x ${laterPageCost()} < ${PRODUCT_CARD_READ}`);
   console.log(`a product's shared card: ${PRODUCT_CARD_UNITS} requests ($${(PRODUCT_CARD_UNITS * laterPageCost()).toFixed(6)}) against $${PRODUCT_CARD_READ.toFixed(6)} at its worst`);
   console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A short link that opens: its link and store read, its count in the hour and its refund, taken as SHORT_LINK_OPEN_UNITS public requests (Claude 5, 7 November 2026).
+  assert.ok(SHORT_LINK_OPEN_UNITS * laterPageCost() >= SHORT_LINK_OPEN_READ, `${SHORT_LINK_OPEN_UNITS} x ${laterPageCost()} < ${SHORT_LINK_OPEN_READ}`);
+  // A funnel's address pays its product steps as a collection's products: a funnel never holds more steps than a collection is proven for.
+  assert.ok(MAX_FUNNEL_PAGES <= MAX_COLLECTION_PRODUCTS, `${MAX_FUNNEL_PAGES} funnel steps > ${MAX_COLLECTION_PRODUCTS}`);
+  console.log(`a short link opened:$${SHORT_LINK_OPEN_READ.toFixed(6)} at most, counted as ${SHORT_LINK_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
@@ -370,6 +385,39 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`a bundle's products: $${ORDERS_BUNDLE_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_BUNDLE_UNITS} requests`);
   console.log(`a batch of older purchases: $${ORDERS_OLDER_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OLDER_UNITS} requests`);
   console.log(`a download's lookup of its purchase: $${DOWNLOAD_LOOKUP_READ.toFixed(6)} at most before its metered reads, counted as ${DOWNLOAD_LOOKUP_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A stamped copy or a preview kept in the store's storage (C3-136, 12 November 2026): the store's storage is measured
+  // (a Blob and an R2 listing) only after STORAGE_MEASURE_UNITS public requests are taken, more than its worst costs with
+  // the same tenth to spare and no more; the listing is never read past MEASURE_LIST_PAGES pages in either store, the
+  // function never held past FLY_HOLD_SECONDS (both routes' time limit), and a store without room is not measured
+  // again for an hour.
+  assert.ok(STORAGE_MEASURE_UNITS * laterPageCost() >= ORDERS_SPARE * STORAGE_MEASURE_READ, `${STORAGE_MEASURE_UNITS} x ${laterPageCost()} < ${ORDERS_SPARE} x ${STORAGE_MEASURE_READ}`);
+  assert.ok((STORAGE_MEASURE_UNITS - 1) * laterPageCost() < ORDERS_SPARE * STORAGE_MEASURE_READ, `${STORAGE_MEASURE_UNITS} units, one more than needed`);
+  assert.ok(BLOB_LIST_PAGE >= 2 * (5 / 1e6), "a Blob listing page is priced at no less than twice $5.00 per million");
+  // The listing loops name their page bound (BLOB_LIST_PAGES, VAULT_LIST_PAGES, #3502); each is the MEASURE_LIST_PAGES
+  // the measurement is priced at.
+  for (const [file, name, pages] of [["lib/file-store.ts", "BLOB_LIST_PAGES", BLOB_LIST_PAGES], ["lib/vault.ts", "VAULT_LIST_PAGES", VAULT_LIST_PAGES]] as const) {
+    assert.ok(read(file).includes(`for (let page = 0; page < ${name}; page += 1)`), `${file} lists at most ${name} pages`);
+    assert.equal(pages, MEASURE_LIST_PAGES, `${name} is MEASURE_LIST_PAGES`);
+  }
+  for (const route of ["app/api/store/download/route.ts", "app/api/store/preview/route.ts"]) {
+    assert.ok(read(route).includes(`export const maxDuration = ${FLY_HOLD_SECONDS};`), `${route} is held no longer than FLY_HOLD_SECONDS`);
+  }
+  assert.equal(NO_ROOM_NOTE_SECONDS, 3600);
+  // A copy stamped on the fly for a store without room (never the file unstamped): each request it is counted as pays for
+  // its share, the held function and notes, a CPU millisecond counted FLY_CPU_PER_WALL_MS times per millisecond of wall
+  // time, and each byte read or sent; the hold before it reads covers the whole time limit and every byte it may send.
+  assert.ok(FLY_BASE_UNITS * laterPageCost() >= FLY_BASE, `${FLY_BASE_UNITS} x ${laterPageCost()} < ${FLY_BASE}`);
+  assert.ok(laterPageCost() >= FLY_CPU_MS_PER_UNIT * FLY_CPU_MS, `${laterPageCost()} < ${FLY_CPU_MS_PER_UNIT} ms of CPU`);
+  assert.ok(laterPageCost() >= FLY_BYTES_PER_UNIT * FLY_BYTE, `${laterPageCost()} < ${FLY_BYTES_PER_UNIT} bytes`);
+  assert.ok(FLY_CPU_PER_WALL_MS >= 2, "two processors' CPU counted for each millisecond of wall time");
+  const flyCost = (wallMs: number, bytes: number) => FLY_BASE + wallMs * FLY_CPU_PER_WALL_MS * FLY_CPU_MS + bytes * FLY_BYTE;
+  for (const [wallMs, bytes] of [[0, 0], [1, 1], [999, 600_001], [FLY_HOLD_SECONDS * 1000, 3 * MAX_STAMP_BYTES], [12_345, 7_654_321]]) {
+    assert.ok(flyUnits(wallMs, bytes) * laterPageCost() >= flyCost(wallMs, bytes), `flyUnits(${wallMs}, ${bytes}) below its cost`);
+  }
+  assert.equal(flyHoldUnits(MAX_STAMP_BYTES), flyUnits(FLY_HOLD_SECONDS * 1000, 3 * MAX_STAMP_BYTES));
+  assert.ok(FLY_MAX_BYTES <= 2 * MAX_STAMP_BYTES, "what a copy made on the fly sends stays inside its hold");
+  assert.ok([flyUnits(-1, 0), flyUnits(0, -1), flyUnits(0.5, 0), flyUnits(0, Number.NaN)].every(Number.isNaN), "a figure that is not whole and not negative is no count");
+  console.log(`a store's storage measured before a copy is kept: $${STORAGE_MEASURE_READ.toFixed(6)} at most, counted as ${STORAGE_MEASURE_UNITS} requests; a copy made on the fly: held at ${flyHoldUnits(MAX_STAMP_BYTES)} requests for a ${MAX_STAMP_BYTES / 1024 / 1024} MB file ($${flyCost(FLY_HOLD_SECONDS * 1000, 3 * MAX_STAMP_BYTES).toFixed(6)}), settled at ${flyUnits(2_000, 3 * 2_000_000)} for 2 MB stamped in two seconds`);
   // A read of a hundred bookings' moves, one MGET with its keys and moves (C3-82): counted as ORDERS_MOVES_READ_COMMANDS, above what it
   // costs; a hundred at a command, as readMoves reads them; and the most taken before the bookings are read covers five pages of them.
   assert.ok(ORDERS_MOVES_READ_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_MOVES, `${ORDERS_MOVES_READ_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_MOVES}`);
@@ -695,6 +743,8 @@ test("an API reading that reads more than a page takes further requests that cov
   const book = read("lib/affiliates.ts");
   assert.ok(book.includes(`.slice(0, ${BOOK_MOVES})`) && book.includes(`const INVOICE_PAGES = ${BOOK_INVOICES / 100};`) && book.includes('limit: "100"'), "the book's moves and invoices");
   assert.ok(BOOK_STRIPE_PAGES >= BOOK_INVOICES / 100);
+  // The paid invoices the book keeps between readings (audit A1): the ceilings priced are the code's own.
+  assert.ok(book.includes(`export const INVOICES_KEPT_MAX_BYTES = ${BOOK_INVOICES_KEPT_BYTES.toLocaleString("en-US").replace(/,/g, "_")};`) && book.includes(`export const INVOICES_KEPT_MAX_LINES = ${BOOK_INVOICES_KEPT_LINES.toLocaleString("en-US").replace(/,/g, "_")};`), "the book's kept invoices");
   const stats = read("lib/stats.ts");
   assert.ok(stats.includes(`readPaidSales(store, sinceBefore, ${SALES_PAGES})`) && stats.includes(`readRenewals(store, since, now, ${RENEWAL_PAGES})`) && stats.includes(`readRefunds(store, since, ${REFUND_READ_PAGES})`) && stats.includes(`const DISPUTE_PAGES = ${DISPUTE_READ_PAGES};`), "the numbers' pages");
   assert.equal(stats.match(/= walk\("/g)?.length, 2, "the sales are two lists of pages");
@@ -710,9 +760,9 @@ test("an API reading that reads more than a page takes further requests that cov
   };
   before("lib/learn.ts", "if (!(await allow(rows.length, blockedAll))) return null;", '["SMEMBERS", doneKey(course.id, row.e)]');
   before("lib/api-read.ts", "said.refused = await charge(apiReadUnits(studentsPageWork(rows, blocked)));", "data: page.students.map");
-  before("lib/api-read.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
+  before("lib/api-read.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store, undefined, { keptPaid: true });");
   before("lib/api-read.ts", "const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));", "const rows = await paidCalls(store);");
-  before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
+  before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store, undefined, { keptPaid: true });");
   before("lib/api-read.ts", "const refused = await charge(apiReadUnits(productsPageWork(", "const slice = await readListings(store, page);");
   before("lib/mcp-tools.ts", "const refused = charge ? await charge(apiReadUnits(listingsWork(", "const listings = await readListings(store, named)");
   before("lib/mcp-tools.ts", "const first = await charge(units);", "membershipNumbersPaid(store");

@@ -25,7 +25,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { countHit } from "@/lib/visit";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
@@ -68,7 +68,10 @@ export async function GET(request: NextRequest) {
   const locale = LANGUAGES[store.language].locale;
   // Which products are still coming soon: a reading that cannot be had is never "none" (Claude 6's audit of rule 24),
   // so no line is payable right now, as for a stock count that cannot be read.
-  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  const [read, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  // A draft is answered as an id the store does not have: no line, no name, no price (MM-SA-30, lib/draft-view.ts).
+  // Whoever knows its id learns nothing from the cart; a draft cannot be paid for in one anyway (lib/cart-rules.ts, cartable).
+  const listings = read.filter((product) => !product.hidden);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
   // Which lines ask questions at checkout: those are bought from their own page, which asks them, and the cart
@@ -353,10 +356,12 @@ export async function POST(request: NextRequest) {
   // Whether this press took a hold count (holdAdmission), given back when no unit stays held.
   let charged = false;
   try {
-    const via = await attributionFor(store, products[0].id, {
+    // A lookup that does not answer never stops the sale: the click rides on the order as pending (owner's decision 6).
+    const credit = await attributionOrPending(store, products[0].id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    }).catch(() => null);
+    }, products.map((p) => p.id));
+    const via = credit.known ? credit.via : null;
     const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && products.every((p) => assistReminderOffered(store, p));
     // Offers after paying, from the first product in the cart whose funnel is
     // on (lib/cart-offers.ts): a secret for this browser, its fingerprint on
@@ -385,7 +390,7 @@ export async function POST(request: NextRequest) {
       cameFrom: cameFrom(request.headers.get("referer"), new URL(origin).hostname),
         // The channel this sale is credited to: the page's own tags, else the
         // one remembered for this visitor (lib/visit-channel.ts), else direct.
-        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
+        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)), ...pendingChannel(credit) },
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,

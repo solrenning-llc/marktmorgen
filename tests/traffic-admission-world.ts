@@ -11,3 +11,9 @@ export const storeFolder = async (_ref: string) => world.folder;
 export const rememberFolderOwner = async (..._args: unknown[]) => {};
 export const deriveKey = (_name: string) => null;
 export const monthKey = (date = new Date()) => date.toISOString().slice(0,7);
+// The spike alarm lib/traffic.ts calls after each count (lib/traffic-spike.ts) loads the email and house-store
+// modules, which import names this world does not stand in for; it is aliased here instead (tests/aliases), and it
+// never alerts: this test counts admissions, and an alarm changes no count (Claude 4 on #3380, 6919548809).
+export const alertSpike = async () => false;
+// #3697 asks spikeMark first, so an ordinary request schedules nothing; here no mark is ever reached, as no alarm is sent.
+export const spikeMark = (..._args: unknown[]): number | null => null;

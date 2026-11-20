@@ -56,6 +56,9 @@ redis.pipeline = (async (commands: Commands) => {
   return out;
 }) as typeof redis.pipeline;
 const reads = (name: string, key: string) => (commands: Commands) => commands.some((c) => c[0] === name && String(c[1]).includes(key));
+// A join's place is written by WAIT_JOIN (lib/waitlist.ts, fenced by the coming-soon mark since #4462), one EVAL with the
+// list's key among its keys, where an HSETNX was.
+const writesPlace = (key: string) => (commands: Commands) => commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:waitlist-join:") && c.includes(key));
 
 const used = async (room: DataStore = ROOM) => (await dataUsed(room))?.used ?? 0;
 const lastToken = (kind: "token" | "leave") => mailed.at(-1)?.match(new RegExp(`${kind}=([0-9a-f]{48})`))?.[1] ?? "";
@@ -200,7 +203,7 @@ async function waitlists(): Promise<void> {
 
   part("The links are written before the place: a deletion in between takes them too");
   const beforeKai = await used(store);
-  after(reads("HSETNX", ryeKey), async () => {
+  after(writesPlace(ryeKey), async () => {
     await forgetWaitlistPerson(store.statsId, [rye.id], "kai@example.com", store);
     await forgetNoted(store.statsId, "kai@example.com");
   });
@@ -233,7 +236,7 @@ async function waitlists(): Promise<void> {
       await redis.pipeline([suppressCommand(listId, "mo@example.com")]);
       await forgetWaitlistPerson(store.statsId, [rye.id], "mo@example.com", store);
       // Its last step, the links it noted, once the place is written.
-      after(reads("HSETNX", ryeKey), () => forgetNoted(store.statsId, "mo@example.com"));
+      after(writesPlace(ryeKey), () => forgetNoted(store.statsId, "mo@example.com"));
     },
   );
   is("the sign-up is refused", await enter("mo@example.com"), "error");

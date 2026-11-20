@@ -42,14 +42,21 @@ import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 
 /** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
 const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
+/** The studio request a removal's invitations' first page takes (lib/move-members.ts notePendingInvites, or
+ * dropProductInvites when the removal is asked again), admitted with the removal itself (#4462). */
+const REMOVE_INVITES_FIRST_UNITS = 1;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
+import { WAITLIST_DROP_UNITS, dropWaitlist, finishWaitlistDrop, holdWaitlistDrop } from "@/lib/waitlist";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { giveAllowance } from "@/lib/store-allowance";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
+import { InvitesPendingFullError, InvitesUnpaidError, dropProductInvites, notePendingInvites } from "@/lib/move-members";
+import { studioRefusal } from "@/lib/person-tasks";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
@@ -169,7 +176,14 @@ export async function GET(request: NextRequest) {
 /** Adds, changes, reorders or removes one thing on the creator's store. */
 export async function POST(request: NextRequest) {
   // Room for the long description, which is the one big thing sent here.
-  const guarded = await guardStoreWrite(request, "products", 40_000);
+  // A removal's fixed studio units are admitted together: its ordinary request, its waitlist's (WAITLIST_DROP_UNITS)
+  // and its invitations' first page (REMOVE_INVITES_FIRST_UNITS). With room for fewer, none is consumed (Codex U and P
+  // on #4462). Other product writes keep their one ordinary request.
+  // The moment before the admission: a give-back below goes to the window the units were taken in (or the one before,
+  // if a window turned during the admission: the new one then stays counted higher, never lower).
+  const tookAt = Date.now();
+  const guarded = await guardStoreWrite(request, "products", 40_000, undefined,
+    (body) => (text(body.action, 10) === "remove" ? 1 + WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS : 1));
   if (!guarded.ok) return guarded.response;
 
   const { ref, body } = guarded;
@@ -320,6 +334,13 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (action === "remove") {
+      // Refused before anything is held or dropped: the units taken for the waitlist's and the invitations' fixed work
+      // are given back, so a creator who tries again pays only each request itself (Claude 5's LOW on #4462). Best
+      // effort: a give-back that fails leaves the figure counted higher, never lower.
+      const early = async (response: Response): Promise<Response> => {
+        await giveAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS, tookAt);
+        return response;
+      };
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
       // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
@@ -328,10 +349,10 @@ export async function POST(request: NextRequest) {
         waiting = await waitingCount(guarded.store, id);
       } catch (error) {
         console.error("could not read a product's pre-orders before removing it", error);
-        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        return early(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
       }
       if (waiting > 0) {
-        return Response.json({ ok: false, error: "preorders" }, { status: 409 });
+        return early(Response.json({ ok: false, error: "preorders" }, { status: 409 }));
       }
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
@@ -349,7 +370,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
-        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        return early(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
       }
       // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
       // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
@@ -357,8 +378,72 @@ export async function POST(request: NextRequest) {
       // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
       if (before && guarded.store.stripeAccountId) {
         const running = await runningSubscriptions(guarded.store, id);
-        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
-        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
+        if (running === null) return early(Response.json({ ok: false, error: "stripe" }, { status: 502 }));
+        if (running > 0) return early(Response.json({ ok: false, error: "memberships", running }, { status: 409 }));
+      }
+      // guardStoreWrite admitted this request and its WAITLIST_DROP_UNITS together before anything went (#4462).
+      // Noted as dropping its waitlist before the product goes (lib/waitlist.ts holdWaitlistDrop): whatever its coming-soon
+      // mark, a person's deletion reaches the addresses until their drop is confirmed. Not noted, nothing is removed.
+      if (before) {
+        try {
+          await holdWaitlistDrop(guarded.store.statsId, id);
+        } catch (error) {
+          console.error("could not note a product's waitlist as dropping before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // The waitlist first (#4462): its hold only notes the addresses for a person's deletion until the drop is
+      // confirmed, so a removal refused below leaves nothing wrong; main's invitations come next (#3473).
+      // The invitations an import gave members to keep it here (lib/move-members.ts), with their links and reminders:
+      // kept under its id, a person's erasure would never reach them once it is gone. Main's refusal while a membership
+      // or payment plan still runs comes first (above), so a removal it refuses deletes no invitation. Each page is paid
+      // for in studio requests first; not finished (a reply not known, the studio's requests used up): nothing is
+      // removed, and the same removal asked again goes on where this stopped.
+      const refusal: { reason?: string; message?: string } = {};
+      // The invitations' first page was admitted with the request (REMOVE_INVITES_FIRST_UNITS, above): notePendingInvites,
+      // or dropProductInvites when asked again for a product already removed, spends it first; only more is counted here.
+      let prepaid = REMOVE_INVITES_FIRST_UNITS;
+      const pay = async (asked: number): Promise<boolean> => {
+        const fromPrepaid = Math.min(prepaid, asked);
+        prepaid -= fromPrepaid;
+        const units = asked - fromPrepaid;
+        if (units === 0) return true;
+        const counted = await countStudio(guarded.store, null, units);
+        if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
+        return counted.ok;
+      };
+      // Deleted only once the product is (below): a removal that does not go through keeps every invitation and its
+      // emailed link (Claude 7, MEDIUM on #3473). Asked again for a product already removed, what an earlier removal
+      // left is deleted now.
+      if (!before && id && PRODUCT_ID.test(id)) {
+        try {
+          await dropProductInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          console.error("could not delete the invitations to a removed membership", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // A product still here is noted first among the memberships whose invitations wait to be deleted (Claude 3, MEDIUM
+      // on #3473), in the studio request that also pays for their deletion's first page below: that one deletion runs
+      // after the product is gone, when the studio can no longer ask for it again, so if it does not finish, a person's
+      // erasure and the copy of their data still reach every invitation through the note. Not noted (refused, a reply
+      // not known, the note full): nothing is removed.
+      if (before) {
+        try {
+          await notePendingInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          if (error instanceof InvitesPendingFullError) return Response.json({ ok: false, error: "member_invites" }, { status: 409 });
+          console.error("could not note a membership's invitations before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
       }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
@@ -388,10 +473,24 @@ export async function POST(request: NextRequest) {
       if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
         const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
         if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
-        if (finished === "dropped") result = { ok: true, product: null };
+        // And its waitlist, still noted as dropping when its drop was not confirmed then (lib/waitlist.ts, #4462).
+        const waited = await finishWaitlistDrop(guarded.store.statsId, id, guarded.store).catch((error: unknown) => {
+          console.error("could not finish dropping a removed product's waitlist", error);
+          return null;
+        });
+        if (waited === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped" || waited === "dropped") result = { ok: true, product: null };
       }
       if (removed.ok) {
         const going = removed.product;
+        // Its invitations, now that it is gone (above): not finished (a reply not known, the studio's requests used up),
+        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left. Until then the
+        // note made before the removal keeps them within a person's erasure and data copy. Its first page is paid for by
+        // the request that made the note.
+        await dropProductInvites(removed.store, id, pay, !!before).catch((error: unknown) => {
+          console.error("could not delete the invitations to a removed membership", error);
+          cleanupPending = true;
+        });
         const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
@@ -430,6 +529,13 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
+        // And its waitlist, whose addresses are kept in plain text with no expiry (lib/waitlist.ts). One not confirmed
+        // gone is said (cleanupPending) and stays noted as dropping, so a person's deletion still reaches it and the
+        // same removal asked again finishes it (finishWaitlistDrop above).
+        await dropWaitlist(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+          cleanupPending = true;
+          console.error("could not drop a removed product's waitlist", error);
+        });
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store, id, courseIndexes).catch((error: unknown) => console.error("could not drop a removed course", error));
         }

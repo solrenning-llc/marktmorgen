@@ -9,6 +9,37 @@ This is an explicit exception to the historical closing-day deletion statements
 below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
 unreadable independent refund queue) never advances a store to `removed`.
 There is no deletion deadline for uncertainty and no new customer limit.
+**DONO-3 (owner, 9 November2026), replacing that sentence for a store at or past its
+closing day:** Stripe giving no answer at all (network failure, a timeout of Stripe's
+but never our run's own cutoff, 5xx/429 also as an HTML page, or the creator's connected
+account refused for good with 403 account_invalid/permission_error: `lib/stripe-silence.ts`)
+holds it only until `STRIPE_SILENT_DAYS` (ERASE_WITHIN_DAYS less
+ERASE_EVERY_DAYS) after that day; then members whose paid time was not given back are
+told, the closing goes on without Stripe, its personal records go by the existing walk,
+and only the dated closing record stays (`lapsed`, `unstopped`), counted in the month's
+`nl:held:month:` hash and in the owner's monthly report. An answer, even after the
+deadline, is followed; our own key refused (401), an unreadable answer, Stripe not
+configured, a member's notice that cannot go out (or no email credit for it) or a failure
+of ours still holds with no deadline, and each such store past the published time is
+counted once a month by reason in the owner's report ("retidas além do prazo publicado").
+A creator account refusing us (403 account_invalid) lapses only after STRIPE_SILENT_DAYS of
+refusals seen on daily runs at most REFUSAL_GAP_MS apart, with the platform reading the store's
+own subscription in the same run, and never while several distinct accounts refuse together
+(`nl:held:refused:`/`nl:held:answered:`). Since Claude 3's review of #3463, the creator's own
+account giving no answer has the same shape (`nl:held:silent:`): STRIPE_SILENT_DAYS of silence on
+daily runs, the platform reading the store's own subscription in the same run, never with several
+accounts silent together; our platform key giving no answer is never the creator's and holds with
+no deadline; and before a store closed without its members' renewals stopped is deleted, each
+member with a known subscription is told the membership may keep renewing, in the same letter as its
+refund when one was owed, one letter an address; a member already told of the closing gets one
+follow-up, the one its notice paid for, and any letter past it takes a credit of the closing's
+emails first or the store is held (Claude 1 cloud's review of #3463). Its work is CLOSING_DEADLINE_WORK in
+tests/plan-cost-registry.ts. The deadline is the earliest moment, not a guaranteed
+latest: a store already in the held recheck line waits its turn among the50 rechecks a
+day, and the walk then runs at most every WALK_GAP_MS, so deletion within
+ERASE_WITHIN_DAYS of the closing day is not guaranteed in the worst case. A store held
+before its closing day (members not yet held, buyers not yet read) is not covered by this
+decision and still waits.
 
 `lib/held-stores.ts` retains each unresolved obligation in the private shared
 `nl:held:stores` index. The daily closing job revisits oldest due entries. **CX-69,4 November2026:**
@@ -125,6 +156,34 @@ What Marktmorgen pays for it is bounded per closing, before any of it is spent: 
 No company postal address exists yet (`lib/company-postal.ts`, empty): until it does, no buyer is emailed, and a store whose buyers must be told does not close (its retention continues inside the existing closing-days exposure). This is a release condition, not a cost.
 
 **A plan paid for a store already closing (queue item 307 [EC1], with item 569 [NC1]).** From the start of its closing day a store refuses a plan checkout, but one opened before can still be finished on it. That plan is ended at once and its payment refunded in full from Marktmorgen's own Stripe account (`lib/closing-plan-guard.ts`): it is the money the creator paid us, given back, so the refund itself is not a cost, but the receiving cost of that one payment (`lib/receiving-costs.ts`, the dearer provider's fee on the amount charged) is not given back by Stripe on a refund and is the company's. It is a full-refund occurrence of this review, never offset by another scope. **Bounded by the owner's decision of 30/10/2026, 18h16 ("faça o correto"; "Depende do dono" (d) of item 307 resolved):** starting a plan again during the closing period stays open, because it saves the store, but from the plan's end every plan checkout of the store lasts `CLOSING_CHECKOUT_SECONDS` (31 minutes: Stripe's minimum of 30, docs.stripe.com/api/checkout/sessions/create, and one for clocks), and none is opened from `lastPlanMoment` (the closing day less 32 minutes; the studio shows the exact moment, in UTC). So no plan checkout of the store is open when its closing day begins; the open ones are expired then anyway (`expirePlanCheckouts`), and a new one is refused until the store's records are gone. What is left is a payment submitted on a checkout before it expired that Stripe confirms only after the day began (a delayed payment method), or one that Stripe completes later than its own expiry. Each is at most one occurrence per closing: the contract funding allows one pending checkout grant per store (`pending: 'one-grant-per-store'`, lib/contract-funding-rules.ts) and a store whose plan is paid is refused a second checkout (`billing=already`). Its ceiling is the receiving cost of the dearest plan payment a store can make (Scale yearly, from `lib/receiving-costs.ts`), and the refund guard (`lib/closing-plan-guard.ts`) ends it and returns the money. Like every scope here, the exposure review stays null and release stays closed.
+
+## Support mail sent on through SES: a company fixed cost with a ceiling (9 November 2026)
+
+ALTO 1 of Claude 5's email audit (9 November 2026): every message written to our own support addresses was sent on through SES as a company email (`lib/inbound-mail.ts`, `forwardInbound`), with nothing bounding it but the webhook's per-connection limit, and the connection is Resend's, not the sender's. One sender writing 300 times with 1 MB each had all 300 messages and 300 MB sent on; the only real bound was SES's 24-hour quota (about $120 a day at 15 MB a message), and spending that quota also stops buyers' receipts and sign-in links.
+
+Each count below is taken before anything is read, fetched or sent. A count that cannot be read sends nothing and Resend tries again; each count a message has taken is marked on it (`nl:inbound:support:counted:`), so a try again takes only the ones still missing and its files are paid once.
+
+| Ceiling | Value | Where |
+|---|---|---|
+| Announcements of mail not written to a store, read at Resend, a UTC day | `SUPPORT_ANNOUNCED_DAILY` = 1,000 | `lib/inbound-mail.ts` |
+| Of those, the reserve for an announcement whose From has a store under it (one EXISTS, before the read) | `SUPPORT_ANNOUNCED_CREATOR_DAILY` = 200 | `lib/inbound-mail.ts` |
+| One sender, however the address is written (`canonicalEmail`), an hour | `SUPPORT_SENDER_HOURLY` = 10 | `lib/inbound-mail.ts` |
+| One sender, a day | `SUPPORT_SENDER_DAILY` = 30 | `lib/inbound-mail.ts` |
+| Every sender together, a UTC day | `SUPPORT_DAILY` = 200 | `lib/inbound-mail.ts` |
+| Of those, senders without a PAID plan under the address (no store, or a free one) | `SUPPORT_PUBLIC_DAILY` = 120 | `lib/inbound-mail.ts` |
+| One paying creator's address, a UTC day (from the creators' share of 80) | `SUPPORT_CREATOR_SENDER_DAILY` = 8 | `lib/inbound-mail.ts` |
+| Files sent on, a UTC day, before base64; each charged once at its listed size and never read past it | `SUPPORT_FILE_BYTES_DAILY` = 300,000,000 | `lib/inbound-mail.ts` |
+| Notice to the inbox that messages are held, a UTC day | `SUPPORT_HELD_NOTICES_DAILY` = 1 | `lib/inbound-mail.ts` |
+
+A message past a ceiling is held: it is not sent on and will not be sent later; it can be read in Resend (Emails, Receiving), and this site keeps no copy. How long Resend keeps it has no dated source here. The inbox is told so once a day. A file past the day's bytes, or bigger than it was listed, is left out and named in the message ("Not attached (see Resend, Emails, Receiving)"). The store path keeps its own `CREATOR_HOURLY` and is one of the store's emails, not this cost.
+
+**Announcements are split the way the forwards are.** An announcement whose From (`data.from` of Resend's `email.received` event, passed by the route) has a store under it takes the creators' reserve of 200; every other announcement, and every one with no From string, takes the public share of 800. So 1,000 made-up senders spend the 800 and a paying creator's mail is still read and counted afterwards. Limits of this: the From is not authenticated, so a forged From of any store owner (a free store included, since only an EXISTS is made before the read) spends the 200; the plan is checked only after the read, where the sender's own ceilings apply. A dated Resend source for `data.from` could not be read (resend.com was outside the session's network), so it must be confirmed; with no From the announcement is counted as public, which fails closed for the reserve. Past the day, an announcement with a From costs one more command (the EXISTS) until the reserve is out too, and one that also shows an address on the creators' domain one more (the MGET of the store names below).
+
+**What the ceilings do not prove.** The sender is the message's From, which nothing in the code authenticates (no DMARC or SPF result is read). Anyone can spend one person's own hour by writing in their name. Only an address with a paid plan (the store's `subscriptionActive`, read from its record) counts as a creator; a free store is counted with the public, since anyone can make one. A forged From of a paying creator the forger knows still spends the creators' share of 80 a day: at 8 a day for each address it takes ten known paying addresses to hold the whole share, and the real creator whose address was used is held for that day once their own 8 are spent. Made-up addresses and free stores cannot take that share, but a buyer with no paid plan is held with them once the public share is spent. Should Redis stay out of reach for longer than Resend keeps trying, support mail is not sent on and nobody is told: it is only in Resend.
+
+**The month at the ceilings: $45.70 at the most** (`supportForwardMonthlyUsd` in tests/plan-cost-registry.ts, held by tests/support-forward-ceiling.test.ts): 31 UTC days of 1,000 announcements read, each at `SUPPORT_HELD_READ_COMMANDS` commands (a paying store owner's worst path, 32, since cloud J's review of #3481) and a call waited on for the read's 10 seconds and one more ($0.0005 each); of them 201 emails a day, each at `PER_EMAIL` ($0.0009, Resend's overage, dearer than SES), the route's whole 60 seconds of CPU and memory and `SUPPORT_FORWARD_COMMANDS` database commands ($0.0044 a forward); plus, for each of those announcements, one read of the sender's store record at its largest size (`MAX_STORE_BYTES`, to tell a paid plan), plus 31 days of files at 4/3 for base64 at SES's $0.12 a GB (read 18 October 2026 in docs/pack-cost-decomposition-2026-10-18.md; not read again on 9 November 2026, aws.amazon.com being blocked in that session). Both command figures are checked against what the code sends. It belongs 100% to Marktmorgen among the LLC's fixed costs (FX275), as the line `support-forward` of `LLC_FIXED_COST_IDS` (`lib/llc-fixed-costs.ts`), whose ceiling stays unknown like the other lines, and is covered from the minimum paid base under MR item 2.
+
+Not in that figure, so the complete month stays unknown, never zero: announcements past `SUPPORT_ANNOUNCED_DAILY` (a function call and the route's 3 commands each, no read at Resend and, after the first on an instance, no counter or notice command, because the instance remembers that the day is out; the first on each instance still counts once; bounded only by the webhook's per-connection limit and Resend's own receiving quota), transfer out of the function to SES, and Resend's count of received mail against its plan. Mail the announcement shows written to a store and not to our own support is not counted here and has no ceiling before its read (a name on that domain that is no store's is read at Resend, up to its 10 seconds, and dropped each time, with no count): that cost also stays unknown, never zero. An announcement that shows our own support's address beside an address on the creators' domain is exempt from the count only when a store has that name, looked up in one MGET of at most `STORE_NAMES_LOOKED_UP` (20) names before the read, no store record read (`anyStoreNamed` in `lib/store.ts`; a lookup that cannot be read is tried again, unread): support@ written beside a made-up name on that domain is counted like any support mail and held unread past the day (Codex P's review of #3481, HIGH). Only an announcement that shows our own support's address and no store's name is counted before the read; one that shows neither (no `to`, a `to` in another shape, or only an address on another domain, as when the store's address is on Cc or reached through an alias) is read at Resend too and decided after the read, where support mail meets `admitSupport`, so a flood of public announcements never holds a creator's mail unread (Claude 7's review of #3481, MEDIUM 1): the cost of those reads also stays unknown, never zero. A message Resend tries again takes the day's announcement counts again (they carry no per-message mark, unlike `admitSupport`'s): the day's ceilings still bound the cost, but a store owner's address can pass from the reserve to the public share sooner than the counts above suggest (Claude 7, LOW 1).
 
 ## LE448 — exposição própria da lista de pré-abertura (em implementação)
 

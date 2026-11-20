@@ -161,6 +161,35 @@ test("a deleted store's deletion answered in another shape is not finished", asy
   assert.ok(unknown(await under((b, a) => (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) ? a.slice(1) : a), () => forgetStoreSync(STATS))));
 });
 
+// Claude 6's MEDIUM on #4911: a DEL answered with a count above the keys it names is no proof of anything, in the
+// deleted store's forgetting (its sealed key and its jobs' records holding addresses) as in a job's retiring.
+test("a deleted store's deletion answered with a count above its keys is not finished", async () => {
+  await seed();
+  const over = (b: Batch, a: unknown[]) => (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) ? a.map((reply, i) => (b[i]?.[0] === "DEL" ? b[i].length : reply)) : a);
+  assert.ok(unknown(await under(over, () => forgetStoreSync(STATS))));
+});
+
+// Claude 4's LOW on #4911 (7027483305): the ZREM's bound held by a test too. Its members name jobs, not addresses,
+// but a count above them is no more a proof than a DEL's.
+test("a deleted store's queue ZREM answered with a count above its members is not finished", async () => {
+  await seed();
+  const over = (b: Batch, a: unknown[]) => (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) ? a.map((reply, i) => (b[i]?.[0] === "ZREM" ? b[i].length - 1 : reply)) : a);
+  let zrem = false;
+  const result = await under((b, a) => {
+    if (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) && b.some((c) => c[0] === "ZREM")) zrem = true;
+    return over(b, a);
+  }, () => forgetStoreSync(STATS));
+  assert.equal(zrem, true, "the store's job was on the queue, so its deletion holds a ZREM");
+  assert.ok(unknown(result));
+});
+
+test("a retired job's record DEL answered with a count above its key keeps the job on the queue", async () => {
+  await seed("added");
+  redis.run(["LREM", logKey, 0, ID]);
+  await tried((b, a) => (b.length === 1 && b[0]?.[0] === "DEL" && b[0]?.[1] === jobKey(ID) ? [2] : a));
+  assert.equal(await queued(), true);
+});
+
 test("healthy: a due job whose record expired leaves the queue", async () => {
   await seed("queued");
   await redis.pipeline([["DEL", jobKey(ID)]]);

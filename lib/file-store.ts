@@ -11,8 +11,11 @@
  * does it through here. A caller that went to one store directly would be
  * right for the files of that store and silently wrong for the rest.
  */
+import { recordDeletions } from "@/lib/backup-deletions";
+import type { BackupDeletionReason } from "@/lib/backup-files-contract";
 import * as blob from "@/lib/blob";
 import { deleteVault, headVault, listVault, readVault, vaultHeld, vaultUrl, writeVault } from "@/lib/vault";
+import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { VAULT_PREFIX, isVaultPath } from "@/lib/vault-rules";
 
 export type Measured = { pathname: string; size: number; contentType: string };
@@ -28,13 +31,26 @@ export async function headFile(pathname: string): Promise<Measured> {
   return { pathname: found.pathname, size: found.size, contentType: found.contentType };
 }
 
-/** Deletes files, each from the store that keeps it. Throws when one could not be. */
-export async function deleteFile(pathnames: string | string[]): Promise<void> {
+/**
+ * Deletes files, each from the store that keeps it. Throws when one could not be.
+ *
+ * Once a store says its files are gone, a deletion record is kept for each one
+ * the backup copies (lib/backup-deletions.ts, 273 [BK1]), with `reason`, so
+ * the backup removes its copy 30 days later. Never before: a record for a file
+ * still there would remove a live file's copy. A record that cannot be kept
+ * never stops or fails the deletion; it is logged, and the copy goes later,
+ * as an orphan. Nothing is kept while the backup files route is off.
+ */
+export async function deleteFile(pathnames: string | string[], reason: BackupDeletionReason = "creator_deleted"): Promise<void> {
   const all = Array.isArray(pathnames) ? pathnames : [pathnames];
   const here = all.filter((pathname) => isVaultPath(pathname));
   const there = all.filter((pathname) => !isVaultPath(pathname));
   if (here.length && !(await deleteVault(here))) throw new Error("a file could not be deleted");
-  if (there.length) await blob.del(there);
+  if (here.length) await recordDeletions(here, reason);
+  if (there.length) {
+    await blob.del(there);
+    await recordDeletions(there, reason);
+  }
 }
 
 /**
@@ -148,7 +164,7 @@ export async function filesHeld(folder: string): Promise<number> {
   const seen = new Set<string>();
   const paths = new Set<string>();
   let complete = false;
-  for (let page = 0; page < 20; page += 1) {
+  for (let page = 0; page < BLOB_LIST_PAGES; page += 1) {
     const answer = await blob.list({ prefix: `stores/${folder}/`, limit: 1000, cursor });
     if (!answer || !Array.isArray(answer.blobs) || answer.blobs.length > 1000 || typeof answer.hasMore !== "boolean") throw new Error("invalid storage listing");
     for (const entry of answer.blobs) {

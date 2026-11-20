@@ -41,6 +41,9 @@ const SHARED_CACHE_FILES: Record<string, string> = {
   "app/api/store/community/chat/new/route.ts": "a few seconds, keyed by the community and its HMAC pass, no cookie read",
   "app/api/store/podcast/feed/[token]/route.ts": "one buyer's feed under its secret token, FEED_SHARED_SECONDS by design; each episode is authorized again",
   "app/l/[code]/route.ts": "a short link's redirect, keyed by its code",
+  // Read for #3330 (Claude 4 cloud AF): shortLinkRefusal's 410 for a link turned off is the fixed OFF_PAGE, the same for
+  // everybody, reading no cookie, kept as long as a link that opens; every other refusal there is no-store.
+  "lib/short-link-open.ts": "the fixed page of a short link turned off, the same for everybody, keyed by the link's URL",
   "app/llms.txt/route.ts": "public site text",
   "app/[handle]/store-sitemap/route.ts": "a store's public sitemap",
   "app/[handle]/store-robots/route.ts": "a store's public robots.txt",

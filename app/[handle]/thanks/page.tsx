@@ -26,7 +26,7 @@ import { unpaidNotice } from "@/lib/checkout-return";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, chargedIn, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { canMove, chargedIn, confirmBooking, moveLink, packageOf, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
@@ -42,7 +42,7 @@ import { isStorePeople } from "@/lib/visit";
 import { funnelMark } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
 import { funnelWords } from "@/lib/buyer-words/funnel";
-import { UPSELL_COOKIE, funnelView, settleUpsells } from "@/lib/upsell";
+import { UPSELL_COOKIE, cardCountryOf, funnelView, settleUpsells } from "@/lib/upsell";
 import { cartOfferFrom } from "@/lib/cart-offers";
 import { imageUrl } from "@/lib/product-image";
 import { buyersJoin, noteSession } from "@/lib/affiliates";
@@ -452,6 +452,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       currency: order.record.currency,
       lead: order.call.lead,
       pi: order.call.pi,
+      // A session from a package is written down with it (lib/call-packages.ts).
+      fromPackage: packageOf(order.record.metadata),
       due,
       cancel,
       origin: SITE_URL,
@@ -591,6 +593,14 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           cart: (order.record.metadata as Record<string, string> | null)?.cart === "yes"
             ? { offerFrom: cartOfferFrom(order.record.metadata as Record<string, string> | null), email: order.email }
             : undefined,
+          // The EU VAT gate's evidence (lib/upsell.ts, offerGate): this request's IP country, which refuses an EU or UK
+          // place, and the order's two items, its billing country and its card's, read here only to decide whether the
+          // offer is drawn; never shown or kept.
+          evidence: {
+            headers: await headers(),
+            billing: (order.record.customer_details as { address?: { country?: unknown } } | null)?.address?.country,
+            card: cardCountryOf(order.record.payment_intent),
+          },
         })
       : null;
   // A store switched off after a report (lib/takedown.ts) sells nothing: no offer after paying, no next step of a funnel,

@@ -7,7 +7,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { FIRST_DELAY_SECONDS, type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countSesParks, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
+import { ANY_GEN, RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, genOf, leaseAndGenCommand, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun, countSesParks } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -242,6 +242,28 @@ const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
 const statsKey = (flowId: string) => `nl:mail:flowstats:${flowId}`;
+/** A person's start of a sequence, kept 400 days once it is queued (FLOW_QUEUED). */
+const ENROLLED_KEEP_SECONDS = 400 * 86_400;
+/** A start claimed and not yet queued: it lapses within the hour if it never is, so a failed start is never lost for 400 days. */
+const PENDING_START = "pending";
+const PENDING_START_SECONDS = 3_600;
+/**
+ * Queues the first step of each claimed start and keeps its claim 400 days, in one step: a claim still pending for
+ * this start (ARGV[3]) is turned into the mark; one that is gone (erased meanwhile) is neither queued nor recreated.
+ * KEYS: the queue, the sequence's stats, then each person's claim; ARGV: the step's time, the mark's lifetime, the
+ * pending value, then each queue member. Answers how many were queued.
+ */
+const FLOW_QUEUED = `-- marktmorgen:flow-queued:v1
+local queued = 0
+for i = 3, #KEYS do
+  if redis.call('GET', KEYS[i]) == ARGV[3] then
+    redis.call('SET', KEYS[i], '1', 'EX', ARGV[2])
+    redis.call('ZADD', KEYS[1], ARGV[1], ARGV[i + 1])
+    queued = queued + 1
+  end
+end
+if queued > 0 then redis.call('HINCRBY', KEYS[2], 'started', queued) end
+return queued`;
 export const FLOW_ID = /^[0-9a-f]{16}$/;
 
 const newId = () => randomBytes(8).toString("hex");
@@ -780,11 +802,15 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
 
 /**
  * Starts whichever sequences this event begins, for this person. Never
- * throws: the list must never cost anyone what they asked for.
+ * throws: the list must never cost anyone what they asked for. Answers false
+ * when it failed on its way (logged), so a caller that holds a once-only mark
+ * for the moment can let it go and the moment can start them again
+ * (lib/course-finish.ts); each start is claimed per person and sequence
+ * (startFlows), so trying again never starts anybody twice.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<boolean> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
+    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return true;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
@@ -806,15 +832,29 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "paid_request" && event.paidRequest) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
-    if (!flows.length) return;
+    if (!flows.length) return true;
     const address = normaliseEmail(email);
     // Only someone who may be written to starts one; their one start is not
     // spent on a moment they could not have received it.
-    if (!(await isMailable(store.listId, address))) return;
+    if (!(await mailableExactly(store.listId, address))) return true;
     await startFlows(store, flows, [address]);
+    return true;
   } catch (error) {
     console.error("starting a sequence failed", error);
+    return false;
   }
+}
+
+/**
+ * Whether this address may be written to now, read exactly: the contact's own record or nil (nobody); any other reply
+ * (a number, a list, a lost reply) throws, so enroll says it failed and a once-only moment is not spent on an unread contact (Claude 7 on #4301).
+ */
+async function mailableExactly(listId: string, address: string): Promise<boolean> {
+  const [raw] = repliesFor(await redisPipeline([["HGET", leadsKey(listId), address]]), 1) ?? [undefined];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a contact's record for a sequence's start");
+  // A record read whole that is not a contact stays "not mailable", as isMailable reads it (lib/contacts.ts).
+  const contact = parseContact(raw);
+  return contact !== null && mailable(contact);
 }
 
 /**
@@ -834,13 +874,24 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
     // person is neither restarted nor sent anything, and the whole call says so once the definite starts are done
     // (CX-123 rule 24).
-    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400])), addresses.length);
+    // The claim is only "pending" for an hour: it becomes the 400-day mark in the same atomic step that puts the run
+    // in the queue (FLOW_QUEUED), so a failure on the way (the run's record or its place in the queue not written)
+    // never leaves a 400-day claim with no run behind it (Codex G and X5 on #4301).
+    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), PENDING_START, "NX", "EX", PENDING_START_SECONDS])), addresses.length);
     if (!claims) {
       unknown = true;
       continue;
     }
     const claimed = addresses.filter((_, i) => claims[i] === "OK");
     if (claims.some((claim) => claim !== "OK" && claim !== null)) unknown = true;
+    // Already claimed: only a confirmed start ("1") is "in it already". A pending claim is a start that is on its way
+    // or failed on its way; it is not a start, so the call says it is unknown and a caller holding a once-only mark for
+    // the moment lets it go (lib/course-finish.ts). It lapses within the hour, and the moment then starts it once.
+    const taken = addresses.filter((_, i) => claims[i] === null);
+    if (taken.length) {
+      const held = repliesFor(await redisPipeline(taken.map((address) => ["GET", enrolledKey(flow.id, address)])), taken.length);
+      if (!held || held.some((value) => value !== "1")) unknown = true;
+    }
     if (!claimed.length) continue;
     // The store's runs a day (lib/flow-limits.ts): past it, nobody more is
     // started today, and their start is given back so a later moment can.
@@ -860,18 +911,18 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     }
     // The run's record first, so its first step always finds it.
     await openRuns(flow.id, fresh, now);
-    // The first step's place in the queue, read exactly (CX-123 rule 24): each ZADD 0 or 1, the count a whole number.
+    // Its place in the queue and its 400-day mark in one atomic step: both or neither. A start whose claim is gone
+    // (the person was erased meanwhile) is not queued. Exactly the number queued, from 0 to all, confirms it.
     const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
-    const queued = await redisPipeline([
-      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, member(address)]),
-      ["HINCRBY", statsKey(flow.id), "started", fresh.length],
-    ]).then((replies) => repliesFor(replies, fresh.length + 1), () => null);
-    if (!queued || !queued.slice(0, fresh.length).every((r) => r === 0 || r === 1) || countOf(queued[fresh.length]) === null) {
-      // Not confirmed: the write may still have landed, its answer lost. The once-only start is given back, with the
-      // day's place, only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued),
-      // so the same event starts it again; a mark kept with nothing queued would hold the run at step 0 for 400 days.
-      // Anywhere else the start stays: a start given back after its step went out would send that step twice
-      // (Codex X5 and Codex P on #4307).
+    const queued = await redisPipeline([[
+      "EVAL", FLOW_QUEUED, 2 + fresh.length, QUEUE, statsKey(flow.id), ...fresh.map((address) => enrolledKey(flow.id, address)),
+      now + flow.steps[0].delayHours * 3600, ENROLLED_KEEP_SECONDS, PENDING_START, ...fresh.map(member),
+    ]]).then((replies) => countOf(repliesFor(replies, 1)?.[0]), () => null);
+    if (queued === null || queued < 0 || queued > fresh.length) {
+      // Not confirmed: the script may still have run, its answer lost. The start is given back, with the day's place,
+      // only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued), so the same
+      // event starts it again at once instead of after the pending claim lapses. Anywhere else the start stays: a start
+      // given back after its step went out would send that step twice (Codex X5 and Codex P on #4307).
       const never = await firstStepNeverQueued(flow.id, QUEUE, fresh.map((address) => ({ email: address, member: member(address) })));
       const back = fresh.filter((_, i) => never[i] === true);
       if (back.length) {
@@ -879,10 +930,10 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
         await giveBackRuns(store.listId, back.length, now);
       }
       started += never.filter((answer) => answer === false).length;
-      if (back.length || never.some((answer) => answer === null)) unknown = true;
+      unknown = true;
       continue;
     }
-    started += fresh.length;
+    started += queued;
   }
   if (unknown) throw new UnknownReplyError("a sequence's once-only start");
   return started;
@@ -1318,6 +1369,7 @@ async function waitOrStop(
   everyone: { email: string; reason: WaitReason; note: string }[],
   nowSeconds: number,
   known: { windowEnd?: number | null; pauseUntil?: number | null } = {},
+  gens?: Map<string, string>,
 ): Promise<{ queue: (string | number)[][]; outcomes: Settled[] }> {
   const queue: (string | number)[][] = [];
   const outcomes: Settled[] = [];
@@ -1331,7 +1383,8 @@ async function waitOrStop(
     // Each park counted on the run, at most SES_PARKS_PER_RUN (lib/flow-limits.ts); a step parked again keeps the
     // second it was first parked at this step, so the longest waiting email stays first. Past the bound, or with a
     // count not read exactly, the step waits as any other wait does, and the run stops when that runs out.
-    const parks = await countSesParks(flowId, waitingForAmazon.map((p) => p.email), index, nowSeconds);
+    // Counted only on the run this step was taken for (its generation), as the waits below (Claude 3 local on #4234).
+    const parks = await countSesParks(flowId, waitingForAmazon.map((p) => p.email), index, nowSeconds, gens);
     for (const p of waitingForAmazon) {
       const park = parks.get(p.email) ?? null;
       if (!park || park.parks > SES_PARKS_PER_RUN) {
@@ -1345,10 +1398,11 @@ async function waitOrStop(
   const people = countedWaits;
   if (!people.length) return { queue, outcomes };
   // A look while the store is switched off is counted as half a wait (lib/flow-limits.ts, SWITCHED_OFF_LOOKS_PER_WAIT);
-  // a batch waits for one reason, but each person is counted by their own.
+  // a batch waits for one reason, but each person is counted by their own. Counted only on the run this step was
+  // taken for (its generation, Codex L's MEDIUM on #4234).
   const off = people.filter((p) => p.reason === "switched_off").map((p) => p.email);
   const whole = people.filter((p) => p.reason !== "switched_off").map((p) => p.email);
-  const counted = new Map([...(await countWaits(flowId, whole, index, nowSeconds)), ...(await countWaits(flowId, off, index, nowSeconds, true))]);
+  const counted = new Map([...(await countWaits(flowId, whole, index, nowSeconds, false, gens)), ...(await countWaits(flowId, off, index, nowSeconds, true, gens))]);
   for (const p of people) {
     const count = counted.get(p.email) ?? null;
     const stop = stopWaiting(count, nowSeconds);
@@ -1394,13 +1448,12 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
         ? target < 0 ? "You chose to try it again, but the step is no longer in the workflow, so the run ended." : "Tried again at your request. If the first attempt went through, this may happen twice."
         : target < 0 ? "Marked as done by you; it was the last step." : `Marked as done by you; going on to step ${target + 1}.`;
   const now = Math.floor(Date.now() / 1000);
-  if (!(await releaseHold(store.listId, flowId, person, run.open, note, status, target, now))) return "not_held";
-  if (target >= 0) {
-    const due = choice === "retry" ? now : now + flow.steps[target].delayHours * 3600;
-    const reply = await redisPipeline([["ZADD", QUEUE, due, `${store.listId}|${store.handle}|${flowId}|${target}|${run.email}`]]).catch(() => null);
-    if (!Array.isArray(reply) || reply.length !== 1) throw new FlowWriteUnconfirmed();
-  }
-  return "ok";
+  const next = target < 0 ? undefined : {
+    key: QUEUE,
+    due: choice === "retry" ? now : now + flow.steps[target].delayHours * 3600,
+    member: `${store.listId}|${store.handle}|${flowId}|${target}|${run.email}`,
+  };
+  return await releaseHold(store.listId, flowId, person, run.open, note, status, target, now, next) ? "ok" : "not_held";
 }
 
 /**
@@ -1504,12 +1557,36 @@ export async function sendDueSteps(
     if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlowsExact(listId));
     const flow = flowsFor.get(listId)!.find((f) => f.id === flowId);
     const step = flow?.steps[index];
+    // With the rows, who still holds this step's lease entry, and the generation of their run: each lease entry and
+    // its run's generation are one command (lib/flow-runs.ts LEASE_AND_GEN, in place of the lease entry's ZSCORE, so a
+    // step costs what it did). Read before anything is written, so every later write (a note, the claim, a wait, the
+    // outcome) carries the generation and lands only on the run this step was taken for, never on the run the same
+    // person started again after being erased meanwhile (Codex L's MEDIUM on #4234). Taken out by another workflow's
+    // step since this batch was taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or
+    // attempted for them, whatever the step's condition says.
+    const reply: unknown = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => leaseAndGenCommand(LEASE, `${group}|${email}`, flowId, email))]);
+    // Only an exact reply decides: a row that is exactly nil is "no longer on your list", a score that is exactly nil is
+    // "taken out", a generation is exactly 32 hex characters or nil (a run with none). Any other shape is unknown:
+    // neither of those, and no go-ahead to send either. The batch goes back in the queue (sendDueSteps puts it back on a
+    // throw) and is done on a later run (CX-123 rule 24). The outer reply, the rows and each pair are read from their
+    // own slots (repliesFor): a hole, a getter or a Proxy is not a reply, so neither a missing row nor a missing score
+    // is ever read as nil or as held (Codex U on #3124).
+    const replies = repliesFor(reply, emails.length + 1);
+    const rows = replies ? repliesFor(replies[0], emails.length) : null;
+    const pairs = replies ? replies.slice(1).map((r) => repliesFor(r, 2)) : [];
+    const scores: unknown[] = pairs.map((pair) => (pair ? pair[0] : undefined));
+    const score = (s: unknown) => s === null || ((typeof s === "number" || (typeof s === "string" && s.trim() !== "")) && Number.isFinite(Number(s)));
+    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || pairs.some((pair) => !pair || genOf(pair[1]) === null) || !scores.every(score)) {
+      throw new Error("A due workflow step's rows or lease entries could not be read");
+    }
+    const gens = new Map(emails.map((email, i) => [email, genOf(pairs[i]![1]) ?? ANY_GEN]));
+    const ofRun = <T extends { email: string }>(xs: T[]): (T & { gen: string })[] => xs.map((x) => ({ ...x, gen: gens.get(x.email) ?? ANY_GEN }));
     if (!flow || !flow.active || !step || monthlyAllowance(store) === 0) {
       counts.dropped += emails.length;
       // Written in the run's history, so a run that ends this way says why.
       if (flow) {
         const note = !flow.active ? "The workflow was paused, so this run ended here." : !step ? "This step was removed from the workflow, so this run ended here." : "Email is not part of this store's plan now, so this run ended here.";
-        await noteRuns(flow.id, emails.map((email) => ({ email, index, stepId: step?.id ?? "", kind: "run", state: "ended" as const, note, to: -1, status: "ended" as const })), now).catch(() => {});
+        await noteRuns(flow.id, ofRun(emails.map((email) => ({ email, index, stepId: step?.id ?? "", kind: "run", state: "ended" as const, note, to: -1, status: "ended" as const }))), now).catch(() => {});
       }
       return;
     }
@@ -1519,30 +1596,14 @@ export async function sendDueSteps(
     // the run stops, saying why), queued only
     // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
     if (store.suspended) {
-      const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now);
+      const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now, {}, gens);
       const out = await queueHeld(waiting.queue);
       const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
       counts.later += later;
       counts.dropped += emails.length - later;
       const ended = waiting.outcomes.filter((o) => o.state === "failed");
-      await noteRuns(flow.id, ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const })), now).catch((error) => console.error("writing workflow history failed", error));
+      await noteRuns(flow.id, ofRun(ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const }))), now).catch((error) => console.error("writing workflow history failed", error));
       return;
-    }
-    // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
-    // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
-    // the step's condition says.
-    const reply: unknown = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
-    // Only an exact reply decides: a row that is exactly nil is "no longer on your list", a score that is exactly nil is
-    // "taken out". Any other shape is unknown: neither of those, and no go-ahead to send either. The batch goes back in
-    // the queue (sendDueSteps puts it back on a throw) and is done on a later run (CX-123 rule 24). Both the outer
-    // reply and the rows are read from their own slots (repliesFor): a hole, a getter or a Proxy is not a reply, so
-    // neither a missing row nor a missing score is ever read as nil or as held (Codex U on #3124).
-    const replies = repliesFor(reply, emails.length + 1);
-    const rows = replies ? repliesFor(replies[0], emails.length) : null;
-    const scores: unknown[] = replies ? replies.slice(1) : [];
-    const score = (s: unknown) => s === null || ((typeof s === "number" || (typeof s === "string" && s.trim() !== "")) && Number.isFinite(Number(s)));
-    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || !scores.every(score)) {
-      throw new Error("A due workflow step's rows or lease entries could not be read");
     }
     const found: unknown[] = rows;
     const held = new Set(emails.filter((_, i) => scores[i] !== null));
@@ -1598,15 +1659,15 @@ export async function sendDueSteps(
     if (left + onward.length) tallies.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
     const skippedOut = await queueHeld(moved, tallies);
     counts.dropped += skippedOut.size;
-    await noteRuns(flow.id, notes.filter((n) => !skippedOut.has(n.email)), now).catch((error) => console.error("writing workflow history failed", error));
+    await noteRuns(flow.id, ofRun(notes.filter((n) => !skippedOut.has(n.email))), now).catch((error) => console.error("writing workflow history failed", error));
     if (!still.length) return;
     const mine = still;
 
     // The attempt is written down before anything is done (lib/flow-runs.ts).
     // Whoever already has an attempt open here is held, never tried again.
-    let claim: { claimed: string[]; open: string[] };
+    let claim: { claimed: string[]; open: string[]; gone: string[]; opens: Map<string, string> };
     try {
-      claim = await claimAttempts(flow.id, mine, index, step.id, kind, now);
+      claim = await claimAttempts(flow.id, mine, index, step.id, kind, now, gens);
     } catch {
       // Nothing was attempted: back in the queue, as before history existed, unless taken out meanwhile.
       const out = await queueHeld(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
@@ -1614,9 +1675,15 @@ export async function sendDueSteps(
       counts.dropped += out.size;
       return;
     }
+    // Erased since they were taken from the queue: nothing is done for them, and nothing of theirs is written again.
+    counts.dropped += claim.gone.length;
     if (claim.open.length) {
-      await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), now).catch(() => {});
+      // Not this step's own attempt, so any open one of this run (its generation still checked).
+      await settleAttempts(listId, flow.id, index, step.id, kind, ofRun(claim.open.map((email) => ({ email, state: "uncertain" as const, note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index }))), now).catch(() => {});
     }
+    // Each outcome below is for this step's own attempt of this run: its generation and the attempt claimAttempts wrote.
+    const claimedBy = claim.opens;
+    const own = (xs: Settled[]): Settled[] => xs.map((x) => ({ ...x, gen: gens.get(x.email) ?? ANY_GEN, open: claimedBy.get(x.email) ?? "*" }));
     const going = claim.claimed;
     if (!going.length) return;
     const to = afterIndex(flow.steps, index);
@@ -1639,11 +1706,11 @@ export async function sendDueSteps(
         const confirmed = all.filter((o) => o.state === "confirmed" && o.changed).map((o) => o.email);
         // A failed action is written down and the run goes on: one missing deal does not stop the emails after it.
         const onwards = all.filter((o) => o.state === "confirmed" || o.state === "failed").map((o) => o.email);
-        const waiting = await waitOrStop(flow.id, group, index, all.filter((o) => o.state === "deferred").map((o) => ({ email: o.email, reason: o.wait ?? "retry", note: o.note })), now);
+        const waiting = await waitOrStop(flow.id, group, index, all.filter((o) => o.state === "deferred").map((o) => ({ email: o.email, reason: o.wait ?? "retry", note: o.note })), now, {}, gens);
         const out = await queueHeld([...queueNext(onwards), ...waiting.queue], confirmed.length ? [["HINCRBY", statsKey(flow.id), "acted", confirmed.length]] : []);
         const stay = new Set(going.filter((email) => !out.has(email)));
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)], now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, own([...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)]), now);
         return;
       }
 
@@ -1651,7 +1718,7 @@ export async function sendDueSteps(
       const result = await sendTo(store, going, step.subject, step.body, key, { medium: "sequence", campaign: stepCampaign(flow.id, step.id) }).catch(() => null);
       if (!result) {
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index })), now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, own(going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index }))), now);
         return;
       }
       const uncertain = new Set(result.uncertain ?? []);
@@ -1686,7 +1753,7 @@ export async function sendDueSteps(
           const why =
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";
           const window = allowanceWindow(store, now * 1000);
-          waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });
+          waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null }, gens);
           onQueue.push(...waiting.queue);
         }
       }
@@ -1723,14 +1790,16 @@ export async function sendDueSteps(
         counts.dropped += waiting.outcomes.length - later;
       }
       queued = true;
-      await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
-      await settleLeftIfRun(flow.id, index, step.id, kind, gone, "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", now);
+      await settleAttempts(listId, flow.id, index, step.id, kind, own(outcomes), now);
+      // Each with the generation of the run this step was taken from, as every late write here (own): one erased and
+      // started again meanwhile is not ended as left.
+      await settleLeftIfRun(flow.id, index, step.id, kind, gone, "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", now, gens);
     } catch (error) {
       // Something after the attempt could not be confirmed. The attempts stay
       // open, so nothing is repeated by itself; when nothing was queued after
       // them either, the runs are held here for the creator to see.
       console.error("finishing a workflow step failed", error);
-      if (!queued) await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "What happened at this step could not be confirmed.", to: index })), now).catch(() => {});
+      if (!queued) await settleAttempts(listId, flow.id, index, step.id, kind, own(going.map((email) => ({ email, state: "uncertain", note: "What happened at this step could not be confirmed.", to: index }))), now).catch(() => {});
     }
   }
 }

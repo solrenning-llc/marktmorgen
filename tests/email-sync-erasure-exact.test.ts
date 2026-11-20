@@ -169,6 +169,20 @@ test("a deleted store's deletion answered with a count above its keys is not fin
   assert.ok(unknown(await under(over, () => forgetStoreSync(STATS))));
 });
 
+// Claude 4's LOW on #4911 (7027483305): the ZREM's bound held by a test too. Its members name jobs, not addresses,
+// but a count above them is no more a proof than a DEL's.
+test("a deleted store's queue ZREM answered with a count above its members is not finished", async () => {
+  await seed();
+  const over = (b: Batch, a: unknown[]) => (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) ? a.map((reply, i) => (b[i]?.[0] === "ZREM" ? b[i].length - 1 : reply)) : a);
+  let zrem = false;
+  const result = await under((b, a) => {
+    if (b.some((c) => c[0] === "DEL" && c[1] === cfgKey) && b.some((c) => c[0] === "ZREM")) zrem = true;
+    return over(b, a);
+  }, () => forgetStoreSync(STATS));
+  assert.equal(zrem, true, "the store's job was on the queue, so its deletion holds a ZREM");
+  assert.ok(unknown(result));
+});
+
 test("a retired job's record DEL answered with a count above its key keeps the job on the queue", async () => {
   await seed("added");
   redis.run(["LREM", logKey, 0, ID]);

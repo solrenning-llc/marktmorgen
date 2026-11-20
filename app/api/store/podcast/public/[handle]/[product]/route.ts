@@ -91,7 +91,7 @@ async function build(store: Store, segment: string, now: number): Promise<KeptFe
       episodes: candidates,
       audio: (e) => audio.get(e.id) ?? "",
     });
-    return { store, xml, etag: etagOf(xml), bytes: Buffer.byteLength(xml, "utf8") };
+    return { xml, etag: etagOf(xml), bytes: Buffer.byteLength(xml, "utf8") };
   } catch (error) {
     if (error instanceof PublicFeedError) console.warn(`a public podcast feed could not be written: ${error.reason}`);
     else console.error("a public podcast feed's records could not be read", error);
@@ -112,20 +112,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return notFound();
   }
   if (handleProblem(handle) || segment === "" || segment.length > MAX_SEGMENT) return notFound();
-  const key = `${handle}|${segment}`;
   const now = Date.now();
+
+  // The store is read, live, before the cache (Codex L-20261120-1144): a feed kept from before its store was erased,
+  // suspended or given up is never answered from memory. The cache is keyed by the store's own id too, so a store that
+  // later holds the same address never gets another store's feed.
+  let store: Awaited<ReturnType<typeof storeForHandleExactly>>;
+  try {
+    store = await storeForHandleExactly(handle);
+  } catch (error) {
+    console.error("a public podcast feed's store could not be read", error);
+    return unavailable();
+  }
+  if (store === "unknown") return unavailable();
+  if (store === "none" || store.suspended) return notFound();
+  const key = `${store.sid}|${handle}|${segment}`;
 
   let feed = cachedFeed(key, now);
   if (!feed) {
-    let store: Awaited<ReturnType<typeof storeForHandleExactly>>;
-    try {
-      store = await storeForHandleExactly(handle);
-    } catch (error) {
-      console.error("a public podcast feed's store could not be read", error);
-      return unavailable();
-    }
-    if (store === "unknown") return unavailable();
-    if (store === "none" || store.suspended) return notFound();
     const built = await build(store, segment, now);
     if (built === "none") return notFound();
     if (built === "unavailable") return unavailable();
@@ -136,12 +140,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   // An app that already has this feed is told so with no body: one unit, taken before it is answered.
   if (matchesTag(request.headers.get("if-none-match"), feed.etag)) {
-    if (!(await takePublicRequest(feed.store, "public", now, 1))) return resting();
+    if (!(await takePublicRequest(store, "public", now, 1))) return resting();
     return new Response(null, { status: 304, headers: { ...FEED_HEADERS, ETag: feed.etag } });
   }
   const units = sendUnits(feed.bytes);
   if (units === null) return unavailable();
-  if (!(await takePublicRequest(feed.store, "public", now, units))) return resting();
+  if (!(await takePublicRequest(store, "public", now, units))) return resting();
   const body = feed.xml;
   return new Response(body, { status: 200, headers: { ...FEED_HEADERS, ETag: feed.etag } });
 }

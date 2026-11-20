@@ -2011,6 +2011,27 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
 }
 
 /**
+ * Runs `work` only while this very store is live, under the same lock closeStoreRecord takes (Codex L-20261120-1151):
+ * for a write beside the record (a key of a family the closing walk deletes) that read the store before and writes
+ * after. The walk writes the erasing mark and deletes the live store's data under this lock, so either the work ends
+ * first and the walk deletes what it wrote, or the walk has begun (the mark is there) or ended (no record) and the work
+ * does not run. Null then. The same store is the same sid, or for a store from before ids the same statsId (as
+ * closeStoreRecord's sameLegacy). An erasing mark that cannot be read throws UnknownReplyError, with nothing run.
+ */
+export async function withLiveStore<T>(
+  known: Pick<Store, "email" | "sid" | "extra" | "statsId">,
+  work: (current: Store) => Promise<T>,
+): Promise<T | null> {
+  const ref = storeRef(known);
+  return withStore(ref, async (current) => {
+    const same = STORE_ID_PATTERN.test(known.sid) ? current.sid === known.sid : Boolean(known.statsId) && current.statsId === known.statsId;
+    if (!same) return null;
+    if ((await erasingSince(ref)) !== null) return null;
+    return work(current);
+  });
+}
+
+/**
  * Holds the locks of several stores at once, one inside the other, and hands
  * `work` the stores as they are with all of them held. A key with no store
  * behind it is left out. Only for a change that has to write several stores

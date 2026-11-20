@@ -152,12 +152,12 @@ async function main(): Promise<void> {
   is("the hold's rest was given back", buildUnits(readBytes)! < PUBLIC_FEED_HOLD_UNITS, true);
   is("no request to any other service, and no audio read", fetched, 0);
 
-  part("Kept in a bounded cache: asked again, nothing is read from Redis, only the count written");
+  part("Kept in a bounded cache: asked again, only the store is read (live, before the cache: Codex L-20261120-1144), and the count written");
   before = await requestsIn(folder, window);
   sent.length = 0;
   const again = await get(`${pid}.xml`);
   is("the same feed", [again.status, await again.text()], [200, xml]);
-  is("no read of the store, listing, podcast or settings", reads().filter((c) => !c.startsWith("GET nl:traffic:r:")), []);
+  is("only the store's address and record are read: no listing, podcast or settings", reads().filter((c) => !c.startsWith("GET nl:traffic:r:")).map((c) => c.split(" ").slice(0, 2).join(" ").replace(/:[^:]+$/, ":*")), ["GET nl:store:handle:*", "GET nl:store:owner:*"]);
   is("a kept feed takes only the units of its bytes, one at least", (await requestsIn(folder, window)) - before, sendUnits(bytes));
 
   part("An app that sends the ETag back is answered 304, with no body, and counted once");
@@ -327,17 +327,17 @@ async function main(): Promise<void> {
   part("The cache is bounded by entries and by bytes");
   forgetPublicFeeds();
   const big = "x".repeat(1000);
-  for (let n = 0; n < PUBLIC_FEED_CACHE_ENTRIES + 50; n += 1) keepFeed(`k${n}`, { store, xml: big, etag: '"e"', bytes: 1000 }, Date.now());
+  for (let n = 0; n < PUBLIC_FEED_CACHE_ENTRIES + 50; n += 1) keepFeed(`k${n}`, { xml: big, etag: '"e"', bytes: 1000 }, Date.now());
   let held = 0;
   for (let n = 0; n < PUBLIC_FEED_CACHE_ENTRIES + 50; n += 1) if (cachedFeed(`k${n}`, Date.now())) held += 1;
   is("never more than PUBLIC_FEED_CACHE_ENTRIES, the oldest let go first", [held, Boolean(cachedFeed("k0", Date.now())), Boolean(cachedFeed(`k${PUBLIC_FEED_CACHE_ENTRIES + 49}`, Date.now()))], [PUBLIC_FEED_CACHE_ENTRIES, false, true]);
   forgetPublicFeeds();
   const huge = "y".repeat(PUBLIC_FEED_CACHE_BYTES / 4);
-  for (let n = 0; n < 8; n += 1) keepFeed(`h${n}`, { store, xml: huge, etag: '"h"', bytes: huge.length }, Date.now());
+  for (let n = 0; n < 8; n += 1) keepFeed(`h${n}`, { xml: huge, etag: '"h"', bytes: huge.length }, Date.now());
   let total = 0;
   for (let n = 0; n < 8; n += 1) total += cachedFeed(`h${n}`, Date.now())?.bytes ?? 0;
   is("never more than PUBLIC_FEED_CACHE_BYTES held", total <= PUBLIC_FEED_CACHE_BYTES && total > 0, true);
-  keepFeed("too-big", { store, xml: "z", etag: '"z"', bytes: PUBLIC_FEED_CACHE_BYTES + 1 }, Date.now());
+  keepFeed("too-big", { xml: "z", etag: '"z"', bytes: PUBLIC_FEED_CACHE_BYTES + 1 }, Date.now());
   is("a feed larger than the whole cache is not kept (it is still sent, counted)", cachedFeed("too-big", Date.now()), null);
   forgetPublicFeeds();
 

@@ -22,7 +22,6 @@
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import type { Store } from "@/lib/store";
 import { EPISODE_ID, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, PODCAST_ID, type Episode, type Podcast } from "@/lib/podcast-rules";
 import { PUBLIC_CATEGORIES, type PublicCategory, type PublicEpisodeCandidate } from "@/lib/podcast-public-feed";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
@@ -188,8 +187,12 @@ export function matchesTag(header: string | null, etag: string): boolean {
   });
 }
 
-/** A feed kept: the store it is counted against, the XML, its tag and its size in bytes. */
-export type KeptFeed = { store: Store; xml: string; etag: string; bytes: number };
+/**
+ * A feed kept: only the XML, already public, its tag and its size in bytes. The store is not kept with it: the route
+ * reads the store, live, before it looks here, so an erased store's feed is never answered from memory and no owner's
+ * address stays in the cache (Codex L-20261120-1144, L-20261118-0519).
+ */
+export type KeptFeed = { xml: string; etag: string; bytes: number };
 
 const kept = new Map<string, { feed: KeptFeed; until: number }>();
 let keptBytes = 0;

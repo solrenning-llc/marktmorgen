@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       await cancelRsvp(id, event, viewer.key, store);
       return back(page, "notgoing");
     }
-    // The store's stable list id, so the write is fenced by the person's erasure print (issue #4786).
+    // The store's stable list id, so the write is fenced by the person's erasure print (Codex L, L-20261120-1245).
     const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
     if (!listId) return back(page, "error");
     const answer = await rsvp(id, event, viewer.key, store, Date.now(), { listId, email: viewer.email });

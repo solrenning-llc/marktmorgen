@@ -1,5 +1,5 @@
 /**
- * An RSVP admitted before a person's erasure cannot write their place back after the erasure finished (issue #4786,
+ * An RSVP admitted before a person's erasure cannot write their place back after the erasure finished (L-20261120-1245,
  * Codex L, MEDIUM, privacy): the write checks the store's one-way erasure print in the same Redis step, so either the
  * RSVP lands first and the eraser deletes it, or the erasure lands first and the RSVP writes nothing. Synthetic only.
  */

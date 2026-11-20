@@ -772,7 +772,7 @@ if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL'
 return 0`;
 /**
  * Takes a place only while this address has not been erased from the store, in the same Redis step as the write
- * (issue #4786): an RSVP that passed its first checks before the person's erasure cannot write them back after the
+ * (Codex L, L-20261120-1245): an RSVP that passed its first checks before the person's erasure cannot write them back after the
  * eraser ran, since erasePerson writes the store's one-way erasure print before any eraser.
  * KEYS: the event's RSVP hash and the store's erased-address hash. ARGV: member key, one-way erasure print, mark.
  * Returns {-1, 0} when erased, or {HSETNX, HLEN}; malformed/lost replies are unknown and keep no unconfirmed place.

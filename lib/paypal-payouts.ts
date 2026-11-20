@@ -890,10 +890,15 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
   return out;
 }
 
-/** Marks a batch whose answer is not known for the creator's own check, once, and counts it. */
-async function needsManualCheck(statsId: string, field: string, sent: OpenBatch): Promise<"manual"> {
+/**
+ * Marks a batch whose answer is not known for the creator's own check, once, and counts it. Written only while the
+ * store is live (KEEP_OPEN_IF_LIVE; Claude 6 on #4963): it can run outside the press's lock, after the settling's slow
+ * calls, and an erased store's batch is never written back nor counted.
+ */
+async function needsManualCheck(store: Store, field: string, sent: OpenBatch): Promise<"manual"> {
   if (sent.m === 1) return "manual";
-  await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, m: 1 })]]);
+  const [held] = await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, m: 1 }), false)]);
+  if (held === -1) return "manual";
   await countUnknown("manual");
   return "manual";
 }
@@ -912,7 +917,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   const statsId = store.statsId as string;
   const now = Date.now();
   if (seen.m === 1) return "manual";
-  if (now - seen.at >= UNKNOWN_MANUAL_AFTER_MS) return needsManualCheck(statsId, field, seen);
+  if (now - seen.at >= UNKNOWN_MANUAL_AFTER_MS) return needsManualCheck(store, field, seen);
   if (seen.t !== undefined && now - seen.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
   return withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async () => {
     // Read again under the payment's own lock: a press or another settling may have moved it.
@@ -927,7 +932,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     // the same sender_batch_id sent from another account (the store connected a new app since) could pay everyone
     // again. A batch that kept no sender (made before this check, or with no server secret) or whose app changed is
     // money that may have left: never sent again, left for the creator's own check (rule 30).
-    if (!sent.p || !sender || sender !== sent.p) return needsManualCheck(statsId, field, sent);
+    if (!sent.p || !sender || sender !== sent.p) return needsManualCheck(store, field, sent);
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
     // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds, or membership and plan payments,
     // that cannot all be read: not known, wait (no try counted), never a line "no longer owed" (audit A1). A line no longer owed in full (refunded since, or the affiliate gone or no longer
@@ -939,17 +944,21 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     const lines: BatchLine[] = [];
     for (const line of sent.lines) {
       const row = rows.get(line.a);
-      if (!row || row.affiliate.status !== "approved" || row.payable < line.c || sent.currency !== store.currency) return needsManualCheck(statsId, field, sent);
+      if (!row || row.affiliate.status !== "approved" || row.payable < line.c || sent.currency !== store.currency) return needsManualCheck(store, field, sent);
       const again: BatchLine = { affiliate: row.affiliate, cents: line.c };
       // The same recipient or none (review of Codex H2 on #2681, GRAVE): if the affiliate's PayPal address changed
       // since the first request, or the batch kept no fingerprint of it, the retry could pay someone else.
-      if (!sameReceiver(receiverOf(again), line.r)) return needsManualCheck(statsId, field, sent);
+      if (!sameReceiver(receiverOf(again), line.r)) return needsManualCheck(store, field, sent);
       lines.push(again);
     }
     // The try is counted before it is made, so a run that stops halfway never tries twice in a day.
-    const tried: unknown = await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, t: now })]]);
+    // Written only while the store is live (KEEP_OPEN_IF_LIVE; Claude 6 on #4963): the erasure's mark may be there while
+    // its deletes are still to come, and a store being erased is never asked for its money again. -1: nothing written,
+    // nothing sent, left waiting for the erasure to take it.
+    const tried: unknown = (await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, t: now }), false)]))?.[0];
+    if (tried === -1) return "waiting";
     // HSET answers 0 for a field it changed (1 only if it was gone, which the read under the lock just ruled out).
-    if (!Array.isArray(tried) || tried.length !== 1 || (tried[0] !== 0 && tried[0] !== 1)) return "waiting";
+    if (!Array.isArray(tried) || tried.length !== 2 || (tried[0] !== 0 && tried[0] !== 1)) return "waiting";
     const senderBatchId = field.slice(UNKNOWN_BATCH_PREFIX.length);
     let batch = "";
     try {
@@ -959,7 +968,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     } catch (error) {
       if (!(error instanceof PayPalError && error.duplicate)) return "waiting";
       // PayPal already has it: sent. Its id when the refusal links it; otherwise the creator's own check.
-      if (!BATCH_ID.test(error.original)) return needsManualCheck(statsId, field, { ...sent, t: now });
+      if (!BATCH_ID.test(error.original)) return needsManualCheck(store, field, { ...sent, t: now });
       batch = error.original;
     }
     if (!BATCH_ID.test(batch)) return "waiting";

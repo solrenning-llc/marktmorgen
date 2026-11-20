@@ -8,10 +8,10 @@
  * Nothing calls it yet: the routes and the billing-country field are wired in a later unit, once the coordinator says
  * so, and sales stay closed by lib/opening.ts regardless (PLANS_ON_SALE false, DEEMED_SUPPLIER_RECORDS empty).
  */
-import { EU_VAT_COUNTRIES, type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
+import { type EuSupplyFields, REFUSED_PLACES, euSupplyOf } from "@/lib/eu-vat-supply";
 import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { type EuVatRate, type VatOnTop } from "@/lib/eu-vat-amount";
-import { euCheckout } from "@/lib/eu-vat-checkout";
+import { type EuCheckoutRefusal, euCheckout } from "@/lib/eu-vat-checkout";
 import { SHIP_COUNTRIES } from "@/lib/shipping";
 
 /** Said when the two items of evidence are missing or name different countries (docs/art9a-sources-and-build-spec, 2.3). */
@@ -23,7 +23,7 @@ export const EU_SALE_REFUSED = "This product can't be bought from a country in t
 
 export type EuGate =
   | { ok: true; vat: VatOnTop | null }
-  | { ok: false; reason: "place" | "goods" | "human" | "supply" | "record" | "treatment" | "rate" | "review" | "business"; message: string };
+  | { ok: false; reason: EuCheckoutRefusal | "business"; message: string };
 
 export function euCheckoutGate(input: {
   product: EuSupplyFields;
@@ -46,13 +46,10 @@ export function euCheckoutGate(input: {
 }
 
 /**
- * The places whose consumers are refused at checkout while neither the EU nor the UK has a "collect" record (the
- * coordinator's opening path, C2-20261113-1320-ABRIR-1, 2b): the 27 Member States, the EU's outermost regions and
- * Åland, which a country code names apart (GF, GP, MQ, RE, YT, MF, AX), Monaco, which is inside France's VAT territory,
- * and the United Kingdom with the Isle of Man, which is inside the UK's. Wider than the VAT territories on purpose:
- * refusing a buyer there costs a sale, while selling there unrecorded would owe VAT nobody collected.
+ * The places whose consumers are refused at checkout: defined beside the Member States (lib/eu-vat-supply.ts), so the
+ * shipping lock reads the same set without this module (lib/eu-vat-goods.ts, 789 [IV1] unit 1).
  */
-export const REFUSED_PLACES: ReadonlySet<string> = new Set([...EU_VAT_COUNTRIES, "GF", "GP", "MQ", "RE", "YT", "MF", "AX", "MC", "GB", "IM"]);
+export { REFUSED_PLACES };
 
 /** Said when a paid product electronically supplied, or a physical one, is asked for from the EU or the UK. */
 export const EU_UK_REFUSED =

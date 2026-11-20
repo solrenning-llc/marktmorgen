@@ -66,11 +66,13 @@
  *     key rule (a C0 control, DEL, over 1,024 characters), is left out alone and
  *     its listing ends "unsignable", never complete (Claude 5's and Claude 3's
  *     MEDIUMs on #3313);
- *   - at most the review's maxPagesPerDay pages a UTC day for each source,
+ *   - at most the review's maxPagesPerDay pages a UTC day for each source
+ *     (and its own maxStoresPagesPerDay and maxDeletionsPagesPerDay for those pages),
  *     counted before the provider is asked (one INCR and one EXPIRE NX, lib/window-count.ts, read
  *     in their exact shape, rule 24): past it 429, unreadable 503.
  *
- *   nl:backup:files:day:<YYYY-MM-DD>:<source>   the day's pages of one source, kept two days
+ *   nl:backup:files:day:<YYYY-MM-DD>:<source>   the day's pages of one source (or of the stores or
+ *                                               deletions page), kept two days
  *
  * Rule 24: a listing or a token that cannot be read in its exact shape throws,
  * and the route answers 503: never an empty or complete page.
@@ -82,6 +84,7 @@ import {
   BACKUP_FILES_PAGE_ENTRIES,
   BACKUP_FILES_PAGES_PER_STORE,
   BACKUP_FILES_URL_SECONDS,
+  BACKUP_FILES_DAY_CEILING_REFUSALS,
   type BackupFilesEntry,
   type BackupFilesPage,
   type BackupFilesReason,
@@ -91,7 +94,7 @@ import {
   parseFilesPage,
   sourcePrefix,
 } from "@/lib/backup-files-contract";
-import { backupFilesR2Config, listR2Page, presignR2Get } from "@/lib/backup-files-r2";
+import { R2UnsignableKey, backupFilesR2Config, listR2Page, presignR2Get } from "@/lib/backup-files-r2";
 import type { BackupFilesRouteReview } from "@/lib/backup-files-review";
 import { redisPipeline } from "@/lib/redis";
 import { windowCount, windowCountOf } from "@/lib/window-count";
@@ -146,8 +149,9 @@ const ROOM = 1.1;
 
 /**
  * The route's worst month in micro-dollars, a company cost (the company's backup, 100% Marktmorgen under FX275): the
- * review's maxPagesPerDay, which takeDayPage counts before any provider call, for each source that is on, every UTC day
- * of the month, plus R2's rounding block, with room. No review: 0, since the route answers 404 before any command.
+ * review's maxPagesPerDay, which takeDayPage counts before any provider call, and the day's one refused call past it
+ * (BACKUP_FILES_DAY_CEILING_REFUSALS), for each source that is on, every UTC day of the month, plus R2's rounding block,
+ * with room. No review: 0, since the route answers 404 before any command.
  * Null (unknown, never zero) for a review that is not a whole page count, or when Bunny Stream, whose listing price is
  * not read, is turned on.
  */
@@ -156,7 +160,8 @@ export function backupFilesRouteWorstMonth(review: BackupFilesRouteReview | null
   if (!Number.isSafeInteger(review.maxPagesPerDay) || review.maxPagesPerDay < 1) return null;
   if (SOURCE_OFF.bunny === null) return null;
   const on = (["blob", "r2"] as const).filter((source) => SOURCE_OFF[source] === null).length;
-  const pages = on * review.maxPagesPerDay * ROUTE_DAYS_PER_MONTH;
+  // And the day's refused call past the ceiling (BACKUP_FILES_DAY_CEILING_REFUSALS), priced as a whole page.
+  const pages = on * (review.maxPagesPerDay + BACKUP_FILES_DAY_CEILING_REFUSALS) * ROUTE_DAYS_PER_MONTH;
   return Math.ceil((pages * BACKUP_FILES_PAGE_MICRO_USD + (SOURCE_OFF.r2 === null ? R2_BLOCK_MICRO_USD : 0)) * ROOM);
 }
 
@@ -210,12 +215,19 @@ export function admitFilesReview(raw: unknown): BackupFilesRouteReview | null {
     const descriptor = Object.getOwnPropertyDescriptor(raw, name);
     return descriptor && "value" in descriptor ? descriptor.value : undefined;
   };
-  const maxPagesPerDay = read("maxPagesPerDay");
+  const figure = (name: string): number | null => {
+    const value = read(name);
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 1_000_000 ? value : null;
+  };
+  // Each page kind's own figure (a review sized for listings never admits stores pages at that count): one missing is no review.
+  const maxPagesPerDay = figure("maxPagesPerDay");
+  const maxStoresPagesPerDay = figure("maxStoresPagesPerDay");
+  const maxDeletionsPagesPerDay = figure("maxDeletionsPagesPerDay");
   const reviewedAt = read("reviewedAt");
   const source = read("source");
-  if (typeof maxPagesPerDay !== "number" || !Number.isSafeInteger(maxPagesPerDay) || maxPagesPerDay < 1 || maxPagesPerDay > 1_000_000) return null;
+  if (maxPagesPerDay === null || maxStoresPagesPerDay === null || maxDeletionsPagesPerDay === null) return null;
   if (typeof reviewedAt !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(reviewedAt) || typeof source !== "string" || source.trim().length < 3) return null;
-  return { maxPagesPerDay, reviewedAt, source };
+  return { maxPagesPerDay, maxStoresPagesPerDay, maxDeletionsPagesPerDay, reviewedAt, source };
 }
 
 // -------------------------------------------------------------------- cursor
@@ -252,8 +264,11 @@ export function decodeFilesCursor(text: string, source: BackupFilesSource, store
 
 // ------------------------------------------------------------- day's ceiling
 
-/** Takes one of the day's reviewed pages for a source before the provider is asked: "ok", "over" past it, "unknown" when the count cannot be read. */
-export async function takeDayPage(source: BackupFilesSource, review: BackupFilesRouteReview, now = Date.now()): Promise<"ok" | "over" | "unknown"> {
+/** What the day's reviewed pages are counted for: each source's listing, and the stores and deletions pages. */
+export type BackupFilesPageKind = BackupFilesSource | "stores" | "deletions";
+
+/** Takes one of the day's reviewed pages for a source (or page), against that kind's own figure of the review, before the provider or the database is asked: "ok", "over" past it, "unknown" when the count cannot be read. */
+export async function takeDayPage(source: BackupFilesPageKind, review: BackupFilesRouteReview, now = Date.now()): Promise<"ok" | "over" | "unknown"> {
   const key = `nl:backup:files:day:${new Date(now).toISOString().slice(0, 10)}:${source}`;
   try {
     // The window count (lib/window-count.ts): INCR, then the expiry only when the key has none, so a key that expired
@@ -261,7 +276,8 @@ export async function takeDayPage(source: BackupFilesSource, review: BackupFiles
     // #3313). Read only in its exact shape (windowCountOf, rule 24): anything else is unknown.
     const count = windowCountOf(await redisPipeline(windowCount(key, 2 * 86_400)));
     if (count === null) return "unknown";
-    return count > review.maxPagesPerDay ? "over" : "ok";
+    const ceiling = source === "stores" ? review.maxStoresPagesPerDay : source === "deletions" ? review.maxDeletionsPagesPerDay : review.maxPagesPerDay;
+    return count > ceiling ? "over" : "ok";
   } catch {
     return "unknown";
   }
@@ -359,7 +375,16 @@ function sourceOf(source: BackupFilesSource, now: () => number): { list: (prefix
     list: (prefix, cursor) => listR2Page(config, prefix, cursor),
     sign: async (key) => {
       const at = now();
-      return { url: presignR2Get(config, key, BACKUP_FILES_URL_SECONDS, new Date(at)), expiresAt: Math.floor(at / 1000) * 1000 + BACKUP_FILES_URL_SECONDS * 1000 };
+      let url: string;
+      try {
+        url = presignR2Get(config, key, BACKUP_FILES_URL_SECONDS, new Date(at));
+      } catch (error) {
+        // A key R2's signer would not lead to (a dot segment, or an address that does not decode back to it) is that
+        // one object left out, as a Blob key is, never the page (Codex N1's LOW 3 on #3313).
+        if (error instanceof R2UnsignableKey) throw new UnsignableKey();
+        throw error;
+      }
+      return { url, expiresAt: Math.floor(at / 1000) * 1000 + BACKUP_FILES_URL_SECONDS * 1000 };
     },
   };
 }
@@ -415,9 +440,18 @@ export async function backupFilesPage(
     if (!refused) console.error("backup files: a key could not be handed out as itself and is left out", input.source);
     refused = true;
   };
+  // The last object looked at, handed out or left out: a page cut off goes on after it. Left out is carried in the
+  // cursor (refused), so its end is still "unsignable". A key the contract refuses (a control or past 1,024
+  // characters) is never the resume point, since the cursor refuses it too (Claude 6's MEDIUM on #4840): it is
+  // passed without a cutoff until a key the cursor can carry is looked at, and looked at again after a cutoff, harmless.
+  let looked = state.after;
   for (const object of objects) {
-    const resume = carry({ page: state.page, provider: state.provider, after: entries.length ? entries[entries.length - 1].key : state.after });
-    if (now() >= options.stopAt) return answer(entries, "cutoff", resume);
+    const resume = carry({ page: state.page, provider: state.provider, after: looked });
+    // The cutoff is kept only once this call has looked at one object: a listing slow enough to pass it would
+    // otherwise answer an empty page with the cursor it was given, and a Worker repeating it would never move
+    // (Codex N1's LOW 2 on #3313). A call that runs past the request's own limit (BACKUP_FILES_REQUEST_MS) still ends
+    // there, unanswered, and its page is counted.
+    if (looked !== state.after && now() >= options.stopAt) return answer(entries, "cutoff", resume);
     // The contract's own key rule first (a C0 control, DEL, or more than 1,024 characters: Claude 3's MEDIUM on
     // #3313): such a key would make parseFilesPage refuse the whole page, so it is left out alone, as below.
     if (!isContractKey(object.key)) {
@@ -430,12 +464,14 @@ export async function backupFilesPage(
     } catch (error) {
       if (!(error instanceof UnsignableKey)) throw error;
       refuse();
+      looked = object.key;
       continue;
     }
     // The contract's own address rule too (Claude 3's second MEDIUM on #3313): an address past it would make
     // parseFilesPage refuse the whole page, so its key is left out alone, as above.
     if (!isContractUrl(signed.url)) {
       refuse();
+      looked = object.key;
       continue;
     }
     const entry: BackupFilesEntry = { source: input.source, key: object.key, etag: object.etag, size: object.size, url: signed.url, expiresAt: signed.expiresAt };
@@ -443,6 +479,7 @@ export async function backupFilesPage(
     if (bytes + weight > BACKUP_FILES_PAGE_BYTES) return answer(entries, "page_bytes", resume);
     bytes += weight;
     entries.push(entry);
+    looked = object.key;
   }
   if (listed.next === null) return answer(entries, refused ? "unsignable" : "done", null);
   if (state.page + 1 >= BACKUP_FILES_PAGES_PER_STORE) return answer(entries, "over_bound", null);

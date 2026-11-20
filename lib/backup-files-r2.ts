@@ -63,13 +63,24 @@ export function backupFilesR2Config(env: Env = process.env): BackupFilesR2Config
  */
 export function presignR2Get(config: BackupFilesR2Config, key: string, seconds: number, now: Date = new Date()): string {
   const segments = key.split("/");
-  if (!key || segments.some((segment) => segment === "." || segment === "..")) throw new Error("R2 sign: a key with a dot segment");
-  const path = `/${config.bucket}/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+  if (!key || segments.some((segment) => segment === "." || segment === "..")) throw new R2UnsignableKey();
+  // Each segment as SigV4's canonical URI writes it: every byte but A-Z, a-z, 0-9, "-", ".", "_" and "~" percent-encoded,
+  // so "!", "'", "(", ")" and "*", which encodeURIComponent leaves as they are, cannot come back from the signer
+  // changed (Codex N1's LOW 3 on #3313).
+  const path = `/${config.bucket}/${segments.map((segment) => encodeURIComponent(segment).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)).join("/")}`;
   const signed = presignV4({ method: "GET", url: `${config.endpoint}${path}`, expires: seconds, region: "auto", service: "s3", key: config.key, now });
   const url = new URL(signed);
   const decoded = url.pathname.split("/").map((piece) => decodeURIComponent(piece)).join("/");
-  if (url.pathname !== path || decoded !== `/${config.bucket}/${key}` || url.hash !== "" || url.searchParams.has("x-id")) throw new Error("R2 sign: an address that is not the key's");
+  if (url.pathname !== path || decoded !== `/${config.bucket}/${key}` || url.hash !== "" || url.searchParams.has("x-id")) throw new R2UnsignableKey();
   return signed;
+}
+
+/** A key presignR2Get will not sign as itself: the caller leaves that one object out, never the page (Codex N1's LOW 3 on #3313). */
+export class R2UnsignableKey extends Error {
+  constructor() {
+    super("R2 sign: an address that is not the key's");
+    this.name = "R2UnsignableKey";
+  }
 }
 
 export class R2ListingError extends Error {

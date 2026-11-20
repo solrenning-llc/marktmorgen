@@ -1,5 +1,6 @@
 import {activateRestartContract,type RestartContractActivation} from "@/lib/contract-restart-activation";
 import { stripeJson } from "@/lib/stripe-http-error";
+import { askBillingAddress } from "@/lib/billing-address";
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
 import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
@@ -444,6 +445,8 @@ export async function createBillingCheckout(
   // judgement, so the usual sign-up keeps its one-page checkout.
   if (cycle === "year") body.set("payment_method_options[card][request_three_d_secure]", "any");
   inTheCurrencyShown(body);
+  // The plan is paid, a trial included (the card is kept for it): the creator's full billing address (790 [IV2]).
+  askBillingAddress(body);
 
   let price: string | null = null;
   try {

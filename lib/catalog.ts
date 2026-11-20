@@ -12,6 +12,11 @@
  *                                page, a checkout and a download need to know
  *   nl:catalog:<id>:x:<product>  the heavy rest, the checkout questions and
  *                                the funnel, only when there is any
+ *   nl:catalog:<id>:g:<product>  the page's copy of the legal information of
+ *                                a product the creator ships (618 [SZ2]),
+ *                                written with the heavy rest, which keeps it
+ *                                too, only when there is any: the product's
+ *                                page reads this alone, never the questions
  *
  * The <id> is the catalog's own, written in the store record, so a new
  * address or a new sign-in email moves nothing here.
@@ -35,15 +40,16 @@
  * store record replaced, in one write. Until that write lands the old record
  * is the store, complete, and doing it again writes the same records.
  */
-import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
-export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
+import { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
+export { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH, listingReads } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
 import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
+import { safetyComplete } from "@/lib/physical-legal-ship";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -260,6 +266,15 @@ export type Product = {
    */
   legal?: PhysicalLegal | null;
   /**
+   * On the listing only: true when the product's own legal record had every
+   * EU/EEA safety item, its picture included, when it was last saved
+   * (lib/physical-legal-ship.ts), so the store page and the cart know where
+   * it ships now without reading that record. Computed by listingOf from a
+   * full product, never typed and never read from a full record; absent is
+   * not filled. Every checkout judges the record itself.
+   */
+  safetyFilled?: boolean;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -368,6 +383,8 @@ function parseCard(id: string, raw: string): Card | null {
   }
 }
 const extrasKey = (catalog: string, product: string) => `nl:catalog:${catalog}:x:${product}`;
+/** The page's copy of a product's legal record (618 [SZ2]): at most LEGAL_RECORD_MAX_BYTES, read on its page alone. */
+const legalKey = (catalog: string, product: string) => `nl:catalog:${catalog}:g:${product}`;
 
 type Command = (string | number)[];
 
@@ -477,13 +494,18 @@ export function listingOf(product: Listing): Listing {
     yearly: product.yearly ?? null,
     note: product.note ?? false,
     shipping: product.shipping ?? null,
+    // From a full product, computed from its own legal record; from a listing, its mark as stored.
+    ...((Object.hasOwn(product, "fields") ? safetyComplete(product as Product) : product.safetyFilled === true) ? { safetyFilled: true } : {}),
     hidden: product.hidden,
   };
 }
 
 function parseListing(entry: unknown): Listing | null {
   const product = parseProduct(entry);
-  return product ? listingOf(product) : null;
+  if (!product) return null;
+  // A stored listing keeps its mark only when it is exactly true (lib/physical-legal-ship.ts).
+  const mark = (entry as { safetyFilled?: unknown }).safetyFilled === true;
+  return listingOf({ ...listingOf(product), ...(mark ? { safetyFilled: true } : {}) });
 }
 
 /** Whether a stored entry's schedule is there (not absent, not null) and was read as none. */
@@ -677,19 +699,32 @@ export async function listingsNamed(store: Store, meta: Record<string, string | 
 
 // ---- Reading ----------------------------------------------------------------
 
+/** MGETs in one pipeline at the most: the same few hundred keys a request as the GETs before, sent side by side. */
+const MGETS_PER_PIPELINE = 4;
+
 /**
- * Many GETs, in pipelines of a few hundred sent side by side: one reply for each key, in its own envelope, or
- * UnknownReplyError (CX-123 rule 24), never a list cut short whose missing replies would read as "no record".
+ * Many records, LISTINGS_PER_MGET at one MGET, MGETS_PER_PIPELINE MGETs a pipeline, the pipelines sent side by side.
+ * Read only whole (CX-123 rule 24): one reply for each MGET and, in each, one value for each key, a string or Redis's
+ * own nil; anything else throws UnknownReplyError, never a list cut short whose missing replies would read as "no
+ * record", nor a value of another type taken for none.
  */
-async function getMany(keys: string[]): Promise<unknown[]> {
+async function getMany(keys: string[]): Promise<(string | null)[]> {
   if (keys.length === 0) return [];
-  const chunks: string[][] = [];
-  for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
+  const lots: string[][] = [];
+  for (let i = 0; i < keys.length; i += LISTINGS_PER_MGET) lots.push(keys.slice(i, i + LISTINGS_PER_MGET));
+  const trips: string[][][] = [];
+  for (let i = 0; i < lots.length; i += MGETS_PER_PIPELINE) trips.push(lots.slice(i, i + MGETS_PER_PIPELINE));
   const answers = await Promise.all(
-    chunks.map(async (chunk) => {
-      const replies = repliesFor(await redisPipeline(chunk.map((key) => ["GET", key])), chunk.length);
+    trips.map(async (trip) => {
+      const replies = repliesFor(await redisPipeline(trip.map((lot) => ["MGET", ...lot])), trip.length);
       if (!replies) throw new UnknownReplyError("a store's product records");
-      return replies;
+      return trip.flatMap((lot, l) => {
+        const values = listSlots(replies[l]);
+        if (!values || values.length !== lot.length || !values.every((v) => v === null || typeof v === "string")) {
+          throw new UnknownReplyError("a store's product records");
+        }
+        return values as (string | null)[];
+      });
     }),
   );
   return answers.flat();
@@ -888,6 +923,22 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
     if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * The legal information of one product (618 [SZ2]; lib/physical-legal-record.ts),
+ * from the page's copy of it, written with the product: null when it has none
+ * or the copy cannot be read. One GET of that copy alone (at most
+ * LEGAL_RECORD_MAX_BYTES), never the checkout questions or the funnel kept in
+ * the heavy rest, for the page of a shipped product; every checkout reads the
+ * heavy rest itself.
+ */
+export async function readProductLegal(store: Store, id: string): Promise<PhysicalLegal | null> {
+  const catalog = store.catalog;
+  if (catalog.inline) return catalog.inline.find((product) => product.id === id)?.legal ?? null;
+  if (!SAFE_ID.test(id) || !catalog.id || !isRedisConfigured() || !catalog.items.some((item) => item.id === id)) return null;
+  const [raw] = await getMany([legalKey(catalog.id, id)]);
+  return readPhysicalLegal(parseJson(raw));
 }
 
 /**
@@ -1557,30 +1608,42 @@ export function productWrites(catalog: string, product: Product): Command[] {
   const listing = JSON.stringify(listingOf(product));
   const extras = extrasOf(product);
   const heavy = extras !== "";
-  if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
+  const legal = legalCopyOf(product);
+  if (byteLength(listing) + byteLength(extras) + byteLength(legal) > MAX_PRODUCT_BYTES) throw new StoreFullError();
+  // What is not written is deleted, in one command: a product with neither sends what it always did.
+  const gone = [...(heavy ? [] : [extrasKey(catalog, product.id)]), ...(legal ? [] : [legalKey(catalog, product.id)])];
   return [
     ["SET", listingKey(catalog, product.id), listing],
-    heavy ? ["SET", extrasKey(catalog, product.id), extras] : ["DEL", extrasKey(catalog, product.id)],
+    ...(heavy ? [["SET", extrasKey(catalog, product.id), extras]] : []),
+    ...(legal ? [["SET", legalKey(catalog, product.id), legal]] : []),
+    ...(gone.length ? [["DEL", ...gone]] : []),
     ["HSET", titlesKey(catalog), product.id, cardValue(product)],
   ];
 }
 
+/** The page's copy of a product's legal record, "" when it has none (618 [SZ2]). */
+function legalCopyOf(product: Product): string {
+  return product.legal ? JSON.stringify(product.legal) : "";
+}
+
 /**
  * What one product's records count for in the store's data room
- * (lib/store-data.ts): its listing, its heavy rest and its card, each under
+ * (lib/store-data.ts): its listing, its heavy rest, the page's copy of its
+ * legal record and its card, each under
  * its own key or field.
  */
 export function productBytes(product: Product): number {
   const listing = JSON.stringify(listingOf(product));
   const extras = extrasOf(product);
   const heavy = extras !== "";
-  return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
+  const legal = legalCopyOf(product);
+  return dataBytes([listing, extras, legal, product.id, cardValue(product)], 2 + (heavy ? 1 : 0) + (legal ? 1 : 0));
 }
 
 /** The writes that forget one product's records. */
 export function productDrops(catalog: string, id: string): Command[] {
   if (!SAFE_ID.test(id)) return [];
-  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
+  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id), legalKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
 }
 
 /**

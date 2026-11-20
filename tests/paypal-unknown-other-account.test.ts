@@ -17,6 +17,7 @@
 import { connectPayPal, onTheirWay, payWithPayPal, paypalChecks, settlePayPal } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsother01";
@@ -75,6 +76,7 @@ async function seed(): Promise<void> {
 }
 
 async function linked(store: Store, client: string, secret: string): Promise<void> {
+  await markLive(store);
   const result = await connectPayPal(store, client, secret);
   if (!result.ok) throw new Error(`not linked: ${JSON.stringify(result)}`);
 }

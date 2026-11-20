@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { fairProductsOverCap } from "@/lib/fair-price";
 import { setFair } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 
@@ -12,6 +13,9 @@ import { guardStoreWrite } from "@/lib/store-request";
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 8_000);
   if (!guarded.ok) return guarded.response;
+  // More products than it can be limited to: refused whole, the setting saved before kept as it is, never saved cut
+  // to the first MAX_FAIR_PRODUCTS (Claude 1's order C1-20261117-1449-c6c3-2).
+  if (fairProductsOverCap(guarded.body)) return Response.json({ ok: false, error: "fair_products" }, { status: 400 });
   try {
     const store = await setFair(guarded.ref, {
       on: guarded.body.on === true,

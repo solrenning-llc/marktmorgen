@@ -60,7 +60,9 @@ test("Zoom: 51 stores are not confirmed in one pass; the next notice forgets the
   const told = [...forgotOf(first.error), ...(second.value ?? []).map((one) => one.statsId)].sort();
   assert.deepEqual(told, stores, "every owner told exactly once");
   assert.equal(stores.filter((s) => redis.run(["EXISTS", zoomConnKey(s)]) === 1).length, 0, "no connection kept");
-  assert.equal(redis.run(["EXISTS", zoomUserKey("zu-51")]), 0, "the index goes last");
+  // Changed with #3333's merge (rule 23): each store leaves the index on its own (SREM), so the index lists nothing
+  // after; Redis drops a set left empty, which the in-memory double keeps, so it is read by how many it lists.
+  assert.equal(redis.run(["SCARD", zoomUserKey("zu-51")]), 0, "the index lists nothing last");
 });
 
 test("Meta: 51 stores answer 503 with no confirmation code until every one is forgotten", async () => {

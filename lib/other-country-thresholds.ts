@@ -10,6 +10,9 @@ import { TAX_THRESHOLD_RULES, assessTaxSalesThreshold, assessTaxThreshold, type 
  *     (point 17), from Canada's own ledger;
  *   - Norway (NO): remote services to Norwegian consumers, registration once NOK 50,000 is reached in 12 months
  *     (point 15), from Norway's own ledger;
+ *   - Taiwan (TW): electronic services to individuals in Taiwan, registration once NT$600,000 is reached in the
+ *     previous or the current calendar year (Ministry of Finance decree of 07/04/2025; C5-20261120-2110-9a-other-u4),
+ *     from Taiwan's own ledger;
  *   - Switzerland (CH): CHF 100,000 of WORLDWIDE turnover from supplies that are not excluded, then from the first
  *     supply in Switzerland (point 15). It is not a count of Swiss sales: its evidence is a worldwide snapshot in CHF,
  *     whose conversion and scope the caller's review covers (applicableScopeReviewed).
@@ -27,10 +30,11 @@ import { TAX_THRESHOLD_RULES, assessTaxSalesThreshold, assessTaxThreshold, type 
  */
 export type OtherCountryRule = Readonly<{ ruleId: TaxThresholdRuleId }>;
 
-export const OTHER_COUNTRY_RULES: Readonly<Record<"CA" | "NO" | "CH", OtherCountryRule>> = Object.freeze({
+export const OTHER_COUNTRY_RULES: Readonly<Record<"CA" | "NO" | "CH" | "TW", OtherCountryRule>> = Object.freeze({
   CA: Object.freeze({ ruleId: "ca-specified-supplies" }),
   NO: Object.freeze({ ruleId: "no-remote-services" }),
   CH: Object.freeze({ ruleId: "ch-worldwide-turnover" }),
+  TW: Object.freeze({ ruleId: "tw-cross-border-e-services" }),
 });
 
 const UNKNOWN: TaxThresholdAssessment = Object.freeze({ status: "unknown", projectedApplicableMinor: null }) as TaxThresholdAssessment;

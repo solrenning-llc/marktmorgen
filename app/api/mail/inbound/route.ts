@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 401 });
   }
 
-  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
+  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; from?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
   try {
     notice = JSON.parse(body) as typeof notice;
   } catch {
@@ -169,8 +169,9 @@ export async function POST(request: NextRequest) {
 
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
+  // The addresses the announcement names, so support's daily count is taken before the message is read.
   // A throw (a count that could not be read, rule 24) is a retry too: the mark is let go of, so Resend's retry is heard.
-  const result = await forwardInbound(emailId).catch((error: unknown) => {
+  const result = await forwardInbound(emailId, Date.now(), notice.data?.to, notice.data?.from).catch((error: unknown) => {
     console.error("an inbound message could not be sent on", error);
     return "retry" as const;
   });

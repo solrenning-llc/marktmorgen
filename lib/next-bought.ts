@@ -26,6 +26,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
+import type { Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** Below this many buyers, a sequence is not said. */
 export const MIN_NEXT = 3;
@@ -159,6 +161,16 @@ export async function readPaths(statsId: string | null): Promise<BuyerPaths | nu
 export async function keepPaths(statsId: string | null, paths: BuyerPaths): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   await redisPipeline([["SET", nextKey(statsId), JSON.stringify(paths), "EX", NEXT_KEEP_SECONDS]]);
+}
+
+/**
+ * Keeps paths made by a slow read of the store's sales only while the store is still live: the
+ * erasure walk can delete this family while the read is in flight, and the write is checked against
+ * the store's identity and erasure mark in the same script (Codex L-20261120-0545).
+ */
+export async function keepPathsWhileStoreLive(store: Pick<Store, "statsId" | "sid" | "email" | "extra">, paths: BuyerPaths): Promise<void> {
+  if (!store.statsId) return;
+  await setWhileStoreLive(store, nextKey(store.statsId), JSON.stringify(paths), NEXT_KEEP_SECONDS);
 }
 
 /** Whether the studio should have them read again. */

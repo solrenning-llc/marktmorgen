@@ -32,7 +32,8 @@ import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules
 import { type DiscountCodeRow, type DiscountElsewhere, type DiscountRow, discountCodes, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
-import { keepPaths, pathsFrom } from "@/lib/next-bought";
+import { keepPathsWhileStoreLive, pathsFrom } from "@/lib/next-bought";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -2409,9 +2410,10 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
   if (sales.length) out.since = dayKey(sales[sales.length - 1].created);
   out.together = togetherFrom(sales);
   // What each product's buyers bought later, and how long after (lib/next-bought.ts), kept a week for the studio.
-  await keepPaths(store.statsId, pathsFrom(sales)).catch(() => {});
-  if (store.statsId && isRedisConfigured()) {
-    await redisPipeline([["SET", allSalesKey(store.statsId), JSON.stringify(out), "EX", ALL_SALES_SECONDS]]).catch(() => {});
+  // Both writes are fenced on the store's life: the read above can outlast it (Codex L-20261120-0545).
+  await keepPathsWhileStoreLive(store, pathsFrom(sales)).catch(() => {});
+  if (store.statsId) {
+    await setWhileStoreLive(store, allSalesKey(store.statsId), JSON.stringify(out), ALL_SALES_SECONDS).catch(() => "unknown");
   }
   return out;
 }

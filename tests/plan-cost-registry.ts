@@ -3594,6 +3594,9 @@ export const SCOPES: Record<string, ScopeClass> = {
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
   "course-start-order": BURST("public-requests"), "review-order": BURST("public-requests"), "join-address": BURST("public-requests"),
   "waitlist-address": BURST("public-requests"), "numbers-link": BURST("public-requests"), preview: BURST("public-requests"),
+  // "Email me when it's back" (623 [SZ7]): asking and confirming are public requests; its confirmation and restock emails are the store's own, taken before they go.
+  "stock-alert-ip": PUBLIC, "stock-alert-link": PUBLIC, "stock-alert-address": BURST("public-requests"),
+  "stock-alert-leave": guard("A back-in-stock list's stop link, per connection: honored at once whatever the store's figures, two reads and two deletes; a company cost."),
   "affhub-address": METERED_EMAIL, "affhub-ip": METERED_EMAIL, "library-address": METERED_EMAIL, "library-ip": METERED_EMAIL,
   "erase-address": METERED_EMAIL, "erase-ip": METERED_EMAIL,
   "podcast-link-address": METERED_EMAIL, "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
@@ -3677,6 +3680,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/welcome-offer-send.ts": STORE, "lib/winback-send.ts": STORE,
   // The email that a scheduled discount code could not be switched on (511 [CK3], unit 2): the store's own email, taken before it goes.
   "lib/discount-schedule-notice.ts": STORE, "lib/yearly-ask.ts": STORE, "lib/yearly-switch.ts": STORE,
+  // "Email me when it's back" (623 [SZ7]): the confirmation from the store's access emails (asked), the restock email from its emails, each taken before it goes.
+  "lib/stock-alert-send.ts": STORE,
   // A payment request and its reminders are the store's own emails; its receipt is its order's (18 October 2026).
   "lib/payment-requests.ts": STORE, "lib/payment-request-store.ts": ORDER,
   // A proposal or agreement to sign, its new versions and its signed copies are the store's own emails (18 October 2026).

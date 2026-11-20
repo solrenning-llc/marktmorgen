@@ -43,10 +43,10 @@ export const ACCESSIBILITY_CHECKS: readonly AccessibilityCheck[] = [
   },
   {
     name: "The studio",
-    what: "Two studio pages, the studio's front page and its list of pages, viewed only (nothing is saved), in Chromium, Firefox and WebKit.",
+    what: "Thirteen studio screens, viewed only (nothing is saved), in Chromium, Firefox and WebKit: the studio's front page and its list of pages at five screen widths from 320 to 1920 pixels, and eleven more (the site, people, email, numbers, adding, forms, funnels, deals, reviews, the checkup and the team) on a narrow and a wide screen.",
     workflow: ".github/workflows/accessibility-studio-matrix.yml",
     script: "tests/e2e/accessibility-studio-matrix.mjs",
-    proof: [ENGINES, ...AAA_RULES, "Two authenticated read-only studio/editor surfaces only"],
+    proof: [ENGINES, ...AAA_RULES, '["site","people","email","totals","add","forms","funnels","deals","reviews","checkup","team"]', "[320,1280]", "Thirteen authenticated read-only studio screens"],
   },
   {
     name: "Products",

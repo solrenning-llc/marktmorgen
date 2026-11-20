@@ -37,6 +37,8 @@ let invoicesDown = false;
 /** A 2xx invoice page in a shape not known (Claude 2 cloud C's MEDIUM on #3906): never "complete, no instalments". */
 let invoicesMalformed: unknown = null;
 /** Invoices of other synthetic stores, answered with the first store's (each store reads only its own handle's). */
+// Changed on the merge of main (rule 23): each invoice carries its payments as a whole Stripe list, as main's reading
+// takes them (tests/affiliate-recurring-complete.test.ts); one in another shape is read as not whole, so nobody is removed.
 const moreInvoices: unknown[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -59,7 +61,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
           status_transitions: { paid_at: T0 + 200 * DAY },
           total_taxes: [],
           parent: { subscription_details: { metadata: { store: "planhouse", product: "prod01", via: PLANNER, via_rate: "30", kind: "plan" } } },
-          payments: { data: [{ payment: { type: "payment_intent", payment_intent: "pi_PlanInstal0001" } }] },
+          payments: { object: "list", has_more: false, data: [{ object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_PlanInstal0001" } }] },
         },
         ...moreInvoices,
       ],

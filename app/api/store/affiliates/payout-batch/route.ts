@@ -4,10 +4,25 @@ import { storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_REFERENCE_LENGTH, readBook } from "@/lib/affiliates";
 import { type BatchProvider, batchFile, batchTotal } from "@/lib/affiliate-payouts";
-import { confirmPayFile, keepPayFileLocked, onTheirWay, payableLines } from "@/lib/paypal-payouts";
+import { confirmPayFile, keepPayFileLocked, onTheirWay, payableLines, unsettledBook } from "@/lib/paypal-payouts";
 import { LockBusyError } from "@/lib/redis-lock";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Why no file is made, in the words the studio gives the confirmation's same refusal (components/affiliate-studio.tsx,
+ * MESSAGES): the download is a page the browser shows, not JSON.
+ */
+const UNSETTLED_TEXT: Record<NonNullable<ReturnType<typeof unsettledBook>>, string> = {
+  refunds:
+    "Stripe could not be asked about every refund just now, so what is owed is not settled and no batch file was made. Try again in a moment rather than pay against a guess.",
+  invoices:
+    "Not every membership and plan payment could be read from Stripe just now, so what is owed is not settled and no batch file was made. Try again in a moment rather than pay against a guess.",
+  invoices_ceiling:
+    "Your store has more membership and plan payments from affiliate links than this page can keep track of, so the amounts owed here may be short and no batch file was made. Reloading will not change that. You can still pay each affiliate yourself and write it down with Mark as paid; check their membership payments in your Stripe dashboard first.",
+  invoices_unlinked:
+    "Some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here and no batch file was made. Reloading will not change that. Pay each affiliate yourself and write it down with Mark as paid; check those payments in your Stripe dashboard first.",
+};
 
 /**
  * The batch file for everyone the book says is owed something today, in the
@@ -39,6 +54,11 @@ export async function GET(request: NextRequest) {
         { status: 409, headers: { "Cache-Control": "no-store" } },
       );
     }
+    // Never a file its confirmation (POST below) would refuse, on the same test, before any line is written: paid in
+    // the creator's own PayPal and then not recorded, the same lines would come back in the next file and be paid
+    // twice (review of #3378 by Claude 2, HIGH).
+    const unsettled = unsettledBook(book);
+    if (unsettled) return new Response(UNSETTLED_TEXT[unsettled], { status: 409, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     // Anyone with a PayPal payment on its way is left out, so nobody is paid twice.
     const lines = payableLines(book, await onTheirWay(store));
     if (!lines.length) {
@@ -97,6 +117,13 @@ export async function POST(request: NextRequest) {
 
     const date = text(body.date, 10);
     if (!DATE.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) return fail("date");
+
+    // Refunds are read from Stripe: when that failed, what is owed is not yet known, and writing payouts against a
+    // guess is how a book starts lying. Nor while the membership and plan payments were not all read (audit A1): a
+    // payment left out is owed and unpaid. The same test as the file (GET above), with the same reason (main's guard,
+    // kept on the merge into #3906 before the downloaded file is written down).
+    const unsettled = unsettledBook(await readBook(store));
+    if (unsettled) return fail(unsettled, 409);
 
     const done = await confirmPayFile(store, text(body.file, 48), {
       date,

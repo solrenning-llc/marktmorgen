@@ -442,6 +442,11 @@ async function main(): Promise<void> {
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
     is("control: the vault not confirming the close keeps nothing", await closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps), { ok: false, reason: "unavailable" });
+    // lib/vault.ts (#3502): a finish refused as "busy" or "tries" is told as itself, and the upload stays open.
+    for (const refused of ["busy", "tries"] as const) {
+      const held = world({ closeReservedVault: async () => ({ ok: false, reason: refused }) });
+      is(`the vault answered "${refused}": nothing is kept, and the buyer is told so`, await closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, held.steps), { ok: false, reason: refused });
+    }
     down = false;
     const again = await closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW + 60, w.steps);
     is("and the upload is still open, so closing it again keeps it", again.ok, true);
@@ -470,6 +475,14 @@ async function main(): Promise<void> {
     const stuck = world({ abortReservedVault: async () => false });
     is("the vault did not confirm", await abortSubmissionDoor(at, path, stuck.steps), "unavailable");
     is("so the place is kept", await liveCount(FOLDER, COURSE, lesson, ANA, NOW), 1);
+    // lib/vault.ts (#3502) answers a cancel it did not make with "busy" (another finish or cancel of the upload under
+    // way) or "tries" (past the requests one upload may make): neither cancelled the provider's session, so neither
+    // is a give-up, and the place and the door stay.
+    for (const refused of ["busy", "tries"] as const) {
+      const held = world({ abortReservedVault: async () => refused });
+      is(`the vault answered "${refused}": not given up`, await abortSubmissionDoor(at, path, held.steps), refused);
+      is(`the vault answered "${refused}": the place is kept`, await liveCount(FOLDER, COURSE, lesson, ANA, NOW), 1);
+    }
     const given = await commandsOf(() => abortSubmissionDoor(at, path, w.steps));
     is("the buyer gives it up", given.value, "done");
     is("inside its commands", given.commands <= SUBMISSION_STEP_COMMANDS.abort, true);

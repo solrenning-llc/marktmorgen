@@ -129,7 +129,8 @@ async function main(): Promise<void> {
   let roomFails = true;
   const pipeline = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (roomFails && commands.some((c) => c[0] === "GET" && c[1] === ivyRoom)) {
+    // The room is read with GET, or with MGET among the booking's other keys (lib/call-rooms.ts roomsFor, #3545).
+    if (roomFails && commands.some((c) => (c[0] === "GET" && c[1] === ivyRoom) || (c[0] === "MGET" && c.slice(1).includes(ivyRoom)))) {
       // Once only: the creator's reminder of the same booking reads the room again, and gets it.
       roomFails = false;
       throw new Error("synthetic: the room could not be read");

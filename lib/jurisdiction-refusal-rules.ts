@@ -21,6 +21,10 @@
  *     source, or anything else, is unknown and refused, never guessed;
  *   - every piece counts: if any piece points to a jurisdiction that refuses,
  *     the sale is refused, whatever the other pieces say;
+ *   - "threshold" ("other" only) never sells here: this pure gate cannot
+ *     count, so it answers "count-needed", a refusal that names the country,
+ *     and only lib/other-country-checkout.ts may sell after reserving the
+ *     sale in the per-place counter, below the safety margin;
  *   - "refuse-consumers" refuses every product: the record type says that
  *     jurisdiction's consumers cannot buy, and no official text read in this
  *     repository narrows it per product. Every buyer is taken as a consumer:
@@ -118,16 +122,24 @@ export function candidateJurisdictions(code: unknown): readonly DeemedSupplierJu
   return ASSIGNED.has(code) || code === "XK" ? ["other"] : null;
 }
 
-export type RefusalReason = "not-recorded" | "location-unknown" | "refused-jurisdiction";
+/**
+ * "count-needed": the only jurisdiction left is "other" under "threshold". This pure gate cannot count, so it refuses,
+ * with the country, and only lib/other-country-checkout.ts may turn it into a sale after reserving it in the counter.
+ * A caller that reads `allowed` alone refuses, as it should.
+ */
+export type RefusalReason = "not-recorded" | "location-unknown" | "refused-jurisdiction" | "count-needed";
 export type CheckoutLocationDecision =
   | Readonly<{ allowed: true; jurisdictions: readonly DeemedSupplierJurisdiction[] }>
-  | Readonly<{ allowed: false; reason: RefusalReason; jurisdictions: readonly DeemedSupplierJurisdiction[]; buyerMessage: string }>;
+  | Readonly<{ allowed: false; reason: Exclude<RefusalReason, "count-needed">; jurisdictions: readonly DeemedSupplierJurisdiction[]; buyerMessage: string }>
+  | Readonly<{ allowed: false; reason: "count-needed"; jurisdictions: readonly DeemedSupplierJurisdiction[]; country: string; buyerMessage: string }>;
 
 /** What the buyer reads, in plain US English, before anything is charged. */
 export const REFUSAL_WORDS: Readonly<Record<RefusalReason, string>> = Object.freeze({
   "not-recorded": "Orders can't be taken here yet. Nothing was charged.",
   "location-unknown": "We couldn't confirm your country, so this order can't go ahead. Nothing was charged.",
   "refused-jurisdiction": "This store can't take orders from your country yet. Nothing was charged.",
+  // Shown only if a caller stops at the pure gate: the same words as a refusal, because nothing was counted.
+  "count-needed": "This store can't take orders from your country yet. Nothing was charged.",
 });
 
 /** Own data fields only, copied once, so a getter or an inherited default can never answer later. */
@@ -180,7 +192,7 @@ function evidencePieces(value: unknown): unknown[] | null {
   }
 }
 
-const refuse = (reason: RefusalReason, jurisdictions: readonly DeemedSupplierJurisdiction[]): CheckoutLocationDecision =>
+const refuse = (reason: Exclude<RefusalReason, "count-needed">, jurisdictions: readonly DeemedSupplierJurisdiction[]): CheckoutLocationDecision =>
   Object.freeze({ allowed: false, reason, jurisdictions: Object.freeze([...jurisdictions]), buyerMessage: REFUSAL_WORDS[reason] });
 
 /**
@@ -216,6 +228,13 @@ export function checkoutLocationDecision(evidence: LocationEvidence, records: un
   // Claude 4 nuvem AH on #3681): DE and FR, or US and DE, confirm no country. UK is ISO's reserved code for GB.
   const country = (piece: unknown) => (piece === "UK" ? "GB" : piece);
   if (new Set(pieces.map(country)).size !== 1) return refuse("location-unknown", []);
-  if (found.some((j) => treatment.get(j) !== "collect")) return refuse("refused-jurisdiction", found);
-  return Object.freeze({ allowed: true, jurisdictions: Object.freeze(found) });
+  const uncollected = found.filter((j) => treatment.get(j) !== "collect");
+  if (uncollected.length === 0) return Object.freeze({ allowed: true, jurisdictions: Object.freeze(found) });
+  // "threshold" is valid for "other" only (lib/deemed-supplier.ts), so this is "other" and nothing else left uncollected.
+  if (uncollected.every((j) => j === "other" && treatment.get(j) === "threshold")) {
+    return Object.freeze({
+      allowed: false, reason: "count-needed", jurisdictions: Object.freeze(found), country: String(country(pieces[0])), buyerMessage: REFUSAL_WORDS["count-needed"],
+    });
+  }
+  return refuse("refused-jurisdiction", found);
 }

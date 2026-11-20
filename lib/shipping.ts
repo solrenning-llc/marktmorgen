@@ -152,9 +152,19 @@ export function activeShipping(product: ShipCandidate & { shipping?: Shipping | 
   return shipping && shipProblem(product) === null ? shipping : null;
 }
 
-/** "the United States and Canada", "France, Belgium and 3 more", in the reader's language. */
-export function shipsToWords(shipping: Pick<Shipping, "region" | "countries">, locale: string, words: { and: string; more: (n: number) => string; everywhere: string }): string {
+/**
+ * "the United States and Canada", "France, Belgium and 3 more", in the reader's language.
+ * `except` (lib/physical-legal-ship.ts): everywhere but the EU and the UK while their VAT on goods is not collected,
+ * or but the EU/EEA and the UK while a product's safety fields are not filled too, said in a few words.
+ */
+export function shipsToWords(
+  shipping: Pick<Shipping, "region" | "countries"> & { except?: "eu-uk" | "eea-uk" },
+  locale: string,
+  words: { and: string; more: (n: number) => string; everywhere: string; everywhereElse?: string; everywhereElseEu?: string },
+): string {
   if (shipping.region === "world") return words.everywhere;
+  if (shipping.except === "eea-uk" && words.everywhereElse) return words.everywhereElse;
+  if (shipping.except === "eu-uk" && words.everywhereElseEu) return words.everywhereElseEu;
   let names: string[];
   try {
     const display = new Intl.DisplayNames([locale], { type: "region" });

@@ -31,19 +31,22 @@ export function billingCountries(locale: string): { code: string; name: string }
 /**
  * `problem` is the id of the notice that says why the last try was refused (no country chosen, or one in the EU or the
  * UK): the field is then marked invalid and described by it (WCAG 3.3.1, 3.3.3), so a screen reader names the error
- * on reaching the field.
+ * on reaching the field. `chosen` is the country given on the last try, put back so it is not chosen twice (WCAG
+ * 3.3.7); one the list does not hold leaves the field to be chosen.
  */
-export function BillingCountryField({ id, locale, label, choose, problem }: { id: string; locale: string; label: string; choose: string; problem?: string }) {
+export function BillingCountryField({ id, locale, label, choose, problem, chosen }: { id: string; locale: string; label: string; choose: string; problem?: string; chosen?: string }) {
+  const countries = billingCountries(locale);
+  const start = chosen && countries.some((country) => country.code === chosen) ? chosen : "";
   return (
     <div className="block">
       <label htmlFor={id} className="st-label">
         {label}
       </label>
-      <select id={id} name={BILLING_COUNTRY_FIELD} required defaultValue="" autoComplete="country" className="st-field mt-2" aria-invalid={problem ? true : undefined} aria-describedby={problem || undefined}>
+      <select id={id} name={BILLING_COUNTRY_FIELD} required defaultValue={start} autoComplete="country" className="st-field mt-2" aria-invalid={problem ? true : undefined} aria-describedby={problem || undefined}>
         <option value="" disabled>
           {choose}
         </option>
-        {billingCountries(locale).map((country) => (
+        {countries.map((country) => (
           <option key={country.code} value={country.code}>
             {country.name}
           </option>

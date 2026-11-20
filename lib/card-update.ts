@@ -27,7 +27,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type Store, saleHandles } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, saleHandles, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 
@@ -64,6 +64,13 @@ export function waitingCardPage(kept: string | null): string | null {
 }
 /** Swaps a key from one value to another only while it still holds the first (the same script as lib/calls.ts LOCK_SWAP). */
 const SWAP_IF_SAME = '-- marktmorgen:call-lock-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+
+/** Keep a newly made setup page only while its store is still live and not being erased. KEYS[1] is the store's id key, or, for a store from before ids, its record. */
+export const KEEP_CARD_OPEN_IF_LIVE = `-- marktmorgen:card-open-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 then return "gone" end
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 
 export type CardGrant = { a: string; c: string; s: string };
 
@@ -113,7 +120,7 @@ type SubRow = {
   status?: unknown;
   customer?: unknown;
   metadata?: Record<string, string> | null;
-  latest_invoice?: { id?: unknown; status?: unknown; amount_due?: unknown } | string | null;
+  latest_invoice?: { id?: unknown; status?: unknown; amount_due?: unknown; customer?: unknown; subscription?: unknown; parent?: unknown } | string | null;
 };
 
 const customerOf = (sub: SubRow) =>
@@ -145,6 +152,22 @@ const owes = (sub: SubRow) => {
     ? invoice
     : null;
 };
+
+/** An expanded invoice must name this customer and membership before its id can authorize a payment (rules 24/30). */
+function invoiceBelongsTo(invoice: NonNullable<ReturnType<typeof owes>>, customer: string, subscription: string): boolean {
+  const idOf = (value: unknown): unknown => typeof value === "string" ? value
+    : value !== null && typeof value === "object" && Object.hasOwn(value, "id") ? (value as { id: unknown }).id : undefined;
+  if (!Object.hasOwn(invoice, "customer") || idOf(invoice.customer) !== customer) return false;
+  // Accounts can return the older top-level relation or Basil's parent. Every relation present must agree;
+  // missing, manual or contradictory ownership is unknown, not permission to charge another membership.
+  const legacy = Object.hasOwn(invoice, "subscription");
+  if (legacy && idOf(invoice.subscription) !== subscription) return false;
+  if (!Object.hasOwn(invoice, "parent")) return legacy;
+  const parent = invoice.parent;
+  if (!parent || typeof parent !== "object" || !Object.hasOwn(parent, "type") || (parent as { type?: unknown }).type !== "subscription_details" || !Object.hasOwn(parent, "subscription_details")) return false;
+  const details = (parent as { subscription_details?: unknown }).subscription_details;
+  return details !== null && typeof details === "object" && Object.hasOwn(details, "subscription") && idOf((details as { subscription: unknown }).subscription) === subscription;
+}
 
 export type CardView = { title: string | null; ended: boolean; owes: boolean };
 
@@ -217,7 +240,15 @@ export async function openCardUpdate(store: Store, token: string, origin: string
     const id = typeof made.id === "string" ? made.id : "";
     const url = typeof made.url === "string" ? made.url : "";
     if (!SESSION_PATTERN.test(id) || !url.startsWith("https://")) return { ok: false, reason: "error" };
-    await redisPipeline([["SET", openKey(grant.a, grant.s), id, "EX", OPEN_SECONDS]]);
+    // A store kept from before ids (sid "") has no id key: its record, under its owner's address, is the key fenced
+    // on, as lib/store-live-cache.ts does (Claude 3's MEDIUM on #4906).
+    const ref = storeRef(store);
+    const live = STORE_ID_PATTERN.test(store.sid) ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_CARD_OPEN_IF_LIVE, 3,
+      live, ERASING_KEY, openKey(grant.a, grant.s),
+      await erasingField(ref), id, OPEN_SECONDS]]), 1)?.[0];
+    if (kept === "gone") return { ok: false, reason: "expired" };
+    if (kept !== 1) return { ok: false, reason: "error" };
     return { ok: true, url };
   } catch (error) {
     console.error("opening a card update failed", store.handle, error);
@@ -288,7 +319,7 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
 
     const invoice = owes(sub);
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
-    if (!invoiceId) return "updated";
+    if (!invoiceId || !invoice || !invoiceBelongsTo(invoice, customer, subscription)) return "updated";
     try {
       const paid = await onAccount("POST", account, `/invoices/${invoiceId}/pay`, new URLSearchParams({ payment_method: method }), undefined, `nimbus-card-pay:${invoiceId}:${method}`);
       // "Paid" only from this invoice's own reply saying so; any other answer leaves the card set and says no more.

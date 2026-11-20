@@ -39,6 +39,11 @@ export type PartnerShare = {
    * something anybody agreed to. The creator names them.
    */
   products: string[];
+  /**
+   * When it ends, in seconds: sales from that moment on earn nothing. Absent
+   * means "until revoked" (630 [HN6](39); lib/partner-terms-rules.ts).
+   */
+  until?: number;
 };
 
 export const MIN_PARTNER_SHARE = 1;
@@ -75,31 +80,75 @@ export type ShareProblem =
   /** This product already has as many partners as it may have. */
   | "crowded"
   /** Partners plus the affiliate commission would pass MAX_COMMITTED_SHARE. */
-  | "committed";
+  | "committed"
+  /** More products than one share may name (MAX_SHARED_PRODUCTS): refused whole, never cut to the first ones. */
+  | "many";
+
+/** The most products one partner's share may name. A longer list is refused, never kept in part. */
+export const MAX_SHARED_PRODUCTS = 200;
 
 export const SHARE_PROBLEMS: Record<ShareProblem, string> = {
   percent: `A partner's share is a whole number from ${MIN_PARTNER_SHARE} to ${MAX_PARTNER_SHARE} percent.`,
   products: "Choose at least one product for them to share in.",
   crowded: `A product can have up to ${MAX_PARTNERS_PER_PRODUCT} partners.`,
   committed: `Partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. Lower one of them first.`,
+  many: `A partner can share in up to ${MAX_SHARED_PRODUCTS} products. Nothing was saved. Choose fewer products, then save again.`,
 };
+
+/** The distinct product ids a form or record names, in the shape a share accepts. */
+function sharedIds(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [];
+  return [...new Set(list.filter((id): id is string => typeof id === "string" && /^[a-z0-9]{6,40}$/.test(id)))];
+}
+
+/** Whether a form names more products than one share may hold: refused with SHARE_PROBLEMS.many, never cut. */
+export function sharesTooMany(raw: unknown): boolean {
+  return sharedIds(raw).length > MAX_SHARED_PRODUCTS;
+}
 
 /** Whatever came back from storage or a form, made safe to use, or null. */
 export function parsePartnerShare(raw: unknown): PartnerShare | null {
   if (!raw || typeof raw !== "object") return null;
-  const value = raw as { percent?: unknown; products?: unknown };
+  const value = raw as { percent?: unknown; products?: unknown; until?: unknown };
   const percent = typeof value.percent === "string" ? Number(value.percent.trim()) : value.percent;
   if (typeof percent !== "number" || !Number.isInteger(percent)) return null;
   if (percent < MIN_PARTNER_SHARE || percent > MAX_PARTNER_SHARE) return null;
-  const list = Array.isArray(value.products) ? value.products : [];
-  const products = [...new Set(list.filter((id): id is string => typeof id === "string" && /^[a-z0-9]{6,40}$/.test(id)))].slice(0, 200);
-  if (!products.length) return null;
-  return { percent, products };
+  const products = sharedIds(value.products);
+  // Past the cap the whole share is refused: keeping the first ones would record an agreement nobody chose.
+  if (!products.length || products.length > MAX_SHARED_PRODUCTS) return null;
+  const until = typeof value.until === "number" && Number.isSafeInteger(value.until) && value.until > 0 ? value.until : null;
+  return until === null ? { percent, products } : { percent, products, until };
 }
 
-/** What this partner takes of a sale of this product, in percent; 0 when none. */
-export function shareOn(share: PartnerShare | null, productId: string): number {
+/**
+ * Whether a stored record's `share` field reads exactly, so the cap can rely
+ * on it (Codex G's review of #1924): absent or null is a known "no share";
+ * anything else must parse whole, every product named validly and an end
+ * either absent or a moment. A share that does not read is not "no share"
+ * (parsePartnerShare answers null and it would be dropped): it is unknown, and
+ * what depends on it fails closed. A whole-number percent written as a string
+ * still reads, as parsePartnerShare has always read it.
+ */
+export function shareReadsExactly(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return true;
+  if (typeof raw !== "object" || Array.isArray(raw)) return false;
+  const value = raw as { products?: unknown; until?: unknown };
+  const share = parsePartnerShare(raw);
+  if (!share || !Array.isArray(value.products)) return false;
+  if (!value.products.every((id) => typeof id === "string" && /^[a-z0-9]{6,40}$/.test(id))) return false;
+  if (new Set(value.products).size !== share.products.length) return false;
+  return value.until === undefined || value.until === null || share.until === value.until;
+}
+
+/**
+ * What this partner takes of a sale of this product, in percent; 0 when none.
+ * `atSeconds` is when the sale was paid: a share with an end earns nothing on
+ * a sale paid at or after it. Without `atSeconds` the end is not read, for
+ * callers that only ask what a share covers.
+ */
+export function shareOn(share: PartnerShare | null, productId: string, atSeconds?: number): number {
   if (!share || !productId) return 0;
+  if (share.until !== undefined && atSeconds !== undefined && atSeconds >= share.until) return 0;
   return share.products.includes(productId) ? share.percent : 0;
 }
 

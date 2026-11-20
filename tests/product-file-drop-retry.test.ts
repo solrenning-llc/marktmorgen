@@ -16,10 +16,12 @@ import { paidPeriod } from "./billing-period-fixture";
 import { files, state } from "./product-file-drop-retry-world";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "product-file-drop-retry@example.com";
 
 async function main(): Promise<void> {
+  answerNoRunningSubscriptions();
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   await claimHandle(OWNER, "productfiledropretry", "Product File Drop Retry", "");

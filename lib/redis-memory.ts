@@ -463,6 +463,24 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/flows.ts FLOW_QUEUED: each claim still pending becomes the 400-day mark and its run is queued, in one step.
+        if (key.startsWith("-- marktmorgen:flow-queued:v1\n") && Number(args[0]) >= 3) {
+          const keys = args.slice(1, 1 + Number(args[0])), argv = args.slice(1 + Number(args[0]));
+          let queued = 0;
+          for (let i = 2; i < keys.length; i++) {
+            this.scriptCalls += 1;
+            if (this.run(["GET", keys[i]]) !== argv[2]) continue;
+            this.run(["SET", keys[i], "1", "EX", argv[1]]);
+            this.run(["ZADD", keys[0], argv[0], argv[i + 1]]);
+            this.scriptCalls += 2;
+            queued += 1;
+          }
+          if (queued > 0) {
+            this.run(["HINCRBY", keys[1], "started", String(queued)]);
+            this.scriptCalls += 1;
+          }
+          return queued;
+        }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v1\n") && args[0] === "3" && args.length === 9) {
           const [, run, log, index, email, now, entry, keep, person] = args;

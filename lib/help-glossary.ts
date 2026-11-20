@@ -23,7 +23,6 @@ export const HELP_TERMS: readonly HelpTerm[] = [
   { term: "Endpoint", meaning: "The web address that receives your store's webhook messages.", words: /\bendpoints?\b/i },
   { term: "EPUB", meaning: "The file format most e-book readers open, such as Apple Books.", words: /\bEPUB\b/ },
   { term: "Funnel", meaning: "Pages in a set order that lead a visitor from a first offer to a purchase.", words: /\bfunnels?\b/i },
-  { term: "HMAC-SHA256", meaning: "A way to sign a message with a secret key, so the receiver can check that it came from us and was not changed on the way.", words: /\bHMAC(?:-SHA256)?\b/ },
   { term: "HTML", meaning: "The code web pages and many emails are written in.", words: /\bHTML\b/ },
   { term: "HTTPS", meaning: "A web address that starts with https://, whose connection is encrypted.", words: /\bhttps\b/i },
   { term: "iCal", meaning: "The calendar file format that Google, Outlook and Apple calendars all read.", words: /\biCal\b/ },

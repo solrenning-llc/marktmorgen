@@ -55,7 +55,7 @@ async function main(): Promise<void> {
 
   part("On an answer's page");
   {
-    const webhook = answers.find((a) => a.id === "how-do-i-tell-zapier-make-or-my-own-server-when-something-happens-in-my-store");
+    const webhook = answers.find((a) => a.id === "can-i-connect-zapier-make-or-my-own-server");
     if (!webhook) throw new Error("the webhook answer is gone");
     const html = decode(renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: webhook.section, answer: webhook.id }) })));
     const box = html.match(/<section[^>]*data-help-terms[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? "";

@@ -25,7 +25,7 @@ export const AI_ENTITLEMENT_RULES = {
 /** A PDF run (lib/ai.ts writePage, 1 + READ_PDF_JOBS jobs) reads one document. Kept out of the rules object on purpose:
  * that object is bound into the commercial terms snapshot, whose every character a contract restart's encoding repeats
  * many times under a 1 MiB bound (lib/contract-funding-rules.ts canonicalFinancialSnapshot); the prices it sets are
- * bound there through AUTOMATIC_AI_SPEND_CEILINGS.slotMicroUsd. */
+ * bound there through AUTOMATIC_AI_SPEND_CEILINGS.slots. */
 export const DOCUMENT_READS_PER_PDF_RUN = 1;
 export function aiEntitlementsSnapshot(): string {
   return JSON.stringify(AI_ENTITLEMENT_RULES);
@@ -42,6 +42,8 @@ function priced(model: string, shape: typeof TEXT_MAX | typeof DOCUMENT_MAX): nu
   return value;
 }
 export type AiSlotPrices = { writing: number; answer: number; document: number };
+/** The kinds of call, in the order the commercial terms bind their prices (AUTOMATIC_AI_SPEND_CEILINGS.slots). */
+export const AI_SLOT_KINDS = ['writing', 'answer', 'document'] as const satisfies readonly (keyof AiSlotPrices)[];
 /** A writing job's call may ask either fixed model (some jobs ask the answer model) with text; a visitor answer asks the
  * answer model with text (tests/ai-funded-rights.test.ts holds lib/answers.ts and lib/store-guide.ts to it); the only
  * document request is a PDF read on the answer model (lib/ai.ts refuses any other). */

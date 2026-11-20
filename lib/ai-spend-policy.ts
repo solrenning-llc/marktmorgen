@@ -1,4 +1,4 @@
-import { AI_SLOT_MICRO_USD, aiEntitlementsSnapshot, requiredAiRightsMicroUsd, type AiSlotPrices } from '@/lib/ai-entitlement-rules';
+import { AI_SLOT_KINDS, AI_SLOT_MICRO_USD, aiEntitlementsSnapshot, requiredAiRightsMicroUsd, type AiSlotPrices } from '@/lib/ai-entitlement-rules';
 import { AI_REQUEST_LIMITS, SUPPORTED_AI_MODELS } from '@/lib/ai-request-rules';
 import { COST_TABLE_VERSION, aiRequestHoldMicroUsd } from '@/lib/spend-cost-table';
 /** Reviewed USD microdollar ceilings. Unknown budgets never authorize spending. */
@@ -77,13 +77,15 @@ function largestRequest(model: string): number {
   if (value === null) throw new Error('A supported model is missing from the cost table');
   return value;
 }
-/** Month-free ceilings, bound into the commercial terms snapshot. */
+/** Month-free ceilings, bound into the commercial terms snapshot. The price of each kind of call is bound as `slots`,
+ * in AI_SLOT_KINDS order, not as a keyed object: a contract restart's encoding repeats the terms many times under a
+ * 1 MiB bound (lib/contract-funding-rules.ts canonicalFinancialSnapshot), and the keys alone passed it. */
 export const AUTOMATIC_AI_SPEND_CEILINGS = {
   reviewId: AUTOMATIC_AI_SPEND_REVIEW_ID,
   requestMicroUsd: { 'claude-sonnet-5-5': largestRequest('claude-sonnet-5-5'), 'claude-haiku-5-5': largestRequest('claude-haiku-5-5') },
   storeMicroUsd: AUTOMATIC_AI_STORE_MICRO_USD,
   fundedStores: AUTOMATIC_FUNDED,
-  slotMicroUsd: AI_SLOT_MICRO_USD,
+  slots: AI_SLOT_KINDS.map(kind => AI_SLOT_MICRO_USD[kind]),
 } as const;
 
 /** An optional deployment setting that can only LOWER every ceiling: a whole

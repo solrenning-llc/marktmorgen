@@ -12,8 +12,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AI_REQUEST_LIMITS, ANSWER_MODEL, WRITING_MODEL } from '@/lib/ai-request-rules';
-import { AI_ENTITLEMENT_RULES, AI_SLOT_MICRO_USD, aiEntitlementsFunded, requiredAiRightsMicroUsd } from '@/lib/ai-entitlement-rules';
-import { AUTOMATIC_AI_STORE_MICRO_USD, currentAiSpendPolicy, isAiSpendPolicyValid } from '@/lib/ai-spend-policy';
+import { AI_ENTITLEMENT_RULES, AI_SLOT_KINDS, AI_SLOT_MICRO_USD, aiEntitlementsFunded, requiredAiRightsMicroUsd } from '@/lib/ai-entitlement-rules';
+import { AUTOMATIC_AI_SPEND_CEILINGS, AUTOMATIC_AI_STORE_MICRO_USD, currentAiSpendPolicy, isAiSpendPolicyValid } from '@/lib/ai-spend-policy';
 import { aiRequestHoldMicroUsd } from '@/lib/spend-cost-table';
 import { AI_MONTHLY, READ_PDF_JOBS } from '@/lib/ai-rules';
 import { ANSWERS_MONTHLY } from '@/lib/answers-rules';
@@ -51,6 +51,13 @@ test('the price of each kind of call comes from the cost table, at its worst req
   // The dearest text request an answer can send stays in Haiku's lower price tier (prompts up to 100,000 tokens).
   assert.ok(AI_SLOT_MICRO_USD.answer < AI_SLOT_MICRO_USD.writing);
   assert.ok(AI_SLOT_MICRO_USD.document > AI_SLOT_MICRO_USD.writing);
+});
+
+test('the commercial terms bind the three prices as a short list, in a fixed order, with the policy\'s own values', () => {
+  assert.deepEqual([...AI_SLOT_KINDS], ['writing', 'answer', 'document']);
+  assert.deepEqual(AUTOMATIC_AI_SPEND_CEILINGS.slots, [AI_SLOT_MICRO_USD.writing, AI_SLOT_MICRO_USD.answer, AI_SLOT_MICRO_USD.document]);
+  assert.deepEqual(currentAiSpendPolicy()!.slotMicroUsd, { ...AI_SLOT_MICRO_USD });
+  assert.ok(!('slotMicroUsd' in AUTOMATIC_AI_SPEND_CEILINGS));
 });
 
 test("every paid plan's AI ceiling funds all its published writing jobs, PDF reads and answers at once", () => {

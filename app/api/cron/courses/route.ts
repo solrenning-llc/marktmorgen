@@ -10,6 +10,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
+import { noticeHeldStores } from "@/lib/community-held-notice";
 import { settleSubmissionSlots } from "@/lib/submission-store";
 
 /**
@@ -19,7 +20,9 @@ import { settleSubmissionSlots } from "@/lib/submission-store";
  * in (lib/assignment.ts), and community pictures never put in a post
  * (lib/community-files.ts), a day on. And sets back the room a buyer's
  * upload opened and left still held, once its day is over
- * (lib/submission-store.ts, settleSubmissionSlots).
+ * (lib/submission-store.ts, settleSubmissionSlots). And tells each creator
+ * whose community has posts or comments waiting for approval, once a day
+ * (lib/community-held-notice.ts, 543 [CM2]).
  */
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
@@ -58,6 +61,10 @@ export async function GET(request: NextRequest) {
         return null;
       },
     );
+    const held = await noticeHeldStores({ until: Date.now() + 20_000 }).catch((error) => {
+      console.error("telling creators about held community items failed", error);
+      return null;
+    });
     return Response.json(
       {
         ok: true,
@@ -68,6 +75,7 @@ export async function GET(request: NextRequest) {
         ...(pictures === null ? { picturesFailed: true } : {}),
         submissionSlots: slots,
         ...(slots === null ? { submissionSlotsFailed: true } : {}),
+        heldNotices: held,
       },
       { headers: { "Cache-Control": "no-store" } },
     );

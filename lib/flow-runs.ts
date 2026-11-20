@@ -600,24 +600,34 @@ export const forgetHeldCommand = (listId: string): (string | number)[] => ["DEL"
  */
 export const runStampCommand = (flowId: string, email: string): (string | number)[] => ["HGET", runKey(flowId, personOf(email)), "updatedAt"];
 
+const HOLD_LAYOUT_IF_LEASED = `-- marktmorgen:flow-hold-layout-if-leased:v1
+if tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1])) ~= tonumber(ARGV[2]) then return 0 end
+if (redis.call('HGET', KEYS[2], 'updatedAt') or '') ~= ARGV[3] then return 0 end
+redis.call('HSET', KEYS[2], 'open', ARGV[4], 'email', ARGV[5], 'status', 'held', 'step', ARGV[6], 'note', ARGV[7], 'updatedAt', ARGV[8])
+redis.call('RPUSH', KEYS[3], ARGV[9])
+redis.call('ZADD', KEYS[4], ARGV[8], ARGV[10])
+redis.call('ZADD', KEYS[5], ARGV[8], ARGV[11])
+redis.call('ZREM', KEYS[1], ARGV[1])
+return 1`;
+
 /**
  * Holds these runs at step `index` without attempting anything (lib/flows.ts: the workflow's steps changed places
  * after they were queued, so the position they hold may now be another step). The attempt mark is the step now at
  * that position, so the creator's choice on the held runs screen (resolveHeldRun) sends it ("retry"), skips it
  * ("continue") or ends the run. Nothing was sent, so nothing is written as attempted.
+ * An erasure removes the lease and run. Check the versions that were read and consume the lease in the same
+ * Redis step as all the hold writes, leaving an erased or advanced run alone.
  */
-export async function holdRuns(listId: string, flowId: string, index: number, stepId: string, emails: string[], note: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
-  if (!emails.length) return;
-  const commands: (string | number)[][] = [];
-  for (const email of emails) {
+export async function holdRuns(listId: string, flowId: string, index: number, stepId: string, holds: { email: string; score: number; stamp: string }[], note: string, lease: { key: string; group: string }, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (!holds.length) return;
+  const commands = holds.map(({ email, score, stamp }) => {
     const person = personOf(email);
-    const run = runKey(flowId, person);
-    commands.push(
-      ["HSET", run, "open", `${index}:${stepId}`, "email", normaliseEmail(email), "status", "held", "step", index, "note", note.slice(0, 300), "updatedAt", nowSeconds],
-      ["RPUSH", logKey(flowId, person), event({ at: nowSeconds, step: index, stepId, kind: "run", state: "uncertain", note })],
-      ["ZADD", heldKey(listId), nowSeconds, `${flowId}|${person}`],
-      ["ZADD", indexKey(flowId), nowSeconds, person],
-    );
+    const entry = event({ at: nowSeconds, step: index, stepId, kind: "run", state: "uncertain", note });
+    return ["EVAL", HOLD_LAYOUT_IF_LEASED, 5, lease.key, runKey(flowId, person), logKey(flowId, person), heldKey(listId), indexKey(flowId),
+      `${lease.group}|${email}`, score, stamp, `${index}:${stepId}`, normaliseEmail(email), index, note.slice(0, 300), nowSeconds, entry, `${flowId}|${person}`, person];
+  });
+  const reply = await redisPipeline(commands);
+  if (!replied(reply, commands.length) || reply.some((answer) => answer !== 0 && answer !== 1)) {
+    throw new FlowRunUnavailable("A workflow step's layout hold could not be confirmed");
   }
-  await redisPipeline(commands);
 }

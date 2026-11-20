@@ -354,6 +354,18 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+        // lib/flow-runs.ts HOLD_LAYOUT_IF_LEASED: the same lease and run versions must still be live.
+        if (key.startsWith("-- marktmorgen:flow-hold-layout-if-leased:v1\n") && args[0] === "5" && args.length === 17) {
+          const [, lease, run, log, held, index, member, score, stamp, open, email, step, note, now, entry, heldMember, person] = args;
+          const currentScore = this.run(["ZSCORE", lease, member]);
+          if (currentScore === null || Number(currentScore) !== Number(score) || String(this.run(["HGET", run, "updatedAt"]) ?? "") !== stamp) return 0;
+          this.run(["HSET", run, "open", open, "email", email, "status", "held", "step", step, "note", note, "updatedAt", now]);
+          this.run(["RPUSH", log, entry]);
+          this.run(["ZADD", held, now, heldMember]);
+          this.run(["ZADD", index, now, person]);
+          this.run(["ZREM", lease, member]);
+          return 1;
+        }
         // lib/community-events.ts RELEASE_RSVP: a place deleted only while it holds this request's own mark.
         if (key.startsWith("-- marktmorgen:event-rsvp-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, list, member, mark] = args;

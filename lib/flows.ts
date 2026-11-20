@@ -691,7 +691,8 @@ export async function forgetWorkflowPerson(store: Store, rawEmail: string): Prom
   const flows = await readFlowListStrict(store.listId);
   const person = personOf(email);
   const commands: (string | number)[][] = [];
-  for (const flow of flows) commands.push(...forgetPersonCommands(store.listId, flow.id, person), ["DEL", enrolledKey(flow.id, email)], ...queuedOf(store, flow, [email]));
+  // Take the queued steps and leases away before deleting their records, including a legacy run with no stamp.
+  for (const flow of flows) commands.push(...queuedOf(store, flow, [email]), ...forgetPersonCommands(store.listId, flow.id, person), ["DEL", enrolledKey(flow.id, email)]);
   await erase(commands);
   return { flows: flows.length };
 }
@@ -702,8 +703,8 @@ async function purgeFlow(store: Store, flow: Flow): Promise<void> {
   const people = await runPeople(flow.id);
   const commands: (string | number)[][] = [];
   for (const { person, email } of people) {
-    commands.push(...forgetPersonCommands(store.listId, flow.id, person), ["DEL", `nl:mail:enr:${flow.id}:${person}`]);
     if (email) commands.push(...queuedOf(store, flow, [email]));
+    commands.push(...forgetPersonCommands(store.listId, flow.id, person), ["DEL", `nl:mail:enr:${flow.id}:${person}`]);
   }
   commands.push(forgetIndexCommand(flow.id), ["DEL", statsKey(flow.id)]);
   await erase(commands);
@@ -1613,11 +1614,11 @@ export async function sendDueSteps(
     // right after a save must not be held); a step queued in that same second just before the save is the only one
     // this can miss. The sender stamps a run with the second its list was read (chosenAt), not when it writes, so a
     // save later in the same job, while this list is still the one in use, is after the stamp: it is held next time.
-    const stale: string[] = [];
+    const stale: Parameters<typeof holdRuns>[4] = [];
     emails.forEach((email, i) => {
       if (!held.has(email)) return;
       if (reshaped !== null && (stamps[i] === null || Number(stamps[i]) < reshaped)) {
-        stale.push(email);
+        stale.push({ email, score: Number(scores[i]), stamp: String(stamps[i] ?? "") });
         return;
       }
       const contact = parseContact(found[i]);
@@ -1655,7 +1656,7 @@ export async function sendDueSteps(
     await noteRuns(flow.id, notes.filter((n) => !skippedOut.has(n.email)), chosenAt).catch((error) => console.error("writing workflow history failed", error));
     if (stale.length) {
       counts.dropped += stale.length;
-      await holdRuns(listId, flow.id, index, step.id, stale, LAYOUT_HOLD_NOTE(index), chosenAt);
+      await holdRuns(listId, flow.id, index, step.id, stale, LAYOUT_HOLD_NOTE(index), { key: LEASE, group }, chosenAt);
     }
     if (!still.length) return;
     const mine = still;

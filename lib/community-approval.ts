@@ -55,7 +55,7 @@
  * includes it (lib/person-copy.ts).
  */
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { CREATOR, type Comment, type CommunityImage, type NewPost, type Post, addComment, createPost, newItemId, readComment, readPost } from "@/lib/community";
 import { type Poll, parsePoll } from "@/lib/community-polls";
 import { ITEM_ID, MAX_COMMENT_TEXT, MAX_POST_TEXT, MAX_POST_TITLE, cleanLine } from "@/lib/community-text";
@@ -777,16 +777,15 @@ export async function forgetHeldPerson(id: string, who: string): Promise<number>
     }
   }
   const kept = items.length ? 4 : 2;
-  const done = repliesFor(
-    await redisPipeline([
-      ...(items.length ? [["ZREM", queueKey(id), ...items], ["DEL", ...items.map((item) => itemKey(id, item))]] : []),
-      ["DEL", mineKey(id, who)],
-      ["HDEL", countKey(id), `${who}:p`, `${who}:c`],
-      ...unlisted.map(([item, path]) => ["HSET", picturesKey(id), item, JSON.stringify({ a: who, p: path })]),
-    ]),
-    kept + unlisted.length,
-  );
-  const counts = done?.map(countOf);
+  const erase: (string | number)[][] = [
+    ...(items.length ? [["ZREM", queueKey(id), ...items], ["DEL", ...items.map((item) => itemKey(id, item))]] : []),
+    ["DEL", mineKey(id, who)],
+    ["HDEL", countKey(id), `${who}:p`, `${who}:c`],
+    ...unlisted.map(([item, path]) => ["HSET", picturesKey(id), item, JSON.stringify({ a: who, p: path })]),
+  ];
+  const done = repliesFor(await redisPipeline(erase), kept + unlisted.length);
+  // Each count only within what its command could remove or write (#4798): a DEL of one record answering 2 is unknown.
+  const counts = done?.map((reply, i) => countWithin(reply, erase[i]));
   if (!counts || counts.some((n) => n === null)) throw new Error("Community held items erasure was not confirmed");
   // The pictures last, each file before its line (Codex G on #3020, 6751455863): one that could not be deleted keeps
   // its line, and the erasure says it did not finish, so the next one deletes it.

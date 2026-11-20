@@ -1,4 +1,5 @@
 import { consumerGate } from "@/lib/eu-vat-gate";
+import { EuVatCollectRefused, euSaleGate } from "@/lib/eu-vat-collect";
 import { startGift } from "@/lib/gifts";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { startGroup } from "@/lib/group-buy";
@@ -209,7 +210,9 @@ export async function POST(request: NextRequest) {
   // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate): before anything is held, written or charged, a paid sale to
   // the EU or the UK is refused, and a sale without the billing country asks for it. A bundle is read by its members.
   const members = product.bundle ? new Map((await readListings(store, product.bundle)).map((listing) => [listing.id, listing])) : undefined;
-  const gate = consumerGate({ product, members, headers: request.headers, form: sent });
+  // Since 789 [IV1] step 3 (lib/eu-vat-collect.ts euSaleGate): exactly consumerGate while the EU record is not "collect"
+  // or the switch is off, as today; with both on, an EU buyer whose evidence agrees has the VAT collected on top.
+  const gate = euSaleGate({ product, members, headers: request.headers, form: sent });
   if (!gate.ok) {
     const status = gate.reason === "refused" ? "abroad" : "country";
     return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);
@@ -391,6 +394,8 @@ export async function POST(request: NextRequest) {
         picked,
         // The boxes the buyer ticked go through the same EU VAT gate as the product, as one order.
         gateBoxes: (boxes) => consumerGate({ product, members, boxes, headers: request.headers, form: sent }),
+        // Only when the EU gate said to collect (never while nothing collects): the VAT on top, or a refusal before Stripe.
+        ...(gate.collect ? { euVat: { country: gate.collect.country } } : {}),
         held: holding,
         upsellKey: upsell?.fingerprint,
         plan: inPlan,
@@ -490,6 +495,10 @@ export async function POST(request: NextRequest) {
     if (error instanceof DigitalConsentMissing) return away(consentBack);
     // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
     // A ticked box the EU VAT gate refuses for this order: back to the page, as for the product itself.
+    // The EU VAT this sale needs could not be put on it (lib/eu-vat-collect.ts): refused as an EU sale is today.
+    if (error instanceof EuVatCollectRefused) {
+      return away(from ? `/@${store.handle}/${from}/${product.id}?status=abroad` : `/@${store.handle}/p/${product.id}?status=abroad#buy`);
+    }
     if (error instanceof BoxesRefused) {
       const status = error.reason === "refused" ? "abroad" : "country";
       return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);

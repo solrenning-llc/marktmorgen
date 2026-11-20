@@ -1,3 +1,4 @@
+import {targetsUnder44} from "./target-size.mjs";
 import "./orders-list-actions.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
@@ -49,19 +50,6 @@ try{
 let app,reviewedApp,output="";
 let browser,cases=0,audits=0,failed=0,libraryLink=null;const gaps=[];
 const redact=value=>String(value).replace(/token=[^&\s"']+/g,"token=redacted");
-// 2.5.5 Target Size (Enhanced, AAA): every control a buyer presses on the checkout's own pages is at least 44 by 44 CSS px.
-// A link inside a sentence is the criterion's inline exception; a box counts with its label, which presses it too.
-const targetsUnder44=(page,scope="body")=>page.evaluate(scope=>{
- const out=[],shown=n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return r.width>0&&r.height>0&&s.visibility!=="hidden"&&!n.closest("[hidden],[inert],.sr-only");};
- for(const n of document.querySelector(scope)?.querySelectorAll("a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button]")??[]){
-  const label=n.matches("input")?(n.labels?.[0]??n.closest("label")):null;
-  if(!shown(n)&&!(label&&shown(label)))continue;
-  if(n.tagName==="A"&&getComputedStyle(n).display==="inline"){const p=n.parentElement;if(p&&(p.textContent||"").trim().length>(n.textContent||"").trim().length+3)continue;}
-  const r=n.getBoundingClientRect(),l=label?label.getBoundingClientRect():r,width=Math.max(r.width,l.width),height=Math.max(r.height,l.height);
-  if(width<43.5||height<43.5)out.push({tag:n.tagName,name:(n.getAttribute("aria-label")||n.textContent||"").trim().slice(0,60),width:Math.round(width),height:Math.round(height)});
- }
- return out;
-},scope);
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
  reviewedApp=await prepareReviewedMailApp(root,env);
@@ -140,6 +128,15 @@ try{
    const extras=buyForm.locator('input[name="bump"]');
    if(await extras.evaluateAll(nodes=>nodes.some(n=>n.checked)))throw Error("An extra was selected for the buyer");
    if(mode==="baseline"){await page.keyboard.press("Tab");if(!await page.evaluate(()=>document.activeElement!==document.body))throw Error("Native keyboard focus missing");}
+   // The billing country (components/billing-country-field.tsx, EU VAT art. 9a gate): a required, labelled native select,
+   // with no country chosen for the buyer. A buyer outside the EU and the UK (the United States here) chooses it and can buy;
+   // the refusal of EU and UK places is held in tests/eu-vat-consumer-gate.test.ts and tests/eu-vat-checkout-routes.test.ts.
+   const country=buyForm.locator('select[name="billing_country"]');
+   if(await country.count()!==1)throw Error("Billing country field missing");
+   const field=await country.evaluate(n=>({value:n.value,required:n.required,labelled:Boolean(n.labels&&n.labels.length&&n.labels[0].innerText.trim()),us:[...n.options].some(o=>o.value==="US")}));
+   if(field.value!==""||!field.required||!field.labelled||!field.us)throw Error("Billing country is not an empty, required, labelled select offering the United States "+JSON.stringify(field));
+   await country.focus();await country.selectOption("US");
+   if(await country.inputValue()!=="US")throw Error("The billing country could not be chosen");
    // The box to start during the cancellation period (lib/digital-consent.ts): a real, labelled, required checkbox, never checked for the buyer.
    const consent=buyForm.locator('input[name="dc"]');
    if(await consent.count()!==1)throw Error("Immediate-access consent box missing");

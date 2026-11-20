@@ -141,6 +141,54 @@ def main():
                 assert hgetall(new_key) == hgetall(old_key) == hashes[k], (trial, new_key)
         print("PASS: 1000 random counts, near and past their most, with counts of 0 and below: version 2 answers and keeps exactly what version 1 did")
 
+        # Version 3: "most:ttl" gives the hash the script creates its expiry, inside the script.
+        for trial in range(200):
+            redis.command("DEL", day, old_day)
+            caps = [rng.randint(1, 8)]
+            hashes = [{}]
+            for name in rng.sample(names + ["~"], rng.randint(0, 9)):
+                value = rng.randint(-2, 5)
+                for key in (day, old_day):
+                    redis.command("HSET", key, name, value)
+                hashes[0][name] = value
+            existed = bool(hashes[0])
+            if existed and rng.random() < 0.5:
+                redis.command("EXPIRE", day, 50)
+            ttl_before = redis.command("TTL", day)
+            counts = [(1, rng.choice(names), rng.randint(-3, 3)) for _ in range(rng.randint(1, 9))]
+            flat = [str(part) for c in counts for part in c]
+            got = redis.command("EVAL", count, 1, day, "%d:600" % caps[0], *flat)
+            was = redis.command("EVAL", VERSION_1, 1, old_day, caps[0], *flat)
+            assert got == was == reference(hashes, caps, counts), (trial, caps, counts, got, was)
+            assert hgetall(day) == hgetall(old_day) == hashes[0], trial
+            left = redis.command("TTL", day)
+            if existed:
+                assert left == ttl_before or (ttl_before > 0 and 0 < left <= ttl_before), (trial, ttl_before, left)
+            else:
+                assert 0 < left <= 600, (trial, left)
+        print("PASS: 200 random counts with an expiry answer and keep what version 1 did; only a hash the script creates gets it, one already there keeps its own")
+
+        for bad in ("5:0", "5:x", "5:", ":5", "5:1.5", "0:60", "5:-1"):
+            redis.command("DEL", day)
+            try:
+                redis.command("EVAL", count, 1, day, bad, 1, "a", 1)
+                raise AssertionError("an expiry that does not read was taken: %r" % bad)
+            except RuntimeError:
+                pass
+            assert redis.command("EXISTS", day) == 0
+        print("PASS: an expiry that does not read is refused and nothing is written")
+
+        redis.command("DEL", day)
+        before = inside_calls(redis)
+        redis.command("EVAL", count, 1, day, "100:600", 1, "v", 1)
+        after = inside_calls(redis)
+        assert after.get("expire", 0) - before.get("expire", 0) == 1
+        before = inside_calls(redis)
+        redis.command("EVAL", count, 1, day, "100:600", 1, "v", 1)
+        after = inside_calls(redis)
+        assert after.get("expire", 0) - before.get("expire", 0) == 0
+        print("PASS: the expiry is billed once, on the write that creates the hash")
+
         before = redis.command("HGETALL", day)
         try:
             redis.command("EVAL", count, 2, day, day, 3, 1, 1, "p", 1, 2, "q", 1)

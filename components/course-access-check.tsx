@@ -37,6 +37,11 @@ export function CourseAccessCheck({
       <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">
         Captions show the words of a video as text, for students who cannot hear it, are somewhere quiet, or follow better by reading. This checks the videos of this course as they were when this page opened; reload the page to check again. It is not a full accessibility review.
       </p>
+      {check.unknown ? (
+        <p className="mt-5 text-sm text-ink" role="status" data-course-captions="unknown">
+          We could not check your lesson videos for captions just now. Reload the page in a minute to try again.
+        </p>
+      ) : null}
       {check.done ? (
         <p className="mt-5 flex items-center gap-2 text-sm text-ink" data-course-captions="done">
           <Icon name="check" size={16} className="text-violet-deep" />

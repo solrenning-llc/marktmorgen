@@ -44,6 +44,7 @@
  * not the buyer ever comes back to the thanks page.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
+import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { countOrder } from "@/lib/orders";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -73,6 +74,9 @@ import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliv
 import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { consumerGate } from "@/lib/eu-vat-gate";
+import { BILLING_COUNTRY_FIELD, checkoutEvidence } from "@/lib/eu-vat-evidence";
+import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
 export const UPSELL_COOKIE = "nl_upsell";
 export const UPSELL_WINDOW_SECONDS = 60 * 60;
@@ -185,7 +189,8 @@ async function creditAgain(store: Store, session: string, slot: string): Promise
   if (!record) throw new Error("a paid offer's record did not read");
   // Never paid, or paid before a payment id was known: nothing to credit from.
   if (record.state !== "paid" || !record.pi || !store.stripeAccountId) return;
-  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
+  // With its settled charge, so a partner's dated end is compared with when it was paid (noteCharge, Codex G on #1924).
+  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}?expand[]=latest_charge.balance_transaction`);
   const meta = pi.metadata as Record<string, string> | null;
   if (meta?.parent !== session || (meta?.step ?? "") !== slot) return;
   await noteCharge(store, pi);
@@ -280,6 +285,8 @@ export type TakeResult =
   | { kind: "failed" }
   /** Stripe's answer did not arrive; the thanks page finds out what happened. */
   | { kind: "checking" }
+  /** Stripe answered 429 (too many requests) to the yes: the offer was let go of and can be answered again, under the same idempotency key. */
+  | { kind: "busy" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
   | { kind: "consent" }
@@ -293,7 +300,7 @@ type SessionView = {
   customer?: unknown;
   currency?: unknown;
   metadata?: Record<string, string> | null;
-  customer_details?: { email?: unknown } | null;
+  customer_details?: { email?: unknown; address?: { country?: unknown } | null } | null;
   payment_intent?: { id?: unknown; payment_method?: unknown } | string | null;
 };
 
@@ -334,7 +341,15 @@ export function offerOpen(createdSeconds: number, secret: string | undefined, ke
  * product that is a draft again or has nothing to hand over is passed over
  * as if it were gone, on the thanks page and when the answer is taken alike.
  */
-const sellableTargets = (store: Store, listings: Listing[]) => listings.filter((p) => canSellProduct(store, p));
+// At the price each costs on its own right now: a store-wide sale (lib/store-sale.ts) lowers it, so an offer dearer
+// than the product bought alone is paused as "dearer" (lib/funnel.ts, stepPause), never charged (DISC-B-3).
+const sellableTargets = (store: Store, listings: Listing[]) =>
+  listings
+    .filter((p) => canSellProduct(store, p))
+    .map((p) => {
+      const off = saleOff(store.sale, p, saleClock());
+      return off > 0 ? { ...p, priceCents: salePrice(p.priceCents, off) } : p;
+    });
 
 /**
  * How the thanks page's form names the offer it drew: the step's id, a dot, and a fingerprint of every term drawn
@@ -358,6 +373,35 @@ export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, targe
   ]);
   return `${step.id}.${createHash("sha256").update(`marktmorgen-offer-terms:v1:${terms}`).digest("hex").slice(0, 32)}`;
 }
+
+/**
+ * EU VAT art. 9a (lib/eu-vat-gate.ts; 789 [IV1] unit 1, C): whether this offer may be charged to this buyer. The same
+ * question the card checkout asks (consumerGate), on the product offered, read on its own supply (a bundle by its
+ * members), never on the order it follows: a parent exempt by design (a live call, a package of calls) lets nothing
+ * through. Its evidence is the order's own: the billing country Stripe kept on the paid checkout and the IP country of
+ * this request. An offer that is free or a service a person gives live goes on exactly as consumerGate lets it. Anything
+ * else also needs the two items not to contradict each other (art. 24f): with the IP country present, it must be the
+ * billing country, compared trimmed and upper case as lib/eu-vat-evidence.ts reads both. The aliases consumerGate reads
+ * (UK for GB, EL for GR) are not unfolded here, so "UK" against "GB" disagrees and is refused: fail-closed, and both
+ * name a place REFUSED_PLACES refuses anyway. Pure; nothing is read, written or kept, the country included.
+ */
+export function offerGate(
+  target: Listing,
+  members: ReadonlyMap<string, EuSupplyFields> | undefined,
+  evidence: { headers: Headers; billing: unknown },
+): boolean {
+  // Exempt whatever the evidence: consumerGate answers ok with none only for a free line or a live service.
+  if (consumerGate({ product: target, members, headers: new Headers(), form: new URLSearchParams() }).ok) return true;
+  const billing = typeof evidence.billing === "string" ? evidence.billing : "";
+  const form = new URLSearchParams(billing.trim() ? { [BILLING_COUNTRY_FIELD]: billing } : {});
+  if (!consumerGate({ product: target, members, headers: evidence.headers, form }).ok) return false;
+  const items = checkoutEvidence(evidence.headers, form);
+  return items.ip === null || items.ip === items.billing;
+}
+
+/** What a bundle offered holds, by id, as the checkout reads it for the gate; nothing for a product on its own. */
+const membersOf = async (store: Store, target: Listing): Promise<Map<string, Listing> | undefined> =>
+  target.bundle ? new Map((await readListings(store, target.bundle)).map((listing) => [listing.id, listing])) : undefined;
 
 const toAnswers = (records: Map<string, UpsellRecord>) =>
   new Map<string, StepAnswer>([...records].map(([slot, record]) => [slot, record.state]));
@@ -384,6 +428,8 @@ export async function takeUpsell(input: {
    * given for the order before it never counts for this one.
    */
   consent?: DigitalConsent | null;
+  /** The request's headers: its IP country is one of the two items of the EU VAT gate's evidence (offerGate). */
+  headers: Headers;
 }): Promise<TakeResult> {
   const { store, session, secret, origin, answer } = input;
   // A store that cannot sell (lib/store-checkout.ts, canSell: switched off
@@ -437,8 +483,14 @@ export async function takeUpsell(input: {
   const slot = stepSlot(funnel, step);
   // A bundle offered: what it holds now is what this buyer gets, kept with
   // the answer and on the charge.
-  const items = target.bundle ? deliverableItems(target, await readListings(store, target.bundle)).map((p) => p.id) : null;
+  const members = await membersOf(store, target);
+  const items = members ? deliverableItems(target, [...members.values()]).map((p) => p.id) : null;
   const extra = items ? { items } : {};
+
+  // EU VAT art. 9a (offerGate): refused before anything is written, held, reserved or charged, on the offered
+  // product's own supply, with the billing country of the order paid and this request's IP country. A no is refused
+  // the same: an offer the page never drew has no answer, and the funnel never moves on past it.
+  if (!offerGate(target, members, { headers: input.headers, billing: view.customer_details?.address?.country })) return { kind: "unavailable" };
 
   if (answer === "no") {
     // Nothing is charged; the answer is written once, like a yes.
@@ -553,6 +605,18 @@ export async function takeUpsell(input: {
       slot ? `nimbus-upsell:${session}:${slot}` : `nimbus-upsell:${session}`,
     );
     const id = typeof pi.id === "string" ? pi.id : "";
+    // Only Stripe's answer for this charge (rule 30, DISC-C-4): a payment intent, with its id, for the amount and
+    // currency asked. Any other answer proves nothing: the offer stays pending, with no id taken from it, and is
+    // found among the buyer's payments and settled from what Stripe says (settleOne), never written down as paid.
+    // An answer with no amount at all (audit R48) is still this payment intent by its id, object and currency: it
+    // goes on as Stripe says, and its email leaves the amount line out (afterPaid). An amount that is there and is
+    // not the one asked is another charge's.
+    const amountAsked = pi.amount === undefined || pi.amount === null || pi.amount === step.priceCents;
+    const own = pi.object === "payment_intent" && /^pi_\w+$/.test(id) && amountAsked && typeof pi.currency === "string" && pi.currency.toLowerCase() === store.currency.toLowerCase();
+    if (!own) {
+      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+      return { kind: "checking" };
+    }
     if (pi.status === "succeeded") {
       await writeUpsell(session, slot, { state: "paid", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
@@ -579,11 +643,29 @@ export async function takeUpsell(input: {
     return { kind: "failed" };
   } catch (error) {
     // Stripe answered and said no — a declined card, a refused request — so
-    // nothing was charged.
-    if (error instanceof StripeError && error.status < 500) {
+    // nothing was charged. Never a 429 (too many requests: nothing done, and
+    // nothing said of the card), a 409 or an idempotency error (a request
+    // under this key is still being worked on, or was made before): those
+    // say nothing of a charge, and go the way of no answer below.
+    if (
+      error instanceof StripeError &&
+      error.status < 500 &&
+      error.status !== 409 &&
+      error.status !== 429 &&
+      error.code !== "idempotency_error" &&
+      error.code !== "idempotency_key_in_use"
+    ) {
       await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
       return { kind: "failed" };
+    }
+    // Too many requests: not a word about the card, and the yes is not lost to it (outage drill, 13 November 2026).
+    // The offer is let go of so the buyer can answer it again; that yes goes under this same idempotency key, so
+    // whatever Stripe did with this one, it is charged once at most.
+    if (error instanceof StripeError && error.status === 429) {
+      await redisPipeline([["DEL", recordKey(session, slot)], ...(slot ? [["SREM", slotsKey(session), slot]] : [])]);
+      await unwatchPending(store, session, slot);
+      return { kind: "busy" };
     }
     // No answer, or Stripe's own failure: the charge may have gone through.
     // It stays pending and is settled from what Stripe says (settleUpsells),
@@ -948,6 +1030,11 @@ export async function funnelView(input: {
    * was paid with, to pass over what the buyer already has from the store.
    */
   cart?: { offerFrom: string | null; email: string | null };
+  /**
+   * The EU VAT gate's evidence (offerGate): the request's headers, for its IP country, and the billing country of
+   * the order paid. An offer it refuses is never drawn; the country is neither shown nor kept.
+   */
+  evidence: { headers: Headers; billing: unknown };
 }): Promise<FunnelView> {
   const { store, session, product } = input;
   const records = await readAnswers(session);
@@ -989,6 +1076,8 @@ export async function funnelView(input: {
   }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
+  // Never drawn where the yes would be refused by the EU VAT gate (takeUpsell, offerGate).
+  if (!offerGate(target, await membersOf(store, target), input.evidence)) return { offer: null, taken, notes, declined };
   // Never a picture moved after a notice to a name no public page gives out (R44); a draft's, as the editor shows it.
   const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && picturedFrom(p)) ?? null : null;
   const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");

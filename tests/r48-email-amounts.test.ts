@@ -70,6 +70,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const one = /^\/payment_intents\/(pi_[A-Za-z0-9_]+)$/.exec(path);
   if (one) {
     const found = made.find((pi) => pi.id === one[1]);
+    // A purchase for several reads its payment before handing out places (lib/group-buy.ts settleGroup): paid, its own charge.
+    if (!found && one[1].startsWith("pi_R48Group")) {
+      return answer({ id: one[1], object: "payment_intent", status: "succeeded", latest_charge: { id: "ch_R48Group0001", object: "charge", payment_intent: one[1], refunded: false, amount_refunded: 0, disputed: false } });
+    }
     return found ? answer(found) : answer({ error: { message: "no such payment" } }, 404);
   }
   if (path === "/payment_intents" && method === "GET") return answer({ object: "list", data: [], has_more: false });
@@ -168,7 +172,7 @@ async function offers(): Promise<void> {
       currency: "usd",
       amount_total: 3900,
       metadata: { store: "harbor", product: front, upsell_key: browser.fingerprint },
-      customer_details: { email: buyerOf(n) },
+      customer_details: { email: buyerOf(n), address: { country: "US" } },
       payment_intent: { id: `pi_test_r48front${n}`, payment_method: { id: "pm_test_r48card01", type: "card", customer: "cus_TestR48Buyer" } },
     };
     return id;
@@ -177,7 +181,7 @@ async function offers(): Promise<void> {
     piOver = over;
     emails.length = 0;
     const session = order(n);
-    const outcome = await takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+    const outcome = await takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
     piOver = {};
     const letter = emails.find((e) => e.to[0] === buyerOf(n))?.text ?? "";
     return { outcome: outcome.kind, letter };
@@ -206,7 +210,7 @@ async function offers(): Promise<void> {
   piStatus = "requires_action";
   const pending = order(7);
   piOver = { amount: undefined };
-  const asked = await takeUpsell({ store, session: pending, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+  const asked = await takeUpsell({ headers: new Headers(), store, session: pending, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
   piOver = {};
   piStatus = "succeeded";
   is("sent to confirm with the bank first", asked.kind, "confirm");

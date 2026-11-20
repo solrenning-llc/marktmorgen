@@ -71,7 +71,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 /** A paid checkout of the front product, as Stripe reports it, with the billing country Stripe kept (or none). */
-function paidCheckout(id: string, product: string, fingerprint: string, country: string | null): Record<string, unknown> {
+/** card: the paying card's country Stripe reports (payment_method.card.country); by default the address's, as most cards are. */
+function paidCheckout(id: string, product: string, fingerprint: string, country: string | null, card: string | null = country): Record<string, unknown> {
   return {
     id,
     status: "complete",
@@ -81,7 +82,7 @@ function paidCheckout(id: string, product: string, fingerprint: string, country:
     currency: "usd",
     metadata: { store: "harbor", product, upsell_key: fingerprint },
     customer_details: country === null ? { email: BUYER } : { email: BUYER, address: { country } },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", ...(card === null ? {} : { card: { country: card } }) } },
   };
 }
 
@@ -100,7 +101,7 @@ const weekly: CallSetup = {
   sessions: [],
 } as unknown as CallSetup;
 
-type OfferGate = (target: Listing, members: ReadonlyMap<string, EuSupplyFields> | undefined, evidence: { headers: Headers; billing: unknown }) => boolean;
+type OfferGate = (target: Listing, members: ReadonlyMap<string, EuSupplyFields> | undefined, evidence: { headers: Headers; billing: unknown; card: unknown }) => boolean;
 
 async function main(): Promise<void> {
   redis.clear();
@@ -127,7 +128,7 @@ async function main(): Promise<void> {
 
   const ip = (country: string | null) => new Headers(country === null ? {} : { "x-vercel-ip-country": country });
   // The thanks page's call, with the order's billing country and the request's IP country (app/[handle]/thanks/page.tsx).
-  const drawn = async (country: string | null, ipCountry: string | null, id: string) =>
+  const drawn = async (country: string | null, ipCountry: string | null, id: string, card: string | null = country) =>
     (await funnelView({
       store,
       session: id,
@@ -137,17 +138,17 @@ async function main(): Promise<void> {
       created: NOW - 60,
       secret: browser.secret,
       upsellKey: browser.fingerprint,
-      evidence: { headers: ip(ipCountry), billing: country ?? undefined },
+      evidence: { headers: ip(ipCountry), billing: country ?? undefined, card: card ?? undefined },
     } as Parameters<typeof funnelView>[0])).offer;
   // The route's call, with the request's headers (app/api/store/upsell/route.ts).
   const take = async (id: string, ipCountry: string | null) =>
     takeUpsell({ store, session: id, secret: browser.secret, origin, step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT, headers: ip(ipCountry) } as Parameters<typeof takeUpsell>[0]);
 
   /** One buyer: the session Stripe kept, the page's offer, the yes, and whether anything was charged or written. */
-  const buyer = async (id: string, country: string | null, ipCountry: string | null) => {
-    sessions[id] = paidCheckout(id, front, browser.fingerprint, country);
+  const buyer = async (id: string, country: string | null, ipCountry: string | null, card: string | null = country) => {
+    sessions[id] = paidCheckout(id, front, browser.fingerprint, country, card);
     const before = charges.length;
-    const offer = await drawn(country, ipCountry, id);
+    const offer = await drawn(country, ipCountry, id, card);
     const kind = (await take(id, ipCountry)).kind;
     return { drawn: offer !== null, kind, charged: charges.length - before, record: (await readUpsell(id, ""))?.state ?? null };
   };
@@ -173,8 +174,8 @@ async function main(): Promise<void> {
   part("(c) RED: a paid checkout with no billing country is offered nothing");
   is("RED: no offer, unavailable, nothing charged or written", await buyer("cs_test_eugate0000000004", null, "US"), { drawn: false, kind: "unavailable", charged: 0, record: null });
 
-  part("(d) RED: an IP country and a billing country that disagree are refused (art. 24f)");
-  for (const [n, country, ipCountry] of [["5", "FR", "US"], ["6", "US", "FR"], ["7", "US", "CA"]] as const) {
+  part("(d) An EU or UK place in the IP country or the address is refused, whatever the other says");
+  for (const [n, country, ipCountry] of [["5", "FR", "US"], ["6", "US", "FR"]] as const) {
     is(`RED: address ${country}, IP ${ipCountry}: no offer, unavailable, nothing charged`, await buyer(`cs_test_eugate000000000${n}`, country, ipCountry), {
       drawn: false,
       kind: "unavailable",
@@ -182,6 +183,26 @@ async function main(): Promise<void> {
       record: null,
     });
   }
+
+  part("(d2) RED, 790 [IV2] unit 2: the two items are the billing address and the paying card's country (arts. 24b, 24f)");
+  // The owner's decision of 20/11/2026 (AGENTS.md, IV (i); docs/codex-queue.md, 790 [IV2] unit 2): the IP country is
+  // no longer one of the two items; an EU or UK IP still refuses, as (d) shows, because consumerGate refuses any such place.
+  is("RED: address US, IP CA, card US: offered and charged (the IP no longer has to match)", await buyer("cs_test_eugate0000000007", "US", "CA", "US"), { drawn: true, kind: "done", charged: 1, record: "paid" });
+  for (const [n, country, card] of [["10", "US", "DE"], ["11", "US", "GB"], ["12", "US", "CA"], ["13", "CA", "US"]] as const) {
+    is(`RED: address ${country}, IP ${country}, card ${card}: a contradiction, no offer, nothing charged`, await buyer(`cs_test_eugate00000000${n}`, country, country, card), {
+      drawn: false,
+      kind: "unavailable",
+      charged: 0,
+      record: null,
+    });
+  }
+  is("RED: a card whose country Stripe did not give is no second item: no offer, nothing charged", await buyer("cs_test_eugate0000000014", "US", "US", null), {
+    drawn: false,
+    kind: "unavailable",
+    charged: 0,
+    record: null,
+  });
+  is("a lower-case card country reads as the same country", await buyer("cs_test_eugate0000000015", "US", "US", "us"), { drawn: true, kind: "done", charged: 1, record: "paid" });
 
   part("(f) Without the IP header (as the checkout reads it), a buyer with address US is offered and charged");
   is("drawn, taken, charged once", await buyer("cs_test_eugate0000000008", "US", null), { drawn: true, kind: "done", charged: 1, record: "paid" });
@@ -200,17 +221,19 @@ async function main(): Promise<void> {
     // Read from the store as it is now: the record read above was taken before the call was set.
     const call = (await readListing((await storeForEmail(OWNER))!, callId))!;
     const download = (await readListing(store, guide))!;
-    const de = { headers: ip("DE"), billing: "DE" };
+    const de = { headers: ip("DE"), billing: "DE", card: "DE" };
     is("a live call goes on for an EU buyer, as the checkout lets it", offerGate(call, undefined, de), true);
-    is("and with no evidence at all, as consumerGate exempts it", offerGate(call, undefined, { headers: new Headers(), billing: undefined }), true);
+    is("and with no evidence at all, as consumerGate exempts it", offerGate(call, undefined, { headers: new Headers(), billing: undefined, card: undefined }), true);
     is("a download is refused for the same EU buyer", offerGate(download, undefined, de), false);
-    is("a download for a US buyer goes on", offerGate(download, undefined, { headers: ip("US"), billing: "US" }), true);
-    is("a billing country that is not a string is no billing country", offerGate(download, undefined, { headers: ip("US"), billing: 840 }), false);
-    is("an alias that disagrees with the IP is refused (UK vs GB), fail-closed", offerGate(download, undefined, { headers: ip("GB"), billing: "UK" }), false);
+    is("a download for a US buyer goes on", offerGate(download, undefined, { headers: ip("US"), billing: "US", card: "US" }), true);
+    is("a billing country that is not a string is no billing country", offerGate(download, undefined, { headers: ip("US"), billing: 840, card: "US" }), false);
+    is("an alias that disagrees with the card is refused (UK vs GB), fail-closed", offerGate(download, undefined, { headers: new Headers(), billing: "UK", card: "GB" }), false);
+    is("RED: a card country that is not a string is no card country", offerGate(download, undefined, { headers: ip("US"), billing: "US", card: 840 }), false);
+    is("RED: a US address with an EU card is refused on the helper too", offerGate(download, undefined, { headers: ip("US"), billing: "US", card: "DE" }), false);
     const bundle = { ...download, id: "bundle1", bundle: [guide, front] } as Listing;
     const members = new Map<string, EuSupplyFields>([[guide, download], [front, frontListing]]);
     is("a bundle of downloads, read by its members, is refused for an EU buyer", offerGate(bundle, members, de), false);
-    is("and goes on for a US buyer", offerGate(bundle, members, { headers: ip("US"), billing: "US" }), true);
+    is("and goes on for a US buyer", offerGate(bundle, members, { headers: ip("US"), billing: "US", card: "US" }), true);
   }
 
   done();

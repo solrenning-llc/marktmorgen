@@ -111,7 +111,7 @@ export async function lessonsFound(
   const courses = new Map<string, Course>();
   await Promise.all(
     courseIds.map(async ([productId, courseId]) => {
-      const course = await readCourse(courseId).catch(() => null);
+      const course = await readCourse(courseId).catch((error) => { console.error("reading a course for community search failed", error); return null; });
       if (course) courses.set(productId, course);
     }),
   );
@@ -150,16 +150,17 @@ export async function eventsFound(
 ): Promise<Found<FoundEvent>> {
   const communityId = store.community?.id;
   if (!communityId || !ids.length) return { found: [], unchecked: 0, lasting: false };
-  const events: CommunityEvent[] = await readEvents(communityId, ids).catch(() => []);
+  const events: CommunityEvent[] = await readEvents(communityId, ids).catch((error) => { console.error("reading events for community search failed", error); return []; });
   const byId = new Map(events.map((e) => [e.id, e]));
   const kept: FoundEvent[] = [];
   let unchecked = 0;
-  // One reading for every event of the page, read here only when the page has none.
-  const holdings = viewer.owner ? null : (viewer.holdings ?? (await holdingsOf(store, config, viewer.email)));
+  // One reading for every event of the page, read here only when the page has none, and only when an event was read:
+  // with no event there is nothing to check, so nothing is paid (and a failed event read stays one logged failure).
+  const holdings = viewer.owner || !events.length ? null : (viewer.holdings ?? (await holdingsOf(store, config, viewer.email)));
   for (const id of ids) {
     const event = byId.get(id);
     if (!event) continue;
-    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings, pay: viewer.pay }).catch((): "unknown" => "unknown");
+    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings, pay: viewer.pay }).catch((error): "unknown" => { console.error("checking event access in community search failed", error); return "unknown"; });
     if (answer === "unknown") unchecked += 1;
     if (answer !== true) continue;
     kept.push({ event, state: event.cancelled ? "cancelled" : isOver(event, now) ? "over" : "upcoming" });
@@ -170,7 +171,7 @@ export async function eventsFound(
 /** The members among these keys who are still listed, in the index's order. */
 export async function membersFound(communityId: string, keys: string[]): Promise<Member[]> {
   if (!keys.length) return [];
-  const found = await readMembers(communityId, keys).catch(() => new Map<string, Member>());
+  const found = await readMembers(communityId, keys).catch((error) => { console.error("reading members for community search failed", error); return new Map<string, Member>(); });
   return keys
     .map((k) => found.get(k))
     .filter((m): m is Member => Boolean(m && m.dir && m.n && !m.removed));

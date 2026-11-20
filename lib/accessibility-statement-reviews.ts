@@ -138,6 +138,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/studio/copy": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/course/[product]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/deals": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/studio/declines": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/discord": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/disputes": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/studio/email": { date: "November 18, 2026", digest: "eba44788522343cb" },

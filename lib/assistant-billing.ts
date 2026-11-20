@@ -19,6 +19,7 @@
 import { ADD_ON_MARK, BillingError, onPlatform, onPlatformAt, setCancelAtPeriodEnd } from "@/lib/billing";
 export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
+import { askBillingAddress } from "@/lib/billing-address";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
 import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, type AssistantPlan } from "@/lib/store-assistant-rules";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
@@ -138,6 +139,8 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
     success_url: `${origin}/api/billing/assistant?session_id={CHECKOUT_SESSION_ID}${store.sid ? `&store=${store.sid}` : ""}`,
     cancel_url: `${origin}/studio?${store.sid ? `store=${store.sid}&` : ""}assistant=canceled#assistant`,
   });
+  // The add-on is paid: the creator's full billing address (790 [IV2]).
+  askBillingAddress(body);
   // Two tabs at the same moment send the same key, and Stripe gives both the same page (startAssistant gives an open
   // page again afterward, and reads the open pages again when Stripe answers that the key is still in progress). The
   // price is in the key: a request with other values under a used key is refused by Stripe. The store is named by its

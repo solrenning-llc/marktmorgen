@@ -2134,7 +2134,7 @@ export class MemoryRedis {
           while (list.length > Number(args[3])) out.push(list.pop()!);
           return out;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v5\n")) {
+        if (key.startsWith("-- marktmorgen:form-forget:v6\n")) {
           // lib/form-store.ts FORGET_FORM_PERSON: the person's own responses removed, their address emptied in others'.
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
@@ -2155,9 +2155,11 @@ export class MemoryRedis {
               }
               const answers = value && typeof value.answers === "object" && value.answers !== null ? value.answers : null;
               if (answers === null) return;
-              // By the address kept with the response; one that names none, by any answer (lib/form-store.ts isResponderOf).
+              // By the address kept with the response; one that names none, by an answer that is the address when no
+              // other answer holds an "@" (lib/form-store.ts isResponderOf).
               const by = typeof value?.by === "string" ? value.by.trim() : "";
-              if (by !== "" ? by.toLowerCase() === address : Object.values(answers).some(named)) hits.push([k + 1, raw]);
+              const other = Object.values(answers).some((a) => typeof a === "string" && !named(a) && a.includes("@"));
+              if (by !== "" ? by.toLowerCase() === address : Object.values(answers).some(named) && !other) hits.push([k + 1, raw]);
               else if (Object.values(answers).some(named)) {
                 const now = JSON.stringify({ ...value, answers: Object.fromEntries(Object.entries(answers).map(([id, a]) => [id, named(a) ? "" : a])) });
                 edits.push([k + 1, i, raw, now]);

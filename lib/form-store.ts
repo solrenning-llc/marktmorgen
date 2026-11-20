@@ -174,14 +174,19 @@ export async function responseCounts(statsId: string | null, ids: string[]): Pro
  * question never makes it theirs, and changing, deleting or reordering the form's
  * questions later changes nothing (review of #4436). A response that names no
  * address of its own (kept before `by` was, or sent with no email question
- * answered) is matched by any answer that is the address: more is erased rather
- * than anything about the person left behind. The copy (lib/person-copy.ts) and
- * the erasure (FORGET_FORM_PERSON) both decide by this rule.
+ * answered) is theirs when an answer is the address and no other answer holds
+ * an "@": only then can it be nobody else's. One that also names another
+ * address may be the other person's, so it is not theirs: it stays out of their
+ * copy, and their erasure only empties their address in it (withoutAddress;
+ * Codex X7's review of #4436). The copy (lib/person-copy.ts) and the erasure
+ * (FORGET_FORM_PERSON) both decide by this rule.
  */
 export function isResponderOf(response: Pick<FormResponse, "answers" | "by">, email: string): boolean {
   const wanted = email.trim().toLowerCase();
   if (typeof response.by === "string" && response.by.trim() !== "") return response.by.trim().toLowerCase() === wanted;
-  return Object.values(response.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === wanted);
+  const answers = Object.values(response.answers).filter((a): a is string => typeof a === "string");
+  const named = (a: string) => a.trim().toLowerCase() === wanted;
+  return answers.some(named) && !answers.some((a) => !named(a) && a.includes("@"));
 }
 
 /**
@@ -210,7 +215,8 @@ export function withoutAddress(raw: string, email: string): string | null {
 /**
  * For every list of responses given, on the Redis side so no response travels,
  * in one script, and with nothing written unless all of it reads: removes each
- * response that is this person's (ARGV[1], lower case) by isResponderOf, and,
+ * response that is this person's (ARGV[1], lower case) by isResponderOf (with no
+ * `by`, only when no other answer holds an "@"), and,
  * in every other response, empties each answer that is their address
  * (withoutAddress), cutting only that answer's text out of the JSON as
  * addResponse wrote it, checked to read back with the answer empty. Answers
@@ -218,7 +224,7 @@ export function withoutAddress(raw: string, email: string): string | null {
  * and {form's place, response as it was, response as it is now} for each one
  * emptied. A response it cannot empty exactly is an error, with nothing changed.
  */
-export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v5
+export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v6
 local function trim(text) return string.match(text, "^%s*(.-)%s*$") end
 local function named(answer) return type(answer) == "string" and string.lower(trim(answer)) == ARGV[1] end
 local function blank(raw, id)
@@ -245,9 +251,12 @@ for k = 1, #KEYS do
       if type(value.by) == "string" and trim(value.by) ~= "" then
         hit = string.lower(trim(value.by)) == ARGV[1]
       else
+        local other = false
         for _, answer in pairs(value.answers) do
-          if named(answer) then hit = true end
+          if named(answer) then hit = true
+          elseif type(answer) == "string" and string.find(answer, "@", 1, true) then other = true end
         end
+        if other then hit = false end
       end
       if hit then
         table.insert(hits, {k, raw})

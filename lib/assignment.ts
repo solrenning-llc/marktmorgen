@@ -419,6 +419,14 @@ export class HandInChangedError extends Error {
   }
 }
 
+/** The creator approved the work before this hand-in reached its final read. */
+export class HandInClosedError extends Error {
+  constructor() {
+    super("this work has already been approved");
+    this.name = "HandInClosedError";
+  }
+}
+
 /**
  * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
  * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
@@ -460,6 +468,8 @@ export async function handIn(input: {
   const at = input.now ?? Math.floor(Date.now() / 1000);
   const read = await readSubmission(courseId, lessonId, who);
   const before = read.found;
+  // Use the same snapshot as the conditional write: the route's earlier read may predate an approval.
+  if (task.review && before?.state === "approved") throw new HandInClosedError();
   const state: TaskState = task.review ? "waiting" : "approved";
   const kept: Submission = {
     text: input.text.replace(/\r\n?/g, "\n").trim().slice(0, MAX_ANSWER_TEXT),
@@ -559,9 +569,25 @@ export async function waitingWork(courseId: string, limit = 50, all = false): Pr
 export type Review = { ok: true; submission: Submission } | { ok: false; reason: "unknown" | "state" };
 
 /**
+ * The review written only over the work it read (KEYS: the work, the course's waiting list; ARGV: the work as read,
+ * the reviewed work, the list's member). 1 when written, 0 when the work changed since and nothing was written: a
+ * student who handed in again meanwhile (handIn answered the old file as replaced, and it is deleted) keeps the new
+ * work, and another review of the same work is never written over (#3954).
+ */
+export const REVIEW_WRITE_IF = `-- marktmorgen:review-write-if:v1
+local now = redis.call('GET', KEYS[1])
+if now ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+redis.call('ZREM', KEYS[2], ARGV[3])
+return 1`;
+
+/**
  * The creator approves a student's work, or asks for another try, with what
  * they wrote back. Only work that is waiting is reviewed; approving it marks
- * the lesson done for the student.
+ * the lesson done for the student. Written only over the work read here
+ * (REVIEW_WRITE_IF): work handed in again, or reviewed, in between answers
+ * "state", nothing written and the lesson left as it was, so the studio
+ * reloads and the creator reviews what is there now.
  */
 export async function review(input: {
   courseId: string;
@@ -575,7 +601,8 @@ export async function review(input: {
   data: DataStore;
 }): Promise<Review> {
   const { courseId, lessonId, who } = input;
-  const before = await submissionOf(courseId, lessonId, who);
+  const read = await readSubmission(courseId, lessonId, who);
+  const before = read.found;
   if (!before) return { ok: false, reason: "unknown" };
   if (before.state !== "waiting") return { ok: false, reason: "state" };
   const after: Submission = {
@@ -586,10 +613,16 @@ export async function review(input: {
   };
   const grown = recordBytes(JSON.stringify(after)) - recordBytes(JSON.stringify(before));
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
-  await redisPipeline([
-    ["SET", subKey(courseId, lessonId, who), JSON.stringify(after)],
-    ["ZREM", waitingKey(courseId), `${lessonId}|${who}`],
-  ]);
+  const wrote = repliesFor(
+    await redisPipeline([["EVAL", REVIEW_WRITE_IF, 2, subKey(courseId, lessonId, who), waitingKey(courseId), read.raw, JSON.stringify(after), `${lessonId}|${who}`]]),
+    1,
+  )?.[0];
+  if (wrote === 0) {
+    // Nothing written: what this review took from the room comes back.
+    if (grown > 0) await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
+    return { ok: false, reason: "state" };
+  }
+  if (wrote !== 1) throw new UnknownReplyError("whether a review was written");
   if (input.verdict === "approved") await finish(courseId, lessonId, who, input.email, input.data);
   return { ok: true, submission: after };
 }

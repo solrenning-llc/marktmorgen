@@ -9,6 +9,37 @@ This is an explicit exception to the historical closing-day deletion statements
 below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
 unreadable independent refund queue) never advances a store to `removed`.
 There is no deletion deadline for uncertainty and no new customer limit.
+**DONO-3 (owner, 9 November2026), replacing that sentence for a store at or past its
+closing day:** Stripe giving no answer at all (network failure, a timeout of Stripe's
+but never our run's own cutoff, 5xx/429 also as an HTML page, or the creator's connected
+account refused for good with 403 account_invalid/permission_error: `lib/stripe-silence.ts`)
+holds it only until `STRIPE_SILENT_DAYS` (ERASE_WITHIN_DAYS less
+ERASE_EVERY_DAYS) after that day; then members whose paid time was not given back are
+told, the closing goes on without Stripe, its personal records go by the existing walk,
+and only the dated closing record stays (`lapsed`, `unstopped`), counted in the month's
+`nl:held:month:` hash and in the owner's monthly report. An answer, even after the
+deadline, is followed; our own key refused (401), an unreadable answer, Stripe not
+configured, a member's notice that cannot go out (or no email credit for it) or a failure
+of ours still holds with no deadline, and each such store past the published time is
+counted once a month by reason in the owner's report ("retidas além do prazo publicado").
+A creator account refusing us (403 account_invalid) lapses only after STRIPE_SILENT_DAYS of
+refusals seen on daily runs at most REFUSAL_GAP_MS apart, with the platform reading the store's
+own subscription in the same run, and never while several distinct accounts refuse together
+(`nl:held:refused:`/`nl:held:answered:`). Since Claude 3's review of #3463, the creator's own
+account giving no answer has the same shape (`nl:held:silent:`): STRIPE_SILENT_DAYS of silence on
+daily runs, the platform reading the store's own subscription in the same run, never with several
+accounts silent together; our platform key giving no answer is never the creator's and holds with
+no deadline; and before a store closed without its members' renewals stopped is deleted, each
+member with a known subscription is told the membership may keep renewing, in the same letter as its
+refund when one was owed, one letter an address; a member already told of the closing gets one
+follow-up, the one its notice paid for, and any letter past it takes a credit of the closing's
+emails first or the store is held (Claude 1 cloud's review of #3463). Its work is CLOSING_DEADLINE_WORK in
+tests/plan-cost-registry.ts. The deadline is the earliest moment, not a guaranteed
+latest: a store already in the held recheck line waits its turn among the50 rechecks a
+day, and the walk then runs at most every WALK_GAP_MS, so deletion within
+ERASE_WITHIN_DAYS of the closing day is not guaranteed in the worst case. A store held
+before its closing day (members not yet held, buyers not yet read) is not covered by this
+decision and still waits.
 
 `lib/held-stores.ts` retains each unresolved obligation in the private shared
 `nl:held:stores` index. The daily closing job revisits oldest due entries. **CX-69,4 November2026:**
@@ -101,6 +132,7 @@ Both exposures of the database after a plan ends are closed:
 
   Taking one's data away is a right: once a plan has ended, the store has `ENDED_STORE_EXPORTS` (1) whole export of its own before it closes, counted for the store (app/api/store/export), never taken from a studio figure or the share of stores that pay nothing, so never refused for want of room or a place, and priced above at the largest store there can be (its room and record, every product, course, lesson, post and form there can be, read together, and its sales' pages at Stripe, the two lists side by side). What an order leaves for its store's closing is priced with the order (`ORDER_COST`): its buyers' library entries for their whole life, and its share of stopping a renewal at Stripe, 25 at a time. The store's id left in a person's records that the registry already counts as the company's (the lists they joined, an affiliate's hub) is the company's as those records are, now bounded: it runs out with the quarter it was written in. A free trial's store closes the same way, $0.0084 at the most, in the share of stores that pay nothing (`nonPayingWorst`). To make room, the closing's costly parts were made cheap (nobody's library walked buyer by buyer, deletes 4,000 keys a command, followers and the export reading a hundred to a thousand records a command), what a store writes after its plan ends is bounded by an ended store's own figures, and `retained-data` no longer counts again what a unit writes and lets go by itself, because each window's share of `database-storage` already pays for its whole life (`lifetimeByteMonths`, held for every part). With all of it, the room over the floor is $0.2504 for Store by the month, $1.0124 for Studio and $1.0096 for Scale by the year, each above its buffer ($0.25 and $1), and no price changed. The walk itself, reading the whole database, is the company's scheduled job: once a day at the most, for every store due since the last, at about $0.0044 a walk for every million keys ($0.14 a month for every million keys at one walk a day), and its hourly check is two commands when nothing is due.
 - **Data kept before 18 October 2026: closed by the one-time count.** A store's records written before the room was counted were counted only as they were next written or moved. `lib/data-recount.ts` (`app/api/cron/recount`, hourly until done) measures every key of a family the room counts, finds its store by the ids that name it, and sets the store's room slot `legacy` to what was measured beyond what the room counts, so every room is at least as full as what its store keeps. Bounded per run, resumable and idempotent (docs/order-data.md). Release should wait until it reports done. Keys that name no store (a mark under a payment's id, an address's library across stores) are not anyone's room and stay bounded by their own entries in `tests/store-data-registry.ts`.
+- **Private podcast feeds granted before their products were noted (#4471): a one-time walk.** `lib/podcast-access.ts` `notePodcastProducts` (`app/api/cron/recount`, hourly until done, run before the count) reads every feed index (`nl:pod:by:*`) and adds its product to its store's `nl:pod:pids:` set, charged to that store's room as it is written, and held with the product's own side room (`PRODUCT_SIDE_BYTES`), one member a product. One run examines up to 200,000 keys (200 SCAN pages at COUNT 1,000; one command a page, only matching names come back), twice the database the daily backup accepts (`BACKUP_SCAN_PAGES` pages of 500), and notes up to 50 stores a run (`NOTE_STORE_READS`), so on such a database one run ends it when at most 50 stores have feeds still to note; with more, it takes one run for every 50 of them. One run sends at most `NOTE_RUN_COMMANDS` (200,652) commands and moves at most `NOTE_RUN_BYTES` (about 101 MB: every name at 256 bytes and 50 store records at `MAX_STORE_BYTES`), each page taken at its COUNT in names, priced at `PODCAST_NOTE_RUN_USD` (about $0.40) in `tests/plan-cost-registry.ts`. On a database larger than the backup accepts it takes more runs, a number not known: its total is a company cost (100% Marktmorgen, FX275) that stays unknown, never zero. Once done, a run sends two commands. Until it is done a person's deletion and copy in a store made before the walk started look for that person's own old feeds with a read-only SCAN (at most four pages, in the deletion's own units), and a deletion that cannot finish that SCAN answers that it is not finished; a store made after the walk started never waits.
 
 The database is priced as one region. A read region added in Upstash keeps a copy of everything and is billed for it: it multiplies the `database-storage` and `retained-data` lines by the number of copies, and must be priced before it is turned on. `tests/upstash-single-region.test.ts` fails if the code or the deployment ever configures one; switching one on in Upstash's console is the owner's act, and must wait for that price.
 

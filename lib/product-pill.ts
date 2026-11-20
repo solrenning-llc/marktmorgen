@@ -1,4 +1,4 @@
-import { speech } from "@/lib/buyer-words";
+import { everyPhrase, speech } from "@/lib/buyer-words";
 import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { isFree, type Listing, type Store } from "@/lib/store";
@@ -21,7 +21,8 @@ export function pricePill(store: Store, product: Listing): string {
   if (isFree(product)) return w.free;
   if (activePwyw(product)) return `${money(product.priceCents)}+`;
   const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // How often, as charged: "a month", or "every 3 months" (609 [WP8]).
+  const every = product.recurring ? ` ${everyPhrase(store, product.recurring.interval, product.recurring.every)}` : "";
   // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
   const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
   if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));

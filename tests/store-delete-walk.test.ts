@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
-import { BATCH_KEY, WALK_KEY, eraseClosed } from "@/lib/closed-store-data";
+import { BATCH_KEY, DUE_KEY, WALK_KEY, eraseClosed, queueDeleted } from "@/lib/closed-store-data";
 import { CLOSING, closingFamilyOf } from "@/lib/data-families";
 import { finishClosed } from "@/lib/plan-closing";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -312,6 +312,25 @@ async function main(): Promise<void> {
   // At that moment only the record is known gone: its other keys go with the next walk, and its addresses may not be held.
   is("it never says the store's content is gone or erased", /content|gone|erased/i.test(partly?.[2] ?? "gone"), false);
   is("it says the store was deleted and a last step was not confirmed", [/deleted/.test(partly?.[1] ?? ""), /not confirm/.test(`${partly?.[1]} ${partly?.[2]}`)], [true, true]);
+
+  part("an admitted deleted store whose own record reads there again is walked, never put in the closing line (merge of #3643 with #3670)");
+  redis.clear();
+  await claimHandle(OWNER, "keepshome", "Keeps Home", "");
+  const back = await createStore(OWNER, "keepsback", "Keeps Back", "");
+  if (!back.ok) throw new Error("no store read back");
+  const backStore = await furnished(storeRef(back.store));
+  const backRef = storeRef(backStore);
+  // Its entry as the walk's admission leaves it (admitted: no longer queued), with its own record read there again,
+  // as a late writer would leave it.
+  const admitted: Record<string, unknown> = { ...(await queueDeleted(backStore)) };
+  delete admitted.queued;
+  await pipe([["HSET", BATCH_KEY, backRef, JSON.stringify(admitted)]]);
+  is("before: its entry is admitted, its record stands and it is not in the closing line", [JSON.parse(String(await inBatch(backRef))).queued, (await storeForEmail(backRef))?.sid, (await pipe([["ZSCORE", DUE_KEY, backRef]]))[0]], [undefined, backStore.sid, null]);
+  const backWalk = await eraseClosed(deadline(), finishClosed, Date.now());
+  is("the walk starts and is done", [backWalk.started, backWalk.done], [true, true]);
+  is("it is never put in the closing line, so it is never closed as a closed store", (await pipe([["ZSCORE", DUE_KEY, backRef]]))[0], null);
+  is("no closing record is written for it: its owner is never told a store closed", (await pipe([["GET", stateKey(backRef)]]))[0], null);
+  is("every key named by its ids is erased and it left the walk's line", [await erasableBy(idsOf(backStore)), await inBatch(backRef)], [[], null]);
 
   part("rule 24: a record not read at the walk leaves the entry waiting, never walked nor dropped");
   redis.clear();

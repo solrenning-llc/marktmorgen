@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   is("the lead goes to the platforms that take sign-ups", sent.length > 0, true);
   const typed = sha256("someone.else@example.com");
   is("and none of them carries the typed address, hashed or not", sent.filter((s) => s.body.includes(typed) || s.body.toLowerCase().includes("someone.else")).length, 0);
-  is("the free copy's route sends its lead the same way, without the address", readFileSync("app/api/store/free/route.ts", "utf8").includes('sendServerLead(store, request, { id: lead, email: "", product: product.id })'), true);
+  is("the free copy's route sends its lead the same way, without the address", readFileSync("app/api/store/free/route.ts", "utf8").includes('sendServerLead(store, request, { id: lead, email: "", typed: email, product: product.id })'), true);
   done();
 }
 

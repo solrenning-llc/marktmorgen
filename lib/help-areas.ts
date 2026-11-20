@@ -76,5 +76,6 @@ export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
 export const NOT_AREAS: Readonly<Record<string, string>> = {
   "check-in": "The door of one in-person event, where tickets are checked as people arrive; opened from that event, never on its own.",
   checkup: "It is itself a help screen: \"Something not working?\".",
+  devices: "Logs out the person's other devices after asking first, an account action rather than a part of the store.",
   paused: "A state of the studio while it is paused, not a place a creator goes to work.",
 };

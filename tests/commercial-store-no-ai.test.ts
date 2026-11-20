@@ -10,6 +10,7 @@ import { CURRENT_AI_SPEND_POLICY as policy } from './commercial-store-no-ai-poli
 import { commercialMarginReady, commercialPlansMayOpen, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from '@/lib/commercial-margin';
 import { AUTOMATIC_AI_STORE_MICRO_USD } from '@/lib/ai-spend-policy';
 import { AI_MONTHLY } from '@/lib/ai-rules';
+import { requiredAiStoreMicroUsd } from '@/lib/ai-entitlement-rules';
 import { ANSWERS_MONTHLY } from '@/lib/answers-rules';
 import { fundedCustomerWithAi, planPaymentDisputeFixture, zeroExposureFixture, zeroFixedCompanyFixture } from './margin-test-fixtures';
 // The synthetic review names this month when it is made; only Date is stopped, so a run across 00:00 UTC on a month's
@@ -45,4 +46,21 @@ test('a plan with AI rights still needs a ceiling of at least one largest reques
     policy.storeMicroUsd.pro = saved;
   }
   assert.equal(commercialMarginReady(review()), true);
+});
+
+test('Studio and Scale are still held to every right funded in full, and Store needs nothing', () => {
+  assert.equal(requiredAiStoreMicroUsd('creator', policy.requestMicroUsd), 0n);
+  for (const tier of ['pro', 'scale'] as const) {
+    const required = requiredAiStoreMicroUsd(tier, policy.requestMicroUsd)!;
+    assert.ok(required > 0n);
+    const saved = policy.storeMicroUsd[tier];
+    try {
+      policy.storeMicroUsd[tier] = Number(required) - 1;
+      assert.equal(commercialMarginReady(review()), false, `${tier} one micro-dollar short of its rights`);
+      policy.storeMicroUsd[tier] = Number(required);
+      assert.equal(commercialMarginReady(review()), true, `${tier} at exactly its rights`);
+    } finally {
+      policy.storeMicroUsd[tier] = saved;
+    }
+  }
 });

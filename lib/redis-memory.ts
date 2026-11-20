@@ -283,6 +283,30 @@ export class MemoryRedis {
           if (members.length) gone += Number(this.run(["DEL", who]));
           return [gone, members.length];
         }
+        // lib/calendar-sync.ts: one config fence for the whole refresh, and only each claim's own release.
+        if (key.startsWith("-- marktmorgen:calendar-readings-current:v1\n")) {
+          const count = Number(args[0]);
+          if (!Number.isSafeInteger(count) || count < 5 || (count - 1) % 4) throw new Error("MemoryRedis: unsupported calendar reading commit");
+          const keys = args.slice(1, count + 1), argv = args.slice(count + 1);
+          if (keys.length !== count || argv.length !== count + 2) throw new Error("MemoryRedis: unsupported calendar reading commit");
+          const same = this.run(["GET", keys[0]]) === argv[0];
+          let kept = same;
+          for (let i = 0; i < (count - 1) / 4; i++) {
+            const k = 1 + 4 * i, a = 3 + 4 * i;
+            const mine = this.run(["GET", keys[k]]) === argv[a];
+            if (!mine) kept = false;
+            if (same && mine && argv[a + 1] === "good") {
+              this.run(["SET", keys[k + 1], argv[a + 2], "EX", argv[1]]);
+              this.run(["SET", keys[k + 2], argv[a + 2], "EX", argv[2]]);
+              this.run(["DEL", keys[k + 3]]);
+            } else if (same && mine && argv[a + 1] === "error") {
+              this.run(["SET", keys[k + 3], argv[a + 2], "EX", argv[2]]);
+              this.run(["SET", keys[k + 1], argv[a + 3], "EX", argv[1]]);
+            }
+            if (mine) this.run(["DEL", keys[k]]);
+          }
+          return kept ? 1 : 0;
+        }
         // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
         // only while no live store holds it, read in the same step.
         if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {

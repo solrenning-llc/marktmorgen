@@ -82,7 +82,7 @@ export function allocateEntireLlcFixedCosts(lines: readonly FixedCostCeiling[]) 
 }
 
 /** Generated-report section: unknown complete ceilings block a finite minimum.
- * Per-unit most-tax failures also cannot be repaired by a larger customer count.
+ * Per-unit failures under the TX reading also cannot be repaired by a larger customer count.
  */
 export function renderLlcFixedCostStatus(): string {
  const costs=allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS);

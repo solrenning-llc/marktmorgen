@@ -92,3 +92,23 @@ Continuam sem mudança:
    - o registro em cada estado americano, quando a lei exigir.
 
    Tudo isso é do dono; nenhum agente cria conta nem contrata.
+
+## Conferência na documentação oficial da Stripe (19/11/2026, 21h45 Fortaleza, Claude 4)
+
+O dono pediu essa conferência. As páginas foram lidas por inteiro em docs.stripe.com nesta data. Nenhuma delas mostra data de atualização.
+
+| Ponto | Texto oficial lido | Consequência para o desenho |
+| --- | --- | --- |
+| Restrição de país na taxa da plataforma em cobrança direta | [Create direct charges](https://docs.stripe.com/connect/direct-charges): "In line with Brazilian regulatory and compliance requirements, platforms based outside of Brazil with Brazilian connected accounts can't collect application fees through Stripe." É a única restrição de país sobre a taxa da plataforma nessa página. | Não há proibição escrita para plataforma dos EUA com contas do Reino Unido, do EEE ou do Canadá. **Falta de proibição não é permissão confirmada.** A confirmação expressa continua pendente (pergunta à Stripe, abaixo). |
+| Exigência de mesma região | [How charges work](https://docs.stripe.com/connect/charges): a regra "the platform and connected account must be in the same region unless using on_behalf_of" está escrita só para destination charges e separate charges and transfers. Para cobrança direta: "Funds always settle in the country of the connected account." [Cross-border payouts](https://docs.stripe.com/connect/cross-border-payouts) lista como fluxos só "Separate charges and transfers without on_behalf_of", "Top-ups and transfers" e "Destination charges without on_behalf_of". | A exigência de mesma região não está escrita para cobrança direta. |
+| Limites da taxa | direct-charges: "The value of application_fee_amount must be positive and less than the amount of the charge"; "There are no additional Stripe fees on the application fee itself." | A parte do plano + o imposto + os custos sempre ficam abaixo do valor cobrado; a Stripe não cobra tarifa sobre a própria taxa. |
+| Moeda | [Collect application fees](https://docs.stripe.com/connect/marketplace/tasks/app-fees): "The application_fee_amount is always computed in the same currency as the transaction"; "The application fee settles in the same currency as the connected account's settlement currency". [Currencies](https://docs.stripe.com/connect/currencies): a conversão pode ocorrer nas taxas da plataforma e "is subject to fees". [Fee payer behavior](https://docs.stripe.com/connect/direct-charges-fee-payer-behavior): quem paga a tarifa de conversão depende da configuração da conta. | O imposto chega na moeda de liquidação do criador (euro ou libra, por exemplo). Falta saber se uma plataforma dos EUA guarda saldo em euro ou libra ou se converte para dólar, e com que tarifa: custo desconhecido, que reprova até a resposta. |
+| Reembolso | direct-charges: "Application fees aren't automatically refunded when issuing a refund"; com refund_application_fee, no reembolso parcial "a proportional amount of the application fee is refunded". [Create an application fee refund](https://docs.stripe.com/api/fee_refunds/create): parâmetro "amount", "how much of this fee to refund". | A plataforma devolve a parte exata do imposto pelo reembolso da taxa com "amount". Não se usa o reembolso proporcional, que devolveria também a parte do plano e dos custos. |
+| Contestação | [Disputes on Connect](https://docs.stripe.com/connect/disputes): "Regardless of a dispute's outcome, Stripe doesn't automatically refund the application fee to the connected account." | Bate com a decisão do dono: na contestação perdida, a parte do imposto não volta ao criador. |
+
+Ainda sem resposta oficial; perguntar à Stripe é decisão do dono, e nenhum agente envia nada:
+
+1. Uma plataforma dos EUA (LLC de Delaware com sócio único residente no Brasil) pode conectar contas Standard (contrato completo, painel da Stripe) no Reino Unido, no EEE e no Canadá e cobrar `application_fee_amount` em cobranças diretas nelas?
+2. Em que moeda a taxa fica no saldo da plataforma? A plataforma pode manter saldo e fazer saque em euro e libra? Qual é a tarifa de conversão?
+3. Há restrição a usar a taxa da plataforma para receber o IVA ou o sales tax que a plataforma deve como fornecedora presumida ou "marketplace facilitator"? O Stripe Tax calcula o imposto da plataforma numa cobrança direta?
+4. Continua sem resposta a pergunta de 20/10/2026 sobre quem paga a tarifa do Stripe Tax em cobranças diretas (SR5).

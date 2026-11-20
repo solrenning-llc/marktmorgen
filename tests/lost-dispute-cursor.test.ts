@@ -87,6 +87,25 @@ async function main(): Promise<void> {
   is("the end hands back the newest closing of the whole sweep, so the job's place moves past every page", two.newest, NOW);
   is("and the place is let go", (await redis.pipeline([["GET", key]]))[0], null);
 
+  part("A closing event dated ahead of the clock cannot complete a sweep or move the review job");
+  const future = { ...events[0], id: "evt_CursorFuture01", created: NOW + 86_400 };
+  const savedEvents = events.splice(0, events.length, future);
+  try {
+    const forward = await lostDisputesSince(ACCOUNT, since);
+    is("an out-of-window page is incomplete and contains no trusted closing", [forward.complete, forward.rows.length], [false, 0]);
+    const futureStats = "f".repeat(32);
+    const futureShop = { statsId: futureStats, stripeAccountId: ACCOUNT, handle: "future-reviews" } as unknown as Store;
+    const futurePlace = `nl:rev:refunds:since:${futureStats}`;
+    await redis.pipeline([["SET", futurePlace, String(NOW - 200)]]);
+    await markRefundedReviews(futureShop, Date.now() + 60_000);
+    is("the job keeps its previous anchor", Number((await redis.pipeline([["GET", futurePlace]]))[0]), NOW - 200);
+    events[0] = { ...future, created: NOW - 5 };
+    await markRefundedReviews(futureShop, Date.now() + 60_000);
+    is("a healthy closing advances it normally", Number((await redis.pipeline([["GET", futurePlace]]))[0]), NOW - 5);
+  } finally {
+    events.splice(0, events.length, ...savedEvents);
+  }
+
   part("The review job keeps its place too (inbox C4-21)");
   const statsId = "r".repeat(32);
   const shop = { statsId, stripeAccountId: ACCOUNT, handle: "cursor-shop" } as unknown as Store;

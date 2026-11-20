@@ -31,6 +31,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setStripeAccount,
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { listingKeysRead } from "./listing-reads";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_api_read_units_more_only";
 
@@ -247,7 +248,7 @@ async function main(): Promise<void> {
     const unnamed = await productsTool(mine, read!.data, "d30", { hold: (most) => holdMoreApi(mine, most), charge: async () => refusal });
     const seq = unnamed.bought_next?.sequences[0];
     is("named by their ids when their listings are not covered, and said", [seq?.first, seq?.then, typeof unnamed.bought_next?.names_note], [a, b, "string"]);
-    is("no listing read for them", commands.some((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))), false);
+    is("no listing read for them", commands.some((c) => listingKeysRead(c).length > 0), false);
     is("what was set aside settled at what was read and sent", (await allowanceUsed(mine, "api")) - mark >= 1, true);
     mark = await allowanceUsed(mine, "api");
     const namedAnswer = await productsTool(mine, read!.data, "d30", { hold: (most) => holdMoreApi(mine, most), charge: (more, taken) => takeMoreApi(mine, more, taken) });

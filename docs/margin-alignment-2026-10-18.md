@@ -19,10 +19,10 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Store monthly ($69) | $69.00 | $69.00 | $9.02 | $6.04 | $8.31 | $45.63 | 66.13% | $0.25 | positive | no |
 | Store yearly ($690) | $690.00 | $690.00 | $84.49 | $68.85 | $82.54 | $454.12 | 65.81% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $449.00 | $55.21 | $27.98 | $56.28 | $309.53 | 68.93% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $4,490.00 | $546.26 | $319.58 | $557.41 | $3,066.75 | 68.30% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $999.00 | $122.04 | $58.77 | $125.84 | $692.35 | 69.30% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $9,990.00 | $1,214.62 | $674.68 | $1,245.90 | $6,854.80 | 68.61% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $449.00 | $55.21 | $28.05 | $56.26 | $309.48 | 68.92% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $4,490.00 | $546.26 | $320.44 | $557.27 | $3,066.03 | 68.28% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $999.00 | $122.04 | $58.84 | $125.83 | $692.29 | 69.29% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $9,990.00 | $1,214.62 | $675.54 | $1,245.76 | $6,854.08 | 68.60% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $69.00 | $9.02 | $2.48 | $8.85 | $48.65 | 70.50% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $36.00 | $5.00 | $1.20 | $4.59 | $25.21 | 70.02% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $36.00 | $5.00 | $0.90 | $4.64 | $25.46 | 70.72% | $0.00 | positive | no |
@@ -36,8 +36,8 @@ A month's receipts after every fee and reserve (netOf), less every cost line at 
 
 | Interval | Store | Studio | Scale |
 | --- | --- | --- | --- |
-| Monthly plan | US$45.91 | US$310.78 | US$694.69 |
-| A month of a yearly plan | US$37.84 | US$255.66 | US$571.42 |
+| Monthly plan | US$45.91 | US$310.72 | US$694.63 |
+| A month of a yearly plan | US$37.84 | US$255.60 | US$571.35 |
 
 ## LLC fixed costs — owner decision22 October2026
 

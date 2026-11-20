@@ -62,6 +62,23 @@ export const STALE_SECONDS = HOST_STALE_MINUTES * 60;
 export const HOST_LOOKAHEAD_DAYS = 92;
 /** How long the last reading and the last failure are kept, for the studio. */
 const KEEP_SECONDS = 7 * 86_400;
+/** EVAL and the config GET added to the former reading write; inner writes retain their former count. */
+export const HOST_READING_FENCE_COMMANDS = 2;
+const KEEP_READING_IF_CURRENT = `-- marktmorgen:host-reading-current:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+if ARGV[4] == "good" then redis.call("DEL", KEYS[3]) end
+return 1`;
+
+/** No result of a removed/replaced calendar can restore its private reading or error. */
+async function keepReading(host: string, config: string, value: string, kind: "good" | "error"): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["EVAL", KEEP_READING_IF_CURRENT, 3,
+    cfgKey(host), kind === "good" ? goodKey(host) : errKey(host), errKey(host),
+    config, value, KEEP_SECONDS, kind,
+  ]]), 1);
+  if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("a host's calendar reading write");
+  return reply[0] === 1;
+}
 export const MAX_ICS_URL = 1000;
 
 export type HostSource = "google" | "ics" | "none";
@@ -273,6 +290,7 @@ export async function hostSync(
   if (!store.statsId || !isRedisConfigured()) return result("none", "none", null);
   const host = hostId(email);
   let config: Config | null;
+  let configRead: string | null = null;
   let good: Good | null;
   let failure: { at: number; message: string } | null;
   try {
@@ -282,6 +300,7 @@ export async function hostSync(
       ? storedValues([options.known.cfg, options.known.good, options.known.err], 3)
       : storedReply(await redisPipeline([["MGET", cfgKey(host), goodKey(host), errKey(host)]]), 3);
     config = parseConfig(c);
+    configRead = c;
     good = parseGood(g);
     failure = parseError(e);
     if (good && good.at > now) throw unreadable();
@@ -314,18 +333,21 @@ export async function hostSync(
   const lock = claimValue();
   if ((await claimMark(lockKey(host), HOST_LOCK_SECONDS, lock)) !== "ours") return fallback();
   try {
-    const busy = await readBusyNow(store.statsId, host, config, tz, now, options.hooks ?? {});
+    let busy: [number, number][];
+    try {
+      busy = await readBusyNow(store.statsId, host, config, tz, now, options.hooks ?? {});
+    } catch (error) {
+      const message = syncWords(error);
+      const kept = configRead !== null && await keepReading(host, configRead, JSON.stringify({ at: now, message }), "error").catch(() => false);
+      if (!kept) return result(source, "failed", null, "Your calendar settings could not be read just now.");
+      if (age < STALE_SECONDS * 1000) return result(source, "ok", good, message);
+      return result(source, good ? "stale" : "failed", good, message);
+    }
     const reading: Good = { at: now, busy, source };
-    await redisPipeline([
-      ["SET", goodKey(host), JSON.stringify(reading), "EX", KEEP_SECONDS],
-      ["DEL", errKey(host)],
-    ]);
+    // A failed/unconfirmed commit never starts a second write to keep an error about that write.
+    const kept = configRead !== null && await keepReading(host, configRead, JSON.stringify(reading), "good").catch(() => false);
+    if (!kept) return result(source, "failed", null, "Your calendar settings could not be read just now.");
     return result(source, "ok", reading);
-  } catch (error) {
-    const message = syncWords(error);
-    await redisPipeline([["SET", errKey(host), JSON.stringify({ at: now, message }), "EX", KEEP_SECONDS]]).catch(() => {});
-    if (age < STALE_SECONDS * 1000) return result(source, "ok", good, message);
-    return result(source, good ? "stale" : "failed", good, message);
   } finally {
     await releaseMark(lockKey(host), lock);
   }

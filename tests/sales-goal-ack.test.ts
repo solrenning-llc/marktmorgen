@@ -56,7 +56,10 @@ async function main() {
     for (const reply of replies) {
       await seed(); fault = { command, reply };
       const answer = await submit(cents);
-      is(command + JSON.stringify(reply) + ": unknown reply is not success", [answer.status, answer.body.ok, answer.body.goal], [500, false, undefined]);
+      // -1 is the fence's own answer for a store gone or being deleted (Claude 6's LOW on #4939): refused as unavailable,
+      // never success; every other reply here does not read and stays a server error.
+      const gone = JSON.stringify(reply) === "[-1]";
+      is(command + JSON.stringify(reply) + ": unknown reply is not success", [answer.status, answer.body.ok, answer.body.goal], [gone ? 503 : 500, false, undefined]);
       is("the unperformed write kept the original target", (await readSalesGoal(goalStore.statsId, "usd")).cents, 5000);
       is("only the existing mutation attempted", mutations, 1);
     }

@@ -62,6 +62,14 @@ export async function readSalesGoal(statsId: string | null, currency: string): P
 }
 
 /** Sets the goal from this month on, or takes it away with 0. Null when the figure is not one a goal can be. */
+/** The store is gone or its erasure has begun (WRITE_IF_LIVE answered -1): an expected refusal, nothing written. */
+export class SalesGoalStoreGoneError extends Error {
+  constructor() {
+    super("The store is gone or being deleted");
+    this.name = "SalesGoalStoreGoneError";
+  }
+}
+
 export async function setSalesGoal(store: Pick<Store, "sid" | "email" | "extra" | "statsId">, raw: unknown, currency: string, now = Date.now()): Promise<number | null> {
   const cents = readGoal(raw);
   if (cents === null || !store.statsId || !isRedisConfigured()) return null;
@@ -71,6 +79,7 @@ export async function setSalesGoal(store: Pick<Store, "sid" | "email" | "extra" 
   // Identity, erasure mark and mutation share one atomic step. Keep the goal persistent, as before.
   const reply = await redisPipeline([["EVAL", WRITE_IF_LIVE, 3, live, ERASING_KEY, key(store.statsId),
     await erasingField(ref), cents ? JSON.stringify({ cents, currency, since }) : ""]]);
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === -1) throw new SalesGoalStoreGoneError();
   if (!Array.isArray(reply) || reply.length !== 1 || (cents ? reply[0] !== 1 : reply[0] !== 0 && reply[0] !== 1)) throw new Error("Goal update could not be confirmed");
   return cents;
 }

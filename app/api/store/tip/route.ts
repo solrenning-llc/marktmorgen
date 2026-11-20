@@ -50,11 +50,11 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   // Back to the box with what was given, so nothing is entered twice (WCAG 3.3.7, the more accessible reading AX274
-  // asks for): only what the box itself offers goes back (lib/store-tips.ts, tipKept). The country goes back only after
-  // a notice about the amount: after "abroad" it is the one refused, and after "country" none was given.
+  // asks for): only what the box itself offers goes back (lib/store-tips.ts, tipKept). The country goes back after every
+  // notice but two: after "abroad" it is the one refused, and after "country" none was given.
   const away = (problem: string) => {
     const back = new URLSearchParams({ tip: problem });
-    const kept = tipKept(store, { chose: picked, other, from: problem === "amount" ? sent.get(BILLING_COUNTRY_FIELD) : null });
+    const kept = tipKept(store, { chose: picked, other, from: problem === "abroad" || problem === "country" ? null : sent.get(BILLING_COUNTRY_FIELD) });
     if (kept.chose) back.set("chose", kept.chose);
     if (kept.other) back.set("other", kept.other);
     if (kept.from) back.set("from", kept.from);

@@ -515,8 +515,20 @@ export async function giveBackUnused(
       // Owed more than the readable charges can give back while some of the invoice's payments did not read: the rest
       // may be on those, so the member is tried again (what was given now is counted then), never settled short.
       if (left > 0 && !whole) throw new Error("part of an invoice's payments did not read, and the readable ones cannot give back all that is owed");
-      // What could be given is given: a charge with nothing left to give back, or a disputed one, cannot be asked for
-      // more. A member who got nothing from this closing because a dispute had already taken it is settled disputed.
+      // Even a full payment list can leave an unpaid part: a partial dispute does not make the rest of its charge
+      // refundable, and the other charges may not cover what is left. Keep trying before closing, then report only
+      // the unpaid remainder through the existing notice for refunds that could not be made automatically.
+      if (left > 0 && !pending) {
+        if (ops.final) {
+          await ops.settle("over", left);
+          out.unmade.push({ sub: row.sub, amount: left, cur: row.paid.cur, email: row.paid.e });
+        } else {
+          console.error("a closing refund could not give back the full unused amount; the member stays to be reconciled");
+          out.failed += 1;
+        }
+        return;
+      }
+      // A member who got nothing from this closing because a dispute had already taken it is settled disputed.
       if (given <= 0 && disputed) {
         await ops.settle("disputed");
         out.disputed += 1;

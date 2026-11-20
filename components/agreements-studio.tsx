@@ -311,7 +311,7 @@ export function AgreementsStudio({
             {`Each email, the link, a new version and each signed copy (one to them, one to you), is one of your store's emails for this month: ${emailsUsedLine(emails.used, emails.limit)} The link takes a signature for ${SIGN_DAYS} days.`}
           </p>
           {!editing ? (
-            <label className="mt-4 flex items-start gap-3">
+            <label className="mt-4 flex min-h-11 items-start gap-3">
               <input id="ag-consent" type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
               <span className="text-sm text-ink">I deal with this person, and they expect this from me.</span>
             </label>

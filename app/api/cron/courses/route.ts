@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
     // Not swept (the list could not be read, or a reply was in an unknown shape): said in the log and the answer,
     // never "0 swept", as the pictures below (#4279); the uploads stay on the list and the next run sweeps them.
-    const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
+    const stale = await sweepTaskUploads((paths) => deleteFile(paths, "site_cleanup")).catch((error: unknown) => {
       console.error("could not sweep unused assignment uploads", error);
       return null;
     });

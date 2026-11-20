@@ -232,6 +232,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/phone": row("settings", never(BROWSER)),
   "POST store/photo": row("pages", draft),
   "POST store/physical-legal": row("products", draft),
+  "POST store/pipeline-access": row("access", never(ACCESS)),
   "POST store/pixels": row("settings", draft),
   "POST store/podcast": row("podcast", draft),
   "POST store/preorder": row("products", draft),

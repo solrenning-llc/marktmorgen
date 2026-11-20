@@ -11,7 +11,7 @@
 import { EU_VAT_COUNTRIES, type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
 import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { type EuVatRate, type VatOnTop } from "@/lib/eu-vat-amount";
-import { euCheckout } from "@/lib/eu-vat-checkout";
+import { type EuCheckoutRefusal, euCheckout } from "@/lib/eu-vat-checkout";
 import { SHIP_COUNTRIES } from "@/lib/shipping";
 
 /** Said when the two items of evidence are missing or name different countries (docs/art9a-sources-and-build-spec, 2.3). */
@@ -23,7 +23,7 @@ export const EU_SALE_REFUSED = "This product can't be bought from a country in t
 
 export type EuGate =
   | { ok: true; vat: VatOnTop | null }
-  | { ok: false; reason: "place" | "goods" | "human" | "supply" | "record" | "treatment" | "rate" | "review" | "business"; message: string };
+  | { ok: false; reason: EuCheckoutRefusal | "business"; message: string };
 
 export function euCheckoutGate(input: {
   product: EuSupplyFields;

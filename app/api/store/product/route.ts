@@ -42,9 +42,14 @@ import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 
 /** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
 const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
+/** The studio request a removal's invitations' first page takes (lib/move-members.ts notePendingInvites, or
+ * dropProductInvites when the removal is asked again), admitted with the removal itself (#4462). */
+const REMOVE_INVITES_FIRST_UNITS = 1;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
+import { WAITLIST_DROP_UNITS, dropWaitlist, finishWaitlistDrop, holdWaitlistDrop } from "@/lib/waitlist";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { giveAllowance } from "@/lib/store-allowance";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -60,7 +65,7 @@ import { templateLeft } from "@/lib/template-text";
 import { keptPageBytes, readPage } from "@/lib/sales-page-store";
 import { publishPageUnits } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
-import { clearTakenDown, revokeDraftPreview, takenDownMark } from "@/lib/draft-preview";
+import { clearTakenDown, releaseDraftPreviewLock, revokeDraftPreview, takeDraftPreviewLock, takenDownMark } from "@/lib/draft-preview";
 
 /**
  * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
@@ -172,7 +177,14 @@ export async function GET(request: NextRequest) {
 /** Adds, changes, reorders or removes one thing on the creator's store. */
 export async function POST(request: NextRequest) {
   // Room for the long description, which is the one big thing sent here.
-  const guarded = await guardStoreWrite(request, "products", 40_000);
+  // A removal's fixed studio units are admitted together: its ordinary request, its waitlist's (WAITLIST_DROP_UNITS)
+  // and its invitations' first page (REMOVE_INVITES_FIRST_UNITS). With room for fewer, none is consumed (Codex U and P
+  // on #4462). Other product writes keep their one ordinary request.
+  // The moment before the admission: a give-back below goes to the window the units were taken in (or the one before,
+  // if a window turned during the admission: the new one then stays counted higher, never lower).
+  const tookAt = Date.now();
+  const guarded = await guardStoreWrite(request, "products", 40_000, undefined,
+    (body) => (text(body.action, 10) === "remove" ? 1 + WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS : 1));
   if (!guarded.ok) return guarded.response;
 
   const { ref, body } = guarded;
@@ -323,6 +335,13 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (action === "remove") {
+      // Refused before anything is held or dropped: the units taken for the waitlist's and the invitations' fixed work
+      // are given back, so a creator who tries again pays only each request itself (Claude 5's LOW on #4462). Best
+      // effort: a give-back that fails leaves the figure counted higher, never lower.
+      const early = async (response: Response): Promise<Response> => {
+        await giveAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS + REMOVE_INVITES_FIRST_UNITS, tookAt);
+        return response;
+      };
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
       // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
@@ -331,10 +350,10 @@ export async function POST(request: NextRequest) {
         waiting = await waitingCount(guarded.store, id);
       } catch (error) {
         console.error("could not read a product's pre-orders before removing it", error);
-        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        return early(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
       }
       if (waiting > 0) {
-        return Response.json({ ok: false, error: "preorders" }, { status: 409 });
+        return early(Response.json({ ok: false, error: "preorders" }, { status: 409 }));
       }
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
@@ -352,7 +371,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
-        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        return early(Response.json({ ok: false, error: "unavailable" }, { status: 503 }));
       }
       // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
       // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
@@ -360,16 +379,36 @@ export async function POST(request: NextRequest) {
       // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
       if (before && guarded.store.stripeAccountId) {
         const running = await runningSubscriptions(guarded.store, id);
-        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
-        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
+        if (running === null) return early(Response.json({ ok: false, error: "stripe" }, { status: 502 }));
+        if (running > 0) return early(Response.json({ ok: false, error: "memberships", running }, { status: 409 }));
       }
+      // guardStoreWrite admitted this request and its WAITLIST_DROP_UNITS together before anything went (#4462).
+      // Noted as dropping its waitlist before the product goes (lib/waitlist.ts holdWaitlistDrop): whatever its coming-soon
+      // mark, a person's deletion reaches the addresses until their drop is confirmed. Not noted, nothing is removed.
+      if (before) {
+        try {
+          await holdWaitlistDrop(guarded.store.statsId, id);
+        } catch (error) {
+          console.error("could not note a product's waitlist as dropping before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // The waitlist first (#4462): its hold only notes the addresses for a person's deletion until the drop is
+      // confirmed, so a removal refused below leaves nothing wrong; main's invitations come next (#3473).
       // The invitations an import gave members to keep it here (lib/move-members.ts), with their links and reminders:
       // kept under its id, a person's erasure would never reach them once it is gone. Main's refusal while a membership
       // or payment plan still runs comes first (above), so a removal it refuses deletes no invitation. Each page is paid
       // for in studio requests first; not finished (a reply not known, the studio's requests used up): nothing is
       // removed, and the same removal asked again goes on where this stopped.
       const refusal: { reason?: string; message?: string } = {};
-      const pay = async (units: number): Promise<boolean> => {
+      // The invitations' first page was admitted with the request (REMOVE_INVITES_FIRST_UNITS, above): notePendingInvites,
+      // or dropProductInvites when asked again for a product already removed, spends it first; only more is counted here.
+      let prepaid = REMOVE_INVITES_FIRST_UNITS;
+      const pay = async (asked: number): Promise<boolean> => {
+        const fromPrepaid = Math.min(prepaid, asked);
+        prepaid -= fromPrepaid;
+        const units = asked - fromPrepaid;
+        if (units === 0) return true;
         const counted = await countStudio(guarded.store, null, units);
         if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
         return counted.ok;
@@ -435,7 +474,13 @@ export async function POST(request: NextRequest) {
       if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
         const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
         if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
-        if (finished === "dropped") result = { ok: true, product: null };
+        // And its waitlist, still noted as dropping when its drop was not confirmed then (lib/waitlist.ts, #4462).
+        const waited = await finishWaitlistDrop(guarded.store.statsId, id, guarded.store).catch((error: unknown) => {
+          console.error("could not finish dropping a removed product's waitlist", error);
+          return null;
+        });
+        if (waited === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped" || waited === "dropped") result = { ok: true, product: null };
       }
       if (removed.ok) {
         const going = removed.product;
@@ -485,6 +530,13 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
+        // And its waitlist, whose addresses are kept in plain text with no expiry (lib/waitlist.ts). One not confirmed
+        // gone is said (cleanupPending) and stays noted as dropping, so a person's deletion still reaches it and the
+        // same removal asked again finishes it (finishWaitlistDrop above).
+        await dropWaitlist(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+          cleanupPending = true;
+          console.error("could not drop a removed product's waitlist", error);
+        });
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store, id, courseIndexes).catch((error: unknown) => console.error("could not drop a removed course", error));
         }
@@ -560,54 +612,77 @@ export async function POST(request: NextRequest) {
           if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
-      // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
-      // between keeps its own (Codex L's MEDIUM 1 on #3597). A mark that cannot be read is never cleared (null).
-      const seenMark = body.hidden === false && !guarded.store.suspended ? await takenDownMark(guarded.store, id).catch(() => null) : null;
-      // Published: the draft's preview link ends first, so a later unpublish never opens it again (Claude 4 cloud AE on
-      // #3597, LEVE 2). One that cannot be confirmed ended publishes nothing: the creator tries again.
-      if (body.hidden === false && guarded.store.statsId) {
-        const ended = await revokeDraftPreview(guarded.store, id).then(() => true, (error: unknown) => {
-          console.error("a draft's preview link could not be ended before publishing", error);
-          return false;
+      // Publishing takes the draft's preview lock (lib/draft-preview.ts) from the end of the old link to the product made
+      // public and its takedown mark cleared, so a link asked for in between waits and is then refused as no longer a
+      // draft: never one made in the gap that a later unpublish would open again (Codex G, N1 and P on #3597). A lock
+      // that cannot be taken publishes nothing: the creator tries again.
+      const previewHeld =
+        body.hidden === false && guarded.store.statsId
+          ? await takeDraftPreviewLock(guarded.store, id).catch((error: unknown) => {
+              console.error("a draft's preview lock could not be taken before publishing", error);
+              return null;
+            })
+          : undefined;
+      if (previewHeld === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      try {
+        // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
+        // between keeps its own (Codex L's MEDIUM 1 on #3597). A mark that cannot be read is never cleared (null).
+        const seenMark = body.hidden === false && !guarded.store.suspended ? await takenDownMark(guarded.store, id).catch(() => null) : null;
+        // Published: the draft's preview link ends first, so a later unpublish never opens it again (Claude 4 cloud AE on
+        // #3597, LEVE 2). One that cannot be confirmed ended publishes nothing: the creator tries again.
+        if (body.hidden === false && guarded.store.statsId) {
+          const ended = await revokeDraftPreview(guarded.store, id).then(() => true, (error: unknown) => {
+            console.error("a draft's preview link could not be ended before publishing", error);
+            return false;
+          });
+          if (!ended) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+        // The sales page read again under the lock its saves are written under, so a part saved since the read above
+        // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+        let pageChanged = false;
+        let pageUnread = false;
+        let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
+        const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
+          if (!now.page || !store.statsId) return true;
+          // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
+          // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
+          const keptBytes = await keptPageBytes(store.statsId, now.id);
+          if (keptBytes === null) {
+            pageUnread = true;
+            return false;
+          }
+          if (keptBytes > pagePaid) {
+            pageChanged = true;
+            return false;
+          }
+          const page = await readPage(store.statsId, now.id);
+          const fast = fastMoneyOnPage(pageWords(page));
+          const left = templateLeft(page);
+          heldBy = { fast, left, title: now.title };
+          return !fast && !left;
         });
-        if (!ended) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-      }
-      // The sales page read again under the lock its saves are written under, so a part saved since the read above
-      // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
-      let pageChanged = false;
-      let pageUnread = false;
-      let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
-      const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
-        if (!now.page || !store.statsId) return true;
-        // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
-        // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
-        const keptBytes = await keptPageBytes(store.statsId, now.id);
-        if (keptBytes === null) {
-          pageUnread = true;
-          return false;
+        if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
+        if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
+        if (!done.ok && done.reason === "held" && heldBy) {
+          const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
+          if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
+          if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
         }
-        if (keptBytes > pagePaid) {
-          pageChanged = true;
-          return false;
+        result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
+        // Published: the draft's link is ended once more, now that the product is public. A publish slowed past
+        // PREVIEW_LOCK_SECONDS loses the lock, and a link asked for then is made legitimately under it while the product
+        // still reads as a draft; this second end closes it, and any later request is refused as not a draft (Claude 4's
+        // LOW on #3597). The product is already public, so one that cannot be confirmed is only logged.
+        if (done.ok && body.hidden === false && guarded.store.statsId) {
+          await revokeDraftPreview(guarded.store, id).catch((error: unknown) => console.error("a draft's preview link could not be ended after publishing", error));
         }
-        const page = await readPage(store.statsId, now.id);
-        const fast = fastMoneyOnPage(pageWords(page));
-        const left = templateLeft(page);
-        heldBy = { fast, left, title: now.title };
-        return !fast && !left;
-      });
-      if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
-      if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
-      if (!done.ok && done.reason === "held" && heldBy) {
-        const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
-        if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
-        if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
+        // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
+        // that fails keeps the mark, which only refuses preview links: never a wrong opening.
+        // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).
+        if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id, seenMark).catch((error) => console.error("preview mark not cleared", error));
+      } finally {
+        if (previewHeld) await releaseDraftPreviewLock(previewHeld);
       }
-      result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
-      // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
-      // that fails keeps the mark, which only refuses preview links: never a wrong opening.
-      // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).
-      if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id, seenMark).catch((error) => console.error("preview mark not cleared", error));
     } else if (action === "unlink") {
       // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
       // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.

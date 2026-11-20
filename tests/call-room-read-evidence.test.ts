@@ -15,7 +15,8 @@ beforeEach(() => {
   redis.clear(); writes = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands[0]?.[0] === "SET") { writes += 1; return made as never; }
-    return initial as never;
+    // One booking's four keys are read at one MGET (lib/call-rooms.ts, ROOM_KEYS_PER_MGET): its reply holds the values.
+    return (commands[0]?.[0] === "MGET" ? [initial] : initial) as never;
   }) as typeof redis.pipeline;
 });
 afterEach(() => { redis.pipeline = pipeline; });

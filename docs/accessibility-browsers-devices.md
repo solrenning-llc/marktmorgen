@@ -6,7 +6,17 @@ Iniciado em20/10/2026 17:29 de Fortaleza. Estado: em andamento; nenhuma conformi
 
 Playwright-core1.56.1 do lockfile instala Firefox/WebKit e dependências Linux no CI. E2E_BROWSER seleciona explicitamente o motor; instalação/lançamento falho reprova sem fallback para Chromium. O job Chromium original continua. A suíte existente inteira de studio/páginas públicas roda em cada motor, com serviços sintéticos. Não há conta, pagamento ou envio real.
 
-A matriz completa exigida (home, preços, cadastro, criação de produto, publicação da loja, página da loja, checkout, comprador;320/390/768/1280/1920px;axe AAA, teclado, zoom400%/reflow, espaçamento1.4.12, movimento reduzido, alto contraste) ainda precisa ser acrescentada e verificada. Rodar esta etapa não encerra201. Axe não certifica critérios que exigem avaliação humana; resultados inconclusivos devem permanecer registrados.
+**Estado da matriz automática (conferido no main em 12/11/2026, complemento C1-20261105-1919-C4-1).** O texto anterior dizia que a matriz completa "ainda precisa ser acrescentada"; ela já existe no main, em cinco arquivos, cada um com seu workflow, nos três motores (`browser: [chromium, firefox, webkit]`), nas cinco larguras 320, 390, 768, 1280 e 1920 px e nos modos `baseline`, `text-spacing` (1.4.12), `reduced-motion`, `forced-colors`, `reflow-320` e, no repositório público, `dark`, com axe-core injetado na página:
+
+| Arquivo | Workflow | O que cobre |
+| --- | --- | --- |
+| `tests/e2e/accessibility-public-matrix.mjs` | `.github/workflows/accessibility-public-matrix.yml` | Páginas públicas `/`, `/pricing` e `/signin`, com teclado (foco e alvo do conteúdo) e auditoria axe por largura e modo |
+| `tests/e2e/accessibility-studio-matrix.mjs` | `.github/workflows/accessibility-studio-matrix.yml` | Estúdio: `/studio` e `/studio/pages` de uma loja sintética |
+| `tests/e2e/accessibility-signup-actions.mjs` | `.github/workflows/accessibility-signup-actions.yml` | Cadastro, com caixa de entrada, sessão e reserva do nome da loja sintéticos e descartáveis |
+| `tests/e2e/accessibility-product-actions.mjs` | `.github/workflows/accessibility-product-actions.yml` | Formulário de produto no estúdio e criação de um produto descartável |
+| `tests/e2e/accessibility-buyer-actions.mjs` | `.github/workflows/accessibility-buyer-actions.yml` | Lado do comprador: página da loja, página do produto, checkout sintético, página de agradecimento e `/library` |
+
+Isso é automação de motor, não conformidade: o axe não certifica critérios que exigem avaliação humana, e os resultados "incomplete" ficam registrados como lacunas pelos próprios arquivos. Continuam abertas, sem nenhum resultado afirmado aqui: aparelhos reais (iPhone/iPad, Android, Windows/Edge), tecnologias assistivas reais (VoiceOver, TalkBack, NVDA, JAWS), o zoom real de 400% do navegador (a matriz mede reflow em 320 px, que não substitui o zoom do usuário) e a verificação contra robôs (BotID, `lib/bot-check.ts`), que o complemento mantém como conferência manual. Rodar estas matrizes não encerra o item 201.
 
 ## Custo de CI
 

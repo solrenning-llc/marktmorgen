@@ -111,12 +111,15 @@ function own(value: unknown, keys: readonly string[]): Record<string, unknown> |
 
 /**
  * The first UTC millisecond the rule's window reaches back to: `placeTotals`' `since`. A rolling rule: the day `months`
- * calendar months before `now`'s day, one day more. A calendar-year rule: 1 January of the first year it counts.
+ * calendar months before `now`'s day, one day more. A calendar-year rule: 1 January of the first year it counts, one
+ * day more, so a country ahead of UTC never loses the first hours of its year.
  */
 export function otherCountryWindowStart(ruleId: PlaceCountedRuleId, now: number): number {
   const at = new Date(now);
   if (Object.hasOwn(OTHER_COUNTRY_CALENDAR_YEARS, ruleId)) {
-    return Date.UTC(at.getUTCFullYear() - (OTHER_COUNTRY_CALENDAR_YEARS[ruleId as keyof typeof OTHER_COUNTRY_CALENDAR_YEARS] - 1), 0, 1);
+    // One UTC day before 1 January: a country ahead of UTC (Taiwan, UTC+8) starts its year on 31 December in UTC, and
+    // the counter reads whole UTC months from `since`, so that December is counted whole (Claude 5's LOW on #4912).
+    return Date.UTC(at.getUTCFullYear() - (OTHER_COUNTRY_CALENDAR_YEARS[ruleId as keyof typeof OTHER_COUNTRY_CALENDAR_YEARS] - 1), 0, 1) - 24 * 60 * 60 * 1000;
   }
   const day = Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - OTHER_COUNTRY_WINDOW_MONTHS[ruleId as keyof typeof OTHER_COUNTRY_WINDOW_MONTHS], at.getUTCDate());
   // One day more than the window, so a day is never missed at a month's end (the dearer count).

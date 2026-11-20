@@ -52,6 +52,11 @@ export function riskLevelOf(charge: unknown): RiskLevel {
   const reviewRead = record(review);
   if (reviewRead) {
     if (reviewRead.object !== "review" || typeof reviewRead.id !== "string" || !reviewRead.id || typeof reviewRead.open !== "boolean") return "not_available";
+    // An expanded review's state belongs only to its own charge. Another
+    // charge's closed review cannot prove this payment is no longer in review.
+    const linked = reviewRead.charge;
+    const linkedId = typeof linked === "string" ? linked : record(linked)?.object === "charge" ? record(linked)?.id : null;
+    if (linkedId !== c.id) return "not_available";
     if (reviewRead.open) return "in_review";
   } else if (review !== null && review !== undefined) {
     return "not_available";

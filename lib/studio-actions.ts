@@ -97,6 +97,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "checkup", title: "Find out why something is not working", segment: "checkup", permission: "settings", words: ["broken", "not working", "problem", "health check", "fix", "error", "issue", "trouble", "help"] },
   { id: "path", title: "See your next steps", segment: "path", permission: "settings", words: ["path", "next step", "guide", "checklist", "getting started", "setup", "onboarding"] },
   { id: "tax", title: "See where you collect tax", segment: "tax", permission: "payments", words: ["tax", "vat", "sales tax", "gst", "registration"] },
+  { id: "declines", title: "See payments that did not go through", segment: "declines", permission: "payments", words: ["declined", "declined payment", "failed payment", "card declined", "payment failed"] },
   { id: "team", title: "Invite someone to help run your store", segment: "team", permission: "team", words: ["team", "staff", "helper", "role", "permission", "admin", "assistant", "activity log"] },
   { id: "invite", title: "Invite other creators for plan credit", segment: "invite", permission: "billing", words: ["invite", "refer", "referral", "credit", "invite creator"] },
   { id: "refund", title: "Ask for a refund of your Marktmorgen plan", segment: "refund", permission: "billing", words: ["refund", "money back", "plan refund", "refund plan"] },

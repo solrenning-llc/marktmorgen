@@ -172,8 +172,8 @@ async function offers(): Promise<void> {
       currency: "usd",
       amount_total: 3900,
       metadata: { store: "harbor", product: front, upsell_key: browser.fingerprint },
-      customer_details: { email: buyerOf(n) },
-      payment_intent: { id: `pi_test_r48front${n}`, payment_method: { id: "pm_test_r48card01", type: "card", customer: "cus_TestR48Buyer" } },
+      customer_details: { email: buyerOf(n), address: { country: "US" } },
+      payment_intent: { id: `pi_test_r48front${n}`, payment_method: { id: "pm_test_r48card01", type: "card", customer: "cus_TestR48Buyer", card: { country: "US" } } },
     };
     return id;
   };
@@ -181,7 +181,7 @@ async function offers(): Promise<void> {
     piOver = over;
     emails.length = 0;
     const session = order(n);
-    const outcome = await takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+    const outcome = await takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
     piOver = {};
     const letter = emails.find((e) => e.to[0] === buyerOf(n))?.text ?? "";
     return { outcome: outcome.kind, letter };
@@ -210,7 +210,7 @@ async function offers(): Promise<void> {
   piStatus = "requires_action";
   const pending = order(7);
   piOver = { amount: undefined };
-  const asked = await takeUpsell({ store, session: pending, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+  const asked = await takeUpsell({ headers: new Headers(), store, session: pending, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
   piOver = {};
   piStatus = "succeeded";
   is("sent to confirm with the bank first", asked.kind, "confirm");

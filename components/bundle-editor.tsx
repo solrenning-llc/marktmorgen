@@ -37,6 +37,7 @@ const MESSAGES: Record<string, string> = {
   recurring: "A membership cannot be a bundle. Make it a one-off product first.",
   call: "A call cannot be a bundle. Stop selling it as a call first.",
   course: "A course cannot be a bundle. Make a new product for the bundle instead.",
+  shipped: "A product you ship cannot be a bundle. Make a new product for the bundle instead.",
   delivery: "Take this product's own file or link off first: a bundle hands over the products in it, not a file of its own.",
   options: "Take this product's price options off first: a bundle has one price.",
   pwyw: "A bundle has a set price. Stop letting its buyers choose the price first.",

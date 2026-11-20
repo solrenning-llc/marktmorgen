@@ -175,7 +175,8 @@ export async function refundHistory(store: Store, email: string): Promise<Refund
     for (const variant of variants) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: String(REFUND_HISTORY_LIST) });
       query.append("expand[]", "data.payment_intent.latest_charge");
-      listings.push(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, undefined, undefined, REFUND_HISTORY_READ_MS));
+      // Read up to REFUND_HISTORY_PAGE_BYTES: a heavier answer throws StripeBodyTooLarge, said below as could not check.
+      listings.push(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, undefined, undefined, REFUND_HISTORY_READ_MS, REFUND_HISTORY_PAGE_BYTES));
     }
   } catch (error) {
     console.error("reading a buyer's past refunds and disputes failed", error);

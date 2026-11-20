@@ -70,7 +70,7 @@ import { AI_MONTHLY } from "@/lib/ai-rules";
 import { AI_STEP_EXTRA_BYTES, AI_STOP_COMMANDS } from "@/lib/ai-steps";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
-import { REFUND_HISTORY_READ_MS, REFUND_HISTORY_READS } from "@/lib/buyer-history";
+import { REFUND_HISTORY_PAGE_BYTES, REFUND_HISTORY_READ_MS, REFUND_HISTORY_READS } from "@/lib/buyer-history";
 import { BLOCK_CHECK_COMMANDS, BLOCK_ENTRY_BYTES } from "@/lib/buyer-block";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS, PAUSED_IMPORT_CHECKS, PAUSED_IMPORT_CHECKS_MONTH, PAUSED_IMPORT_PASSES, PAUSED_IMPORT_PASSES_MONTH, PAUSED_IMPORT_PASS_BYTES, PAUSED_IMPORT_PASS_COMMANDS, PAUSED_IMPORT_SKIP_BYTES, PAUSED_IMPORT_SKIP_COMMANDS } from "@/lib/imports";
@@ -1129,11 +1129,12 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
 /**
  * One refund-history check at its worst (lib/buyer-history.ts; Claude 7's MEDIUM on #3841): the inbox route's own
  * studio request, and REFUND_HISTORY_READS listings of the creator's checkouts, each waited on for
- * REFUND_HISTORY_READ_MS at 2 GB and an expanded page of STRIPE_PAGE_BYTES worked through. The route takes
+ * REFUND_HISTORY_READ_MS at 2 GB and an expanded page of REFUND_HISTORY_PAGE_BYTES worked through (lib/buyer-history.ts,
+ * the most onAccount reads of one listing; Codex X6 on #3841). The route takes
  * REFUND_HISTORY_UNITS studio requests more before Stripe is asked; tests/buyer-history-cost.test.ts holds that they
  * cover it. The creator's Stripe account bills none of the reads.
  */
-export const REFUND_HISTORY_READ = UNIT_COST.studio + REFUND_HISTORY_READS * ((REFUND_HISTORY_READ_MS / 1000) * MEMORY_SECOND + perMegabyte(STRIPE_PAGE_BYTES));
+export const REFUND_HISTORY_READ = UNIT_COST.studio + REFUND_HISTORY_READS * ((REFUND_HISTORY_READ_MS / 1000) * MEMORY_SECOND + perMegabyte(REFUND_HISTORY_PAGE_BYTES));
 
 /**
  * The most times takeLock (lib/redis-lock.ts) tries a lock's SET NX while it waits `waitMs` for another holder: it

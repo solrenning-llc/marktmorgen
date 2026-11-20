@@ -42,7 +42,7 @@ import { isStorePeople } from "@/lib/visit";
 import { funnelMark } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
 import { funnelWords } from "@/lib/buyer-words/funnel";
-import { UPSELL_COOKIE, funnelView, settleUpsells } from "@/lib/upsell";
+import { UPSELL_COOKIE, cardCountryOf, funnelView, settleUpsells } from "@/lib/upsell";
 import { cartOfferFrom } from "@/lib/cart-offers";
 import { imageUrl } from "@/lib/product-image";
 import { buyersJoin, noteSession } from "@/lib/affiliates";
@@ -593,6 +593,14 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           cart: (order.record.metadata as Record<string, string> | null)?.cart === "yes"
             ? { offerFrom: cartOfferFrom(order.record.metadata as Record<string, string> | null), email: order.email }
             : undefined,
+          // The EU VAT gate's evidence (lib/upsell.ts, offerGate): this request's IP country, which refuses an EU or UK
+          // place, and the order's two items, its billing country and its card's, read here only to decide whether the
+          // offer is drawn; never shown or kept.
+          evidence: {
+            headers: await headers(),
+            billing: (order.record.customer_details as { address?: { country?: unknown } } | null)?.address?.country,
+            card: cardCountryOf(order.record.payment_intent),
+          },
         })
       : null;
   // A store switched off after a report (lib/takedown.ts) sells nothing: no offer after paying, no next step of a funnel,

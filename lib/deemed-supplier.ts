@@ -54,8 +54,14 @@ export const DEEMED_SUPPLIER_RULES: Record<DeemedSupplierJurisdiction, { rule: s
 
 export type DeemedSupplierRecord = {
   jurisdiction: DeemedSupplierJurisdiction;
-  /** "collect": the tax is charged on top of the buyer's price or taken from the creator's payout, never from the commission. "refuse-consumers": that jurisdiction's consumers cannot buy. */
-  treatment: "collect" | "refuse-consumers";
+  /**
+   * "collect": the tax is charged on top of the buyer's price or taken from the creator's payout, never from the commission.
+   * "refuse-consumers": that jurisdiction's consumers cannot buy.
+   * "threshold", for "other" only (C5-20261119-1625-9a-other): a country with a reviewed rule sells only while its count,
+   * with the sale reserved, stays below OTHER_COUNTRY_SAFETY_PERCENT of the local threshold (lib/other-country-checkout.ts);
+   * every other country of "other" is refused. No registration: the treatment is to stay under the threshold.
+   */
+  treatment: "collect" | "refuse-consumers" | "threshold";
   /** The files that implement it. */
   implementedIn: string;
   /** The day it was recorded, YYYY-MM-DD. */
@@ -121,7 +127,8 @@ function jurisdictionProblems(records: DeemedSupplierRecord[], jurisdiction: Dee
   }
   const record = found[0];
   const out: string[] = [];
-  if (record.treatment !== "collect" && record.treatment !== "refuse-consumers") out.push(`${jurisdiction}: treatment`);
+  const treatments: readonly unknown[] = jurisdiction === "other" ? ["collect", "refuse-consumers", "threshold"] : ["collect", "refuse-consumers"];
+  if (!treatments.includes(record.treatment)) out.push(`${jurisdiction}: treatment`);
   if (!said(record.implementedIn)) out.push(`${jurisdiction}: implementedIn`);
   if (!said(record.evidence)) out.push(`${jurisdiction}: evidence`);
   if (!calendarDay(record.recordedOn)) out.push(`${jurisdiction}: recordedOn`);

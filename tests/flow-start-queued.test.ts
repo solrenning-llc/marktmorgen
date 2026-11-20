@@ -22,7 +22,8 @@ const real = redis.pipeline.bind(redis);
 let failLease = false;
 let loseReply = false;
 redis.pipeline = (async (batch: Command[]) => {
-  const queueWrite = batch.length > 1 && batch[0][0] === "ZADD" && batch[0][1] === "nl:mail:flowq" && batch.at(-1)?.[0] === "HINCRBY";
+  // The first step's place in the queue and the start's 400-day mark, written together (lib/flows.ts FLOW_QUEUED).
+  const queueWrite = batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:flow-queued:v1\n");
   if (failLease && queueWrite) {
     failLease = false;
     throw new Error("Redis request failed with status 503");

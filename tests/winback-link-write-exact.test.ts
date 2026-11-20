@@ -8,7 +8,7 @@
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
-import { UNWRITTEN_LINK_COMMANDS, readWinBack, sendWinBacks } from "@/lib/winback-send";
+import { UNWRITTEN_LINK_COMMANDS, WINBACK_CLAIM, readWinBack, sendWinBacks } from "@/lib/winback-send";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   const stated = UNWRITTEN_LINK_COMMANDS;
   // A script is billed as one command and each redis.call it runs; each here runs each of its calls at most once (one
   // key, one member), so its calls are counted from its own text. A script not one of these is not known: priced high.
-  const scriptCalls = (source: string) => (source === RELEASE || source.startsWith("-- marktmorgen:contact-cas-hset:v1") ? (source.match(/redis\.call\(/g) ?? []).length : 1000);
+  const scriptCalls = (source: string) => (source === RELEASE || source === WINBACK_CLAIM || source.startsWith("-- marktmorgen:contact-cas-hset:v1") ? (source.match(/redis\.call\(/g) ?? []).length : 1000);
   const billed = (cmds: Cmd[][]) => cmds.flat().reduce((sum, cmd) => sum + (cmd[0] === "EVAL" ? 1 + scriptCalls(String(cmd[1])) : 1), 0);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   part("The failure path's commands are stated and priced");
@@ -194,6 +194,11 @@ async function main(): Promise<void> {
       const [cmd] = commands;
       // A mark's SET NX answered in another shape: read back.
       if (commands.length === 1 && cmd[0] === "SET" && cmd.includes("NX") && (cmd[1] === sentMark || String(cmd[1]).startsWith("nl:wb:once:"))) {
+        await real();
+        return ["QUEUED"];
+      }
+      // The once-mark's claim script (WINBACK_CLAIM, #4807) answered in another shape: read back.
+      if (commands.length === 1 && cmd[0] === "EVAL" && cmd[1] === WINBACK_CLAIM) {
         await real();
         return ["QUEUED"];
       }

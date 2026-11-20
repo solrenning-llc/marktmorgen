@@ -16,7 +16,7 @@ export const LLC_COMPLIANCE_COST_IDS = [
  "us-form-5472", "us-pro-forma-1120", "br-irpf", "br-cbe", "vat-oss-and-local-compliance",
  "itin-and-acceptance-agent", "us-resident-representative", "us-business-address",
 ] as const;
-export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "account-moves", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
+export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "account-moves", "support-forward", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
 export type FixedCostId = typeof LLC_FIXED_COST_IDS[number];
 export type FixedCostCeiling = { id: FixedCostId; fullMonthlyUsdCents: number | null; fullAnnualUsdCents: number | null; evidence: string; reserveReviewed: boolean };
 /** Public observations checked22 October2026; discounts/free periods never reduce worst-case cost. */
@@ -40,6 +40,10 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * line's reviewed ceiling in CURRENT_LLC_FIXED_COST_CEILINGS stays unknown, and with it the company total. */
  accountMoves: { currency: "USD", model: "tests/plan-cost-registry.ts MOVES_MONTH_COST", unknowns: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", checked: "2026-11-11", source: "tests/move-cost.test.ts", approvedCeiling: false,
   boundedPartApproval: { monthlyUsdCents: 1700, covers: "tests/plan-cost-registry.ts MOVES_MONTH_COST", excludes: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", approvedBy: "owner", decided: "2026-11-11T11:32:00-03:00", decision: "Aprovar US$ 17/mês" } },
+ /** Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the 9 November 2026 email audit), a company
+  * cost: its month at the code's ceilings from tests/plan-cost-registry.ts (supportForwardMonthlyUsd) and docs/funded-exposure-review.md.
+  * Not a reviewed ceiling: announcements past the day's, transfer out of the function and Resend's receiving quota stay unknown. */
+ supportForward: { currency: "USD", model: "tests/plan-cost-registry.ts supportForwardMonthlyUsd", review: "docs/funded-exposure-review.md", checked: "2026-11-09", source: "lib/inbound-mail.ts", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

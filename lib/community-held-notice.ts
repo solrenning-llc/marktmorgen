@@ -7,8 +7,9 @@
  * store that waited its turn longest first, and each store answered for goes
  * to the back of the line (passHeldTurn), so a run that stops for time reaches
  * every store within a bounded number of days (review of #3033). For each one: the
- * queue is counted (heldQueue, after the sweep that refuses what waited
- * HELD_DAYS), and only when something waits, the day's mark is claimed and
+ * queue is counted, read only (heldWaiting: no sweep and no write, so the
+ * run adds no work to the queue; review of #3033, Claude 2), and only when
+ * something waits, the day's mark is claimed and
  * one plain email goes to the creator with the counts and the way to the
  * queue in the studio. Nothing is said about who wrote what.
  *
@@ -24,10 +25,17 @@ import { NIMBUS_FROM, sendEmail as realSendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { standingOf } from "@/lib/plan-standing";
 import { type Store, storeForId } from "@/lib/store";
-import { HELD_DAYS, heldNoticeKey, heldQueue, passHeldTurn, storesWithHeld } from "@/lib/community-approval";
+import { HELD_DAYS, HELD_WAITING_COMMANDS, heldNoticeKey, heldWaiting, passHeldTurn, storesWithHeld } from "@/lib/community-approval";
 
 /** The most stores one run reads, in their turn: the store that waited its turn longest first. */
 export const NOTICE_STORES_PER_RUN = 500;
+/**
+ * The commands one store's visit sends at the most, besides its store read (one GET of the id and the store's own
+ * read, storeForId): the count of its queue (HELD_WAITING_COMMANDS), the day's mark (one SET NX) and its turn passed
+ * (one ZADD). A run adds storesWithHeld's three commands, one ZSCORE a store in line, and, for stores let go, one
+ * pipeline of a ZREM and their ZSCOREs and at most one ZADD. Held by tests/cm2-u2-daily-notice.test.ts.
+ */
+export const NOTICE_VISIT_COMMANDS = HELD_WAITING_COMMANDS + 2;
 /** How long the day's mark is kept: the day, and the next for a run that starts late. */
 const MARK_SECONDS = 2 * 86_400;
 
@@ -70,14 +78,13 @@ async function visit(store: Store, now: number, sendEmail: typeof realSendEmail)
   const standing = standingOf(store, now / 1000);
   if (standing !== "paid" && standing !== "trial") return { outcome: "skipped", known: true };
   // Counted first: an unreadable queue sends nothing and takes no mark, so the next run tries again.
-  const waiting = await heldQueue(id, Math.floor(now / 1000)).catch(() => null);
+  const waiting = await heldWaiting(id, Math.floor(now / 1000)).catch(() => null);
   if (waiting === null) return { outcome: "skipped", known: false };
-  if (!waiting.length) return { outcome: "none", known: true };
-  const posts = waiting.filter((held) => held.kind === "post").length;
+  if (!waiting.posts && !waiting.comments) return { outcome: "none", known: true };
   const claimed = await claimMark(heldNoticeKey(id, new Date(now).toISOString().slice(0, 10)), MARK_SECONDS);
   if (claimed === "taken") return { outcome: "seen", known: true };
   if (claimed !== "ours") return { outcome: "skipped", known: false };
-  const { subject, text } = heldNoticeEmail(store, posts, waiting.length - posts);
+  const { subject, text } = heldNoticeEmail(store, waiting.posts, waiting.comments);
   const sent = await sendEmail({ meter: { by: "store", store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,

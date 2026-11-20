@@ -608,31 +608,60 @@ export async function passHeldTurn(sid: string, now = nowSeconds()): Promise<boo
 }
 
 /**
+ * What waits, oldest first, read only: the items sent less than HELD_DAYS ago
+ * whose record still says "held", and the entries whose record is gone or no
+ * longer waits (stale), which this read does not touch. One ZRANGEBYSCORE and
+ * one MGET of at most MAX_HELD records; nothing is written.
+ */
+async function readHeld(id: string, now: number): Promise<{ held: Held[]; stale: string[] }> {
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf", "LIMIT", 0, MAX_HELD]]), 1);
+  const ids = replies ? stringList(replies[0]) : null;
+  if (!ids) throw new UnknownReplyError("the held community queue");
+  if (!ids.length) return { held: [], stale: [] };
+  if (ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError("the held community queue");
+  const rows = repliesFor(await redisPipeline([["MGET", ...ids.map((item) => itemKey(id, item))]]), 1);
+  const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], ids.length) : null;
+  if (!values) throw new UnknownReplyError("the held community items");
+  const held: Held[] = [];
+  const stale: string[] = [];
+  ids.forEach((item, i) => {
+    const one = itemOf(values[i], item);
+    if (one?.state === "held") held.push(one);
+    else stale.push(item);
+  });
+  return { held, stale };
+}
+
+/**
  * The creator's queue: what waits, oldest first. Only what was sent less than
  * HELD_DAYS ago, however many expired ones the sweep has not reached yet.
  */
 export async function heldQueue(id: string, now = nowSeconds()): Promise<Held[]> {
   await sweepHeld(id, now);
-  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf", "LIMIT", 0, MAX_HELD]]), 1);
-  const ids = replies ? stringList(replies[0]) : null;
-  if (!ids) throw new UnknownReplyError("the held community queue");
-  if (!ids.length) return [];
-  if (ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError("the held community queue");
-  const rows = repliesFor(await redisPipeline([["MGET", ...ids.map((item) => itemKey(id, item))]]), 1);
-  const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], ids.length) : null;
-  if (!values) throw new UnknownReplyError("the held community items");
-  const out: Held[] = [];
-  const stale: string[] = [];
-  ids.forEach((item, i) => {
-    const held = itemOf(values[i], item);
-    if (held?.state === "held") out.push(held);
-    else stale.push(item);
-  });
+  const { held, stale } = await readHeld(id, now);
   // An entry whose record is gone, or no longer waits, is not waiting: taken
   // off by whoever takes it, with the picture it may have left (finding 3).
   for (const item of stale) if (await claim(id, item)) await dropListedPicture(id, item);
-  return out;
+  return held;
 }
+
+/**
+ * How many posts and comments wait, for the daily notice (543 [CM2] unit 2;
+ * Claude 2's MEDIUM on #3033): the same items heldQueue answers, read only.
+ * No sweep and no claim: an item that waited HELD_DAYS is refused by the
+ * sweeps that already run (a member's hold, the creator's queue), so the
+ * daily job adds no note, no picture deletion and no write to the queue.
+ * Its commands are HELD_WAITING_COMMANDS: one ZRANGEBYSCORE and, when
+ * something is listed, one MGET of at most MAX_HELD records.
+ */
+export async function heldWaiting(id: string, now = nowSeconds()): Promise<{ posts: number; comments: number }> {
+  const { held } = await readHeld(id, now);
+  const posts = held.filter((one) => one.kind === "post").length;
+  return { posts, comments: held.length - posts };
+}
+
+/** The commands heldWaiting sends at the most. */
+export const HELD_WAITING_COMMANDS = 2;
 
 /**
  * One member's own items, newest first: what waits, and the notes about what

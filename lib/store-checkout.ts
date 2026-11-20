@@ -354,7 +354,8 @@ export async function createCheckout(
   // A call is booked for a time, through its own door, never bought blind.
   if (product.call) throw new Error("A call is booked, not bought directly");
   // A physical product is shipped to the buyer who pays for it: not as a gift or for a group (lib/shipping.ts).
-  // Without the EU/EEA countries while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  // Without the EU/EEA countries while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts), and
+  // without the EU and the UK until the opening, where consumerGate refuses a buyer too (789 [IV1], lib/eu-vat-goods.ts).
   const shipping = shippingNow(product);
   if (shipping && shipping.countries.length === 0) throw new Error("This is not shipped anywhere right now");
   if (shipping && (extras.gift || extras.group)) throw new Error("This is shipped to the buyer who pays for it");

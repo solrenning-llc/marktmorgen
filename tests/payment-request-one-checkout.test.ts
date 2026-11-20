@@ -10,14 +10,15 @@
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readDraft } from "@/lib/payment-request-rules";
-import { createRequest } from "@/lib/payment-request-store";
-import { openRequestCheckout } from "@/lib/payment-requests";
+import { createRequest, requestOf } from "@/lib/payment-request-store";
+import { markPaidOutside, openRequestCheckout } from "@/lib/payment-requests";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 
 const checkouts: URLSearchParams[] = [];
 const sessions = new Map<string, Record<string, unknown>>();
+const accounts = new Map<string, string | null>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -25,6 +26,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") return answer({ id: "email_1" });
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
+  const account = new Headers(init?.headers).get("Stripe-Account");
   if (path === "/checkout/sessions" && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
     checkouts.push(body);
@@ -35,6 +37,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       if (m) meta[m[1]] = value;
     }
     sessions.set(id, { id, status: "open", payment_status: "unpaid", url: `https://checkout.stripe.com/c/pay/${id}`, metadata: meta, created: Math.floor(Date.now() / 1000) });
+    accounts.set(id, account);
     return answer(sessions.get(id));
   }
   if (path.endsWith("/expire") && method === "POST") {
@@ -45,7 +48,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer(sessions.get(id));
   }
   if (path.startsWith("/checkout/sessions/") && method === "GET") {
-    const found = sessions.get(decodeURIComponent(path.slice("/checkout/sessions/".length)));
+    const id = decodeURIComponent(path.slice("/checkout/sessions/".length));
+    const found = accounts.get(id) === account ? sessions.get(id) : undefined;
     return found ? answer(found) : answer({ error: { code: "resource_missing", message: "No such checkout" } }, 404);
   }
   if (path === "/checkout/sessions" && method === "GET") return answer({ object: "list", data: [...sessions.values()], has_more: false });
@@ -113,6 +117,25 @@ async function main(): Promise<void> {
     is(`no new checkout is opened (${label})`, checkouts.length, before);
     is(`the answer is an error (${label})`, again.ok ? again : again.reason, "error");
   }
+  part("A checkout on the store's previous account may still be payable");
+  const switched = { ...store, stripeAccountId: "acct_1ReqChanged01" };
+  for (const action of ["open", "record outside"] as const) {
+    const created = await createRequest(store, draft, now);
+    if (!created.ok) throw new Error("synthetic request was not created");
+    const id = created.request.id;
+    const opened = await openRequestCheckout(store, id, "https://marktmorgen.com", now);
+    if (!opened.ok) throw new Error("synthetic previous checkout was not opened");
+    const previous = (await requestOf(store, id))!.session;
+    const before = checkouts.length;
+    const handled = action === "open"
+      ? await openRequestCheckout(switched, id, "https://marktmorgen.com", now + 60_000)
+      : await markPaidOutside(switched, id, { method: "cash", note: "", paidAt: now }, now + 60_000);
+    const after = await requestOf(store, id);
+    is(`${action}: the current account's 404 gives no evidence of closure`,
+      [handled.ok ? "ok" : handled.reason, after?.state, after?.session, checkouts.length, sessions.get(previous)?.status],
+      ["error", "open", previous, before, "open"]);
+  }
+
   done();
 }
 

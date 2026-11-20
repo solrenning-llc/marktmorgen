@@ -16,7 +16,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
 import { MOST_TAX_READING } from "./historical-margin-model";
 import {
-  DOC_FILE, ELASTICITIES, INPUT_FILE, SAFETY_CENTS, dataset, exhaustive, hedonic, keeps, linearityGap, milpInput, milpOutput, minimaxRegret, ones,
+  DOC_FILE, ELASTICITIES, INPUT_FILE, SAFETY_CENTS, cornerGap, dataset, exhaustive, hedonic, keeps, linearityGap, milpInput, milpOutput, minimaxRegret, ones, printedShares,
   renderPricingOptimization, unitAt, verified,
 } from "./pricing-optimization-table";
 
@@ -41,6 +41,7 @@ test("the program's input is what the repository's margin code gives today (run 
   close(JSON.parse(read(INPUT_FILE)), JSON.parse(JSON.stringify(milpInput())), "input");
   assert.ok(SAFETY_CENTS >= 5, "the actual solver deducts at least five cents on both intervals");
   assert.ok(linearityGap() < SAFETY_CENTS, "the linear usage stays strictly inside the deducted safety reserve");
+  assert.ok(cornerGap() < SAFETY_CENTS, "at every share the program may choose, the linear usage stays strictly inside the reserve");
 });
 
 test("every solution keeps 60% at full use on both intervals, fails the most-tax gate, respects the plan order, and equals the exhaustive search", () => {
@@ -82,12 +83,23 @@ test("the document is what the numbers render today", () => {
   assert.match(read(DOC_FILE), /\*\*An analysis for the owner, not a change\.\*\*/);
 });
 
+test('no lowest share a solution may take prints more than the program counted',()=>{
+ // Under the printed floors (an hour of video, half a GiB), a tenth of a small figure prints as more than a tenth: the program's
+ // lowest share is raised to what the page prints, so a solution never needs more room than the program kept (#4514, 18 Nov 2026).
+ const input=milpInput();
+ for(const tier of TIERS)for(const alt of ['A','C'] as const)for(const name of input.printed){
+  const low=input.plans[tier].lowest[alt][name];
+  assert.ok(low>=input.alternatives[alt]&&low<=1,`${tier} ${alt} ${name}`);
+  assert.ok(printedShares(tier,{...ones(),[name]:low})[name]<=low,`${tier} ${alt} ${name} prints no more than its lowest share`);
+ }
+});
+
 test('the exhaustive C oracle keeps the solver raw share floor and the same five-cent linear budgets',()=>{
  const input=milpInput();
  for(const tier of TIERS){
   const choice=exhaustive(tier,'C',-1.5)!;
   const plan=input.plans[tier],option=plan.options.find(o=>o.monthCents===choice.monthCents)!;
-  for(const name of input.printed)assert.equal(choice.shares[name],plan.figures[name]>0?input.alternatives.C:1);
+  for(const name of input.printed)assert.equal(choice.shares[name],plan.lowest.C[name]);
   for(const cycle of ['Month','Year'] as const){
    const base=cycle==='Month'?plan.baseMonth:plan.baseYear;
    const coef=cycle==='Month'?plan.coefMonth:plan.coefYear;

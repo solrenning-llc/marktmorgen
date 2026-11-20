@@ -50,6 +50,22 @@ async function main(): Promise<void> {
   is("a record listed under this folder that names another one is unknown, never \"nothing owed\"", await read(), "unknown");
   put(record(3500, null, FOLDER, "not-a-stream-path"));
   is("nor one whose path does not read", await read(), "unknown");
+  part("the refund must belong to the video the index names");
+  const otherId = "6b9c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d";
+  put(record(3500, null, FOLDER, streamPath(FOLDER, "lesson000010", otherId)));
+  is("a record for another video in the same folder leaves the total unknown", await read(), "unknown");
+
+  put(record(3500, null));
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0][0] === "SMEMBERS" && commands[0][1] === `nl:stream:autoowed:${FOLDER}`) return [[ID, ID]];
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try {
+    is("a duplicate member is unknown instead of counting the same debt twice", await read(), "unknown");
+  } finally {
+    redis.pipeline = real;
+  }
   done();
 }
 

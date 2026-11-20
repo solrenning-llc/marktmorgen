@@ -1,0 +1,9 @@
+{
+  "@/lib/blob": "failure-cleanup-world.ts",
+  "@vercel/blob/client": "failure-cleanup-world.ts",
+  "@/lib/store": "community-photo-path-world.ts",
+  "@/lib/community-access": "community-photo-path-world.ts",
+  "@/lib/community": "community-photo-path-world.ts",
+  "@/lib/buyer-actions": "community-photo-path-world.ts",
+  "@/lib/community-picture-rules": "community-photo-path-world.ts"
+}

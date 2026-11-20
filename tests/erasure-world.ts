@@ -11,7 +11,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { tokensFor, upsertContact } from "@/lib/contacts";
 import { noteClick, rememberLinkKeys } from "@/lib/mail-clicks";
@@ -193,6 +193,19 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await markPassed(w.courseId, learner, w.lessons[0], ROOM);
   await takeRoom(storeKey(store), 1_000);
   await handIn({ data: ROOM, courseId: w.courseId, lessonId: w.lessons[1], who: learner, email, task: { prompt: "Write it", review: true, file: true } as never, text: "My work", file: { path: `tasks/${hex(4)}.pdf`, name: "work.pdf", bytes: 1_000, type: "application/pdf" } });
+  // A file they sent for review on a lesson (lib/submission-store.ts, 750 [CD1]): its record, their entry and the sweep's list.
+  {
+    const folder = await storeFolder(storeRef(store));
+    const id = hex(16);
+    const path = `vault/${folder}/sub_${id}/${hex(8)}-form.mp4`;
+    const keepUntil = now + 30 * 86_400;
+    const record = { id, target: { kind: "lesson", courseId: w.courseId, lessonId: w.lessons[0] }, buyer: email, file: { name: "form.mp4", bytes: 1_000, type: "video/mp4" }, note: "Week one", at: now, keepUntil, state: "submitted", reply: null, closedAt: 0, path, who: learner, folder };
+    await redisPipeline([
+      ["SET", `nl:sub:rec:${folder}:${id}`, JSON.stringify(record), "EX", 40 * 86_400],
+      ["ZADD", `nl:sub:who:${folder}:${learner}`, keepUntil + 7 * 86_400, `${w.courseId}|${w.lessons[0]}|${id}|${path}`],
+      ["ZADD", "nl:sub:due", keepUntil, `${folder}|${path}`],
+    ]);
+  }
   const course = { id: w.courseId, modules: [{ id: w.modules[0], title: "Module 1", dripDays: 0, lessons: w.lessons.map((id) => ({ id, title: id })) }], certificate: true, startsAt: null } as never;
   const issued = await issueCertificate({ room: ROOM, store: store.handle, productId: w.courseProduct, course, title: "The Course", creator: store.name, email, who: learner, name: "Tess Taylor" });
   if (!issued.ok) throw new Error("no certificate");
@@ -222,7 +235,8 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await award(id, learner, 1, store);
   await tell(id, [learner], { kind: "reply", post: "p00001", comment: "", by: "creator", words: "Welcome in" } as never, ROOM);
   await redisPipeline([
-    ["SET", `nl:cm:${id}:ps:${learner}`, JSON.stringify([{ endpoint: "https://push.example.com/1", keys: { p256dh: "x", auth: "y" }, kid: "k1", live: false }])],
+    // A device as rememberDevice (lib/community-push.ts) has always kept it: a hash from endpoint to device.
+    ["HSET", `nl:cm:${id}:ps:${learner}`, "https://push.example.com/1", JSON.stringify({ endpoint: "https://push.example.com/1", keys: { p256dh: "x", auth: "y" }, kid: "k1", addedAt: now })],
     ["ZADD", `nl:cm:${id}:ch`, 1, JSON.stringify({ i: Date.now(), a: learner, text: "hello room", at: now, n: "Tess" })],
     ["SET", `nl:cm:${id}:chs:${learner}`, "1", "EX", 60],
     ["SET", `nl:cm:${id}:rg:${learner}`, JSON.stringify({ u: Date.now() + 60_000, w: 1 }), "EX", 600],

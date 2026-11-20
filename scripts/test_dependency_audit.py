@@ -1,4 +1,5 @@
 """Synthetic gate failures must never be mistaken for a clean audit."""
+import inspect
 import json
 import tempfile
 import unittest
@@ -32,8 +33,25 @@ class GateTests(unittest.TestCase):
             self.assertIsNone(review(finding(severity), finding(severity)))
 
     def test_no_exception_list_remains(self):
-        for name in ["REVIEWED", "ADVISORY", "EXPIRES"]:
-            self.assertFalse(hasattr(check_dependency_audit, name))
+        # The withdrawn braces exception (GHSA-vfj7-8cjw-p6xm) and the dated picomatch exception
+        # (GHSA-fc5q-39xc-vjpf, #4843) both stay gone: the lint toolchain that pulled picomatch in was
+        # replaced by oxlint, so the gate is strict again, with no exception of any kind.
+        for name in ["REVIEWED", "EXPIRES", "ADVISORY", "EXCEPTION_LAST_DAY", "EXPIRED", "EXCEPTED",
+                     "LOCK_PICOMATCH", "ONLY_NPM_FIX", "STEP_BACK_PACKAGE"]:
+            self.assertFalse(hasattr(check_dependency_audit, name), name)
+        self.assertEqual(list(inspect.signature(review).parameters), ["all_report", "production_report"])
+        source = Path(check_dependency_audit.__file__).read_text()
+        for text in ["GHSA-", "advisories/", "datetime", "EXCEPT"]:
+            self.assertNotIn(text, source)
+
+    def test_the_picomatch_advisory_refuses_like_any_other(self):
+        # GHSA-fc5q-39xc-vjpf still has no patched picomatch; if it comes back into the tree, the gate refuses.
+        picomatch = report({"picomatch": {"severity": "high", "nodes": ["node_modules/picomatch"], "via": [{
+            "name": "picomatch", "dependency": "picomatch", "severity": "high", "range": "<=4.0.7",
+            "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf"}],
+            "fixAvailable": {"name": "eslint-config-next", "version": "14.2.35", "isSemVerMajor": True}}})
+        with self.assertRaises(ValueError):
+            review(picomatch, report())
 
     def test_development_high_or_critical_refuses(self):
         for severity in ["high", "critical"]:
@@ -64,6 +82,13 @@ class GateTests(unittest.TestCase):
             trace.write_text(json.dumps({"files": ["../node_modules/braces/index.js"]}))
             with self.assertRaises(ValueError):
                 check_traces(folder)
+            # The picomatch chain of GHSA-fc5q-39xc-vjpf is development-only too (Next's own compiled copy is not it).
+            for package in ["picomatch", "tinyglobby", "fdir"]:
+                trace.write_text(json.dumps({"files": ["../node_modules/" + package + "/index.js"]}))
+                with self.assertRaises(ValueError):
+                    check_traces(folder)
+            trace.write_text(json.dumps({"files": ["../node_modules/next/dist/compiled/picomatch/index.js"]}))
+            self.assertEqual(check_traces(folder), 1)
 
 
 if __name__ == "__main__":

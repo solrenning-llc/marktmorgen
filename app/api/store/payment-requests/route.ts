@@ -4,6 +4,7 @@ import { ensureStoreId } from "@/lib/store";
 import { DRAFT_PROBLEMS, ID_PATTERN, readDraft, readOutside } from "@/lib/payment-request-rules";
 import { createRequest, deleteRequest } from "@/lib/payment-request-store";
 import { type RefundCheckWhy, checkRequestRefunds, markPaidOutside, remindNow, requestsOpen, sendRequestEmail, withdrawRequest } from "@/lib/payment-requests";
+import { LockBusyError } from "@/lib/redis-lock";
 
 /** What the studio says when one request's refunds could not be checked, by why (lib/payment-requests.ts, RefundCheckWhy). */
 const REFUND_CHECK_WORDS: Record<RefundCheckWhy, string> = {
@@ -107,6 +108,9 @@ export async function POST(request: NextRequest) {
     }
     return refuse("invalid", "That is not something this page can do.");
   } catch (error) {
+    // Another change of the same request holds its write lock past the wait (#4775): nothing was done, and the
+    // creator is told to try again, as the sign-in, two-step and affiliate routes answer a busy lock.
+    if (error instanceof LockBusyError) return refuse("busy", "This request is being changed right now. Try again in a moment.", 503);
     console.error("a payment request action failed", error);
     return refuse("server_error", "That could not be done right now. Try again in a minute.", 500);
   }

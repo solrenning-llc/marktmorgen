@@ -22,7 +22,7 @@ import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledger
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
 import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
-  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
+  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
   codesWork, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
@@ -55,7 +55,9 @@ import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD, REFUND_CHEC
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
+import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
+import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
@@ -287,6 +289,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(PRODUCT_CARD_UNITS * laterPageCost() >= PRODUCT_CARD_READ, `${PRODUCT_CARD_UNITS} x ${laterPageCost()} < ${PRODUCT_CARD_READ}`);
   console.log(`a product's shared card: ${PRODUCT_CARD_UNITS} requests ($${(PRODUCT_CARD_UNITS * laterPageCost()).toFixed(6)}) against $${PRODUCT_CARD_READ.toFixed(6)} at its worst`);
   console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A short link that opens: its link and store read, its count in the hour and its refund, taken as SHORT_LINK_OPEN_UNITS public requests (Claude 5, 7 November 2026).
+  assert.ok(SHORT_LINK_OPEN_UNITS * laterPageCost() >= SHORT_LINK_OPEN_READ, `${SHORT_LINK_OPEN_UNITS} x ${laterPageCost()} < ${SHORT_LINK_OPEN_READ}`);
+  // A funnel's address pays its product steps as a collection's products: a funnel never holds more steps than a collection is proven for.
+  assert.ok(MAX_FUNNEL_PAGES <= MAX_COLLECTION_PRODUCTS, `${MAX_FUNNEL_PAGES} funnel steps > ${MAX_COLLECTION_PRODUCTS}`);
+  console.log(`a short link opened:$${SHORT_LINK_OPEN_READ.toFixed(6)} at most, counted as ${SHORT_LINK_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
@@ -732,6 +739,8 @@ test("an API reading that reads more than a page takes further requests that cov
   const book = read("lib/affiliates.ts");
   assert.ok(book.includes(`.slice(0, ${BOOK_MOVES})`) && book.includes(`const INVOICE_PAGES = ${BOOK_INVOICES / 100};`) && book.includes('limit: "100"'), "the book's moves and invoices");
   assert.ok(BOOK_STRIPE_PAGES >= BOOK_INVOICES / 100);
+  // The paid invoices the book keeps between readings (audit A1): the ceilings priced are the code's own.
+  assert.ok(book.includes(`export const INVOICES_KEPT_MAX_BYTES = ${BOOK_INVOICES_KEPT_BYTES.toLocaleString("en-US").replace(/,/g, "_")};`) && book.includes(`export const INVOICES_KEPT_MAX_LINES = ${BOOK_INVOICES_KEPT_LINES.toLocaleString("en-US").replace(/,/g, "_")};`), "the book's kept invoices");
   const stats = read("lib/stats.ts");
   assert.ok(stats.includes(`readPaidSales(store, sinceBefore, ${SALES_PAGES})`) && stats.includes(`readRenewals(store, since, now, ${RENEWAL_PAGES})`) && stats.includes(`readRefunds(store, since, ${REFUND_READ_PAGES})`) && stats.includes(`const DISPUTE_PAGES = ${DISPUTE_READ_PAGES};`), "the numbers' pages");
   assert.equal(stats.match(/= walk\("/g)?.length, 2, "the sales are two lists of pages");
@@ -747,9 +756,9 @@ test("an API reading that reads more than a page takes further requests that cov
   };
   before("lib/learn.ts", "if (!(await allow(rows.length, blockedAll))) return null;", '["SMEMBERS", doneKey(course.id, row.e)]');
   before("lib/api-read.ts", "said.refused = await charge(apiReadUnits(studentsPageWork(rows, blocked)));", "data: page.students.map");
-  before("lib/api-read.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
+  before("lib/api-read.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store, undefined, { keptPaid: true });");
   before("lib/api-read.ts", "const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));", "const rows = await paidCalls(store);");
-  before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
+  before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store, undefined, { keptPaid: true });");
   before("lib/api-read.ts", "const refused = await charge(apiReadUnits(productsPageWork(", "const slice = await readListings(store, page);");
   before("lib/mcp-tools.ts", "const refused = charge ? await charge(apiReadUnits(listingsWork(", "const listings = await readListings(store, named)");
   before("lib/mcp-tools.ts", "const first = await charge(units);", "membershipNumbersPaid(store");

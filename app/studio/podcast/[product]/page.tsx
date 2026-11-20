@@ -62,7 +62,7 @@ export default async function StudioPodcastPage({
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold">
             {view.role === "owner" ? (
-              <Link href={`/@${store.handle}/podcast/${product.id}`} className="text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+              <Link href={`/@${store.handle}/podcast/${product.id}`} className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep">
                 Get your own feed, as a buyer does
               </Link>
             ) : null}

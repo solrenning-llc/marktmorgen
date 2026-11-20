@@ -15,7 +15,7 @@ import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const BACKUP_FILES_DAY_CEILING_REFUSALS = (contract as Record<string, unknown>).BACKUP_FILES_DAY_CEILING_REFUSALS as number;
-const review = (maxPagesPerDay: number) => ({ maxPagesPerDay, reviewedAt: "2026-11-15", source: "synthetic" });
+const review = (maxPagesPerDay: number) => ({ maxPagesPerDay, maxStoresPagesPerDay: 30, maxDeletionsPagesPerDay: 40, reviewedAt: "2026-11-15", source: "synthetic" });
 
 part("One admitted page, at the dearest prices");
 // gru1 CPU $0.221 an hour and memory $0.0183 a GB-hour at 2 GB for the route's 10 s; $0.60 a million calls; Fast Origin

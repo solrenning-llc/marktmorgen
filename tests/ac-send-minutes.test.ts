@@ -20,6 +20,9 @@ is("1: a fixed table in the queue panel, repeated in each new channel", rule.inc
 is("2: the family coordinator answers within 30 minutes", rule.includes("em até 30 minutos"), true);
 is("3: silence never stops a session", rule.includes("Sem resposta em 30 minutos") && rule.includes("últimas 2 horas do canal"), true);
 is("4: no session is left without a slot", rule.includes("nunca deixa uma sessão sem vaga"), true);
+// Claude 2's focal review of #4925 (2 LEVE): the reserved gap is said in words, and two silent sessions never keep one minute.
+is("the letters (ff) to (hh) are said to be reserved for 3Rj's complements", rule.includes("(ff) a (hh) ficam reservadas às complementações da 3Rj"), true);
+is("3: the first announcement of a minute wins; a later one picks another before sending", rule.includes("vale o primeiro anúncio no canal") && rule.includes("escolhe outro antes de enviar"), true);
 is("every push keeps its checks", rule.includes("(m)") && rule.includes("MV (a)") && rule.includes("CV"), true);
 
 part("AC (cc)-(ee): the letters the coordinator reserved for #4925, apart from #4850's (r)-(bb)");

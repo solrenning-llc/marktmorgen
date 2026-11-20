@@ -40,7 +40,7 @@ async function seed(): Promise<Store> {
 
 test("a snapshot with no list id still answers its members, through the store's list read fresh", async () => {
   const store = await seed();
-  const health = await memberHealth({ ...store, listId: undefined }, true);
+  const health = await memberHealth({ ...store, listId: null }, true);
   assert.notEqual(health, null, "the members' health is answered");
   assert.deepEqual(health!.members.map((m) => m.email).sort(), [ERASED, KEPT].sort());
 });
@@ -48,7 +48,7 @@ test("a snapshot with no list id still answers its members, through the store's 
 test("a person the store deleted before is never answered, though the snapshot had no list id", async () => {
   const store = await seed();
   await redis.pipeline([suppressCommand(store.listId!, ERASED)]);
-  const health = await memberHealth({ ...store, listId: undefined }, true);
+  const health = await memberHealth({ ...store, listId: null }, true);
   assert.notEqual(health, null);
   assert.deepEqual(health!.members.map((m) => m.email), [KEPT]);
   const kept = redis.run(["GET", `nl:health:${store.statsId}`]);

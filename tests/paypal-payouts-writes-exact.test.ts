@@ -26,6 +26,7 @@ import { connectPayPal, onTheirWay, payoutUnknownMonth, paypalChecks, payWithPay
 import { autoPayEmail } from "@/lib/affiliate-payday";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statswex01";
@@ -94,6 +95,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", "aaaaaaaaaaaa", 10000)],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_2", sale("cs_2", "bbbbbbbbbbbb", 5000)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
 }

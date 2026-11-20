@@ -28,9 +28,10 @@
  *   nl:recent:feed:<statsId>   what the pages show, worked out at most every FEED_SECONDS
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { KIND, readListings } from "@/lib/catalog";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { RECENT_DAYS, type RecentSale, SHOWN } from "@/lib/recent-sales-rules";
 
 /** How many are kept. */
@@ -40,6 +41,12 @@ const FEED_SECONDS = 300;
 
 const listKey = (statsId: string) => `nl:recent:${statsId}`;
 const feedKey = (statsId: string) => `nl:recent:feed:${statsId}`;
+
+/** Keeps a public feed only while the store is still live and its erasure has not begun. */
+const KEEP_FEED_IF_LIVE = `-- marktmorgen:recent-feed-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return "gone" end
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
+return 1`;
 
 /** One purchase as it is kept: the product, when, the billing country and the payment. */
 type Kept = { p: string; at: number; c: string; pi: string };
@@ -174,8 +181,8 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
         })
         .slice(0, SHOWN);
     }
-    await redisPipeline([["SET", feedKey(statsId), JSON.stringify(shown), "EX", FEED_SECONDS]]);
-    return shown;
+    const [saved] = await redisPipeline([["EVAL", KEEP_FEED_IF_LIVE, 3, storeIdCommand(store.sid)[1], ERASING_KEY, feedKey(statsId), await erasingField(storeRef(store)), JSON.stringify(shown), FEED_SECONDS]]);
+    return saved === 1 ? shown : [];
   } catch (error) {
     console.error("reading recent purchases failed", error);
     return [];
@@ -185,5 +192,8 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
 /** Everything kept here for a store that is being deleted. */
 export async function forgetRecentSales(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", listKey(statsId), feedKey(statsId)]]);
+  // Two keys: only 0, 1 or 2 is a possible answer; anything else leaves the step unconfirmed (the closing walk,
+  // which erases both families by the store's ids, still runs: lib/data-families.ts).
+  const removed = countOf(repliesFor(await redisPipeline([["DEL", listKey(statsId), feedKey(statsId)]]), 1)?.[0]);
+  if (removed === null || removed > 2) throw new UnknownReplyError("the deletion of a store's recent purchases");
 }

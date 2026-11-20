@@ -98,7 +98,7 @@ export function StoreCopyPanel({ from, stores }: { from: string; stores: { sid: 
           </select>
         </label>
       </div>
-      <label className="mt-5 flex items-start gap-3">
+      <label className="mt-5 flex min-h-11 items-start gap-3">
         <input type="checkbox" className="mt-1" checked={setup} disabled={busy !== ""} onChange={(e) => { setSetup(e.target.checked); reset(); }} />
         <span className="text-sm text-ink">
           {`Also copy the store page's setup: the about line, colors and letters, links, social profiles, questions and answers, the order of its parts, sections and line of news. This replaces ${name || "that store"}'s own setup.`}

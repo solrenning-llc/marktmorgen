@@ -53,10 +53,12 @@ export async function POST(request: NextRequest) {
   if (!tipsOpen(store)) return away("closed");
 
   // A chosen amount is taken only when the box offers it; "another amount", or nothing chosen, reads what was typed,
-  // held to the range.
+  // held to the range. One of the creator's amounts chosen while another was typed is never settled silently either
+  // way (WCAG 3.3.6): the supporter is asked to choose one.
   const offered = tipAmounts(store.tips, store.currency);
   const amount =
     picked === "other" || !picked ? readTipAmount(other, store.currency)
+    : other.trim() ? null
     : /^\d{1,9}$/.test(picked) && offered.includes(Number(picked)) ? Number(picked)
     : null;
   if (amount === null) return away("amount");

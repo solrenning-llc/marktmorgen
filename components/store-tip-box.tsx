@@ -26,6 +26,8 @@ export function StoreTipBox({ store, problem, rehearsal }: { store: Store; probl
   const notice = problem ? w.notices[problem] ?? null : null;
   // After the EU VAT gate's answer, the country field is marked invalid and described by the notice (WCAG 3.3.1, 3.3.3).
   const countryProblem = notice && (problem === "abroad" || problem === "country") ? "support-notice" : undefined;
+  // After "choose an amount", the box for another amount is marked invalid and described by the notice too.
+  const amountProblem = notice !== null && problem === "amount";
   return (
     <section id="support" aria-labelledby="support-heading" className="st-card mt-8 scroll-mt-8 p-6 sm:p-7">
       <h2 id="support-heading" className="font-display text-xl font-semibold leading-snug">
@@ -42,7 +44,8 @@ export function StoreTipBox({ store, problem, rehearsal }: { store: Store; probl
         <input type="hidden" name="handle" value={store.handle} />
         <fieldset aria-describedby="support-range">
           <legend className="text-sm font-semibold">{w.amounts}</legend>
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          {/* Stacked on a narrow screen, so an amount never runs past its option (WCAG 1.4.10). */}
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             {amounts.map((amount) => (
               <label key={amount} htmlFor={`support-amount-${amount}`} className="st-option">
                 <span className="flex items-center gap-3">
@@ -67,7 +70,8 @@ export function StoreTipBox({ store, problem, rehearsal }: { store: Store; probl
             maxLength={12}
             placeholder={moneyField(amounts[amounts.length - 1] * 2 <= max ? amounts[amounts.length - 1] * 2 : max, store.currency)}
             aria-labelledby="support-other-label"
-            aria-describedby="support-range"
+            aria-describedby={amountProblem ? "support-notice support-range" : "support-range"}
+            aria-invalid={amountProblem || undefined}
             className="st-field mt-2 w-full"
           />
           <p id="support-range" className="st-muted mt-2 text-sm">

@@ -3,13 +3,14 @@
  * payment disputed), a buyer's review photo is new storage nobody is paying
  * for. The review route still saves the words, does not read or store the
  * photo, and tells the buyer; a store that is paid up checks and keeps photos
- * as before.
+ * as before. Since the original unit 4c (12/11/2026), the same once the
+ * store's plan has ended (lib/plan-standing.ts newCostCode).
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/review/route";
 import { addProduct, claimHandle, ensureStatsId, recordPlanDispute, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { readReview, reviewId, setReviewPhoto } from "@/lib/reviews";
-import { costsPaused } from "@/lib/plan-standing";
+import { costsPaused, newCostCode } from "@/lib/plan-standing";
 import { reviewPhotoPath } from "@/lib/review-photo";
 import { REVIEW_NOTICES } from "@/components/review-form";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
@@ -107,6 +108,18 @@ async function main() {
   is("costs paused by the dispute", costsPaused(store), true);
   is("the photo is not read", statusOf(await send({ photo: "data:image/jpeg;base64,<not-a-photo>" })), "photoPaused");
   is("the creator is told in the same words", (await import("@/lib/plan-dispute-rules")).DISPUTE_PAUSED_WORDS.includes("your buyers' review photos included"), true);
+
+  part("The plan has ended: the photo is not kept either (232 [CA1], the original 4c)");
+  await setSubscription(OWNER, { active: false, period: null });
+  store = (await storeForEmail(OWNER))!;
+  is("no running plan, so nothing is paused as a running plan", costsPaused(store), false);
+  is("but the plan has ended", newCostCode(store), "plan_ended");
+  is("a new photo is not read", statusOf(await send({ photo: "data:image/jpeg;base64,<not-a-photo>", text: "Ended, still great." })), "photoPaused");
+  is("a readable one is not kept", statusOf(await send({ photo: jpeg(1200, 900), text: "Ended, still great." })), "photoPaused");
+  const afterEnd = await readReview(store.statsId as string, productId, id);
+  is("the words were saved", afterEnd?.text, "Ended, still great.");
+  is("the photo already there stays", afterEnd?.photo, earlier);
+  is("a review with no photo is answered as usual", statusOf(await send({ text: "Ended, no photo." })), "updated");
 
   done();
 }

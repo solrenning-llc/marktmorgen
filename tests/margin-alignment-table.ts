@@ -9,13 +9,50 @@
  * fails when the file on disk is not what this renders, so a change to a
  * price, a limit, a fee or a reading that is not regenerated is caught.
  */
-import { MOST_TAX_READING } from "./historical-receiving-model";
-const gateReading=()=>MOST_TAX_READING;
-export const HISTORICAL_TAX_NOTICE='> **Historical tax model — superseded by TX.** These dated sizing/most-tax figures are retained for history. Current profit and capacity require complete scoped annual books, exchange operations, FX and applicable component facts through the real reviewed model; missing evidence is unknown, never a zero cost or permission to sell.\n\n';
+import { worstMonthKept } from "./worst-month-kept";
+import { MOST_CORRECT_READING, POSITIVE_NET_CENTS, receivingOf, type UnitResult } from "@/lib/receiving-costs";
+export const CURRENT_TAX_NOTICE='> **TX tax reading, the legally correct one (owner, 27 October and 19 November 2026).** IRPF 15% and IOF 0.38% on the profit; no 27.5% floor, no most-tax reading, no ISS. These are registered-model figures, not a complete scoped tax review: real annual books, exchange operations and component facts are still required, and missing evidence is unknown, never a zero cost or permission to sell.\n\n';
 import { PLAN_PRICES, PLAN_TITLES, TIERS, type Cycle, type Tier } from "@/lib/plan";
 import { ADD_ON_ROOM_CENTS, ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_PRICE_CENTS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, autoCaptionCents } from "@/lib/auto-captions-rules";
-import { unitUnder, type Reading, type UnitResult } from "./historical-receiving-model";
+
+/**
+ * The tax on a unit's profit under TX (AGENTS.md, rule LC; owner, 19 November 2026: "a interpretação e aplicação de
+ * impostos será de agora em diante sempre a que voce(claude) considerar o que for o mais correto juridicamente"):
+ * IRPF 15% on the LLC's yearly profit, due at 31 December even when nothing is distributed (Lei 14.754/2023, art. 5;
+ * IN RFB 1.037/2010, art. 2, VII), plus IOF 0.38% on the whole profit entering Brazil (Decreto 6.306/2007, arts. 14
+ * and 15-B, XXV), the worst case being every dollar of profit sent home before the IRPF is paid. No ISS (LC 116/2003,
+ * arts. 2, I, 3 and 4), no PIS/Cofins/IRPJ/CSLL (no Brazilian legal person) and no US federal income tax (no US trade
+ * or business, 26 U.S.C. 864). The buyer's tax is added on top of the price and only raises the fees charged on it.
+ * The same 15.38% as tests/worst-month-kept.ts.
+ */
+export const CURRENT_PROFIT_TAX_BPS = MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps;
+const taxOnProfit = (pretaxCents: number) => Math.ceil((Math.max(0, pretaxCents) * CURRENT_PROFIT_TAX_BPS) / 10_000);
+
+/** The smallest pretax profit that still leaves the positive net cent rule MR asks for after the tax above. */
+const SMALLEST_KEEPING_PRETAX = (() => { let p = 1; while (p - taxOnProfit(p) < POSITIVE_NET_CENTS) p += 1; return p; })();
+
+/** One unit of sale under the current TX reading: receiving and reserves from lib/receiving-costs.ts, then the tax on profit. */
+export function unitUnder(priceCents: number, usageCents: number, ownTransaction = true): UnitResult {
+  const r = receivingOf(priceCents, MOST_CORRECT_READING, ownTransaction);
+  const costCents = r.totalCents + usageCents;
+  const pretaxCents = r.revenueCents - costCents;
+  const taxCents = taxOnProfit(pretaxCents);
+  const netCents = pretaxCents - taxCents;
+  return {
+    ...r,
+    usageCents,
+    costCents,
+    pretaxCents,
+    taxCents,
+    netCents,
+    netBps: r.revenueCents > 0 ? Math.floor((netCents * 10_000) / r.revenueCents) : 0,
+    floorCents: POSITIVE_NET_CENTS,
+    meetsFloor: netCents >= POSITIVE_NET_CENTS,
+    gapCents: Math.max(0, POSITIVE_NET_CENTS - netCents),
+    usageRoomCents: r.revenueCents - r.totalCents - SMALLEST_KEEPING_PRETAX,
+  };
+}
 import { renderLlcFixedCostStatus } from "../lib/llc-fixed-costs";
 import { COST_LINES, perPaymentCost } from "./plan-cost-registry";
 
@@ -68,14 +105,14 @@ export function roomKept(unit: Unit): number {
   return unit.id.includes("-year-") ? 100 : 25;
 }
 
-/** Internal exact threshold test under the binding reading, with room when asked; never a price proposal. */
-export function floorPriceCents(usageCents: number, room = 0, reading: Reading = gateReading()): number {
+/** Internal exact threshold test under the current TX reading, with room when asked; never a price proposal. */
+export function floorPriceCents(usageCents: number, room = 0): number {
   let lo = 1, hi = 100_000_000;
-  while (lo < hi) { const mid = Math.floor((lo + hi) / 2); const u = unitUnder(mid, usageCents + room, reading, true); if (u.meetsFloor) hi = mid; else lo = mid + 1; }
+  while (lo < hi) { const mid = Math.floor((lo + hi) / 2); const u = unitUnder(mid, usageCents + room, true); if (u.meetsFloor) hi = mid; else lo = mid + 1; }
   // The fee and the reserves round up by the cent, so the net is not monotone in the price near the edge: the lowest
   // price that keeps is looked for over the twenty dollars below the bisection's answer.
   let lowest = lo;
-  for (let p = lo - 1; p >= Math.max(1, lo - 2_000); p -= 1) if (unitUnder(p, usageCents + room, reading, true).meetsFloor) lowest = p;
+  for (let p = lo - 1; p >= Math.max(1, lo - 2_000); p -= 1) if (unitUnder(p, usageCents + room, true).meetsFloor) lowest = p;
   return lowest;
 }
 
@@ -86,7 +123,7 @@ export function assistantUnit(onSale: boolean): Unit {
 }
 
 /** AI captions at their dearest per charge: the service's ten cents a minute a language, and a dime more for the spoken language counted apart. */
-export function captionUnits(onSale: boolean, reading: Reading = gateReading()): Unit[] {
+export function captionUnits(onSale: boolean): Unit[] {
   const worst: Unit[] = [];
   for (let languages = 1; languages <= MAX_AUTO_LANGUAGES; languages += 1) {
     let lowest: Unit | null = null;
@@ -94,7 +131,7 @@ export function captionUnits(onSale: boolean, reading: Reading = gateReading()):
     for (let minutes = 1; minutes <= MAX_AUTO_MINUTES; minutes += 1) {
       const priceCents = autoCaptionCents(minutes * 60, languages);
       const usageCents = minutes * (languages + 1) * 10;
-      const bps = unitUnder(priceCents, usageCents, reading, true).netBps;
+      const bps = unitUnder(priceCents, usageCents, true).netBps;
       if (bps < lowestBps) {
         lowestBps = bps;
         lowest = { id: `captions-${languages}`, name: `AI captions, ${languages} language${languages > 1 ? "s" : ""} (${minutes} min, $${(priceCents / 100).toFixed(2)})`, priceCents, usageCents, coreUsageCents: usageCents, ownTransaction: true, onSale };
@@ -110,8 +147,8 @@ export function allUnits(plansOnSale: boolean, assistantOnSale: boolean): Unit[]
   return [...planUnits(plansOnSale), assistantUnit(assistantOnSale), ...captionUnits(plansOnSale)];
 }
 
-export function evaluate(unit: Unit, reading: Reading = gateReading()): UnitResult {
-  return unitUnder(unit.priceCents, unit.usageCents, reading, unit.ownTransaction);
+export function evaluate(unit: Unit): UnitResult {
+  return unitUnder(unit.priceCents, unit.usageCents, unit.ownTransaction);
 }
 
 const usd = (cents: number) => `${cents < 0 ? "−" : ""}$${(Math.abs(cents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -121,13 +158,13 @@ const pctOf = (bps: number) => `${bps < 0 ? "−" : ""}${(Math.abs(bps) / 100).t
 export function currentPriceMarginRows(plansOnSale: boolean, assistantOnSale: boolean): string[] {
   return allUnits(plansOnSale, assistantOnSale).map(unit => {
     const actual = evaluate(unit), room = roomKept(unit);
-    const buffered = unitUnder(unit.priceCents, unit.usageCents + room, gateReading(), unit.ownTransaction);
+    const buffered = unitUnder(unit.priceCents, unit.usageCents + room, unit.ownTransaction);
     return `| ${unit.name} | ${usd(unit.priceCents)} | ${usd(actual.revenueCents)} | ${usd(actual.totalCents)} | ${usd(unit.usageCents)} | ${usd(actual.taxCents)} | ${usd(actual.netCents)} | ${pctOf(actual.netBps)} | ${usd(room)} | ${buffered.meetsFloor ? "positive" : "fails"} | ${unit.onSale ? "yes" : "no"} |`;
   });
 }
 export function renderMarginAlignment(plansOnSale: boolean, assistantOnSale: boolean): string {
   const out: string[] = [];
-  const reading = gateReading();
+  const reading = MOST_CORRECT_READING;
   out.push("# Margin alignment — current prices, MR27 October2026");
   out.push("");
   out.push("<!-- Generated by node scripts/margin-alignment.mjs from tests/margin-alignment-table.ts. No figures are edited by hand. -->");
@@ -136,8 +173,8 @@ export function renderMarginAlignment(plansOnSale: boolean, assistantOnSale: boo
   out.push("");
   out.push("These are registered-model calculations, not certified actual costs or an approved commercial review. Unknown supplier coverage, retention, tax treatment, fixed cost or exposure fails approval; it is never entered as zero. Current prices and visible allowances are unchanged. No new price is proposed.");
   out.push("");
-  out.push(`Binding reading: ${reading.id}; ${reading.label}. Profit tax ${reading.profitTaxBps / 100}%; revenue tax ${reading.revenueTaxBps / 100}%; sales tax inside ${reading.salesTaxInsideBps / 100}%; sales tax on top ${reading.salesTaxOnTopBps / 100}%.`);
-  out.push("The receiving model remains lib/receiving-costs.ts: dearer provider per charge, remittance, full refund/dispute reserves, the most onerous tax reading and ISS5%. No free supplier quota is treated as free usage. Annual usage includes12full monthly windows and retained post-plan records.");
+  out.push(`Tax reading: ${reading.id} (TX, the legally correct reading; rule LC). On the profit: IRPF ${reading.profitTaxBps / 100}% (Lei 14.754/2023, art. 5; IN RFB 1.037/2010, art. 2, VII) and IOF ${reading.incomingExchangeIofBps / 100}% on the whole profit sent home (Decreto 6.306/2007, arts. 14 and 15-B, XXV), ${CURRENT_PROFIT_TAX_BPS / 100}% together. Revenue tax ${reading.revenueTaxBps / 100}% (no ISS: LC 116/2003, arts. 2, I, 3 and 4); no US federal income tax; no 27.5% floor and no most-tax reading. The buyer's tax is added on top of the price, up to ${reading.salesTaxOnTopBps / 100}%, and is counted only where it raises the fees and the dispute reserve charged on the whole amount.`);
+  out.push("The receiving model remains lib/receiving-costs.ts: dearer provider per charge, remittance allowance, full refund/dispute reserves. No free supplier quota is treated as free usage. Annual usage includes12full monthly windows and retained post-plan records.");
   out.push("");
   out.push("## Each current unit at full registered use");
   out.push("");
@@ -147,33 +184,26 @@ export function renderMarginAlignment(plansOnSale: boolean, assistantOnSale: boo
   out.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   out.push(...currentPriceMarginRows(plansOnSale, assistantOnSale));
   out.push("");
-  out.push("Caption rows select their worst modeled net share under the binding reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.");
+  out.push("Caption rows select their worst modeled net share under the TX reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.");
+  out.push("");
+  out.push("## What each plan keeps in its worst month, under the LC reading");
+  out.push("");
+  out.push("A month's receipts after every fee and reserve (netOf), less every cost line at its limit (worstCost), then IRPF 15% and IOF 0.38% on that profit (MOST_CORRECT_READING, the LC rule of 1 November 2026). tests/switch-keeps-window.test.ts section 11 holds each one above zero (rule MR); this table holds the exact figures, through this document's staleness test (tests/worst-month-kept.ts, one formula for both).");
+  out.push("");
+  out.push("| Interval | Store | Studio | Scale |");
+  out.push("| --- | --- | --- | --- |");
+  out.push(`| Monthly plan | US$${worstMonthKept("month").join(" | US$")} |`);
+  out.push(`| A month of a yearly plan | US$${worstMonthKept("year").join(" | US$")} |`);
   out.push("");
   out.push(renderLlcFixedCostStatus());
   out.push("SR3 must additionally establish the official costs and acceptance of ITIN/acceptance-agent work if applicable, a US-resident legal representative and a real US business address. Existing registered-agent/mailbox/GDPR quotations do not prove these requirements. Complete company costs and the actual minimum paying base remain unknown.");
   out.push("");
   out.push("## Closed conditions and actual monthly reporting");
   out.push("");
-  out.push("PLANS_ON_SALE and OPENING_REQUESTED remain false. The commercial review is absent; contract/exposure coverage and the other existing funding gates remain incomplete; art9a treatments are not recorded. The tax reading is not lowered, EU hosting is not confirmed, and SR2 still requires a dated proved US-company Stripe platform account eligible for the required direct-charge regions. A positive modeled unit never opens a sale.");
+  out.push("PLANS_ON_SALE and OPENING_REQUESTED remain false. The commercial review is absent; contract/exposure coverage and the other existing funding gates remain incomplete; art9a treatments are not recorded. EU hosting is not confirmed (no longer a condition), and SR2 still requires a dated proved US-company Stripe platform account eligible for the required direct-charge regions. A positive modeled unit never opens a sale.");
   out.push("");
   out.push("The internal monthly report calculator accepts only complete reconciled actual accounting for the previous UTC month and outputs aggregates without personal data. Its actual dataset is still null. Ingestion, automatic scheduling and owner presentation are not delivered by that calculator; no actual60%achievement, company margin or finite customer base is asserted.");
   out.push("");
-  return HISTORICAL_TAX_NOTICE+out.join("\n");
+  return CURRENT_TAX_NOTICE+out.join("\n");
 }
 
-/**
- * The net share under the model each unit was held to before this change, at
- * 27.5% on profit: a plan at 2.9% + 0.7% + 30 cents on the price with no
- * reserve; the add-on at 6.6% + 30 cents on the price with its reserves; AI
- * captions at the card's 2.9% + 30 cents.
- */
-export function wasNetBps(unit: Unit): number {
-  const p = unit.priceCents;
-  const up = (cents: number, bps: number) => Math.ceil((cents * bps) / 10_000);
-  const receiving = unit.id === "store-assistant"
-    ? up(p, 660) + 30 + up(p, 150) + up(p, 100) + up(p + 3000, 100)
-    : unit.id.startsWith("captions") ? up(p, 290) + 30 : up(p, 360) + 30;
-  const pretax = p - receiving - unit.usageCents;
-  const net = pretax - up(Math.max(0, pretax), 2750);
-  return Math.floor((net * 10_000) / p);
-}

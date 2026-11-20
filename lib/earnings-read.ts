@@ -61,7 +61,7 @@ import { readsSales } from "@/lib/stats";
 import { type Store, saleHandles } from "@/lib/store";
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 import { keyFor, onAccount } from "@/lib/stripe-account";
-import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type Kept, NotRead, keptReading } from "@/lib/store-readings";
 
 /** Pages of a hundred each Stripe list is read for: those of the sales reading (lib/stats.ts, readSales), less its 3 of disputes (said not read): 55 in all. */
@@ -204,6 +204,7 @@ async function stripeList(account: string, path: string, kind: MoneyKind, sinceS
   let last: number | null = null;
   for (let page = 0; page < pages; page += 1) {
     const answer = await onAccount("GET", account, `${path}?limit=100${filter}&created[gte]=${sinceSec}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`, undefined, STRIPE_LIST_VERSION);
+    if (!plainObject(answer) || ownField(answer, "object") !== "list") throw new StripeListUnreadable("earnings page is not a list object");
     // The page's own shape (a plain object, data a list, has_more true or false), or it throws.
     const { hasMore, lastId } = readStripePage(answer);
     const data = ownField(answer, "data") as unknown[];

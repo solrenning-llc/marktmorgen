@@ -53,15 +53,18 @@
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type RemindOutcome, remindAsked } from "@/lib/checkout-recovery";
 import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
 import { canSellProduct } from "@/lib/store-checkout";
-import type { Listing, Store } from "@/lib/store";
+import { type Listing, type Store, ensureListId, storeRef } from "@/lib/store";
 import { ASK_WHENS, type AskWhen } from "@/lib/ask-when";
 import { cartable } from "@/lib/cart-rules";
 import { cartAskKey } from "@/lib/checkout-ask-cart";
+import { ASK_ERASE_BATCH } from "@/lib/erasure-rules";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 /** How long after asking the reminder goes: the same hour the other one waits. */
 export const ASK_AFTER_SECONDS = 60 * 60;
@@ -79,6 +82,15 @@ const STALE_SECONDS = 6 * 60 * 60;
 export const ASK_STALE_SECONDS = STALE_SECONDS;
 
 const QUEUE = "nl:recover:asks";
+/**
+ * One person's asks at one store, the same members at the same times as in QUEUE, written and taken out with it: what
+ * that person's erasure and copy read (Claude 2 nuvem B on #4290), so they never scan every store's asks, nor every
+ * buyer's asks at the store (Claude 7 on #4290: a store's whole index is about 330 KB at its ceiling). Named by a
+ * hash of the store and the address, so the key holds no address. It stays until the asks leave the global queue or
+ * finish in flight: expiring this locator first would leave an address that erasure can no longer find.
+ */
+export const askIndexKey = (statsId: string, email: string) =>
+  `nl:recover:asks:s:${statsId}:${createHash("sha256").update(`nimbus-recover-ask:${statsId}|${normaliseEmail(email) ?? ""}`).digest("hex").slice(0, 32)}`;
 
 export type AskOutcome =
   /** Kept, and a reminder goes in about an hour. */
@@ -139,6 +151,82 @@ export async function askCartReminder(input: { store: Store; items: Listing[]; e
   return keep(store, cartAskKey(items.map((p) => p.id)), input.email, input.ip, "checkout", ASK_AFTER_SECONDS);
 }
 
+/** The own index's count, before its erasure is paid for. Unknown never means empty. */
+export async function checkoutAskCount(statsId: string | null, rawEmail: string): Promise<number> {
+  const email = normaliseEmail(rawEmail);
+  if (!statsId || !email || !isRedisConfigured()) return 0;
+  const count = countOf(repliesFor(await redisPipeline([["ZCARD", askIndexKey(statsId, email)]]), 1)?.[0]);
+  if (count === null) throw new UnknownReplyError("a person's checkout reminder ask count");
+  return count;
+}
+
+/**
+ * The read and both removals are one operation: ASK_AGAIN either finishes before it and its new member is removed,
+ * or runs after it and finds no original member. All members are checked before any write. More than the paid count
+ * is unknown, never a larger unpaid erasure. Only the own index is read; no scan of the global queue.
+ * Billed: EVAL + ZRANGEBYSCORE + DEL, and one ZREM per ASK_ERASE_BATCH members (lib/erasure-rules.ts).
+ */
+export const ASK_FORGET = `-- marktmorgen:ask-forget:v1
+local most = tonumber(ARGV[3])
+if not most or most < 0 or most > 9007199254740991 or most % 1 ~= 0 then return {-1, -1} end
+local members = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', '+inf')
+if #members > most then return {-1, -1} end
+for _, member in ipairs(members) do
+  local ok, ask = pcall(cjson.decode, member)
+  if not ok or type(ask) ~= 'table' or type(ask[1]) ~= 'string' or ask[1] ~= ARGV[1]
+    or type(ask[2]) ~= 'string' or ask[2] == '' or type(ask[3]) ~= 'string' or ask[3] == ''
+    or type(ask[4]) ~= 'string' or ask[4] ~= ARGV[2] or type(ask[5]) ~= 'number'
+    or ask[5] ~= ask[5] or ask[5] == math.huge or ask[5] == -math.huge then return {-1, -1} end
+end
+if #members == 0 then return {0, 0} end
+local taken = 0
+for first = 1, #members, ${ASK_ERASE_BATCH} do
+  taken = taken + redis.call('ZREM', KEYS[1], unpack(members, first, math.min(first + ${ASK_ERASE_BATCH} - 1, #members)))
+end
+redis.call('DEL', KEYS[2])
+return {taken, #members}`;
+
+/**
+ * Takes one person's asks at one store off the queue (lib/person-erasure.ts): each member holds their address in
+ * plain text and waits up to three days for its time (ASK_WHENS), more with the send's retries, so it is deleted
+ * with them rather than left for the job to skip (webhooks/cron audit, Claude 1, 12/11/2026). Only this store's index
+ * (askIndexKey, the person's own) is read, never the queue of every store, and each ask is taken out of both. Read exactly (CX-123 rule
+ * 24): the read, or the removal's counts, in another shape throws, so the erasure says this part did not finish and is
+ * tried again, never "nothing here". Counts what it took off the queue.
+ */
+/** The optional count is the ceiling already paid for by erasePerson. Direct helpers count before running. */
+export async function forgetAskPerson(statsId: string | null, rawEmail: string, paidCount?: number): Promise<number> {
+  const email = normaliseEmail(rawEmail);
+  if (!statsId || !email || !isRedisConfigured()) return 0;
+  const most = paidCount === undefined ? await checkoutAskCount(statsId, email) : paidCount;
+  if (!Number.isSafeInteger(most) || most < 0) throw new UnknownReplyError("a person's checkout reminder ask count");
+  const reply = repliesFor(await redisPipeline([["EVAL", ASK_FORGET, 2, QUEUE, askIndexKey(statsId, email), statsId, email, most]]), 1);
+  const pair = repliesFor(reply?.[0], 2);
+  const taken = countOf(pair?.[0]), indexed = countOf(pair?.[1]);
+  if (taken === null || indexed === null || taken > indexed || indexed > most) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
+  return taken;
+}
+
+/** One person's asks still waiting at one store, for their copy of their data (lib/person-copy.ts). */
+export async function asksOf(statsId: string | null, rawEmail: string): Promise<{ product: string; asked: string; from: AskFrom }[]> {
+  return (await askMembersOf(statsId, rawEmail)).flatMap((member) => {
+    const ask = parseAsk(member);
+    return ask ? [{ product: ask.productId, asked: new Date(ask.askedAt * 1000).toISOString(), from: ask.from }] : [];
+  });
+}
+
+/** This person's asks at this store, from the store's own index, read exactly (see forgetAskPerson). */
+async function askMembersOf(statsId: string | null, rawEmail: string): Promise<string[]> {
+  const email = normaliseEmail(rawEmail);
+  if (!statsId || !email || !isRedisConfigured()) return [];
+  const members = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", askIndexKey(statsId, email), "-inf", "+inf"]]), 1)?.[0]);
+  if (members === null) throw new UnknownReplyError("a store's checkout reminder asks");
+  return [...new Set(members)].filter((member) => {
+    const ask = parseAsk(member);
+    return ask !== null && ask.statsId === statsId && normaliseEmail(ask.email) === email;
+  });
+}
+
 /** Keeps an ask for a reminder. Says what happened; never throws at the buyer. */
 export async function askReminder(input: { store: Store; product: Listing | null; email: string; ip: string; from?: AskFrom; when?: AskWhen }): Promise<AskOutcome> {
   const { store, product } = input;
@@ -154,12 +242,57 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
   if (!(await withinEssentialLimit("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600))) return "limited";
   if (!(await withinEssentialLimit("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400))) return "limited";
+  // The store's list of erased people, made when a store older than it has none yet (as lib/api-write.ts does): without
+  // it no erasure could be checked, so the ask is not kept.
+  const listId = store.listId ?? (await ensureListId(storeRef(store)).catch(() => null))?.listId ?? null;
+  if (!listId) return "closed";
   const askedAt = Math.floor(Date.now() / 1000);
-  await redisPipeline([
-    ["ZADD", QUEUE, askedAt + after, askMember({ statsId, handle: store.handle, productId, email, askedAt, from, after })],
-  ]);
-  return "asked";
+  const member = askMember({ statsId, handle: store.handle, productId, email, askedAt, from, after });
+  // Written only while the person is not erased from this store, in the same step as the check (Codex X7 on #4290):
+  // a person's erasure writes their print before it takes their asks (ASK_FORGET), so an ask written before the print
+  // is taken by the erasure, and one that comes after it is refused, never left with the address after the erasure.
+  // Said kept only on its exact reply (rule 24). Billed 1 + 4; lib/redis-memory.ts runs it the same way.
+  let kept: unknown;
+  try {
+    kept = repliesFor(await redisPipeline([[
+      "EVAL", ASK_KEEP, 3, QUEUE, askIndexKey(statsId, email), suppressedKey(listId),
+      askedAt + after, member, suppressionPrint(listId, email),
+    ]]), 1)?.[0];
+  } catch {
+    kept = undefined;
+  }
+  // 1 kept; -1 this address was erased from this store; anything else is not known to be kept. Neither is said
+  // "asked", and an erased address is answered as for a store that takes none, so the page reveals nothing.
+  return kept === 1 ? "asked" : "closed";
 }
+
+/**
+ * Keeps an ask, in one step, only while the person's print is not in the store's erased list (KEYS[3], ARGV[3]): the
+ * queue (KEYS[1]) and the person's index (KEYS[2]) at ARGV[1], the member ARGV[2]. The locator stays as long as the
+ * queued address. PERSIST also clears an older index's expiry when another ask is kept; the last ZREM deletes it.
+ * Answers 1 when kept, -1 when the person was erased.
+ */
+const ASK_KEEP = `-- marktmorgen:ask-keep:v2
+if redis.call("HEXISTS", KEYS[3], ARGV[3]) == 1 then return -1 end
+redis.call("ZADD", KEYS[1], ARGV[1], ARGV[2])
+redis.call("ZADD", KEYS[2], ARGV[1], ARGV[2])
+redis.call("PERSIST", KEYS[2])
+return 1`;
+
+/**
+ * Puts a retried ask back, in one step, only while the entry it was taken with still waits in its person's index
+ * (KEYS[2], ARGV[1]): sendAsked leaves that entry there while the ask is in flight, and a person's erasure takes it out
+ * (forgetAskPerson), so an ask whose person was erased meanwhile is never written back (Codex L on #4290). Swaps the
+ * old entry for the new one in the index; answers ZADD's reply on the queue, or -1. Billed 1 + 5; lib/redis-memory.ts
+ * runs it the same way.
+ */
+const ASK_AGAIN = `-- marktmorgen:ask-again:v2
+if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return -1 end
+local added = redis.call("ZADD", KEYS[1], ARGV[2], ARGV[3])
+redis.call("ZREM", KEYS[2], ARGV[1])
+redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
+redis.call("PERSIST", KEYS[2])
+return added`;
 
 /**
  * Puts an ask whose send failed back in the queue, for a later try
@@ -168,14 +301,17 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
  * than none, and the buyer can ask again. Its name (askKey) does not change,
  * so a try that does go is the one email. Whether it went back.
  */
-async function again(ask: Ask, now: number): Promise<boolean> {
+async function again(ask: Ask, was: string, now: number): Promise<boolean> {
   const tries = ask.tries ?? 0;
   const at = now + reminderRetryAfter(tries);
   if (tries >= REMINDER_RETRIES || at - (ask.askedAt + ask.after) > STALE_SECONDS) return false;
   try {
-    const [added] = await redisPipeline([["ZADD", QUEUE, at, askMember({ ...ask, tries: tries + 1 })]]);
-    // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
+    const member = askMember({ ...ask, tries: tries + 1 });
+    const [added] = await redisPipeline([["EVAL", ASK_AGAIN, 2, QUEUE, askIndexKey(ask.statsId, ask.email), was, at, member]]);
+    // 1 put back; 0 one just like it already waits; -1 its person was erased while it was in flight (its entry in their
+    // index is gone), so it stays out. Anything else is unknown: not counted as put back.
     if (added === 1 || added === 0) return true;
+    if (added === -1) return false;
     console.error("putting an asked-for reminder back answered in no known shape", ask.handle);
   } catch (error) {
     console.error("putting an asked-for reminder back failed", ask.handle, error);
@@ -203,10 +339,16 @@ export async function sendAsked(
   const members = Array.isArray(due) ? (due as string[]) : [];
   for (const member of members) {
     if (Date.now() >= deadline) break;
+    const ask = parseAsk(member);
     const [taken] = await redisPipeline([["ZREM", QUEUE, member]]);
     if (Number(taken) !== 1) continue;
-    const ask = parseAsk(member);
+    // Its entry in the person's index stays while it is in flight, so a person's erasure meanwhile still finds it and
+    // takes it out, and a retry is then refused (again; Codex L on #4290). It leaves the index once the ask is done.
+    const done = async () => {
+      if (ask) await redisPipeline([["ZREM", askIndexKey(ask.statsId, ask.email), member]]);
+    };
     if (!ask || now - (ask.askedAt + ask.after) > STALE_SECONDS) {
+      await done();
       counts.skipped += 1;
       continue;
     }
@@ -223,10 +365,16 @@ export async function sendAsked(
       console.error("sending an asked-for reminder failed", ask.handle, error);
       outcome = "retry";
     }
-    if (outcome === "sent") counts.sent += 1;
+    if (outcome === "sent") {
+      await done();
+      counts.sent += 1;
+    }
     // "failed" is a send the email service was asked for and did not take: never again (lib/reminder-retry.ts).
-    else if (outcome === "retry" && (await again(ask, now))) counts.retried += 1;
-    else counts.skipped += 1;
+    else if (outcome === "retry" && (await again(ask, member, now))) counts.retried += 1;
+    else {
+      await done();
+      counts.skipped += 1;
+    }
   }
   return counts;
 }

@@ -441,7 +441,8 @@ export default function TermsPage() {
           can, usually at once (when it does not come off by itself, we act on
           it by hand), keep it as the law requires, and report it, with the account behind it, to the
           National Center for Missing &amp; Exploited Children (NCMEC), as
-          United States law requires (18 U.S.C. § 2258A). The account is closed.
+          United States law requires (18 U.S.C. § 2258A). We may also suspend the store or close the account
+          behind it.
           We remove an intimate image shared without consent within 48 hours of
           a complete request at <Link href="/report" className="text-black underline underline-offset-2 hover:no-underline">/report</Link>,
           along with any copies of it we find.

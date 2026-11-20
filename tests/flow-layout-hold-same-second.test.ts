@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "layoutsecond", "Layout Second", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestLayoutSecond", true);
+  await setStripeAccount(OWNER, "acct_1TestLayout2", true);
   await setSubscription(OWNER, { customerId: "cus_LayoutSecond1", subscriptionId: "sub_LayoutSecond1", active: true, tier: "pro", period: paidPeriod() });
   await setMailSettings(OWNER, { fromName: "Layout Second", address: "1 Main St, Portland, OR 97201" });
   let store: Store = (await storeForEmail(OWNER))!;

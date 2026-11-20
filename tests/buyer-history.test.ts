@@ -11,7 +11,7 @@
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setInboxSetting, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { REFUND_HISTORY_LIST, REFUND_HISTORY_PER_DAY, REFUND_HISTORY_SCREEN, REFUND_HISTORY_UNITS, historyFrom, refundHistory } from "@/lib/buyer-history";
+import { REFUND_HISTORY_LIST, REFUND_HISTORY_PAGE_BYTES, REFUND_HISTORY_PER_DAY, REFUND_HISTORY_SCREEN, REFUND_HISTORY_UNITS, historyFrom, refundHistory } from "@/lib/buyer-history";
 import { readInbox, startChat } from "@/lib/inbox";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { POST as inboxRoute } from "@/app/api/store/inbox/route";
@@ -145,6 +145,13 @@ async function main(): Promise<void> {
   is("Stripe refused: could not check", await refundHistory(store, "buyer@example.com"), unknown);
   replies = { "buyer@example.com": { status: 200, body: { object: "list", data: [paid("cs_x", null)], has_more: false } } };
   is("a charge not given: could not check", await refundHistory(store, "buyer@example.com"), unknown);
+  // Codex X6's LOW on #3841: a listing heavier than the page the read is priced at (REFUND_HISTORY_READ in
+  // tests/plan-cost-registry.ts) is stopped as it streams in and said as could not check, never worked through whole.
+  const heavy = { ...list([paid("cs_full", charge(true, 4900, false))]), url: "x".repeat(REFUND_HISTORY_PAGE_BYTES) };
+  replies = { "buyer@example.com": { status: 200, body: heavy } };
+  is("a page heavier than is read: could not check", await refundHistory(store, "buyer@example.com"), unknown);
+  replies = { "buyer@example.com": { status: 200, body: { ...list([paid("cs_full", charge(true, 4900, false))]), url: "/v1/checkout/sessions" } } };
+  is("the same page at its size still reads", (await refundHistory(store, "buyer@example.com")).state, "known");
 
   // The route's action is held while the studio's screen does not exist (tests/buyer-history-held.test.ts); turned on
   // here, for this file only, to hold what it does once the screen ships.

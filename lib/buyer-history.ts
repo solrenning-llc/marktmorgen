@@ -69,6 +69,13 @@ export const REFUND_HISTORY_UNITS = 3;
 /** The newest checkouts one check reads under each spelling of the address: Stripe's largest page. */
 export const REFUND_HISTORY_LIST = 100;
 
+/**
+ * The most bytes of one listing read (onAccount's maxBytes): an expanded page of REFUND_HISTORY_LIST checkouts at
+ * its largest, the size REFUND_HISTORY_READ prices (tests/plan-cost-registry.ts). A heavier answer is stopped as it
+ * streams in and said as could not check (Codex X6 on #3841).
+ */
+export const REFUND_HISTORY_PAGE_BYTES = 1_000_000;
+
 /** A read gives up sooner than a payment would: this is only a look back. */
 export const REFUND_HISTORY_READ_MS = 8_000;
 

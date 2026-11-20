@@ -658,7 +658,7 @@ export type KeptSubmission = Submission & { path: string; who: string; folder: s
 
 export type DoorClosed =
   | { ok: true; submission: KeptSubmission }
-  | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" | "note" | "full" };
+  | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" | "note" | "full" | "tries" | "busy" };
 
 /**
  * Closes the buyer's upload: the pieces joined and the file measured by the
@@ -816,7 +816,7 @@ export async function abortSubmissionDoor(
   pathname: string,
   steps: DoorSteps = VAULT_STEPS,
   nowSeconds = Math.floor(Date.now() / 1000),
-): Promise<"done" | "unknown" | "unavailable"> {
+): Promise<"done" | "unknown" | "unavailable" | "tries" | "busy"> {
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return "unknown";
   // The door is taken off Redis in one step before the vault is asked, as a close takes it (review of #3570, Claude 1
@@ -826,10 +826,14 @@ export async function abortSubmissionDoor(
   if (!taken) throw new UnknownReplyError("a submission upload taken to give up");
   if (taken[0] === null) return "unknown";
   if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to give up");
-  if (!(await steps.abortReservedVault(pathname))) {
+  // Only the vault's own true is a cancel (lib/vault.ts abortVaultUpload): "busy" (another finish or cancel of the
+  // upload under way) and "tries" (past the requests one upload may make) cancelled nothing, so the place and the
+  // door stay, as they do when the vault could not confirm.
+  const aborted = await steps.abortReservedVault(pathname);
+  if (aborted !== true) {
     // Not given up at the vault: the door is put back for the rest of its day, only while the buyer still holds it.
     await putBackSubmissionDoor(door, pathname, nowSeconds);
-    return "unavailable";
+    return aborted === "busy" || aborted === "tries" ? aborted : "unavailable";
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
   await givePlace(place, pathname);

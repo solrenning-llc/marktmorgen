@@ -5,6 +5,8 @@
  * runs in one EVAL with the fence of C5-20261119-1210-defeitos18: the store's id key still there and the store not
  * being erased, or nothing is written. Synthetic PayPal, clock and Redis only; fetch answers only the stand-ins here.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, storeIdCommand, storeRef, ERASING_KEY, erasingField } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -118,6 +120,12 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("the erasure was marked during the paid record's read, the store's id key kept", [marked, (await real([["EXISTS", storeIdKey]]))[0]], [true, 1]);
   is("the store being erased does not get its watch list made again", (await real([["EXISTS", watchKey]]))[0], 0);
+  // Claude 6 at #3499's merge of main: a branch that still wrote a plain ZADD put the order back unfenced after the
+  // merge, and no part above reaches its path (the refund notice's unreadable mark). Every write that puts an order
+  // back on the watch goes through PAYPAL_WATCH_IF_LIVE; none is a plain ZADD of the watch list.
+  part("No path of the watch puts an order back with a plain ZADD");
+  const source = readFileSync(join(process.cwd(), "lib/paypal-sales.ts"), "utf8");
+  is("no plain ZADD of the watch list in lib/paypal-sales.ts", source.match(/\["ZADD", watchKey\(/g)?.length ?? 0, 0);
   Date.now = realNow;
   done();
 }

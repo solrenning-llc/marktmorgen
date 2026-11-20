@@ -19,7 +19,9 @@ test("unknown event and member reads return no records and log the failure", asy
   redis.pipeline = (async () => { throw new Error("synthetic Redis read failure"); }) as typeof redis.pipeline;
   console.error = (...args: unknown[]) => { logged.push(args); };
   try {
-    assert.deepEqual(await eventsFound(store, config, ["0123456789ab"], viewer), []);
+    // Merge with #3395: eventsFound now answers { found, unchecked, lasting }; a failed event read is no event,
+    // not an unknown one (nothing was there to check), so found is empty and unchecked 0.
+    assert.deepEqual(await eventsFound(store, config, ["0123456789ab"], viewer), { found: [], unchecked: 0, lasting: false });
     assert.deepEqual(await membersFound(store.community!.id, ["member@example.com"]), []);
     assert.deepEqual(logged.map(([message]) => message), [
       "reading events for community search failed",

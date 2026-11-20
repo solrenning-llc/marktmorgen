@@ -11,6 +11,7 @@ import { everyOf } from "@/lib/product-recurring";
 import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
+import { askBillingAddress } from "@/lib/billing-address";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
@@ -26,7 +27,7 @@ import { currencyRule } from "@/lib/money";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
-import { activeShipping } from "@/lib/shipping";
+import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
 import { type ShipAddress, shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { type Shipped, readShipped } from "@/lib/shipments";
 import { shippingWords } from "@/lib/buyer-words/shipping";
@@ -138,6 +139,8 @@ export function canSellProduct(store: Store, product: Listing): boolean {
   if (product.priceCents === 0) return false;
   // A draft is not on sale until the creator publishes it.
   if (product.hidden) return false;
+  // Shipped only where its EU/EEA safety fields keep closed (618 [SZ2], lib/physical-legal-ship.ts): not sold until filled.
+  if (shipsNowhere(product)) return false;
   if (!canSell(store)) return false;
   // What it hands over is read from the product alone (lib/product-option.ts,
   // handsOver), which the studio also reads to say what removing a price does.
@@ -351,7 +354,10 @@ export async function createCheckout(
   // A call is booked for a time, through its own door, never bought blind.
   if (product.call) throw new Error("A call is booked, not bought directly");
   // A physical product is shipped to the buyer who pays for it: not as a gift or for a group (lib/shipping.ts).
-  const shipping = activeShipping(product);
+  // Without the EU/EEA countries while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts), and
+  // without the EU and the UK until the opening, where consumerGate refuses a buyer too (789 [IV1], lib/eu-vat-goods.ts).
+  const shipping = shippingNow(product);
+  if (shipping && shipping.countries.length === 0) throw new Error("This is not shipped anywhere right now");
   if (shipping && (extras.gift || extras.group)) throw new Error("This is shipped to the buyer who pays for it");
 
   // A bundle's list is read now and written onto the checkout, so what this
@@ -416,6 +422,9 @@ export async function createCheckout(
   });
 
   if (recurring) body.set("subscription_data[billing_mode][type]", "classic");
+  // Every sale here charges (a free product is never sold, canSellProduct; a trial still keeps the card for the
+  // payments): the buyer's full billing address, 790 [IV2]. Set before the confirmation digest below binds the body.
+  askBillingAddress(body);
 
   // Which option was bought decides which file is handed over later, so it
   // travels with the charge rather than being worked out again afterward.

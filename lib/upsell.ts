@@ -378,25 +378,38 @@ export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, targe
  * EU VAT art. 9a (lib/eu-vat-gate.ts; 789 [IV1] unit 1, C): whether this offer may be charged to this buyer. The same
  * question the card checkout asks (consumerGate), on the product offered, read on its own supply (a bundle by its
  * members), never on the order it follows: a parent exempt by design (a live call, a package of calls) lets nothing
- * through. Its evidence is the order's own: the billing country Stripe kept on the paid checkout and the IP country of
- * this request. An offer that is free or a service a person gives live goes on exactly as consumerGate lets it. Anything
- * else also needs the two items not to contradict each other (art. 24f): with the IP country present, it must be the
- * billing country, compared trimmed and upper case as lib/eu-vat-evidence.ts reads both. The aliases consumerGate reads
- * (UK for GB, EL for GR) are not unfolded here, so "UK" against "GB" disagrees and is refused: fail-closed, and both
- * name a place REFUSED_PLACES refuses anyway. Pure; nothing is read, written or kept, the country included.
+ * through. Its two items of evidence are the order's own (arts. 24b, 24f; 790 [IV2] unit 2, the owner's decision of
+ * 20/11/2026): the billing address's country Stripe kept on the paid checkout, which every paid checkout asks for
+ * (lib/billing-address.ts), and the country of the card that paid it (payment_intent.payment_method.card.country). An
+ * offer that is free or a service a person gives live goes on exactly as consumerGate lets it. Anything else needs
+ * consumerGate to let the address through with this request's headers, so an EU or UK place in the IP country or the
+ * address is still refused, and the card's country to be present and to be the address's, compared trimmed and upper
+ * case as lib/eu-vat-evidence.ts reads the address. A card with no country, or one that is not a string, is no second
+ * item and is refused; so is a payment with no card at all, such as Stripe Link (lib/instant-pay.ts), which may be
+ * saved for the offer but carries no card country. The IP country is no longer compared with the address: it is not one of the two items. The
+ * aliases consumerGate reads (UK for GB, EL for GR) are not unfolded here, so "UK" against "GB" disagrees and is
+ * refused: fail-closed, and both name a place REFUSED_PLACES refuses anyway. Pure; nothing is read, written or kept,
+ * the countries included.
  */
 export function offerGate(
   target: Listing,
   members: ReadonlyMap<string, EuSupplyFields> | undefined,
-  evidence: { headers: Headers; billing: unknown },
+  evidence: { headers: Headers; billing: unknown; card: unknown },
 ): boolean {
   // Exempt whatever the evidence: consumerGate answers ok with none only for a free line or a live service.
   if (consumerGate({ product: target, members, headers: new Headers(), form: new URLSearchParams() }).ok) return true;
   const billing = typeof evidence.billing === "string" ? evidence.billing : "";
   const form = new URLSearchParams(billing.trim() ? { [BILLING_COUNTRY_FIELD]: billing } : {});
   if (!consumerGate({ product: target, members, headers: evidence.headers, form }).ok) return false;
-  const items = checkoutEvidence(evidence.headers, form);
-  return items.ip === null || items.ip === items.billing;
+  // The card's country, read as checkoutEvidence reads the address (lib/eu-vat-evidence.ts): cut, trimmed, upper case.
+  const card = typeof evidence.card === "string" ? evidence.card.slice(0, 64).trim().toUpperCase() : "";
+  return card !== "" && card === checkoutEvidence(new Headers(), form).billing;
+}
+
+/** The paying card's country as Stripe gave it on the checkout's expanded payment method, or nothing. */
+export function cardCountryOf(paymentIntent: unknown): unknown {
+  const method = (paymentIntent as { payment_method?: unknown } | null | undefined)?.payment_method;
+  return (method as { card?: { country?: unknown } | null } | null | undefined)?.card?.country;
 }
 
 /** What a bundle offered holds, by id, as the checkout reads it for the gate; nothing for a product on its own. */
@@ -428,7 +441,7 @@ export async function takeUpsell(input: {
    * given for the order before it never counts for this one.
    */
   consent?: DigitalConsent | null;
-  /** The request's headers: its IP country is one of the two items of the EU VAT gate's evidence (offerGate). */
+  /** The request's headers: an EU or UK IP country refuses the offer in the EU VAT gate (offerGate). */
   headers: Headers;
 }): Promise<TakeResult> {
   const { store, session, secret, origin, answer } = input;
@@ -490,7 +503,9 @@ export async function takeUpsell(input: {
   // EU VAT art. 9a (offerGate): refused before anything is written, held, reserved or charged, on the offered
   // product's own supply, with the billing country of the order paid and this request's IP country. A no is refused
   // the same: an offer the page never drew has no answer, and the funnel never moves on past it.
-  if (!offerGate(target, members, { headers: input.headers, billing: view.customer_details?.address?.country })) return { kind: "unavailable" };
+  if (!offerGate(target, members, { headers: input.headers, billing: view.customer_details?.address?.country, card: cardCountryOf(view.payment_intent) })) {
+    return { kind: "unavailable" };
+  }
 
   if (answer === "no") {
     // Nothing is charged; the answer is written once, like a yes.
@@ -1031,10 +1046,11 @@ export async function funnelView(input: {
    */
   cart?: { offerFrom: string | null; email: string | null };
   /**
-   * The EU VAT gate's evidence (offerGate): the request's headers, for its IP country, and the billing country of
-   * the order paid. An offer it refuses is never drawn; the country is neither shown nor kept.
+   * The EU VAT gate's evidence (offerGate): the request's headers, whose IP country refuses an EU or UK place, and the
+   * two items of the order paid, its billing address's country and its card's (cardCountryOf). An offer it refuses is
+   * never drawn; the countries are neither shown nor kept.
    */
-  evidence: { headers: Headers; billing: unknown };
+  evidence: { headers: Headers; billing: unknown; card: unknown };
 }): Promise<FunnelView> {
   const { store, session, product } = input;
   const records = await readAnswers(session);

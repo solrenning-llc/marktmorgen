@@ -649,6 +649,23 @@ export class MemoryRedis {
           }
           return queued;
         }
+        // lib/submission-store.ts SUBMISSION_SLOT_TAKE: a slot's turn taken off only while still at the score read.
+        if (key.startsWith("-- marktmorgen:submission-slot-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, score] = args;
+          const held = this.run(["ZSCORE", list, member]);
+          if (held === null || held === undefined || Number(held) !== Number(score)) return 0;
+          this.run(["ZREM", list, member]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_STORE_NEXT: the store's turn taken off when its list is empty, else
+        // set to the soonest turn on it.
+        if (key.startsWith("-- marktmorgen:submission-slot-store-next:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, list, stores, store] = args;
+          const first = this.zset(list)[0];
+          if (first === undefined) this.run(["ZREM", stores, store]);
+          else this.run(["ZADD", stores, String(first.score), store]);
+          return 1;
+        }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back,
         // and one of another generation (started again meanwhile) is left as it is.
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v2\n") && args[0] === "3" && args.length === 10) {

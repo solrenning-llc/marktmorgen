@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   replies = ["not json", "not json"];
   const failed = await writePage(store, { title: "Recipe Pack", price: "$27", kind: "download", summary: "", about: "", notes: "", pdf: await firstPages(await book.save(), 3) });
   is("a reading that says nothing, with nothing else said, drafts nothing", failed.ok ? "drafted" : failed.reason, "failed");
-  is("started provider work retains its reserved requests", await aiLeft(store), left - 1 - READ_PDF_JOBS);
+  is("the reading, sent, stays counted; the page, never asked for, is given back (758 [STN5])", [await aiLeft(store), asked.length], [left - READ_PDF_JOBS, 1]);
 
   done();
 }

@@ -1,27 +1,39 @@
 # The agents' coordination channel rolls over before GitHub closes it (owner, 20/11/2026, about 03h Fortaleza).
 # GitHub refuses comments on an issue past 2,500; the channel is the one open issue labeled canal-ativo. At 2,250
-# comments on it, scripts/coordination_rollover.mjs opens the next part (or uses one already opened by hand), writes its
-# first comment explaining the change and the label rule, puts a pointer line on top of the previous part's body, changes
-# the PAINEL's first line (comment 6929670678 on #4827) and moves the label last. It never closes or locks an issue and
-# never deletes or edits a comment but that one line. A failure stops before the label moves, so the channel never
-# switches halfway, and the run is red; the next comment on the same part retries the same rollover.
+# comments on it, scripts/coordination_rollover.mjs opens the next part (or uses one already opened from inside the
+# repository), puts a pointer line on top of the previous part's body, writes the new part's first comment explaining
+# the change and the label rule (with the PAINEL's old first line, to undo), changes the PAINEL's first line (comment
+# 6929670678 on #4827, the owner's one exception to "never edits comments") and moves the label last. It never closes or
+# locks an issue and never deletes or edits any other comment. Every read and check comes before the first write; a
+# failure leaves the run red and the channel where it was, and the next comment on the same part retries.
 #
-# It runs only on comments on the issue labeled canal-ativo once it holds 2,250, and by hand: every other comment skips
-# the job, which costs no runner minute (and standard runners are free in public repositories); a skipped run still
-# shows in the Actions list. No comment's text is read. A next part is adopted only if opened from inside the
-# repository. Not a required check and not part of CI: it has no final check (tests/coordination-rollover.test.ts).
+# It is off until the repository variable COORDINATION_ROLLOVER is set (owner, 20/11/2026: tested before it is turned on):
+#   - unset: comments run nothing; a manual run (Actions, Coordination rollover, Run workflow) is a dry run by default,
+#     which only reads and prints what a rollover would do;
+#   - "dry-run": every comment on the labeled issue runs that dry run and prints the values GitHub evaluated for the
+#     job's condition (labeled, pull request, comment count, at or above 2,250);
+#   - "on": a comment on the labeled issue at 2,250 comments or more rolls the channel over.
+# Every other comment skips the job, which costs no runner minute (standard runners are free in public repositories);
+# a skipped run still shows in the Actions list. The text of the triggering comment is never read. Not a required check
+# and not part of CI: it has no final check (tests/coordination-rollover.test.ts).
 name: Coordination rollover
 on:
   issue_comment:
     types: [created]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run only reads and prints what it would do; run rolls over if the active part is at 2,250 comments
+        type: choice
+        options: [dry-run, run]
+        default: dry-run
 permissions:
   contents: read
   issues: write
 jobs:
   rollover:
     name: Coordination rollover
-    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'canal-ativo') && github.event.issue.comments >= 2250) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'canal-ativo') && ((vars.COORDINATION_ROLLOVER == 'on' && github.event.issue.comments >= 2250) || vars.COORDINATION_ROLLOVER == 'dry-run')) }}
     # On the job, not the workflow: a run whose job is skipped (every other comment in the repository) never enters the
     # group, so it can never replace a pending run that would roll the channel over.
     concurrency:
@@ -41,4 +53,10 @@ jobs:
       - name: Open the next part and move the canal-ativo label when the active part nears the limit
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.COORDINATION_ROLLOVER }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+          EVENT_LABELED: ${{ contains(github.event.issue.labels.*.name, 'canal-ativo') }}
+          EVENT_IS_PR: ${{ github.event.issue.pull_request != null }}
+          EVENT_COMMENTS: ${{ github.event.issue.comments }}
+          EVENT_AT_ROLL: ${{ github.event.issue.comments >= 2250 }}
         run: node scripts/coordination_rollover.mjs

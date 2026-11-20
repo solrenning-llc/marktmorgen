@@ -6,8 +6,14 @@
 // part's body, changes the PAINEL's first line and moves the label LAST, so a failure at any earlier step leaves the
 // channel where it was and the next comment's run finishes the same rollover. Every step is idempotent.
 //
-// It never closes or locks an issue and never deletes, edits or hides a comment, with one exception the owner asked for:
-// the PAINEL's first line ("CANAL ATIVO: #N ..."), and only that line. A comment's text never reaches this script.
+// It never closes or locks an issue and never deletes, edits or hides a comment, with one exception the owner decided
+// (20/11/2026): the PAINEL's first line, and only that line. The PAINEL is found by its fixed id AND its fixed mark; its
+// first line must be "#N" or "Canal ativo: #N" (any case, bold or not), or nothing is written, the run fails and the
+// active channel gets one warning. Every other byte of the PAINEL is checked to be the same before the write, and the
+// old first line is kept in the new part's first comment, so the change can be undone. The text of the comment that
+// triggered a run never reaches this script.
+//
+// MODE "dry-run" (the manual run's default) only reads and prints what a rollover would do, at any count.
 // Run by .github/workflows/coordination-rollover.yml; held by tests/coordination-rollover.test.ts.
 
 /** @typedef {(method: string, path: string, body?: unknown) => Promise<any>} Api */
@@ -19,15 +25,20 @@ export const COMMENT_LIMIT = 2500;
 export const ROLL_AT = 2250;
 /** The PAINEL DA FILA, comment 6929670678 on #4827; its first line names the active part. */
 export const PANEL_COMMENT_ID = 6929670678;
-const FIND = "gh issue list --label canal-ativo --state open";
-const MARKER = "<!-- coordination-rollover: first comment -->";
+/** A fixed mark only the PAINEL has; with the fixed id, it makes the PAINEL the only comment this script edits. */
+export const PANEL_MARK = "PAINEL DA FILA";
 /** GitHub's limit on an issue or comment body. */
 export const BODY_LIMIT = 65536;
 /** Who may have opened a part this script adopts: never an outside account of a public repository. */
 export const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const FIND = "gh issue list --label canal-ativo --state open";
+const MARKER = "<!-- coordination-rollover: first comment -->";
+const WARN_MARKER = "<!-- coordination-rollover: panel warning -->";
 const POINTER = /^\*\*Canal ativo: #(\d+)\*\*/;
+/** The PAINEL's first line: "#N" or "Canal ativo: #N"; an old "(parte P), desde ... (Fortaleza)" after it is kept in step. */
+const PANEL_LINE = /^(\**\s*(?:canal ativo: )?)#(\d+)( \(parte \d+\), desde [^)]*\))?/i;
 const PAGES = 25;
-const PANEL_LINE = /^(\*\*CANAL ATIVO: )#\d+ \(parte \d+\), desde [^)]*\)/;
+const FENCE = "`".repeat(3);
 
 /** The part number in "Agent coordination — part 7 (continues #4858)", or null. */
 export function partOf(title) {
@@ -57,6 +68,12 @@ export function withPointer(body, next, pending = false) {
   return text ? line + "\n\n" + text : line;
 }
 
+/** The part a pointer line at the top of a body names, or null. */
+export const pointedTo = (body) => { const m = POINTER.exec(String(body ?? "")); return m ? Number(m[1]) : null; };
+
+/** Opened by the workflow itself or by someone with write access, never by an outside account. */
+export const trusted = (issue) => TRUSTED.has(issue?.author_association) || issue?.user?.login === "github-actions[bot]";
+
 /** "DD/MM/YYYY HHhMM" in Fortaleza, UTC−3 with no daylight saving time. */
 export function fortaleza(date) {
   const d = new Date(date.getTime() - 3 * 3600 * 1000);
@@ -64,14 +81,30 @@ export function fortaleza(date) {
   return `${two(d.getUTCDate())}/${two(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${two(d.getUTCHours())}h${two(d.getUTCMinutes())}`;
 }
 
-/** The PAINEL with only its first line naming the new part; anything else in it is left as it is. */
+/** A body's first line. */
+export const firstLine = (body) => { const text = String(body ?? ""); const end = text.indexOf("\n"); return end < 0 ? text : text.slice(0, end); };
+
+/** Why this PAINEL body cannot be edited, or null when it carries the mark and its first line has the expected format. */
+export function panelProblem(body) {
+  if (typeof body !== "string") return "the PAINEL comment could not be read";
+  if (!body.includes(PANEL_MARK)) return `comment ${PANEL_COMMENT_ID} no longer carries the mark "${PANEL_MARK}"`;
+  if (!PANEL_LINE.test(firstLine(body))) return `the PAINEL's first line is not "#N" or "Canal ativo: #N"`;
+  return null;
+}
+
+/** The PAINEL with only its first line naming the new part; every other byte stays the same, or it throws. */
 export function panelWith(body, next, part, now) {
-  const text = String(body ?? "");
-  const end = text.indexOf("\n");
-  const first = end < 0 ? text : text.slice(0, end);
-  if (!PANEL_LINE.test(first)) throw new Error("the PAINEL's first line is not the CANAL ATIVO line; not guessing where to write");
-  if (first.startsWith(`**CANAL ATIVO: #${next} (parte ${part}),`)) return text;
-  return first.replace(PANEL_LINE, `$1#${next} (parte ${part}), desde ${fortaleza(now)} (Fortaleza)`) + (end < 0 ? "" : text.slice(end));
+  const problem = panelProblem(body);
+  if (problem) throw new Error(problem + "; not guessing where to write");
+  const first = firstLine(body);
+  const rest = body.slice(first.length);
+  const m = PANEL_LINE.exec(first);
+  if (Number(m[2]) === next) return body;
+  const line = m[1] + "#" + next + (m[3] ? ` (parte ${part}), desde ${fortaleza(now)} (Fortaleza)` : "") + first.slice(m[0].length);
+  if (line.includes("\n")) throw new Error("the PAINEL's new first line would span lines");
+  const out = line + rest;
+  if (out.slice(line.length) !== rest) throw new Error("the PAINEL would change beyond its first line");
+  return out;
 }
 
 function newPartBody(active, count, now) {
@@ -84,20 +117,25 @@ function newPartBody(active, count, now) {
   ].join("\n\n");
 }
 
-function firstComment(active, next) {
+function firstComment(active, next, oldPanelLine) {
   return [
     MARKER,
     `**The coordination channel moved: #${active.number} is nearly full; the active channel is #${next}.**`,
     `Before you write in the channel, check which issue has the label \`${LABEL}\`: \`${FIND}\`. The label is on one issue only, and this ` +
       `workflow moves it before each part fills, with a pointer line on top of the previous part and the PAINEL's first line updated.`,
+    `To undo the PAINEL change, put back its first line (comment ${PANEL_COMMENT_ID}) as it was before this rollover:`,
+    FENCE + "text\n" + oldPanelLine.replaceAll(FENCE, "'''") + "\n" + FENCE,
   ].join("\n\n");
 }
 
-/** The part a pointer line at the top of a body names, or null. */
-export const pointedTo = (body) => { const m = POINTER.exec(String(body ?? "")); return m ? Number(m[1]) : null; };
-
-/** Opened by the workflow itself or by someone with write access, never by an outside account. */
-export const trusted = (issue) => TRUSTED.has(issue?.author_association) || issue?.user?.login === "github-actions[bot]";
+function panelWarning(problem) {
+  return [
+    WARN_MARKER,
+    `**Coordination rollover stopped before writing anything:** ${problem}.`,
+    `The workflow edits only the first line of the PAINEL (comment ${PANEL_COMMENT_ID}), and only when it is "#N" or "Canal ativo: #N" and the ` +
+      `comment carries "${PANEL_MARK}". Fix the PAINEL, then run the workflow by hand (Actions, Coordination rollover, Run workflow).`,
+  ].join("\n\n");
+}
 
 function list(value, what) {
   if (!Array.isArray(value)) throw new Error(`unreadable ${what}: ${JSON.stringify(value)?.slice(0, 300)}`);
@@ -120,14 +158,43 @@ function fits(body, what) {
   return body;
 }
 
+/** One warning in the active part, not repeated by the next comments' runs: its newest page is read for the marker. */
+async function warnOnce(api, active, problem) {
+  const last = Math.max(1, Math.ceil(active.comments / 100));
+  const page = list(await api("GET", `issues/${active.number}/comments?per_page=100&page=${last}`), "active part's newest comments");
+  if (page.some((c) => String(c?.body ?? "").startsWith(WARN_MARKER))) return;
+  await api("POST", `issues/${active.number}/comments`, { body: panelWarning(problem) });
+}
+
+/** The part this one continues, from its title "(continues #M)", or null. */
+export const previousOf = (title) => { const m = /\(continues #(\d+)\)$/.exec(String(title ?? "")); return m ? Number(m[1]) : null; };
+
 /**
- * One rollover check; returns { action: "none" } or { action: "rolled", next }. Throws on anything it cannot read.
+ * After a rollover whose very last write (the final pointer line) failed, a manual run finishes it: the previous part
+ * still says "opening: keep writing here" about the part that now has the label. Returns that part's number, or null.
+ */
+async function finishPointer(api, active) {
+  const previous = previousOf(active.title);
+  if (previous === null) return null;
+  const issue = await api("GET", `issues/${previous}`);
+  const body = issue?.body ?? "";
+  if (pointedTo(body) !== active.number || !body.startsWith(pointerLine(active.number, true))) return null;
+  await api("PATCH", `issues/${previous}`, { body: withPointer(body, active.number) });
+  return previous;
+}
+
+/**
+ * One rollover check; returns { action: "none" | "dry-run" | "rolled" }. Throws on anything it cannot read.
  * Every read and check comes before the first write. The order of the writes keeps a retry finishing the same
  * rollover: the next part, then the pointer on the active part (which records the next part's number for a retry),
  * then the first comment, the PAINEL, and the label last; the label is what agents follow, so until it moves they
- * keep writing in the active part and each of their comments retries.
+ * keep writing in the active part and each of their comments retries. A dry run stops after the reads and prints the plan.
  */
-export async function rollover({ api, now, log = console.log }) {
+/**
+ * @param {{ api: Api, now: Date, log?: (line: string) => void, dryRun?: boolean,
+ *   event?: null | { issue?: string, labeled?: string, pullRequest?: string, count?: string, atRoll?: string } }} options
+ */
+export async function rollover({ api, now, log = console.log, dryRun = false, event = null }) {
   const labeled = list(await api("GET", `issues?labels=${LABEL}&state=all&per_page=100`), "labeled issue listing")
     .filter((i) => !i?.pull_request);
   if (labeled.length !== 1) throw new Error(`exactly one issue must have the label ${LABEL}; found ${labeled.length}: ${labeled.map((i) => "#" + i?.number).join(", ")}. ` +
@@ -137,9 +204,16 @@ export async function rollover({ api, now, log = console.log }) {
   if (!Number.isSafeInteger(active.number) || active.state !== "open" || part === null || !Number.isSafeInteger(active.comments)) {
     throw new Error(`the labeled issue is not an open coordination part: ${JSON.stringify({ number: active.number, state: active.state, title: active.title })}`);
   }
-  if (active.comments < ROLL_AT) {
-    log(`#${active.number} (part ${part}) has ${active.comments} comments, below ${ROLL_AT}: nothing to do`);
-    return { action: "none", active: active.number };
+  if (event) {
+    log(`GitHub evaluated for this event: issue #${event.issue}, labeled ${LABEL}: ${event.labeled}, pull request: ${event.pullRequest}, ` +
+      `comments: ${event.count}, at or above ${ROLL_AT}: ${event.atRoll}`);
+  }
+  const atRoll = active.comments >= ROLL_AT;
+  if (!atRoll && !dryRun) {
+    const finished = await finishPointer(api, active);
+    log(`#${active.number} (part ${part}) has ${active.comments} comments, below ${ROLL_AT}: nothing to do` +
+      (finished ? `; the line on top of #${finished} now says it no longer takes coordination` : ""));
+    return { action: finished ? "finished" : "none", active: active.number };
   }
 
   // Reads and checks, all before any write.
@@ -160,10 +234,28 @@ export async function rollover({ api, now, log = console.log }) {
     next = found[0] ?? null;
   }
   const panel = await api("GET", `issues/comments/${PANEL_COMMENT_ID}`);
-  if (typeof panel?.body !== "string") throw new Error("unreadable PAINEL comment " + PANEL_COMMENT_ID);
+  const problem = panelProblem(panel?.body);
+  if (problem) {
+    if (!dryRun) await warnOnce(api, active, problem);
+    throw new Error(problem + (dryRun ? " (dry run: no warning written)" : `; one warning is in #${active.number}`));
+  }
   const PROBE = 99999999;
   fits(panelWith(panel.body, PROBE, part + 1, now), "the PAINEL");
   fits(withPointer(active.body, PROBE), `#${active.number}'s body`);
+
+  if (dryRun) {
+    const n = next?.number ?? "N";
+    const plan = [
+      `dry run: nothing is written. #${active.number} (part ${part}) has ${active.comments} comments; a rollover ${atRoll ? "is due now" : `starts at ${ROLL_AT}`}. It would:`,
+      next ? `1. use #${next.number}, already open: "${title}"` : `1. open "${title}" (#N)`,
+      `2. put on top of #${active.number}: ${pointerLine(n, true)}`,
+      `3. write #${n}'s first comment, keeping the PAINEL's old first line: ${firstLine(panel.body)}`,
+      `4. change the PAINEL's first line to: ${firstLine(panelWith(panel.body, next?.number ?? PROBE, part + 1, now)).replace(String(PROBE), "N")}`,
+      `5. move the label ${LABEL} from #${active.number} to #${n}, then make the line on #${active.number}: ${pointerLine(n)}`,
+    ];
+    for (const line of plan) log(line);
+    return { action: "dry-run", active: active.number, next: next?.number ?? null, due: atRoll, plan };
+  }
 
   // Writes.
   const opened = !next;
@@ -176,7 +268,7 @@ export async function rollover({ api, now, log = console.log }) {
 
   const comments = await all(api, `issues/${next.number}/comments?sort=created`, "next part's comments");
   if (!comments.some((c) => String(c?.body ?? "").startsWith(MARKER))) {
-    await api("POST", `issues/${next.number}/comments`, { body: firstComment(active, next.number) });
+    await api("POST", `issues/${next.number}/comments`, { body: firstComment(active, next.number, firstLine(panel.body)) });
   }
 
   const newPanel = panelWith(panel.body, next.number, part + 1, now);
@@ -192,20 +284,54 @@ export async function rollover({ api, now, log = console.log }) {
   try {
     await api("POST", `issues/${next.number}/labels`, { labels: [LABEL] });
   } catch (error) {
-    let back = "it is back on #" + active.number;
+    // The add may have been applied with its reply lost: read who has the label before putting it back, so it is never
+    // on two issues. If that read fails too, nothing is put back and the run says to look.
+    let now;
     try {
-      await api("POST", `issues/${active.number}/labels`, { labels: [LABEL] });
-    } catch (again) {
-      back = `putting it back on #${active.number} failed too (${String(again)}): NO issue has the label; put it on #${next.number} by hand`;
+      now = list(await api("GET", `issues?labels=${LABEL}&state=all&per_page=100`), "labeled issue listing").filter((i) => !i?.pull_request).map((i) => i.number);
+    } catch (unread) {
+      throw new Error(`the label add on #${next.number} failed (${String(error)}) and who has it could not be read (${String(unread)}); ` +
+        `check by hand that exactly one of #${active.number} and #${next.number} has ${LABEL}`);
     }
-    throw new Error(`the label could not go on #${next.number} (${String(error)}); ${back}`);
+    if (now.length === 1 && now[0] === next.number) {
+      log(`the label add on #${next.number} answered an error but was applied`);
+    } else {
+      let back = "it is back on #" + active.number;
+      try {
+        await api("POST", `issues/${active.number}/labels`, { labels: [LABEL] });
+      } catch (again) {
+        back = `putting it back on #${active.number} failed too (${String(again)}): NO issue has the label; put it on #${next.number} by hand`;
+      }
+      throw new Error(`the label could not go on #${next.number} (${String(error)}); ${back}`);
+    }
   }
   log(`the channel is now #${next.number} (part ${part + 1})`);
   // The label moved: the pointer now says the part is closed for coordination. A failure here leaves the run red with the
-  // channel already right; the "opening" line still points to the right part.
+  // channel already right (the "opening" line still points to the right part); a manual run in mode run finishes it.
   const closed = withPointer(pending, next.number);
   if (closed !== pending) await api("PATCH", `issues/${active.number}`, { body: closed });
   return { action: "rolled", active: active.number, next: next.number };
+}
+
+/**
+ * The GitHub REST client. A 5xx is retried twice (after wait(5000), then wait(15000)) only for calls that are safe to
+ * repeat: reads, PATCHes and the label calls, which set a state. A POST of an issue or comment is never repeated (it may
+ * have been made): the next run finds it by the pointer, the title or the marker.
+ * @returns {Api}
+ */
+export function httpApi({ fetch: get, token, base, wait = (ms) => new Promise((ok) => setTimeout(ok, ms)) }) {
+  return async function api(method, path, body) {
+    for (let attempt = 0; ; attempt += 1) {
+      const reply = await get(base + path, {
+        method,
+        headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (reply.status >= 500 && attempt < 2 && (method !== "POST" || path.endsWith("/labels"))) { await wait(attempt ? 15000 : 5000); continue; }
+      if (!reply.ok) throw new Error(`${method} ${path}: HTTP ${reply.status} ${(await reply.text()).slice(0, 300)}`);
+      return reply.status === 204 ? null : reply.json();
+    }
+  };
 }
 
 async function main() {
@@ -213,25 +339,11 @@ async function main() {
   const repo = process.env.GITHUB_REPOSITORY;
   const base = (process.env.GITHUB_API_URL || "https://api.github.com") + "/repos/" + repo + "/";
   if (!token || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("missing GITHUB_TOKEN or GITHUB_REPOSITORY");
-
-  /** @type {Api} */
-  async function api(method, path, body) {
-    // A 5xx is retried twice, 5 and 15 seconds later, for the calls that are safe to repeat: reads, PATCHes and the label
-    // calls set a state. A POST of an issue or comment is never repeated here (it may have been made): the next run finds
-    // it by the pointer, the title or the marker.
-    for (let attempt = 0; ; attempt += 1) {
-      const reply = await fetch(base + path, {
-        method,
-        headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (reply.status >= 500 && attempt < 2 && (method !== "POST" || path.endsWith("/labels"))) { await new Promise((ok) => setTimeout(ok, attempt ? 15000 : 5000)); continue; }
-      if (!reply.ok) throw new Error(`${method} ${path}: HTTP ${reply.status} ${(await reply.text()).slice(0, 300)}`);
-      return reply.status === 204 ? null : reply.json();
-    }
-  }
-
-  await rollover({ api, now: new Date() });
+  const mode = process.env.MODE;
+  if (mode !== "dry-run" && mode !== "run" && mode !== "on") throw new Error(`MODE must be dry-run, run or on; got ${JSON.stringify(mode)}`);
+  const event = process.env.EVENT_ISSUE ? { issue: process.env.EVENT_ISSUE, labeled: process.env.EVENT_LABELED, pullRequest: process.env.EVENT_IS_PR,
+    count: process.env.EVENT_COMMENTS, atRoll: process.env.EVENT_AT_ROLL } : null;
+  await rollover({ api: httpApi({ fetch, token, base }), now: new Date(), dryRun: mode === "dry-run", event });
 }
 
 if (process.argv[1]?.endsWith("coordination_rollover.mjs")) {

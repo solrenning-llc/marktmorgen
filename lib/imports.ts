@@ -81,7 +81,8 @@ import {
 import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
-import { MAX_ABOUT_LENGTH, cleanAbout, writeStoreAbout } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout } from "@/lib/product-about";
+import { writeStoreAbout } from "@/lib/product-about-live";
 import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
 import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";

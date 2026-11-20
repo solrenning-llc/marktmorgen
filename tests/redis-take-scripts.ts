@@ -11,7 +11,7 @@ type Command = (string | number)[];
 type Script = (run: (command: Command) => unknown, keys: string[], argv: string[]) => unknown;
 
 const SCRIPTS: Record<string, Script> = {
-  // lib/product-about.ts ABOUT_WRITE_IF_STORE_LIVE: a store's product description written (or compared and written) only
+  // lib/product-about-live.ts ABOUT_WRITE_IF_STORE_LIVE: a store's product description written (or compared and written) only
   // while it is not erasing and its id key exists. {1} written, {0, length} changed, {-1} gone or erasing.
   "about-write-live:v1": (run, [storeId, erasing, about], [field, compare, expected, text]) => {
     if (run(["HGET", erasing, field]) !== null) return [-1];

@@ -74,7 +74,7 @@ export const COPY_COMMANDS = {
   step: 16,
   /**
    * A product: its two records, its long description (read, room, and its write fenced by the store's erasure: an EVAL
-   * with HGET, EXISTS and SET inside, lib/product-about.ts ABOUT_FENCE_EXTRA_COMMANDS more than a plain SET) and its
+   * with HGET, EXISTS and SET inside, lib/product-about-live.ts ABOUT_FENCE_EXTRA_COMMANDS more than a plain SET) and its
    * page (read, room, three reads, write, sections).
    */
   product: 17,

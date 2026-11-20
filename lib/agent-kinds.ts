@@ -10,7 +10,8 @@
  * (confirmed in a batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
-import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact, writeStoreAboutIf } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact } from "@/lib/product-about";
+import { writeStoreAboutIf } from "@/lib/product-about-live";
 import { setProductAbout, setProductSummary, setProductTitle, type Store } from "@/lib/store";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";

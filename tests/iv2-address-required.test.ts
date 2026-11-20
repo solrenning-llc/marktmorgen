@@ -139,10 +139,11 @@ async function main(): Promise<void> {
   }
   is("the card update stays a setup with no address", /mode: "setup"/.test(readFileSync(join(ROOT, "lib/card-update.ts"), "utf8")), true);
   const privacy = readFileSync(join(ROOT, "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
-  // Claude 3's and Claude 5's LOW on #4938 (VR item 2): the policy says only what the code does today. A package of calls
-  // (lib/call-packages.ts, held by Codex W in #2617) and PayPal do not ask yet, and the policy says so.
+  // Claude 3's and Claude 5's LOW on #4938 (VR item 2): the policy says only what the code does today; PayPal does not
+  // ask on a Stripe page, and the policy says so.
   is("RED: the policy no longer says every paid checkout without its exceptions", privacy.includes("asks for your billing address on every paid checkout,"), false);
-  is("RED: it names the two that do not ask yet", [privacy.includes("except, for now, when you buy a package of calls"), privacy.includes("PayPal asks for what it needs on its own page")], [true, true]);
+  // Since the package checkout asks too (790 [IV2] unit 1, its last paid Stripe checkout), only PayPal is named apart.
+  is("every paid Stripe checkout, a package of calls included; PayPal named apart", [privacy.includes("except, for now, when you buy a package of calls"), privacy.includes("on every paid checkout on its page, a package of calls included."), privacy.includes("PayPal asks for what it needs on its own page")], [false, true, true]);
   is("RED: both places say the same (the payment paragraph points to #billing-address)", privacy.includes('href="#billing-address"'), true);
   // Claude 2's LOW on #4946: the payment paragraph claims nothing the package checkout does not do; the exception is in
   // #billing-address, where it links.

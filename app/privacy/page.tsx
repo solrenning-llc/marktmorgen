@@ -432,7 +432,7 @@ export default function PrivacyPage() {
         <p id="billing-address">
           <strong className="text-black">Your billing address.</strong>{" "}
           Stripe asks for your billing address on every paid checkout on its
-          page, except, for now, when you buy a package of calls. PayPal asks
+          page, a package of calls included. PayPal asks
           for what it needs on its own page. Stripe keeps the address with the
           payment, on the Stripe account of whoever is paid:
           the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen

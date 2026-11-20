@@ -62,6 +62,13 @@ async function main(): Promise<void> {
   back = await tip("US", { amount: "99999", other: "<b>1</b>", [BILLING_COUNTRY_FIELD]: "ZZ" });
   is("nothing the box does not offer goes back: an amount it does not offer, markup typed, an unknown country", [back.searchParams.get("chose"), back.searchParams.get("other"), back.searchParams.get("from")], [null, null, null]);
   is("the notice and the place on the page are kept", [back.pathname, back.hash], [`/@${SHOP}`, "#support"]);
+  // Claude 3's LOW on #4919 @23935b6469: after a notice that is not about the country ("error", "limited"), the country
+  // already passed the gate, so it goes back too.
+  const working = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "stand-in for Stripe failing" } }), { status: 500 })) as typeof fetch;
+  back = await tip("US", { amount: preset, [BILLING_COUNTRY_FIELD]: "US" });
+  globalThis.fetch = working;
+  is("RED: error: the amount and the country go back", [back.searchParams.get("tip"), back.searchParams.get("chose"), back.searchParams.get("from")], ["error", preset, "US"]);
 
   part("The store page reads it only as the box offers it");
   is("RED: a known amount, a typed amount and a country", tipKept(store, { chose: preset, other: "20", from: "us" }), { chose: preset, other: "20", from: "US" });

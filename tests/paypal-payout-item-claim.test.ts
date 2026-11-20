@@ -13,6 +13,7 @@ import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/pa
 import { readBook, removePayout } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsclaim1";
@@ -94,6 +95,7 @@ async function seed(store: Store, two = false): Promise<void> {
       ["HSET", `nl:aff:${STATS}:sales`, "cs_2", sale("cs_2", BEN)],
     ]);
   }
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
   const sent = await payWithPayPal(store);
   if (!sent.ok) throw new Error(`not sent: ${sent.reason}`);

@@ -193,8 +193,8 @@ const nl: FormWords = {
 
 const pt: FormWords = {
   keepLabel: "Guardar minhas respostas neste aparelho até eu enviá-las",
-  keepHelp: "Elas ficam só neste navegador e não são enviadas a lugar nenhum antes de você apertar o botão. Deixe desligado num computador compartilhado.",
-  keepBack: "Suas respostas guardadas neste aparelho voltaram. Confira antes de enviar.",
+  keepHelp: "Ficam só neste navegador e não são enviadas para lado nenhum antes de carregar no botão. Deixe desligado num computador partilhado.",
+  keepBack: "As suas respostas guardadas neste dispositivo foram recuperadas. Verifique-as antes de enviar.",
   notYet: (when: string) => `Este formulário abre em ${when}.`,
   ended: "Este formulário está fechado e não recebe mais respostas.",
   send: "Enviar",

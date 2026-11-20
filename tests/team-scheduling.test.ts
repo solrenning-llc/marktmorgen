@@ -189,7 +189,8 @@ async function connectGoogle(store: Store, email: string): Promise<boolean> {
   const state = new URL(url).searchParams.get("state") ?? "";
   const taken = await takeConsent("google", state, { sessionCookie: `cookie-${email}`, email });
   if (!taken || taken.host !== hostId(email) || asked !== GOOGLE_HOST_SCOPES.join(" ")) return false;
-  const result = await finishConsent("google", { statsId: taken.statsId, code: email, verifier: taken.verifier, by: email, owner: { email: store.email, handle: store.handle }, host: taken.host });
+  // startedAt: when the consent flow began, which finishConsent now needs (lib/meet-connect.ts KEEP_UNLESS_GONE, Claude 5 zoom-forget-race).
+  const result = await finishConsent("google", { statsId: taken.statsId, code: email, verifier: taken.verifier, by: email, owner: { email: store.email, handle: store.handle }, host: taken.host, startedAt: taken.at });
   return result.ok;
 }
 
@@ -376,10 +377,14 @@ async function main(): Promise<void> {
   const hq = await hold(quay.store, quayCall, Q);
   if (!hq.ok) throw new Error("no hold on the quay call");
   await confirmBooking({ store: quay.store, product: quayCall, session: hq.session, start: Q, end: Q + HOUR, buyerEmail: "lee@example.com", buyerTz: NY, origin: "https://marktmorgen.com" });
-  const shorter: CallListing = { ...quayCall, call: { ...quayCall.call, minutes: 30 } };
-  const pastHours = await moveBooking({ store: quay.store, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 6.5 * HOUR, origin: "https://marktmorgen.com" });
+  // The change is saved, as the creator saves it: a move checks the call as saved once its lock is taken (issue #3983).
+  const changed = await setProductCall("quay@example.com", quayCall.id, { ...quayCall.call, minutes: 30 });
+  if (!changed.ok) throw new Error("the quay call was not changed to 30 minutes");
+  const quayNow = (await storeForEmail("quay@example.com")) as Store;
+  const shorter = (await readListing(quayNow, quayCall.id)) as CallListing;
+  const pastHours = await moveBooking({ store: quayNow, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 6.5 * HOUR, origin: "https://marktmorgen.com" });
   is("a move whose paid hour would run past the host's 17:00 is refused, though the call's 30 minutes now would fit", pastHours.ok ? "moved" : pastHours.reason, "taken");
-  const fits = await moveBooking({ store: quay.store, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 5 * HOUR, origin: "https://marktmorgen.com" });
+  const fits = await moveBooking({ store: quayNow, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 5 * HOUR, origin: "https://marktmorgen.com" });
   is("one that fits the whole hour moves, and the host is held for the whole hour", [fits.ok, ((await readClaims([hostId("quay@example.com")])).get(hostId("quay@example.com")) ?? []).find((c) => c.start === Q + 5 * HOUR)?.end], [true, Q + 6 * HOUR]);
 
   // The times offered for that move are the host's own at the paid length too: a host stretch that fits the call's 30

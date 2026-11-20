@@ -157,7 +157,9 @@ async function writeConfig(host: string, config: Config): Promise<void> {
 /** Forgets a host's last reading and last failure, only on a count Redis answered for it. */
 async function forgetReadings(host: string): Promise<void> {
   const [gone] = repliesFor(await redisPipeline([["DEL", goodKey(host), errKey(host)]]), 1) ?? [];
-  if (countOf(gone) === null) throw new UnknownReplyError("forgetting a host's calendar readings");
+  // One DEL of the two keys above answers 0, 1 or 2: a bigger count is not this command's (Codex G, G-20261119-0442).
+  const count = countOf(gone);
+  if (count === null || count > 2) throw new UnknownReplyError("forgetting a host's calendar readings");
 }
 
 function emptyConfig(email: string): Config {

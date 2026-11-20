@@ -381,6 +381,23 @@ export async function settleAllUsage(meter: Meter, now = Date.now()): Promise<Se
  * first time it is asked for a store, a month and a meter, and never again.
  */
 export async function firstWordOf(meter: Meter, folder: string, month: string): Promise<boolean> {
-  // Taken or unknown, nobody is written to this run (CX-123 rule 24).
-  return (await takeMark(toldKey(meter, folder, month), markValue())) === "ours";
+  return (await takeFirstWordOf(meter, folder, month)) !== null;
+}
+
+/**
+ * The month's first word taken for this run: the mark's own value, to give it back with, or null when it is another
+ * run's or unknown (CX-123 rule 24: nobody is written to this run).
+ */
+export async function takeFirstWordOf(meter: Meter, folder: string, month: string): Promise<string | null> {
+  const value = markValue();
+  return (await takeMark(toldKey(meter, folder, month), value)) === "ours" ? value : null;
+}
+
+/**
+ * Gives the month's first word back after its notice was certainly not sent (the provider refused it), so the next
+ * run writes again (Claude 7's cron hunt): only while the mark still holds this run's value. Never after an answer
+ * that is not known: the provider may have taken it, and the notice would go twice.
+ */
+export async function giveFirstWordBack(meter: Meter, folder: string, month: string, value: string): Promise<void> {
+  await releaseLock({ key: toldKey(meter, folder, month), token: value, ttlSeconds: 1 });
 }

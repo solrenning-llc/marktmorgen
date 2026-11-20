@@ -9,6 +9,9 @@
  *   - the tab's title alone takes one public request, as the body does;
  *   - a store past its public requests reads no certificate, listing or
  *     course for the title or the body, and the body says the store rests;
+ *   - while it rests, the tab is titled as the resting page is, in the
+ *     store's language, from the record the load already read: the title
+ *     sends no more than the body does;
  *   - an admission reply that is not a count (CX-123 rule 24) reads nothing
  *     either;
  *   - the title and the body are one load (React cache), so a page drawn is
@@ -21,10 +24,11 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import CertificatePage, { generateMetadata } from "@/app/[handle]/certificate/[id]/page";
 import { StoreResting } from "@/components/store-resting";
+import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { saveCourse, type Course } from "@/lib/course";
 import { storeKey } from "@/lib/learn";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setLanguage, setProductCourse, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
 import { requestsIn } from "@/lib/traffic";
 import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -110,6 +114,22 @@ async function main(): Promise<void> {
     const page = await body(id);
     is(`${id === "sample" ? "the sample's" : "a certificate's"} body: the store resting, nothing read`, [page.type === StoreResting, readContent(from)], [true, false]);
   }
+
+  part("While it rests, the tab says so, from the record already read");
+  const resting = (s: Store) => `${speech(s).w.restingTitle} — Marktmorgen`;
+  for (const id of [CERT_ID, "sample"]) {
+    let from = sent.length;
+    await body(id);
+    const page = sent.slice(from);
+    from = sent.length;
+    const tab = await title(id);
+    const sentForTab = sent.slice(from);
+    is(`${id === "sample" ? "the sample's" : "a certificate's"} title is the resting page's (${JSON.stringify(tab)})`, tab, resting(store));
+    is(`${id === "sample" ? "the sample's" : "a certificate's"} title sends no more than the body (${sentForTab.length}, ${page.length})`, sentForTab.length <= page.length, true);
+  }
+  const german = (await setLanguage(OWNER, "de")) as Store;
+  is("in the store's language", await title(CERT_ID), resting(german));
+  await setLanguage(OWNER, "en");
   await redis.pipeline([["DEL", counter]]);
 
   part("An admission reply that is not a count reads nothing (CX-123 rule 24)");

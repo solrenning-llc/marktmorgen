@@ -16,13 +16,17 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { addProduct, claimHandle, createStore, deleteStore, ensureStatsId, storeForEmail, storeForHandle, storeForId, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, createStore, deleteStore as deleteWith, ensureStatsId, storeForEmail, storeForHandle, storeForId, storeRef } from "@/lib/store";
+import { queueDeleted } from "@/lib/closed-store-data";
 import { listKeys, makeKey, resolveKey, revokeAllKeys } from "@/lib/api-keys";
 import { addEndpoint, forgetStoreWebhooks, webhooksView } from "@/lib/webhooks";
 import { dropTeam, memberStores, putMember } from "@/lib/team";
 import { resolveAccess } from "@/lib/studio-route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// As app/api/store/stores deletes a store: its walk entry written first (tests/store-delete-walk.test.ts).
+const deleteStore = (ref: string) => deleteWith(ref, queueDeleted);
 
 async function main(): Promise<void> {
   redis.clear();

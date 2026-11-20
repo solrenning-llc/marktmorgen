@@ -37,6 +37,9 @@ import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
 import { consentMetaValue } from "@/lib/digital-consent";
 import { NextRequest } from "next/server";
 import { POST as switchRoute } from "@/app/api/store/manage/switch/route";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_switch_only";
 process.env.RESEND_API_KEY = "re_test_yearly_switch_only";
@@ -76,7 +79,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   calls.push({ method, path, body });
-  if (method === "GET" && path === "/customers") return json({ data: [{ id: "cus_Dana000001", created: 1 }] });
+  // A list as Stripe gives it, with has_more (rule 23: fixture only; findMember reads lists exactly since sweep APP2).
+  if (method === "GET" && path === "/customers") return json({ data: [{ id: "cus_Dana000001", created: 1 }], has_more: false });
   if (method === "GET" && path === "/customers/cus_Dana000001") return json({ id: "cus_Dana000001", email: "dana@example.com" });
   if (method === "GET" && path === "/subscriptions") {
     const customer = url.searchParams.get("customer");

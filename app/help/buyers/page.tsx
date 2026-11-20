@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { BUYER_HELP, BUYER_HELP_CHECKED } from "@/lib/buyer-help";
 
 export const metadata: Metadata = {

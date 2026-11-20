@@ -96,7 +96,7 @@ function paidCheckout(id: string, product: string, fingerprint: string, via = ""
     currency: "usd",
     metadata: { store: "r24money", product, upsell_key: fingerprint, ...(via ? { via } : {}) },
     customer_details: { email: "buyer@example.com", address: { country: "US" } },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
   };
 }
 

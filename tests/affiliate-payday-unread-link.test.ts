@@ -17,6 +17,7 @@ import { connectPayPal, setAutoPay } from "@/lib/paypal-payouts";
 import { paydayEmail, sendPaydayEmails } from "@/lib/affiliate-payday";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "c0dec0dec0dec0dec0dec0dec0dec0d5";
@@ -57,6 +58,7 @@ async function seed(store: Store, auto: boolean): Promise<void> {
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff: "aaaaaaaaaaaa", at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })],
     ["SET", `nl:store:owner:${OWNER}`, JSON.stringify(store)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
   await setAutoPay(store, auto);

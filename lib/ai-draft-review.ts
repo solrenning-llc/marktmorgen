@@ -306,8 +306,11 @@ function digitsKey(written: string): string {
   return Number.isFinite(value) ? String(value) : plain;
 }
 
-/** A percentage written out after the digits ("19 percent", "20 pour cent"), read in the languages the drafts use. */
-const PERCENT_WORD = /[ \t]+(?:percent|pour[ \t]+cent|por[ \t]+ciento|por[ \t]+cento|prozent|per[ \t]+cento|procent)(?![\p{L}\p{N}])/iuy;
+/**
+ * A percentage written out after the digits ("19 percent", "20 pour cent"), read in the languages the drafts use, with
+ * the British "per cent" and a hyphen before the word ("19-percent") too (LOW of Claude 6, Codex X6 and N1 on #3437).
+ */
+const PERCENT_WORD = /(?:[ \t]+|[ \t]*-[ \t]*)(?:percent|per[ \t]+cent|pour[ \t]+cent|por[ \t]+ciento|por[ \t]+cento|prozent|per[ \t]+cento|procent)(?![\p{L}\p{N}])/iuy;
 const PERCENT_SIGN = /[ \t]*%/y;
 
 /** Each number in a text, as written and by what it stands for, in the order they appear. */

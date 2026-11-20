@@ -5,7 +5,7 @@ import { POST } from "@/app/api/store/outreach/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { saveSender } from "@/lib/outreach";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, claimHandle, ensureStatsId, ensureStoreId, erasingField, ownerKey, setSubscription, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS, UNIT_COST, request } from "./plan-cost-registry";
@@ -102,3 +102,32 @@ test("a sender request already past its route guard refuses after the store was 
     assert.equal((await original.call(redis, [["GET", senderKey]]))[0], null);
   } finally { resume(); redis.pipeline = original; }
 });
+
+// The same fence on a store from before ids (sid ""), as on #4928 (Claude 3's LOW): its owner record stands in for
+// the identity key, so it keeps saving its sender while it lives and never restores it once that record is gone.
+async function legacyFixture() {
+  const { store, senderKey } = await fixture();
+  const key = await ownerKey(store.email);
+  const [raw] = await redis.pipeline([["GET", key]]);
+  const record = JSON.parse(String(raw)) as Record<string, unknown>;
+  await redis.pipeline([["DEL", storeIdCommand(store.sid)[1]], ["SET", key, JSON.stringify({ ...record, sid: undefined })]]);
+  const legacy = (await storeForEmail(store.email))!;
+  assert.equal(legacy.sid, "", "the legacy store reads back with no id");
+  return { store: legacy, senderKey, key };
+}
+test("a live store from before ids keeps saving its sender", async () => {
+  const { store, senderKey } = await legacyFixture();
+  assert.deepEqual(await saveSender(store, sender), sender);
+  assert.deepEqual(JSON.parse(String((await redis.pipeline([["GET", senderKey]]))[0])), sender);
+});
+for (const boundary of ["gone", "erasing"] as const) {
+  test(`a store from before ids never has its sender restored once ${boundary}`, async () => {
+    const { store, senderKey, key } = await legacyFixture();
+    if (boundary === "gone") await redis.pipeline([["DEL", key]]);
+    else await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(store)), "1"]]);
+    await redis.pipeline([["DEL", senderKey]]);
+    const outcome = await saveSender(store, sender).then(() => "saved", error => error instanceof UnknownReplyError ? "refused" : "other-error");
+    const [raw] = await redis.pipeline([["GET", senderKey]]);
+    assert.deepEqual({ outcome, raw }, { outcome: "refused", raw: null });
+  });
+}

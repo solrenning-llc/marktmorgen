@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   const made = await createRequest(store, draft, now);
   if (!made.ok) throw new Error("the request was not made");
   const id = made.request.id;
-  await markPaid(store, id, { id: "cs_test_refundsunverified000000001", amount_total: PAID, payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+  await markPaid(store, id, { id: "cs_test_refundsunverified000000001", amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
   const paidNow = async () => (await readRequest(id))!;
   is("the request is paid on Stripe, nothing refunded yet", [(await paidNow()).state, (await paidNow()).refunded, (await paidNow()).payment], ["paid", 0, INTENT]);
 
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
   const store2 = await paidStore("refund-check-2@example.com", "refundchk2");
   const made2 = await createRequest(store2, draft, now);
   if (!made2.ok) throw new Error("the second request was not made");
-  await markPaid(store2, made2.request.id, { id: "cs_test_refundsunverified000000002", amount_total: PAID, payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+  await markPaid(store2, made2.request.id, { id: "cs_test_refundsunverified000000002", amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
   const second = async () => (await readRequest(made2.request.id))!;
   const reading2 = async (given: Page[]) => {
     pages = given;

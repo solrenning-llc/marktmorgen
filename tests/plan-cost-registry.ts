@@ -2358,6 +2358,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
       // A waitlist's confirm press writes its entry back in WAIT_CONFIRM (#4268), one EVAL and WAIT_CONFIRM_CALLS inside it, and takes WAIT_CONFIRM_UNITS more of the store's requests before it writes (#4404).
       { file: "lib/waitlist.ts", names: ["WAIT_CONFIRM", "WAIT_CONFIRM_CALLS", "WAIT_CONFIRM_UNITS", "takePublicRequest(store, \"public\", Date.now(), WAIT_CONFIRM_UNITS)"] },
+      // A join's place is written in WAIT_JOIN, fenced by the coming-soon mark (#4462, 16 November 2026; since the merge
+      // of main of 18 November 2026, over main's exact join): one EVAL and at most WAIT_JOIN_CALLS inside it, a coming-soon
+      // check more where the HSETNX of a new place or the HASH_SWAP_IF of a place asked again was, inside the join's own
+      // request (withinStore "waitlist-ip").
+      { file: "lib/waitlist.ts", names: ["WAIT_JOIN", "WAIT_JOIN_CALLS", "withinStore(\"waitlist-ip\""] },
       // A link of a sent email that goes through its redirect (124 [F2-EDIT-SENT-LINKS], 6 November 2026): one request, counted before the change is read.
       { file: "app/go/[handle]/[id]/[link]/route.ts", names: ["takePublicRequest(store, \"public\", Date.now(), SENT_LINK_REQUEST_UNITS)", "readSentLinks(id)"] },
       { file: "lib/sent-link-rules.ts", names: ["SENT_LINK_REQUEST_UNITS = 1"] },
@@ -2385,6 +2390,16 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
+      // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and
+      // WAITLIST_DROP_BYTES bytes inside the additional unit (#4462; tests/waitlist-removed-drop-pending.test.ts).
+      { file: "lib/waitlist.ts", names: ["WAITLIST_DROP_UNITS", "WAITLIST_DROP_COMMANDS", "WAITLIST_DROP_BYTES", "holdWaitlistDrop", "finishWaitlistDrop"] },
+      { file: "app/api/store/product/route.ts", names: ["1 + WAITLIST_DROP_UNITS"] },
+      // A person's erasure reads the store's waitlist marks (two SCARD and two SMEMBERS, in ERASE_FIXED_COMMANDS) and
+      // counts each mark read (ERASE_PER.waitlists), capped at MAX_WAITLIST_MARKS; paid with the rest of the erasure.
+      { file: "lib/erasure-rules.ts", names: ["ERASE_FIXED_COMMANDS = 571", "waitlists: [3, 1_000]"] },
+      { file: "lib/waitlist.ts", names: ["MAX_WAITLIST_MARKS", "waitlistMarks"] },
+      { file: "lib/person-erasure.ts", names: ["waitlists: scope.waitlistMarks ?? 0"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },

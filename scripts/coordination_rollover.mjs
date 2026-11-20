@@ -37,13 +37,19 @@ export function partOf(title) {
 
 export const nextTitle = (part, previous) => `Agent coordination — part ${part + 1} (continues #${previous})`;
 
-export const pointerLine = (next) =>
-  `**Canal ativo: #${next}** (this part no longer takes coordination; find the current part with \`${FIND}\`).`;
+/**
+ * The line on top of the previous part. While the label has not moved yet ("pending"), it says to keep writing here, so
+ * agents' comments keep coming and each retries the rollover; once the label moved, it says the part is closed for
+ * coordination.
+ */
+export const pointerLine = (next, pending = false) => pending
+  ? `**Canal ativo: #${next}** (opening: keep writing here until the label \`${LABEL}\` moves there; check with \`${FIND}\`).`
+  : `**Canal ativo: #${next}** (this part no longer takes coordination; find the current part with \`${FIND}\`).`;
 
 /** The body with the pointer line on top; an older pointer line of this script is replaced, nothing else changes. */
-export function withPointer(body, next) {
+export function withPointer(body, next, pending = false) {
   const text = body ?? "";
-  const line = pointerLine(next);
+  const line = pointerLine(next, pending);
   if (POINTER.test(text)) {
     const end = text.indexOf("\n");
     return line + (end < 0 ? "" : text.slice(end));
@@ -147,8 +153,9 @@ export async function rollover({ api, now, log = console.log }) {
     }
     next = issue;
   } else {
-    const found = (await all(api, "issues?state=open&sort=created&direction=desc", "open issue listing"))
-      .filter((i) => !i?.pull_request && i?.title === title && trusted(i));
+    // By number, once: a page boundary can repeat an item when an issue is opened during the read.
+    const found = [...new Map((await all(api, "issues?state=open&sort=created&direction=desc", "open issue listing"))
+      .filter((i) => !i?.pull_request && i?.title === title && trusted(i)).map((i) => [i.number, i])).values()];
     if (found.length > 1) throw new Error(`more than one open "${title}": ${found.map((i) => "#" + i.number).join(", ")}`);
     next = found[0] ?? null;
   }
@@ -164,8 +171,8 @@ export async function rollover({ api, now, log = console.log }) {
   if (!Number.isSafeInteger(next?.number)) throw new Error("the next part has no number: " + JSON.stringify(next)?.slice(0, 300));
   log(opened ? `opened #${next.number}` : `using #${next.number}, already open`);
 
-  const withNext = withPointer(active.body, next.number);
-  if (withNext !== active.body) await api("PATCH", `issues/${active.number}`, { body: withNext });
+  const pending = withPointer(active.body, next.number, true);
+  if (pending !== active.body) await api("PATCH", `issues/${active.number}`, { body: pending });
 
   const comments = await all(api, `issues/${next.number}/comments?sort=created`, "next part's comments");
   if (!comments.some((c) => String(c?.body ?? "").startsWith(MARKER))) {
@@ -176,7 +183,12 @@ export async function rollover({ api, now, log = console.log }) {
   if (newPanel !== panel.body) await api("PATCH", `issues/comments/${PANEL_COMMENT_ID}`, { body: newPanel });
 
   // The switch itself, last: never two issues with the label, and back on the old one if the new one refuses it.
-  await api("DELETE", `issues/${active.number}/labels/${LABEL}`);
+  try {
+    await api("DELETE", `issues/${active.number}/labels/${LABEL}`);
+  } catch (error) {
+    // Already gone (a retried DELETE the server had applied): the switch goes on; anything else stops here, label in place.
+    if (!/HTTP 404/.test(String(error))) throw error;
+  }
   try {
     await api("POST", `issues/${next.number}/labels`, { labels: [LABEL] });
   } catch (error) {
@@ -189,6 +201,10 @@ export async function rollover({ api, now, log = console.log }) {
     throw new Error(`the label could not go on #${next.number} (${String(error)}); ${back}`);
   }
   log(`the channel is now #${next.number} (part ${part + 1})`);
+  // The label moved: the pointer now says the part is closed for coordination. A failure here leaves the run red with the
+  // channel already right; the "opening" line still points to the right part.
+  const closed = withPointer(pending, next.number);
+  if (closed !== pending) await api("PATCH", `issues/${active.number}`, { body: closed });
   return { action: "rolled", active: active.number, next: next.number };
 }
 

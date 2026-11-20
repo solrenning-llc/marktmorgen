@@ -64,6 +64,7 @@ is("the next part, the pointer on the previous part, the first comment, the PAIN
   ["DELETE", "`issues/${active.number}/labels/${LABEL}`"],
   ["POST", "`issues/${next.number}/labels`"],
   ["POST", "`issues/${active.number}/labels`"],
+  ["PATCH", "`issues/${active.number}`"],
 ]);
 is("no close, lock, state change, comment deletion or merge anywhere",
   /state:\s*"closed"|\/lock|DELETE",\s*`issues\/comments|\/merge/.test(script), false);
@@ -91,6 +92,9 @@ is("the line written by hand on 20/11/2026 is read as a pointer too",
 is("a body that only mentions the channel is not a pointer, and keeps its first line", [pointedTo("Canal ativo: #4932 is busy"), withPointer("**Canal ativo** is busy", 5000)],
   [null, pointerLine(5000) + "\n\n**Canal ativo** is busy"]);
 is("an empty body gets just the line", withPointer(null, 5000), pointerLine(5000));
+is("until the label moves, the line says to keep writing in the old part; the final line replaces it",
+  [pointerLine(5000, true).includes("keep writing here until the label"), pointedTo(pointerLine(5000, true)), withPointer(withPointer(old, 5000, true), 5000)],
+  [true, 5000, pointerLine(5000) + "\n\n" + old]);
 is("only someone inside the repository, or this workflow, opens a part it adopts",
   [trusted({ author_association: "MEMBER" }), trusted({ author_association: "OWNER" }), trusted({ author_association: "COLLABORATOR" }),
     trusted({ author_association: "NONE", user: { login: "github-actions[bot]" } }), trusted({ author_association: "NONE", user: { login: "someone" } }),
@@ -113,7 +117,7 @@ type Issue = { number: number; title: string; body: string | null; comments: num
   pull_request?: unknown; posted?: string[]; author_association: string; user: { login: string } };
 const member = { author_association: "MEMBER", user: { login: "owner" } };
 function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?: boolean; existingNext?: string; outsiderNext?: boolean;
-  panel?: string; failAdd?: boolean; failBack?: boolean; filler?: number; activeBody?: string } = {}) {
+  panel?: string; failAdd?: boolean; failBack?: boolean; filler?: number; activeBody?: string; deleteApplied404?: boolean; repeatPart?: boolean } = {}) {
   const calls: Call[] = [];
   const issues: Issue[] = [
     { number: 4858, title: "Agent coordination — part 6 (continues #4848)", body: "Part 6.", comments: 2500, labels: [], state: "open", ...member },
@@ -134,7 +138,12 @@ function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?
     calls.push({ method, path, body: payload as Record<string, unknown> });
     const one = /^issues\/(\d+)$/.exec(path);
     if (method === "GET" && path === `issues?labels=${LABEL}&state=all&per_page=100`) return issues.filter((i) => i.labels.some((l) => l.name === LABEL));
-    if (method === "GET" && path.startsWith("issues?state=open&sort=created&direction=desc&per_page=100&page=")) return pageOf([...issues].sort((a, b) => b.number - a.number), path);
+    if (method === "GET" && path.startsWith("issues?state=open&sort=created&direction=desc&per_page=100&page=")) {
+      const sorted = [...issues].sort((a, b) => b.number - a.number);
+      const page = pageOf(sorted, path);
+      // An issue opened during the read shifts the list by one: the next page repeats the last item of this one.
+      return options.repeatPart && path.endsWith("page=2") ? [sorted[99], ...page] : page;
+    }
     if (method === "GET" && one) return issues.find((x) => x.number === Number(one[1])) ?? null;
     if (method === "GET" && path === `issues/comments/${PANEL_COMMENT_ID}`) return { id: PANEL_COMMENT_ID, body: panel };
     if (method === "PATCH" && path === `issues/comments/${PANEL_COMMENT_ID}`) { panel = String(payload?.body); return { id: PANEL_COMMENT_ID }; }
@@ -152,6 +161,10 @@ function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?
       if (method === "POST" && !thread[2]) { i.posted = [...(i.posted ?? []), String(payload?.body)]; return { id: 1 }; }
     }
     const del = /^issues\/(\d+)\/labels\/(.+)$/.exec(path);
+    if (method === "DELETE" && del && options.deleteApplied404) {
+      const i = issues.find((x) => x.number === Number(del[1]))!; i.labels = i.labels.filter((l) => l.name !== del[2]);
+      throw new Error("DELETE " + path + ": HTTP 404 Label does not exist");
+    }
     if (method === "DELETE" && del) { const i = issues.find((x) => x.number === Number(del[1]))!; i.labels = i.labels.filter((l) => l.name !== del[2]); return []; }
     const add = /^issues\/(\d+)\/labels$/.exec(path);
     if (method === "POST" && add) {
@@ -194,10 +207,12 @@ async function endToEnd() {
       [gh.panel().split("\n")[0].startsWith("**CANAL ATIVO: #5000 (parte 8), desde 21/11/2026 06h30 (Fortaleza)."), gh.panel().split("\n").slice(1).join("\n") === before.split("\n").slice(1).join("\n")], [true, true]);
     is("the label is on the new part only", labeled(gh.issues), [5000]);
     is("the writes, in order: new part, pointer, first comment, PAINEL, then the label moves last", writesOf(gh.calls).map((c) => c.method + " " + c.path), [
-      "POST issues", "PATCH issues/4932", "POST issues/5000/comments", `PATCH issues/comments/${PANEL_COMMENT_ID}`, `DELETE issues/4932/labels/${LABEL}`, "POST issues/5000/labels"]);
+      "POST issues", "PATCH issues/4932", "POST issues/5000/comments", `PATCH issues/comments/${PANEL_COMMENT_ID}`, `DELETE issues/4932/labels/${LABEL}`, "POST issues/5000/labels",
+      "PATCH issues/4932"]);
+    is("the pointer said 'keep writing here' until the label moved", String(writesOf(gh.calls)[1].body?.body).startsWith(pointerLine(5000, true)), true);
     is("every PATCH carries only a body: no state, lock, title or label change", writesOf(gh.calls).filter((c) => c.method === "PATCH").every((c) => Object.keys(c.body ?? {}).join() === "body"), true);
     const again = await rollover({ api: gh.api, now: NOW, log: quiet });
-    is("a run right after (another comment queued) writes nothing more", [again.action, writesOf(gh.calls).length], ["none", 6]);
+    is("a run right after (another comment queued) writes nothing more", [again.action, writesOf(gh.calls).length], ["none", 7]);
   }
   {
     const gh = github({ comments: ROLL_AT, existingNext: "An agent's note." });
@@ -215,6 +230,16 @@ async function endToEnd() {
     const gh = github({ comments: ROLL_AT, filler: 250 });
     const result = await rollover({ api: gh.api, now: NOW, log: quiet });
     is("more than a page of newer issues: it reads every page before deciding there is no part 8", [result.next, gh.calls.filter((c) => c.path.includes("direction=desc")).length], [5000, 3]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, deleteApplied404: true });
+    const result = await rollover({ api: gh.api, now: NOW, log: quiet });
+    is("a label DELETE that answers 404 (already applied) still finishes the switch: never zero labeled issues", [result.next, labeled(gh.issues)], [5000, [5000]]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, existingNext: "note", filler: 96, repeatPart: true });
+    const result = await rollover({ api: gh.api, now: NOW, log: quiet });
+    is("the same part 8 read twice across a page boundary is one part, not two", [result.next, labeled(gh.issues)], [4990, [4990]]);
   }
   for (const [what, options] of [["two labeled issues", { extraLabeled: true }], ["no labeled issue", { noLabeled: true }]] as const) {
     const gh = github({ comments: ROLL_AT, ...options });
@@ -240,8 +265,11 @@ async function endToEnd() {
     retry.issues.splice(0, retry.issues.length, ...gh.issues);
     await rollover({ api: retry.api, now: NOW, log: quiet });
     is("the next comment's run finds part 8 through the pointer and finishes it: no second part, no second explanation",
-      [retry.calls.some((c) => c.method === "POST" && c.path === "issues"), retry.calls.some((c) => c.path.includes("direction=desc")), labeled(retry.issues), posts(retry.issues, 5000),
-        retry.calls.some((c) => c.method === "PATCH" && c.path === "issues/4932")], [false, false, [5000], 1, false]);
+      [retry.calls.some((c) => c.method === "POST" && c.path === "issues"), retry.calls.some((c) => c.path.includes("direction=desc")), labeled(retry.issues), posts(retry.issues, 5000)],
+      [false, false, [5000], 1]);
+    is("the old part's line stayed 'keep writing here' until the label moved, then became the final one, once",
+      [gh.issues.find((i) => i.number === 4932)!.body!.startsWith(pointerLine(5000, true)) || retry.issues.find((i) => i.number === 4932)!.body!.startsWith(pointerLine(5000)),
+        retry.calls.filter((c) => c.method === "PATCH" && c.path === "issues/4932").map((c) => String(c.body?.body).startsWith(pointerLine(5000)))], [true, [true]]);
   }
   {
     const gh = github({ comments: ROLL_AT, failAdd: true, failBack: true });

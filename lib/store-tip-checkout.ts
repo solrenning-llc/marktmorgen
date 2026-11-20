@@ -12,6 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
+import { askBillingAddress } from "@/lib/billing-address";
 import { saleHandles, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -104,6 +105,8 @@ export async function createTipCheckout(
   });
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
+  // A gift is paid: the buyer's full billing address (790 [IV2]).
+  askBillingAddress(body);
   // The share, when the store's plan has one (lib/platform-share.ts): a tip is
   // money paid through the store like any sale, and nothing comes off it.
   applyShare(body, store, { recurring: false, least: amount });

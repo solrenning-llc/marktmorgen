@@ -62,7 +62,7 @@ const item = {
 async function review(): Promise<void> {
   let answer: () => Promise<Response> = async () => json({ ok: false, error: "gone" }, 404);
   globalThis.fetch = (async () => answer()) as typeof fetch;
-  const entry = await mount(ReviewEntry as (props: { productId: string; item: typeof item }) => unknown, { productId: "prod1", item }, { attach });
+  const entry = await mount(ReviewEntry as (props: { productId: string; item: typeof item }) => unknown, { productId: "prod1", item }, undefined, { attach });
   onScreen = entry.tree;
   const check = async () => {
     type(entry.tree(), "Keep your knees out.");
@@ -107,7 +107,7 @@ async function review(): Promise<void> {
 async function settings(): Promise<void> {
   let answers: Response[] = [];
   globalThis.fetch = (async () => answers.shift() ?? json({ ok: false, error: "unavailable" }, 503)) as typeof fetch;
-  const panel = await mount(SubmissionSettings as (props: { productId: string; lessonId: string }) => unknown, { productId: "prod1", lessonId: "lesson0001ab" }, { attach });
+  const panel = await mount(SubmissionSettings as (props: { productId: string; lessonId: string }) => unknown, { productId: "prod1", lessonId: "lesson0001ab" }, undefined, { attach });
   onScreen = panel.tree;
 
   part("Settings: focus follows what stays");

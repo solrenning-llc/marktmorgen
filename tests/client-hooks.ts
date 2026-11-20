@@ -5,7 +5,7 @@
  * renderToString never runs effects or click handlers. This runner calls one
  * function component directly with React's own hook dispatcher swapped for a
  * small one (useState, useEffect, useRef, useSyncExternalStore, useMemo,
- * useCallback, useId), re-renders it after every state change and runs its
+ * useCallback, useId, useContext), re-renders it after every state change and runs its
  * effects, so the component's real code decides what the person is shown.
  * Child components are not rendered: the proof reads the host elements and
  * text the component itself returns. Test-only; no product file uses it.
@@ -37,11 +37,19 @@ function refsOf(node: unknown, out: [{ current: unknown }, RefNode][] = []): [{ 
 
 /**
  * Renders `component(props)`, runs its effects, and re-renders on every state change.
+ * `contexts` gives a context the value a provider above would; any other reads its default.
+ * `beforeEffects`, when given, is called with each render's tree before its effects run, as React attaches refs before
+ * it runs effects.
  * With `attach`, each ref object a host element is given is set, as React does, before
  * the effects run: to what `attach` answers for that element (a stand-in with focus(),
  * for example), and back to null once the element is no longer rendered.
  */
-export async function mount<P>(component: (props: P) => unknown, props: P, options: { attach?: (node: RefNode) => unknown } = {}): Promise<Mounted> {
+export async function mount<P>(
+  component: (props: P) => unknown,
+  props: P,
+  contexts?: Map<unknown, unknown>,
+  options: { beforeEffects?: (tree: unknown) => void; attach?: (node: RefNode) => unknown } = {},
+): Promise<Mounted> {
   let attached = new Set<{ current: unknown }>();
   const slots: Slot[] = [];
   let index = 0;
@@ -78,6 +86,9 @@ export async function mount<P>(component: (props: P) => unknown, props: P, optio
     },
     useId() {
       return `id-${index++}`;
+    },
+    useContext(context: { _currentValue?: unknown }) {
+      return contexts?.has(context) ? contexts.get(context) : context._currentValue;
     },
     useSyncExternalStore(subscribe: (change: () => void) => () => void, snapshot: () => unknown) {
       const i = index++;
@@ -116,6 +127,7 @@ export async function mount<P>(component: (props: P) => unknown, props: P, optio
       for (const ref of attached) if (!now.has(ref)) ref.current = null;
       attached = now;
     }
+    options.beforeEffects?.(last);
     while (pending.length) pending.shift()!();
   };
   const settle = async () => {

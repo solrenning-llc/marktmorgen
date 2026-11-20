@@ -37,7 +37,7 @@ const realNow = Date.now;
 const clock = Math.floor(realNow() / 1000);
 Date.now = () => clock * 1000;
 
-type Charge = { id: string; object: "charge"; payment_intent: string; amount: number; amount_refunded: number; disputed: boolean; dispute?: { id: string; object: "dispute"; status: string; charge: string } | null; currency: string; balance_transaction: { amount: number; currency: string }; invoice: string };
+type Charge = { id: string; object: "charge"; payment_intent: string; amount: number; amount_refunded: number; disputed: boolean; dispute?: { id: string; object: "dispute"; status: string; charge: string; amount?: number; currency?: string } | null; currency: string; balance_transaction: { amount: number; currency: string }; invoice: string };
 type Invoice = { id: string; object: "invoice"; subscription: string; status: string; created: number; amount_paid: number; paid_out_of_band: boolean; charge: Charge };
 type Refund = { id: string; object: "refund"; payment_intent: string; amount: number; currency: string; status: string; metadata: Record<string, string> };
 
@@ -149,6 +149,7 @@ function plan(payments: number, ago: number, charged: number, over: Record<strin
       status: "paid",
       created: addPeriods(anchor, "month", i),
       amount_paid: 5_000,
+      currency: "usd",
       paid_out_of_band: false,
       charge: { id: `ch_${tag}x${i}`, object: "charge" as const, payment_intent: intent, amount: 5_000, amount_refunded: 0, disputed: false, currency: "usd", balance_transaction: { amount: 5_000, currency: "usd" }, invoice: id },
     };
@@ -201,9 +202,26 @@ async function main(): Promise<void> {
   reset();
   const c = plan(2, 100, 4);
   c.invoices[2].charge.disputed = true;
-  c.invoices[2].charge.dispute = { id: "du_lostx2", object: "dispute", status: "lost", charge: c.invoices[2].charge.id };
+  c.invoices[2].charge.dispute = { id: "du_lostx2", object: "dispute", status: "lost", charge: c.invoices[2].charge.id, amount: 5_000, currency: "usd" };
   is("settled, only the undisputed late payment refunded", [await finishPlan(ACCOUNT, c.session), madeFor(c.invoices[2]).length, madeFor(c.invoices[3]).length], ["done", 0, 1]);
   is("no refund was even asked for the disputed one", posts.filter((p) => p.body.get("payment_intent") === c.invoices[2].charge.payment_intent).length, 0);
+
+  part("A lost partial dispute keeps the late payment in the daily retry line");
+  reset();
+  redis.clear();
+  const partialDispute = plan(2, 100, 3);
+  const disputedCharge = partialDispute.invoices[2].charge;
+  disputedCharge.disputed = true;
+  disputedCharge.dispute = { id: "du_lostpartial", object: "dispute", status: "lost", charge: disputedCharge.id, amount: 1_000, currency: "usd" };
+  await rememberPlan(ACCOUNT, partialDispute.session);
+  const partialDisputeRun = await settlePlans();
+  is("a 1000 chargeback on a 5000 payment is owed, not done, and remains reachable", [partialDisputeRun.owed, partialDisputeRun.done, await inALine(partialDispute.session), posts.length], [1, 0, true, 0]);
+  // A later, readable full return is evidence the old partial answer did not provide.
+  disputedCharge.dispute.amount = 5_000;
+  Date.now = () => (clock + DAY) * 1000;
+  const reconciled = await settlePlans();
+  is("only a later full return releases the daily line, without a refund POST", [reconciled.done, await inALine(partialDispute.session), posts.length], [1, false, 0]);
+  Date.now = () => clock * 1000;
 
   // Codex X5's MEDIUM at 52e9c7a1ed (adopted by Claude 3, nuvem E): `charge.disputed` stays true after the dispute closes,
   // so a dispute the creator won left them a payment taken after the plan's end, never refunded.
@@ -326,6 +344,52 @@ async function main(): Promise<void> {
   balance += failedQ.amount;
   refundStatus = "succeeded";
   is("pending, then failed, the key still kept: made again and settled", [await finishPlan(ACCOUNT, q.session), madeFor(q.invoices[2]).map((one) => one.status)], ["done", ["failed", "succeeded"]]);
+
+  part("A previous partial late refund never drops the still-owed remainder from the retry line");
+  reset();
+  redis.clear();
+  const remainder = plan(2, 70, 3);
+  const late = remainder.invoices[2];
+  const priorPart: Refund = { id: "re_vpriorpart", object: "refund", payment_intent: late.charge.payment_intent, amount: 3500, currency: "usd", status: "succeeded", metadata: { plan_late_refund: late.id } };
+  const failedOther: Refund = { id: "re_vfailedother", object: "refund", payment_intent: late.charge.payment_intent, amount: 1500, currency: "usd", status: "failed", metadata: {} };
+  refunds[late.charge.payment_intent] = [priorPart, failedOther];
+  late.charge.amount_refunded = 3500;
+  refundStatus = "pending";
+  await rememberPlan(ACCOUNT, remainder.session);
+  const partialRun = await settlePlans();
+  is("only the remaining amount is requested", posts.map((one) => Number(one.body.get("amount"))), [1500]);
+  is("the plan is not reported done and remains reachable while its remainder is pending", [partialRun.done, await inALine(remainder.session)], [0, true]);
+  const finalPart = madeFor(late).find((one) => one !== priorPart && one !== failedOther);
+  if (finalPart) finalPart.status = "succeeded";
+  posts.length = 0;
+  is("only a confirmed whole return settles the plan, with no second refund", [await finishPlan(ACCOUNT, remainder.session), posts.length], ["done", 0]);
+
+  part("An external partial refund is not counted as final while the provider still reports it pending");
+  reset();
+  redis.clear();
+  const external = plan(2, 100, 4);
+  const [partialExternal, unaffected] = external.invoices.slice(2);
+  const partialIntent = partialExternal.charge.payment_intent;
+  const externalPending: Refund = { id: "re_externalPartial", object: "refund", payment_intent: partialIntent, amount: 2_000, currency: "usd", status: "pending", metadata: {} };
+  refunds[partialIntent] = [externalPending];
+  partialExternal.charge.amount_refunded = externalPending.amount;
+  await rememberPlan(ACCOUNT, external.session);
+  const externalRun = await settlePlans();
+  is("the plan remains owed, with no second refund against this charge", [externalRun.owed, externalRun.done, await inALine(external.session), madeFor(partialExternal).length], [1, 0, true, 1]);
+  is("the other late charge is refunded in the same pass", madeFor(unaffected).map((one) => one.amount), [5_000]);
+  externalPending.status = "failed";
+  partialExternal.charge.amount_refunded -= externalPending.amount;
+  posts.length = 0;
+  is("after the external refund fails, the run refunds the whole late charge once", [await finishPlan(ACCOUNT, external.session), posts.map((one) => one.body.get("amount")), madeFor(partialExternal).map((one) => one.status)], ["done", ["5000"], ["failed", "succeeded"]]);
+
+  part("When an external partial refund succeeds, only the remaining amount is refunded");
+  reset();
+  const partialSuccess = plan(2, 70, 3);
+  const one = partialSuccess.invoices[2];
+  const intent = one.charge.payment_intent;
+  refunds[intent] = [{ id: "re_externalSuccess", object: "refund", payment_intent: intent, amount: 2_000, currency: "usd", status: "succeeded", metadata: {} }];
+  one.charge.amount_refunded = 2_000;
+  is("the confirmed partial refund counts toward the total", [await finishPlan(ACCOUNT, partialSuccess.session), posts.map((item) => item.body.get("amount")), one.charge.amount_refunded], ["done", ["3000"], 5_000]);
 
   part("A try stays within the registry's Stripe calls");
   reset();

@@ -119,7 +119,8 @@ function party(value: unknown): EuInvoiceParty | null {
 
 /**
  * A sale's VAT converted to euro cents at an ECB rate given as "currency per euro" (1 EUR = perEuro units), rounded
- * half up once, in integer arithmetic; null when the rate is not a published-looking positive decimal.
+ * half up once, in integer arithmetic; null when the rate is not a published-looking positive decimal. `cents` are
+ * hundredths of a currency written in hundredths: its callers refuse any other (NOT_HUNDREDTHS, decimalsOf).
  */
 export function toEuroCents(cents: number, perEuro: string): number | null {
   if (!whole(cents) || cents < 0 || typeof perEuro !== "string" || !RATE.test(perEuro)) return null;

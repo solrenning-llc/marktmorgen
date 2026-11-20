@@ -198,8 +198,9 @@ return {written and 1 or 0, redis.call("GET", KEYS[1])}`;
  * The store's list id, where the prints of its deleted people are kept (lib/suppression.ts). A store from before lists
  * is given its list first (ensureListId, as an erasure does), so a deletion is always checked where it is written.
  * Throws UnknownReplyError when the store does not read: nothing of the order is handed over, and it stays owed.
+ * Also read by the sweep's pass over PayPal orders whose affiliate link is pending (lib/affiliates.ts notePayPalPendings).
  */
-async function deletionListId(store: Store): Promise<string> {
+export async function deletionListId(store: Store): Promise<string> {
   const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
   if (!listId) throw new UnknownReplyError("the store's list, to check a deletion before a PayPal hand-over");
   return listId;
@@ -213,7 +214,7 @@ async function deletionListId(store: Store): Promise<string> {
  * is none, or when they were deleted before they paid again. One HGET, read exactly (CX-123 rule 24): nothing, or a
  * time in seconds; any other reply throws UnknownReplyError, so nothing of them is written and the order stays owed.
  */
-async function erasedSincePaid(listId: string, paid: Paid, own = false): Promise<boolean> {
+export async function erasedSincePaid(listId: string, paid: Paid, own = false): Promise<boolean> {
   const field = own ? ownErasureField(listId, paid.email) : suppressionPrint(listId, paid.email);
   const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), field]]), 1);
   const mark = replies?.[0];
@@ -655,7 +656,8 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
         currency: paid.currency,
         buyer: { email: erased ? null : paid.email, name: null },
         refunded_at: new Date().toISOString(),
-      });
+        // Nobody the store deleted at or after the payment is named (R38, rule 30; review of #3491).
+      }, Date.now(), { email: paid.email, paidAt: paid.at });
     },
   });
   done.cleared += await handOverAgain(store, deadline);

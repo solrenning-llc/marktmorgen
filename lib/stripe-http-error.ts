@@ -1,0 +1,34 @@
+/**
+ * Stripe answered with an HTTP status whose body is not JSON: a gateway's 502, 503 or 504 page, say. Its own error,
+ * with the status kept, so a caller can tell a server error from a reply in a shape it cannot read
+ * (lib/stripe-silence.ts); never a BillingError or a StripeError, which callers read as Stripe's own refusal.
+ */
+export class StripeUnreadableReply extends Error {
+  readonly status: number;
+
+  constructor(status: number, cause: unknown) {
+    super(`Stripe answered ${status} with a body that is not JSON`, { cause });
+    this.name = "StripeUnreadableReply";
+    this.status = status;
+  }
+}
+
+/** A Stripe answer's text as JSON; a non-JSON body of a status that is not OK is a StripeUnreadableReply. */
+export function parseStripeText(text: string, response: Pick<Response, "ok" | "status">): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch (error) {
+    if (!response.ok) throw new StripeUnreadableReply(response.status, error);
+    throw error;
+  }
+}
+
+/** The body of a Stripe answer as JSON, read through parseStripeText. */
+export async function stripeJson(response: Response): Promise<Record<string, unknown>> {
+  // A stand-in answer that has only json(), or that replaced json() on a real Response (to hand back a value JSON
+  // cannot carry, such as NaN), is read through its json() as before; a real Response never has json() of its own.
+  if (typeof response.text !== "function" || Object.hasOwn(response, "json")) {
+    return (await response.json()) as Record<string, unknown>;
+  }
+  return parseStripeText(await response.text(), response);
+}

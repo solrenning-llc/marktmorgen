@@ -52,7 +52,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   calls.push({ method, path, body, key: new Headers(init?.headers).get("Idempotency-Key") });
   if (method === "GET" && path === "/subscriptions/sub_Year00000001") return json(subscription());
   if (method === "GET" && path === "/invoices/in_Year00000001") {
-    return json({ id: "in_Year00000001", status: "open", billing_reason: "subscription_cycle", amount_due: 20000, currency: "usd", parent: { subscription_details: { subscription: "sub_Year00000001" } } });
+    const pause = calls.findLast((call) => call.method === "POST" && call.path === "/invoices/in_Year00000001")?.body.get("auto_advance");
+    return json({ id: "in_Year00000001", status: "open", amount_paid: 0, auto_advance: pause !== "false", billing_reason: "subscription_cycle", amount_due: 20000, currency: "usd", parent: { subscription_details: { subscription: "sub_Year00000001" } } });
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
   if (method === "POST" && path === "/invoices/in_Year00000001") return json({ id: "in_Year00000001" });

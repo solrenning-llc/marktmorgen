@@ -37,8 +37,17 @@ export type ErasureScope = {
   droppedRecords?: number;
   /** Every product of the store, by id. */
   productIds: string[];
+  /**
+   * The products, not in the catalog, whose waitlists the person may still be on: marked coming soon or still being
+   * dropped (lib/waitlist.ts waitlistMarks, #4462). Reached by the waitlist's eraser and copy only.
+   */
+  waitlistIds?: string[];
+  /** How many waitlist marks were read to find them, the catalog's included: counted as ErasureSize.waitlists. */
+  waitlistMarks?: number;
   /** The store's community, when it has one. */
   communityId: string | null;
+  /** The checkout-ask count paid for before the erasers run. */
+  checkoutAsks?: number;
 };
 
 /** Who asked: the store's team in the studio, or the person, by their emailed link. */
@@ -70,6 +79,15 @@ export type ErasureSize = {
   droppedCourses: number;
   /** Dropped courses read whole (their lessons and modules), the person having a record there. */
   droppedRecords: number;
+  /**
+   * Products noted in the store's set of products with private podcast feeds (lib/podcast-access.ts, nl:pod:pids:),
+   * removed ones included, which a deletion looks for the person's feeds in beside the catalog (#4471).
+   */
+  podcastProducts: number;
+  /** The checkout-ask count paid for before the erasers run (lib/checkout-ask.ts checkoutAskCount, #4290). */
+  checkoutAsks: number;
+  /** Waitlist marks read (lib/waitlist.ts waitlistMarks): coming soon and still dropping, at most MAX_WAITLIST_MARKS. */
+  waitlists: number;
 };
 
 /**
@@ -78,16 +96,38 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
- * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it.
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4471) the private podcast feeds of
+ * removed products: the count of the store's noted products (SCARD), their set read with whether the walk of feeds
+ * granted before the note is done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most
+ * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (Claude 3 on #3473) the read of the memberships whose
+ * invitations wait to be deleted (lib/move-members.ts withPendingInvites), one SMEMBERS: 558 before it, 559 with it.
+ * And (since #4808, 15 November 2026) the paths of the person's files kept for a repeat: one SMEMBERS, an SADD and an
+ * EXPIRE, and an SREM, four more: 563; and (3rjdf's review) their review photos' paths kept before the reviews go (an
+ * SADD and an EXPIRE) and the kept paths' time renewed on a repeat and when one is lost (two EXPIREs), four more: 567.
+ * Since Codex L on #4871 the kept paths have no expiry, so their four EXPIREs are no longer sent; 567 stays the bound.
+ * And (#4462, 16 November 2026) the count and the read of the store's waitlist marks (lib/waitlist.ts waitlistMarks: two
+ * SCARD, two SMEMBERS), whose members are then counted with the rest (ERASE_PER.waitlists), four more: 571.
  */
-export const ERASE_FIXED_COMMANDS = 551;
-/** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+// 567 before #4290 and #4462; four more cover the own ask count and the atomic ask eraser's fixed work (ZCARD, EVAL,
+// ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575.
+export const ERASE_FIXED_COMMANDS = 575;
+/**
+ * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
+ * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
+ * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
+ * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000;
+ * 325,000 before (#4290) the atomic ask eraser's script, two keys, arguments and its two counts, 5,000.
+ */
+export const ERASE_FIXED_BYTES = 330_000;
+/** Members removed per command in the atomic checkout-ask eraser; not a cap on a person's erasure. */
+export const ASK_ERASE_BATCH = 512;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],
-  courses: [14, 70_000],
-  lessons: [1, 800],
+  // Since #4808 a course's handed-in files are kept for a repeat before their records go: each lesson's submission
+  // read once more (one command, its record's bytes again) and each course's SADD and EXPIRE.
+  courses: [16, 70_000],
+  lessons: [2, 1_600],
   deals: [0, 1_000],
   conversations: [0, 700],
   dmConversations: [3, 300],
@@ -102,6 +142,18 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   // REMOVED_COURSE_RECORD_BYTES (lib/removed-courses.ts, 15,442) at most, counted at 16,000; held by
   // tests/erasure-dropped-list-budget.test.ts.
   droppedRecords: [1, 16_000],
+  // A noted podcast product (#4471, lib/podcast-access.ts): the GET of the person's index for it, and its index's and
+  // cached answer's names in the deletion's DEL; its member in the set read (an id of at most 80 bytes), its index's
+  // name in a SCAN page (at most 204 bytes) and the index's reply (a 48-character token): counted at 1,000 bytes. A
+  // product still in the catalog is counted here too, over what it costs.
+  podcastProducts: [1, 1_000],
+  // Members stay inside Redis; only two counts return. Their commands are counted by batches below.
+  checkoutAsks: [0, 0],
+  // A waitlist mark read (#4462, Claude 7 MÉDIO 4 and 8): its member in the SMEMBERS reply (a product id, 64 bytes at
+  // most), and for one not in the catalog the HDEL of the address (its key and the address, 254 bytes at most) and its
+  // launch list walked in BLANK_IN_LISTS (its key, then LRANGE and an LSET inside the script): 3 commands, counted at
+  // 1,000 bytes. A mark of a catalog product is counted the same, though its product's line already pays for it.
+  waitlists: [3, 1_000],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;
@@ -122,6 +174,9 @@ export function erasureWork(size: Partial<ErasureSize>): { commands: number; byt
     commands = nextCommands;
     bytes = nextBytes;
   }
+  const asks = size.checkoutAsks ?? 0;
+  commands += Math.ceil(asks / ASK_ERASE_BATCH);
+  if (!Number.isSafeInteger(commands)) throw new RangeError("Unknown erasure size");
   return { commands, bytes };
 }
 

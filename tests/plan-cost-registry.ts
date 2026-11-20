@@ -2477,7 +2477,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/product/route.ts", names: ["1 + WAITLIST_DROP_UNITS"] },
       // A person's erasure reads the store's waitlist marks (two SCARD and two SMEMBERS, in ERASE_FIXED_COMMANDS) and
       // counts each mark read (ERASE_PER.waitlists), capped at MAX_WAITLIST_MARKS; paid with the rest of the erasure.
-      { file: "lib/erasure-rules.ts", names: ["ERASE_FIXED_COMMANDS = 571", "waitlists: [3, 1_000]"] },
+      { file: "lib/erasure-rules.ts", names: ["ERASE_FIXED_COMMANDS = 575", "waitlists: [3, 1_000]"] },
       { file: "lib/waitlist.ts", names: ["MAX_WAITLIST_MARKS", "waitlistMarks"] },
       { file: "lib/person-erasure.ts", names: ["waitlists: scope.waitlistMarks ?? 0"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.

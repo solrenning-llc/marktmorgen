@@ -481,6 +481,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/chat-grant.ts": short("A member's leave from the live room's cooldown", "buyer", 1),
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },
   "nl:recover:asks@lib/checkout-ask.ts": company("Checkout asks due", "One sorted set for every store, members gone when asked (a few hours): each a public request's."),
+  "nl:recover:asks:s:@lib/checkout-ask.ts": company("A person's checkout asks due at a store", "The same members and times as nl:recover:asks, one sorted set a person at a store, named by a hash with no address in it, taken out when the asks finish or are erased, retained while they remain queued or in flight even after a worker outage: each a public request's, as the queue's."),
   "nl:none@lib/checkout-recovery.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:read:once:@lib/page-read.ts": short("A page's reading token used, until it expires two hours after the page was drawn: one a page view drawn", "request", 1, MARK, REQ("page reading")),
   "nl:recover:link:@lib/checkout-recovery.ts": short("A stop link of a checkout reminder, 400 days: one an email; or of the emails to a moved member (moveStopLink): one a store and address, the same in each of them and on every pass that tries one again, written only for an email the day and the month have room for, so never more than one an email", "own", 400, LINK_BYTES, MAIL("reminder")),

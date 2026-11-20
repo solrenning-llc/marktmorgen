@@ -5,8 +5,9 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { createTipCheckout, tipsOpen } from "@/lib/store-tip-checkout";
-import { readTipAmount, tipAmounts } from "@/lib/store-tips";
+import { readTipAmount, tipAmounts, tipKept } from "@/lib/store-tips";
 import { consumerGate } from "@/lib/eu-vat-gate";
+import { BILLING_COUNTRY_FIELD } from "@/lib/eu-vat-evidence";
 import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
 /**
@@ -48,8 +49,17 @@ export async function POST(request: NextRequest) {
   }
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
-  const away = (problem: string) =>
-    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}?tip=${problem}#support`, "Cache-Control": "no-store" } });
+  // Back to the box with what was given, so nothing is entered twice (WCAG 3.3.7, the more accessible reading AX274
+  // asks for): only what the box itself offers goes back (lib/store-tips.ts, tipKept). The country goes back after every
+  // notice but two: after "abroad" it is the one refused, and after "country" none was given.
+  const away = (problem: string) => {
+    const back = new URLSearchParams({ tip: problem });
+    const kept = tipKept(store, { chose: picked, other, from: problem === "abroad" || problem === "country" ? null : sent.get(BILLING_COUNTRY_FIELD) });
+    if (kept.chose) back.set("chose", kept.chose);
+    if (kept.other) back.set("other", kept.other);
+    if (kept.from) back.set("from", kept.from);
+    return new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}?${back}#support`, "Cache-Control": "no-store" } });
+  };
   if (!tipsOpen(store)) return away("closed");
 
   // A chosen amount is taken only when the box offers it; "another amount", or nothing chosen, reads what was typed,

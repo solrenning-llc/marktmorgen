@@ -57,7 +57,13 @@ async function main(): Promise<void> {
   await setSubscription(OWNER, { customerId: "cus_TipVatGate1", subscriptionId: "sub_TipVatGate1", active: true, period: paidPeriod() });
   const store = (await storeForEmail(OWNER)) as Store;
   const tip = (ip: string | null, fields: Record<string, string> = {}) => tipRoute(ask(ip, { handle: SHOP, ...fields }));
-  const where = (response: Response) => [response.status, response.headers.get("location")];
+  // The notice only: what the box puts back beside it (chose, other, from) is held in tests/tips-keep-amount.test.ts.
+  const where = (response: Response) => {
+    const location = response.headers.get("location");
+    if (!location?.includes("?tip=")) return [response.status, location];
+    const url = new URL(location);
+    return [response.status, `${url.origin}${url.pathname}?tip=${url.searchParams.get("tip")}${url.hash}`];
+  };
   const back = (problem: string) => [303, `https://marktmorgen.com/@${SHOP}?tip=${problem}#support`];
   const amountSent = () => Number(sessions[sessions.length - 1]?.get("line_items[0][price_data][unit_amount]"));
 

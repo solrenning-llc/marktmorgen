@@ -631,7 +631,10 @@ export async function review(input: {
 
 /** Notes a file a student was let upload, so one never handed in is deleted (sweepTaskUploads). */
 export async function noteTaskUpload(path: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DOORS_KEY, Math.floor(now / 1000), path]]);
+  // Read exactly (#4871, Codex X7): one ZADD of one member answers 0 (listed already) or 1 (listed anew). Anything
+  // else may not have listed it, so it throws UnknownReplyError and the caller keeps the path, never "queued".
+  const added = countOf(repliesFor(await redisPipeline([["ZADD", DOORS_KEY, Math.floor(now / 1000), path]]), 1)?.[0]);
+  if (added === null || added > 1) throw new UnknownReplyError("a file handed to the daily job that deletes uploads nobody kept");
 }
 
 /**
@@ -897,7 +900,13 @@ export class TaskRecordUnreadError extends Error {
  * read too: a batch that does not answer a count for every command throws
  * UnknownReplyError, its files left to the daily job (Codex P on #2847).
  */
-export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
+export async function forgetTasksPerson(
+  courseId: string,
+  lessonIds: string[],
+  who: string,
+  room: string | null,
+  beforeDeleteFiles?: (paths: string[]) => Promise<void>,
+): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
   const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
@@ -916,6 +925,10 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
       for (const f of handedFilesOf(hashes[i])) if (inStudentFolder(f.path, courseId, lessonId, who)) files.push({ lessonId, ...f });
     });
   }
+  // The erasure keeps the exact paths this read will remove, those taken from an unread record's own folder included,
+  // before any record, index or file reference that leads to them is deleted (#4808, Codex X4). A separate earlier read
+  // of the records never sees those paths. Not kept: the callback throws and nothing is deleted.
+  if (beforeDeleteFiles) await beforeDeleteFiles([...new Set(files.map((file) => file.path))]);
   const members = handed.map((h) => `${h.lessonId}|${who}`);
   const batch: (string | number)[][] = [
     ["DEL", ...handed.map((h) => subKey(courseId, h.lessonId, who))],

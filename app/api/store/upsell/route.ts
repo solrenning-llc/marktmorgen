@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
     step,
     answer,
     consent: answer === "yes" ? consent : null,
-    // The IP country the EU VAT gate reads with the order's billing country (lib/upsell.ts, offerGate).
+    // The IP country the EU VAT gate reads: an EU or UK one refuses the offer (lib/upsell.ts, offerGate).
     headers: request.headers,
   });
   if (result.kind === "confirm") {

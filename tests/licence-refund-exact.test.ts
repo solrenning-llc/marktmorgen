@@ -176,7 +176,9 @@ async function main(): Promise<void> {
   // so its listing is read with a GET of its own; that GET answers with no reply at all.
   is("control: the store still lists the product", store.catalog.items.some((item) => item.id === app.id), true);
   const headless: Store = { ...store, catalog: { ...store.catalog, head: [] } };
-  const listingGet = (commands: Command[]) => commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).endsWith(`:l:${app.id}`);
+  // Read by a GET of its own, or in an MGET of a few listings (lib/catalog.ts getMany): either answers with no reply.
+  const listingGet = (commands: Command[]) =>
+    commands.length === 1 && (commands[0][0] === "GET" || commands[0][0] === "MGET") && commands[0].slice(1).some((key) => String(key).endsWith(`:l:${app.id}`));
   redis.pipeline = (async (commands: Command[]) => (listingGet(commands) ? [] : real(commands))) as typeof redis.pipeline;
   let outsideRun: number | "threw";
   try {

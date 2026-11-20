@@ -25,7 +25,7 @@ import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, replyList, repliesFor, stringList } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 // On its own line, so open pull requests that change the redis-reply import above still merge cleanly.
 import { listSlots } from "@/lib/redis-reply";
@@ -64,12 +64,48 @@ const passKey = (sid: string) => `nl:pre:${sid}:refunds:pass`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const REFUND_PASS_SECONDS = 7 * 86_400;
 /**
+ * Refunds Stripe finished (succeeded) whose work could not be done, refund id to payment, in the store's nl:pre: keys (erased
+ * with it): read again from Stripe and tried again first on every run, and let go only once handled or once Stripe says
+ * there is nothing to take back, never in silence, so one row that can never
+ * be handled (a record that does not read, a course removal that always fails) does not hold the anchor forever (r24
+ * money inventory, item 1). At most REFUND_RETRY_CAP; with the list full, the row holds the anchor at its time instead. Kept as long as the records a refund on it could take
+ * back (KEPT_SECONDS, renewed with every row put on it): past that there is nothing left for it to take back.
+ */
+const retryKey = (sid: string) => `nl:pre:${sid}:refunds:retry`;
+/**
+ * The last refund on the list to try again that a run read again (focal review of #3302, comment 6786660350, MEDIUM),
+ * in the store's nl:pre: keys (erased with it): the next run of this store reads on from the one after it, in the
+ * order of their ids, and back to the first after the last, so the place moves with this store's own runs, never with
+ * the clock, and every refund on the list is read again within a bounded number of runs however often the sweep
+ * reaches the store. Kept as long as the list (KEPT_SECONDS); a place absent or in another shape reads from the first:
+ * read again, never skipped.
+ */
+const retryFromKey = (sid: string) => `nl:pre:${sid}:refunds:retry:from`;
+/**
+ * The time a run gives the refunds on the list to try again before it reads its pages (focal review of #3302, LOW 1):
+ * past it the run reads none more (at least one is read whenever the deadline allows), and the next run reads on from
+ * where this one stopped, so a list of rows kept on every read never takes the time the pages need.
+ */
+const REFUND_REREAD_MS = 2_000;
+const REFUND_RETRY_CAP = 100;
+/**
+ * Refunds on the list to try again read again from Stripe (GET /refunds/{id}, its charge expanded) per store per run,
+ * before any is taken back (review of #3302, Claude 2 MEDIUM; the owner's decision 18 of 9 November 2026): in the order of
+ * their ids from the one after the last a run of this store read (retryFromKey), so each on the list is read in turn
+ * whatever the time of the runs. Priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ */
+export const PREORDER_REFUND_REREADS_PER_STORE = 10;
+const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]{3,250}$/;
+const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
+/** The anchor in its exact shape: the whole seconds of the newest refund a pass read to its end. */
+const ANCHOR = /^\d{1,12}$/;
+/**
  * A pass: the window it reads (created since), the last refund it read, the newest refund it read, the connected
  * account it reads (a pass kept from the store's earlier account is started over: its cursor names a refund the
  * account it has now does not have; review of #3301, Claude 2 M2), the time the anchor waits at when the pass ends
  * (absent: nothing to wait for), that of the oldest refund it read that Stripe had not finished (heldAt) or that could
- * not be handled, and whether it read a row that is not readable (then the anchor stays where it was when the pass
- * ends), so the next pass reads each of those rows again.
+ * not be handled and was not kept on the list to try again, and whether it read a row that is not readable (then the
+ * anchor stays where it was when the pass ends), so the next pass reads each of those rows again.
  */
 type RefundPass = { since: number; after: string; newest: number; account: string; waiting?: number; unread?: true };
 /** A kept pass in its exact shape; null when there is none or it is in any other shape (then the pass starts over). */
@@ -221,29 +257,109 @@ export function preorderDay(store: Store, product: Listing, soon: boolean, day: 
 
 // ------------------------------------------------------------------ the studio
 
-/** Sets the day a coming-soon product is expected, so it takes pre-orders; null stops taking them. */
+/**
+ * The expected day's HSET or HDEL answered in another shape, or not at all once sent: it may or may not have been
+ * written, never said saved and never said unchanged.
+ */
+export class PreorderDayUnconfirmed extends Error {
+  constructor(cause?: unknown) {
+    super("the expected day of a pre-order could not be confirmed saved", cause === undefined ? undefined : { cause });
+    this.name = "PreorderDayUnconfirmed";
+  }
+}
+
+/**
+ * Sets the day a coming-soon product is expected, so it takes pre-orders; null stops taking them. The write of one
+ * field answers 0 or 1; anything else throws PreorderDayUnconfirmed, so the switch never says "Saved." on it
+ * (independent review of #3005).
+ */
 export async function setExpectedDay(store: Store, productId: string, day: string | null): Promise<void> {
   if (!store.statsId) return;
-  await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  // Not set up: nothing is sent, so nothing was written; the route's own error, never "unconfirmed".
+  if (!isRedisConfigured()) throw new Error("Redis is not configured");
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  } catch (error) {
+    // Sent, then its answer lost (one that does not read, a timeout, a dropped connection): the write may have been
+    // applied, so it is unconfirmed, never "nothing was changed" (Codex X4 6984205751 and X6 6989392736 on #3005).
+    throw new PreorderDayUnconfirmed(error);
+  }
+  if (!oneWrite(repliesFor(replies, 1)?.[0])) throw new PreorderDayUnconfirmed();
 }
 
 export type PreorderView = { day: string | null; waiting: number; given: number; refunded: number };
 
-/** What the studio shows of each product's pre-orders. */
-export async function preorderViews(store: Store, productIds: string[]): Promise<Record<string, PreorderView>> {
-  const out: Record<string, PreorderView> = {};
+/** One product's pre-orders could not be read exactly: said so for that product alone (Codex X6's LOW on #3005). */
+export const PREORDERS_UNREAD = "unread" as const;
+
+/**
+ * What the studio shows of each product's pre-orders, read exactly (CX-123 rule 24): the expected days a list of
+ * texts in pairs, each asked-about product's day a day, each product's pre-orders a list of pre-orders. Anything
+ * else throws UnknownReplyError, never "no pre-orders": the studio says they could not be read, the pre-order
+ * switch answers 503 "preorders_unread".
+ */
+export async function preorderViews(store: Store, productIds: string[]): Promise<Record<string, PreorderView | typeof PREORDERS_UNREAD>> {
+  const out: Record<string, PreorderView | typeof PREORDERS_UNREAD> = {};
   if (!store.statsId || !isRedisConfigured() || !productIds.length) return out;
   const sid = store.statsId;
-  const rows = await redisPipeline([["HGETALL", dayKey(sid)], ...productIds.map((p) => ["HVALS", entriesKey(sid, p)])]);
-  const days = daysOf(rows[0]);
+  const rows = repliesFor(await redisPipeline([["HGETALL", dayKey(sid)], ...productIds.map((p) => ["HVALS", entriesKey(sid, p)])]), productIds.length + 1);
+  if (!rows) throw new UnknownReplyError("the studio's pre-orders");
+  const { days, unread } = exactDays(rows[0], new Set(productIds));
   productIds.forEach((p, i) => {
-    const raw = rows[i + 1];
-    const entries = (Array.isArray(raw) ? raw : []).map(parsePreorder).filter((e): e is Preorder => e !== null);
+    // One product's record that does not read leaves that product's panel unread, never every product's (Codex X6's
+    // LOW on #3005); a reply that is not a list at all still throws, for every product.
+    if (unread.has(p)) {
+      out[p] = PREORDERS_UNREAD;
+      return;
+    }
+    let entries: Preorder[];
+    try {
+      entries = exactPreorders([rows[i + 1]]);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      out[p] = PREORDERS_UNREAD;
+      return;
+    }
     const day = days.get(p) ?? null;
     if (!day && entries.length === 0) return;
     out[p] = { day, ...preorderCounts(entries) };
   });
   return out;
+}
+
+/**
+ * The expected days, read exactly: texts in pairs, or it throws. A product asked about whose kept day is not a day is
+ * unread, that product alone.
+ */
+function exactDays(reply: unknown, asked: Set<string>): { days: Map<string, string>; unread: Set<string> } {
+  const fields = stringList(reply);
+  if (!fields || fields.length % 2 !== 0) throw new UnknownReplyError("the expected days of pre-orders");
+  const days = new Map<string, string>();
+  const unread = new Set<string>();
+  for (let i = 0; i < fields.length; i += 2) {
+    if (!asked.has(fields[i])) continue;
+    const day = keptDay(fields[i + 1]);
+    if (day) days.set(fields[i], day);
+    else unread.add(fields[i]);
+  }
+  return { days, unread };
+}
+
+/**
+ * A product's pre-orders as kept, read exactly (CX-123 rule 24): one reply, a list of texts, each one a pre-order.
+ * Anything else (no reply, a number, text, a member that is not text or not a pre-order) is unknown and throws,
+ * never "nobody waits" in the studio's view. (waitingCount, after main's #2963, counts a record that does not read
+ * as waiting instead of throwing.)
+ */
+function exactPreorders(replies: unknown): Preorder[] {
+  const values = stringList(repliesFor(replies, 1)?.[0]);
+  if (!values) throw new UnknownReplyError("a product's pre-orders");
+  return values.map((value) => {
+    const entry = parsePreorder(value);
+    if (!entry) throw new UnknownReplyError("a product's pre-orders");
+    return entry;
+  });
 }
 
 /**
@@ -343,13 +459,17 @@ async function givenExactly(sid: string, productId: string, sessionId: string): 
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)]));
+  // Read exactly (CX-123 rule 24): an unknown reply throws, so the copy is not handed over without their pre-orders.
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)])), productIds.length);
+  if (!replies) throw new UnknownReplyError("a person's pre-orders");
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a person's pre-orders");
     const out: (Preorder & { product: string; checkout: string })[] = [];
-    for (let k = 0; k + 1 < flat.length; k += 2) {
+    for (let k = 0; k < flat.length; k += 2) {
       const entry = parsePreorder(flat[k + 1]);
-      if (entry && entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: String(flat[k]) });
+      if (!entry) throw new UnknownReplyError("a person's pre-orders");
+      if (entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: flat[k] });
     }
     return out;
   });
@@ -705,7 +825,12 @@ export async function revokeRefundedPreorders(
   if (!begun) return 0;
   const [any, anchorRaw, passRaw] = begun;
   if (!any) return 0;
-  const fresh = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
+  // The anchor read exactly (r24 money inventory, item 1), as lib/group-buy.ts does: in another shape this run asks
+  // nothing of Stripe and writes no pass or anchor, never a pass from a week back that would skip the refunds older
+  // than that; only the list to try again, which does not depend on it, is read (review of #3302, Claude 5 LEVE 2).
+  // Only a confirmed absent anchor (the store's first pass) starts from a week back.
+  const anchorKnown = anchorRaw === null || (typeof anchorRaw === "string" && ANCHOR.test(anchorRaw));
+  const fresh = Math.max(0, (anchorKnown && anchorRaw !== null ? Number(anchorRaw) : now() - 7 * 86_400) - 300);
   // A pass over the refunds longer than one run goes on where the last run stopped (r24 money inventory, item 1, the
   // gap left by #3188), as lib/group-buy.ts does: without it a store with more refunds since the anchor than one run
   // reads read the same newest pages every run and never reached the older ones. A pass kept in an unknown shape (not
@@ -714,7 +839,7 @@ export async function revokeRefundedPreorders(
   const keptPass = readRefundPass(passRaw);
   const pass = keptPass && keptPass.account === account && (anchorRaw === null || keptPass.since === fresh) ? keptPass : null;
   const since = pass ? pass.since : fresh;
-  let newest = pass ? pass.newest : Number(anchorRaw) || since;
+  let newest = pass ? pass.newest : anchorKnown && anchorRaw !== null ? Number(anchorRaw) : since;
   let after = pass ? pass.after : "";
   // The oldest refund the pass read that Stripe had not finished (heldAt; Infinity: none), kept with the pass.
   let waiting = pass?.waiting ?? Infinity;
@@ -746,8 +871,9 @@ export async function revokeRefundedPreorders(
     if (foundSid === sid && productId && session) {
       // Under the hand-over's own giving mark (handOverPreorder): a hand-over that read this entry before the revoked
       // write and wrote `given` after it would undo it, the grant would stand, and this refund, marked read, would never
-      // be read again (Claude 7, Redis race hunt). While a hand-over holds the mark, the row is left unread and the next
-      // run takes back what it gave.
+      // be read again (Claude 7, Redis race hunt). While a hand-over holds the mark, the row is not handled this run (a
+      // refund Stripe finished goes on the list to try again, any other holds the anchor) and the next run takes back
+      // what it gave.
       const value = claimValue();
       const claimed = await claimMark(giveKey(session), 300, value);
       if (claimed !== "ours") return false;
@@ -817,6 +943,122 @@ export async function revokeRefundedPreorders(
     }
   };
 
+  /**
+   * Puts refunds Stripe finished whose work could not be done on the list to try again; true only when every one is
+   * kept for sure. Only a refund that succeeded (reviews of #3302, Claude 6 and Claude 5 LEVE 1; the owner's decision 18
+   * of 9 November 2026): the list tries a row again as finished, so a refund not final yet is never put on it.
+   */
+  const keepForLater = async (rows: Record<string, unknown>[]): Promise<boolean> => {
+    const fields: string[] = [];
+    for (const row of rows) {
+      const { id, payment_intent: pi } = row;
+      if (row.status !== "succeeded" || typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) return false;
+      fields.push(id, pi);
+    }
+    // Only rows not on the list yet count against its cap (Claude 5 on #3302): a page read again puts back rows already
+    // there, which HLEN holds. Each already there is read in its exact shape (its payment), a new one as nil.
+    const ids = fields.filter((_, i) => i % 2 === 0);
+    const read = repliesFor(await redisPipeline([["HLEN", retryKey(sid)], ["HMGET", retryKey(sid), ...ids]]), 2);
+    const counted = countOf(read?.[0]);
+    const there = read?.[1];
+    // Read slot by slot from the reply's own data (replyList; Codex X6 on #3302, LOW): a sparse reply would let every and
+    // filter skip its holes and count too few new rows. Any text already there is a field HLEN counts, so the HSET below
+    // puts the payment read from Stripe over it, a malformed one included (Codex X6, LOW), and it adds nothing to the
+    // count; only nil is a new row.
+    const slots = replyList(there);
+    let fresh: number | null = slots && slots.length === ids.length ? 0 : null;
+    for (const value of slots ?? []) {
+      if (fresh === null) break;
+      if (value === null) fresh += 1;
+      else if (typeof value !== "string") fresh = null;
+    }
+    if (counted === null || fresh === null || counted + fresh > REFUND_RETRY_CAP) {
+      console.error("reading refunds for pre-orders: the list to try again is full or unknown; the anchor waits at the rows");
+      return false;
+    }
+    const kept = repliesFor(await redisPipeline([["HSET", retryKey(sid), ...fields], ["EXPIRE", retryKey(sid), KEPT_SECONDS]]), 2);
+    const added = countOf(kept?.[0]);
+    return added !== null && added <= rows.length && kept?.[1] === 1;
+  };
+
+  /**
+   * A refund on the list read again from Stripe before anything is taken back (review of #3302, Claude 2 MEDIUM; the
+   * owner's decision 18 of 9 November 2026): the list keeps which refund it was, never whether it still gives the money
+   * back. Read in its exact shape (refundRowKnown, the same refund and payment): the row itself when it succeeded on a
+   * charge refunded in full; "drop" when Stripe failed or canceled it, or its charge is not refunded in full (nothing
+   * to take back); "keep" when it is not final yet, read in another shape, or Stripe could not be asked (nothing taken
+   * back, read again next run).
+   */
+  const reread = async (id: string, pi: string): Promise<Record<string, unknown> | "drop" | "keep"> => {
+    let row: Record<string, unknown>;
+    try {
+      row = await onAccount("GET", account, `/refunds/${id}?${new URLSearchParams([["expand[]", "charge"]])}`);
+    } catch (error) {
+      console.error("reading refunds for pre-orders: a row to try again could not be read again; kept", error);
+      return "keep";
+    }
+    if (row.object !== "refund" || row.id !== id || row.payment_intent !== pi || !refundRowKnown(row)) return "keep";
+    if (row.status === "failed" || row.status === "canceled") return "drop";
+    const charge = row.charge as { refunded?: unknown } | null;
+    if (row.status !== "succeeded" || !charge) return "keep";
+    return charge.refunded === true ? row : "drop";
+  };
+
+  // The refunds Stripe finished whose work could not be done, first, at most PREORDER_REFUND_REREADS_PER_STORE a run
+  // and at most REFUND_REREAD_MS of the run, in the order of their ids from the one after the last this store's runs
+  // read (retryFromKey; focal review of #3302, MEDIUM: a place taken from the clock read the same rows on every run of
+  // a store reached every ten minutes, and the refunds behind rows never handled stayed with the buyer): each read
+  // again from Stripe and handled as the row Stripe sends only when it succeeded on a charge refunded in full; let go once handled, or once Stripe failed or canceled it or its
+  // charge is not refunded in full, nothing taken back. A list read in another shape, or a row on it that is not a
+  // refund and a payment, is left as it is and read again next run: never taken as empty or dropped.
+  const retrying = repliesFor(await redisPipeline([["HGETALL", retryKey(sid)], ["GET", retryFromKey(sid)]]), 2);
+  const flat = retrying ? stringList(retrying[0]) : null;
+  if (!flat || flat.length % 2 !== 0) console.error("reading refunds for pre-orders: the list to try again was read in another shape; read again next run");
+  else {
+    const listed: [string, string][] = [];
+    for (let i = 0; i < flat.length; i += 2) {
+      if (REFUND_ID.test(flat[i]) && PAYMENT_ID.test(flat[i + 1])) listed.push([flat[i], flat[i + 1]]);
+      else console.error("reading refunds for pre-orders: a row to try again in another shape; kept");
+    }
+    // In the order of their ids, whatever order the store keeps the list in; from the one after the last read.
+    listed.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const from = retrying?.[1] ?? null;
+    const place = typeof from === "string" && REFUND_ID.test(from) ? from : null;
+    if (from !== null && place === null) console.error("reading refunds for pre-orders: the place on the list to try again was read in another shape; read from its first row");
+    const past = place === null ? 0 : listed.findIndex(([id]) => id > place);
+    const start = past < 0 ? 0 : past;
+    const until = Math.min(deadline, Date.now() + REFUND_REREAD_MS);
+    let last = "";
+    let late = false;
+    for (let k = 0; k < Math.min(listed.length, PREORDER_REFUND_REREADS_PER_STORE); k += 1) {
+      if (Date.now() >= deadline) {
+        late = true;
+        break;
+      }
+      if (k > 0 && Date.now() >= until) break;
+      const [id, pi] = listed[(start + k) % listed.length];
+      last = id;
+      const verdict = await reread(id, pi);
+      if (verdict === "keep") continue;
+      if (verdict !== "drop" && !(await handle(verdict))) continue;
+      // Handled and marked read, or nothing to take back: one left on the list by a reply lost here is read again.
+      const gone = repliesFor(await redisPipeline([["HDEL", retryKey(sid), id]]), 1);
+      if (!oneWrite(gone?.[0])) console.error("reading refunds for pre-orders: letting go of a row was left unknown; read again next run");
+    }
+    // The place moves past every row read this run, kept or not, also when the deadline cut the run short. A write left
+    // unknown reads the same rows again next run: never one skipped.
+    if (last) {
+      const moved = repliesFor(await redisPipeline([["SET", retryFromKey(sid), last, "EX", KEPT_SECONDS]]), 1);
+      if (moved?.[0] !== "OK") console.error("reading refunds for pre-orders: the place on the list to try again was left unknown; read from it again next run");
+    }
+    if (late) return revoked;
+  }
+
+  if (!anchorKnown) {
+    console.error("reading refunds for pre-orders: the anchor was read in another shape; only the list to try again was read this run");
+    return revoked;
+  }
+
   // A dispute closed as lost takes a pre-order back as a full refund does, whatever its amount (lib/refunds.ts, the
   // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
   // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
@@ -831,8 +1073,9 @@ export async function revokeRefundedPreorders(
 
   // Every page of the refunds since the anchor (CX-123 rule 24; r24 money inventory, item 1), newest first, read in
   // its exact shape. The pass moves past a page once every row on it was read and handled as far as it can be (kept in
-  // passKey, a week); a row not readable or not handled holds the anchor, never the pass, and a page in another shape
-  // or a run out of time leaves the pass on that page, read again next run. A run that resumes a pass
+  // passKey, a week); a refund Stripe finished whose work could not be done goes on the list to try again (retryKey),
+  // any other row not handled or not readable holds the anchor, never the pass, and a page in another shape or a run
+  // out of time leaves the pass on that page, read again next run. A run that resumes a pass
   // first reads the newest page, so a refund made meanwhile does not wait for the pass: what it reads there never
   // moves the pass or the anchor, and the next pass reads it again (each handled one stays handled).
   let pages = PREORDER_REFUND_PAGES_PER_STORE;
@@ -849,20 +1092,27 @@ export async function revokeRefundedPreorders(
     if (Date.now() >= deadline) return revoked;
     const read = await readPage(after);
     if (!read) break;
-    // One row that cannot be handled, or that is not readable at all, never holds the pages behind it (reviews of
-    // #3301, Claude 2 M1 and Claude 5): the pass goes on, the row is never marked read, and the anchor waits for it.
-    // A row not handled holds the anchor at its time, as a refund Stripe had not finished does; a row not readable,
-    // whose time is not known, keeps the anchor where it was. The next pass reads it again either way:
-    // never taken as refunded, never as not refunded, never passed over.
-    let unhandled = Infinity;
+    const failed: Record<string, unknown>[] = [];
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
-      if (!(await handle(refund))) unhandled = Math.min(unhandled, typeof refund.created === "number" ? refund.created : since);
+      if (!(await handle(refund))) failed.push(refund);
     }
+    // One row that cannot be handled, or that is not readable at all, never holds the pages behind it (reviews of
+    // #3301, Claude 2 M1 and Claude 5; of #3302, Claude 5 MEDIUM 1): the pass goes on and the row is never marked read.
+    // A refund Stripe finished goes on the list to try again, so the anchor need not wait for it. Any other row not
+    // handled (a refund not final yet, or one the list could not keep for sure: full, or a reply left unknown) holds
+    // the anchor at its time, as a refund Stripe had not finished does; a row not readable, whose time is not known,
+    // keeps the anchor where it was. The next pass reads each again: never taken as refunded, never as not refunded,
+    // never passed over.
+    const finished = failed.filter((refund) => refund.status === "succeeded");
+    const listed = finished.length > 0 && (await keepForLater(finished));
+    for (const refund of failed) {
+      if (listed && refund.status === "succeeded") continue;
+      waiting = Math.min(waiting, typeof refund.created === "number" ? refund.created : since);
+    }
+    if (read.unreadable > 0) unread = true;
     // The page read and handled as far as it can be moves the pass, and what it read moves with it: its newest refund,
     // and the time the anchor waits at, however far the pass goes on (the pass skips no page; the anchor waits on it).
-    waiting = Math.min(waiting, unhandled);
-    if (read.unreadable > 0) unread = true;
     for (const refund of read.rows) {
       newest = Math.max(newest, typeof refund.created === "number" ? refund.created : 0);
       const held = heldAt(refund);

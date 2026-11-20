@@ -443,6 +443,25 @@ export type FlowResult =
  * another step (one added in between, removed or moved). Words, delays, conditions or steps added at the end keep
  * every place; a step taken off the end leaves no one at a place that holds another step (that run ends, as before).
  */
+/**
+ * The mark a save that moves places gives the workflow (Flow.layoutAt): strictly after the second it is saved in, and
+ * strictly after the mark before it. A list read before this save was read in this second or earlier, so every run
+ * stamped from it is below the mark and held, even in the save's own second; two saves in one second stay in order
+ * (Codex N1 and X6 on #4539: whole seconds alone let a step queued in the save's second compare equal).
+ */
+export function nextLayoutAt(flow: Pick<Flow, "layoutAt">, nowSeconds: number): number {
+  return Math.max(nowSeconds + 1, (typeof flow.layoutAt === "number" ? flow.layoutAt : 0) + 1);
+}
+
+/**
+ * The stamp for a run whose step was chosen from this workflow as read: the moment read, or the workflow's own layout
+ * mark when that is later, since a run chosen from a list that already holds the mark is on the new places. Somebody
+ * started or sent on right after a save (the mark may be a second or more ahead) is then not held for nothing.
+ */
+export function layoutStamp(flow: Pick<Flow, "layoutAt">, seconds: number): number {
+  return Math.max(seconds, typeof flow.layoutAt === "number" ? flow.layoutAt : 0);
+}
+
 export function positionsChanged(before: readonly Pick<FlowStep, "id">[], after: readonly Pick<FlowStep, "id">[]): boolean {
   const n = Math.min(before.length, after.length);
   for (let i = 0; i < n; i += 1) if (before[i].id !== after[i].id) return true;
@@ -546,7 +565,7 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
   const starter = starterOf(raw.starter) ?? (at >= 0 ? flows[at].starter : undefined);
   // People wait by a step's position: a save that moves places is marked, so whoever waited before it is held, not
   // sent another step than the one they were due (sendDueSteps).
-  const layoutAt = at >= 0 ? (positionsChanged(flows[at].steps, steps) ? Math.floor(Date.now() / 1000) : flows[at].layoutAt) : undefined;
+  const layoutAt = at >= 0 ? (positionsChanged(flows[at].steps, steps) ? nextLayoutAt(flows[at], Math.floor(Date.now() / 1000)) : flows[at].layoutAt) : undefined;
   const flow: Flow = {
     id: id ?? newId(),
     name,
@@ -882,7 +901,8 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
       continue;
     }
     // The run's record first, so its first step always finds it.
-    await openRuns(flow.id, fresh, now);
+    // Stamped from the workflow as read here, which chose step 0: never below a layout mark it already holds.
+    await openRuns(flow.id, fresh, layoutStamp(flow, now));
     // The first step's place in the queue, read exactly (CX-123 rule 24): each ZADD 0 or 1, the count a whole number.
     const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
     const queued = await redisPipeline([
@@ -1421,7 +1441,9 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
         ? target < 0 ? "You chose to try it again, but the step is no longer in the workflow, so the run ended." : "Tried again at your request. If the first attempt went through, this may happen twice."
         : target < 0 ? "Marked as done by you; it was the last step." : `Marked as done by you; going on to step ${target + 1}.`;
   const now = Math.floor(Date.now() / 1000);
-  if (!(await releaseHold(store.listId, flowId, person, run.open, note, status, target, now))) return "not_held";
+  // The step it goes on to was chosen from the workflow as read here: stamped no lower than its layout mark, so a run sent
+  // on right after a save is not held again for that save.
+  if (!(await releaseHold(store.listId, flowId, person, run.open, note, status, target, layoutStamp(flow, now)))) return "not_held";
   if (target >= 0) {
     const due = choice === "retry" ? now : now + flow.steps[target].delayHours * 3600;
     const reply = await redisPipeline([["ZADD", QUEUE, due, `${store.listId}|${store.handle}|${flowId}|${target}|${run.email}`]]).catch(() => null);
@@ -1537,7 +1559,7 @@ export async function sendDueSteps(
       // An unreadable list throws, nothing is kept, and the batch goes back in the queue (CX-123 rule 24).
       flowsFor.set(listId, { flows: await readFlowsExact(listId), readAt });
     }
-    const { flows: listed, readAt: chosenAt } = flowsFor.get(listId)!;
+    const { flows: listed, readAt: listReadAt } = flowsFor.get(listId)!;
     const flow = listed.find((f) => f.id === flowId);
     const step = flow?.steps[index];
     if (!flow || !flow.active || !step || monthlyAllowance(store) === 0) {
@@ -1567,6 +1589,9 @@ export async function sendDueSteps(
     // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
     // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
     // the step's condition says.
+    // Every run this batch moves is stamped from the list as read: its read second, or the layout mark that list
+    // already holds when that is later (layoutStamp), so a save after this read is always after the stamp.
+    const chosenAt = layoutStamp(flow, listReadAt);
     // A workflow whose steps changed places (Flow.layoutAt): with them, when each run last moved, read in the same step.
     const reshaped = typeof flow.layoutAt === "number" ? flow.layoutAt : null;
     const reply: unknown = await redisPipeline([
@@ -1610,10 +1635,10 @@ export async function sendDueSteps(
     let done = 0;
     let left = 0;
     // Queued before the steps changed places: the place they hold may now be another step. Held for the creator.
-    // Seconds on both sides: a run last moved in the very second of the save is taken as after it (somebody started
-    // right after a save must not be held); a step queued in that same second just before the save is the only one
-    // this can miss. The sender stamps a run with the second its list was read (chosenAt), not when it writes, so a
-    // save later in the same job, while this list is still the one in use, is after the stamp: it is held next time.
+    // A save marks the workflow strictly after the second it is saved in (nextLayoutAt), and a run is stamped from the
+    // list that chose its step (chosenAt, layoutStamp): a run chosen before the save is below the mark, even in the
+    // save's own second, and one chosen from a list that holds the mark is not. A save later in this same job, while
+    // this list is still the one in use, is after the stamp: it is held next time.
     const stale: Parameters<typeof holdRuns>[4] = [];
     emails.forEach((email, i) => {
       if (!held.has(email)) return;

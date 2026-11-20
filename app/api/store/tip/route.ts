@@ -6,13 +6,24 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { createTipCheckout, tipsOpen } from "@/lib/store-tip-checkout";
 import { readTipAmount, tipAmounts } from "@/lib/store-tips";
+import { consumerGate } from "@/lib/eu-vat-gate";
+import type { EuSupplyFields } from "@/lib/eu-vat-supply";
+
+/**
+ * A gift, for the EU VAT gate: no product, so its kind never reads (a paid supply of unknown kind,
+ * lib/eu-vat-supply.ts euSupplyOf). Under the reading of docs/eu-vat-article-9a.md a tip is consideration paid through
+ * the platform to a creator whose content the payer receives, so the gate always asks where the buyer is.
+ */
+const TIP_SUPPLY: EuSupplyFields = { priceCents: 1, file: null, link: null, keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null };
 
 /**
  * "Support my work" on a store page (lib/store-tips.ts): a plain form, so it
- * works without JavaScript. Each of the creator's amounts is a button of its
- * own (`amount`, in the currency's smallest unit, and only one the box
- * offers); the box beside them takes another (`other`, as typed). The answer
- * is Stripe's page, or the store page saying what was wrong.
+ * works without JavaScript. The supporter chooses one of the creator's amounts
+ * (`amount`, in the currency's smallest unit, and only one the box offers) or
+ * "another amount" (`amount=other`, with `other` as typed; a typed amount with
+ * nothing chosen, as Enter in the box sends it, is read the same way), and the
+ * country they are sending from. The answer is Stripe's page, or the store
+ * page saying what was wrong.
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -20,8 +31,11 @@ export async function POST(request: NextRequest) {
   let handle = "";
   let picked = "";
   let other = "";
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent = new FormData();
   try {
     const form = await (await limited(request, 2_000)).formData();
+    sent = form;
     const read = (name: string, max: number) => {
       const value = form.get(name);
       return typeof value === "string" ? value.slice(0, max) : "";
@@ -38,10 +52,19 @@ export async function POST(request: NextRequest) {
     new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}?tip=${problem}#support`, "Cache-Control": "no-store" } });
   if (!tipsOpen(store)) return away("closed");
 
-  // A button's amount is taken only when the box offers it; anything else typed is read and held to the range.
+  // A chosen amount is taken only when the box offers it; "another amount", or nothing chosen, reads what was typed,
+  // held to the range.
   const offered = tipAmounts(store.tips, store.currency);
-  const amount = /^\d{1,9}$/.test(picked) && offered.includes(Number(picked)) ? Number(picked) : picked ? null : readTipAmount(other, store.currency);
+  const amount =
+    picked === "other" || !picked ? readTipAmount(other, store.currency)
+    : /^\d{1,9}$/.test(picked) && offered.includes(Number(picked)) ? Number(picked)
+    : null;
   if (amount === null) return away("amount");
+  // EU VAT art. 9a (owner's decision IV, 789 [IV1] unit 1): before anything is sent to Stripe, a supporter in the EU
+  // or the UK is refused and one without a billing country is asked for it, as the card checkout and the cart do. Kept
+  // until the tax is collected on top of the price at checkout (AGENTS.md, section IV).
+  const gate = consumerGate({ product: TIP_SUPPLY, headers: request.headers, form: sent });
+  if (!gate.ok) return away(gate.reason === "refused" ? "abroad" : "country");
 
   // Twenty a connection in ten minutes per store: far past any fan, short of a script trying cards.
   if (!(await withinStore("tip", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return away("limited");

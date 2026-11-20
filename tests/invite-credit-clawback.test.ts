@@ -110,6 +110,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 const list = (data: unknown[]) => ({ object: "list", data, has_more: false });
+/** A row on a customer's balance history, as Stripe adds it: newer first, or the oldest when `older`. */
+function row(customer: string, amount: number, older = false): void {
+  const r = { id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`, amount, metadata: {} };
+  history.set(customer, older ? [...(history.get(customer) ?? []), r] : [r, ...(history.get(customer) ?? [])]);
+  balances.set(customer, (balances.get(customer) ?? 0) + amount);
+}
+/** Credit Stripe adds (a negative amount): another share, a bonus or a proration. */
+const credit = (customer: string, cents: number, older = false) => row(customer, -cents, older);
+/** Credit an invoice used (Stripe's applied_to_invoice, a positive amount). */
+const spend = (customer: string, cents: number) => row(customer, cents);
 const dispute = (status: string, id = "du_BeaClaw01", invoiceId = INVOICE) => ({
   id, object: "dispute", status, amount: 2900, currency: "usd", payment_intent: PI, created: nowS - 2 * DAY,
   charge: { id: "ch_bea_claw", invoice: { id: invoiceId, subscription: BEA_SUB, lines: { data: [{ period: { start: nowS - 30 * DAY, end: nowS } }] } } },
@@ -192,11 +202,28 @@ async function main(): Promise<void> {
   is("Ana: 500 debited, her balance at zero; Bea, all used: nothing", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01"), posts.get("cus_BeaClaw01")?.slice(1)], [[500], 0, []]);
   is("the records say what was taken back, the rest is the company's", [clawed(INVOICE), clawed(bonusId)], [500, 0]);
 
-  part("More credit on the balance than this one: never more than the credit itself");
+  part("Older credit on the balance than this one, none spent: only this credit is taken back, never more");
   bonusId = `bonus_${await sent()}`;
-  balances.set("cus_AnaClaw01", -10_000);
+  credit("cus_AnaClaw01", 8_550, true);
   await quiet(() => clawBackInviteCredits(INVOICE, nowS));
-  is("only the share is taken back", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01")], [[share], -10_000 + share]);
+  is("only the share is taken back, the older credit stays", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01")], [[share], -8_550]);
+
+  part("Used first, as Stripe spends the oldest credit first (Claude 5's MEDIUM on #4514): the used part is never taken from newer credit");
+  bonusId = `bonus_${await sent()}`;
+  credit("cus_AnaClaw01", share);
+  spend("cus_AnaClaw01", share);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("this share used, a newer one unused: nothing taken, the newer credit stays whole", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01"), clawed(INVOICE)], [[], -share, 0]);
+  bonusId = `bonus_${await sent()}`;
+  credit("cus_AnaClaw01", 1_000);
+  spend("cus_AnaClaw01", 500);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("this share partly used, a newer credit after it: only this share's unused part is taken", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01"), clawed(INVOICE)], [[share - 500], -1_000, share - 500]);
+  bonusId = `bonus_${await sent()}`;
+  spend("cus_AnaClaw01", share);
+  credit("cus_AnaClaw01", 700);
+  await quiet(() => clawBackInviteCredits(INVOICE, nowS));
+  is("a proration credit added after this share was used: not taken", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01"), clawed(INVOICE)], [[], -700, 0]);
 
   part("The debit applied but its reply lost: found in the history, never sent twice");
   bonusId = `bonus_${await sent()}`;

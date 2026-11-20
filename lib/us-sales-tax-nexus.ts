@@ -12,19 +12,23 @@
  *     not reviewed, or a ledger that is not complete, in USD, for that state, over the exact window: unknown, which
  *     refuses the sale;
  *   - a state with no state sales tax (Delaware, Montana, Oregon, as read): no duty;
- *   - otherwise the state's threshold, as read, against THREE windows: the current calendar year to today, the whole
- *     previous calendar year and the trailing twelve months to today. The states word their period differently
- *     (current or previous year, previous twelve months, four quarters), and the table keeps their words, not a
- *     machine reading. A threshold crossed in ANY window requires treatment, which covers each reading.
+ *   - otherwise the state's threshold, as read, against EVERY period a state may name: the current calendar year to
+ *     today, the whole previous calendar year, the trailing twelve months to today, and the twelve months ending at
+ *     each of the last twelve month ends. That last set holds each state's "twelve months ending at a quarter's end",
+ *     whatever its quarters are (Connecticut's September 30, New York's four sales tax quarters, Missouri's
+ *     quarter-end tests; Claude 3's MEDIUM on #4961). The table keeps the states' words, not a machine reading, so a
+ *     threshold crossed in ANY of these windows requires treatment, which covers each reading; treatment can switch on
+ *     early, never late.
  *   - Dollars count as met at the figure itself (">=" even where a state says "exceeds"), transactions at the count
  *     itself; an "and" rule needs both; a facilitator's own threshold is the one the table holds (Oklahoma,
  *     Connecticut). Treatment switches on at US_STATE_SAFETY_MARGIN_BPS before a limit, as for the doing-business tests.
  *
  * What counts as a sale and as a transaction is the caller's: each applicable ledger entry is one transaction in the
  * state, and its amount is what the state's rule counts (gross, retail or taxable, as `counts` says for that state).
- * `applicableScopeReviewed` is the caller's statement that this was reviewed; without it nothing passes. The
- * previous-year ledger holds settled supplies only, because countTaxSales refuses a pending supply outside a ledger's
- * period.
+ * `applicableScopeReviewed` is the caller's statement that this was reviewed; without it nothing passes. One ledger
+ * covers every window (usSalesTaxLookback): a pending supply (reserved or proposed) counts only in the windows that end
+ * today, and one dated before the trailing twelve months refuses, because countTaxSales refuses a pending supply
+ * outside a ledger's period.
  */
 import { countTaxSales, type TaxSalesLedger } from "@/lib/tax-sales-counter";
 import { usSalesTaxRule } from "@/lib/us-sales-tax-rules";
@@ -32,12 +36,8 @@ import { US_STATE_SAFETY_MARGIN_BPS, type UsStateSaleDecision, type UsStateThres
 
 export type UsSalesTaxNexusEvidence = {
   state: string;
-  /** Place { country: "US", state }, USD, 1 January of this year to today. */
-  currentYear: TaxSalesLedger;
-  /** Place { country: "US", state }, USD, the whole previous calendar year; settled supplies only. */
-  previousYear: TaxSalesLedger;
-  /** Place { country: "US", state }, USD, the day after the same date a year ago, to today. */
-  trailingTwelveMonths: TaxSalesLedger;
+  /** Place { country: "US", state }, USD, exactly usSalesTaxLookback(now): every window below is read from it. */
+  ledger: TaxSalesLedger;
   /** The caller reviewed that each applicable entry is what this state's threshold counts. */
   applicableScopeReviewed: boolean;
 };
@@ -51,7 +51,7 @@ export type UsSalesTaxNexusAssessment = {
   reasons: readonly string[];
 };
 
-const KEYS = ["state", "currentYear", "previousYear", "trailingTwelveMonths", "applicableScopeReviewed"] as const;
+const KEYS = ["state", "ledger", "applicableScopeReviewed"] as const;
 const stop = (status: "unknown" | "invalid", state: string | null, reasons: string[]): UsSalesTaxNexusAssessment =>
   ({ status, state, peakMinor: null, peakTransactions: null, reasons });
 
@@ -71,20 +71,38 @@ function own(value: unknown): Record<string, unknown> | null {
   return out;
 }
 
-/** The three windows, as UTC dates, for `now`. */
-export function usSalesTaxWindows(now: number): Record<"currentYear" | "previousYear" | "trailingTwelveMonths", { start: string; end: string }> {
+const iso = (y: number, m0: number, d: number) => new Date(Date.UTC(y, m0, d)).toISOString().slice(0, 10);
+
+export type UsSalesTaxWindow = { name: string; start: string; end: string };
+
+/**
+ * Every window a state's period may be, as UTC dates, for `now`: the current year to today, the previous year, the
+ * trailing twelve months to today, and the twelve months ending at each of the last twelve month ends.
+ */
+export function usSalesTaxWindows(now: number): UsSalesTaxWindow[] {
   const today = new Date(now).toISOString().slice(0, 10);
   const year = Number(today.slice(0, 4));
-  const month = Number(today.slice(5, 7));
+  const m0 = Number(today.slice(5, 7)) - 1;
   // The same date a year ago, kept inside its month (29 February goes to the 28th), then the day after: the longer
   // window of the two readings, never the shorter.
-  const lastDay = new Date(Date.UTC(year - 1, month, 0)).getUTCDate();
-  const yearAgo = new Date(Date.UTC(year - 1, month - 1, Math.min(Number(today.slice(8, 10)), lastDay) + 1));
-  return {
-    currentYear: { start: `${year}-01-01`, end: today },
-    previousYear: { start: `${year - 1}-01-01`, end: `${year - 1}-12-31` },
-    trailingTwelveMonths: { start: yearAgo.toISOString().slice(0, 10), end: today },
-  };
+  const lastDay = new Date(Date.UTC(year - 1, m0 + 1, 0)).getUTCDate();
+  const windows: UsSalesTaxWindow[] = [
+    { name: "current-year", start: `${year}-01-01`, end: today },
+    { name: "previous-year", start: `${year - 1}-01-01`, end: `${year - 1}-12-31` },
+    { name: "trailing-twelve-months", start: iso(year - 1, m0, Math.min(Number(today.slice(8, 10)), lastDay) + 1), end: today },
+  ];
+  for (let back = 1; back <= 12; back += 1) {
+    // Day 0 of a month is the last day of the month before it.
+    const end = iso(year, m0 - back + 1, 0);
+    windows.push({ name: `twelve-months-to-${end}`, start: iso(year, m0 - back - 11, 1), end });
+  }
+  return windows;
+}
+
+/** The one ledger interval that holds every window: from the earliest start to today. */
+export function usSalesTaxLookback(now: number): { start: string; end: string } {
+  const windows = usSalesTaxWindows(now);
+  return { start: windows.map((w) => w.start).sort()[0], end: windows[0].end };
 }
 
 export function assessUsSalesTaxNexus(value: unknown, now = Date.now()): UsSalesTaxNexusAssessment {
@@ -108,16 +126,22 @@ export function assessUsSalesTaxNexus(value: unknown, now = Date.now()): UsSales
       return stop("unknown", state, ["threshold"]);
     }
 
-    const windows = usSalesTaxWindows(now);
+    const lookback = usSalesTaxLookback(now);
+    const whole = countTaxSales(data.ledger);
+    if (whole.status !== "known") return stop(whole.status, state, [`ledger-${whole.status}`]);
+    if (whole.place.country !== "US" || whole.place.state !== state) return stop("unknown", state, ["ledger-place"]);
+    if (whole.currency !== "USD") return stop("unknown", state, ["ledger-currency"]);
+    if (whole.periodStart !== lookback.start || whole.periodEnd !== lookback.end) return stop("unknown", state, ["ledger-period"]);
+    // Read once, as plain data, after countTaxSales has checked every field: each window is counted from this copy.
+    const ledger = structuredClone(data.ledger) as TaxSalesLedger;
     const counted: { name: string; minor: bigint; count: number }[] = [];
-    for (const name of ["currentYear", "previousYear", "trailingTwelveMonths"] as const) {
-      const total = countTaxSales(data[name]);
-      if (total.status !== "known") return stop(total.status, state, [`${name}-${total.status}`]);
-      if (total.place.country !== "US" || total.place.state !== state) return stop("unknown", state, [`${name}-place`]);
-      if (total.currency !== "USD") return stop("unknown", state, [`${name}-currency`]);
-      if (total.periodStart !== windows[name].start || total.periodEnd !== windows[name].end) return stop("unknown", state, [`${name}-period`]);
+    for (const window of usSalesTaxWindows(now)) {
+      // A pending supply belongs to a window that ends today; a window that ended before has settled supplies only.
+      const entries = window.end === lookback.end ? ledger.entries : ledger.entries.filter((entry) => entry.position === "settled");
+      const total = countTaxSales({ ...ledger, periodStart: window.start, periodEnd: window.end, entries });
+      if (total.status !== "known") return stop(total.status, state, [`${window.name}-${total.status}`]);
       const minor = BigInt(total.settledApplicableMinor) + BigInt(total.reservedApplicableMinor) + BigInt(total.proposedApplicableMinor);
-      counted.push({ name, minor, count: total.applicableEntries });
+      counted.push({ name: window.name, minor, count: total.applicableEntries });
     }
 
     const BPS = BigInt(10_000);

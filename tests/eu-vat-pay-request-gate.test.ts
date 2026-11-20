@@ -9,7 +9,8 @@
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { createRequest } from "@/lib/payment-request-store";
+import { cancelRequest, createRequest } from "@/lib/payment-request-store";
+import { REFUSE_CONSUMERS_DRAFTS, REFUSE_CONSUMERS_OPEN } from "@/lib/deemed-supplier-drafts";
 import { REQUEST_WORDS } from "@/lib/buyer-words/requests";
 import { BILLING_COUNTRY_FIELD } from "@/lib/eu-vat-evidence";
 import { POST as payRoute } from "@/app/api/store/pay-request/route";
@@ -101,12 +102,33 @@ async function main(): Promise<void> {
     is(`${notice}: the field is described by the notice`, described !== "" && html.includes(`id="${described}"`), true);
   }
 
+  is("the field's label is the request page's own words", plain.includes(`>${String((REQUEST_WORDS.en as { billingCountry?: string }).billingCountry ?? "\u0000").replace(/'/g, "&#x27;")}</label>`), true);
+
+  part("Never beside a request that can no longer be paid here");
+  const other = await createRequest(store, { email: "other@example.com", name: "Alex", lines: [{ text: "Workshop seat", quantity: 1, cents: 9000 }], note: "", dueDate: "", autoReminders: 0, total: 9000 } as Parameters<typeof createRequest>[1]);
+  if (!other.ok) throw new Error(`no second request: ${other.reason}`);
+  if (typeof (await cancelRequest(store, other.request.id)) !== "object") throw new Error("not canceled");
+  for (const notice of ["abroad", "country"] as const) {
+    const html = await markup(`https://marktmorgen.com/@${SHOP}/pay/${other.request.id}`, () =>
+      PaymentRequestPage({ params: Promise.resolve({ handle: `@${SHOP}`, request: other.request.id }), searchParams: Promise.resolve({ notice }) } as Parameters<typeof PaymentRequestPage>[0]),
+    );
+    is(`${notice} on a withdrawn request: not said`, html.includes(REQUEST_WORDS.en.notices[notice].title.replace(/'/g, "&#x27;")), false);
+  }
+
+  part("The refuse-consumers drafts name this path as gated");
+  is("payment requests are no longer listed as open", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("payment requests")), false);
+  for (const draft of REFUSE_CONSUMERS_DRAFTS) {
+    is(`${draft.jurisdiction}: the route is named`, draft.implementedIn.includes("app/api/store/pay-request/route.ts"), true);
+    is(`${draft.jurisdiction}: this test is named`, draft.evidence.includes("tests/eu-vat-pay-request-gate.test.ts"), true);
+  }
+
   part("Every language says both");
   for (const [language, words] of Object.entries(REQUEST_WORDS)) {
     for (const notice of ["abroad", "country"] as const) {
       const said = words.notices[notice];
       is(`${language}: ${notice} has a title and a body`, !!said && said.title.trim().length > 0 && said.body.trim().length > 0, true);
     }
+    is(`${language}: the field has its own label`, typeof words.billingCountry === "string" && words.billingCountry.trim().length > 0, true);
   }
 
   done();

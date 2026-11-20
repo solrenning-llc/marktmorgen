@@ -55,8 +55,8 @@ export default async function StudioPausedPage({ searchParams }: Params) {
   const noMonth = allowanceWindow(store) === null;
 
   return (
-    <div className="min-h-screen bg-paper text-ink">
-      <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur-xl">
+    <div className="min-h-screen bg-paper text-ink" data-dark-ready="">
+      <header className="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-xl">
         <div className="container-page flex h-16 items-center justify-between gap-2 sm:gap-3">
           <Link href="/" className="shrink-0 rounded-[10px]" aria-label="Marktmorgen, home">
             <Logo />

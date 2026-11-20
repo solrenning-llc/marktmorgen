@@ -16,9 +16,15 @@ export const metadata: Metadata = {
  * lib/embed-sites.ts, lib/embed-open.ts) and nothing ahead of it. When the
  * script or its rules change, this page changes in the same commit.
  */
-function Code({ children }: { children: string }) {
+/**
+ * A code sample. A long line scrolls sideways inside the block instead of
+ * widening the page (WCAG 1.4.10), so the block takes the keyboard focus
+ * and has a name: a keyboard user can scroll it with the arrow keys
+ * (2.1.1), and a screen reader says what it holds.
+ */
+function Code({ label, children }: { label: string; children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
+    <pre tabIndex={0} role="region" aria-label={label} className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
       <code>{children}</code>
     </pre>
   );
@@ -54,7 +60,7 @@ export default async function CheckoutScriptPage() {
 
       <LegalSection title="What you paste">
         <p>A link, and once per page, the script. This is a link made in the studio:</p>
-        <Code>{example}</Code>
+        <Code label="Example link from the studio">{example}</Code>
         <p>
           The link works with or without the script: followed as it is, it opens the card as a page of its own, whose buy button goes on to
           Stripe in the same tab. With the script on the page and {c('data-mm="overlay"')}, it opens the card in a frame over your page instead,
@@ -90,7 +96,7 @@ export default async function CheckoutScriptPage() {
           The script dispatches these on the link that was pressed, so they bubble up to {c("document")}. Each carries {c("detail")} with{" "}
           {c("kind")} ({c("product")} or {c("optin")}), {c("handle")}, {c("product")} (null for the form) and {c("mode")}:
         </p>
-        <Code>{`marktmorgen:open      the link was pressed
+        <Code label="Events the script dispatches">{`marktmorgen:open      the link was pressed
 marktmorgen:ready     the card or form is showing (over the page)
 marktmorgen:checkout  the buy button was pressed; Stripe opens in a new tab
 marktmorgen:optin     the form was sent; detail.status is "sent" when the
@@ -99,7 +105,7 @@ marktmorgen:optin     the form was sent; detail.status is "sent" when the
 marktmorgen:close     the overlay closed; detail.reason says how
 marktmorgen:purchase  back from paying (on document); detail is
                       { product, order }`}</Code>
-        <Code>{`document.addEventListener("marktmorgen:purchase", (event) => {
+        <Code label="Example: listening for a purchase">{`document.addEventListener("marktmorgen:purchase", (event) => {
   // event.detail.order is the id of the sale.completed webhook for this order
   showThankYou(event.detail.product);
 });`}</Code>
@@ -142,12 +148,12 @@ marktmorgen:purchase  back from paying (on document); detail is
           is on the page twice.
         </p>
         <p>{`This is version ${SCRIPT_VERSION}, in full. It is the same for every store, so its hash is the same too:`}</p>
-        <Code>{loaderSource()}</Code>
+        <Code label={`The script, version ${SCRIPT_VERSION}`}>{loaderSource()}</Code>
       </LegalSection>
 
       <LegalSection title="Content-Security-Policy">
         <p>If your site sends a Content-Security-Policy, these let the script run and its frame open:</p>
-        <Code>{cspLines(hash).join("\n")}</Code>
+        <Code label="Content-Security-Policy lines">{cspLines(hash).join("\n")}</Code>
         <p>
           The hash matches the script exactly as the studio gives it. A builder that changes pasted code as it saves it changes the hash too;
           there, use the link on its own, which needs no policy at all.

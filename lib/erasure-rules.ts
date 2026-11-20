@@ -83,21 +83,33 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
- * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (review of #3929) the read of the
- * note of the carts the person was reminded of (lib/checkout-recovery.ts, forgetRecoveryPerson), one SMEMBERS, the note
- * itself deleted inside the marks' one DEL: 551 before it; and (#4471) the private podcast feeds of removed products: the
- * count of the store's noted products (SCARD), their set read with whether the walk of feeds granted before the note is
- * done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most NOTE_INLINE_PAGES (4) SCAN
- * pages: 552 before them.
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4471) the private podcast feeds of
+ * removed products: the count of the store's noted products (SCARD), their set read with whether the walk of feeds
+ * granted before the note is done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most
+ * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them; and (Claude 3 on #3473) the read of the memberships whose
+ * invitations wait to be deleted (lib/move-members.ts withPendingInvites), one SMEMBERS: 558 before it, 559 with it.
+ * And (since #4808, 15 November 2026) the paths of the person's files kept for a repeat: one SMEMBERS, an SADD and an
+ * EXPIRE, and an SREM, four more: 563; and (3rjdf's review) their review photos' paths kept before the reviews go (an
+ * SADD and an EXPIRE) and the kept paths' time renewed on a repeat and when one is lost (two EXPIREs), four more: 567.
+ * Since Codex L on #4871 the kept paths have no expiry, so their four EXPIREs are no longer sent; 567 stays the bound.
+ * And (review of #3929) the read of the note of the carts the person was reminded of (lib/checkout-recovery.ts,
+ * forgetRecoveryPerson), one SMEMBERS, the note itself deleted inside the marks' one DEL: 568.
  */
-export const ERASE_FIXED_COMMANDS = 559;
-/** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+export const ERASE_FIXED_COMMANDS = 568;
+/**
+ * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
+ * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
+ * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
+ * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000.
+ */
+export const ERASE_FIXED_BYTES = 325_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],
-  courses: [14, 70_000],
-  lessons: [1, 800],
+  // Since #4808 a course's handed-in files are kept for a repeat before their records go: each lesson's submission
+  // read once more (one command, its record's bytes again) and each course's SADD and EXPIRE.
+  courses: [16, 70_000],
+  lessons: [2, 1_600],
   deals: [0, 1_000],
   conversations: [0, 700],
   dmConversations: [3, 300],

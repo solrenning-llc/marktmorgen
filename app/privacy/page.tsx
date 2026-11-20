@@ -315,10 +315,15 @@ export default function PrivacyPage() {
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
           behalf and under its own privacy policy. A visitor who did not allow
-          ad measurement is never sent. We keep the token sealed; for four days,
-          the request that opened a checkout; for 400 days, the cookies and ad
+          ad measurement is never sent, and neither is a purchase, payment or
+          sign-up of somebody deleted from the store, unless it was already
+          being sent when they were deleted. We keep the token sealed; for
+          four days at the most, the request that opened a checkout, deleted
+          once its purchase is known; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
-          address or browser; for three days (40 for a membership payment) that
+          address or browser, deleted with the buyer when they are deleted
+          from the store;
+          for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.
         </p>
@@ -948,7 +953,8 @@ export default function PrivacyPage() {
           saying what moved and how to open it. We send it on the
           creator&apos;s instruction and on their word that these people
           bought from them and may be told so, which we cannot check against
-          the other platform. A store may send up to 20,000 of these in 30
+          the other platform. Nobody who left that creator&apos;s list is
+          written to. A store may send up to 20,000 of these in 30
           days, and for that we keep only a count.
         </p>
         <p id="moved-members">
@@ -970,7 +976,12 @@ export default function PrivacyPage() {
           the membership, so somebody who kept it is not written to. We send
           these on the creator&apos;s instruction and on their word that these
           people are their members, which we cannot check against the other
-          platform; they count within the same 20,000 in 30 days. Keeping the
+          platform; they count within the same 20,000 in 30 days. Nobody who
+          left that creator&apos;s list is written to. Each of these emails
+          carries the creator&apos;s postal address and a link that stops
+          them, tied to the address and the store, for 400 days; pressing it
+          keeps a one-way hash of the address for that store for good, so
+          that store never sends them a reminder again. Keeping the
           membership is a checkout on the creator&apos;s own Stripe account,
           like any purchase in their store.
         </p>
@@ -2041,7 +2052,11 @@ export default function PrivacyPage() {
           creator&apos;s store may set these, each for that store alone: a pass
           that lets a
           browser into a course or a community, named <code>nl_learn_</code>{" "}
-          followed by a code for the store, for 90 days; the code and time of
+          followed by a code for the store, for 90 days; a student&apos;s
+          &quot;No thanks&quot; to the next step a course&apos;s creator suggests,
+          named <code>nl_ns_</code> followed by a code for the course, holding
+          only that answer, for a year, so it is not suggested again in that
+          browser; the code and time of
           an affiliate link a visitor followed, named <code>nl_via_</code>{" "}
           followed by the store&apos;s address, for up to {MAX_COOKIE_DAYS} days,
           subject to the browser&apos;s own limits; it may expire sooner. The store also keeps an

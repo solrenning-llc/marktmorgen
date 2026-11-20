@@ -51,7 +51,10 @@ async function seed(): Promise<void> {
   ]);
 }
 const isMembers = (c: Commands) => c.length === 1 && c[0][0] === "SMEMBERS" && c[0][1] === WHO;
-const isDelete = (c: Commands) => c.length === 1 && c[0][0] === "DEL" && c[0][1] === WHO;
+// Changed on the merge of main (rule 23): main's #4380 forgets a person in one script (FORGET_PERSON: the note read,
+// each consent and the note deleted, answering {deleted, members} or -1), so the forget checks below answer that
+// script in other shapes, where they answered its SMEMBERS and DEL before; the copy checks are unchanged.
+const isForget = (c: Commands) => c.length === 1 && c[0][0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:assist-reminder-forget:") && c[0][3] === WHO;
 const isConsentRead = (c: Commands) => c.length >= 1 && c[0][0] === "GET" && String(c[0][1]) === assistRemindKey(SESSION);
 const SHAPES: [() => Promise<unknown>, string][] = [
   [async () => [null], "answered nothing"],
@@ -65,7 +68,7 @@ test("forgetting a person: their checkouts' list in another shape is unknown, an
   for (const [answer, label] of SHAPES) {
     await t.test(label, async () => {
       await seed();
-      await assert.rejects(intercept(isMembers, answer, () => forgetAssistReminderPerson(STATS, EMAIL)), `forget: SMEMBERS ${label}`);
+      await assert.rejects(intercept(isForget, answer, () => forgetAssistReminderPerson(STATS, EMAIL)), `forget: the script ${label}`);
       // Nothing that would let a retry find the consent was taken away.
       const [members] = await redis.pipeline([["SMEMBERS", WHO]]);
       assert.deepEqual(members, [SESSION], "the note of their checkouts is kept for the erasure pressed again");
@@ -75,14 +78,15 @@ test("forgetting a person: their checkouts' list in another shape is unknown, an
 
 test("forgetting a person: a count of what went in another shape is unknown, never 'nothing here'", async (t) => {
   for (const [answer, label] of [
-    [async () => [null], "DEL answered nothing"],
-    [async () => ["2"], "DEL answered text"],
-    [async () => [-1], "DEL answered -1"],
-    [async () => [], "DEL with no reply"],
+    [async () => [[null, 1]], "the count deleted answered nothing"],
+    [async () => [["2", 1]], "the count deleted answered text"],
+    [async () => [[-1, 1]], "the count deleted answered -1"],
+    [async () => [[5, 1]], "more deleted than the note named"],
+    [async () => [], "the script with no reply"],
   ] as [() => Promise<unknown>, string][]) {
     await t.test(label, async () => {
       await seed();
-      await assert.rejects(intercept(isDelete, answer, () => forgetAssistReminderPerson(STATS, EMAIL)), `forget: ${label}`);
+      await assert.rejects(intercept(isForget, answer, () => forgetAssistReminderPerson(STATS, EMAIL)), `forget: ${label}`);
     });
   }
 });
@@ -117,11 +121,17 @@ test("a member of the note that is no checkout id is unknown, never skipped (Cod
     [async () => [[SESSION, 7]], "a member that is a number"],
   ] as [() => Promise<unknown>, string][]) {
     await t.test(`forget: ${label}`, async () => {
+      // The note really holds the altered members (main's FORGET_PERSON reads them inside the script, not through an
+      // answer that can be intercepted): the script answers -1, nothing is deleted, and the consent keeps its way back.
+      const written = ((await answer()) as unknown[][])[0];
       await seed();
-      await assert.rejects(intercept(isMembers, answer, () => forgetAssistReminderPerson(STATS, EMAIL)), `forget: ${label}`);
+      await redis.pipeline([["DEL", WHO], ["SADD", WHO, ...written.map(String)], ["EXPIRE", WHO, 3600]]);
+      await assert.rejects(forgetAssistReminderPerson(STATS, EMAIL), `forget: ${label}`);
       const [members, consent] = await redis.pipeline([["SMEMBERS", WHO], ["GET", assistRemindKey(SESSION)]]);
-      assert.deepEqual(members, [SESSION], "the note of their checkouts is kept for the erasure pressed again");
+      assert.deepEqual([...(members as string[])].sort(), written.map(String).sort(), "the note of their checkouts is kept for the erasure pressed again");
       assert.equal(consent, CONSENT, "the consent is kept with a way to find it");
+      // The altered note goes, so the next check starts from the healthy one.
+      await redis.pipeline([["DEL", WHO]]);
     });
     await t.test(`copy: ${label}`, async () => {
       await seed();

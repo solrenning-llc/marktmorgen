@@ -39,6 +39,7 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { forgetPaid } from "@/lib/learn";
 import { forgetTicket } from "@/lib/community-access";
 import type { Listing, Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PRICE_PATTERN = /^price_[A-Za-z0-9]{6,64}$/;
@@ -265,7 +266,8 @@ export async function tierPrice(store: Store, product: Listing): Promise<string>
   const made = await onAccount("POST", account, "/prices", tierPriceBody(store, product));
   const id = typeof made.id === "string" ? made.id : "";
   if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
-  await redisPipeline([["SET", key, id, "EX", 400 * 86_400]]);
+  // Kept only while the store is live: a Stripe answer that comes after its erasure began writes nothing back (G-1333).
+  await setWhileStoreLive(store, key, id, 400 * 86_400);
   return id;
 }
 

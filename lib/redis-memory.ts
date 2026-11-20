@@ -1154,6 +1154,16 @@ export class MemoryRedis {
           this.run(["DEL", record]);
           return 1;
         }
+        // lib/share-settle.ts KEEP_MARKER_IF_LIVE: no owner ref is restored after store erasure.
+        if (key.startsWith("-- marktmorgen:share-marker-live:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, identity, erasing, target, field, ref, value] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", identity]) === 0) return -1;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return -1;
+          this.scriptCalls += 1;
+          return this.run(["HSET", target, ref, value]);
+        }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
         if (key.startsWith("-- marktmorgen:sns-receipt-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, receipt, from, to, seconds] = args;

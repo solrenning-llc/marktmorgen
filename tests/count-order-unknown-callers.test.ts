@@ -207,7 +207,7 @@ async function main(): Promise<void> {
       currency: "usd",
       metadata: { store: store.handle, product: front, upsell_key: browser.fingerprint },
       customer_details: { email: BUYER, address: { country: "US" } },
-      payment_intent: { id: `pi_test_front${String(serial).padStart(5, "0")}`, payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+      payment_intent: { id: `pi_test_front${String(serial).padStart(5, "0")}`, payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
     };
     return id;
   };

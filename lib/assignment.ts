@@ -482,7 +482,10 @@ export async function handIn(input: {
   };
   const member = `${lessonId}|${who}`;
   // Its room first: what it weighs over what it replaces, its two places in the lists the first time, its file's entry.
-  const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (input.file ? ENTRY_BYTES : 0);
+  // The entry only for a file that is not the one already kept (#4486, Codex C2): keeping it writes the same field of
+  // the files' hash again, one entry in Redis, and a drop gives back one entry per field.
+  const newEntry = Boolean(input.file) && input.file?.path !== before?.file?.path;
+  const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (newEntry ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
   input.writing?.();
   // Written only over the work read above (HAND_IN_WRITE_IF): a hand-in whose lease ran out while another replaced the

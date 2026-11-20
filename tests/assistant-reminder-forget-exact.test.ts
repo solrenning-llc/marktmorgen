@@ -10,11 +10,16 @@
  * said they had given no yes. Now an unreadable reply throws
  * UnknownReplyError: the erasure says this part could not finish (and can be
  * asked again), the copy fails whole. A confirmed empty set stays empty.
+ * The erasure reads and deletes the note in one EVAL (FORGET_PERSON, #4483),
+ * so its unreadable replies are those of that EVAL; the copy still reads the
+ * note with SMEMBERS.
  * Synthetic data only.
  */
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { forgetAssistReminderPerson, remindersOf } from "@/lib/assistant-reminder";
+import { normaliseEmail } from "@/lib/auth";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -26,6 +31,8 @@ const STATS = "0123456789abcdef0123456789abcdef";
 const EMAIL = "buyer@assist-forget.example";
 const SESSION = "cs_test_assistforgetexact0001";
 const CONSENT = `nl:assist:remind:${SESSION}`;
+/** The note of this address's yeses, as lib/assistant-reminder.ts names it (whoKey). */
+const WHO = `nl:assist:remindwho:${STATS}:${createHash("sha256").update(`nimbus-assist-remind:${STATS}:${normaliseEmail(EMAIL)}`).digest("hex").slice(0, 32)}`;
 
 /** Every command named answers `reply`; every other command is the stub's. */
 async function withReply<T>(command: string, reply: () => unknown, run: () => Promise<T>): Promise<T> {
@@ -54,7 +61,7 @@ for (const [label, reply] of MALFORMED) {
   test(`erasing a person's reminder yeses: ${label} is unknown, never nothing to erase`, async () => {
     redis.clear();
     await redis.pipeline([["SET", CONSENT, JSON.stringify({ s: STATS, e: EMAIL })]]);
-    await withReply("SMEMBERS", reply, () => assert.rejects(() => forgetAssistReminderPerson(STATS, EMAIL), UnknownReplyError));
+    await withReply("EVAL", reply, () => assert.rejects(() => forgetAssistReminderPerson(STATS, EMAIL), UnknownReplyError));
     const [kept] = await redis.pipeline([["EXISTS", CONSENT]]);
     assert.equal(kept, 1, "the yes is still there, so the erasure must not be said done");
   });
@@ -67,17 +74,17 @@ for (const [label, reply] of MALFORMED) {
 
 test("erasing a person's reminder yeses: an unreadable count of what was deleted is unknown", async () => {
   redis.clear();
-  await withReply("SMEMBERS", () => [[SESSION]], () =>
-    withReply("DEL", () => ["OK"], () => assert.rejects(() => forgetAssistReminderPerson(STATS, EMAIL), UnknownReplyError)));
+  await withReply("EVAL", () => [["OK", 1]], () => assert.rejects(() => forgetAssistReminderPerson(STATS, EMAIL), UnknownReplyError));
 });
 
 test("erasing a person's reminder yeses: a readable note deletes every yes it names", async () => {
   redis.clear();
-  await redis.pipeline([["SET", CONSENT, JSON.stringify({ s: STATS, e: EMAIL })]]);
-  const n = await withReply("SMEMBERS", () => [[SESSION]], () => forgetAssistReminderPerson(STATS, EMAIL));
+  await redis.pipeline([["SET", CONSENT, JSON.stringify({ s: STATS, e: EMAIL })], ["SADD", WHO, SESSION]]);
+  const n = await forgetAssistReminderPerson(STATS, EMAIL);
   assert.ok(n >= 1, "the yes counts as deleted");
-  const [kept] = await redis.pipeline([["EXISTS", CONSENT]]);
+  const [kept, note] = await redis.pipeline([["EXISTS", CONSENT], ["EXISTS", WHO]]);
   assert.equal(kept, 0);
+  assert.equal(note, 0, "the note goes with the yeses it named");
 });
 
 test("a confirmed empty note stays empty: nothing to erase, nothing to copy", async () => {

@@ -37,7 +37,12 @@ async function main() {
   is("it is not closing today", closing.today ?? false, false);
   is("its buyers are said not to be all told", closing.buyers?.done, false);
   is(`its day is at least ${BUYER_NOTICE_DAYS} days from the start of today, as the job counts it from when they are told`, closing.day >= Math.floor(now / DAY) * DAY + BUYER_NOTICE_DAYS * DAY, true);
-  is("and the same all day, so a review drawn from it does not change under its creator", (await closingOf(store, now + 60_000))!.day, closing.day);
+  // The whole of now's UTC day, its first and its last millisecond: never now plus a minute, which passes midnight when
+  // the test starts between 00:09 and 00:10 UTC (now is the plan's end, the real clock, plus CLOSING_DAYS, less ten
+  // minutes), as on #3435's CI at 00:09:57 UTC on 19 November 2026.
+  const today = Math.floor(now / DAY) * DAY;
+  is("and the same at the start of the day, so a review drawn from it does not change under its creator", (await closingOf(store, today))!.day, closing.day);
+  is("and the same at its end", (await closingOf(store, today + DAY - 1))!.day, closing.day);
   is("so its creator may still start a plan to keep it", now < lastPlanMoment(closing.day), true);
   done();
 }

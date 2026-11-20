@@ -35,6 +35,7 @@ import { PAYPAL_REFUNDS_READ, type Paid, readPayPalRefundsWithCoverage, watchPay
 import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { storeIdCommand } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { PAYPAL_PENDING_SWEEP, PAYPAL_REFUND_KEPT, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
 import { ORDER_WRITE } from "@/lib/order-data";
@@ -107,6 +108,8 @@ async function setup(partner = false): Promise<void> {
     ["SET", `nl:ppsell:paid:${ORDER}`, JSON.stringify(paid)],
     ["SET", `nl:ppsell:paid:${OTHER_ORDER}`, JSON.stringify(other)],
     ["ZADD", `nl:ppsell:watch:${SID}`, "0", ORDER],
+    // The live store's id key, which the refund watch's fence reads before it puts an order back (Codex G-1144).
+    ["SET", storeIdCommand(store.sid)[1], store.email],
   ]);
 }
 
@@ -204,6 +207,30 @@ async function main(): Promise<void> {
   is("still watched, about an hour on", score >= NOW + 3000 && score <= NOW + 4000, true);
   is("meanwhile the set's mark takes the refunded sale back", (await offered()).to.get(AFF), 1470);
 
+  part("Retrying the refund watch keeps the refund in the day it was first seen");
+  await setup();
+  captures.set(CAPTURE, "REFUNDED");
+  const dayStart = Math.floor(NOW / 86_400) * 86_400 + 86_400;
+  const firstSeen = dayStart - 60;
+  const nextTry = dayStart + 3600;
+  const realNow = Date.now;
+  try {
+    Date.now = () => firstSeen * 1000;
+    await answering("EVAL", `nl:ppsell:back:${SID}`, "garbled", () => watch());
+    const initial = await readPayPalRefundsWithCoverage(SID, 0);
+    is("the first attempt records the time the refund was seen", initial.rows[0]?.at, firstSeen);
+
+    Date.now = () => nextTry * 1000;
+    await watch();
+    is("the follow-up finishes checking the order", redis.run(["ZSCORE", `nl:ppsell:watch:${SID}`, ORDER]), null);
+    const reading = await readPayPalRefundsWithCoverage(SID, 0);
+    is("the original refund time stays put", reading.rows[0]?.at, firstSeen);
+    const nextDay = await readPayPalRefundsWithCoverage(SID, dayStart);
+    is("the next day does not include the previous day's refund", nextDay.rows.length, 0);
+  } finally {
+    Date.now = realNow;
+  }
+
   part("Unknown: the book's read of the lasting refunds not exact leaves it unchecked");
   await setup();
   captures.set(CAPTURE, "REFUNDED");
@@ -287,6 +314,9 @@ async function main(): Promise<void> {
   // hour on while it fails; tests/plan-cost-registry.ts prices it (PAYPAL_REFUND_KEPT), never "not certified".
   part("The lasting write's commands are the cost line's, retries included");
   {
+    /** The order put back on the watch, fenced against the store's erasure (lib/paypal-sales.ts, PAYPAL_WATCH_IF_LIVE). */
+    const fencedPutBack = (c: (string | number)[]) =>
+      c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-watch-if-live:v1") && c.includes(`nl:ppsell:watch:${SID}`) && c[c.length - 1] === ORDER;
     const scripts = async (run: () => Promise<unknown>) => {
       const original = redis.pipeline;
       const sent: (string | number)[][] = [];
@@ -315,8 +345,11 @@ async function main(): Promise<void> {
     await setup();
     captures.set(CAPTURE, "REFUNDED");
     const failed = await scripts(() => answering("EVAL", `nl:ppsell:back:${SID}`, "garbled", () => watch()));
-    const again = failed.sent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}` && c[c.length - 1] === ORDER);
-    is("a failed write is one script and one ZADD an hour on", [failed.kept.length, again.length], [PAYPAL_REFUND_KEPT.scriptsPerRefundLook, PAYPAL_REFUND_KEPT.retryWritesPerFailedLook]);
+    // Put back an hour on only while the store is live (Codex G-1144): one fenced script, billed as its EVAL and the
+    // three calls it runs (EXISTS, HEXISTS, ZADD).
+    const again = failed.sent.filter((c) => fencedPutBack(c));
+    const billed = again.reduce((sum, c) => sum + 1 + (String(c[1]).match(/redis\.call\(/g) ?? []).length, 0);
+    is("a failed write is one script and one fenced put-back an hour on", [failed.kept.length, again.length, billed], [PAYPAL_REFUND_KEPT.scriptsPerRefundLook, 1, PAYPAL_REFUND_KEPT.retryWritesPerFailedLook]);
     is("tried again at most hourly, as the watch's looks", PAYPAL_REFUND_KEPT.looksPerDayAtMost, PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost);
     is("and no longer than the watch keeps the order", PAYPAL_REFUND_KEPT.daysAtMost, PAYPAL_REFUND_WATCH.daysWatchedAtMost);
 
@@ -336,13 +369,13 @@ async function main(): Promise<void> {
       captures.set(CAPTURE, status);
       const look = await scripts(() => answering(failure.command, failure.prefix, failure.reply, () => watch()));
       const label = `${status}, ${failure.name} unknown`;
-      is(`${label}: looked at again an hour on, one script`, [look.kept.length, look.sent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}`).length], [1, 1]);
+      is(`${label}: looked at again an hour on, one script`, [look.kept.length, look.sent.filter((c) => fencedPutBack(c)).length], [1, 1]);
       const counted = [
         (c: (string | number)[]) => failure.command === "HGET" && c[0] === "HGET" && String(c[1]).startsWith(failure.prefix),
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:pending:${SID}`,
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:watch:${SID}`,
         (c: (string | number)[]) => c[0] === "GET" && c[1] === `nl:ppsell:paid:${ORDER}`,
-        (c: (string | number)[]) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}` && c[c.length - 1] === ORDER,
+        (c: (string | number)[]) => fencedPutBack(c),
         (c: (string | number)[]) => look.kept.includes(c),
       ];
       const rest = [...look.sent];

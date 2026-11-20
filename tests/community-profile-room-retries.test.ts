@@ -31,6 +31,7 @@ let interfere: ((record: Member) => Member) | null = null;
 let interferences = 0;
 /** The data room's scripts run since the last reset: each reservation and each give-back is one. */
 let roomCalls = 0;
+let loseWriteReply = false;
 
 redis.pipeline = (async (commands: Command[]) => {
   for (const command of commands) if (command[0] === "EVAL" && command[1] === TAKE_DATA) roomCalls += 1;
@@ -44,6 +45,10 @@ redis.pipeline = (async (commands: Command[]) => {
     if (redis.run(["HGET", members, field]) !== expected) return [0];
     redis.run(["HSET", members, field, next]);
     redis.run(listed === "1" ? ["ZADD", dir, at, field] : ["ZREM", dir, field]);
+    if (loseWriteReply) {
+      loseWriteReply = false;
+      throw new Error("the write reply was lost");
+    }
     return [1];
   }
   return pipeline(commands);
@@ -102,6 +107,17 @@ async function main(): Promise<void> {
   const plainGrowth = (await used(plain))! - plainStart!;
   is("the first try takes the room once", plainCalls, 1);
   is("the change took room for what it added", plainGrowth > 0, true);
+
+  part("the member write lands and its pipeline reply rejects");
+  const lost = await club("lost@retry.example", "retrylost");
+  const lostSnap = await member(lost, "ana@lost.example");
+  const lostStart = await used(lost);
+  roomCalls = 0;
+  loseWriteReply = true;
+  is("the caller sees the lost reply", await attempt(() => setProfile(lost.community!.id, lostSnap, { name: "Ana", dir: true, mail: false, links: three }, lost)), "the write reply was lost");
+  is("the record already holds the three links", (await readMember(lost.community!.id, lostSnap.k))?.s.length, 3);
+  is("room for the written record stays reserved", (await used(lost))! - lostStart!, plainGrowth);
+  is("no room give-back when the reply is lost", roomCalls, 1);
 
   part("four visits land between read and set: one reservation is kept across the retries");
   const busy = await club("busy@retry.example", "retrybusy");

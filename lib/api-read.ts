@@ -15,6 +15,7 @@
  * seconds for members and students, milliseconds for bookings and
  * affiliates, text already for contacts — so no tool has to guess the unit.
  */
+import { everyOf } from "@/lib/product-recurring";
 import { apiError } from "@/lib/api-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -25,7 +26,7 @@ import { leadsKey, parseContact } from "@/lib/contacts";
 import { memberPage } from "@/lib/community";
 import { readCourse } from "@/lib/course";
 import { studentPage } from "@/lib/learn";
-import { BOOK_STRIPE_PAGES, bookSizes, readBook } from "@/lib/affiliates";
+import { BOOK_STRIPE_PAGES, type Book, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
 import {
@@ -58,7 +59,7 @@ export type Charge = (more: number, taken?: number) => Promise<Response | null>;
 export type Hold = (most: number) => Promise<Response | ((actual: number) => Promise<Response | null>)>;
 
 /** Every field each list's rows go out with, so a field asked for is checked before anything is taken or read (lib/api-fields.ts, badFields). */
-export const PRODUCT_FIELDS = ["id", "title", "price", "currency", "kind", "interval", "hidden", "url"] as const;
+export const PRODUCT_FIELDS = ["id", "title", "price", "currency", "kind", "interval", "interval_count", "hidden", "url"] as const;
 export const LEAD_FIELDS = ["email", "name", "agreed", "agreed_at", "unsubscribed", "unsubscribed_at", "first_at", "last_at", "products", "product_ids", "tags", "source"] as const;
 export const MEMBER_FIELDS = ["email", "name", "handle", "listed", "announcements", "muted", "removed", "joined_at", "last_seen_at"] as const;
 export const STUDENT_FIELDS = ["email", "lessons_done", "lessons_total", "started_at", "last_seen_at", "blocked"] as const;
@@ -116,6 +117,8 @@ export async function products(store: Store, cursor: string | null, charge: Char
       currency: store.currency,
       kind: p.call ? "call" : p.course ? "course" : p.recurring ? "membership" : p.priceCents === 0 ? "free" : "one_time",
       interval: p.recurring?.interval ?? null,
+      // How many intervals one charge covers (609 [WP8]): 3 with "month" is every 3 months; null for something bought once.
+      interval_count: p.recurring ? everyOf(p.recurring) : null,
       hidden: p.hidden === true,
       url: productLink(store, p.id),
     })),
@@ -334,16 +337,31 @@ export async function chargeBook(store: Store, charge: Charge): Promise<Response
   return charge(apiReadUnits(bookWork(sizes, BOOK_STRIPE_PAGES)));
 }
 
+/**
+ * Whether every membership and plan payment is in the book: read whole and none left out unlinked. The invoice half
+ * of unsettledBook (lib/paypal-payouts.ts), shared with the MCP tool (lib/mcp-tools.ts, affiliatesTool), so a tool
+ * paying from the API waits exactly when the studio, PayPal and payday do.
+ */
+export function invoicesSettled(book: Pick<Book, "invoicesChecked" | "unlinkedInvoices">): boolean {
+  return book.invoicesChecked && !(book.unlinkedInvoices ?? 0);
+}
+
 /** Every affiliate, with what they have earned, been paid, and are owed. */
-export async function affiliates(store: Store, charge: Charge): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean } | Response> {
+export async function affiliates(store: Store, charge: Charge): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean; invoices_checked: boolean; unlinked_invoices: number } | Response> {
   const refused = await chargeBook(store, charge);
   if (refused) return refused;
-  const book = await readBook(store);
+  // Counted ahead, the kept invoices with it (chargeBook, bookWork).
+  const book = await readBook(store, undefined, { keptPaid: true });
   return {
     currency: book.currency,
     // When Stripe could not be asked about refunds, the amounts may be high.
     // Said, so a tool paying from these numbers can wait for a clean read.
     refunds_checked: book.refundsChecked,
+    // Nor every membership and plan payment (audit A1): the amounts may then be low. The same test as the studio's
+    // batch file and its confirmation (unsettledBook), so a tool paying from these numbers waits as they do: a paid
+    // invoice left out because it cannot be linked to one payment (unlinked_invoices) is a commission not counted.
+    invoices_checked: invoicesSettled(book),
+    unlinked_invoices: book.unlinkedInvoices ?? 0,
     data: book.rows.map((r) => ({
       id: r.affiliate.id,
       email: r.affiliate.email,

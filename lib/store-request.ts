@@ -35,6 +35,7 @@ export async function guardStoreWrite(
   need: Need | ((body: Record<string, unknown>) => Need | null),
   maxBodyBytes = 4_000,
   act?: (body: Record<string, unknown>) => string,
+  units: number | ((body: Record<string, unknown>) => number) = 1,
 ): Promise<
   | { ok: true; email: string; ref: string; store: Store; role: Role; body: Record<string, unknown> }
   | { ok: false; response: Response }
@@ -74,7 +75,10 @@ export async function guardStoreWrite(
   // something on an object's prototype ("constructor") is not one.
   if (!permission || (permission !== "member" && !isPermission(permission))) return refuse("invalid", 400);
   const action = act ? act(body).slice(0, 40) : typeof body.action === "string" ? body.action.slice(0, 20) : "";
-  const result = await studioAccess(request, permission, action);
+  // A route whose fixed work is more than the request itself can admit all of it atomically. If the figure has less
+  // room, takeAllowance gives the whole count back; a first unit is never consumed before a second fixed unit refuses.
+  const countedUnits = typeof units === "function" ? units(body) : units;
+  const result = await studioAccess(request, permission, action, countedUnits);
   if (!result.ok) return { ok: false, response: refusedJson(result.reason, result.message) };
   const { access } = result;
 

@@ -78,6 +78,11 @@ def main():
         assert 0 < redis.command("PTTL", keys[5]) <= start + 90 * 60_000 - now - 120_000 + 2 * DAY
         print("PASS: an expired hold gives its time back; a booking moves onto its own time; the list expires")
 
+        assert claim(redis, [keys[3]], start + 4 * HOUR, start + 5 * HOUR, "k" + "a" * 24) == 1
+        assert claim(redis, [keys[3]], start + 4 * HOUR, start + 5 * HOUR, "k" + "a" * 24, hold=now + 60_000) == 1
+        assert redis.command("HGET", keys[3], "k" + "a" * 24).split("|")[2] == "0"
+        print("PASS: a hold written over the same claim kept for good never downgrades it")
+
         pairs = [(keys[6], keys[7]), (keys[7], keys[6])]
         results = race(lambda client, i: claim(client, list(pairs[i % 2]), start, start + HOUR, "k%024x" % (500 + i)), 32)
         assert results.count(1) == 1, results

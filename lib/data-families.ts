@@ -27,7 +27,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:pod:t:", "nl:ppsell:back:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
   "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:hid:", "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
-  "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:", "nl:sub:door:", "nl:sub:live:", "nl:sub:rec:", "nl:sub:setup:", "nl:sub:slots:", "nl:sub:who:",
+  "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:", "nl:sub:door:", "nl:sub:list:", "nl:sub:live:", "nl:sub:rec:", "nl:sub:setup:", "nl:sub:slots:", "nl:sub:who:",
   "nl:taxobs:v1:", "nl:tben:given:", "nl:tben:who:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
   "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wf:ver:idx:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
@@ -466,7 +466,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stock:": E, "nl:stock:back:": E, "nl:stock:lock:": E,
   "nl:storage:pending:": X(1),
   // A buyer's files for review (750 [CD1]): the setup is named by the course, the record and the places by the store's files' folder.
-  "nl:sub:door:": X(1), "nl:sub:due": I, "nl:sub:live:": E, "nl:sub:rec:": E, "nl:sub:setup:": E, "nl:sub:who:": E,
+  "nl:sub:door:": X(1), "nl:sub:due": I, "nl:sub:list:": E, "nl:sub:live:": E, "nl:sub:rec:": E, "nl:sub:setup:": E, "nl:sub:who:": E,
   // The buyer slots an upload was opened on (review of #3568, Claude 6): the store's list is erased with it, and the
   // company's list of stores with one due is a list naming stores, taken out by the walk.
   "nl:sub:slots:": E, "nl:sub:slotdue": I,

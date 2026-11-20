@@ -9,7 +9,7 @@ import { type PlatformProofSnapshot, platformProof } from "@/lib/platform-proof"
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-type Store = { readPlatformProofKept?: () => Promise<{ snapshot: PlatformProofSnapshot; validDays: number } | null>; writePlatformProof?: (s: PlatformProofSnapshot, validDays: number) => Promise<void>; PROOF_KEY?: string; PROOF_SNAPSHOT_MAX_BYTES?: number };
+type Store = { readPlatformProofKept?: () => Promise<{ snapshot: PlatformProofSnapshot; validDays: number } | null>; writePlatformProof?: (s: PlatformProofSnapshot, validDays: number, now?: number) => Promise<void>; PROOF_KEY?: string; PROOF_SNAPSHOT_MAX_BYTES?: number };
 const DAY = 86_400_000;
 const now = Date.UTC(2026, 10, 10, 6);
 const fresh: PlatformProofSnapshot = { asOf: new Date(now - 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z"), evidenceRef: "synthetic-count", mode: "live", excludesDemoAndTest: true, counts: { stores: 120, sales: 1500, activeCreators: 60 }, activeWindowDays: 30 };
@@ -31,9 +31,11 @@ async function main(): Promise<void> {
   // The snapshot as its only reader gives it, with the window it was kept for (Claude 1's LEVE on #3738: no reader drops it).
   const kept = lib.readPlatformProofKept ?? store.readPlatformProofKept;
   const read = kept ? async () => (await kept())?.snapshot ?? null : undefined;
-  const write = lib.writePlatformProof ?? store.writePlatformProof;
+  const writeAt = lib.writePlatformProof ?? store.writePlatformProof;
+  // Every write in this test is made at the test's own clock, the same `now` its windows are counted from.
+  const write = writeAt ? (s: PlatformProofSnapshot, days: number) => writeAt(s, days, now) : undefined;
   is("the store module exists", [typeof read, typeof write], ["function", "function"]);
-  if (!read || !write) return done();
+  if (!read || !write || !writeAt) return done();
   redis.clear();
   is("nothing kept: none", await read(), null);
   await write(fresh, 30);
@@ -89,6 +91,45 @@ async function main(): Promise<void> {
   is("the ceiling is in UTF-8 bytes, not characters", [bytes(multibyte) > 1_024, wide], [true, "refused"]);
   redis.run(["SET", key, JSON.stringify(sized(1_025))]);
   is("a kept value over the ceiling is not read as a snapshot", await read(), null);
+  part("Kept only until its window ends, counted from its asOf (Codex X6 on #3509)");
+  redis.clear();
+  const ttlOf = () => Number(redis.run(["TTL", key]));
+  await write(fresh, 30);
+  is("a snapshot 2 days old on a 30-day window is kept 28 days, not 30", [ttlOf() <= 28 * 86_400, ttlOf() > 28 * 86_400 - 60], [true, true]);
+  redis.clear();
+  await writeAt(fresh, 30, now + 27 * DAY);
+  is("written 27 days later, it is kept the 1 day left, never a full window", [ttlOf() <= 86_400, ttlOf() > 0], [true, true]);
+  redis.clear();
+  let setsPast = 0;
+  const countingPast = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: unknown[][]) => { setsPast += commands.filter((c) => c[0] === "SET").length; return countingPast(commands as never); }) as never;
+  const lateRefusals: string[] = [];
+  await writeAt(fresh, 30, now + 28 * DAY).catch(() => { lateRefusals.push("past"); });
+  await write({ ...fresh, asOf: new Date(now - 41 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z") }, 40).catch(() => { lateRefusals.push("past monthly"); });
+  await write({ ...fresh, asOf: new Date(now + DAY).toISOString().replace(/\.\d{3}Z$/, "Z") }, 30).catch(() => { lateRefusals.push("future"); });
+  redis.pipeline = countingPast;
+  is("a snapshot already past its window, or from the future, is never written", [lateRefusals, setsPast], [["past", "past monthly", "future"], 0]);
+
+  part("A failed read is unknown and leaves a trace (Codex X6 on #3509)");
+  const logged: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+  try {
+    redis.clear();
+    is("nothing kept: none, and nothing logged", [await read(), logged.length], [null, 0]);
+    const plain = redis.pipeline.bind(redis);
+    redis.pipeline = (async () => { throw new Error("ECONNRESET synthetic"); }) as never;
+    is("a database that fails: unknown", await read(), null);
+    redis.pipeline = (async () => [{ error: "ERR synthetic" }]) as never;
+    is("an error reply: unknown", await read(), null);
+    redis.pipeline = plain;
+    redis.run(["SET", key, "{"]);
+    is("a kept value that is not a snapshot: unknown", await read(), null);
+    is("each of the three left one line naming the platform proof", [logged.length, logged.every((line) => line.includes("platform proof"))], [3, true]);
+  } finally {
+    console.error = realError;
+  }
+
   part("The window it was kept for is read with it (Claude 1's LOW on #3509)");
   const withWindow = lib as unknown as { readPlatformProofKept?: () => Promise<{ snapshot: PlatformProofSnapshot; validDays: number } | null>; keptPlatformProof?: (now?: number) => Promise<{ count: number }[] | null> };
   redis.clear();

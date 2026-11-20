@@ -916,7 +916,9 @@ export async function forgetSubmissionsPerson(
     lessons.add(`${entry.courseId}|${entry.lessonId}`);
     const door = await readDoorById(folder, entry.id);
     const pathname = door?.pathname ?? entry.pathname;
-    if (door && !(await steps.abortReservedVault(door.pathname))) throw new Error("a submission upload could not be given up");
+    // Only the vault's own true is a cancel (lib/vault.ts abortVaultUpload): "busy" and "tries" cancelled nothing, so
+    // the erasure is not finished and pressing again finishes it, as when the vault could not confirm.
+    if (door && (await steps.abortReservedVault(door.pathname)) !== true) throw new Error("a submission upload could not be given up");
     if (pathname) files.push(pathname);
     const replies = repliesFor(
       await redisPipeline([

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import PostPage, { generateMetadata } from "../app/[handle]/blog/[post]/page";
 import StudioBlogPage from "../app/studio/blog/page";
+import BlogPage from "../app/[handle]/blog/page";
 import { claimHandle, ensureStatsId, storeForEmail } from "../lib/store";
 import { wordsIn } from "../lib/buyer-words";
 import { type Post } from "../lib/store-blog";
@@ -106,4 +107,46 @@ test("an unread list never enables an editor for an independently unread existin
   assert.match(html, /This post couldn&#x27;t be loaded\. Reload to try again\./);
   assert.match(html, /aria-label="Blog editor unavailable"/);
   assert.doesNotMatch(html, /data-synthetic-editor|Posts \(0\)|No posts yet/);
+});
+
+test("the actual blog index keeps unknown, confirmed empty and past-end readings distinct", async () => {
+  const shop = await fixture;
+  const index = { params: Promise.resolve({ handle: "@blogpageproof" }) };
+  // A cached zero must never override the exact nonempty listing.
+  configure({ ...shop, posts: 0 }, value, "none");
+  assert.match(renderToStaticMarkup(await BlogPage(index)), /Fictional bread guide/);
+
+  configure({ ...shop, posts: 1 }, value, "empty");
+  await assert.rejects(() => BlogPage(index), /SYNTHETIC_NOT_FOUND/);
+
+  configure(shop, value, "list");
+  const unavailable = renderToStaticMarkup(await BlogPage(index));
+  assert.match(unavailable, /role="status"/);
+  assert.match(unavailable, /This does not mean there are no posts/);
+  assert.doesNotMatch(unavailable, /data-empty-state|Fictional bread guide/);
+
+  configure(shop, value, "past");
+  const past = renderToStaticMarkup(await BlogPage({
+    ...index, searchParams: Promise.resolve({ page: "2" }),
+  }));
+  assert.match(past, /data-empty-state=""/);
+  assert.match(past, /href="\/@blogpageproof\/blog"/);
+  assert.doesNotMatch(past, /This does not mean there are no posts/);
+});
+
+test("the actual unavailable index centers its full-height retry link in every buyer language", async () => {
+  const shop = await fixture;
+  for (const language of ["en", "es", "fr", "de", "it", "nl", "pt"] as const) {
+    configure({ ...shop, language }, value, "list");
+    const html = renderToStaticMarkup(await BlogPage({
+      params: Promise.resolve({ handle: "@blogpageproof" }),
+    }));
+    const retry = html.match(/<a\b[^>]*href="\/@blogpageproof\/blog"[^>]*>/)?.[0];
+    assert.ok(retry, language);
+    assert.match(retry, /\bmin-h-11\b/);
+    assert.match(retry, /\binline-flex\b/);
+    assert.match(retry, /\bitems-center\b/);
+    assert.match(retry, /\bjustify-center\b/);
+    assert.match(html, /role="status"/);
+  }
 });

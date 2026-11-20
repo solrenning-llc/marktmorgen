@@ -24,6 +24,7 @@ import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setStripeA
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { listingValues } from "./listing-reads";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_affiliate_book_titles_stand_in";
@@ -51,8 +52,9 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   return replies;
 }) as typeof redis.pipeline;
 
-const listingGets = (cat: string) => seen.filter((s) => s.command[0] === "GET" && String(s.command[1]).startsWith(`nl:catalog:${cat}:l:`));
-const listingBytes = (cat: string) => listingGets(cat).reduce((sum, s) => sum + (typeof s.reply === "string" ? Buffer.byteLength(s.reply) : 0), 0);
+/** Each listing record read, alone (GET) or in an MGET (lib/catalog.ts getMany), with the value it answered. */
+const listingGets = (cat: string) => seen.flatMap((s) => listingValues([s.command], [s.reply])).filter((r) => r.key.startsWith(`nl:catalog:${cat}:l:`));
+const listingBytes = (cat: string) => listingGets(cat).reduce((sum, r) => sum + (typeof r.value === "string" ? Buffer.byteLength(r.value) : 0), 0);
 const cardReads = (cat: string) => seen.filter((s) => String(s.command[1]) === `nl:catalog:${cat}:t` && (s.command[0] === "HMGET" || s.command[0] === "HGETALL"));
 
 async function main(): Promise<void> {
@@ -90,7 +92,10 @@ async function main(): Promise<void> {
     status_transitions: { paid_at: NOW - DAY - i },
     total_taxes: [],
     parent: { subscription_details: { metadata: { store: "harbor", product, via: SARA, via_rate: "30", via_months: "12", via_at: String(NOW - 30 * DAY) } } },
-    payments: { data: [{ payment: { type: "payment_intent", payment_intent: `pi_title_${i}` } }] },
+    // Rule 23 (claude5/affiliate-refund-list-exact2, merging main): the expanded `payments` list in the shape Stripe gives it
+    // (object "list", has_more false, the row status "paid"); the book now counts a payment only when that list is read whole,
+    // so the shorter fixture this test was written with read as an unknown payment. What the test asserts is unchanged.
+    payments: { object: "list", has_more: false, data: [{ object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: `pi_title_${i}` } }] },
   }));
   const csvOf = async () => bookCsv(await readBook(store), await listAffiliates(store));
   const titleOf = (book: Awaited<ReturnType<typeof readBook>>) => new Map(book.lines.filter((l) => l.how === "recurring").map((l) => [l.product, l.title]));
@@ -109,7 +114,7 @@ async function main(): Promise<void> {
   part("With its cards, the book reads no listing record");
   seen = [];
   const book = await readBook(store);
-  is("no listing record GET for a product past the head", listingGets(cat).length, 0);
+  is("no listing record read for a product past the head", listingGets(cat).length, 0);
   is("no listing byte read for a title", listingBytes(cat), 0);
   is("the cards read in one HMGET of the products the invoices name", cardReads(cat).map((s) => [s.command[0], s.command.length - 2]), [["HMGET", pastHead.length]]);
   is("the same titles", ids.map((id) => titleOf(book).get(id)), ids.map((id) => titles.get(id)));
@@ -122,7 +127,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["HDEL", `nl:catalog:${cat}:t`, ...legacy], ["HSET", `nl:catalog:${cat}:t`, older, JSON.stringify("Wrong title")]]);
   seen = [];
   const healed = await readBook(store);
-  is("only those four read from their listings", listingGets(cat).map((s) => String(s.command[1]).split(":l:")[1]).sort(), [...legacy, older].sort());
+  is("only those four read from their listings", listingGets(cat).map((r) => r.key.split(":l:")[1]).sort(), [...legacy, older].sort());
   is("their titles from the listings, never the older card's", [...legacy, older].map((id) => titleOf(healed).get(id)), [...legacy, older].map((id) => titles.get(id)));
   is("their cards left behind", ((await redis.pipeline([["HMGET", `nl:catalog:${cat}:t`, ...legacy, older]]))[0] as unknown[]).map((raw) => (typeof raw === "string" ? (JSON.parse(raw) as unknown[])[0] : raw)), [...legacy, older].map((id) => titles.get(id)));
   seen = [];

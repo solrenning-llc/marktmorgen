@@ -47,6 +47,7 @@ export const PERSON_DATA: PersonData[] = [
   // ---------------------------------------------------------------- the list and email
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
   { file: "lib/contacts.ts", how: "erased", what: "The link in your emails that unsubscribes them" },
+  { file: "lib/person-erasure.ts", how: "kept", what: "While a deletion is not finished: the names of the person's uploaded files that could not be deleted yet, under the one-way fingerprint, never the address.", why: "So deleting the same person again finds those files and deletes them. Each one goes as soon as its file is deleted or handed to the daily cleanup, and not before, so no file is left with nothing pointing to it." },
   { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. When they asked for the deletion themselves, it also notes that it was their request. Only the person can lift it, by joining your list again themselves." },
   { file: "lib/joined-stores.ts", how: "erased", via: "lib/buyer-library.ts", what: "The note that they joined your list, used to find them when they ask to be deleted everywhere" },
   { file: "lib/mail-clicks.ts", how: "erased", what: "Which links in your sequences' emails they used" },
@@ -188,6 +189,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/team.ts", how: "account", what: "A store's team and invitations" },
   { file: "lib/pipeline-access.ts", how: "account", what: "What each teammate may do with each sales pipeline, under the teammate's sign-in address; it goes when they leave the team" },
   { file: "lib/store.ts", how: "account", what: "Which stores an account owns" },
+  { file: "lib/closed-store-data.ts", how: "account", what: "Reads which stores an account owns (lib/store.ts's set), never writes it, before the closing walk deletes what a closing store's Stripe account names" },
   { file: "lib/account-exists.ts", how: "account", what: "Reads, never writes, whether an address already owns a store, from the same records lib/store.ts keeps, when a team invitation is taken" },
   { file: "lib/phone-alerts.ts", how: "account", what: "The creator's own phone, and one-way marks of events already told" },
   { file: "lib/path.ts", how: "account", what: "The store owner's own Path: their four answers, days, best level, cached facts and optional mission-board token/count/time; private record downloadable only by the owner through /api/store/path, board removed when Path/store is deleted, nothing about a buyer" },

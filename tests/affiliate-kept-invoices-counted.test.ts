@@ -107,9 +107,11 @@ async function main(): Promise<void> {
 
   part("What reading and writing back the kept invoices costs, in studio requests");
   const kept = 2 * BOOK_INVOICES_KEPT_BYTES;
-  const cost = request("heavy", 2, kept) + perMegabyte(kept);
+  // The GET of the kept invoices, and their write back: one script of four commands (EVAL, EXISTS, HGET, SET) since
+  // it is fenced by the store's erasure (Codex L-20261119-1003, lib/store-live-cache.ts setWhileStoreLive).
+  const cost = request("heavy", 5, kept) + perMegabyte(kept);
   is("a whole number of studio requests, at least one", Number.isSafeInteger(units) && units >= 1, true);
-  is("worth at least the two commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
+  is("worth at least the five commands and both megabytes at a heavy request's price", units * UNIT_COST.studio >= cost, true);
 
   part("A studio or payout reading takes them before it reads, and reads whole");
   const before = await left(store);

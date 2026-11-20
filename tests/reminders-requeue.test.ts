@@ -11,7 +11,7 @@
  * is held in tests/welcome-offer.test.ts; the assistant's retry without a
  * second model call in tests/assistant-reminder.test.ts.
  */
-import { askKey, askMember, parseAsk, sendAsked } from "@/lib/checkout-ask";
+import { askIndexKey, askKey, askMember, parseAsk, sendAsked } from "@/lib/checkout-ask";
 import { sendAssistReminders } from "@/lib/assistant-reminder";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -41,6 +41,10 @@ async function main(): Promise<void> {
   const now = Math.floor(realNow() / 1000);
   const ask = { statsId: "stats1", handle: "harbor", productId: "plan", email: "ana@example.com", askedAt: now - 3_700, from: "checkout" as const, after: 3_600 };
 
+  // As every ask is written (lib/checkout-ask.ts keep): in the queue and in its person's index, where a retry needs
+  // to find it still waiting (Codex L on #4290).
+  const seedAsk = (a: Parameters<typeof askMember>[0]) => redis.pipeline([["ZADD", ASKS, a.askedAt + a.after, askMember(a)], ["ZADD", askIndexKey(a.statsId, a.email), a.askedAt + a.after, askMember(a)]]);
+
   part("An ask keeps how many times it was tried, and nothing else changes");
   is("tried twice, read back the same", parseAsk(askMember({ ...ask, tries: 2 })), { ...ask, tries: 2 });
   is("an ask never tried reads as it always did", parseAsk(askMember(ask)), ask);
@@ -48,7 +52,7 @@ async function main(): Promise<void> {
 
   part("A buyer's own ask: a passing error puts it back once, five minutes later");
   redis.clear();
-  await redis.pipeline([["ZADD", ASKS, ask.askedAt + ask.after, askMember(ask)]]);
+  await seedAsk(ask);
   await sendAsked(broken, realNow() + 10_000);
   const back = await queued(ASKS);
   is("back in the queue, once", back.length, 1);
@@ -57,7 +61,7 @@ async function main(): Promise<void> {
 
   part("A buyer's own ask: tried a few times at the most");
   redis.clear();
-  await redis.pipeline([["ZADD", ASKS, ask.askedAt + ask.after, askMember(ask)]]);
+  await seedAsk(ask);
   const tries: (number | null)[] = [];
   for (let run = 0; run < 5; run += 1) {
     Date.now = () => realNow() + run * 3_600_000;
@@ -70,19 +74,19 @@ async function main(): Promise<void> {
 
   part("A buyer's own ask: a decision still drops it");
   redis.clear();
-  await redis.pipeline([["ZADD", ASKS, ask.askedAt + ask.after, askMember(ask)]]);
+  await seedAsk(ask);
   await sendAsked(another, realNow() + 10_000);
   is("another store at the handle now: not put back", (await queued(ASKS)).length, 0);
   const stale = { ...ask, askedAt: now - SIX_HOURS - 3_600 - 60 };
-  await redis.pipeline([["ZADD", ASKS, stale.askedAt + stale.after, askMember(stale)]]);
+  await seedAsk(stale);
   await sendAsked(broken, realNow() + 10_000);
   is("too late to be worth sending: not put back", (await queued(ASKS)).length, 0);
   const edge = { ...ask, askedAt: now - SIX_HOURS - 3_600 + 100 };
-  await redis.pipeline([["ZADD", ASKS, edge.askedAt + edge.after, askMember(edge)]]);
+  await seedAsk(edge);
   await sendAsked(broken, realNow() + 10_000);
   is("a retry that would land past its six hours: not put back", (await queued(ASKS)).length, 0);
   const spent = { ...ask, tries: 3 };
-  await redis.pipeline([["ZADD", ASKS, spent.askedAt + spent.after, askMember(spent)]]);
+  await seedAsk(spent);
   await sendAsked(broken, realNow() + 10_000);
   is("already tried three times: not put back", (await queued(ASKS)).length, 0);
 

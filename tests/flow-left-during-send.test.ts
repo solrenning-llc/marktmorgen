@@ -23,9 +23,13 @@ Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let leaveAfterRead: string | null = null;
 let eraseAfterRead: (() => Promise<void>) | null = null;
+// sendGroup's read: the contacts' rows, then each lease entry. Since #4234 a lease entry is read with its run's generation
+// in one EVAL (lib/flow-runs.ts LEASE_AND_GEN) instead of a ZSCORE; either shape is that read (merge of main, Claude 1
+// cloud c1-fila).
+const leaseRead = (c: Command) => c[0] === "ZSCORE" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-lease-gen:"));
 redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
-  if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+  if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every(leaseRead)) {
     // The person unsubscribes right after sendGroup read their row (before sendTo's own tokensFor read).
     const key = String(batch[0][1]);
     const [raw] = await real([["HGET", key, leaveAfterRead]]);
@@ -33,7 +37,7 @@ redis.pipeline = (async (batch: Command[]) => {
     await real([["HSET", key, leaveAfterRead, JSON.stringify({ ...contact, unsub: true, unsubAt: new Date().toISOString() })]]);
     leaveAfterRead = null;
   }
-  if (eraseAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+  if (eraseAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every(leaseRead)) {
     // The person is erased right after sendGroup read their row (before sendTo's own read).
     const erase = eraseAfterRead;
     eraseAfterRead = null;

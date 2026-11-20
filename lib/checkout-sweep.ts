@@ -43,6 +43,7 @@
  * second email.
  */
 import { noteFirstSale } from "@/lib/yearly-offer";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { noteTestSales } from "@/lib/headline-test";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
@@ -59,7 +60,7 @@ import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { AFFILIATE_ID_PATTERN, affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
+import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, listPartners, notePayPalPendings, notePendingDue, notePendingLinks, noteSession, settleUnconfirmed } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
@@ -499,6 +500,24 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     } catch (error) {
       console.error("asking PayPal about a store's orders failed", store.handle, error);
     }
+    // A PayPal order whose affiliate link could not be read at checkout, decided or told about as a Stripe one is
+    // (owner's decision 6, lib/affiliates.ts): its own list, read only by a store with a program.
+    try {
+      const failed = await notePayPalPendings(store);
+      if (failed) counts.failed += failed;
+    } catch (error) {
+      console.error("reading a store's pending PayPal affiliate links failed", store.handle, error);
+    }
+  }
+  // A sale whose second tier waits for its buyer's address (lib/affiliates.ts settleUnconfirmed): read again, a batch a
+  // run, and decided by itself. Only a store with a program on: one command a run, and only that.
+  if (affiliatesOn(store) && (store.stripeAccountId || store.paypalSeller)) {
+    try {
+      const unconfirmed = await settleUnconfirmed(store, undefined, deadline);
+      if (unconfirmed.failed) counts.failed += unconfirmed.failed;
+    } catch (error) {
+      console.error("reading a store's sales with an unconfirmed buyer failed", store.handle, error);
+    }
   }
   if (reviewed) {
     try {
@@ -552,6 +571,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // it are counted as failed and wait for the next pass (the writes are HSETNX, so a retry records a share once),
     // while the confirmations, the library and the rest below go on. A click wins over a code (Codex H2 on #3238):
     // an order whose `via` is an affiliate id is decided by noteSession without the codes, the same test it uses.
+    // What the affiliates' part below read, handed on to the pending links after it (undefined: read there if needed).
+    let readOwners: Map<string, string> | undefined;
+    let readPartners: Affiliate[] | undefined;
     if (affiliatesOn(store) && paid.length) {
       // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
       // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
@@ -567,6 +589,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         coded ? codeOwners(store).catch(unread("the codes given to affiliates")) : new Map<string, string>(),
         listPartners(store).catch(unread("the store's partners")),
       ]);
+      readOwners = owners ?? undefined;
+      readPartners = partners ?? undefined;
       for (const row of sold) {
         const id = row.id as string;
         if (partners === null || (owners === null && needsCodes(row))) {
@@ -586,9 +610,25 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     }
     // The store's first sale ever, noted once, with the yearly plan offered
     // at the moment it is most worth keeping (lib/yearly-offer.ts). Not on the
-    // demo's account, which canConfirm leaves out.
+    // demo's account, which canConfirm leaves out. Its reading of earlier sales keeps to the sweep's deadline: what it
+    // could not read before it is not known, and the next pass asks again.
     if (paid.length && canConfirm(store)) {
-      await noteFirstSale(store, paid).catch((error) => console.error("noting a first sale failed", store.handle, error));
+      await noteFirstSale(store, paid, PLANS_ON_SALE, deadline).catch((error) => console.error("noting a first sale failed", store.handle, error));
+    }
+    // An order whose affiliate could not be read at checkout carries the click as pending (owner's decision 6):
+    // read again at each pass, credited once it answers, the creator told past PENDING_LINK_SECONDS; whether the
+    // program is on now or not, since the sale was made while it was. Never ends the store's pass: an order that does
+    // not read is counted as failed and waits for the next run. A gift or a payment request sold nothing.
+    const pendingRows = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request" && typeof row.metadata?.[VIA_PENDING_META] === "string");
+    if (pendingRows.length) {
+      const pending = await notePendingLinks(store, pendingRows as Parameters<typeof notePendingLinks>[1], now, readOwners, readPartners, undefined, deadline).catch((error: unknown) => {
+        console.error("reading the pending affiliate links failed; they wait for the next run", store.handle, describe(error));
+        return null;
+      });
+      if (pending === null) for (const row of pendingRows) failOrder(row.id as string);
+      for (const id of pending?.failed ?? []) failOrder(id);
+      // A creator who could not be told (refused REFUSED_TRIES times) is said in the run's log, by order count only.
+      if (pending?.untold) console.error("creators not told about unconfirmed affiliate links", store.handle, pending.untold);
     }
     // A sale paid from a page running a test counts for the version its buyer was shown, once (lib/headline-test.ts).
     if (paid.some((row) => row.metadata?.ab)) {
@@ -753,6 +793,12 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   await retryPayPalCancelNotices(deadline).catch((error) => console.error("trying canceled PayPal orders' notices again failed", error));
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
+  // Pending affiliate links the stores' own listings no longer bring (past their checkout's day, a store this run does
+  // not reach), first, inside the run's deadline (lib/affiliates.ts notePendingDue, owner's decision 6).
+  counts.failed += await notePendingDue(Math.floor(Date.now() / 1000), deadline).catch((error: unknown) => {
+    console.error("reading the pending affiliate links' list failed", describe(error));
+    return 0;
+  });
   // Redis's SCAN may hand back the same key on more than one page (and a store
   // moving between addresses is seen under both), so each store is swept at
   // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and

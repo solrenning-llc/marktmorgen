@@ -49,6 +49,7 @@ import { bookingWords } from "@/lib/buyer-words/booking";
 import type { Listing, Store } from "@/lib/store";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
+import { askBillingAddress } from "@/lib/billing-address";
 
 export const PACKAGE_TOKEN = /^[0-9a-f]{48}$/;
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
@@ -274,6 +275,8 @@ export function packageCheckoutBody(store: Store, product: Listing, pkg: CallPac
   // on the page, in the currency the page showed (lib/instant-pay.ts).
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
+  // A paid checkout asks the billing address (790 [IV2]; lib/billing-address.ts).
+  askBillingAddress(body);
   return body;
 }
 

@@ -12,6 +12,8 @@ import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { withCutoff } from "@/lib/fetch-timeout";
+import { noticeHeldStores } from "@/lib/community-held-notice";
+import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store";
 
 export const maxDuration = 60;
 
@@ -30,10 +32,14 @@ async function dripStore(handle: string) {
  * course opens for them. Once per student and module, one run at a time.
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
- * (lib/community-files.ts), a day on.
+ * (lib/community-files.ts), a day on. And deletes the files buyers sent for
+ * review whose keeping time ended, and their records (lib/submission-store.ts), and sets back the room a buyer's
+ * upload opened and left still held, once its day is over (settleSubmissionSlots). And tells each creator
+ * whose community has posts or comments waiting for approval, once a day
+ * (lib/community-held-notice.ts, 543 [CM2]).
  *
  * Sixty seconds (maxDuration), every request given up by 57 s (withCutoff): the drip emails start nothing new after
- * 40 s and the next run starts where they stopped (lib/learn.ts), so the two sweeps always have their turn.
+ * 40 s and the next run starts where they stopped (lib/learn.ts), so the sweeps and the held-items notice after them always have their turn.
  */
 export async function GET(request: NextRequest) {
   const started = Date.now();
@@ -73,6 +79,23 @@ async function run(request: NextRequest, started: number) {
       console.error("could not sweep unused community pictures", error);
       return null;
     });
+    // Not swept (the list could not be read exactly): said, never "0 deleted"; the next run sweeps.
+    const submissions = await sweepSubmissions(Math.floor(Date.now() / 1000)).catch((error: unknown) => {
+      console.error("could not sweep submissions past their keeping time", error);
+      return null;
+    });
+    // Not read exactly: said, never "0 settled"; every slot keeps its turn for the next run.
+    const slots = await settleSubmissionSlots(Math.floor(Date.now() / 1000)).then(
+      (done) => done.settled,
+      (error: unknown) => {
+        console.error("could not set back the room of buyer uploads left open", error);
+        return null;
+      },
+    );
+    const held = await noticeHeldStores({ until: Date.now() + 20_000 }).catch((error) => {
+      console.error("telling creators about held community items failed", error);
+      return null;
+    });
     return Response.json(
       {
         ok: true,
@@ -81,6 +104,11 @@ async function run(request: NextRequest, started: number) {
         ...(stale === null ? { uploadsFailed: true } : {}),
         unusedPictures: pictures,
         ...(pictures === null ? { picturesFailed: true } : {}),
+        expiredSubmissions: submissions,
+        ...(submissions === null ? { submissionsFailed: true } : {}),
+        submissionSlots: slots,
+        ...(slots === null ? { submissionSlotsFailed: true } : {}),
+        heldNotices: held,
       },
       { headers: { "Cache-Control": "no-store" } },
     );

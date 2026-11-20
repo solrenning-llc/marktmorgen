@@ -21,6 +21,12 @@ export const ROLL_AT = 2250;
 export const PANEL_COMMENT_ID = 6929670678;
 const FIND = "gh issue list --label canal-ativo --state open";
 const MARKER = "<!-- coordination-rollover: first comment -->";
+/** GitHub's limit on an issue or comment body. */
+export const BODY_LIMIT = 65536;
+/** Who may have opened a part this script adopts: never an outside account of a public repository. */
+export const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const POINTER = /^\*\*Canal ativo: #(\d+)\*\*/;
+const PAGES = 25;
 const PANEL_LINE = /^(\*\*CANAL ATIVO: )#\d+ \(parte \d+\), desde [^)]*\)/;
 
 /** The part number in "Agent coordination — part 7 (continues #4858)", or null. */
@@ -38,7 +44,7 @@ export const pointerLine = (next) =>
 export function withPointer(body, next) {
   const text = body ?? "";
   const line = pointerLine(next);
-  if (text.startsWith("**Canal ativo: #")) {
+  if (POINTER.test(text)) {
     const end = text.indexOf("\n");
     return line + (end < 0 ? "" : text.slice(end));
   }
@@ -81,16 +87,45 @@ function firstComment(active, next) {
   ].join("\n\n");
 }
 
+/** The part a pointer line at the top of a body names, or null. */
+export const pointedTo = (body) => { const m = POINTER.exec(String(body ?? "")); return m ? Number(m[1]) : null; };
+
+/** Opened by the workflow itself or by someone with write access, never by an outside account. */
+export const trusted = (issue) => TRUSTED.has(issue?.author_association) || issue?.user?.login === "github-actions[bot]";
+
 function list(value, what) {
   if (!Array.isArray(value)) throw new Error(`unreadable ${what}: ${JSON.stringify(value)?.slice(0, 300)}`);
   return value;
 }
 
-/** One rollover check; returns { action: "none" } or { action: "rolled", next }. Throws on anything it cannot read. */
+/** Every page of a listing, up to PAGES pages of 100. */
+async function all(api, path, what) {
+  const items = [];
+  for (let page = 1; page <= PAGES; page += 1) {
+    const found = list(await api("GET", `${path}&per_page=100&page=${page}`), what);
+    items.push(...found);
+    if (found.length < 100) return items;
+  }
+  throw new Error(`more than ${PAGES} pages of ${what}`);
+}
+
+function fits(body, what) {
+  if (body.length > BODY_LIMIT) throw new Error(`${what} would pass GitHub's ${BODY_LIMIT}-character limit`);
+  return body;
+}
+
+/**
+ * One rollover check; returns { action: "none" } or { action: "rolled", next }. Throws on anything it cannot read.
+ * Every read and check comes before the first write. The order of the writes keeps a retry finishing the same
+ * rollover: the next part, then the pointer on the active part (which records the next part's number for a retry),
+ * then the first comment, the PAINEL, and the label last; the label is what agents follow, so until it moves they
+ * keep writing in the active part and each of their comments retries.
+ */
 export async function rollover({ api, now, log = console.log }) {
   const labeled = list(await api("GET", `issues?labels=${LABEL}&state=all&per_page=100`), "labeled issue listing")
     .filter((i) => !i?.pull_request);
-  if (labeled.length !== 1) throw new Error(`exactly one issue must have the label ${LABEL}; found ${labeled.length}: ${labeled.map((i) => "#" + i?.number).join(", ")}`);
+  if (labeled.length !== 1) throw new Error(`exactly one issue must have the label ${LABEL}; found ${labeled.length}: ${labeled.map((i) => "#" + i?.number).join(", ")}. ` +
+    "Fix the label by hand, then run the workflow by hand (Actions, Coordination rollover, Run workflow).");
   const active = labeled[0];
   const part = partOf(active.title);
   if (!Number.isSafeInteger(active.number) || active.state !== "open" || part === null || !Number.isSafeInteger(active.comments)) {
@@ -101,24 +136,42 @@ export async function rollover({ api, now, log = console.log }) {
     return { action: "none", active: active.number };
   }
 
+  // Reads and checks, all before any write.
   const title = nextTitle(part, active.number);
-  const found = list(await api("GET", "issues?state=open&sort=created&direction=desc&per_page=100"), "recent issue listing")
-    .filter((i) => !i?.pull_request && i?.title === title);
-  if (found.length > 1) throw new Error(`more than one open "${title}": ${found.map((i) => "#" + i.number).join(", ")}`);
-  const next = found[0] ?? await api("POST", "issues", { title, body: newPartBody(active, active.comments, now) });
-  if (!Number.isSafeInteger(next?.number)) throw new Error("the next part has no number: " + JSON.stringify(next)?.slice(0, 300));
-  log(found[0] ? `using #${next.number}, already open` : `opened #${next.number}`);
+  const pointed = pointedTo(active.body);
+  let next = null;
+  if (pointed !== null) {
+    const issue = await api("GET", `issues/${pointed}`);
+    if (issue?.title !== title || issue.state !== "open" || issue.pull_request || !trusted(issue)) {
+      throw new Error(`#${active.number} points to #${pointed}, which is not an open "${title}" opened from inside the repository`);
+    }
+    next = issue;
+  } else {
+    const found = (await all(api, "issues?state=open&sort=created&direction=desc", "open issue listing"))
+      .filter((i) => !i?.pull_request && i?.title === title && trusted(i));
+    if (found.length > 1) throw new Error(`more than one open "${title}": ${found.map((i) => "#" + i.number).join(", ")}`);
+    next = found[0] ?? null;
+  }
+  const panel = await api("GET", `issues/comments/${PANEL_COMMENT_ID}`);
+  if (typeof panel?.body !== "string") throw new Error("unreadable PAINEL comment " + PANEL_COMMENT_ID);
+  const PROBE = 99999999;
+  fits(panelWith(panel.body, PROBE, part + 1, now), "the PAINEL");
+  fits(withPointer(active.body, PROBE), `#${active.number}'s body`);
 
-  const comments = list(await api("GET", `issues/${next.number}/comments?per_page=100`), "next part's comments");
+  // Writes.
+  const opened = !next;
+  if (opened) next = await api("POST", "issues", { title, body: newPartBody(active, active.comments, now) });
+  if (!Number.isSafeInteger(next?.number)) throw new Error("the next part has no number: " + JSON.stringify(next)?.slice(0, 300));
+  log(opened ? `opened #${next.number}` : `using #${next.number}, already open`);
+
+  const withNext = withPointer(active.body, next.number);
+  if (withNext !== active.body) await api("PATCH", `issues/${active.number}`, { body: withNext });
+
+  const comments = await all(api, `issues/${next.number}/comments?sort=created`, "next part's comments");
   if (!comments.some((c) => String(c?.body ?? "").startsWith(MARKER))) {
     await api("POST", `issues/${next.number}/comments`, { body: firstComment(active, next.number) });
   }
 
-  const pointed = withPointer(active.body, next.number);
-  if (pointed !== active.body) await api("PATCH", `issues/${active.number}`, { body: pointed });
-
-  const panel = await api("GET", `issues/comments/${PANEL_COMMENT_ID}`);
-  if (typeof panel?.body !== "string") throw new Error("unreadable PAINEL comment " + PANEL_COMMENT_ID);
   const newPanel = panelWith(panel.body, next.number, part + 1, now);
   if (newPanel !== panel.body) await api("PATCH", `issues/comments/${PANEL_COMMENT_ID}`, { body: newPanel });
 
@@ -127,8 +180,13 @@ export async function rollover({ api, now, log = console.log }) {
   try {
     await api("POST", `issues/${next.number}/labels`, { labels: [LABEL] });
   } catch (error) {
-    await api("POST", `issues/${active.number}/labels`, { labels: [LABEL] });
-    throw new Error(`the label could not go on #${next.number} and is back on #${active.number}: ${String(error)}`);
+    let back = "it is back on #" + active.number;
+    try {
+      await api("POST", `issues/${active.number}/labels`, { labels: [LABEL] });
+    } catch (again) {
+      back = `putting it back on #${active.number} failed too (${String(again)}): NO issue has the label; put it on #${next.number} by hand`;
+    }
+    throw new Error(`the label could not go on #${next.number} (${String(error)}); ${back}`);
   }
   log(`the channel is now #${next.number} (part ${part + 1})`);
   return { action: "rolled", active: active.number, next: next.number };
@@ -142,13 +200,19 @@ async function main() {
 
   /** @type {Api} */
   async function api(method, path, body) {
-    const reply = await fetch(base + path, {
-      method,
-      headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!reply.ok) throw new Error(`${method} ${path}: HTTP ${reply.status} ${(await reply.text()).slice(0, 300)}`);
-    return reply.status === 204 ? null : reply.json();
+    // A 5xx is retried twice, 5 and 15 seconds later, for the calls that are safe to repeat: reads, PATCHes and the label
+    // calls set a state. A POST of an issue or comment is never repeated here (it may have been made): the next run finds
+    // it by the pointer, the title or the marker.
+    for (let attempt = 0; ; attempt += 1) {
+      const reply = await fetch(base + path, {
+        method,
+        headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (reply.status >= 500 && attempt < 2 && (method !== "POST" || path.endsWith("/labels"))) { await new Promise((ok) => setTimeout(ok, attempt ? 15000 : 5000)); continue; }
+      if (!reply.ok) throw new Error(`${method} ${path}: HTTP ${reply.status} ${(await reply.text()).slice(0, 300)}`);
+      return reply.status === 204 ? null : reply.json();
+    }
   }
 
   await rollover({ api, now: new Date() });

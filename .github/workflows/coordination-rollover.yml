@@ -7,8 +7,9 @@
 # switches halfway, and the run is red; the next comment on the same part retries the same rollover.
 #
 # It runs only on comments on the issue labeled canal-ativo once it holds 2,250, and by hand: every other comment skips
-# the job, which costs no runner minute (and standard runners are free in public repositories). No comment's text is
-# read. Not a required check and not part of CI: it has no final check (tests/coordination-rollover.test.ts).
+# the job, which costs no runner minute (and standard runners are free in public repositories); a skipped run still
+# shows in the Actions list. No comment's text is read. A next part is adopted only if opened from inside the
+# repository. Not a required check and not part of CI: it has no final check (tests/coordination-rollover.test.ts).
 name: Coordination rollover
 on:
   issue_comment:
@@ -17,13 +18,15 @@ on:
 permissions:
   contents: read
   issues: write
-concurrency:
-  group: coordination-rollover
-  cancel-in-progress: false
 jobs:
   rollover:
     name: Coordination rollover
     if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'canal-ativo') && github.event.issue.comments >= 2250) }}
+    # On the job, not the workflow: a run whose job is skipped (every other comment in the repository) never enters the
+    # group, so it can never replace a pending run that would roll the channel over.
+    concurrency:
+      group: coordination-rollover
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -15,8 +15,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
-  LABEL, ROLL_AT, COMMENT_LIMIT, PANEL_COMMENT_ID, partOf, nextTitle, pointerLine, withPointer, panelWith,
-  fortaleza, rollover, type Api,
+  LABEL, ROLL_AT, COMMENT_LIMIT, PANEL_COMMENT_ID, BODY_LIMIT, partOf, nextTitle, pointerLine, withPointer, pointedTo,
+  panelWith, fortaleza, trusted, rollover, type Api,
 } from "../scripts/coordination_rollover.mjs";
 
 const read = (path: string) => readFileSync(path, "utf8");
@@ -46,7 +46,8 @@ is("the checkout keeps no credentials and reads only the script",
   [/persist-credentials: false/.test(workflow), /sparse-checkout: scripts\/coordination_rollover\.mjs\n/.test(workflow)], [true, true]);
 is("only GITHUB_TOKEN, never another secret", [/secrets\./.test(workflow), /GITHUB_TOKEN: \$\{\{ github\.token \}\}/.test(workflow)], [false, true]);
 is("event fields (a comment's text included) never reach a shell line or the script", [/run:.*\$\{\{/.test(workflow), /comment\.body|event\.comment/.test(workflow + script)], [false, false]);
-is("one run at a time, never two parts at once", /\nconcurrency:\n {2}group: coordination-rollover\n {2}cancel-in-progress: false\n/.test(triggers), true);
+is("one run at a time, never two parts at once, held on the job so a skipped run never takes the pending place",
+  [/\n {4}concurrency:\n {6}group: coordination-rollover\n {6}cancel-in-progress: false\n/.test(workflow), /\nconcurrency:/.test(triggers)], [true, false]);
 is("the job runs the script with a time limit", [/run: node scripts\/coordination_rollover\.mjs\n/.test(workflow), /timeout-minutes: \d+\n/.test(workflow)], [true, true]);
 is("it has no final check, so it can never become a required check", /All checks \(/.test(workflow), false);
 const notCi = (path: string) => /NOT_CI = \{([^}]*)\}/.exec(read(path))?.[1] ?? "";
@@ -55,10 +56,10 @@ is("it is a workflow file of its own", readdirSync(".github/workflows").includes
 
 part("the script's only writes");
 const writes = [...script.matchAll(/api\(\s*"(POST|PATCH|PUT|DELETE)",\s*(`[^`]*`|"[^"]*")/g)].map((m) => [m[1], m[2]]);
-is("create the next part and its first comment, the previous part's body, the PAINEL's body, and the label (removed, added, put back on failure)", writes, [
+is("the next part, the pointer on the previous part, the first comment, the PAINEL, and the label (removed, added, put back on failure)", writes, [
   ["POST", '"issues"'],
-  ["POST", "`issues/${next.number}/comments`"],
   ["PATCH", "`issues/${active.number}`"],
+  ["POST", "`issues/${next.number}/comments`"],
   ["PATCH", "`issues/comments/${PANEL_COMMENT_ID}`"],
   ["DELETE", "`issues/${active.number}/labels/${LABEL}`"],
   ["POST", "`issues/${next.number}/labels`"],
@@ -66,6 +67,12 @@ is("create the next part and its first comment, the previous part's body, the PA
 ]);
 is("no close, lock, state change, comment deletion or merge anywhere",
   /state:\s*"closed"|\/lock|DELETE",\s*`issues\/comments|\/merge/.test(script), false);
+const firstWrite = script.indexOf('// Writes.');
+is("every read and check of a rollover comes before its first write",
+  [firstWrite > 0, script.slice(script.indexOf("export async function rollover"), firstWrite).includes('api("POST"') ||
+    script.slice(script.indexOf("export async function rollover"), firstWrite).includes('api("PATCH"')], [true, false]);
+is("a 5xx is retried only where repeating is safe: never the POST of an issue or comment",
+  /reply\.status >= 500 && attempt < 2 && \(method !== "POST" \|\| path\.endsWith\("\/labels"\)\)/.test(script), true);
 
 part("thresholds");
 is("it rolls over 250 comments before GitHub's limit of 2,500", [ROLL_AT, COMMENT_LIMIT, COMMENT_LIMIT - ROLL_AT], [2250, 2500, 250]);
@@ -79,7 +86,15 @@ const old = "Continuation of #4858.\n\nEverything holds.";
 is("the pointer goes on top, and the old text stays whole", withPointer(old, 5000), pointerLine(5000) + "\n\n" + old);
 is("a second run changes nothing", withPointer(withPointer(old, 5000), 5000), withPointer(old, 5000));
 is("an older pointer line of its own is replaced, nothing else", withPointer(pointerLine(4932) + "\n\n" + old, 5000), pointerLine(5000) + "\n\n" + old);
+is("the line written by hand on 20/11/2026 is read as a pointer too",
+  pointedTo("**Canal ativo: #4932** (this part no longer accepts comments; find the current part with `gh issue list --label canal-ativo --state open`).\n\nx"), 4932);
+is("a body that only mentions the channel is not a pointer, and keeps its first line", [pointedTo("Canal ativo: #4932 is busy"), withPointer("**Canal ativo** is busy", 5000)],
+  [null, pointerLine(5000) + "\n\n**Canal ativo** is busy"]);
 is("an empty body gets just the line", withPointer(null, 5000), pointerLine(5000));
+is("only someone inside the repository, or this workflow, opens a part it adopts",
+  [trusted({ author_association: "MEMBER" }), trusted({ author_association: "OWNER" }), trusted({ author_association: "COLLABORATOR" }),
+    trusted({ author_association: "NONE", user: { login: "github-actions[bot]" } }), trusted({ author_association: "NONE", user: { login: "someone" } }),
+    trusted({ author_association: "CONTRIBUTOR" })], [true, true, true, true, false, false]);
 const panel = "**CANAL ATIVO: #4932 (parte 7), desde 20/11/2026 02h05 (Fortaleza). COORDENADOR: Claude 5 (sessão ibqho). Rotinas e agentes: leiam o canal.**\n\n## PAINEL DA FILA\n- line\n";
 const at = new Date("2026-11-21T09:30:00Z");
 const newPanel = panelWith(panel, 5000, 8, at);
@@ -94,35 +109,46 @@ is("Fortaleza is UTC−3 all year", [fortaleza(new Date("2026-11-20T02:05:00Z"))
 
 part("whole runs against a synthetic GitHub");
 type Call = { method: string; path: string; body?: Record<string, unknown> };
-type Issue = { number: number; title: string; body: string | null; comments: number; labels: { name: string }[]; state: string; pull_request?: unknown; posted?: string[] };
-function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?: boolean; existingNext?: boolean; panel?: string; failAdd?: boolean } = {}) {
+type Issue = { number: number; title: string; body: string | null; comments: number; labels: { name: string }[]; state: string;
+  pull_request?: unknown; posted?: string[]; author_association: string; user: { login: string } };
+const member = { author_association: "MEMBER", user: { login: "owner" } };
+function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?: boolean; existingNext?: string; outsiderNext?: boolean;
+  panel?: string; failAdd?: boolean; failBack?: boolean; filler?: number; activeBody?: string } = {}) {
   const calls: Call[] = [];
   const issues: Issue[] = [
-    { number: 4858, title: "Agent coordination — part 6 (continues #4848)", body: "Part 6.", comments: 2500, labels: [], state: "open" },
-    { number: 4932, title: "Agent coordination — part 7 (continues #4858)", body: "Continuation of #4858.", comments: options.comments ?? 100,
-      labels: options.noLabeled ? [] : [{ name: LABEL }], state: "open" },
-    { number: 4940, title: "A pull request", body: "", comments: 3000, labels: [{ name: LABEL }], state: "open", pull_request: {} },
+    { number: 4858, title: "Agent coordination — part 6 (continues #4848)", body: "Part 6.", comments: 2500, labels: [], state: "open", ...member },
+    { number: 4932, title: "Agent coordination — part 7 (continues #4858)", body: options.activeBody ?? "Continuation of #4858.", comments: options.comments ?? 100,
+      labels: options.noLabeled ? [] : [{ name: LABEL }], state: "open", ...member },
+    { number: 4940, title: "A pull request", body: "", comments: 3000, labels: [{ name: LABEL }], state: "open", pull_request: {}, ...member },
   ];
   if (options.extraLabeled) issues[0].labels = [{ name: LABEL }];
-  if (options.existingNext) issues.push({ number: 4990, title: "Agent coordination — part 8 (continues #4932)", body: "Opened by hand.", comments: 3, labels: [], state: "open" });
+  if (options.outsiderNext) issues.push({ number: 4980, title: "Agent coordination — part 8 (continues #4932)", body: "Not ours.", comments: 0, labels: [], state: "open",
+    author_association: "NONE", user: { login: "stranger" } });
+  if (options.existingNext) issues.push({ number: 4990, title: "Agent coordination — part 8 (continues #4932)", body: "Opened by hand.", comments: 3, labels: [], state: "open",
+    posted: [options.existingNext], ...member });
+  // Newer issues and pull requests than the parts, more than a page of them.
+  for (let n = 0; n < (options.filler ?? 0); n += 1) issues.push({ number: 6000 + n, title: "Other " + n, body: "", comments: 0, labels: [], state: "open", ...member });
   let panel = options.panel ?? panelWith(panel0(), 4932, 7, new Date("2026-11-20T05:05:00Z"));
+  const pageOf = <T,>(items: T[], path: string) => { const page = Number(/[?&]page=(\d+)/.exec(path)?.[1] ?? "1"); return items.slice((page - 1) * 100, page * 100); };
   const api: Api = async (method, path, payload) => {
     calls.push({ method, path, body: payload as Record<string, unknown> });
     const one = /^issues\/(\d+)$/.exec(path);
     if (method === "GET" && path === `issues?labels=${LABEL}&state=all&per_page=100`) return issues.filter((i) => i.labels.some((l) => l.name === LABEL));
-    if (method === "GET" && path === "issues?state=open&sort=created&direction=desc&per_page=100") return [...issues].reverse();
+    if (method === "GET" && path.startsWith("issues?state=open&sort=created&direction=desc&per_page=100&page=")) return pageOf([...issues].sort((a, b) => b.number - a.number), path);
+    if (method === "GET" && one) return issues.find((x) => x.number === Number(one[1])) ?? null;
     if (method === "GET" && path === `issues/comments/${PANEL_COMMENT_ID}`) return { id: PANEL_COMMENT_ID, body: panel };
     if (method === "PATCH" && path === `issues/comments/${PANEL_COMMENT_ID}`) { panel = String(payload?.body); return { id: PANEL_COMMENT_ID }; }
     if (method === "POST" && path === "issues") {
-      const made: Issue = { number: 5000, title: String(payload?.title), body: String(payload?.body), comments: 0, labels: [], state: "open" };
+      const made: Issue = { number: 5000, title: String(payload?.title), body: String(payload?.body), comments: 0, labels: [], state: "open",
+        author_association: "NONE", user: { login: "github-actions[bot]" } };
       issues.push(made);
       return made;
     }
     if (method === "PATCH" && one) { const i = issues.find((x) => x.number === Number(one[1]))!; i.body = String(payload?.body); return i; }
-    const thread = /^issues\/(\d+)\/comments(\?per_page=100)?$/.exec(path);
+    const thread = /^issues\/(\d+)\/comments(\?sort=created&per_page=100&page=\d+)?$/.exec(path);
     if (thread) {
       const i = issues.find((x) => x.number === Number(thread[1]))!;
-      if (method === "GET" && thread[2]) return (i.posted ?? []).map((body) => ({ body }));
+      if (method === "GET" && thread[2]) return pageOf((i.posted ?? []).map((body) => ({ body })), path);
       if (method === "POST" && !thread[2]) { i.posted = [...(i.posted ?? []), String(payload?.body)]; return { id: 1 }; }
     }
     const del = /^issues\/(\d+)\/labels\/(.+)$/.exec(path);
@@ -130,6 +156,7 @@ function github(options: { comments?: number; extraLabeled?: boolean; noLabeled?
     const add = /^issues\/(\d+)\/labels$/.exec(path);
     if (method === "POST" && add) {
       if (options.failAdd && add[1] !== "4932") throw new Error("HTTP 502");
+      if (options.failBack && add[1] === "4932") throw new Error("HTTP 503");
       const i = issues.find((x) => x.number === Number(add[1]))!; i.labels.push({ name: LABEL }); return i.labels;
     }
     throw new Error("unexpected call " + method + " " + path);
@@ -140,7 +167,11 @@ function panel0() { return "**CANAL ATIVO: #4858 (parte 6), desde 18/11/2026 18h
 const quiet = () => {};
 const writesOf = (calls: Call[]) => calls.filter((c) => c.method !== "GET");
 const labeled = (issues: Issue[]) => issues.filter((i) => !i.pull_request && i.labels.some((l) => l.name === LABEL)).map((i) => i.number);
+const posts = (issues: Issue[], n: number) => issues.find((i) => i.number === n)?.posted?.length ?? 0;
 const NOW = new Date("2026-11-21T09:30:00Z");
+async function fails(gh: ReturnType<typeof github>) {
+  try { await rollover({ api: gh.api, now: NOW, log: quiet }); return ""; } catch (error) { return String(error); }
+}
 
 async function endToEnd() {
   {
@@ -157,46 +188,71 @@ async function endToEnd() {
     is("the new part says where it continues from, how to find the channel and what holds",
       [made.body!.includes("#4932"), made.body!.includes("--label canal-ativo"), made.body!.includes(String(PANEL_COMMENT_ID))], [true, true, true]);
     is("the previous part gets the pointer on top, its text whole", gh.issues.find((i) => i.number === 4932)!.body, pointerLine(5000) + "\n\n" + "Continuation of #4858.");
+    is("the new part's first comment explains the change and the label rule",
+      [posts(gh.issues, 5000), /#4932 is nearly full; the active channel is #5000/.test(made.posted?.[0] ?? ""), (made.posted?.[0] ?? "").includes("gh issue list --label canal-ativo")], [1, true, true]);
     is("the PAINEL's first line names part 8 and nothing else in it changed",
       [gh.panel().split("\n")[0].startsWith("**CANAL ATIVO: #5000 (parte 8), desde 21/11/2026 06h30 (Fortaleza)."), gh.panel().split("\n").slice(1).join("\n") === before.split("\n").slice(1).join("\n")], [true, true]);
-    is("the new part's first comment explains the change and the label rule",
-      [made.posted?.length, /#4932 is nearly full; the active channel is #5000/.test(made.posted?.[0] ?? ""), (made.posted?.[0] ?? "").includes("gh issue list --label canal-ativo")], [1, true, true]);
     is("the label is on the new part only", labeled(gh.issues), [5000]);
-    is("the writes, in order: new part, pointer, PAINEL, then the label moves last", writesOf(gh.calls).map((c) => c.method + " " + c.path), [
-      "POST issues", "POST issues/5000/comments", "PATCH issues/4932", `PATCH issues/comments/${PANEL_COMMENT_ID}`, `DELETE issues/4932/labels/${LABEL}`, "POST issues/5000/labels"]);
+    is("the writes, in order: new part, pointer, first comment, PAINEL, then the label moves last", writesOf(gh.calls).map((c) => c.method + " " + c.path), [
+      "POST issues", "PATCH issues/4932", "POST issues/5000/comments", `PATCH issues/comments/${PANEL_COMMENT_ID}`, `DELETE issues/4932/labels/${LABEL}`, "POST issues/5000/labels"]);
     is("every PATCH carries only a body: no state, lock, title or label change", writesOf(gh.calls).filter((c) => c.method === "PATCH").every((c) => Object.keys(c.body ?? {}).join() === "body"), true);
     const again = await rollover({ api: gh.api, now: NOW, log: quiet });
     is("a run right after (another comment queued) writes nothing more", [again.action, writesOf(gh.calls).length], ["none", 6]);
   }
   {
-    const gh = github({ comments: ROLL_AT, existingNext: true });
+    const gh = github({ comments: ROLL_AT, existingNext: "An agent's note." });
     const result = await rollover({ api: gh.api, now: NOW, log: quiet });
-    is("a part 8 already opened by hand is used, never a second one, and still gets the first comment",
-      [result.next, gh.calls.some((c) => c.method === "POST" && c.path === "issues"), labeled(gh.issues), gh.issues.find((i) => i.number === 4990)!.posted?.length], [4990, false, [4990], 1]);
+    is("a part 8 already opened by hand inside the repository is used, never a second one, and still gets the explanation",
+      [result.next, gh.calls.some((c) => c.method === "POST" && c.path === "issues"), labeled(gh.issues), posts(gh.issues, 4990)], [4990, false, [4990], 2]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, outsiderNext: true });
+    const result = await rollover({ api: gh.api, now: NOW, log: quiet });
+    is("a part 8 opened by an outside account is ignored: the workflow opens its own and never labels or edits the other",
+      [result.next, labeled(gh.issues), gh.calls.some((c) => c.path.startsWith("issues/4980"))], [5000, [5000], false]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, filler: 250 });
+    const result = await rollover({ api: gh.api, now: NOW, log: quiet });
+    is("more than a page of newer issues: it reads every page before deciding there is no part 8", [result.next, gh.calls.filter((c) => c.path.includes("direction=desc")).length], [5000, 3]);
   }
   for (const [what, options] of [["two labeled issues", { extraLabeled: true }], ["no labeled issue", { noLabeled: true }]] as const) {
     const gh = github({ comments: ROLL_AT, ...options });
-    let failed = false;
-    try { await rollover({ api: gh.api, now: NOW, log: quiet }); } catch { failed = true; }
-    is(`${what} fails visibly and writes nothing`, [failed, writesOf(gh.calls).length], [true, 0]);
+    const error = await fails(gh);
+    is(`${what} fails visibly, says how to run it by hand, and writes nothing`, [error.includes("exactly one issue"), error.includes("Run workflow"), writesOf(gh.calls).length], [true, true, 0]);
   }
   {
     const gh = github({ comments: ROLL_AT, panel: "## PAINEL DA FILA\n" });
-    let failed = false;
-    try { await rollover({ api: gh.api, now: NOW, log: quiet }); } catch { failed = true; }
-    is("an unreadable PAINEL fails before the label moves: the channel stays where it was", [failed, labeled(gh.issues), gh.calls.some((c) => c.method === "DELETE")], [true, [4932], false]);
-    const retry = github({ comments: ROLL_AT });
-    Object.assign(retry.issues, gh.issues);
-    await rollover({ api: retry.api, now: NOW, log: quiet });
-    is("the next comment's run finishes it with the same part, never a second one, and never a second first comment",
-      [retry.calls.some((c) => c.method === "POST" && c.path === "issues"), labeled(retry.issues), retry.issues.find((i) => i.number === 5000)!.posted?.length,
-        retry.calls.some((c) => c.method === "PATCH" && c.path === "issues/4932")], [false, [5000], 1, false]);
+    const error = await fails(gh);
+    is("an unreadable PAINEL fails before ANY write: no part, no pointer, no comment, the label where it was",
+      [error.includes("CANAL ATIVO"), writesOf(gh.calls).length, labeled(gh.issues)], [true, 0, [4932]]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, activeBody: "x".repeat(BODY_LIMIT) });
+    const error = await fails(gh);
+    is("a pointer that would pass GitHub's body limit fails before any write", [error.includes("limit"), writesOf(gh.calls).length], [true, 0]);
   }
   {
     const gh = github({ comments: ROLL_AT, failAdd: true });
-    let failed = false;
-    try { await rollover({ api: gh.api, now: NOW, log: quiet }); } catch { failed = true; }
-    is("if the label cannot go on the new part it goes back on the old one and the run fails", [failed, labeled(gh.issues)], [true, [4932]]);
+    const error = await fails(gh);
+    is("if the new part refuses the label it goes back on the old one and the run fails", [error.includes("back on #4932"), labeled(gh.issues)], [true, [4932]]);
+    const retry = github({ comments: ROLL_AT });
+    retry.issues.splice(0, retry.issues.length, ...gh.issues);
+    await rollover({ api: retry.api, now: NOW, log: quiet });
+    is("the next comment's run finds part 8 through the pointer and finishes it: no second part, no second explanation",
+      [retry.calls.some((c) => c.method === "POST" && c.path === "issues"), retry.calls.some((c) => c.path.includes("direction=desc")), labeled(retry.issues), posts(retry.issues, 5000),
+        retry.calls.some((c) => c.method === "PATCH" && c.path === "issues/4932")], [false, false, [5000], 1, false]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, failAdd: true, failBack: true });
+    const error = await fails(gh);
+    is("if the label cannot go back either, the run says that no issue has it and where to put it, with both errors",
+      [error.includes("NO issue has the label"), error.includes("put it on #5000 by hand"), error.includes("502"), error.includes("503")], [true, true, true, true]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, activeBody: pointerLine(4980) + "\n\nContinuation of #4858.", outsiderNext: true });
+    const error = await fails(gh);
+    is("a pointer to an issue that is not an open part from inside the repository fails before any write", [error.includes("points to #4980"), writesOf(gh.calls).length], [true, 0]);
   }
 }
 

@@ -53,7 +53,12 @@ async function main(): Promise<void> {
   let left = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const reply = await pipeline(commands);
-    if (!left && commands.some((c) => c[0] === "HSETNX" && String(c[1]).endsWith(`:${cy}`))) {
+    // The step's claim of Cy's attempt: an HSETNX of the run's open attempt before main's run generations (#4234), now
+    // the CLAIM_IF_RUN script on the run's own key (lib/flow-runs.ts claimAttempts).
+    const claimsCy = (c: (string | number)[]) =>
+      (c[0] === "HSETNX" && String(c[1]).endsWith(`:${cy}`)) ||
+      (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-claim:") && String(c[3]).endsWith(`:${cy}`));
+    if (!left && commands.some(claimsCy)) {
       left = true;
       const [raw] = await pipeline([["HGET", leadsKey(list), "cy@example.com"]]);
       await pipeline([["HSET", leadsKey(list), "cy@example.com", JSON.stringify({ ...JSON.parse(String(raw)), unsub: true })]]);

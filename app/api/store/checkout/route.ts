@@ -450,7 +450,9 @@ export async function POST(request: NextRequest) {
       // A refused returning code made no checkout: either refused before Stripe
       // was asked, or Stripe's 400 on the code's coupon. Its unit comes back at
       // once, as the hold count does below, so a refused code holds nothing.
-      (error) => refusedBeforeStripe(error) || error instanceof ReturningCodeRefused,
+      // So does a sale whose EU VAT could not be put on it (lib/eu-vat-collect.ts), refused before Stripe is asked
+      // (Claude 5's LOW on #4975).
+      (error) => refusedBeforeStripe(error) || error instanceof ReturningCodeRefused || error instanceof EuVatCollectRefused,
     );
     if (!held.ok) {
       if (charged) await giveBackHold(store, clientAddress(request));
@@ -484,7 +486,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Refused before a checkout opened (Stripe not asked, or its 400 refusal of the code's coupon): no unit stays
     // held, so the hold count is given back.
-    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof ReturningCodeRefused)) await giveBackHold(store, clientAddress(request));
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof ReturningCodeRefused || error instanceof EuVatCollectRefused)) await giveBackHold(store, clientAddress(request));
     // No checkout opened: the link's claim is let go, so it can be used again.
     if (returning) await releaseReturningLink(linkToken);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
@@ -493,12 +495,12 @@ export async function POST(request: NextRequest) {
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
-    // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
-    // A ticked box the EU VAT gate refuses for this order: back to the page, as for the product itself.
     // The EU VAT this sale needs could not be put on it (lib/eu-vat-collect.ts): refused as an EU sale is today.
     if (error instanceof EuVatCollectRefused) {
       return away(from ? `/@${store.handle}/${from}/${product.id}?status=abroad` : `/@${store.handle}/p/${product.id}?status=abroad#buy`);
     }
+    // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
+    // A ticked box the EU VAT gate refuses for this order: back to the page, as for the product itself.
     if (error instanceof BoxesRefused) {
       const status = error.reason === "refused" ? "abroad" : "country";
       return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);

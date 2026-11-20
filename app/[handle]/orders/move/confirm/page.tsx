@@ -44,7 +44,10 @@ export default async function ConfirmMovePage({ params, searchParams }: Params) 
       : finished
         ? w.confirmed[finished]
         : null;
-  const showForm = Boolean(open && !open.confirmed && !finished);
+  // The new address, once confirmed, keeps its button: pressing it again sends the current address's link when it may
+  // not have gone, and nothing when it went (lib/purchase-move-flow.ts sendCurrentLink).
+  const again = Boolean(open && open.confirmed && open.side === "to" && open.state === "waiting-from");
+  const showForm = Boolean(open && !finished && (!open.confirmed || again));
 
   return (
     <div lang="en-US" className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -67,8 +70,9 @@ export default async function ConfirmMovePage({ params, searchParams }: Params) 
                 <form action="/api/store/purchase-move/confirm" method="post" className="space-y-4">
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="t" value={token} />
+                  {again ? <p className="st-muted text-sm">{w.resendHint}</p> : null}
                   <button type="submit" className="btn st-btn btn-block">{w.confirmButton}</button>
-                  <p className="st-muted text-sm">{w.confirmIgnore}</p>
+                  {again ? null : <p className="st-muted text-sm">{w.confirmIgnore}</p>}
                 </form>
               ) : null}
             </div>

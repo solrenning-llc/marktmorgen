@@ -82,7 +82,7 @@ import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
 import { forgetMovedPerson } from "@/lib/purchase-move-index";
-import { forgetPodcastPerson } from "@/lib/podcast-access";
+import { forgetPodcastPerson, podcastProductCount } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
 import { forgetRecoveryPerson } from "@/lib/checkout-recovery";
@@ -95,6 +95,7 @@ import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
+import { forgetBenefitPerson } from "@/lib/tier-benefits";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
@@ -134,14 +135,14 @@ export const ERASERS: Eraser[] = [
   { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
-  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
+  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person, s.store) },
   { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
   },
   { module: "lib/course-finish.ts", run: (s) => forgetFinishPerson(s.courses.map((c) => c.courseId), s.email) },
-  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner) },
+  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner, s.store) },
   {
     module: "lib/assignment.ts",
     run: async (s, files) => {
@@ -165,10 +166,10 @@ export const ERASERS: Eraser[] = [
   },
   { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
-  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
+  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email, s.store) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
-  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email) },
+  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email, s.store) },
   // A move of purchases to another address (611 [WP10]): both lines of each move that names the address.
   { module: "lib/purchase-move-index.ts", run: (s) => forgetMovedPerson(s.store, s.email) },
   { module: "lib/podcast-access.ts", run: (s) => forgetPodcastPerson(s.store, s.productIds, s.email) },
@@ -199,6 +200,7 @@ export const ERASERS: Eraser[] = [
   // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
   { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
+  { module: "lib/tier-benefits.ts", run: (s) => forgetBenefitPerson(s.store, s.person) },
   {
     module: "lib/reviews.ts",
     only: "person",
@@ -219,7 +221,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
-  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
+  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email, s.store) },
 ];
 
 export type ErasureResult =
@@ -284,13 +286,14 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, podcastProducts] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    podcastProductCount(scope.statsId),
   ]);
   return {
     products: scope.productIds.length,
@@ -304,6 +307,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificates,
     droppedCourses: scope.droppedCourses ?? 0,
     droppedRecords: scope.droppedRecords ?? 0,
+    podcastProducts,
   };
 }
 

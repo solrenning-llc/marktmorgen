@@ -30,6 +30,6 @@ for (const [letter, title] of [["cc", "Ajudante de teste compartilhado"], ["dd",
   is(`(${letter}) ${title}, once`, (ac.match(new RegExp(`\\n\\(${letter}\\) \\*\\*${title}`, "g")) ?? []).length, 1);
 }
 is("this PR's rules no longer take (r)-(t)", /\n\((r|s|t)\) \*\*(Ajudante de teste|Estado de um fluxo|Número derivado)/.test(ac), false);
-is("the new reception is recorded in the provenance", ac.includes("Recebido também em 20/11/2026, à Claude 4"), true);
+is("the new reception is recorded in the provenance, with its hour", ac.includes("Recebido também em 20/11/2026, por volta das 00h40 (Fortaleza), à Claude 4"), true);
 
 done();

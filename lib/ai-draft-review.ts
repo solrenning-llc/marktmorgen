@@ -308,6 +308,7 @@ function digitsKey(written: string): string {
 
 /** A percentage written out after the digits ("19 percent", "20 pour cent"), read in the languages the drafts use. */
 const PERCENT_WORD = /[ \t]+(?:percent|pour[ \t]+cent|por[ \t]+ciento|por[ \t]+cento|prozent|per[ \t]+cento|procent)(?![\p{L}\p{N}])/iuy;
+const PERCENT_SIGN = /[ \t]*%/y;
 
 /** Each number in a text, as written and by what it stands for, in the order they appear. */
 function numbersIn(original: string, codes: readonly string[]): { written: string; key: string; at: number }[] {
@@ -332,7 +333,12 @@ function numbersIn(original: string, codes: readonly string[]): { written: strin
       // "Double-check it" asks for a check, it claims no number.
       if (/^double$/i.test(match[0]) && /^-check/i.test(text.slice(at + match[0].length))) continue;
       if (code === "en" && /^(double|triple)$/i.test(match[0]) && !sticky(MULTIPLIES, text, at + match[0].length)) continue;
-      found.push({ written: match[0], key: wordKey(match[0], code), at });
+      // The same holds for a number in words (Claude 5 and Codex X6 on #3437): "nineteen percent" keys as "19%".
+      const after = at + match[0].length;
+      PERCENT_SIGN.lastIndex = after;
+      PERCENT_WORD.lastIndex = after;
+      const suffix = PERCENT_SIGN.exec(text)?.[0] ?? PERCENT_WORD.exec(text)?.[0] ?? "";
+      found.push({ written: match[0] + suffix, key: wordKey(match[0], code) + (suffix ? "%" : ""), at });
     }
   }
   return found.sort((a, b) => a.at - b.at);

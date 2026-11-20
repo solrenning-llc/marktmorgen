@@ -422,11 +422,11 @@ async function main(): Promise<void> {
     amount_subtotal: 999, amount_total: 669, total_details: { amount_discount: 330, amount_shipping: 0, amount_tax: 0 },
     discounts: [{ coupon: null, promotion_code: "promo_1Spring0001" }],
     metadata: { store: HANDLE, product: guideId, upsell_key: browser.fingerprint, code: "SPRING" },
-    customer_details: { email: BUYER },
+    customer_details: { email: BUYER, address: { country: "US" } },
     payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
   });
   sessions.cs_test_codeorder000001 = paidWithCode("cs_test_codeorder000001");
-  const take = async (session: string) => takeUpsell({ store, session, secret: browser.secret, origin, step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+  const take = async (session: string) => takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin, step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
   const took = await take("cs_test_codeorder000001");
   const charged = intents.at(-1)!;
   is("the offer is charged at its own price, $19, with no code, coupon or discount carried over", [took.kind, charged.body.get("amount"), [...charged.body.keys()].filter((k) => /discount|coupon|promotion/.test(k))], ["done", "1900", []]);

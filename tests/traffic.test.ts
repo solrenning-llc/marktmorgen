@@ -135,9 +135,14 @@ const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
   commands += list.length;
   const answers = await real(list);
-  for (const answer of answers) replyBytes += typeof answer === "string" ? Buffer.byteLength(answer) : 0;
+  for (const answer of answers) replyBytes += textBytes(answer);
   return answers;
 }) as typeof redis.pipeline;
+/** The bytes of the texts in a reply, inside a list too: an MGET answers with one (lib/catalog.ts, getMany). */
+function textBytes(answer: unknown): number {
+  if (typeof answer === "string") return Buffer.byteLength(answer);
+  return Array.isArray(answer) ? answer.reduce((sum: number, part) => sum + textBytes(part), 0) : 0;
+}
 async function counted(work: () => Promise<unknown>): Promise<number> {
   commands = 0;
   await work();

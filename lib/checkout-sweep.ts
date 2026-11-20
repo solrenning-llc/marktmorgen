@@ -664,8 +664,17 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       // and never write again. Either all of it is done or none, and the next pass marks them again.
       if (settledNow.length && settledKey) {
         const at = Math.floor(Date.now() / 1000);
+        // Taken as written only on its exact answer, one count of the sessions marked (the script's #ARGV - 2): any other
+        // shape is said like a failed write (Codex X6's LOW, retained by Codex L on #4413); either way they are read
+        // again next run, where noteSession's writes (HSETNX) record nothing twice.
         await redisPipeline([["EVAL", KEEP_AFFILIATE_SETTLED, 1, settledKey, at, CONFIRM_WITHIN_SECONDS, ...settledNow]])
-          .catch((error) => console.error("noting the checkouts whose affiliate step is settled failed; read again next run", store.handle, describe(error)));
+          .then((replies) => {
+            const marked = repliesFor(replies, 1);
+            if (!marked || countOf(marked[0]) !== settledNow.length) {
+              console.error("the affiliate step's settled mark got no exact answer; read again next run", store.handle);
+            }
+          })
+          .catch((error) => console.error("noting the checkouts whose affiliate step is settled failed (settled mark); read again next run", store.handle, describe(error)));
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered

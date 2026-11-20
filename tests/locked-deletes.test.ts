@@ -495,7 +495,7 @@ async function main(): Promise<void> {
     "stream/captions": ["act:products:remove"],
     "team": ["need:team"],
     "resend": ["act:orders:resend"],
-    "waitlist": ["act:products:launch"],
+    "waitlist": ["need:send"],
     "webhooks": ["need:settings"],
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
@@ -565,7 +565,7 @@ async function main(): Promise<void> {
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
     "community/challenges": { create: "open:adds", delete: "act:events" },
     "community/manage": {
-      access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
+      "about-page": "need:settings", access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
       messages: "need:settings", onboarding: "need:settings", "report-delete": "act:community", rewards: "need:settings", room: "need:settings",
       settings: "need:settings", "space-add": "need:settings", "space-edit": "need:settings", "space-move": "need:settings", "space-remove": "need:settings",
     },
@@ -575,7 +575,7 @@ async function main(): Promise<void> {
       "cm-hide": "open:reversible", "cm-on": "open:reversible", "cm-reply": "open:adds", disable: "open:only a course with nothing in it turns back into a product",
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",
-      "module-move": "open:edits", "module-remove": "act:products", outline: "open:adds", quiz: "act:products:quiz-remove",
+      "module-move": "open:edits", "module-remove": "act:products", "next-step": "open:edits", outline: "open:adds", quiz: "act:products:quiz-remove",
       retries: "open:gives a student their quiz tries back", review: "open:edits", shelf: "open:edits", start: "open:edits", task: "act:products:task-remove",
       template: "open:adds", withdraw: "act:products",
     },
@@ -630,7 +630,7 @@ async function main(): Promise<void> {
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },
     "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },
-    "waitlist": { launch: "act:products", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
+    "waitlist": { launch: "need:send", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
     "webhooks": "need:settings",
     "course/task": "not:a student replacing or taking back their own handed-in work",
   };

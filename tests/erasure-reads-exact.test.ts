@@ -58,7 +58,8 @@ const steps: [string, (b: Batch) => boolean, () => Promise<unknown>][] = [
   ["forgetHandle: the script's count", (b) => b.length === 1 && b[0][0] === "EVAL", () => forgetHandle(COMMUNITY, "ana", "member01")],
   ["forgetServer: the people", (b) => b.length === 1 && b[0][0] === "HKEYS", () => forgetServer("room0001", store.sid)],
   ["forgetServer: their address links", (b) => b.length === 1 && b[0][0] === "HVALS", () => forgetServer("room0001", store.sid)],
-  ["forgetImportedPerson", (b) => b.length === 2 && b[0][0] === "DEL" && b[1][0] === "HDEL", () => forgetImportedPerson(STATS, "a@example.com")],
+  // forgetImportedPerson reads and deletes the purchases in one step (lib/imported-purchases.ts, HASH_TAKE_ALL), then the HDEL.
+  ["forgetImportedPerson", (b) => b.length === 2 && b[0][0] === "EVAL" && b[1][0] === "HDEL", () => forgetImportedPerson(STATS, "a@example.com")],
 ];
 
 async function seed(): Promise<void> {

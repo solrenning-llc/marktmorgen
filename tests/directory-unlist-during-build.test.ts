@@ -48,11 +48,12 @@ async function selling(email: string, handle: string, name: string): Promise<voi
   await program(email, true);
 }
 
-/** Runs a build in which `before` runs just before the build's SET of the kept page. */
+/** Runs a build in which `before` runs just before the build keeps its page (its SET, or the script that holds it). */
 async function buildWith(before: () => Promise<void>): Promise<string[] | string> {
   let armed = true;
   redis.pipeline = (async (commands: Commands) => {
-    if (armed && commands[0]?.[0] === "SET" && commands[0]?.[1] === DIRECTORY_CACHE) {
+    // The page is kept by the build's own script (PUBLISH_IF_OWNER, Codex N1 on #2921), the cache key among its keys.
+    if (armed && ((commands[0]?.[0] === "SET" && commands[0]?.[1] === DIRECTORY_CACHE) || (commands[0]?.[0] === "EVAL" && commands[0].slice(3).includes(DIRECTORY_CACHE)))) {
       armed = false;
       await before();
     }

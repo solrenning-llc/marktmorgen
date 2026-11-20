@@ -60,6 +60,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
     // The receipt and the order's count, once, whichever of this page and the five-minute job is first.
     if (request.state === "paid" && request.session === sessionId) await confirmPurchase(store, sessionId).catch((error) => console.error("confirming a payment request failed", error));
   }
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const status = statusOf(request, now);
   const said = speechFor(store.language, request.currency);

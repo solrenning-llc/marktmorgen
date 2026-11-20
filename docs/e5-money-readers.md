@@ -73,6 +73,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/pay-what-you-want.ts` | NEW-CHARGE | 123–137: the Price with a custom amount, in the store's currency | no |
 | `lib/payment-request-store.ts` | NEW-CHARGE | 92: a payment request saved with the store's currency | partly: kept per request |
 | `lib/paypal-sales.ts` | NEW-CHARGE | 288: the PayPal order in the store's currency; 260 eligibility | no |
+| `lib/member-price.ts` | NEW-CHARGE | 223: a member price is never taken below the smallest charge of the store's currency (DISC-S-1, as a sale and a fair price) | partly: a member price is offered only in the store's currency |
 | `lib/store-checkout.ts` | NEW-CHARGE | 355/439 lines, 400 shipping, 509 intro coupon, 528 codes, in the store's currency; 1068 the order takes the session's | partly |
 | `lib/store-tip-checkout.ts` | NEW-CHARGE | 45/51: the tip's range and checkout line; 122 the session's | partly |
 | `app/api/cron/monthly/route.ts` | TOTALS | 72: the monthly goal in the store's currency against the totals | partly: a goal in another currency is dropped |
@@ -99,7 +100,8 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/mcp-tools.ts` | TOTALS | 248–277: revenue in the store's currency, sales_in_another_currency apart (unit 2d) | yes |
 | `lib/member-health.ts` | TOTALS | 164–170: each member's monthly amount in its own currency; 196–200 the at-risk total in the store's, the rest counted (unit 2e) | yes |
 | `lib/membership-numbers.ts` | TOTALS | 523/541: membership numbers and MRR movements in the store's currency | partly: "elsewhere" for live subscriptions only |
-| `lib/next-actions-rules.ts` | TOTALS | 247: "Do this next" ranks recorded money only in the store's currency (`options.currency`); another currency is never compared or converted | no |
+| `lib/next-actions-read.ts` | TOTALS | 70: the kept memberships reading's own currency (`numbers.currency`) goes with each amount it hands to "Do this next"; no amount without it, and none while any live membership is in another currency (`elsewhere`), never converted | partly: money only when every live membership is in the reading's currency, else not known |
+| `lib/next-actions-rules.ts` | TOTALS | 256: "Do this next" ranks recorded money only in the store's currency (`options.currency`); another currency is never compared or converted | partly: said in its own currency, ranked after known money by count, never compared or converted |
 | `lib/meta-ads.ts` | TOTALS | 611: ad spend only for an account in the store's currency | partly: refused |
 | `lib/meta-routes.ts` | TOTALS | 84/88: Meta picks an account in the store's currency | partly |
 | `lib/path-facts.ts` | TOTALS | 81/123: Path's revenue in the store's currency only | partly: other sales count, not their money |

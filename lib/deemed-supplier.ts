@@ -114,25 +114,40 @@ function ownTreatmentRecords(value: unknown): DeemedSupplierRecord[] | null {
   }
 }
 
+function jurisdictionProblems(records: DeemedSupplierRecord[], jurisdiction: DeemedSupplierJurisdiction): string[] {
+  const found = records.filter((record) => record?.jurisdiction === jurisdiction);
+  if (found.length !== 1) {
+    return [found.length === 0 ? `${jurisdiction}: not recorded. ${DEEMED_SUPPLIER_RULES[jurisdiction].rule}` : `${jurisdiction}: recorded more than once`];
+  }
+  const record = found[0];
+  const out: string[] = [];
+  if (record.treatment !== "collect" && record.treatment !== "refuse-consumers") out.push(`${jurisdiction}: treatment`);
+  if (!said(record.implementedIn)) out.push(`${jurisdiction}: implementedIn`);
+  if (!said(record.evidence)) out.push(`${jurisdiction}: evidence`);
+  if (!calendarDay(record.recordedOn)) out.push(`${jurisdiction}: recordedOn`);
+  if (record.treatment === "collect" && !said(record.registration)) out.push(`${jurisdiction}: a tax collected needs its registration`);
+  return out;
+}
+
 /** Every reason sales must stay closed under the deemed-supplier rules: empty only when each jurisdiction has a complete record. */
 export function deemedSupplierProblems(value: unknown = DEEMED_SUPPLIER_RECORDS): string[] {
   const records = ownTreatmentRecords(value);
   if (!records) return ["tax-treatment records: complete own data required"];
-  const out: string[] = [];
-  for (const jurisdiction of DEEMED_SUPPLIER_JURISDICTIONS) {
-    const found = records.filter((record) => record?.jurisdiction === jurisdiction);
-    if (found.length !== 1) {
-      out.push(found.length === 0 ? `${jurisdiction}: not recorded. ${DEEMED_SUPPLIER_RULES[jurisdiction].rule}` : `${jurisdiction}: recorded more than once`);
-      continue;
-    }
-    const record = found[0];
-    if (record.treatment !== "collect" && record.treatment !== "refuse-consumers") out.push(`${jurisdiction}: treatment`);
-    if (!said(record.implementedIn)) out.push(`${jurisdiction}: implementedIn`);
-    if (!said(record.evidence)) out.push(`${jurisdiction}: evidence`);
-    if (!calendarDay(record.recordedOn)) out.push(`${jurisdiction}: recordedOn`);
-    if (record.treatment === "collect" && !said(record.registration)) out.push(`${jurisdiction}: a tax collected needs its registration`);
-  }
-  return out;
+  return DEEMED_SUPPLIER_JURISDICTIONS.flatMap((jurisdiction) => jurisdictionProblems(records, jurisdiction));
+}
+
+/**
+ * The treatment of one jurisdiction's complete record, read by the same checks as deemedSupplierProblems; null when
+ * the list is unreadable, or that jurisdiction has no record, more than one, or an incomplete one. A null is never
+ * "collect": a caller refuses that jurisdiction's consumers.
+ */
+export function recordedTreatment(
+  jurisdiction: DeemedSupplierJurisdiction,
+  value: unknown = DEEMED_SUPPLIER_RECORDS,
+): DeemedSupplierRecord["treatment"] | null {
+  const records = ownTreatmentRecords(value);
+  if (!records || jurisdictionProblems(records, jurisdiction).length > 0) return null;
+  return records.find((record) => record.jurisdiction === jurisdiction)!.treatment;
 }
 
 /** Whether every jurisdiction's treatment is built and recorded. Not permission to sell by itself. */

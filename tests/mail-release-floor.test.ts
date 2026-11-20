@@ -6,7 +6,7 @@
  * giveBackToMonth (second review on #3384, HIGH). Synthetic only.
  */
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { monthlyAllowance, release } from "@/lib/mail";
+import { mailDay, monthlyAllowance, release } from "@/lib/mail";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -32,15 +32,15 @@ async function main(): Promise<void> {
   is("setup: a paid plan with monthly emails and a window", [allowance > 0, Boolean(window)], [true, true]);
   // What reserve wrote for a batch of 3 (it needs a configured sender, which a test has none of).
   await redis.pipeline([["SET", monthKey, "3"], ["SET", dayKey, "3"]]);
-  await release(store, 3);
+  await release(store, 3, mailDay());
   is("control: what was reserved is given back exactly", [await count(monthKey), await count(dayKey)], [0, 0]);
-  await release(store, 5);
+  await release(store, 5, mailDay());
   const month = await count(monthKey);
   const day = await count(dayKey);
   is("a give-back larger than what the month holds leaves it at zero, not below", month === null || month >= 0, true);
   is("and the day's count too", day === null || day >= 0, true);
   await redis.pipeline([["DEL", monthKey]]);
-  await release((await storeForEmail(owner))!, 4);
+  await release((await storeForEmail(owner))!, 4, mailDay());
   is("a give-back on a window with no count yet (it turned after the reserve) leaves none", await count(monthKey), null);
   done();
 }

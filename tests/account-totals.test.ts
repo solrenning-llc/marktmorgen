@@ -19,8 +19,8 @@ const store = (name: string, read: StoreFigures["read"]): StoreFigures => ({ sid
 function main(): void {
   part("Counts add, money only within one currency");
   const sum = sumStores([
-    store("Bread", { state: "ok", data: data("usd", [100, 10, 4, 4_000]), members: { currency: "usd", paying: 3, trialing: 1, mrr: 2_700 } }),
-    store("Pasta", { state: "ok", data: data("USD", [50, 5, 2, 1_000]), members: { currency: "usd", paying: 2, trialing: 0, mrr: 1_800 } }),
+    store("Bread", { state: "ok", data: data("usd", [100, 10, 4, 4_000]), members: { currency: "usd", paying: 3, trialing: 1, mrr: 2_700, complete: true, elsewhere: 0 } }),
+    store("Pasta", { state: "ok", data: data("USD", [50, 5, 2, 1_000]), members: { currency: "usd", paying: 2, trialing: 0, mrr: 1_800, complete: true, elsewhere: 0 } }),
     store("Brot", { state: "ok", data: data("eur", [20, 2, 1, 900]), members: null }),
   ]);
   is("visitors, checkouts and sales add up", [sum.windows.d30.visitors, sum.windows.d30.checkouts, sum.windows.d30.sales], [170, 17, 7]);

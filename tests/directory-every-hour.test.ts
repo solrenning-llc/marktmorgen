@@ -53,7 +53,12 @@ async function attempt(): Promise<string[] | string> {
 async function counted<T>(run: () => Promise<T>): Promise<{ result: T; words: Record<string, number> }> {
   const words: Record<string, number> = {};
   redis.pipeline = (async (commands: Commands) => {
-    for (const command of commands) words[String(command[0])] = (words[String(command[0])] ?? 0) + 1;
+    for (const command of commands) {
+      words[String(command[0])] = (words[String(command[0])] ?? 0) + 1;
+      // A script is billed with the commands inside it (the build's own PUBLISH_IF_OWNER, Codex N1 on #2921): each
+      // redis.call counted once, its worst.
+      if (command[0] === "EVAL") for (const [, word] of String(command[1]).matchAll(/redis\.call\("(\w+)"/g)) words[word] = (words[word] ?? 0) + 1;
+    }
     return original(commands);
   }) as typeof redis.pipeline;
   try {

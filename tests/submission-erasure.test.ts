@@ -173,6 +173,13 @@ async function main(): Promise<void> {
     const open = await send("e".repeat(32), lesson(4), stuck.steps, true);
     is("an upload the vault did not give up leaves the erasure unfinished", await threw(() => forgetSubmissionsPerson(FOLDER, "e".repeat(32), [], stuck.steps)), "Error: a submission upload could not be given up");
     is("and its door is kept for the retry", (await submissionsCopyOf(FOLDER, "e".repeat(32))).length, 1);
+    // lib/vault.ts (#3502) answers a cancel it did not make with "busy" or "tries": neither gave the upload up, so the
+    // erasure is not finished and the door stays for the retry, as when the vault could not confirm.
+    for (const refused of ["busy", "tries"] as const) {
+      const held = world({ abortReservedVault: async () => refused });
+      is(`the vault answered "${refused}": the erasure is not finished`, await threw(() => forgetSubmissionsPerson(FOLDER, "e".repeat(32), [], held.steps)), "Error: a submission upload could not be given up");
+      is(`the vault answered "${refused}": the door is kept for the retry`, (await submissionsCopyOf(FOLDER, "e".repeat(32))).length, 1);
+    }
     is("pressed again once the vault answers, it finishes", await forgetSubmissionsPerson(FOLDER, "e".repeat(32), [], world().steps), 0);
     void open;
     await redis.pipeline([["ZADD", `nl:sub:who:${FOLDER}:${"f".repeat(32)}`, NOW + DAY, "not|an entry"]]);

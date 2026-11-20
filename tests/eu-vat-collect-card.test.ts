@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   const owner = "vatcollect@example.com";
   await claimHandle(owner, SHOP, "VAT Collect Shop", "");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_1TestVatCollect1", true);
+  await setStripeAccount(owner, "acct_1TestVatColl01", true);
   await setSubscription(owner, { customerId: "cus_VatCollect001", subscriptionId: "sub_VatCollect001", active: true, period: paidPeriod() });
   const made = await addProduct(owner, "Pattern pack", "", "29", null);
   if (!made.ok) throw new Error("no product");

@@ -47,6 +47,7 @@ import type { DepositFigures } from "@/lib/deposit-code";
 import { chargeNow, creatorDueLine, type DueInPerson, dueLines, readDue } from "@/lib/call-deposit";
 import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
 import { admitOrders } from "@/lib/order-admission";
+import { askBillingAddress } from "@/lib/billing-address";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
 import { saleHandles, storeForEmail, storeRef } from "@/lib/store";
@@ -1313,6 +1314,8 @@ export function callCheckoutBody(input: {
   // Not for a session from a package: nothing is paid, so there is nothing to
   // invoice, and the package's own checkout already asked (lib/call-packages.ts).
   if (!pkg) applyTaxDocuments(store, body, false);
+  // A paid booking: the buyer's full billing address (790 [IV2]); never for a session from a package, which charges nothing.
+  if (!pkg) askBillingAddress(body);
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
   // Stripe will not keep a checkout open for less than half an hour, counted

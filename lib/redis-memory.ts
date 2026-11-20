@@ -497,6 +497,18 @@ export class MemoryRedis {
           this.run(["DEL", pass]);
           return held;
         }
+        // lib/podcast-public-show.ts FEED_STORE_LIVE: the handle still leads to the ref the store's id names, and no erasure has begun.
+        if (key.startsWith("-- marktmorgen:podcast-feed-store-live:v1\n") && args[0] === "3" && args.length === 5) {
+          const [, handle, id, erasing, field] = args;
+          this.scriptCalls += 1;
+          const ref = this.run(["GET", id]);
+          if (ref === null) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["GET", handle]) !== ref) return 0;
+          this.scriptCalls += 1;
+          if (Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          return 1;
+        }
         // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from, sent as its SHA-1.
         if (key.startsWith("-- marktmorgen:flows-write-if:v2\n") && args[0] === "1" && args.length === 5) {
           const [, list, had, expected, json] = args;

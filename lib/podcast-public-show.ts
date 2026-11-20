@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { ERASING_KEY, STORE_ID_PATTERN, type Store, erasingField, storeHandleKey, storeIdCommand, storeRef } from "@/lib/store";
 import { EPISODE_ID, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, PODCAST_ID, type Episode, type Podcast } from "@/lib/podcast-rules";
 import { PUBLIC_CATEGORIES, type PublicCategory, type PublicEpisodeCandidate } from "@/lib/podcast-public-feed";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
@@ -188,11 +189,35 @@ export function matchesTag(header: string | null, etag: string): boolean {
 }
 
 /**
- * A feed kept: only the XML, already public, its tag and its size in bytes. The store is not kept with it: the route
- * reads the store, live, before it looks here, so an erased store's feed is never answered from memory and no owner's
- * address stays in the cache (Codex L-20261120-1144, L-20261118-0519).
+ * Whether a kept feed's store is still the live store at its address, in one step and without its record (Codex
+ * L-20261120-1144): the address still leads to the ref the store's id names (the handle's key and the id's key hold the
+ * same ref; an address let go holds "released:..." and a store erased has no id key), and its erasure has not begun.
+ * KEYS: the handle's key, the store's id key, nl:closed:erasing. ARGV: the store's erasing field.
+ * 1 live; 0 not (nothing to serve from the cache). Three small reads, no record: inside the unit a kept feed takes
+ * (tests/f2-public-feed-route.test.ts). Modelled by lib/redis-memory.ts.
  */
-export type KeptFeed = { xml: string; etag: string; bytes: number };
+export const FEED_STORE_LIVE = `-- marktmorgen:podcast-feed-store-live:v1
+local ref = redis.call("GET", KEYS[2])
+if not ref or redis.call("GET", KEYS[1]) ~= ref then return 0 end
+if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return 0 end
+return 1`;
+
+/** Billed commands of FEED_STORE_LIVE at the most: its EVAL and three reads inside. */
+export const FEED_STORE_LIVE_COMMANDS = 4;
+
+/**
+ * A kept feed's store, read live before the cache answers: true only on the script's exact 1; false when it is not
+ * live; "unknown" for any other reply, or a store kept from before ids, which has no id key to check.
+ */
+export async function keptStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "handle">): Promise<boolean | "unknown"> {
+  if (!STORE_ID_PATTERN.test(store.sid)) return "unknown";
+  const replies = repliesFor(await redisPipeline([["EVAL", FEED_STORE_LIVE, 3, storeHandleKey(store.handle), storeIdCommand(store.sid)[1], ERASING_KEY, await erasingField(storeRef(store))]]), 1);
+  const answer = replies?.[0];
+  return answer === 1 ? true : answer === 0 ? false : "unknown";
+}
+
+/** A feed kept: the store it is counted against, the XML, its tag and its size in bytes. */
+export type KeptFeed = { store: Store; xml: string; etag: string; bytes: number };
 
 const kept = new Map<string, { feed: KeptFeed; until: number }>();
 let keptBytes = 0;
@@ -228,6 +253,11 @@ export function keepFeed(key: string, feed: KeptFeed, now: number): void {
   }
   kept.set(key, { feed, until: now + PUBLIC_FEED_CACHE_SECONDS * 1000 });
   keptBytes += feed.bytes;
+}
+
+/** Lets one kept feed go: its store is not live any more, or could not be read as live. */
+export function forgetFeed(key: string): void {
+  drop(key);
 }
 
 /** Forgets every kept feed (tests). */

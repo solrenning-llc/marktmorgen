@@ -88,7 +88,7 @@ function paidCheckout(id: string, product: string, fingerprint: string): Record<
     currency: "usd",
     metadata: { store: HANDLE, product, upsell_key: fingerprint },
     customer_details: { email: "buyer@example.com", address: { country: "US" } },
-    payment_intent: { id: "pi_test_front00002", payment_method: { id: "pm_test_card0002", type: "card", customer: "cus_TestBuyer02" } },
+    payment_intent: { id: "pi_test_front00002", payment_method: { id: "pm_test_card0002", type: "card", customer: "cus_TestBuyer02", card: { country: "US" } } },
   };
 }
 

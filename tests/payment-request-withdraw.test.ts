@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 
   part("A checkout already paid, or being paid, is never withdrawn");
   const paid = await make();
-  await withSession(paid, "cs_test_paidwd12345", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_withdraw123", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: paid, store: "withdrawshop" } });
+  await withSession(paid, "cs_test_paidwd12345", { status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_withdraw123", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: paid, store: "withdrawshop" } });
   is("paid online: written down as paid, the withdrawal refused", [await outcome(paid), (await requestOf(store, paid))?.state], ["paid_online", "paid"]);
   const slow = await make();
   await withSession(slow, "cs_test_slowwd12345", { status: "complete", payment_status: "unpaid" });
@@ -99,13 +99,13 @@ async function main(): Promise<void> {
   const mine = await make();
   const theirs = await make();
   await withSession(mine, "cs_test_probeA12345", { status: "open", payment_status: "unpaid" });
-  sessions["cs_test_probeA12345"] = { id: "cs_test_probeB12345", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_probeB12345", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: theirs, store: "withdrawshop" } };
+  sessions["cs_test_probeA12345"] = { id: "cs_test_probeB12345", status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_probeB12345", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: theirs, store: "withdrawshop" } };
   is("another checkout's answer: refused, never written down with its payment", [await outcome(mine), (await requestOf(store, mine))?.state, (await requestOf(store, mine))?.payment ?? ""], ["error", "open", ""]);
   const named = await make();
-  await withSession(named, "cs_test_namedwd1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_namedwd1234", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: theirs, store: "withdrawshop" } });
+  await withSession(named, "cs_test_namedwd1234", { status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_namedwd1234", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: theirs, store: "withdrawshop" } });
   is("its own checkout, paid, but naming another request: refused, nothing written", [await outcome(named), (await requestOf(store, named))?.state, (await requestOf(store, named))?.payment ?? ""], ["error", "open", ""]);
   const elsewhere = await make();
-  await withSession(elsewhere, "cs_test_otherwd1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_otherwd1234", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: elsewhere, store: "another-shop" } });
+  await withSession(elsewhere, "cs_test_otherwd1234", { status: "complete", payment_status: "paid", amount_total: 12000, currency: "usd", payment_intent: "pi_test_otherwd1234", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: elsewhere, store: "another-shop" } });
   is("paid, naming another store: refused, nothing written", [await outcome(elsewhere), (await requestOf(store, elsewhere))?.state], ["error", "open"]);
 
   part("Read again under the hold (Claude 7 on #4513): a checkout opened after the first read is closed too");

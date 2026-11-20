@@ -157,7 +157,19 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
   const [added] = await redisPipeline([["HSETNX", QUEUE, field, JSON.stringify(entry)]]);
   const n = countOf(added);
   if (n === null) throw new Error("putting a deleted store's forgetting in line answered in an unknown shape");
-  if (n === 1) await redisPipeline([["HINCRBY", monthKey(monthOf(now)), "queued", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
+  if (n === 1) {
+    await redisPipeline([["HINCRBY", monthKey(monthOf(now)), "queued", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
+    return;
+  }
+  // Already in line (Codex X6 on #4348, LOW): a row put there before its community id was known gains it now, so a
+  // later try can find the community's folder. Only the community is added: the row's tries, times, late passes and
+  // files mark stay exactly as read, and a row that already names one, or that cannot be read exactly, is left alone.
+  // At most an HGET and an HSET, in place of the month's HINCRBY and EXPIRE, so the line's five commands still bound it.
+  if (!entry.community) return;
+  const [raw] = await redisPipeline([["HGET", QUEUE, field]]);
+  const row = parseEntry(raw);
+  if (!row || row.community) return;
+  await redisPipeline([["HSET", QUEUE, field, JSON.stringify({ ...row, community: entry.community })]]);
 }
 
 /**

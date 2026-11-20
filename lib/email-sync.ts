@@ -585,7 +585,8 @@ function isScore(reply: unknown): boolean {
 
 /** Puts jobs back at the end of a store's log, throwing when the push does not answer the log's length. */
 async function putBack(log: string, ids: string[]): Promise<void> {
-  if (!countsFor(await redisPipeline([["RPUSH", log, ...ids]]), 1)) throw new UnknownReplyError("a store's email platform job log, putting a job back");
+  const push: (string | number)[][] = [["RPUSH", log, ...ids]];
+  if (!countsFor(await redisPipeline(push), push)) throw new UnknownReplyError("a store's email platform job log, putting a job back");
 }
 
 /**
@@ -625,7 +626,8 @@ async function retire(statsId: string, id: string, now: number): Promise<void> {
   const logged = stringList(repliesFor(await redisPipeline([["LRANGE", log, 0, -1]]), 1)?.[0]);
   if (!logged) throw new UnknownReplyError("a store's email platform job log, retiring a job");
   if (!logged.includes(id)) {
-    if (!countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) throw new UnknownReplyError("the record of an email platform job, retiring it");
+    const drop: (string | number)[][] = [["DEL", jobKey(id)]];
+    if (!countsFor(await redisPipeline(drop), drop)) throw new UnknownReplyError("the record of an email platform job, retiring it");
     await redisPipeline([["ZREM", QUEUE_KEY, member]]);
     return;
   }
@@ -633,7 +635,8 @@ async function retire(statsId: string, id: string, now: number): Promise<void> {
     const again = repliesFor(await redisPipeline([["ZREM", QUEUE_KEY, member], ["LRANGE", log, 0, -1]]), 2);
     const still = stringList(again?.[1]);
     if (still?.includes(id)) return;
-    if (still && countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) return;
+    const drop: (string | number)[][] = [["DEL", jobKey(id)]];
+    if (still && countsFor(await redisPipeline(drop), drop)) return;
   } catch (error) {
     await redisPipeline([["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
     throw error;
@@ -977,14 +980,26 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
   ];
-  if (!countsFor(await redisPipeline(commands), commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
+  if (!countsFor(await redisPipeline(commands), commands)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
   if (unread) throw new UnknownReplyError("a deleted store's email platform jobs");
 }
 
-/** Whether a pipeline of deletions answered exactly one count for each command. */
-function countsFor(replies: unknown, commands: number): boolean {
-  const exact = repliesFor(replies, commands);
-  return !!exact && exact.every((reply) => countOf(reply) !== null);
+/**
+ * Whether a pipeline answered exactly one count for each command, and each count is one Redis can give: a DEL never
+ * more than the keys it names, a ZREM never more than its members (Claude 6's MEDIUM on #4911); a count above them is
+ * no proof the records holding addresses are gone. Any other command (RPUSH, the list's new length) only needs a count.
+ */
+function countsFor(replies: unknown, commands: readonly (readonly (string | number)[])[]): boolean {
+  const exact = repliesFor(replies, commands.length);
+  if (!exact) return false;
+  return exact.every((reply, i) => {
+    const count = countOf(reply);
+    if (count === null) return false;
+    const [name] = commands[i];
+    if (name === "DEL") return count <= commands[i].length - 1;
+    if (name === "ZREM") return count <= commands[i].length - 2;
+    return true;
+  });
 }
 
 /**

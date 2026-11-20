@@ -23,6 +23,8 @@ const STATS = "statsrace001";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 const posts: unknown[] = [];
+/** The money request's answer lost on the way back: the press keeps its "?" entry (Claude 6 on #4963). */
+let lostPost = false;
 /** Run once, inside the next PayPal call of this path: the moment the erasure "wins" a race. */
 let during: { path: "token" | "batch"; run: () => Promise<void> } | null = null;
 
@@ -41,6 +43,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
     posts.push(JSON.parse(String(init.body)));
+    if (lostPost) throw new TypeError("fetch failed: the answer was lost");
     return json({ batch_header: { payout_batch_id: `RACE${posts.length}BATCHAB`, batch_status: "PENDING" } }, 201);
   }
   if (url.pathname.startsWith("/v1/payments/payouts/") && (init?.method ?? "GET") === "GET") {
@@ -134,6 +137,40 @@ async function main(): Promise<void> {
   await payWithPayPal(store);
   await settlePayPal(store);
   is("its batch is still on its way", await openLeft(), 1);
+
+  // Claude 6 on #4963 (MEDIUM): the settling's other writers of the open batches, needsManualCheck (which can run
+  // outside the press's lock) and settleUnknown's count of a try before it sends the same request again.
+  part("Settling: an old '?' batch of a store erased while the settling waits on PayPal's token is not written back");
+  await seed(store);
+  lostPost = true;
+  const unknown = await payWithPayPal(store);
+  lostPost = false;
+  const field = ((redis.run(["HKEYS", `nl:pp:open:${STATS}`]) as string[]) ?? [])[0] ?? "";
+  is("setup: the press left a '?' entry", [unknown.ok, field.startsWith("?")], [false, true]);
+  const aged = JSON.parse(String(redis.run(["HGET", `nl:pp:open:${STATS}`, field])));
+  redis.run(["HSET", `nl:pp:open:${STATS}`, field, JSON.stringify({ ...aged, at: Date.now() - 8 * 86_400_000 })]);
+  during = { path: "token", run: () => erase(store) };
+  await settlePayPal(store);
+  is("the erased store's '?' batch stays gone (needsManualCheck)", await openLeft(), 0);
+
+  part("Settling: a fresh '?' batch of a store whose erasing mark is there is never sent again");
+  await seed(store);
+  lostPost = true;
+  await payWithPayPal(store);
+  lostPost = false;
+  const sentBefore = posts.length;
+  await redis.pipeline([["HSET", ERASING_KEY, await erasingField(storeRef(store)), String(Date.now())]]);
+  await settlePayPal(store);
+  is("no money is asked for again for a store being erased (settleUnknown)", posts.length - sentBefore, 0);
+
+  part("Settling: a live store's fresh '?' batch is still sent again once, with the same key");
+  await seed(store);
+  lostPost = true;
+  await payWithPayPal(store);
+  lostPost = false;
+  const liveBefore = posts.length;
+  await settlePayPal(store);
+  is("the same request is sent once more", posts.length - liveBefore, 1);
 
   part("The erasure's mark waits for the press's own lock (lib/closed-store-data.ts)");
   const source = (await import("node:fs")).readFileSync("lib/closed-store-data.ts", "utf8");

@@ -282,7 +282,7 @@ async function main(): Promise<void> {
   const browser = newUpsellKey();
   const offerImage = async (session: string) => {
     const { store, listing } = await now(front);
-    const view = await funnelView({ store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     return [view.offer?.target.id ?? null, view.offer?.image?.path ?? null];
   };
   is("control: the offer shows that product's picture", await offerImage("cs_test_picturefunnel0001"), [target, cover.image.path]);
@@ -300,7 +300,7 @@ async function main(): Promise<void> {
   is("the funnel is accepted, its picture from a draft", draftFunnel.ok, true);
   const draftView = async (session: string) => {
     const { store, listing } = await now(draftFront);
-    const view = await funnelView({ store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     return [view.offer?.target.id ?? null, view.offer?.image?.path ?? null];
   };
   is("the offer shows the draft's picture, as before", await draftView("cs_test_picturefunnel0003"), [draftTarget, sketch.image.path]);

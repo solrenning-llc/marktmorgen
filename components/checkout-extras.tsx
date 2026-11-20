@@ -138,7 +138,7 @@ export function CheckoutExtras({
     }
   }
 
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
 
   return (
     <div className="mt-3 space-y-2">
@@ -182,12 +182,12 @@ export function CheckoutExtras({
         <p className="text-sm text-ink-soft">
           <span className="font-semibold text-ink">{`Limited to ${product.stock.toLocaleString("en-US")}`}</span>
           {" · "}
-          <button type="button" className={link} onClick={() => setOpen("stock")}>Change</button>
+          <button type="button" className={`inline-flex ${link}`} onClick={() => setOpen("stock")}>Change</button>
           {" · "}
-          <button type="button" className={link} aria-busy={busy} disabled={busy} onClick={() => send({ stock: null }, "Limit removed.")}>No limit</button>
+          <button type="button" className={`inline-flex ${link}`} aria-busy={busy} disabled={busy} onClick={() => send({ stock: null }, "Limit removed.")}>No limit</button>
         </p>
       ) : (
-        <button type="button" className={link} onClick={() => setOpen("stock")}>
+        <button type="button" className={`inline-flex ${link}`} onClick={() => setOpen("stock")}>
           Limit how many can be sold
         </button>
       )}
@@ -233,12 +233,12 @@ export function CheckoutExtras({
               {`${product.funnel.steps.length === 1 ? "One offer" : `${product.funnel.steps.length} offers`} after paying`}
             </span>
             {" \u00b7 "}
-            <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={link}>Edit the funnel</Link>
+            <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={`inline-flex ${link}`}>Edit the funnel</Link>
           </p>
           <Quiet lines={notes?.funnel ?? []} />
         </div>
       ) : (
-        <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={`block ${link}`}>
+        <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={`flex ${link}`}>
           Offer more after they pay
         </Link>
       )}
@@ -312,7 +312,7 @@ function OfferBlock({
   const currentTarget = current
     ? { title: named[current.productId] ?? candidates.find((p) => p.id === current.productId)?.title ?? "" }
     : null;
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   const id = `bump-${owner}-${slot}`;
 
   if (open) {
@@ -387,14 +387,14 @@ function OfferBlock({
           {(paused ? text.paused : text.on)(currentTarget.title, formatMoney(current.priceCents, currency))}
         </span>
         {" \u00b7 "}
-        <button type="button" className={link} onClick={onOpen}>Change</button>
+        <button type="button" className={`inline-flex ${link}`} onClick={onOpen}>Change</button>
         {" \u00b7 "}
-        <button type="button" className={link} aria-busy={busy} disabled={busy} onClick={() => onSend({ bump: null, slot }, text.stopped)}>{text.stop}</button>
+        <button type="button" className={`inline-flex ${link}`} aria-busy={busy} disabled={busy} onClick={() => onSend({ bump: null, slot }, text.stopped)}>{text.stop}</button>
       </p>
     );
   }
   return (
-    <button type="button" className={`block ${link}`} onClick={onOpen}>
+    <button type="button" className={`flex ${link}`} onClick={onOpen}>
       {slot === 0 ? text.add : text.more(slot)}
     </button>
   );
@@ -438,7 +438,7 @@ function PlanBlock({
       }),
     ),
   );
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   const id = `plan-${product.id}`;
 
   if (open) {
@@ -552,14 +552,14 @@ function PlanBlock({
           {`${paused ? "Payment plan, paused" : "Payment plan"}: ${planWords(current, currency)}${current.options && several ? `, from ${formatMoney(current.amountCents, currency)} each` : ""}`}
         </span>
         {" \u00b7 "}
-        <button type="button" className={link} onClick={onOpen}>Change</button>
+        <button type="button" className={`inline-flex ${link}`} onClick={onOpen}>Change</button>
         {" \u00b7 "}
-        <button type="button" className={link} aria-busy={busy} disabled={busy} onClick={() => onSend({ plan: null }, "Payment plan stopped.")}>Stop offering it</button>
+        <button type="button" className={`inline-flex ${link}`} aria-busy={busy} disabled={busy} onClick={() => onSend({ plan: null }, "Payment plan stopped.")}>Stop offering it</button>
       </p>
     );
   }
   return (
-    <button type="button" className={`block ${link}`} onClick={onOpen}>
+    <button type="button" className={`flex ${link}`} onClick={onOpen}>
       Offer a payment plan
     </button>
   );

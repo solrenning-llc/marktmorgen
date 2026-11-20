@@ -490,7 +490,8 @@ export async function refreshBook(store: Store, at: number, held: Held, tries: n
   const version = await bookVersion(store.statsId);
   // readBook reads at most 200 open bookings across the whole program (lib/affiliates.ts, openBookings):
   // worked out for everybody at once, a program past that may read fewer of one affiliate's than their own book did.
-  const book = await readBook(store, undefined, { deadline });
+  // Counted ahead by the affiliate's page that asked for it, the kept invoices with it (affiliatePageCost).
+  const book = await readBook(store, undefined, { deadline, keptPaid: true });
   const written = await writeSnapshot(store, book, at, held, version, tries);
   return written && { book, ...written };
 }

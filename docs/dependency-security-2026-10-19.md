@@ -40,3 +40,46 @@ scripts/check_dependency_audit.py: the full and production audits now both refus
 any high or critical finding, with no exception list. The runtime trace check
 (scripts/check_dependency_runtime.py) is unchanged and still keeps this
 development-only chain out of every production trace.
+
+## Dated development exception for GHSA-fc5q-39xc-vjpf — 17 November 2026
+
+GitHub published GHSA-fc5q-39xc-vjpf ("picomatch vulnerable to ReDoS through single-branch repeated extglobs",
+high, CVSS 7.5, `picomatch <=4.0.7`). No patched version exists: the latest picomatch on npm is 4.0.7, and the
+advisory has no first patched version. From then on the strict gate refused every tree, main included
+(MAIN VERMELHO #4842), although the production audit (`--omit=dev`) stayed at zero.
+
+The owner authorized on 17 November 2026, 15:13 Fortaleza (C1-20261117-1513-c5c4c6-1), one narrow exception in
+scripts/check_dependency_audit.py, valid through 1 December 2026 (UTC) inclusive. It holds only while all of these
+are true; any other finding, change or doubt refuses:
+
+- the production audit has no high or critical finding (no exception there, ever);
+- every high or critical finding of the full audit is caused, through its whole `via` chain, only by this advisory
+  on picomatch `<=4.0.7`, severity high;
+- only the 14 packages of the lint toolchain reviewed on main `1fcc549cda` are found: `@next/eslint-plugin-next`,
+  `@typescript-eslint/{eslint-plugin,parser,type-utils,typescript-estree,utils}`, `eslint-config-next`,
+  `eslint-import-resolver-typescript`, `fast-glob`, `fdir`, `micromatch`, `picomatch`, `tinyglobby`,
+  `typescript-eslint`;
+- the lock holds picomatch only at `node_modules/picomatch` 2.3.2 and
+  `node_modules/tinyglobby/node_modules/picomatch` 4.0.5, both `dev: true`;
+- picomatch's finding offers no fix but npm's semver-major step back of `eslint-config-next` to 14.2.35: a real fix
+  refuses, so it is taken in a reviewed PR.
+
+After 1 December 2026 the gate refuses again, with "exceção GHSA-fc5q-39xc-vjpf vencida: decisão do dono".
+The runtime trace check (scripts/check_dependency_runtime.py) now also keeps `picomatch`, `tinyglobby` and `fdir`
+out of every production trace (Next's own compiled copy, used only by the image optimizer, which is off, is a
+different path). scripts/test_dependency_audit_picomatch.py holds each condition; it runs with
+scripts/test_dependency_audit.py, so no workflow changed. This is an exception for an unpatched upstream package,
+not a fix, and no claim of the absence of security defects.
+
+## GHSA-fc5q-39xc-vjpf exception removed — 18 November 2026
+
+On the owner's order of 18 November 2026 ("resolva vc"), the lint toolchain that brought picomatch into the tree
+(`eslint` 9 with `eslint-config-next` 16.4.5 and the `typescript-eslint` chain) was replaced by `oxlint` 1.90.0,
+pinned exactly (MIT, no JavaScript dependencies; one prebuilt binary per platform under `optionalDependencies`).
+`.oxlintrc.json` keeps every rule the former `core-web-vitals` and `typescript` presets turned on that oxlint
+implements, at the same severity; the rules without an oxlint equivalent are listed in the pull request.
+
+With it, `package-lock.json` holds no copy of picomatch, `npm audit` reports no finding, and the dated exception
+above is gone: scripts/check_dependency_audit.py is again the strict gate with no exception list, and
+scripts/test_dependency_audit.py fails if any exception constant or advisory text comes back. The runtime trace
+check keeps its list unchanged. No claim of the absence of security defects.

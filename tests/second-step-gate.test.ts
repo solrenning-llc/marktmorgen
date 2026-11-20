@@ -31,11 +31,12 @@ import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { accountStores, claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { endMoving, isMoving, markBrokenMove, markMoving, readBrokenMove, sendMoveLink } from "@/lib/auth";
-import { clearBrokenMoveByHand, describeMove } from "@/lib/move-repair";
+import { clearBrokenMoveByHand, describeMove, repairMove } from "@/lib/move-repair";
 import { existsSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
@@ -114,6 +115,9 @@ async function signInWithPasskey(key: ReturnType<typeof makePasskey>): Promise<s
 }
 
 async function main(): Promise<void> {
+  // The lock waits (lib/redis-lock.ts) and the short pauses below pass on a virtual clock, in the order the real
+  // one would give: every check of the time still sees the whole wait.
+  const clock = installVirtualClock({ maxMs: 1_000 });
   redis.clear();
   is("the passkey wait is the app's wait", REMOVAL_DAYS, RESET_DAYS);
 
@@ -925,13 +929,15 @@ async function main(): Promise<void> {
     if (rSeen === null && c && c[0] === "SET" && c.includes("NX") && c.includes(15)) {
       redis.pipeline = rPipe;
       // The ways in have left; the store has not. Were the process to die now, this is what would be left.
-      rSeen = [await readBrokenMove(RSD), (await listPasskeys(RSD)).length];
+      // The record carries its move's own token (Codex X5 on #2271): any 64 hex is shown as one.
+      const seen = await readBrokenMove(RSD);
+      rSeen = [seen && typeof seen.op === "string" && /^[0-9a-f]{64}$/.test(seen.op) ? { ...seen, op: "<token>" } : seen, (await listPasskeys(RSD)).length];
     }
     return rPipe(commands);
   }) as typeof redis.pipeline;
   await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: rsdToken }));
   redis.pipeline = rPipe;
-  is("in the gap, the record is already there", rSeen, [{ from: RSD, to: RSDD }, 0]);
+  is("in the gap, the record is already there", rSeen, [{ from: RSD, to: RSDD, op: "<token>" }, 0]);
   is("and cleared once the move is done", [await readBrokenMove(RSD), await readBrokenMove(RSDD), Boolean(await storeForEmail(RSDD))], [null, null, true]);
 
   part("When moving two-step login refuses and its copy could not be taken back, the undo takes it");
@@ -1033,6 +1039,32 @@ async function main(): Promise<void> {
   const tokenEdf = hex(String(Math.random()));
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenEdf}`).slice(0, 40)}`, EDF, "EX", 900]]);
   is("an edited copy is never deleted: the login waits, and the record stays for a person", [(await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenEdf }))).headers.get("location"), (await storeForEmail(EDT))?.name, await isMoving(EDF)], [`${ORIGIN}/signin?status=move-busy`, "Edited On The Copy", true]);
+
+  // The store itself changed since (its daily jobs and Stripe's answers write to it by its id), the copy did not:
+  // the copy goes, the store stays as it is now (review of #2140, task 47).
+  const TRF = "trf-from@example.com";
+  const TRT = "trf-dest@example.com";
+  await claimHandle(TRF, "trf-from", "Trf", "");
+  await makePasskey(TRF, "cred-trf").keep();
+  const trfOwner = await openSession(TRF, "passkey", "cred-trf");
+  mails.length = 0;
+  await sendMoveLink(TRF, TRT, ORIGIN, trfOwner);
+  const trfToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === TRT)?.text ?? "")?.[1] ?? "";
+  const trfOwnerKey = `nl:store:owner:${hex(`nimbus-store:${TRF}`).slice(0, 40)}`;
+  const trfPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((x) => x[0] === "DEL" && x.includes(trfOwnerKey))) throw new Error("down for a moment");
+    return trfPipe(commands);
+  }) as typeof redis.pipeline;
+  await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: trfToken }));
+  redis.pipeline = trfPipe;
+  is("the move's record notes what was written at the new address", /^[0-9a-f]{64}$/.test((await readBrokenMove(TRF))?.copy ?? ""), true);
+  const [trueRaw] = await redis.pipeline([["GET", trfOwnerKey]]);
+  await redis.pipeline([["SET", trfOwnerKey, JSON.stringify({ ...JSON.parse(String(trueRaw)), name: "Changed By A Daily Job" })]]);
+  const tokenTrf = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenTrf}`).slice(0, 40)}`, TRF, "EX", 900]]);
+  const trfLogin = (await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenTrf }))).headers.get("location") ?? "";
+  is("the store changed since, the copy did not: the copy goes, the store keeps its change, and the record is cleared", [trfLogin.includes("move-busy"), Boolean(await storeForEmail(TRT)), (await storeForEmail(TRF))?.name, await readBrokenMove(TRF)], [false, false, "Changed By A Daily Job", null]);
 
   part("A request to turn the app off never ends during a move");
   const RSF = "rsf-owner@example.com";
@@ -1292,6 +1324,45 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
+  part("A broken move's repair whose logout of the away address is unknown keeps the record (issue 4366)");
+  const REA = "rep-away@example.com";
+  const REB = "rep-home@example.com";
+  await claimHandle(REB, "rep-home", "Rep Home", "");
+  const reaSession = await openSession(REA);
+  await markBrokenMove(REA, REB);
+  const reaSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${REA}`).slice(0, 40)}`;
+  const beforeRepair = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === reaSet ? [42] : beforeRepair(commands)) as typeof redis.pipeline;
+  const reaRepaired = await repairMove(REA);
+  redis.pipeline = beforeRepair;
+  is("control: the old session on the away address is still open", await emailForSession(reaSession), REA);
+  is("the repair does not report success while the away address was not logged out", reaRepaired, false);
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(REA)) !== null, await isMoving(REA), await isMoving(REB)], [true, true, true]);
+  is("a later try whose logout is confirmed repairs it", [await repairMove(REA), await emailForSession(reaSession), await readBrokenMove(REA), await isMoving(REA), await isMoving(REB)], [true, null, null, false, false]);
+
+  part("Clearing a broken move by hand whose logout of one address is unknown keeps the record");
+  const HCA = "hand-a@example.com";
+  const HCB = "hand-b@example.com";
+  const hcaSession = await openSession(HCA);
+  const hcbSession = await openSession(HCB);
+  await markBrokenMove(HCA, HCB);
+  const hcbSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${HCB}`).slice(0, 40)}`;
+  const beforeHand = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === hcbSet ? [42] : beforeHand(commands)) as typeof redis.pipeline;
+  const hcCleared = await clearBrokenMoveByHand(HCA, HCA);
+  redis.pipeline = beforeHand;
+  is("control: the old session on the address whose logout was unknown is still open", await emailForSession(hcbSession), HCB);
+  is("it does not report cleared while an address was not logged out", hcCleared, "logout");
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(HCA)) !== null, await isMoving(HCA), await isMoving(HCB)], [true, true, true]);
+  is(
+    "a later try whose logouts are confirmed clears it",
+    [await clearBrokenMoveByHand(HCA, HCA), await emailForSession(hcaSession), await emailForSession(hcbSession), await readBrokenMove(HCA), await isMoving(HCA), await isMoving(HCB)],
+    ["cleared", null, null, null, false, false],
+  );
+
+  clock.restore();
   done();
 }
 

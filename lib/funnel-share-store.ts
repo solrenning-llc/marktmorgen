@@ -18,6 +18,7 @@
  * is honored only while both are there, so a half-finished revoke never
  * leaves a link that works.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -178,8 +179,7 @@ export async function openShare<T extends "sum" | "bundle">(
  * cannot be read: an unread count is not zero.
  */
 export async function countUse(key: string, limit: number, windowSeconds: number): Promise<boolean> {
-  const replies = await redisPipeline([["SET", key, "0", "EX", windowSeconds, "NX"], ["INCR", key]]);
-  const count = repliesFor(replies, 2) ? countOf(replies[1]) : null;
+  const count = windowCountOf(await redisPipeline(windowCount(key, windowSeconds)));
   if (count === null || count < 1) throw new Error("Use count unavailable");
   return count <= limit;
 }

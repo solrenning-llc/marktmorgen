@@ -65,12 +65,16 @@ async function passes(started: number): Promise<Response> {
       return { error: "failed" as const };
     });
     // Creators' payment requests still unpaid, reminded on the day they asked for (lib/payment-requests.ts), in a
-    // slice of their own after the nudges' deadline, and a few seconds even when the passes before ran late.
+    // slice of their own after the nudges' deadline, and a few seconds even when the passes before ran late. A pass
+    // that threw is said as such, never as "nothing was due" (#4278); the reminders stay on their list.
     const requests = await sendDueReminders(Math.min(started + 52_000, Math.max(started + 48_000, Date.now() + 5_000))).catch((error) => {
       console.error("sending payment request reminders failed", error);
-      return { sent: 0, skipped: 0 };
+      return null;
     });
-    return Response.json({ ok: true, ...counts, failedPayments: failed, breaks, nudges, requests }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json(
+      { ok: true, ...counts, failedPayments: failed, breaks, nudges, requests, ...(requests === null ? { requestsFailed: true } : {}) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("sending billing reminders failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

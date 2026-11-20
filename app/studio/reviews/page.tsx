@@ -61,6 +61,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const asked = Number(typeof query.page === "string" ? query.page : "1");
   const page = Number.isInteger(asked) && asked >= 1 ? asked : 1;
   // The request's own time, read once on the server, for the months below (636 [GL4](c)).
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const [list, numbers, recent] = await Promise.all([
     studioReviews(store.statsId, { queue, offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE }).catch(() => null),

@@ -74,7 +74,7 @@ export function FormAnswers({ form, latest, total, canReview, blocked, existingD
         </div>
       </div>
       {!filtered.length ? <p className="mt-3 rounded-xl bg-paper p-3 text-sm text-ink-soft">No loaded answers match this selection. Clear the filters or download all answers from the form card.</p> : (
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Answers sent, as a table">
           <table className="w-full min-w-[32rem] text-left text-sm">
             <thead>
               <tr className="text-ink-soft">

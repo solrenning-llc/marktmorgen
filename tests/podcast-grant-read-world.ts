@@ -23,6 +23,9 @@ const unexpected = () => {
 };
 
 export const orderWrite = unexpected;
+export const orderWriteOnce = unexpected;
+export const storeForHandle = unexpected;
+export const MAX_STORE_BYTES = 1_000_000;
 export const withinStore = unexpected;
 export const withinLimit = unexpected;
 export const withinEssentialLimit = unexpected;

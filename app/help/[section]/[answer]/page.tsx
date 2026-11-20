@@ -11,6 +11,9 @@ import { HELP_DATES } from "@/lib/help-dates";
 import { answerLinks } from "@/lib/help-areas";
 import { termsIn } from "@/lib/help-glossary";
 
+// All help answers are known at build time.
+export const dynamicParams = false;
+
 /**
  * One answer of the help center on a page of its own (564 [HC1]): the trail
  * above it, the question as the page's title, the answer as /help shows it,

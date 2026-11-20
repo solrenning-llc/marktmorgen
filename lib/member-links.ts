@@ -74,7 +74,9 @@ const SHARE_MARKS = /^(utm_.*|igsh|igshid|si|s|t|_t|_r|mibextid|fbclid|gclid|fea
  * A network's own link redirector: on the network's host, but it sends the
  * reader to another site under a label that says the network (Facebook's
  * l.php and its l./lm. hosts, Instagram's linkshim and l. host, YouTube's
- * redirect, LinkedIn's redir). Never anyone's profile.
+ * redirect, LinkedIn's redir, Pinterest's offsite, TikTok's link, a
+ * Substack's redirect). Never anyone's profile. The path is read decoded, so
+ * an escaped letter (/%72edirect) is the same redirector (Codex N4 on #3024).
  */
 const REDIRECTOR_HOST = /^(l|lm)\.(facebook\.com|fb\.com|instagram\.com)$/;
 const REDIRECTOR_PATH: Partial<Record<SocialNetwork, RegExp>> = {
@@ -82,7 +84,18 @@ const REDIRECTOR_PATH: Partial<Record<SocialNetwork, RegExp>> = {
   instagram: /^\/linkshim(\/|$)/i,
   youtube: /^\/redirect(\/|$)/i,
   linkedin: /^\/redir(\/|$)/i,
+  pinterest: /^\/offsite(\/|$)/i,
+  tiktok: /^\/link(\/|$)/i,
+  substack: /^\/redirect(\/|$)/i,
 };
+
+/**
+ * A value that names another site without a scheme: a host with a dot and a
+ * name of letters after it, at the start or after a slash, an at sign or an
+ * equals sign (evil.example, www.evil.example/page, evil.example:8080/x). A
+ * profile's own query (Facebook's id=100012345) has none (Codex N4 on #3024).
+ */
+const NAMES_A_HOST = /(^|[\/@=])[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*[a-z0-9](?=$|[\/:?#&])/i;
 
 /** The text decoded as far as it goes (at most three times); an escape that does not decode leaves it as it is. */
 function decoded(text: string): string {
@@ -124,14 +137,18 @@ function cleaned(network: SocialNetwork, href: string): string {
     return "";
   }
   if (url.protocol !== "https:") return "";
+  // An explicit port is no network's page (the default 443 is dropped by URL and reads as the plain address).
+  if (url.port !== "") return "";
   for (const key of [...url.searchParams.keys()]) if (SHARE_MARKS.test(key)) url.searchParams.delete(key);
   url.hash = "";
   const host = url.hostname.toLowerCase();
   // A redirector, or anything that carries another address in its path or
   // what is left of its query, sends the reader off the network.
-  if (REDIRECTOR_HOST.test(host) || REDIRECTOR_PATH[network]?.test(url.pathname)) return "";
+  if (REDIRECTOR_HOST.test(host) || REDIRECTOR_PATH[network]?.test(decoded(url.pathname))) return "";
   if (url.pathname.includes("//") || carriesAddress(url.pathname)) return "";
-  for (const [key, value] of url.searchParams) if (carriesAddress(key) || carriesAddress(value)) return "";
+  for (const [key, value] of url.searchParams) {
+    if (carriesAddress(key) || carriesAddress(value) || NAMES_A_HOST.test(decoded(value))) return "";
+  }
   // Substack's address is the publication's own name under substack.com;
   // everywhere else the network's front page is nobody's profile.
   if (network === "substack" ? host === "substack.com" || host === "www.substack.com" : url.pathname === "/") return "";

@@ -115,6 +115,28 @@ async function main(): Promise<void> {
   await sweepCheckouts(Date.now() + 20_000);
   const [ttl] = await redis.pipeline([["TTL", settledKey]]);
   is("a write cut after its first command never leaves the mark without its expiry", Number(ttl) > 0 && Number(ttl) <= CONFIRM_WITHIN_SECONDS, true);
+
+  // Codex X6's LOW, retained by Codex L on #4413 (7029564415): a resolved reply in another shape (not one count, or a
+  // count other than the sessions written) is not taken as the mark written; it is said, as a failed write is.
+  for (const [name, answer] of [["no reply", [] as unknown[]], ["a count off by one", [9]], ["not a count", ["OK"]]] as const) {
+    await redis.pipeline([["DEL", settledKey]]);
+    sessions = many.slice(0, 10).map((row, i) => ({ ...row, id: `cs_test_sweepbondOdd${name.length}${String(i).padStart(5, "0")}`, payment_intent: `pi_sweepbondOdd${name.length}${String(i).padStart(5, "0")}` }));
+    const said: string[] = [];
+    const error = console.error;
+    console.error = (...args: unknown[]) => { said.push(args.map(String).join(" ")); };
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      const marks = batch.some((c) => String(c[0]) === "EVAL" && String(c[1]).startsWith("-- marktmorgen:sweep-affiliate-settled:"));
+      const replies = await real(batch);
+      return marks ? answer : replies;
+    }) as typeof redis.pipeline;
+    try {
+      await sweepCheckouts(Date.now() + 20_000);
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+      console.error = error;
+    }
+    is(`the settled mark answered with ${name} is said, not taken as written`, said.some((line) => line.includes("settled mark")), true);
+  }
   done();
 }
 

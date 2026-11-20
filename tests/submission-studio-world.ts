@@ -1,3 +1,4 @@
+import type { Role } from "@/lib/team-roles";
 /**
  * A stand-in world for tests/submission-studio.test.ts (750 [CD1] unit 4): the
  * studio's access, the creator's course and the store's studio requests, each
@@ -19,22 +20,22 @@ export const STORE = {
   trialEnds: 0,
   planEndedAt: "",
 };
-export const state = { access: true, allowance: true, listing: "course" as "course" | "none" | "unknown", events: [] as string[] };
+export const state = { role: "owner" as Role, access: true, allowance: true, listing: "course" as "course" | "none" | "unknown", events: [] as string[] };
 export function resetWorld(): void {
-  Object.assign(state, { access: true, allowance: true, listing: "course" });
+  Object.assign(state, { role: "owner", access: true, allowance: true, listing: "course" });
   state.events.length = 0;
 }
 const refused = () => Response.json({ ok: false, error: "forbidden" }, { status: 403 });
 // lib/studio-route.ts
 export async function jsonAccess() {
   state.events.push("access");
-  return state.access ? { email: "owner@example.test", store: STORE, ref: "owner@example.test", role: "owner" } : refused();
+  return state.access ? { email: "owner@example.test", store: STORE, ref: "owner@example.test", role: state.role } : refused();
 }
 // lib/store-request.ts
 export async function guardStoreWrite(request: Request) {
   state.events.push("access");
   if (!state.access) return { ok: false as const, response: refused() };
-  return { ok: true as const, email: "owner@example.test", ref: "owner@example.test", store: STORE, role: "owner", body: (await request.json()) as Record<string, unknown> };
+  return { ok: true as const, email: "owner@example.test", ref: "owner@example.test", store: STORE, role: state.role, body: (await request.json()) as Record<string, unknown> };
 }
 export const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
 // lib/catalog.ts

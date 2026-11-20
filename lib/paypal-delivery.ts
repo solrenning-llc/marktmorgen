@@ -13,7 +13,7 @@ import { dropEnrollment, recordOpenEnrollment } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { forgetBoughtCommands } from "@/lib/buyer-library";
 import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
-import { PAYPAL_OPEN_ORDER_SECONDS, type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_OPEN_ORDER_SECONDS, type Paid, type PayPalReceipt, REFUND_TELL_TRIES_AT_MOST, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
 import { tellCanceled } from "@/lib/paypal-cancel";
 import { storeForHandleExactly } from "@/lib/store-exact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -21,7 +21,7 @@ import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { type Store, ensureListId, forgetPayPalPast, storeRef } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
-import { emitEvent } from "@/lib/webhooks";
+import { emitEvent, notSentLines } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
 import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -606,6 +606,12 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
 }
 
 /**
+ * What the store's webhook log says of a PayPal refund whose event could not be made after its tries: "up to", since a
+ * look whose first failure's time is unknown, or one that comes late, tells nothing (Codex C2's M1 on #3499).
+ */
+const REFUND_NOT_SENT_WORDS = `We could not prepare the event for this PayPal refund after up to ${REFUND_TELL_TRIES_AT_MOST} tries, so it was skipped. Look up the refund in your PayPal account.`;
+
+/**
  * The checkout sweep's PayPal part for one store: pending payments cleared, refunds taken back, and paid orders
  * whose product could not be read handed over (counted as cleared).
  */
@@ -658,6 +664,10 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
         refunded_at: new Date().toISOString(),
         // Nobody the store deleted at or after the payment is named (R38, rule 30; review of #3491).
       }, Date.now(), { email: paid.email, paidAt: paid.at });
+    },
+    // Telling failed for REFUND_TELL_RETRY_SECONDS (lib/paypal-sales.ts): the store's webhook log says so, once.
+    notTold: async (paid) => {
+      await notSentLines(store, "refund.issued", `paypal:${paid.capture}`, REFUND_NOT_SENT_WORDS);
     },
   });
   done.cleared += await handOverAgain(store, deadline);

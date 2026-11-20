@@ -20,7 +20,7 @@ import { commonPath, commonPathWords } from "@/lib/funnel-starter";
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   target: "Pick a product for every offer: another product of yours with one price, no limit on how many can be sold, and a file, a link or a bundle behind it.",
-  repeat: "An offer that follows a yes cannot offer the same product again: the buyer already has it.",
+  repeat: "An offer cannot sell the buyer a product they just got, on its own or inside a bundle: not the product this funnel follows, and not one an earlier yes bought. Pick another product for that offer.",
   shape: `Keep between 1 and ${MAX_FUNNEL_STEPS} offers, each leading only to an offer further down the list.`,
   kind: "Offers follow one-off paid products only.",
   unknown: "That product is no longer in your store. Reload the page.",

@@ -35,6 +35,7 @@
  * changed away from is left out of the totals there, and so is left out here.
  */
 import { MAX_REFERENCE_LENGTH, type Affiliate, type Book, type Row, addPayout, payAddress } from "@/lib/affiliates";
+import { csvCell } from "@/lib/csv";
 import { plainAmount } from "@/lib/money";
 import type { Store } from "@/lib/store";
 
@@ -60,8 +61,17 @@ export type BatchLine = {
  * payout; that is money to come back, not a payment, and is left out.
  */
 export function owedLines(book: Book): BatchLine[] {
+  return owedLinesWhere(book, () => true);
+}
+
+/**
+ * The same, among the affiliates a batch can take (`include`), with the 5,000-row ceiling applied last (Codex X5 on
+ * #4318): otherwise 5,000 larger balances nobody can send this time (on their way, or an address PayPal cannot take)
+ * would fill the ceiling, and the next affiliate who can be paid would never be.
+ */
+export function owedLinesWhere(book: Book, include: (affiliate: Affiliate) => boolean): BatchLine[] {
   return book.rows
-    .filter((row: Row) => row.payable > 0 && row.affiliate.status === "approved")
+    .filter((row: Row) => row.payable > 0 && row.affiliate.status === "approved" && include(row.affiliate))
     .sort((a, b) => b.payable - a.payable)
     .slice(0, MAX_BATCH_ROWS)
     .map((row) => ({ affiliate: row.affiliate, cents: row.payable }));
@@ -85,10 +95,13 @@ function paypalAmount(cents: number, currency: string): string {
   return `"${plain.replace(".", ",")}"`;
 }
 
-/** A cell a spreadsheet reads back as text, never as a formula. */
+/**
+ * A cell a spreadsheet reads back as text, never as a formula: the platform's
+ * one cell rule (lib/csv.ts csvCell), always quoted. The PayPal amount is built
+ * apart (paypalAmount), and the currency and wallet columns are fixed words.
+ */
 function cell(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  return csvCell(value);
 }
 
 /**

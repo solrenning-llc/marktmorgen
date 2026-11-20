@@ -9,6 +9,7 @@ import { COMMISSION_PLANS_PUBLISHED, PUBLISHED_PLAN_PRICES, TRIAL_DAYS, PLAN_TIT
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { feeWords } from "@/lib/fee-words";
+import { ZOOM_APPROVED } from "@/lib/meet-providers";
 
 export type HomeQuestion = {q:string;a:string;links?:{label:string;href:string}[]};
 
@@ -74,10 +75,10 @@ export function homeQuestions(): HomeQuestion[] {
 export const LEAVING_QUESTION = "What happens to my payments and customer data if I leave?";
 export const LEAVING_ANSWER = "Your Stripe account, its customers and its payout history stay with you, because they were never held by us: every charge was made on your account. Your email list, your buyers and your product list download as files at any time. What does not travel is what runs here — your store page, your course pages and the links that deliver your files — so buyers would need somewhere new to collect what they bought. A shutdown would come with notice in writing.";
 
-/** Moved from the home page to the help center ("Getting started"); the conservative default without deployment capabilities. */
+/** Moved from the home page to the help center ("Getting started"); the conservative default without deployment capabilities. Zoom links are named only once every store is offered them (ZOOM_APPROVED). */
 export const STAN_QUESTION = "How does Marktmorgen compare with Stan?";
 export function stanComparison(paypalAvailable = false): string {
-  return `Stan has, among other things: automatic Instagram replies, ${paypalAvailable ? "" : "PayPal at checkout, "}an iPhone app from the App Store, affiliate payouts that need no PayPal account of your own, and stores with no limit on products, where ours hold ${MAX_PRODUCTS.toLocaleString("en-US")}. What we have in their place: a studio that installs from the browser with notifications, Google Meet and Zoom links for supported connected accounts, subject to provider availability and connection requirements, a private Jitsi Meet room for each booking and each live event, and an affiliate program whose payouts leave your own PayPal, in one press or on payday by itself. Each difference is listed by name on the feature-by-feature page (/proof/everything), with where we stand on it, and nothing is advertised before it exists.`;
+  return `Stan has, among other things: automatic Instagram replies, ${paypalAvailable ? "" : "PayPal at checkout, "}an iPhone app from the App Store, affiliate payouts that need no PayPal account of your own, and stores with no limit on products, where ours hold ${MAX_PRODUCTS.toLocaleString("en-US")}. What we have in their place: a studio that installs from the browser with notifications, ${ZOOM_APPROVED ? "Google Meet and Zoom links" : "Google Meet links"} for supported connected accounts, subject to provider availability and connection requirements, a private Jitsi Meet room for each booking and each live event, and an affiliate program whose payouts leave your own PayPal, in one press or on payday by itself. Each difference is listed by name on the feature-by-feature page (/proof/everything), with where we stand on it, and nothing is advertised before it exists.`;
 }
 
 /** The home page's questions; they read no deployment capability. */

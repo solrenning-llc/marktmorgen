@@ -60,7 +60,7 @@ const budgetOf = async (folder: string) => ((await redis.pipeline([["HMGET", wor
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
-  if (url.pathname.endsWith("/balance")) return json({ available: [{ amount: 1_000_000, currency: "usd" }] });
+  if (url.pathname.endsWith("/balance")) return json({ object: "balance", available: [{ amount: 1_000_000, currency: "usd" }] });
   return json({ error: { message: "not stubbed" } }, 404);
 }) as typeof fetch;
 

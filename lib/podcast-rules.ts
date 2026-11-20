@@ -76,9 +76,40 @@ export function parsePodcast(raw: unknown): Podcast | null {
   }
 }
 
+/**
+ * Every episode's audio in a stored podcast, read EXACTLY, for a decision to delete a file (app/api/store/file/attach):
+ * null when the record or any one episode is not in the form savePodcast writes (an object with this podcast's id,
+ * episodes a list, each an object with a valid episode id and a non-empty pathname). parsePodcast, for showing,
+ * skips what it cannot read; skipping here would turn a bent record into "no episodes" and let an episode's audio be
+ * deleted, so unknown is kept instead.
+ */
+export function exactEpisodeAudio(raw: unknown, podcastId: string): Set<string> | null {
+  if (typeof raw !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.id !== podcastId || !Array.isArray(record.episodes)) return null;
+  const audio = new Set<string>();
+  for (const episode of record.episodes as unknown[]) {
+    if (!episode || typeof episode !== "object" || Array.isArray(episode)) return null;
+    const x = episode as Record<string, unknown>;
+    if (typeof x.id !== "string" || !EPISODE_ID.test(x.id) || typeof x.pathname !== "string" || x.pathname === "") return null;
+    audio.add(x.pathname);
+  }
+  return audio;
+}
+
 function xml(text: string): string {
   return text
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    // Nor U+FFFE, U+FFFF or an unpaired surrogate (a title cut in the middle of an emoji leaves one): XML 1.0 allows
+    // none of them, and a strict podcast app refuses the whole feed over one (Claude 7, 13 November 2026).
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]|[\ufffe\uffff]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

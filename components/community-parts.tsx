@@ -4,8 +4,12 @@ import { photoUrl } from "@/lib/photo-limits";
 import { isFree, type Listing, type Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
+import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
+import { challengeWords } from "@/lib/buyer-words/challenges";
+import { APPROVAL_WARN, approvalWords } from "@/lib/buyer-words/community-approval";
 import { LANGUAGES } from "@/lib/store-language";
 import { CREATOR, type CommunityConfig, type Member, type Post } from "@/lib/community";
+import { aboutWords } from "@/lib/community-about";
 import { communityImageFile } from "@/lib/community-image";
 import { initialOf, segments } from "@/lib/community-text";
 import { MAX_QUERY_LENGTH } from "@/lib/community-search";
@@ -31,12 +35,16 @@ const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
   "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
+  "notemailed",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
 export function communityNotices(language: unknown): Record<string, { text: string; tone?: "warn" }> {
   const w = communityWords(language);
-  return Object.fromEntries(Object.entries(w.notices).map(([key, text]) => [key, WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
+  // With what waits for the creator's approval (543 [CM2], lib/buyer-words/community-approval.ts), and a post that went
+  // up while who asked for its email could not be read (lib/buyer-words/community-unread.ts).
+  const all: Record<string, string> = { ...w.notices, ...approvalWords(language).notices, notemailed: communityUnreadWords(language).notEmailed };
+  return Object.fromEntries(Object.entries(all).map(([key, text]) => [key, WARN.has(key) || APPROVAL_WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
 }
 
 /** After asking for a link to come in, in the store's language. */
@@ -65,7 +73,7 @@ export function communityImageUrl(store: Store, path: string): string {
   return `/api/store/community/image?h=${encodeURIComponent(store.handle)}&f=${communityImageFile(path)}`;
 }
 
-export type Tab = "feed" | "events" | "members" | "leaderboard" | "you" | "search" | "messages" | "notifications" | "chat";
+export type Tab = "feed" | "events" | "challenges" | "members" | "leaderboard" | "you" | "search" | "messages" | "notifications" | "chat";
 
 /** The bar across the top of every community page. */
 export function CommunityBar({
@@ -100,6 +108,7 @@ export function CommunityBar({
     { id: "feed", label: w.tabFeed, href: home },
     ...(room ? [{ id: "chat" as Tab, label: w.tabRoom, href: `${home}/chat` }] : []),
     { id: "events", label: w.tabEvents, href: `${home}/events` },
+    { id: "challenges", label: challengeWords(store.language).tab, href: `${home}/challenges` },
     { id: "members", label: w.tabMembers, href: `${home}/members` },
     { id: "leaderboard", label: w.tabLeaderboard, href: `${home}/leaderboard` },
     { id: "you", label: w.tabYou, href: `${home}/you` },
@@ -637,6 +646,12 @@ export function Gate({
       <p className="st-label">{w.pageTitle}</p>
       <h1 className="font-display mt-1 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{config.name}</h1>
       {config.about ? <PostText text={config.about} className="st-muted mt-3 leading-relaxed" /> : null}
+      {/* The public About page (233 [SK1]), only while the creator has it on; its words name the community (WCAG 2.4.9). */}
+      {state !== "removed" && config.page.on ? (
+        <p className="mt-3 text-sm">
+          <Link href={`/@${store.handle}/community/about`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{aboutWords(store.language).link(config.name)}</Link>
+        </p>
+      ) : null}
 
       {link ? (
         <div className="st-note mt-6" role="status">

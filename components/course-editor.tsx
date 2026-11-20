@@ -6,6 +6,8 @@ import { UrlField } from "@/components/url-field";
 import { LessonText } from "@/components/lesson-text";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+import { accessEndWhen } from "@/lib/course-access-end";
+import { useHydrated } from "@/components/use-hydrated";
 import { useRouter } from "next/navigation";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
@@ -72,17 +74,20 @@ const MESSAGES: Record<string, string> = {
   caption_many: `A video holds captions in up to ${MAX_CAPTION_TRACKS} languages. Remove one first.`,
   caption_not_ready: "The video has to finish uploading before captions can be added.",
   caption_language: "Choose a language from the list.",
+  caption_writing: "AI captions in this language are still being written for this video. Add your own file once they are done, or after the request ends.",
   caption_unknown: "That video is not there anymore. Reload the page.",
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
   auto_busy: "Captions for this video are already being written. They appear here when they are done.",
+  auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",
   auto_owed: "A refund for an earlier request for this video's captions is not confirmed by Stripe yet, so new AI captions can't be bought for it until it is. Its state is shown at the top of this page.",
   auto_refund_pending: "The video service would not write these captions. The charge is being refunded, but Stripe has not confirmed the refund yet; its state is shown at the top of this page.",
   auto_refunded: "The video service would not write these captions, so the charge was refunded to your card. Nothing is being written; try again in a moment.",
+  auto_credited: "The video service would not write these captions, so the charge was returned to your account credit. Nothing is being written; try again in a moment.",
   auto_unavailable: "The video service could not take this just now. Nothing was charged; try again in a moment.",
   auto_unknown: "That video is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include charging the plan's card. Ask the owner to do this.",
@@ -232,8 +237,11 @@ export function CourseEditor({
   openFirst = null,
   look = null,
   language = "en",
+  draft = false,
 }: {
   productId: string;
+  /** Whether the course's product is hidden from the store (a draft): each lesson then says so (754 [STN1]). */
+  draft?: boolean;
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -354,6 +362,7 @@ export function CourseEditor({
           openLesson={openLesson}
           setOpenLesson={setOpenLesson}
           room={MAX_LESSONS - lessons}
+          draft={draft}
           run={run}
           onCourse={setCourse}
           onError={setError}
@@ -474,11 +483,14 @@ function ModuleCard({
   openLesson,
   setOpenLesson,
   room,
+  draft,
   run,
   onCourse,
   onError,
 }: {
   unit: CourseModule;
+  /** The course is a draft: each lesson says it is hidden. */
+  draft: boolean;
   index: number;
   last: boolean;
   busy: boolean;
@@ -587,6 +599,8 @@ function ModuleCard({
                   .join(" · ") || "empty"}
               </p>
             </div>
+            {/* Said in words on each lesson, not by colour, so a free preview is never taken for one buyers see (754 [STN1]). */}
+            {draft ? <p className="mt-1 text-sm text-ink-soft">Off your store: new buyers cannot see it, but people who already bought the course still do.</p> : null}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm font-bold">
               <button type="button" className={small} onClick={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)} aria-expanded={openLesson === lesson.id}>
                 {openLesson === lesson.id ? "Close" : "Edit lesson"}
@@ -861,16 +875,21 @@ function LessonEditor({
   const streams = useContext(Streams);
 
   async function loadText() {
+    onError(null);
     setLoadingText(true);
     try {
       const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lesson.id}`, { cache: "no-store" });
-      const data = (await response.json()) as { ok?: boolean; text?: string };
-      const read = data.ok ? data.text ?? "" : "";
-      setText(read);
-      setSavedText(read);
+      const data = (await response.json()) as { ok?: boolean; text?: unknown };
+      // Only a text that came back as text opens the box: a failed or unknown read
+      // is said, never shown as an empty lesson whose Save would replace the real one.
+      if (!response.ok || data.ok !== true || typeof data.text !== "string") {
+        onError("The lesson text could not be read just now. Try again in a moment.");
+        return;
+      }
+      setText(data.text);
+      setSavedText(data.text);
     } catch {
-      setText("");
-      setSavedText("");
+      onError("The lesson text could not be read just now. Try again in a moment.");
     } finally {
       setLoadingText(false);
     }
@@ -928,7 +947,7 @@ function LessonEditor({
         >
           {/* In the same card the lesson page puts behind the words, so the color behind them and the line length match. */}
           <div className="st-card p-5 sm:p-8">
-            {now.trim() ? <LessonText text={now} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
+            {now.trim() ? <LessonText text={now} lang={locale} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
           </div>
         </div>
       </div>
@@ -1584,6 +1603,147 @@ export function CourseStart({ productId, startsAt }: { productId: string; starts
       </div>
       {error ? (
         <p className="notice notice-error mt-2" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * When access to the course ends (24 [E7]). Fair to every buyer: the date reaches only people who buy the course on
+ * its own page while it is said there (the checkout stamps the date they were shown). Moving it later or removing it
+ * reaches them too, including people whose access already ended; it never moves earlier (lib/course.ts). A membership
+ * course never takes one: members keep it while they pay.
+ */
+export function CourseAccessEnd({
+  productId,
+  endsAt,
+  passed,
+  membership = false,
+  planOffered = false,
+}: {
+  productId: string;
+  endsAt: number | null;
+  passed: boolean;
+  membership?: boolean;
+  /** The course offers its payment plan (lib/product-extras.ts): buyers who take it are never held to the date. */
+  planOffered?: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A date input wants "YYYY-MM-DD" in the viewer's own zone; the end is the close of that day, there. Drawn only once
+  // the page runs in the browser (useHydrated), so the server's zone never decides the day shown and the two renders
+  // agree; until the creator types, the field shows the day of the end already set.
+  const hydrated = useHydrated();
+  const [typed, setTyped] = useState<string | null>(null);
+  const savedDay = (() => {
+    if (!hydrated || endsAt === null) return "";
+    const d = new Date(endsAt * 1000 - 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const day = typed ?? savedDay;
+  const setDay = setTyped;
+  // The same moment on the creator's own clock, beside the UTC one the buyers read.
+  const local = hydrated && endsAt !== null ? new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short" }).format(new Date(endsAt * 1000)) : null;
+  const id = `access-end-${productId}`;
+
+  async function send(at: number | null) {
+    setBusy(true);
+    setError(null);
+    const answer = await post({ id: productId, action: "access-end", at });
+    setBusy(false);
+    if (!answer.ok) {
+      setError(
+        answer.error === "access_end_earlier"
+          ? "The date can only move later. Buyers were told the current date. To end sooner for new buyers, remove the date and set a new one. People who already bought keep the date they were shown."
+          : answer.error === "access_end"
+            ? "Pick a day after today and at most ten years ahead."
+            : answer.error === "access_end_membership"
+              ? "A membership course has no end date: members keep it while they pay."
+              : problem(answer),
+      );
+      return;
+    }
+    toast(at === null ? "Access to this course no longer ends." : "The end date is set.");
+    router.refresh();
+  }
+
+  if (membership) {
+    return (
+      <div>
+        <p className="field-label">The day access ends</p>
+        <p className="field-hint mt-1">This course is sold as a membership, so it has no end date: members keep it while they pay.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="field-label" htmlFor={id}>
+        The day access ends
+      </label>
+      <p id={`${id}-hint`} className="field-hint mt-1">
+        Leave it empty and students keep this course with no end, which is how it works now. Set a day and access closes
+        at the end of that day. The date applies only to people who buy this course on its own page, where it is shown
+        before they pay. People who bought before, or through your store page, the cart, a bundle, a gift, a group, a
+        pre-order or PayPal, keep the course with no end. Where the course is sold only through PayPal, the date is not
+        shown. In the last 24 hours before the date, it is no longer shown, and people
+        who buy then keep the course with no end too. You can move the date later or remove it, but not earlier. Moving
+        it later or removing it also gives access back to students whose access already ended.
+        {planOffered ? " People who pay in a payment plan keep the course with no end, as members do." : null}
+      </p>
+      {endsAt !== null ? (
+        <p className="mt-2 text-sm" role="status">
+          {passed ? "Access ended on " : "Students see: access ends on "}
+          <strong>{accessEndWhen(endsAt, "en")}</strong>
+          {local ? <> (your time: {local})</> : null}.
+        </p>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <input
+          id={id}
+          type="date"
+          value={day}
+          disabled={busy}
+          className="field w-auto"
+          aria-describedby={error ? `${id}-hint ${id}-error` : `${id}-hint`}
+          aria-invalid={error ? true : undefined}
+          onChange={(event) => setDay(event.target.value)}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy || !day}
+          onClick={() => {
+            // The close of the chosen day, in this browser's own zone: midnight at the start of the next one.
+            const [y, m, d] = day.split("-").map(Number);
+            if (!y || !m || !d) {
+              setError("Type the whole date: month, day and year.");
+              return;
+            }
+            void send(Math.floor(new Date(y, m - 1, d + 1, 0, 0, 0, 0).getTime() / 1000));
+          }}
+        >
+          {busy ? "Saving…" : endsAt === null ? "Set the end date" : "Move the date later"}
+        </button>
+        {endsAt !== null ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={() => {
+              setDay("");
+              void send(null);
+            }}
+          >
+            Remove the date
+          </button>
+        ) : null}
+      </div>
+      {error ? (
+        <p id={`${id}-error`} className="notice notice-error mt-2" role="alert">
           {error}
         </p>
       ) : null}

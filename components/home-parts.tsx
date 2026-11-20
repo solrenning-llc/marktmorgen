@@ -49,7 +49,7 @@ const INCLUDED = [
   "Your own store address, live the moment you take it",
   `${PLAN_NUMBER_FORMAT.format(VISITS_INCLUDED.creator)} counted visits to your store a billing month; public pages pause at ${PLAN_NUMBER_FORMAT.format(publicVisitLimit(VISITS_INCLUDED.creator))}, and the rest are kept for your buyers' courses, community and podcasts; nothing is billed past it`,
   `${PLAN_NUMBER_FORMAT.format(ORDERS_INCLUDED.creator)} orders a billing month${feeWords().ordersShared ? " (an order whose sale paid your plan's share is not counted)" : ""}; at that figure new orders pause until your next billing month, nothing is billed past it, and a buyer already paying always finishes`,
-  `Each billing month, starting on the day your plan renews: ${allowanceListWords("creator")}; past one, that use waits for the next month${PLANS_ON_SALE && PRO_ON_SALE ? ", or a larger plan" : ""}, and nothing is billed`,
+  `Each billing month, starting on the day your plan renews (a switch between monthly and yearly keeps the day it had): ${allowanceListWords("creator")}; past one, that use waits for the next month${PLANS_ON_SALE && PRO_ON_SALE ? ", or a larger plan" : ""}, and nothing is billed`,
   "Buyers pay into your own Stripe account",
   "Up to 2,000 products: files, courses, memberships, paid calls and live sessions",
   "Sales pages and landing pages built from blocks, and reviews only buyers can write",
@@ -291,7 +291,10 @@ function PlanCard({
       {/*
         The title says what the plan is; the line under it says whose
         business it suits, which is the only thing somebody holding two
-        cards up against each other is trying to find out.
+        cards up against each other is trying to find out. 269 [KT3]: it
+        begins with the creator's stage (starting out, growing, scaling up),
+        told by what the creator is doing, never by income
+        (tests/kt3-plan-stage.test.ts).
       */}
       {/* A heading under the pricing page's "Plan prices" section (WCAG 1.3.1, 2.4.10). */}
       <h3 className="t-h3">{PLAN_TITLES[tier]}</h3>
@@ -397,7 +400,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
       <div className="grid gap-6 lg:grid-cols-3 lg:items-stretch">
         <PlanCard
           tier="creator"
-          bestFor={"For selling what you make to the audience you already reach — wherever you reach them now."}
+          bestFor={"Starting out: for selling what you make to the people who follow you now, wherever they find you."}
           groups={CREATOR_GROUPS}
           perks={INCLUDED}
           featured
@@ -405,7 +408,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
         />
         <PlanCard
           tier="pro"
-          bestFor={"For selling and writing to your own list from the same place, so a buyer hears from you again."}
+          bestFor={"Growing: for selling and also writing to your own list from the same place, so a buyer hears from you again."}
           groups={proGroups(domains)}
           perks={proPerks}
           featured={false}
@@ -413,7 +416,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
         />
         <PlanCard
           tier="scale"
-          bestFor="For an established business with a larger list, more visits and more orders every month."
+          bestFor="Scaling up: for a store whose list, visits and orders each month need more room than Studio gives."
           groups={[
             { icon: "check", title: "Everything in Studio", body: "The same selling tools and email features, with larger allowances." },
             // The figures are under the price, once; these say what the larger allowances are for.

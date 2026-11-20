@@ -36,11 +36,13 @@
  *   R2_BUCKET              the bucket's name
  *
  *   nl:vault:up:<hash>     an upload that was opened and not yet closed
+ *   nl:vault:fresh:<hash>  an upload that was finished and not yet attached (FRESH_UPLOAD_SECONDS)
  */
 import { createHash, randomBytes } from "node:crypto";
 import { type AwsKey, EMPTY_HASH, hashOf, presignV4, signV4 } from "@/lib/aws-sign";
 import { VAULT_TIMEOUT_MS, VAULT_WRITE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import {
   PIECE_BYTES,
   PIECE_SECONDS,
@@ -145,19 +147,52 @@ type Upload = {
   at: number;
 };
 
-const uploadKey = (pathname: string) => `nl:vault:up:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
+/** The shape of a session id the provider hands back and openVaultUpload keeps. */
+const UPLOAD_ID = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
 
+const uploadKey = (pathname: string) => `nl:vault:up:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
+const freshKey = (pathname: string) => `nl:vault:fresh:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
+/**
+ * How long a finished upload is noted as not yet attached: its random path is the only proof that it was this
+ * store's own upload and is still nobody's file, so the attach that refuses it may delete it (retireFreshUpload).
+ */
+export const FRESH_UPLOAD_SECONDS = 7 * 86_400;
+
+/**
+ * The upload opened at this path; null only when Redis confirms there is none.
+ * Any other reply, or a record that is not the one written for this path,
+ * throws UnknownReplyError (CX-123 rule 24): signing, joining, cancelling and
+ * giving reserved bytes back all act on it, so none may take it for "none".
+ */
 async function readUpload(pathname: string): Promise<Upload | null> {
   if (!isVaultPath(pathname)) return null;
-  const [raw] = await redisPipeline([["GET", uploadKey(pathname)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", uploadKey(pathname)]]), 1);
+  if (!replies) throw new UnknownReplyError("a vault upload record");
+  const raw = replies[0];
+  if (raw === null) return null;
+  let value: { [K in keyof Upload]?: unknown } | null;
   try {
-    const value = JSON.parse(raw) as Partial<Upload>;
-    if (value.pathname !== pathname || typeof value.bytes !== "number" || !(value.bytes > 0)) return null;
-    return { reservation: typeof value.reservation === "string" ? value.reservation : undefined, pathname, uploadId: typeof value.uploadId === "string" ? value.uploadId : "", bytes: value.bytes, type: typeof value.type === "string" ? value.type : "", at: typeof value.at === "number" ? value.at : 0 };
+    if (typeof raw !== "string") throw new Error();
+    value = JSON.parse(raw) as { [K in keyof Upload]?: unknown } | null;
   } catch {
-    return null;
+    throw new UnknownReplyError("a vault upload record");
   }
+  // Every field in exactly the shape openVaultUpload writes it. A session id
+  // read as "" would be taken for a file sent whole (the object deleted in
+  // place of the session cancelled), and a reservation read as none would
+  // never be given back: anything else is an unknown record, not a guess.
+  if (
+    !value ||
+    typeof value !== "object" ||
+    value.pathname !== pathname ||
+    !(value.reservation === undefined || (typeof value.reservation === "string" && /^[0-9a-f]{32}$/.test(value.reservation))) ||
+    !(value.uploadId === "" || (typeof value.uploadId === "string" && UPLOAD_ID.test(value.uploadId))) ||
+    !(Number.isSafeInteger(value.bytes) && (value.bytes as number) > 0) ||
+    typeof value.type !== "string" ||
+    !(Number.isSafeInteger(value.at) && (value.at as number) >= 0)
+  )
+    throw new UnknownReplyError("a vault upload record");
+  return { reservation: value.reservation, pathname, uploadId: value.uploadId, bytes: value.bytes as number, type: value.type, at: value.at as number };
 }
 
 export type OpenedUpload = {
@@ -198,10 +233,15 @@ export async function openVaultUpload(input: {
   if (pieces > 1 || input.multipart) {
     const made = await ask(config, "POST", `${objectUrl(config, pathname)}?uploads=`, { headers: { "content-type": input.type } });
     uploadId = made.status === 200 ? (tag(made.text, "UploadId") ?? "") : "";
-    if (!uploadId || !/^[A-Za-z0-9._~+/=-]{1,1024}$/.test(uploadId)) return { ok: false, reason: "unavailable" };
+    if (!uploadId || !UPLOAD_ID.test(uploadId)) return { ok: false, reason: "unavailable" };
   }
   const record: Upload = { reservation: input.reservation, pathname, uploadId, bytes: input.bytes, type: input.type, at: Date.now() };
-  await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]);
+  const written = repliesFor(await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]), 1);
+  if (written?.[0] !== "OK") {
+    // Not handed out: nothing can be signed for it, so its session is cancelled now.
+    if (uploadId) await retireVaultSession(pathname, uploadId).catch(() => false);
+    throw new UnknownReplyError("a vault upload record's write");
+  }
   return { ok: true, sessionId: uploadId, upload: { pathname, pieces, pieceBytes: PIECE_BYTES, ...(input.multipart ? { multipart: true as const } : {}) } };
 }
 
@@ -284,8 +324,30 @@ export async function closeVaultUpload(
     await redisPipeline([["DEL", uploadKey(pathname)]]);
     return { ok: false, reason: "invalid" };
   }
-  await redisPipeline([["DEL", uploadKey(pathname)]]);
+  // Noted as finished and not yet attached in the same step that forgets the open upload (Codex V on #4022).
+  await redisPipeline([["DEL", uploadKey(pathname)], ["SET", freshKey(pathname), "1", "EX", FRESH_UPLOAD_SECONDS]]);
   return { ok: true, file: { pathname, bytes: found.bytes, contentType: found.contentType || upload.type } };
+}
+
+/**
+ * Deletes a finished upload that was never attached, when its attach is refused (a session let in without its second
+ * step, lib/two-step.ts, beaten to the product by another one: Codex V on #4022). Only a path noted as finished and not
+ * attached (closeVaultUpload) is deleted, so a path a client names, or a file already attached, never is. The note goes
+ * only after the store confirms the deletion; a failed one keeps it, for the next refusal. A note that cannot be read
+ * is unknown and deletes nothing (rule 24). True when the file was deleted.
+ */
+export async function retireFreshUpload(pathname: string): Promise<boolean> {
+  if (!isVaultPath(pathname) || !vaultConfig() || !isRedisConfigured()) return false;
+  const read = repliesFor(await redisPipeline([["GET", freshKey(pathname)]]), 1);
+  if (!read || read[0] !== "1") return false;
+  if (!(await deleteVault([pathname]))) return false;
+  await redisPipeline([["DEL", freshKey(pathname)]]);
+  return true;
+}
+
+/** A finished upload is attached: it is a file now, never to be deleted as a refused upload. */
+export async function forgetFreshUpload(pathname: string): Promise<void> {
+  if (isVaultPath(pathname) && isRedisConfigured()) await redisPipeline([["DEL", freshKey(pathname)]]);
 }
 
 /** Forgets an upload only after the provider confirms its cancellation. */
@@ -491,10 +553,31 @@ export async function vaultReservationId(pathname: string): Promise<string | und
 /** Cancels a known multipart session even after the short-lived upload record expires. */
 export async function retireVaultSession(pathname: string, uploadId: string): Promise<boolean> {
   const config = vaultConfig();
-  if (!config || !readVaultPath(pathname) || !/^[A-Za-z0-9._~+\/=-]{1,1024}$/.test(uploadId)) return false;
+  if (!config || !readVaultPath(pathname) || !UPLOAD_ID.test(uploadId)) return false;
   const answer = await ask(config, "DELETE", objectUrl(config, pathname) + "?uploadId=" + encodeURIComponent(uploadId));
   if ([200, 204].includes(answer.status)) return true;
   if (answer.status !== 404) return false;
   const completed = await headVault(pathname);
   return completed !== null && completed !== "unreachable";
+}
+
+/**
+ * Retires the session of an upload whose own record has expired (lib/vault-storage.ts). With the record confirmed
+ * gone, nothing can be signed or joined for it any more, so a session the provider no longer has (aborted by its own
+ * lifecycle rule for incomplete uploads, or already completed) holds nothing beyond what the store measures: whether
+ * the object is there (measured with the store's files) or confirmed absent (nothing kept). An unreachable provider
+ * or a record that cannot be read keeps every reserved byte.
+ */
+export async function retireExpiredVaultSession(pathname: string, uploadId: string): Promise<boolean> {
+  const config = vaultConfig();
+  if (!config || !readVaultPath(pathname) || !UPLOAD_ID.test(uploadId)) return false;
+  try {
+    if ((await readUpload(pathname)) !== null) return retireVaultSession(pathname, uploadId);
+  } catch {
+    return false;
+  }
+  const answer = await ask(config, "DELETE", objectUrl(config, pathname) + "?uploadId=" + encodeURIComponent(uploadId));
+  if ([200, 204].includes(answer.status)) return true;
+  if (answer.status !== 404) return false;
+  return (await headVault(pathname)) !== "unreachable";
 }

@@ -11,6 +11,8 @@
  * does it through here. A caller that went to one store directly would be
  * right for the files of that store and silently wrong for the rest.
  */
+import { recordDeletions } from "@/lib/backup-deletions";
+import type { BackupDeletionReason } from "@/lib/backup-files-contract";
 import * as blob from "@/lib/blob";
 import { deleteVault, headVault, listVault, readVault, vaultHeld, vaultUrl, writeVault } from "@/lib/vault";
 import { VAULT_PREFIX, isVaultPath } from "@/lib/vault-rules";
@@ -28,13 +30,26 @@ export async function headFile(pathname: string): Promise<Measured> {
   return { pathname: found.pathname, size: found.size, contentType: found.contentType };
 }
 
-/** Deletes files, each from the store that keeps it. Throws when one could not be. */
-export async function deleteFile(pathnames: string | string[]): Promise<void> {
+/**
+ * Deletes files, each from the store that keeps it. Throws when one could not be.
+ *
+ * Once a store says its files are gone, a deletion record is kept for each one
+ * the backup copies (lib/backup-deletions.ts, 273 [BK1]), with `reason`, so
+ * the backup removes its copy 30 days later. Never before: a record for a file
+ * still there would remove a live file's copy. A record that cannot be kept
+ * never stops or fails the deletion; it is logged, and the copy goes later,
+ * as an orphan. Nothing is kept while the backup files route is off.
+ */
+export async function deleteFile(pathnames: string | string[], reason: BackupDeletionReason = "creator_deleted"): Promise<void> {
   const all = Array.isArray(pathnames) ? pathnames : [pathnames];
   const here = all.filter((pathname) => isVaultPath(pathname));
   const there = all.filter((pathname) => !isVaultPath(pathname));
   if (here.length && !(await deleteVault(here))) throw new Error("a file could not be deleted");
-  if (there.length) await blob.del(there);
+  if (here.length) await recordDeletions(here, reason);
+  if (there.length) {
+    await blob.del(there);
+    await recordDeletions(there, reason);
+  }
 }
 
 /**
@@ -102,9 +117,15 @@ export async function writeFileWhole(pathname: string, bytes: Uint8Array, conten
   await blob.put(pathname, Buffer.from(bytes), { access: "private", contentType, addRandomSuffix: false, allowOverwrite: true });
 }
 
-/** Every path kept under a prefix, in the store the prefix belongs to. Throws when it cannot be read. */
+/**
+ * Every path kept under a prefix, in the store the prefix belongs to. Throws when it cannot be read, or when a
+ * page is not in its exact shape (CX-123 rule 24): "has more" without a new cursor, a cursor handed out twice, a
+ * page that does not say whether more follows, or a path outside the prefix is unknown, never the end of the
+ * folder, so a caller deleting what is listed never takes a partial folder for the whole one.
+ */
 export async function listFiles(prefix: string): Promise<string[]> {
   const out: string[] = [];
+  const seen = new Set<string>();
   if (prefix.startsWith(`${VAULT_PREFIX}/`)) {
     let cursor: string | undefined;
     do {
@@ -112,16 +133,24 @@ export async function listFiles(prefix: string): Promise<string[]> {
       if (!page) throw new Error("the file store could not be listed");
       out.push(...page.files.map((file) => file.pathname));
       cursor = page.cursor ?? undefined;
+      if (cursor !== undefined && seen.has(cursor)) throw new Error("incomplete file store listing");
+      if (cursor !== undefined) seen.add(cursor);
     } while (cursor);
     return out;
   }
   let cursor: string | undefined;
-  do {
+  for (;;) {
     const page = await blob.list({ prefix, cursor, limit: 1000 });
-    out.push(...page.blobs.map((entry) => entry.pathname));
-    cursor = page.hasMore ? page.cursor : undefined;
-  } while (cursor);
-  return out;
+    if (!page || !Array.isArray(page.blobs) || typeof page.hasMore !== "boolean") throw new Error("invalid storage listing");
+    for (const entry of page.blobs) {
+      if (!entry || typeof entry.pathname !== "string" || !entry.pathname.startsWith(prefix)) throw new Error("invalid storage entry");
+      out.push(entry.pathname);
+    }
+    if (!page.hasMore) return out;
+    if (typeof page.cursor !== "string" || !page.cursor || seen.has(page.cursor)) throw new Error("incomplete storage listing");
+    seen.add(page.cursor);
+    cursor = page.cursor;
+  }
 }
 
 /**

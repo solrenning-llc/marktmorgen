@@ -6,8 +6,8 @@
  * back but is not the exact shape asked for is something else: an unknown
  * count, never room (CX-123 rule 24). So:
  *
- *   - the exact reply ("OK" or null for the SET, a whole number of at least
- *     1 for the INCR) is read as before: within the limit, yes; past it, no;
+ *   - the exact reply (a whole number of at least 1 for the INCR, 0 or 1 for
+ *     the EXPIRE NX; lib/window-count.ts) is read: within the limit, yes; past it, no;
  *   - any other reply (a missing or extra part, a count as text, null, 0,
  *     true, a fraction, a negative number, an object) is refused;
  *   - a pipeline that throws still lets the request through, as before.
@@ -20,7 +20,7 @@ import { done, is, part } from "./check";
 let reply: unknown = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  const counter = commands[0]?.[0] === "SET" && /^nl:rlm?:/.test(String(commands[0][1]));
+  const counter = commands[0]?.[0] === "INCR" && /^nl:rlm?:/.test(String(commands[0][1]));
   if (counter && reply === "throw") throw new Error("the database did not answer");
   if (counter && reply !== null) return reply;
   return pipeline(commands);
@@ -38,15 +38,16 @@ const uninspectable = new Proxy([], {
 
 const MALFORMED: [string, unknown][] = [
   ["an empty reply", []],
-  ["only the SET's answer", ["OK"]],
-  ["a third answer", ["OK", 1, 1]],
-  ["a SET answered false", [false, 1]],
-  ["a count that is null", ["OK", null]],
-  ["a count written as text", ["OK", "1"]],
-  ["a count of zero", ["OK", 0]],
-  ["a count that is true", ["OK", true]],
-  ["a fractional count", ["OK", 1.5]],
-  ["a negative count", ["OK", -1]],
+  // The counter's two replies (lib/window-count.ts): the INCR's count, then the EXPIRE NX's 0 or 1.
+  ["only the INCR's answer", [1]],
+  ["a third answer", [1, 1, 1]],
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a count of zero", [0, 1]],
+  ["a count that is true", [true, 1]],
+  ["a fractional count", [1.5, 1]],
+  ["a negative count", [-1, 1]],
   ["a reply that is not a list", { result: 1 }],
   ["a returned list whose shape cannot be inspected", uninspectable],
 ];
@@ -64,11 +65,11 @@ async function main(): Promise<void> {
       reply = value;
       is(`${name}, ${label}: refused, never room`, await call(), false);
     }
-    reply = ["OK", 1];
-    is(`${name}: the first of the window (SET "OK", count 1) is within`, await call(), true);
-    reply = [null, 5];
-    is(`${name}: the last within (SET null, count 5) is within`, await call(), true);
-    reply = [null, 6];
+    reply = [1, 1];
+    is(`${name}: the first of the window (count 1, its expiry set) is within`, await call(), true);
+    reply = [5, 0];
+    is(`${name}: the last within (count 5, expiry already set) is within`, await call(), true);
+    reply = [6, 0];
     is(`${name}: past the limit (count 6) is refused as before`, await call(), false);
     reply = "throw";
     is(`${name}: Redis that cannot be asked still lets the request through, as before`, await call(), true);

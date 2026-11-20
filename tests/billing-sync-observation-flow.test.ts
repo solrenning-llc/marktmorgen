@@ -37,7 +37,7 @@ async function setup() {
 const row = (status: unknown, rowId = id) => ({ id: rowId, status, metadata: { store: "billing-flow-shop" } });
 
 async function main() {
-  part("Whole-list refusal preserves real stored paid rights and continuation");
+  part("Whole-list refusal preserves real stored paid rights and continuation; step 2 still asks by exact id");
   for (const bad of [
     { data: [{ id, metadata: { store: "billing-flow-shop" } }], has_more: false },
     { data: [row(null)], has_more: false },
@@ -47,12 +47,14 @@ async function main() {
     const before = await setup();
     await redis.pipeline([["SET", listCursorKey, cursor]]);
     list = bad;
-    await assert.rejects(syncSubscriptions(Date.now() + 10000), /complete bounded observation/);
+    const refused = await syncSubscriptions(Date.now() + 10000);
+    // Two failures: the refused page, and step 2's read of the store's own subscription, answered unreadably here.
+    is("the refusal and the unreadable step-2 read are counted; the run is not complete", [refused.failed, refused.complete, refused.updated, refused.adopted], [2, false, 0, 0]);
     const after = (await storeForEmail(owner))!;
     is("the actual store is unchanged, including paid period and active status", after, before);
     is("the allowance window derived from the actual store is unchanged", allowanceWindow(after), allowanceWindow(before));
     is("the actual list continuation was not advanced or deleted", await redis.pipeline([["GET", listCursorKey]]), [cursor]);
-    is("refusal prevents fallback, writes to Stripe or notifications", calls, ["/v1/subscriptions"]);
+    is("refusal allows only the exact read of the store's own subscription, no writes to Stripe or notifications", calls, ["/v1/subscriptions", `/v1/subscriptions/${id}`]);
   }
 
   part("Individual fallback observations cannot replace paid rights with unknown data");

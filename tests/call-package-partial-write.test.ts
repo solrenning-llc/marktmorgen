@@ -7,7 +7,7 @@
  */
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { boughtByToken, readBought, recordPackage } from "@/lib/call-packages";
+import { boughtByToken, packageKeys, readBought, recordPackage } from "@/lib/call-packages";
 import { store as redis } from "@/tests/redis-stub";
 import { installSesMailFixture } from "@/tests/ses-mail-fixture";
 import type { Store } from "@/lib/store";
@@ -79,7 +79,39 @@ test("a record write answered with neither OK nor null is unknown: no link hande
     if (mentions(c, `nl:pkg:${id}`) && mentions(c, "NX")) return [[0, "QUEUED"]] as never;
     return real(c);
   }) as typeof redis.pipeline;
-  await assert.rejects(recordPackage(input(id)), /package.*could not be confirmed/i);
+  await assert.rejects(recordPackage(input(id)), (error: unknown) => error instanceof Error && (
+    /package.*could not be confirmed/i.test(error.message) ||
+    (error.name === "UnknownReplyError" && error.message === "Redis answered an order's write: a command's reply in an unknown shape")
+  ));
   redis.pipeline = real;
+  assert.equal(await readBought(id), null, "an unknown reply does not certify a purchase record");
   assert.equal(mail.ses.length, 0);
+});
+
+test("two repairs of one recorded package share the token claim and send one confirmation", async () => {
+  const id = "cs_test_pkgpartial000000005";
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await real(commands);
+    if (mentions(commands, `nl:pkg:${id}`) && mentions(commands, "NX")) throw new Error("synthetic: record acknowledgement lost");
+    return reply;
+  }) as typeof redis.pipeline;
+  await assert.rejects(recordPackage(input(id)), /acknowledgement lost/);
+  redis.pipeline = real;
+  const [first, second] = await Promise.all([recordPackage(input(id)), recordPackage(input(id))]);
+  assert.ok(first && second);
+  assert.equal(first.token, second.token);
+  assert.equal((await boughtByToken(first.token))?.checkout, id);
+  assert.equal(mail.ses.length, 1);
+});
+
+test("a token pointing to another checkout is unknown, never a completed purchase repair", async () => {
+  const id = "cs_test_pkgpartial000000006";
+  const bought = await recordPackage(input(id));
+  assert.ok(bought);
+  const key = packageKeys(id, bought.token)[2];
+  const other = "cs_test_pkgpartial000000007";
+  await real([["SET", key, other]]);
+  await assert.rejects(recordPackage(input(id)), /package.*could not be confirmed/i);
+  assert.equal(redis.run(["GET", key]), other, "an inconsistent token is not overwritten");
+  assert.equal(mail.ses.length, 1, "no extra confirmation is sent");
 });

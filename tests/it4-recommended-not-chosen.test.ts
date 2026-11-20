@@ -37,7 +37,8 @@ is("no picker opens on a starting option", /startingOption/.test(page), false);
 is("no radio is checked when the page opens", /defaultChecked=\{option\.id ===/.test(page), false);
 is("the cards are required", /type="radio"\s+name="option"\s+value=\{option\.id\}\s+required/.test(page), true);
 const lists = page.match(/<select[^>]*name="option"[^>]*>/g) ?? [];
-is("both lists start empty and are required", lists.length === 2 && lists.every((tag) => /defaultValue=""/.test(tag) && /\brequired\b/.test(tag)), true);
+// Empty unless a link to the page named the option, which the buyer chose by clicking it (630 [HN6](27), lib/option-link-rules.ts).
+is("both lists start empty and are required", lists.length === 2 && lists.every((tag) => /defaultValue=(?:""|\{linked \? linked\.id : ""\})/.test(tag) && /\brequired\b/.test(tag)), true);
 is("each list starts on an empty, unpickable 'Choose one' line", (page.match(/<option value="" disabled>\s*\{w\.chooseOne\}\s*<\/option>/g) ?? []).length, 2);
 is("the options are shown in the pick order", (page.match(/optionsInPickOrder\(/g) ?? []).length >= 2, true);
 

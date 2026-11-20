@@ -51,7 +51,7 @@
  * Stripe calls around it are ASSIST_REMIND_REQUEST_UNITS of the store's
  * public requests.
  */
-import { ASSISTANT_OUTPUT_TOKENS, ASSISTANT_PRODUCTS, DEAL_WORDS, MAX_ASSISTANT_REPLY, heldToFacts } from "@/lib/store-assistant-rules";
+import { ASSISTANT_OUTPUT_TOKENS, ASSISTANT_PRODUCTS, DEAL_WORDS, MAX_ASSISTANT_REPLY, heldToFacts, writesAFigure } from "@/lib/store-assistant-rules";
 import { MAX_CART } from "@/lib/cart-rules";
 
 /** What the creator sets in the studio: whether the box is offered at checkout. Off until they switch it on. */
@@ -62,12 +62,8 @@ export function parseAssistReminder(raw: unknown): AssistReminderSetting {
   return { on: Boolean(raw && typeof raw === "object" && (raw as Record<string, unknown>).on === true) };
 }
 
-/**
- * The version of the box's sentence. Kept with each consent, so what a buyer
- * checked can be read back exactly (lib/buyer-words/assistant-reminder.ts);
- * a change of the sentence in any language is a new version.
- */
-export const ASSIST_REMIND_VERSION = "assist-remind-1";
+/* The version of the box's sentence lives in lib/assistant-reminder-version.ts, so the box reads it without this file. */
+export { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-version";
 
 /** How long after the checkout closed unpaid the reminder goes. */
 export const ASSIST_REMIND_AFTER_SECONDS = 60 * 60;
@@ -102,12 +98,12 @@ export const ASSIST_REMIND_REQUEST_UNITS = 4;
 export const assistRemindKey = (session: string) => `nl:assist:remind:${session}`;
 
 /** Words of pressure the line may never use, in the store languages, beyond the deal words. */
-const PRESSURE =
+export const PRESSURE =
   /\b(now|today|tonight|soon|hurry|quick|quickly|fast|last|left|limited|ending|ends|expires?|deadline|before it'?s gone|don'?t miss|miss out|while (it|they) lasts?|popular|everyone|people love|ahora|hoy|pronto|[uú]ltim[oa]s?|maintenant|aujourd'hui|vite|dernier|jetzt|heute|schnell|letzte|adesso|oggi|subito|nu|vandaag|snel|laatste|agora|hoje|r[aá]pido)\b/i;
 
 /**
  * The model's line as it may be sent, or "" when it may not: one line,
- * bounded, no digit, link, exclamation or quotation of a deal, no pressure
+ * bounded, no figure in digits or words, link, exclamation or quotation of a deal, no pressure
  * word in any language the store speaks, and nothing the products' own words
  * do not hold (heldToFacts).
  */
@@ -115,7 +111,8 @@ export function neutralLine(raw: unknown, facts: string): string {
   if (typeof raw !== "string") return "";
   const text = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().replace(/^["“'«]+|["”'»]+$/g, "").trim();
   if (!text || text.length > MAX_ASSIST_REMIND_LINE) return "";
-  if (/\d/.test(text) || /[!¡]/.test(text) || /https?:|www\.|@/.test(text)) return "";
+  // No figure at all, in digits or in words of any store language ("ten thousand cooks", "five hours a week").
+  if (/\d/.test(text) || writesAFigure(text) || /[!¡]/.test(text) || /https?:|www\.|@/.test(text)) return "";
   if (DEAL_WORDS.test(text) || PRESSURE.test(text)) return "";
   if (!heldToFacts(text, facts)) return "";
   return text.slice(0, MAX_ASSISTANT_REPLY);

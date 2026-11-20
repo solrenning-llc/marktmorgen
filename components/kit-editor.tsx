@@ -43,7 +43,8 @@ export function KitEditor({
   currency: Currency;
   /** The networks the creator already lists under their name, offered first. */
   socials: SocialNetwork[];
-  ai: { on: boolean; left: number };
+  /** `known: false` when the allowance could not be read (lib/ai-on-value.ts): said so, never "0 left". */
+  ai: { on: boolean; left: number; known?: false };
   /** Whether the store's contact form is on, which is how a brand gets in touch. */
   contact: boolean;
 }) {
@@ -60,7 +61,7 @@ export function KitEditor({
   const [saving, setSaving] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState<number | null>(ai.known === false ? null : ai.left);
   const [note, setNote] = useState("");
 
   const used = new Set(audience.map((row) => row.n));
@@ -160,11 +161,11 @@ export function KitEditor({
         <textarea id="kit-pitch" rows={4} maxLength={MAX_KIT_PITCH} value={pitch} onChange={(e) => setPitch(e.target.value)} className="field mt-2" placeholder="I make weeknight recipes for busy parents. My audience cooks at home five nights a week and buys what I use." />
         {ai.on ? (
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <button type="button" onClick={draft} disabled={drafting} aria-busy={drafting} className="btn btn-secondary btn-sm">
+            <button type="button" onClick={draft} disabled={drafting || left === null} aria-busy={drafting} className="btn btn-secondary btn-sm">
               <Icon name="sparkle" size={16} />
               {drafting ? "Drafting…" : "Draft it with AI"}
             </button>
-            <span className="text-sm text-ink-soft">{`From what you sell and the numbers below, never others. ${left} drafts left this month.`}</span>
+            <span className="text-sm text-ink-soft">{left === null ? "We could not check your AI allowance just now. Reload the page in a minute to try again." : `From what you sell and the numbers below, never others. ${left} drafts left this month.`}</span>
           </div>
         ) : null}
         {options.length ? (

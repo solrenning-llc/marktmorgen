@@ -27,6 +27,7 @@ import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed } from "@/lib/store-allowance";
+import { putMember } from "@/lib/team";
 
 process.env.RESEND_API_KEY = "re_test_inbox_only_a_stand_in";
 process.env.ANTHROPIC_API_KEY = `sk-ant-api03-${"x".repeat(40)}`;
@@ -133,6 +134,8 @@ async function main(): Promise<void> {
   await visitorSend(token, "Thank you!", (h) => storeForHandle(h));
   is("writing again opens it", (await readInbox(store.statsId))[0]?.status, "open");
   is("only someone who may answer", await assignTo(store, id, "stranger@example.com", [OWNER, HELPER]), null);
+  // Told only while on the team in a role that sees orders, read at the send (lib/inbox.ts answering).
+  is("(setup) the helper is on the team as Support", await putMember(store, HELPER, "support"), true);
   is("given to the helper", (await assignTo(store, id, HELPER, [OWNER, HELPER]))?.assigned, HELPER);
   advance(31 * 60_000);
   await visitorSend(token, "One more question.", (h) => storeForHandle(h));

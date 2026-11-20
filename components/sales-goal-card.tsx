@@ -54,7 +54,7 @@ export function SalesGoalCard({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm font-bold text-ink">{`${month} goal`}</p>
         {!editing ? (
-          <button type="button" className="text-sm font-semibold text-violet-deep underline underline-offset-4" onClick={() => setEditing(true)}>
+          <button type="button" className="inline-flex min-h-11 items-center text-sm font-semibold text-violet-deep underline underline-offset-4" onClick={() => setEditing(true)}>
             {goal > 0 ? "Change" : unavailable ? "Set a new goal" : "Set a goal for the month"}
           </button>
         ) : null}

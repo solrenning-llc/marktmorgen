@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     readFunnelBlockCopy({ nope: {} }, lead),
     JSON.stringify(readFunnelBlockCopy(undefined, lead)),
   ], [JSON.stringify({ thanks: { sub: "Next", steps: { heading: "Next", items: [{ title: "Check your inbox", detail: "" }] }, cta: "Go" } }), null, null, null, null, "{}"]);
-  is("the follow-up starts where the journey gives an address", FUNNEL_TYPES.map((type) => [type.id, followUpMoment(type, Object.fromEntries(type.slots.map((slot) => [slot.key, "id-" + slot.key])))?.trigger ?? null]), [["lead-magnet", "product"], ["training", "product"], ["challenge", "product"], ["launch", "product"], ["book", "product"], ["first-purchase", "product"], ["application", "form"], ["quiz", "form"]]);
+  is("the follow-up starts where the journey gives an address", FUNNEL_TYPES.map((type) => [type.id, followUpMoment(type, Object.fromEntries(type.slots.map((slot) => [slot.key, "id-" + slot.key])))?.trigger ?? null]), [["lead-magnet", "product"], ["training", "product"], ["challenge", "product"], ["launch", "product"], ["book", "product"], ["first-purchase", "product"], ["application", "form"], ["quiz", "form"], ["bundle", "product"]]);
   is("a small sample is said to be one; a larger one is counted, not explained", funnelDiagnostics({ proof: "", products: [{ title: "A", described: false, draft: true, free: false, views: 4, checkouts: 0 }, { title: "B", described: true, draft: false, free: false, views: 120, checkouts: 6 }], unanswered: 2 }).map((d) => d.code), ["no_proof", "thin_product", "draft_product", "small_sample", "traffic", "unanswered"]);
 
   part("Drafting a funnel");

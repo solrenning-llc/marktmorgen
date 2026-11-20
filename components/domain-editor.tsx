@@ -17,6 +17,7 @@ const MESSAGES: Record<string, string> = {
   has_one: "Your store already has a domain. Remove it first to add another.",
   plan: "Your own domain is part of Pro.",
   unavailable: "Domains are not answering just now. Nothing was changed; try again in a moment.",
+  unfinished: "Your store no longer opens on this domain, but removing it did not finish. Try removing it again in a moment.",
   none: "There is no domain on your store yet.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
@@ -131,7 +132,7 @@ export function DomainEditor({
       )}
 
       {shown && !shown.live ? (
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="DNS records to add, as a table">
           <table className="w-full min-w-[20rem] text-left text-sm">
             <caption className="sr-only">DNS records to add</caption>
             <thead>

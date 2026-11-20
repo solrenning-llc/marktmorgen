@@ -36,6 +36,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { type Store, storeForId } from "@/lib/store";
 import { INVITE_CODE_ALPHABET, INVITE_CODE_PATTERN, currentInviteTerms, readInviteTerms, INVITE_PROGRAM_OPEN, mayRecordAcceptedInvite, type InviteTerms } from "@/lib/creator-invite-rules";
@@ -106,6 +107,28 @@ export function parseCredit(raw: unknown): Credit | null {
   }
 }
 
+/**
+ * A SET NX with no expiry, read exactly (CX-123 rule 24, as lib/claim-mark.ts): "OK" is ours, nil is somebody else's;
+ * any other answer is read back: `value` there is ours, another value is somebody else's, anything else is unknown.
+ */
+async function setOnce(key: string, value: string): Promise<"ours" | "taken" | "unknown"> {
+  let reply: unknown[] | null = null;
+  try {
+    reply = repliesFor(await redisPipeline([["SET", key, value, "NX"]]), 1);
+  } catch {
+    reply = null;
+  }
+  if (reply && reply[0] === "OK") return "ours";
+  if (reply && reply[0] === null) return "taken";
+  try {
+    const held = repliesFor(await redisPipeline([["GET", key]]), 1);
+    if (held && held[0] === value) return "ours";
+    return held && typeof held[0] === "string" ? "taken" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** A store's invite code, made the first time it is asked for. */
 export async function inviteCode(sid: string): Promise<string | null> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return null;
@@ -114,10 +137,13 @@ export async function inviteCode(sid: string): Promise<string | null> {
   for (let tries = 0; tries < 5; tries += 1) {
     // randomInt draws each letter evenly; a byte taken modulo the alphabet would favour its first letters.
     const code = Array.from({ length: 8 }, () => INVITE_CODE_ALPHABET[randomInt(INVITE_CODE_ALPHABET.length)]).join("");
-    const [took] = await redisPipeline([["SET", codeKey(code), sid, "NX"]]);
-    if (took === null) continue;
-    const [mine] = await redisPipeline([["SET", myCodeKey(sid), code, "NX"]]);
-    if (mine !== null) return code;
+    // Another store's code is never this store's; not known to be ours, no link is given this time.
+    const took = await setOnce(codeKey(code), sid);
+    if (took === "taken") continue;
+    if (took !== "ours") return null;
+    const mine = await setOnce(myCodeKey(sid), code);
+    if (mine === "ours") return code;
+    if (mine !== "taken") return null;
     // Two tabs asked at once and the other won: give this code back and use
     // that one, so a store only ever has one link.
     const [, won] = await redisPipeline([["DEL", codeKey(code)], ["GET", myCodeKey(sid)]]);
@@ -147,8 +173,15 @@ export async function recordInvite(store: Pick<Store, "sid" | "email" | "extra">
   if (!inviter?.sid) return "no_code";
   if (inviter.sid === store.sid || normaliseEmail(inviter.email) === normaliseEmail(store.email)) return "own";
   const at = Math.floor(now / 1000);
-  const [set] = await redisPipeline([["SET", byKey(store.sid), JSON.stringify({ r: inviter.sid, at, terms: INVITE_PROGRAM_OPEN ? currentInviteTerms() : readInviteTerms(undefined) }), "NX"]]);
-  if (set === null) return "already";
+  const set = await setOnce(byKey(store.sid), JSON.stringify({ r: inviter.sid, at, terms: INVITE_PROGRAM_OPEN ? currentInviteTerms() : readInviteTerms(undefined) }));
+  if (set === "taken") return "already";
+  if (set !== "ours") {
+    // Not known whether this invite was written down: said so (the claim route logs it), and put on the settlement
+    // walk only, which credits from the store's own record alone (lib/creator-invite-credit.ts earnFrom pays by.r and
+    // nothing without a record). The inviter's own list is left alone: nothing confirmed the record is theirs.
+    await redisPipeline([["ZADD", ALL_KEY, "NX", at, store.sid]]).catch(() => null);
+    throw new UnknownReplyError("who invited a new store");
+  }
   await redisPipeline([
     ["ZADD", listKey(inviter.sid), at, store.sid],
     ["ZADD", ALL_KEY, at, store.sid],

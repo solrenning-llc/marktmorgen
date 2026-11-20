@@ -48,6 +48,8 @@ let stripeState: "normal" | "down" | "refunded" = "normal";
 let posts = 0;
 /** The receivers of each POST, in order (review of Codex H2 on #2681). */
 let receivers: string[][] = [];
+/** The receiver each POSTed item was sent to, by "<batch>:<sender_item_id>". */
+const sentTo = new Map<string, string>();
 const items = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -55,8 +57,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.stripe.com") {
     if (stripeState === "down") return json({ error: { message: "synthetic unavailable" } }, 500);
-    if (stripeState === "refunded" && url.pathname === "/v1/refunds") return json({ data: [{ id: "re_1", payment_intent: "pi_cs_1", amount: 10000, status: "succeeded" }, { id: "re_2", payment_intent: "pi_cs_2", amount: 5000, status: "succeeded" }], has_more: false });
-    return json({ data: [], has_more: false });
+    if (stripeState === "refunded" && url.pathname === "/v1/refunds") return json({ object: "list", data: [{ id: "re_1", object: "refund", payment_intent: "pi_cs_1", amount: 10000, currency: "usd", status: "succeeded" }, { id: "re_2", object: "refund", payment_intent: "pi_cs_2", amount: 5000, currency: "usd", status: "succeeded" }], has_more: false });
+    return json({ object: "list", data: [], has_more: false });
   }
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: "https://uri.paypal.com/payments/payouts", expires_in: 32400 });
@@ -83,7 +85,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     batches += 1;
     const id = `BATCH${batches}REC`;
     bySender.set(sender, id);
-    for (const item of body.items) items.set(`${id}:${item.sender_item_id}`, "SUCCESS");
+    for (const item of body.items) {
+      items.set(`${id}:${item.sender_item_id}`, "SUCCESS");
+      // As PayPal does, the read gives back each item's receiver (#4657: a line is booked only for its own receiver).
+      sentTo.set(`${id}:${item.sender_item_id}`, item.receiver);
+    }
     const made = { status: 201, body: { batch_header: { payout_batch_id: id, batch_status: "PENDING", sender_batch_header: body.sender_batch_header } } };
     byKey.set(key, made);
     if (mode === "make-then-drop") throw new TypeError("fetch failed: the answer was lost");
@@ -95,7 +101,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({
       batch_header: { payout_batch_id: batch, batch_status: "SUCCESS" },
       total_pages: 1,
-      items: mine.map(([k, status], i) => ({ payout_item_id: `ITEM${batch}${i}`, payout_batch_id: batch, transaction_status: status, payout_item: { sender_item_id: k.split(":")[1] } })),
+      items: mine.map(([k, status], i) => ({ payout_item_id: `ITEM${batch}${i}`, payout_batch_id: batch, transaction_status: status, payout_item: { sender_item_id: k.split(":")[1], receiver: sentTo.get(k) } })),
     });
   }
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);

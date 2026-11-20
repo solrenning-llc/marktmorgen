@@ -61,7 +61,7 @@ export type ShownKey = ApiKey & {
   /** Whether the person looking may revoke it: a key whose maker left the team is the owner's alone to revoke. */
   mayRevoke: boolean;
   /** Why it is paused (lib/api-keys.ts PauseWhy), or null. */
-  why: "rule" | "left" | "unmatched" | "role" | "unrecorded" | null;
+  why: "rule" | "left" | "unmatched" | "role" | "unrecorded" | "unknown" | null;
   /** For a key whose maker could not be matched to the team, whom the owner may say it belongs to: teammates whose role allows it (the owner is always a choice). */
   whoseChoices: string[];
 };
@@ -104,6 +104,7 @@ export function pausedWords(key: Pick<ShownKey, "why" | "mayTurnOn">): string {
   const stopped = "Anything using it is refused, and the webhook endpoints it added are sent nothing";
   const until = key.mayTurnOn ? "until you turn it back on" : "until the store's owner turns it back on";
   if (key.why === "left") return `Whoever made it is no longer on the team. ${stopped}. It can only be revoked, by the store's owner.`;
+  if (key.why === "unknown") return `Its state could not be read, so it is treated as paused. ${stopped}. It cannot be turned back on; revoke it and make a new one.`;
   if (key.why === "role") return `The role of whoever made it no longer allows such a key. ${stopped}, ${until}.`;
   if (key.why === "unmatched") return `It could not be linked to anyone on the team, most likely because the server's secret changed. ${stopped}, ${until}. Before turning it on, check whose it is: its name and when it was last used help.`;
   if (key.why === "unrecorded") return `Nobody is recorded as this key's maker (keys made before November 4, 2026), and after a change on the team it waits for the owner. ${stopped}, ${until}. Before turning it on, check whose it is: its name and when it was last used help.`;

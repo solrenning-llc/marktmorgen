@@ -24,9 +24,19 @@ import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
+import { FINISH_KEEP_SECONDS } from "@/lib/course-finish-rules";
 
-const finishedKey = (courseId: string, email: string) => `nl:course:${courseId}:fin:${emailKey(email)}`;
-const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:open:${emailKey(email)}`;
+export { FINISH_KEEP_SECONDS };
+
+const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
+const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;
+const finishedKey = (courseId: string, email: string) => finishedKeyOf(courseId, emailKey(email));
+const openedKey = (courseId: string, email: string) => openedKeyOf(courseId, emailKey(email));
+/**
+ * The commands answering 1 when this learner (lib/learn.ts emailKey) has a start or a finish mark in a course: two of a
+ * dropped course's probes (lib/person-erasure.ts), since both marks are written with no student row (#4542 review).
+ */
+export const finishMarkProbes = (courseId: string, learner: string): (string | number)[][] => [["EXISTS", openedKeyOf(courseId, learner)], ["EXISTS", finishedKeyOf(courseId, learner)]];
 
 /** Only a complete, own acknowledgement confirms this invocation took the claim. */
 function confirmedClaim(reply: unknown): boolean {
@@ -43,7 +53,7 @@ function confirmedClaim(reply: unknown): boolean {
 export async function noteIfOpened(store: Store, productId: string, courseId: string, email: string): Promise<boolean> {
   try {
     if (!email || !isRedisConfigured()) return false;
-    const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
+    const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", FINISH_KEEP_SECONDS]]);
     if (!confirmedClaim(claim)) return false;
     await enroll(store, email, { joined: false, started: productId });
     return true;
@@ -66,7 +76,7 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.length) return false;
     const done = await doneLessons(courseId, email);
     if (!lessons.every((id) => done.has(id))) return false;
-    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
+    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", FINISH_KEEP_SECONDS]]);
     if (!confirmedClaim(claim)) return false;
     await enroll(store, email, { joined: false, finished: productId });
     return true;

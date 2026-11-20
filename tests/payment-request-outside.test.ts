@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readDraft, parseRequest, readOutside } from "@/lib/payment-request-rules";
 import { changeRequest, createRequest, requestOf } from "@/lib/payment-request-store";
-import { markPaidOutside } from "@/lib/payment-requests";
+import { markPaidOutside, openRequestCheckout } from "@/lib/payment-requests";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -23,11 +23,21 @@ process.env.STRIPE_SECRET_KEY = "sk_test_paid_outside_only";
 const sessions: Record<string, Record<string, unknown>> = {};
 const expired: string[] = [];
 let expireFails = false;
+/** When set, the next expire POST is answered with this body, and the request's own checkout is left as it is. */
+let expireReceipt: Record<string, unknown> | null = null;
+/** Checkouts this run asked Stripe to open (POST /checkout/sessions). */
+let openedCheckouts = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const path = new URL(String(input)).pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (path === "/checkout/sessions" && init?.method === "POST") openedCheckouts += 1;
   const close = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)\/expire$/.exec(path);
   if (close && init?.method === "POST") {
+    if (expireReceipt) {
+      const receipt = expireReceipt;
+      expireReceipt = null;
+      return answer(receipt);
+    }
     if (expireFails) return answer({ error: { message: "This Checkout Session is not in an expireable state." } }, 400);
     expired.push(close[1]);
     return answer({ ...sessions[close[1]], status: "expired" });
@@ -80,7 +90,8 @@ async function main(): Promise<void> {
 
   part("Already paid online: written down as such, the mark refused");
   const online = await make();
-  await withSession(online, "cs_test_paidone1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_paid12345", created: Math.floor(day / 1000) });
+  // The request's own checkout, as Stripe keeps it: its metadata names the request and the store (lib/payment-requests.ts).
+  await withSession(online, "cs_test_paidone1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_paid12345", created: Math.floor(day / 1000), metadata: { kind: "request", request: online, store: "outsideshop" } });
   const refused = await markPaidOutside(store, online, { method: "cash", note: "", paidAt: day });
   const after = await requestOf(store, online);
   is("refused as paid online", refused.ok ? "marked" : refused.reason, "paid_online");
@@ -88,6 +99,71 @@ async function main(): Promise<void> {
   const pending = await make();
   await withSession(pending, "cs_test_slowone1234", { status: "complete", payment_status: "unpaid" });
   is("still being paid: refused, left open", [(await markPaidOutside(store, pending, { method: "cash", note: "", paidAt: day })).ok, (await requestOf(store, pending))?.state], [false, "open"]);
+
+  part("Another request's paid checkout answers for this one (#4447)");
+  const reqA = await make();
+  const reqB = await make();
+  await withSession(reqA, "cs_test_sessionofA1", { id: "cs_test_sessionofB1", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofBpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
+  const crossed = await markPaidOutside(store, reqA, { method: "cash", note: "", paidAt: day });
+  const afterA = await requestOf(store, reqA);
+  is("the answer for another checkout is a read error", crossed.ok ? "marked" : crossed.reason, "error");
+  is("request A stays open, with its own session and no payment of B's", [afterA?.state, afterA?.session, afterA?.payment], ["open", "cs_test_sessionofA1", ""]);
+  const reqC = await make();
+  await withSession(reqC, "cs_test_sessionofC1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofDpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
+  const named = await markPaidOutside(store, reqC, { method: "cash", note: "", paidAt: day });
+  is("its own checkout naming another request: a read error, left open", [named.ok ? "marked" : named.reason, (await requestOf(store, reqC))?.state], ["error", "open"]);
+
+  part("The buyer's path reads only its own checkout too (#4447, review of #4455)");
+  const reqD = await make();
+  await withSession(reqD, "cs_test_sessionofD1", { id: "cs_test_sessionofE1", status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_sessionofE1" });
+  const sent = await openRequestCheckout(store, reqD, "https://marktmorgen.com", day);
+  is("an open checkout of another session: a read error, the buyer is not sent to it", sent.ok ? sent.url : sent.reason, "error");
+  const reqF = await make();
+  const reqG = await make();
+  await withSession(reqF, "cs_test_sessionofF1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofGpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqG, store: "outsideshop" } });
+  const paidOther = await openRequestCheckout(store, reqF, "https://marktmorgen.com", day);
+  const afterF = await requestOf(store, reqF);
+  is("its own checkout paid for another request: a read error", paidOther.ok ? "sent" : paidOther.reason, "error");
+  is("and the request stays open, with no payment of another's", [afterF?.state, afterF?.payment], ["open", ""]);
+  const reqH = await make();
+  await withSession(reqH, "cs_test_sessionofH1", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_sessionofH1" });
+  const own = await openRequestCheckout(store, reqH, "https://marktmorgen.com", day);
+  is("control: its own open checkout is the page again", own.ok ? own.url : own.reason, "https://checkout.stripe.com/c/pay/cs_test_sessionofH1");
+  part("Codex L's HIGH on #4455: an expiry receipt for another checkout is not this one closed");
+  const reqJ = await make();
+  await withSession(reqJ, "cs_test_ownprobe1234", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_ownprobe1234" });
+  expireReceipt = { id: "cs_test_someoneelse1", object: "checkout.session", status: "expired" };
+  const foreign = await markPaidOutside(store, reqJ, { method: "cash", note: "", paidAt: day });
+  const afterJ = await requestOf(store, reqJ);
+  is("the creator's mark: refused, the request still open and unmarked, its own checkout still open", [foreign.ok ? "marked" : foreign.reason, afterJ?.state, afterJ?.outside, sessions.cs_test_ownprobe1234?.status], ["error", "open", undefined, "open"]);
+  const reqK = await make();
+  await withSession(reqK, "cs_test_ownprobe5678", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_ownprobe5678" });
+  expireReceipt = { id: "cs_test_someoneelse2", object: "checkout.session", status: "expired" };
+  const before = openedCheckouts;
+  // A day later: the open checkout is past its reuse, so the buyer's press closes it before opening another.
+  const buyer = await openRequestCheckout(store, reqK, "https://marktmorgen.com", Date.now() + 86_400_000);
+  is("the buyer's press: an error, and no second checkout opened beside the one still open", [buyer.ok ? "sent" : buyer.reason, openedCheckouts - before, sessions.cs_test_ownprobe5678?.status], ["error", 0, "open"]);
+  expireReceipt = null;
+
+  part("A checkout the current Stripe account does not know (404): refused");
+  const missing = await make();
+  await changeRequest(store, missing, (r) => ({ next: { ...r, session: "cs_test_goneone1234", sessionAt: Date.now() }, answer: true }));
+  const afterMissing = await markPaidOutside(store, missing, { method: "cash", note: "", paidAt: day });
+  is("404: still open, nothing closed", [afterMissing.ok ? "ok" : afterMissing.reason, (await requestOf(store, missing))?.state, expired.includes("cs_test_goneone1234")], ["error", "open", false]);
+
+  part("A malformed 200 reply: an error, nothing marked, closed or written down");
+  for (const [label, session, state] of [
+    ["no status", "cs_test_nostatus123", { payment_status: "unpaid" }],
+    ["an unknown status", "cs_test_oddstate123", { status: "processing", payment_status: "unpaid" }],
+    ["another checkout's id, open", "cs_test_otheropen12", { id: "cs_test_someoneelse0000", status: "open", payment_status: "unpaid" }],
+    ["another checkout's id, paid", "cs_test_otherpaid12", { id: "cs_test_someoneelse0001", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_other12345", created: Math.floor(day / 1000) }],
+  ] as const) {
+    const odd = await make();
+    await withSession(odd, session, state);
+    const answer = await markPaidOutside(store, odd, { method: "cash", note: "", paidAt: day });
+    const kept = await requestOf(store, odd);
+    is(`${label}: error, left open, unmarked, not closed`, [answer.ok ? "marked" : answer.reason, kept?.state, kept?.outside, kept?.payment, expired.includes(session)], ["error", "open", undefined, "", false]);
+  }
 
   part("Kept and said");
   is("a mark reads only whole", [readOutside({ method: "cheque" }), readOutside({ method: "cash", note: "  a\\nb  " })], [null, { method: "cash", note: "a\\nb" }]);

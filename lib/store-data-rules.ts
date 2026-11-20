@@ -111,8 +111,10 @@ export function orderDataBytes(items: number): number {
  * and copies sold, when its buyers were last written to and the latest send,
  * the prices made for a tier or yearly switch (four each), its team event
  * type and round-robin counts, the Discord roles it gives, its introductory
- * coupon, its waitlist and pre-order flags, its reviews' summary and the
- * email platform's tags for it, each at its largest with its key. Once the
+ * coupon, its waitlist and pre-order flags, its reviews' summary, the
+ * email platform's tags for it and the note that it ever had a private
+ * podcast feed (lib/podcast-access.ts, nl:pod:pids:, one set member of 96
+ * bytes, #4471), each at its largest with its key. Once the
  * product is deleted they stay counted for as long as the store is
  * (lib/store.ts): some are kept until they expire, some are never let go.
  */
@@ -206,6 +208,26 @@ export function dataWords(bytes: number): string {
   const b = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
   if (b >= MB) return `${(Math.round((b / MB) * 10) / 10).toLocaleString("en-US")} MB`;
   return `${Math.max(b > 0 ? 1 : 0, Math.round(b / 1000)).toLocaleString("en-US")} KB`;
+}
+
+/**
+ * The share of a store's data room, in percent, that all its students'
+ * private lesson notes together may take (lib/lesson-notes.ts; decision
+ * C1-20261107-1453-TODOS-9 on Claude 2's finding on #3031). The notes are
+ * still counted in the room, so the plan's room stays the bound on what is
+ * kept; this keeps them from filling the room the creator's own work needs.
+ */
+export const STUDENT_NOTES_SHARE_PERCENT = 10;
+
+/** The most bytes all a store's students' notes together may take in its room. */
+export function studentNotesRoomFor(store: DataFields, nowSeconds = Date.now() / 1000): number {
+  return Math.floor((dataRoomFor(store, nowSeconds) * STUDENT_NOTES_SHARE_PERCENT) / 100);
+}
+
+/** The studio's line on what the students' notes take: "Student notes: 1.2 MB of 1.8 MB"; an unknown count is said so, never as 0. */
+export function studentNotesLine(used: number | null | undefined, room: number): string {
+  if (typeof used !== "number" || !Number.isSafeInteger(used) || used < 0) return "Student notes: how much room they take could not be read right now.";
+  return `Student notes: ${dataWords(used)} of ${dataWords(room)}`;
 }
 
 /** The rooms in one sentence, for the pricing page, the help center and the terms. */

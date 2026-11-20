@@ -39,8 +39,12 @@ const world = {
   invoiceListReply: undefined as unknown | undefined,
   /** One exact list/search response used to prove that partial history rows stay unknown. */
   historyReply: null as { path: "/charges" | "/charges/search" | "/customers/search"; customer?: string; data: unknown[] } | null,
+  /** An exact stand-in answer for GET /invoices/<id>, by id: another invoice's, or one with no id (rule 30). */
+  invoiceByIdReply: new Map<string, unknown>(),
   /** A customer's Stripe balance (negative: a credit), 0 when not set. */
   balance: new Map<string, number>(),
+  /** An exact stand-in answer for the /disputes list; undefined keeps the normal filtered list. */
+  disputeListReply: undefined as unknown | undefined,
   calls: 0,
   writes: 0,
 };
@@ -81,6 +85,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const invoice = path.match(/^\/invoices\/(in_\w+)$/);
   if (invoice) {
+    if (world.invoiceByIdReply.has(invoice[1])) return json(world.invoiceByIdReply.get(invoice[1]));
     const row = world.invoices.find((i) => i.id === invoice[1]);
     if (!row) return json({ error: { message: "No such invoice" } }, 404);
     const sub = world.subs.get(String(row.subscription)) ?? { id: row.subscription, metadata: { store: "another-store" } };
@@ -103,6 +108,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const email = (q.get("query") ?? "").match(/email:"([^"]+)"/)?.[1];
     return searchPage([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
   }
+  if (path === "/disputes" && world.disputeListReply !== undefined) return json(world.disputeListReply);
   if (path === "/disputes") return page(world.disputes.filter((d) => d.charge === q.get("charge")));
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
@@ -130,7 +136,7 @@ function pay(s: { customer: string; subscriptionId: string; handle: string }, o:
   const cycle = o.cycle ?? "month";
   const amount = o.amount ?? (cycle === "year" ? 69_000 : 6_900);
   world.invoices.push({ id: inv, subscription: o.subscription ?? s.subscriptionId, status: "paid", created: o.at, total: o.total ?? amount, tax: o.tax ?? null, billing_reason: o.reason ?? "subscription_create", charge: id, status_transitions: { paid_at: o.at }, lines: { data: [{ type: "subscription", period: { start: o.at }, price: { unit_amount: cycle === "year" ? 69_000 : 6_900, currency: "usd", recurring: { interval: cycle } } }] } });
-  world.charges.push({ id, customer: s.customer, invoice: inv, payment_intent: `pi_${s.handle}x${k}`, status: "succeeded", paid: true, currency: "usd", created: o.at, amount_captured: amount, amount_refunded: o.refunded ?? 0, disputed: o.disputed ?? false, payment_method_details: { card: { fingerprint: o.card ?? `fp${s.handle}` } }, balance_transaction: { fee: o.fee ?? 230, currency: o.feeCurrency ?? "usd" } });
+  world.charges.push({ id, customer: s.customer, invoice: inv, payment_intent: `pi_${s.handle}x${k}`, status: "succeeded", paid: true, currency: "usd", created: o.at, amount_captured: amount, amount_refunded: o.refunded ?? 0, disputed: o.disputed ?? false, payment_method_details: { card: { fingerprint: o.card ?? `fp${s.handle}` } }, balance_transaction: { object: "balance_transaction", id: `txn_${s.handle}x${k}`, type: "charge", source: id, fee: o.fee ?? 230, currency: o.feeCurrency ?? "usd" } });
   return { id, inv, pi: `pi_${s.handle}x${k}` };
 }
 
@@ -179,6 +185,32 @@ async function main() {
   pay(again, { at: NOW - 5 * DAY, subscription: "sub_againold0001" });
   pay(again, { at: NOW - 2 * DAY });
   is("the first payment was this store's earlier plan: unknown, never a silent no", (await again.read()).refund, { kind: "unknown", reason: "not_this_store" });
+  // Rule 30: the earlier invoice's reply is for another invoice, or has no id: what it names decides nothing.
+  for (const [label, reply] of [
+    ["another invoice's reply", (id: string) => ({ id: `${id}other`, object: "invoice", subscription: { id: "sub_anotherstore02", metadata: { store: "another-store" } } })],
+    ["a reply with no id", () => ({ object: "invoice", subscription: { id: "sub_anotherstore03", metadata: { store: "another-store" } } })],
+  ] as const) {
+    const misread = await shop();
+    world.subs.set(`sub_${misread.handle}old1`, { id: `sub_${misread.handle}old1`, status: "canceled", customer: misread.customer, metadata: { store: misread.handle } });
+    const earlier = pay(misread, { at: NOW - 5 * DAY, subscription: `sub_${misread.handle}old1` });
+    pay(misread, { at: NOW - 2 * DAY });
+    world.invoiceByIdReply.set(earlier.inv, reply(earlier.inv));
+    is(`the earlier invoice read as ${label}: unknown, never judged as a renewal`, (await misread.read()).refund.kind, "unknown");
+    world.invoiceByIdReply.delete(earlier.inv);
+    is(`and once Stripe answers for it, it is this store's earlier plan (${label})`, (await misread.read()).refund, { kind: "unknown", reason: "not_this_store" });
+  }
+  // Claude 6 on #3098: a 200 whose JSON body is null, a string or a number is not the invoice asked for either. It is
+  // "unreadable" (a person checks it), never "stripe_unread", which tells the creator to try again in a few minutes
+  // as if Stripe could not be reached, though every try gets the same answer.
+  for (const [label, body] of [["null", null], ["a string", "in_text"], ["a number", 7]] as const) {
+    const odd = await shop();
+    world.subs.set(`sub_${odd.handle}old1`, { id: `sub_${odd.handle}old1`, status: "canceled", customer: odd.customer, metadata: { store: odd.handle } });
+    const earlier = pay(odd, { at: NOW - 5 * DAY, subscription: `sub_${odd.handle}old1` });
+    pay(odd, { at: NOW - 2 * DAY });
+    world.invoiceByIdReply.set(earlier.inv, body);
+    is(`the earlier invoice answered with ${label}: unknown and unreadable, never "Stripe could not be reached"`, (await odd.read()).refund, { kind: "unknown", reason: "unreadable" });
+    world.invoiceByIdReply.delete(earlier.inv);
+  }
   const trial = await shop();
   world.invoices.push({ id: `in_trial${n}`, subscription: trial.subscriptionId, status: "paid", created: NOW - DAY, total: 0, tax: null, billing_reason: "subscription_create", charge: null, lines: { data: [] } });
   is("a trial's invoice paid with no charge: no payment yet", (await trial.read()).refund, { kind: "none", reason: "no_plan_payment" });
@@ -215,6 +247,22 @@ async function main() {
   const yc = await shop("year");
   pay(yc, { at: start, cycle: "year", feeCurrency: "eur" });
   is("Stripe's fee in another currency: unknown", (await yc.read()).refund, { kind: "unknown", reason: "currency" });
+  // The fee is taken only from the refunded charge's own balance transaction (rule 30): one whose source is another
+  // charge, or that is not a charge's, would size the refund with a fee that is not this payment's (issue #4450).
+  const yo = await shop("year");
+  const yoPaid = pay(yo, { at: start, cycle: "year", fee: 230 });
+  is("control: the charge's own fee of $2.30 sets the refund", (await yo.read()).refund, { kind: "unstarted_months", cents: 69_000 - 4 * 6_900 - 230, monthsKept: 4 });
+  const yoRow = world.charges.find((c) => c.id === yoPaid.id)!;
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture002", type: "charge", source: "ch_Fixture002", currency: "usd", fee: 30 };
+  is("a balance transaction whose source is another charge does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture003", type: "charge", source: { id: "ch_Fixture003" }, currency: "usd", fee: 30 };
+  is("an expanded source of another charge does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture004", type: "charge", currency: "usd", fee: 30 };
+  is("a balance transaction with no source does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture005", type: "adjustment", source: yoPaid.id, currency: "usd", fee: 30 };
+  is("a balance transaction of another type does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture006", type: "charge", source: { id: yoPaid.id, object: "charge" }, currency: "usd", fee: 230 };
+  is("the charge's own balance transaction with its source expanded sets the fee", (await yo.read()).refund, { kind: "unstarted_months", cents: 69_000 - 4 * 6_900 - 230, monthsKept: 4 });
   const yf = await shop("year");
   pay(yf, { at: NOW - 10 * DAY, cycle: "year" });
   is("a first yearly payment within 30 days: the guarantee, in full", (await yf.read()).refund, { kind: "guarantee", cents: 69_000 });
@@ -382,6 +430,26 @@ async function main() {
   pay(crowd, { at: NOW - 25 * DAY });
   for (let i = 0; i < 6; i += 1) pay(crowd, { at: NOW - 20 * DAY + i * DAY, amount: 1_000, total: 1_000, reason: "subscription_update" });
   is("more payments in the window than one refund gives back at once: unknown, for support", (await crowd.read()).refund, { kind: "unknown", reason: "too_many" });
+
+  part("A dispute row for another charge (#4468)");
+  const disputeList = (rows: unknown[]) => ({ object: "list", data: rows, has_more: false });
+  for (const status of ["lost", "won"]) {
+    const m = await shop();
+    pay(m, { at: NOW - 3 * DAY, disputed: true });
+    world.disputeListReply = disputeList([{ id: "du_foreign", charge: "ch_another0001", status, amount: 6_900 }]);
+    is(`a ${status} dispute row of another charge is unreadable, never applied`, (await m.read()).refund, { kind: "unknown", reason: "unreadable" });
+    world.disputeListReply = disputeList([{ id: "du_foreign", charge: { id: "ch_another0001", object: "charge" }, status, amount: 6_900 }]);
+    is(`a ${status} dispute row of another charge, expanded, is unreadable`, (await m.read()).refund, { kind: "unknown", reason: "unreadable" });
+    world.disputeListReply = disputeList([{ id: "du_foreign", status, amount: 6_900 }]);
+    is(`a ${status} dispute row with no charge is unreadable`, (await m.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  const mp = await shop();
+  const mpPaid = pay(mp, { at: NOW - 3 * DAY, disputed: true });
+  world.disputeListReply = disputeList([{ id: "du_otherpi", charge: mpPaid.id, payment_intent: "pi_another0001", status: "won", amount: 6_900 }]);
+  is("this charge but another payment intent: unreadable", (await mp.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.disputeListReply = disputeList([{ id: "du_ownwon", charge: { id: mpPaid.id, object: "charge" }, payment_intent: mpPaid.pi, status: "won", amount: 6_900 }]);
+  is("its own won dispute, charge expanded: the guarantee applies again", (await mp.read()).refund, { kind: "guarantee", cents: 6_900 });
+  world.disputeListReply = undefined;
 
   part("Bounds");
   let most = 0;

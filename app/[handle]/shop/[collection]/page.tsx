@@ -24,8 +24,9 @@ import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
-import { storeRoot } from "@/lib/store-sitemap";
+import { storeAddress, storeRoot } from "@/lib/store-sitemap";
 import { collectionInSegment, collectionSegment, shownProducts } from "@/lib/store-collections";
+import { productSegment } from "@/lib/product-slug";
 import { ProductCard, productPath } from "@/components/store-product";
 import { AddAllToCart, CartButton } from "@/components/store-cart";
 import { StoreResting } from "@/components/store-resting";
@@ -60,7 +61,8 @@ async function load(rawHandle: string, rawSegment: string) {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, collection: segment } = await params;
   const found = await load(handle, segment);
-  if (!found || found.store.suspended) return { title: "Not found — Marktmorgen" };
+  // Switched off after notices: drawn as the resting store, and out of search as its other pages are.
+  if (!found || found.store.suspended) return { title: "Not found — Marktmorgen", robots: { index: false, follow: true } };
   const { store, collection } = found;
   const url = `${storeRoot(store)}/shop/${collectionSegment(collection)}`;
   const title = `${collection.title} — ${store.name}`;
@@ -128,23 +130,34 @@ export default async function CollectionPage({ params }: Params) {
   const cartOn = selling && offersCart(store);
   const writes = canWrite(store);
   const manageable = canManage(store);
-  const [coming, inBundles, rated, counts] = await Promise.all([
-    soonState(store).catch(() => ({ soon: new Set<string>(), days: new Map<string, string>() })),
+  const [soonRead, inBundles, rated, counts] = await Promise.all([
+    // A reading that failed or came back out of shape is unknown, never "none coming soon" (CX-123 rule 24).
+    soonState(store).catch(() => null),
     offeredItems(store, related).catch(() => new Map<string, Listing[]>()),
     store.reviewed ? summaries(store.statsId).catch(() => new Map()) : Promise.resolve(new Map()),
     Promise.all(
       products.map(async (product) => {
-        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => false)]);
-        return out ? 0 : stock;
+        // Keys left that could not be read are unknown, never "keys left" (CX-123 rule 24): no way to buy, no count.
+        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => null)]);
+        return out === null ? ("unread" as const) : out ? 0 : stock;
       }),
     ),
   ]);
+  const coming = soonRead ?? { soon: new Set<string>(), days: new Map<string, string>() };
   const soon = coming.soon;
   const left = new Map<string, number>();
+  const unread = new Set<string>();
   products.forEach((product, i) => {
-    if (counts[i] !== null) left.set(product.id, counts[i] as number);
+    const count = counts[i];
+    if (count === "unread") unread.add(product.id);
+    else if (count !== null) left.set(product.id, count);
   });
-  const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0).map((p) => p.id) : [];
+  const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0 && !unread.has(p.id)).map((p) => p.id) : [];
+
+  // With coming soon unknown, any product may not be out yet: each card draws no way to buy it and nothing for the
+  // cart, and says buying is not available just now, as the card on the creator's own site does (#2910). With only
+  // part of it read, a product read as coming soon keeps its waitlist; each other one is unknown.
+  if (!soonRead || soonRead.partial) for (const product of products) if (!soon.has(product.id)) unread.add(product.id);
 
   const say = speech(store);
   const { w } = say;
@@ -156,10 +169,10 @@ export default async function CollectionPage({ params }: Params) {
           "@type": "CollectionPage",
           name: collection.title,
           ...(collection.blurb ? { description: collection.blurb } : {}),
-          url: `${SITE_URL}${path}`,
+          url: storeAddress(store, `/shop/${collectionSegment(collection)}`),
           mainEntity: {
             "@type": "ItemList",
-            itemListElement: products.map((product, i) => ({ "@type": "ListItem", position: i + 1, url: `${SITE_URL}${productPath(store, product)}`, name: product.title })),
+            itemListElement: products.map((product, i) => ({ "@type": "ListItem", position: i + 1, url: storeAddress(store, `/p/${productSegment(product)}`), name: product.title })),
           },
         }}
       />
@@ -178,7 +191,7 @@ export default async function CollectionPage({ params }: Params) {
         <h1 className="font-display mt-8 text-center text-3xl font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">{collection.title}</h1>
         <p className="st-muted mt-2 text-center text-sm font-semibold">{w.productCount(products.length)}</p>
         {collection.blurb ? <p className="st-muted mx-auto mt-3 max-w-md text-center text-lg leading-relaxed">{collection.blurb}</p> : null}
-        {inCart.length >= 2 && inCart.length <= MAX_CART ? <AddAllToCart handle={store.handle} productIds={inCart} lang={store.language} /> : null}
+        {soonRead && !soonRead.partial && inCart.length >= 2 && inCart.length <= MAX_CART ? <AddAllToCart handle={store.handle} productIds={inCart} lang={store.language} /> : null}
         <ul className="mt-8 space-y-4">
           {products.map((product, i) => (
             <ProductCard
@@ -197,6 +210,7 @@ export default async function CollectionPage({ params }: Params) {
               soon={soon.has(product.id)}
               preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
               cart={inCart.includes(product.id)}
+              unread={unread.has(product.id)}
             />
           ))}
         </ul>

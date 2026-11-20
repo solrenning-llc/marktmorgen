@@ -27,13 +27,23 @@ export async function POST(request: NextRequest) {
   if (!LINK_ID.test(id)) return new Response("Not found", { status: 404 });
   const back = (query = "") => new Response(null, { status: 303, headers: { Location: `${origin}/numbers/${id}${query}`, "Cache-Control": "no-store" } });
   if (!(await withinLimit("numbers-link", `${clientAddress(request)}|${id}`, 10, 600))) return back("?tries=1");
-  const sid = await linkStore(id);
-  const store = sid ? await storeForId(sid) : null;
+  // A link that could not be read just now is said so (rule 24): never sent back as ended, never a crash.
+  let store: Awaited<ReturnType<typeof storeForId>>;
+  try {
+    const sid = await linkStore(id);
+    store = sid ? await storeForId(sid) : null;
+  } catch (error) {
+    console.error("a numbers link could not be read for its password", error);
+    // Back to the page's own notice, in its language and layout, never a bare text page (Claude 5 on #2971).
+    return back("?unread=1");
+  }
   const link = store?.numbersLinks.find((l) => l.id === id);
   const now = Date.now();
   if (!link || link.expires <= Math.floor(now / 1000)) return back();
   // A password tried is one of the store's public requests for its window (lib/traffic.ts).
-  if (!store || !(await takePublicRequest(store, "public", now))) return back("?tries=1");
+  if (!store) return back();
+  // The store's window refused, or not known to be taken: not "too many tries", which is this connection's own count.
+  if (!(await takePublicRequest(store, "public", now))) return back("?busy=1");
   if (!passwordFits(link, password)) return back("?wrong=1");
   const cookie = passCookie(link, now);
   if (!cookie) return back("?wrong=1");

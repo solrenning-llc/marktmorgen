@@ -5,9 +5,13 @@ import { wordsIn } from "@/lib/buyer-words";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { ReviewPhotoField } from "@/components/review-photo-field";
 import { imageUrl } from "@/lib/product-image";
+import { reviewPagePath } from "@/lib/review-proof";
 
-/** Notices that report something done, rather than something that went wrong. */
-const DONE = new Set(["saved", "updated", "deleted", "photoPaused"]);
+/**
+ * Notices that report something done, rather than something that went wrong. "confirmDelete" asks before a delete
+ * and "kept" answers "Keep my review": neither is an alert.
+ */
+const DONE = new Set(["saved", "updated", "deleted", "photoPaused", "photoLimit", "confirmDelete", "kept"]);
 
 /**
  * What happened to the last thing sent, in the buyer's words: the notices a
@@ -55,7 +59,12 @@ export function ReviewForm({
   const w = wordsIn(code);
   const base = `rv-${product.id}`;
   const known = notice ? REVIEW_NOTICES[notice] ?? null : null;
-  const said = known && notice ? { text: g.reviewNotices[notice] ?? known.text, alert: known.alert } : null;
+  // Asking before a delete (Claude 6's audit 21; WCAG 3.3.4, 3.3.6): with the review there, the question takes the
+  // delete button's place below and no sentence is shown here; with no review left to delete, the sentence says so.
+  const asking = notice === "confirmDelete" && existing !== null;
+  const said = known && notice && !asking ? { text: g.reviewNotices[notice] ?? known.text, alert: known.alert } : null;
+  // "Keep my review" goes back to this same page, opened on the sentence that says nothing was deleted.
+  const keepHref = reviewPagePath(handle, back, door, product.id, "kept", `r-${product.id}-said`);
   const hidden = (
     <>
       <input type="hidden" name="handle" value={handle} />
@@ -69,7 +78,12 @@ export function ReviewForm({
   return (
     <div id={`r-${product.id}`} className="scroll-mt-6">
       {said ? (
-        <p className={said.alert ? "st-note mb-4 text-sm" : "rv-done mb-4 text-sm font-semibold"} role={said.alert ? "alert" : "status"}>
+        <p
+          id={`r-${product.id}-said`}
+          tabIndex={-1}
+          className={said.alert ? "st-note mb-4 scroll-mt-6 text-sm" : "rv-done mb-4 scroll-mt-6 text-sm font-semibold"}
+          role={said.alert ? "alert" : "status"}
+        >
           {said.text}
         </p>
       ) : null}
@@ -152,7 +166,40 @@ export function ReviewForm({
         </button>
         <p className="st-muted text-xs leading-relaxed">{g.reviewPublic(storeName)}</p>
       </form>
-      {existing ? (
+      {existing && asking ? (
+        // The question after the first press. The answer's address opens the page on it (#r-…-delete) and tabindex -1
+        // lets it take focus there, so a screen reader reads the question and what goes at once, and a second Enter
+        // pressed by mistake presses nothing. Only the yes sends confirm=yes; keeping is a plain link back, no request.
+        <div
+          id={`r-${product.id}-delete`}
+          tabIndex={-1}
+          role="group"
+          aria-labelledby={`${base}-delete-ask`}
+          aria-describedby={`${base}-delete-what`}
+          className="st-note mt-3 scroll-mt-6 space-y-3"
+        >
+          <p id={`${base}-delete-ask`} className="text-base leading-relaxed">
+            <strong>{g.deleteReviewAsk(product.title)}</strong>
+          </p>
+          <p id={`${base}-delete-what`} className="text-sm leading-relaxed">
+            {g.deleteReviewWhat(existing.rating, Boolean(existing.text?.trim()), Boolean(existing.photo), storeName)}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <form action="/api/store/review" method="post">
+              {hidden}
+              <input type="hidden" name="action" value="delete" />
+              <input type="hidden" name="confirm" value="yes" />
+              <button type="submit" className="btn st-btn max-w-full whitespace-normal leading-snug [overflow-wrap:anywhere]">
+                {g.deleteReviewYes}
+              </button>
+            </form>
+            <a href={keepHref} className="btn st-btn-ghost max-w-full whitespace-normal leading-snug [overflow-wrap:anywhere]">
+              {g.deleteReviewKeep}
+            </a>
+          </div>
+        </div>
+      ) : existing ? (
+        // The first press only asks: the route answers "confirmDelete" and changes nothing (app/api/store/review).
         <form action="/api/store/review" method="post" className="mt-3">
           {hidden}
           <input type="hidden" name="action" value="delete" />

@@ -62,6 +62,19 @@ export const ORDERS_IMPORTED_ENTRY_COMMANDS = 2;
 export const ORDERS_ROOM_COMMANDS = 6;
 /** Commands one private podcast feed makes at the most (lib/podcast-access.ts, feedToken), with the room its write is counted in. */
 export const ORDERS_FEED_COMMANDS = 8;
+/**
+ * Commands one course's progress on the list makes at the most (lib/purchase-cards.ts, extrasFor; 560 [AS1]): its
+ * outline read whole at COURSE_BYTES (lib/api-read-rules.ts), and one SMISMEMBER of its lessons (MAX_LESSONS ids of 12
+ * letters and their 0 or 1, under 4 KB), each counted as a command of its own though a hundred outlines share an MGET.
+ * tests/plan-cost-registry.test.ts holds it above ORDERS_METERED_PROGRESS.
+ */
+export const ORDERS_PROGRESS_COMMANDS = 10;
+/**
+ * How long the courses' progress is waited on, at the most, inside an opening's ORDERS_READ_MS: past it every course
+ * says its progress could not be checked, and the purchases, keys and downloads are drawn as they are, never lost to a
+ * slow read of the outlines (review of #3522, MEDIUM). What was taken from the meter for it stays taken.
+ */
+export const ORDERS_PROGRESS_MS = 4_000;
 /** Commands one license key makes at the most (lib/licence-keys.ts, keyForSale): read, or given with five tries at a unique one, with its writes. */
 export const ORDERS_KEY_COMMANDS = 24;
 /**

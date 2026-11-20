@@ -75,7 +75,9 @@ export const MAX_RUNS_KEPT_PER_FLOW = Math.max(...Object.values(DAILY_RUNS_BY_TI
  * every few hours for as long as the cause lasted, and none of it was in
  * WORST_COMMANDS_PER_RUN.
  *
- *   - MAX_WAITS_PER_RUN: times one run may wait, all its steps together. A
+ *   - MAX_WAITS_PER_RUN: times one run may wait, all its steps together (a
+ *     look while the store is switched off counts as half a wait, since
+ *     9 November 2026: SWITCHED_OFF_LOOKS_PER_WAIT below). A
  *     wait for something with a known end (the month turning, the next UTC
  *     day, a pause's end) is tried once, at that end; anything else is tried
  *     again with a growing delay (lib/flow-retry.ts). One more wait past it
@@ -113,10 +115,83 @@ export const QUEUE_COMMANDS_PER_STEP = 7;
  * 4 November 2026, with the lease read); 32 with room to spare.
  */
 export const WAIT_COMMANDS_PER_TRY = 32;
+/**
+ * Waiting only for room at Amazon SES (ALL-160, 12 November 2026; the owner's
+ * rule LC: email waits in the Amazon queue and is never discarded). Until this
+ * date such a wait was counted like any other, so after MAX_WAITS_PER_RUN
+ * waits (about two hours of growing delays) the run stopped and the email was
+ * never sent. Now it is not counted against MAX_WAITS_PER_RUN or
+ * MAX_WAIT_DAYS_PER_STEP: the step stays in the queue, parked
+ * (SES_PARK_SCORE in lib/flows.ts), for as long as it takes, and costs no
+ * command while it is parked. The scheduled job wakes parked steps only when
+ * Amazon's room is confirmed, at most SES_WAKE_PER_JOB a job, oldest first.
+ *
+ *   - SES_WAIT_COMMANDS_PER_TRY: one try that meets no SES room, for a batch
+ *     of one person (the dearest case): everything WAIT_COMMANDS_PER_TRY
+ *     counts, with the send's own reads of Amazon's room (the account's state
+ *     read and written back, the 25 hourly counts of the last 24 hours, the
+ *     monthly notice's mark) instead of the wait counted, and the step's
+ *     day clock let go (1). Measured in tests/flow-ses-wait-queue.test.ts.
+ *     Since 15 November 2026 the try also reads whether Amazon is ready (a
+ *     step parks without a bound only then) and counts the park on the run
+ *     with the time it was first parked (lib/flow-runs.ts, countSesParks):
+ *     measured at 61 with Amazon's 24 hours read in full; 64 with room.
+ *   - SES_WAKE_COMMANDS_PER_TRY: the step woken (1).
+ *   - SES_WAITS_PER_RUN: every try a run can make other than a woken one can
+ *     meet no room once: each step's first try, each "try it again", each
+ *     retry after an ordinary wait.
+ *   - SES_PARKS_PER_RUN: a woken step meets no room again when room confirmed
+ *     for it was taken in between by another send (nothing holds Amazon's room
+ *     for it), and is parked again. Since 15 November 2026 every park is
+ *     counted on the run (lib/flow-runs.ts, countSesParks), at most
+ *     SES_PARKS_PER_RUN, the same number WORST_COMMANDS_PER_RUN prices; past
+ *     it the step waits as any other wait does, counted against
+ *     MAX_WAITS_PER_RUN, and the run stops with a note that says why. Until
+ *     then such re-parks were uncounted (reviews of #4246, clouds F and G):
+ *     a run's commands had no ceiling while Amazon stayed near full.
+ *   - Parking without a bound only when Amazon SES is set up and its state is
+ *     read (lib/flows.ts, waitOrStop): otherwise nothing could ever wake the
+ *     step, and the wait is counted as before (review of #4246, cloud B).
+ */
+export const SES_WAIT_COMMANDS_PER_TRY = 64;
+export const SES_WAKE_COMMANDS_PER_TRY = 1;
+export const SES_WAITS_PER_RUN = MAX_STEPS + MAX_RETRIES_BY_YOU + MAX_WAITS_PER_RUN;
+export const SES_PARKS_PER_RUN = SES_WAITS_PER_RUN;
+/** Parked steps one scheduled job wakes at the most, and never more than Amazon's confirmed room. */
+export const SES_WAKE_PER_JOB = 300;
+/**
+ * The job's own commands to look for parked steps (1) and, only when there
+ * are some, to read Amazon's room (the state read and written back, 2, and
+ * the 25 hourly counts): a company cost of the five-minute job, not a run's.
+ */
+export const SES_WAKE_JOB_COMMANDS = 1 + 2 + 25;
+/**
+ * The scheduled mail job's runs a day (vercel.json: /api/cron/mail every five minutes), each looking for parked steps
+ * at SES_WAKE_JOB_COMMANDS at the most: priced, whole, on every plan's workflows line (tests/plan-cost-registry.ts).
+ */
+export const SES_WAKE_JOBS_PER_DAY = 288;
+/**
+ * One counted wait whose try was for room at Amazon SES, past SES_PARKS_PER_RUN or with SES not ready (lib/flows.ts,
+ * waitOrStop): the try reads Amazon's state and its 24 hours as any SES try does, and the wait is counted as any other.
+ * Measured at 65 in tests/flow-ses-over-cap.test.ts (15 November 2026, review of #4246 by Claude 4 cloud AA); 68 with
+ * room. WORST_COMMANDS_PER_RUN prices each of the MAX_WAITS_PER_RUN counted waits at the dearer of this and
+ * WAIT_COMMANDS_PER_TRY, since any of them may be such a try.
+ */
+export const SES_COUNTED_WAIT_COMMANDS_PER_TRY = 68;
+/**
+ * A look at a step waiting while its store is switched off (lib/flow-retry.ts) reads only the queue, the store, its
+ * workflows and the run's count, and puts the step back: measured at 13 commands for a batch of one person, the step's
+ * first wait included (tests/suspended-store-mail.test.ts, 9 November 2026), at most half of WAIT_COMMANDS_PER_TRY. So
+ * it counts as half a wait against MAX_WAITS_PER_RUN: a run may look SWITCHED_OFF_LOOKS_PER_WAIT times for each wait
+ * it has left, and its commands stay within MAX_WAITS_PER_RUN × WAIT_COMMANDS_PER_TRY below.
+ */
+export const SWITCHED_OFF_LOOKS_PER_WAIT = 2;
+export const SWITCHED_OFF_LOOK_COMMANDS = WAIT_COMMANDS_PER_TRY / SWITCHED_OFF_LOOKS_PER_WAIT;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
   (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +
-  MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY;
+  MAX_WAITS_PER_RUN * Math.max(WAIT_COMMANDS_PER_TRY, SES_COUNTED_WAIT_COMMANDS_PER_TRY) +
+  SES_WAITS_PER_RUN * (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY);
 
 type PlanView = { tier: Tier; subscriptionActive: boolean; trialEnds: number };
 const inTrial = (store: PlanView, nowSeconds: number) => store.trialEnds > nowSeconds;

@@ -10,6 +10,7 @@ import { type Conversation, inbox } from "@/lib/community-dm";
 import { CommunityBar, Face, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -79,7 +80,10 @@ export default async function MessagesPage({ params, searchParams }: Params) {
                 <input type="hidden" name="handle" value={store.handle} />
                 <input type="hidden" name="action" value="accept" />
                 <input type="hidden" name="pair" value={c.pair} />
-                <button type="submit" className="cm-pill">{w.accept}</button>
+                <button type="submit" className="cm-pill">
+                  {w.accept}
+                  <span className="sr-only">: {nameOf(c.other)}</span>
+                </button>
               </form>
               <form action="/api/store/community/messages" method="post">
                 <input type="hidden" name="handle" value={store.handle} />
@@ -87,6 +91,7 @@ export default async function MessagesPage({ params, searchParams }: Params) {
                 <input type="hidden" name="pair" value={c.pair} />
                 <button type="submit" className="cm-quiet-link cm-mini cm-danger text-xs font-semibold">
                   {w.declineForGood}
+                  <span className="sr-only">: {nameOf(c.other)}</span>
                 </button>
               </form>
             </div>
@@ -127,16 +132,12 @@ export default async function MessagesPage({ params, searchParams }: Params) {
         <section aria-labelledby="talks-title" className="mt-7">
           <h2 id="talks-title" className="text-lg font-semibold">{w.yourConversations}</h2>
           {talks.length === 0 ? (
-            <div className="st-note mt-3 text-center">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingHereYet}</p>
-              <p className="mt-1 text-sm">
-                {owner
-                  ? w.openMemberName
-                  : config.dm.between
-                    ? w.openSomebodyName
-                    : w.onlyStoreWritten(store.name)}
-              </p>
-            </div>
+            <EmptyState
+              level={3}
+              title={w.nothingHereYet}
+              body={owner ? w.openMemberName : config.dm.between ? w.openSomebodyName : w.onlyStoreWritten(store.name)}
+              className="mt-3"
+            />
           ) : (
             list(talks, false)
           )}

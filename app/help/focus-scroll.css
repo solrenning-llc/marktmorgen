@@ -12,3 +12,12 @@ html:has([data-help-section]) {
 [data-help-section] summary {
   scroll-margin-block: 3rem;
 }
+
+/*
+ * No block of an answer is wider than 80 characters, at any width or with text
+ * spacing (WCAG 1.4.8 AAA, tests/help-line-length.test.ts). In ch, so it
+ * follows the font; Geist's "0" is wide, so 46ch is about 70 characters.
+ */
+[data-help-section] :where(p, li, dd) {
+  max-width: 46ch;
+}

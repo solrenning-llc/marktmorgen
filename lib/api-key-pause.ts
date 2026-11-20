@@ -51,6 +51,7 @@
 import { createHash } from "node:crypto";
 import {
   type Hold,
+  type KeyHold,
   type KeyMaker,
   type KeyRecord,
   NOT_LEFT,
@@ -150,7 +151,7 @@ export async function pausePreview(store: Store): Promise<PausePreview> {
 }
 
 /** What a pause is to do, key by key: the hold it takes and the one it had, so it can be undone exactly. */
-export type PausePlan = { id: string; to: Hold; before: Hold | null }[];
+export type PausePlan = { id: string; to: Hold; before: KeyHold | null }[];
 
 /**
  * What the rule pauses now: a key whose maker is on the team is held
@@ -166,7 +167,7 @@ export async function planPause(store: Store): Promise<PausePlan> {
 }
 
 const groups = (plan: PausePlan) => {
-  const out = new Map<string, { to: Hold; before: Hold | null; ids: string[] }>();
+  const out = new Map<string, { to: Hold; before: KeyHold | null; ids: string[] }>();
   for (const p of plan) {
     const at = `${p.to}|${p.before ?? ""}`;
     const group = out.get(at) ?? { to: p.to, before: p.before, ids: [] };
@@ -195,7 +196,8 @@ export async function pauseForRule(store: Store): Promise<number> {
  * the plan never reached.
  */
 export async function undoPause(store: Store, plan: PausePlan): Promise<void> {
-  for (const g of groups(plan)) await swapHolds(store.sid, g.ids, g.before, [g.to]);
+  // A key whose hold this code does not know was never changed (swapHolds never matches it), and "unknown" is never written.
+  for (const g of groups(plan)) if (g.before !== "unknown") await swapHolds(store.sid, g.ids, g.before, [g.to]);
 }
 
 /**
@@ -227,7 +229,7 @@ export type Exit = { left: string[]; unmatched: string[]; unrecorded: string[]; 
  * can be undone exactly, from the very values it would have written, if the
  * removal it belongs to did not happen.
  */
-export type ExitAttempt = { theirs: string[]; holds: { id: string; to: Hold; before: Hold | null }[] };
+export type ExitAttempt = { theirs: string[]; holds: { id: string; to: Hold; before: KeyHold | null }[] };
 
 /**
  * A teammate left the team or was taken off it (lib/team.ts removeMember,
@@ -321,7 +323,7 @@ const normalised = (email: string) => email.trim().toLowerCase();
 
 /** Keys whose maker's fingerprint matches nobody on the team now, not the leaver's, not already held for it or for good. */
 function unmatchedOf(keys: KeyRecord[], members: Map<string, string>, leaving: string[] = []): KeyRecord[] {
-  return keys.filter((k) => !madeBy(k, leaving) && whoseOf(k.maker, members).kind === "unmatched" && k.hold !== "unmatched" && k.hold !== "left");
+  return keys.filter((k) => !madeBy(k, leaving) && whoseOf(k.maker, members).kind === "unmatched" && k.hold !== "unmatched" && k.hold !== "left" && k.hold !== "unknown");
 }
 
 
@@ -355,6 +357,27 @@ export async function tellOwnerOfExit(store: Store, who: string, exit: Exit, ori
       ...(exit.left.length
         ? ["", "Paused for good, because they were made by someone no longer on the team. You can revoke them there and make new ones:", ...exit.left.map((name) => `- ${name}`)]
         : []),
+    ].join("\n"),
+  }).catch(() => false);
+}
+
+/**
+ * Tells the store's owner that a teammate taken off when they moved their
+ * sign-in address (lib/team.ts dropMemberships) may still have API keys that
+ * work: the sweep after the removal could not be finished, even repeated, so
+ * a key they made while being taken off may not be held. Names no key, as the
+ * keys could not be read; says where to revoke them. Returns whether it went.
+ */
+export async function tellOwnerOfUnswept(store: Store, who: string, origin = SITE_URL): Promise<boolean> {
+  return sendEmail({
+    meter: { by: "store", store, kind: "email" },
+    from: NIMBUS_FROM,
+    to: store.email,
+    subject: headerText(`Some API keys for ${store.name} may still work`, 200),
+    text: [
+      `${who} is no longer on the team of ${store.name}: they moved their sign-in to another address. We could not pause every API key they made, so some may still work.`,
+      "",
+      `Open API keys in the studio (${origin}/studio?store=${store.sid}#api) and revoke any key you do not recognize. Nothing was deleted.`,
     ].join("\n"),
   }).catch(() => false);
 }
@@ -431,10 +454,11 @@ async function teamNow(store: Store) {
  * pauseWhy, the gate's own reading): its maker, on the team, for the two-step
  * rule; the owner, for one nobody is recorded as making, one whose maker
  * could not be matched to the team or one its maker's role does not allow;
- * nobody, for one whose maker left.
+ * nobody, for one whose maker left or whose hold this code does not know.
  */
 function mayTurnOnAs(why: PauseWhy | null, key: KeyRecord, whose: Whose, mine: string[], role: Role): boolean {
-  if (!why || why === "left") return false;
+  // A hold this code does not know is turned back on by nobody: only revoked (Claude 2 on #3096).
+  if (!why || why === "left" || why === "unknown") return false;
   if (why === "rule") return whose.kind === "member" && role !== "owner" && madeBy(key, mine);
   return role === "owner";
 }

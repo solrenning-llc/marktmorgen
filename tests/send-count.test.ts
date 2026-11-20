@@ -34,7 +34,7 @@ function main(): void {
 
   part("In the composer");
   const studio = readFileSync("components/email-studio.tsx", "utf8");
-  is("it takes the month from the same two numbers as the This month card, and none when the plan's month cannot be told", studio.includes("month={props.monthKnown ? { used: props.used, allowance: props.allowance } : null}") && read("app/studio/email/page.tsx").includes("monthKnown={windowId(store) !== null}"), true);
+  is("it takes the month from the same two numbers as the This month card, and none when the plan's month cannot be told or its count could not be read (#3727)", studio.includes("month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}") && read("app/studio/email/page.tsx").includes("monthKnown={windowId(store) !== null && used !== null}"), true);
   is("shown only with a real recipient count, for an email that goes now", studio.includes("const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;"), true);
   is("in a polite live region that is always on the page, so a new count is read out", studio.includes('aria-live="polite" data-send-count>{monthCount?.line ?? ""}</p>'), true);
   is("bold when it is past what is left", studio.includes('monthCount?.over ? "font-semibold text-ink" : "text-ink-soft"'), true);

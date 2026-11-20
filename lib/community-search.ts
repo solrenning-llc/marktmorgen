@@ -72,6 +72,7 @@
  * something they did not pay for.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { MAX_COMMENTS_PER_POST } from "@/lib/community-text";
 
 const base = (id: string) => `nl:cm:${id}`;
@@ -261,15 +262,29 @@ export async function index(
   score: number,
   parts: string[],
 ): Promise<void> {
-  const [raw] = await redisPipeline([["SMEMBERS", indexKey(id, kind, thing)]]);
-  const writes = indexWrites(id, kind, thing, score, parts, Array.isArray(raw) ? raw.map(String) : []);
+  const writes = indexWrites(id, kind, thing, score, parts, await ownWords(id, kind, thing));
   if (writes.length) await redisPipeline(writes);
 }
 
 /** Takes something that is gone out of the index entirely. */
 export async function unindex(id: string, kind: SearchKind, thing: string): Promise<void> {
-  const [raw] = await redisPipeline([["SMEMBERS", indexKey(id, kind, thing)]]);
-  await redisPipeline(unindexWrites(id, kind, thing, Array.isArray(raw) ? raw.map(String) : []));
+  await redisPipeline(unindexWrites(id, kind, thing, await ownWords(id, kind, thing)));
+}
+
+/**
+ * The words a thing is indexed under now, read in their exact shape: a list
+ * of words, empty only when the set is (CX-123 rule 24). Any other reply
+ * throws UnknownReplyError before anything is written, because the writes
+ * are counted from it: taken as none, an unindex would delete the set of a
+ * thing's words and leave the thing under every one of them, where nothing
+ * could find it again, and an erasure would say a person was gone while
+ * their name still found them.
+ */
+async function ownWords(id: string, kind: SearchKind, thing: string): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", indexKey(id, kind, thing)]]), 1);
+  const own = replies ? stringList(replies[0]) : null;
+  if (!own) throw new UnknownReplyError("the words a thing is indexed under");
+  return own;
 }
 
 /**

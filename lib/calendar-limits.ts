@@ -34,8 +34,10 @@ export const CALENDAR_RETRIES_PER_DAY = 1;
 export const CALENDAR_POLLS_PER_HOUR = 4;
 /**
  * Answers refused past the pace in an hour before the address stops (inbox
- * C4-33, light a): the most the first-payment refund the owner funds allows
- * (tests/plan-margin.test.ts, US$ 65), priced in the feed's line. Two apps
+ * C4-33, light a): the most the first-payment refund the owner funds allowed
+ * (tests/plan-margin.test.ts, sized under US$ 65; the US$ 66 of 6 November
+ * 2026, C4-20261106-2640-DONO-156, is room for picture uploads, not for more
+ * of these), priced in the feed's line. Two apps
  * asking every fifteen minutes never reach it; one asking every five minutes
  * (Apple Calendar's shortest) does, and the studio's editor says so. Past it
  * the address is let go, as "Make a new address" does, and the studio shows a
@@ -43,3 +45,15 @@ export const CALENDAR_POLLS_PER_HOUR = 4;
  * answered from its token's one read like any other.
  */
 export const CALENDAR_REFUSED_PER_HOUR = 7;
+/**
+ * Calendars one store may try to add in ten minutes (R27): each try reads the
+ * calendar's address once (lib/calendar-sync.ts addFeed), so a store, even
+ * one with no plan, cannot ask for that read again and again. Ten covers
+ * setting up all MAX_FEEDS with a few corrected addresses.
+ */
+export const CALENDAR_ADDS_PER_TEN_MINUTES = 10;
+/**
+ * The same from one connection, whatever store it is signed in to: a
+ * machine holding several stores cannot multiply the reads.
+ */
+export const CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES = 20;

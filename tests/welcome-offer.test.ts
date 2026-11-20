@@ -15,11 +15,12 @@
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { NO_WELCOME_OFFER, endsAt, leftWords, parseWelcomeOffer, remindAt } from "@/lib/welcome-offer";
-import { openWelcome, scheduleReminder, sendWelcomeReminders, welcomeFor } from "@/lib/welcome-offer-send";
+import { forgetWelcomePerson, openWelcome, scheduleReminder, sendWelcomeReminders, welcomeFor } from "@/lib/welcome-offer-send";
 import { readClaimFull, recordLead, requestCopy } from "@/lib/free";
 import { readListing } from "@/lib/catalog";
 import { discountKindOf, entryOf } from "@/lib/discount-impact";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, storeForEmail } from "@/lib/store";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -29,10 +30,20 @@ process.env.STRIPE_SECRET_KEY = "sk_test_welcome_only_a_stand_in";
 
 const sent: { to: string; subject: string; text: string }[] = [];
 const checkouts: URLSearchParams[] = [];
+/** The email service answering with an error, as it may for a moment: 0 when it takes the email. */
+let mailDown = 0;
+/** Run inside the email service's answer, before it answers: what happens while a send is in flight. */
+let duringSend: (() => Promise<void>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.resend.com") {
+    if (duringSend) {
+      const run = duringSend;
+      duringSend = null;
+      await run();
+    }
+    if (mailDown) return new Response("unavailable", { status: mailDown });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     sent.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
     return json({ id: "email_1" });
@@ -145,6 +156,147 @@ async function main(): Promise<void> {
   const oddClaim = (await readClaimFull(odd))!;
   is("a once-only mark answered oddly that did not land schedules nothing", await withOddWrite("nl:wo:r:", ["QUEUED"], () => scheduleReminder(store, oddClaim, odd, asked + HOUR)), false);
   is("the next whole answer schedules it, once", [await scheduleReminder(store, oddClaim, odd, asked + HOUR), await scheduleReminder(store, oddClaim, odd, asked + HOUR)], [true, false]);
+
+  part("A reminder whose send failed before the email service was asked is tried again at its own hour, a few times at the most, never twice");
+  const waitingFor = async (email: string) => {
+    const [flat] = await redis.pipeline([["ZRANGEBYSCORE", "nl:wo:due", "-inf", "+inf", "WITHSCORES"]]);
+    const list = (flat as string[]) ?? [];
+    const out: { a: unknown; score: number }[] = [];
+    for (let i = 0; i + 1 < list.length; i += 2) {
+      const v = JSON.parse(list[i]) as { e?: string; a?: unknown };
+      if (v.e === email) out.push({ a: v.a, score: Number(list[i + 1]) });
+    }
+    return out;
+  };
+  const scheduled = async (email: string) => {
+    const t = await ask(email, free.product.id, true);
+    const c = (await readClaimFull(t))!;
+    await recordLead(store, c, "Pantry Guide");
+    store = (await storeForEmail(OWNER))!;
+    const began = Math.floor(Date.parse(c.at) / 1000);
+    if (!(await scheduleReminder(store, c, t, began + HOUR))) throw new Error(`not scheduled for ${email}`);
+    return remindAt(began, 48);
+  };
+  // The reminders only, not the free copy each person asked for first.
+  const to = (email: string) => sent.filter((m) => m.to === email && /hours? left/.test(m.subject)).length;
+  /** The free copy's record cannot be read during `run` (a Redis error): a failure before the email service is asked. */
+  const claimDown = async <T>(run: () => Promise<T>, during: (() => Promise<void>) | null = null): Promise<T> => {
+    const real = redis.pipeline.bind(redis);
+    let hook = during;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands[0]?.[0] === "GET" && String(commands[0]?.[1] ?? "").startsWith("nl:free:claim:")) {
+        if (hook) {
+          const now = hook;
+          hook = null;
+          await now();
+        }
+        throw new Error("synthetic: the free copy's record could not be read just now");
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = real;
+    }
+  };
+  const retryAt = await scheduled("retry@example.com");
+  const failedRun = await claimDown(() => sendWelcomeReminders(Date.now() + 10_000, retryAt + 1));
+  const back = await waitingFor("retry@example.com");
+  is("a read failed before the send: not sent, and back in the queue once, tried once", [failedRun.sent, to("retry@example.com"), back.length, back[0]?.a], [0, 0, 1, 1]);
+  is("at its own hour, where an erasure looks for it", back[0]?.score, retryAt);
+  const nextRun = await sendWelcomeReminders(Date.now() + 10_000, retryAt + 301);
+  is("sent the next time, once", [nextRun.sent >= 1, to("retry@example.com"), (await waitingFor("retry@example.com")).length], [true, 1, 0]);
+  await sendWelcomeReminders(Date.now() + 10_000, retryAt + 601);
+  is("and not again", to("retry@example.com"), 1);
+
+  const downAt = await scheduled("down@example.com");
+  const triedAs: unknown[] = [];
+  for (let run = 0; run < 5; run += 1) {
+    await claimDown(() => sendWelcomeReminders(Date.now() + 10_000, downAt + 1 + run * 300));
+    triedAs.push((await waitingFor("down@example.com"))[0]?.a ?? null);
+  }
+  is("still failing: tried again three times, then dropped, never sent", [triedAs, to("down@example.com")], [[1, 2, 3, null, null], 0]);
+
+  // Claude 2 on #3214: the email service's answer cannot tell a refusal (a 4xx, an address it will never take, an
+  // uncertain SES answer) from a failure that may pass, and each ask takes the store's email room again. So a reminder
+  // the email service was asked for is never tried again.
+  const refusedAt = await scheduled("refused@example.com");
+  const roomBefore = await allowanceUsed(store, "email");
+  is("the store's email room is read", roomBefore > 0, true);
+  mailDown = 400;
+  const refusedRun = await sendWelcomeReminders(Date.now() + 10_000, refusedAt + 1);
+  mailDown = 0;
+  is("the email service said no: not sent, not put back", [refusedRun.sent, to("refused@example.com"), (await waitingFor("refused@example.com")).length], [0, 0, 0]);
+  is("its room taken once, for the one ask", (await allowanceUsed(store, "email")) - roomBefore, 1);
+  for (let run = 1; run < 5; run += 1) await sendWelcomeReminders(Date.now() + 10_000, refusedAt + 1 + run * 300);
+  is("no later run sends it or takes more of the store's email room", [to("refused@example.com"), (await allowanceUsed(store, "email")) - roomBefore], [0, 1]);
+
+  // An answer that may have been taken (a server error) is never sent a second time.
+  const maybeAt = await scheduled("maybe@example.com");
+  mailDown = 503;
+  await sendWelcomeReminders(Date.now() + 10_000, maybeAt + 1);
+  mailDown = 0;
+  for (let run = 1; run < 5; run += 1) await sendWelcomeReminders(Date.now() + 10_000, maybeAt + 1 + run * 300);
+  is("a send that may have gone through is never sent again", [to("maybe@example.com"), (await waitingFor("maybe@example.com")).length], [0, 0]);
+
+  const goneAt = await scheduled("gone@example.com");
+  await claimDown(() => sendWelcomeReminders(Date.now() + 10_000, goneAt + 1));
+  is("waiting again after a failed send", (await waitingFor("gone@example.com")).length, 1);
+  const erased = await forgetWelcomePerson(store.statsId, "gone@example.com");
+  is("erasing the person takes it out of the queue with their marks", [erased >= 2, (await waitingFor("gone@example.com")).length], [true, 0]);
+  await sendWelcomeReminders(Date.now() + 10_000, goneAt + 301);
+  is("and nothing is sent to them", to("gone@example.com"), 0);
+
+  // Claude 3 on #3214: the person is erased while their reminder is off the queue, and the try then fails. The erasure
+  // finds nothing there and says it erased; the put-back must not bring the person's address back into the queue.
+  const raceAt = await scheduled("race@example.com");
+  let erasedDuring = -1;
+  await claimDown(
+    () => sendWelcomeReminders(Date.now() + 10_000, raceAt + 1),
+    async () => {
+      erasedDuring = await forgetWelcomePerson(store.statsId, "race@example.com");
+    },
+  );
+  is("the erasure ran during the try and said it erased", erasedDuring >= 1, true);
+  is("after the erasure answered, no reminder holding their address waits in the queue", (await waitingFor("race@example.com")).length, 0);
+  await sendWelcomeReminders(Date.now() + 10_000, raceAt + 301);
+  is("and nothing is sent to them after", to("race@example.com"), 0);
+
+  // The same while the email service is asked, and it says no: never put back either.
+  const sendRaceAt = await scheduled("sendrace@example.com");
+  let erasedInSend = -1;
+  duringSend = async () => {
+    erasedInSend = await forgetWelcomePerson(store.statsId, "sendrace@example.com");
+  };
+  mailDown = 400;
+  await sendWelcomeReminders(Date.now() + 10_000, sendRaceAt + 1);
+  mailDown = 0;
+  duringSend = null;
+  is("erased during a refused send: nothing waits, nothing is sent after", [erasedInSend >= 1, (await waitingFor("sendrace@example.com")).length], [true, 0]);
+  await sendWelcomeReminders(Date.now() + 10_000, sendRaceAt + 301);
+  is("and nothing is sent to them after the refused send", to("sendrace@example.com"), 0);
+
+  part("The queue's read, in its exact shape (CX-123 rule 24)");
+  const realPipeline = redis.pipeline.bind(redis);
+  const oddRead = async (reply: unknown) => {
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands[0]?.[0] === "ZRANGEBYSCORE" && commands[0]?.[1] === "nl:wo:due" ? reply : realPipeline(commands)) as typeof redis.pipeline;
+    try {
+      await sendWelcomeReminders(Date.now() + 10_000, goneAt + 900);
+      return "read";
+    } catch (error) {
+      return error instanceof Error ? error.name : "thrown";
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+  };
+  is(
+    "a member without its hour, an hour of no known shape, or no list: unknown, never \"nothing due\"",
+    [await oddRead([["{}"]]), await oddRead([["{}", "soon"]]), await oddRead([null]), await oddRead([])],
+    ["UnknownReplyError", "UnknownReplyError", "UnknownReplyError", "UnknownReplyError"],
+  );
+  is("an empty queue is read as nothing due", await oddRead([[]]), "read");
   done();
 }
 

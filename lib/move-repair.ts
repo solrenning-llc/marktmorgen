@@ -42,7 +42,9 @@ export async function repairMove(email: string): Promise<boolean> {
     }
     // An index a lost answer left on the other address is pointed back at the list's (C3-117).
     await repointPasskeys(home);
-    await endAllSessions(away);
+    // The record is the lock on both addresses: it is cleared only once the away address's
+    // sessions are known to be logged out. An unknown logout (null) keeps it for a later try (rule 30).
+    if ((await endAllSessions(away)) === null) return false;
     await clearBrokenMove(from, to);
     return true;
   } catch (error) {
@@ -73,9 +75,13 @@ export async function describeMove(email: string): Promise<Record<string, unknow
  * looked (scripts/move-repair.mjs, with the address typed again). Refused
  * while the state is split, the store on one address and its ways in on the
  * other: clearing it would let a login by the emailed link into the store
- * with no second step again. Its two addresses are logged out.
+ * with no second step again. Its two addresses are logged out first, and the
+ * record is cleared only once both logouts are confirmed ("logout" otherwise).
  */
-export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split" | "running"> {
+export async function clearBrokenMoveByHand(
+  email: string,
+  confirm: string,
+): Promise<"cleared" | "none" | "confirm" | "split" | "running" | "logout"> {
   const broken = await readBrokenMove(email);
   if (!broken) return "none";
   if (confirm.trim().toLowerCase() !== email.trim().toLowerCase()) return "confirm";
@@ -87,8 +93,19 @@ export async function clearBrokenMoveByHand(email: string, confirm: string): Pro
   });
   const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
   if ((a.store && !a.ways && b.ways) || (b.store && !b.ways && a.ways)) return "split";
+  // The record is the lock on both addresses: it is cleared only once both are known to be
+  // logged out. An unknown or failed logout keeps it for a later try (rule 30).
+  const loggedOut = async (address: string) => {
+    try {
+      return (await endAllSessions(address)) !== null;
+    } catch (error) {
+      console.error("logging out a broken move's address failed", error);
+      return false;
+    }
+  };
+  const fromOut = await loggedOut(broken.from);
+  const toOut = await loggedOut(broken.to);
+  if (!fromOut || !toOut) return "logout";
   await clearBrokenMove(broken.from, broken.to);
-  await endAllSessions(broken.from);
-  await endAllSessions(broken.to);
   return "cleared";
 }

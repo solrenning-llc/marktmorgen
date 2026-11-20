@@ -1,14 +1,17 @@
 import { originFrom } from "@/lib/request-origin";
+import { noteRemovedCourse } from "@/lib/removed-courses";
 import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { MAX_AI_LESSONS, MAX_AI_MODULES } from "@/lib/ai-rules";
-import { deleteFile as del, headFile as head } from "@/lib/file-store";
+import { headFile as head } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -25,7 +28,7 @@ import {
   findLesson,
   lessonCount,
   lessonsInOrder,
-  readBody,
+  readBodyExact,
   readCourse,
   saveBody,
   saveCourse,
@@ -36,8 +39,8 @@ import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
-import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
-import { readListing } from "@/lib/catalog";
+import { CERT_ID_PATTERN, courseIndexes, withdrawCertificate } from "@/lib/certificate";
+import { hasProduct, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
@@ -77,7 +80,10 @@ export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("quiz") === "1") {
     return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
   }
-  return Response.json({ ok: true, text: await readBody(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+  // Read exactly: an unknown reply is said as such, never handed to the editor as an empty lesson (rule 24).
+  const lessonText = await readBodyExact(course.id, lessonId).catch(() => null);
+  if (lessonText === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  return Response.json({ ok: true, text: lessonText }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**
@@ -99,7 +105,9 @@ export async function GET(request: NextRequest) {
  * verdict, feedback }` approves a student's work or asks for another try;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
- * as it is kept, in one write.
+ * as it is kept, in one write; `{ action: "shelf", id, products }` sets the
+ * course's "More from" shelf (628 [HN4](b)) to up to six of the store's own
+ * products, in that order, and `products: []` takes it off.
  *
  * `id` is always the product's, and the course is found through the
  * creator's own store, so nothing here can reach anyone else's course.
@@ -239,9 +247,17 @@ export async function POST(request: NextRequest) {
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
+        // Noted as dropped before the product lets go of it (lib/removed-courses.ts), so its learners' records stay
+        // reachable by their erasure; a full list or a note not confirmed keeps the course.
+        try {
+          const noted = await noteRemovedCourse(store.statsId, { productId: product.id, courseId: course.id, lessonIds: [], moduleIds: course.modules.map((m) => m.id) }, store, courseIndexes);
+          if (noted !== "noted") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        } catch {
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
-        await dropCourse(course, store);
+        await dropCourse(course, store, product.id, courseIndexes);
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });
         return Response.json({ ok: true });
@@ -267,7 +283,7 @@ export async function POST(request: NextRequest) {
           if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
           await save(result.course);
           const files = await applyTaskDrop(drop, storeKey(store), store);
-          if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
+          if (files.length) await deleteOrSweep(files, "handed-in work");
           return Response.json({ ok: true, course: result.course });
         }
         // A lesson is done by its quiz or by its assignment, never by both.
@@ -326,6 +342,21 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, course: result.course });
       }
 
+      /*
+        When access to the course ends (24 [E7]), or null to take it off: a moment the studio worked out as the close
+        of the day the creator picked, in their own zone. The clock is the server's, never the browser's, so "after now"
+        and "never earlier" (lib/course.ts) are judged the same way for every creator. Only a number or null is read:
+        a string, a missing value or anything else is refused as not a date, never turned into one. A membership course
+        never takes an end (members keep it while they pay).
+      */
+      if (action === "access-end") {
+        const at = body.at === null ? null : typeof body.at === "number" ? body.at : Number.NaN;
+        const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000), membership: product.recurring !== null });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
       // A ready structure (540 [CU1]): only its id comes from the browser, and it
       // is applied to the course as kept, under this lock, in one write. A course
       // the creator has touched, or one a structure was already given, is refused.
@@ -359,6 +390,17 @@ export async function POST(request: NextRequest) {
       // How long certificates issued from now on stay valid (639 [GL7](32)): 1 to 120 months, or for good.
       if (action === "cert-months") {
         const result = editCourse(course, { op: "certificate-months", months: body.months ?? null });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      // The "More from" shelf (628 [HN4](b)): up to six of the store's own products, in the creator's order; anything the
+      // store does not have, and the course itself, are left out here, so the course keeps only ids the store holds.
+      if (action === "shelf") {
+        const asked = Array.isArray(body.products) ? body.products.filter((p: unknown) => typeof p === "string" && hasProduct(store, p)) : null;
+        if (!asked) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+        const result = editCourse(course, { op: "shelf", products: asked, courseProductId: product.id });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });
@@ -407,7 +449,9 @@ export async function POST(request: NextRequest) {
         const lesson = findLesson(course, lessonId);
         if (!lesson) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         // A new video deletes the one the lesson had: not from a session let in without its second step.
-        if (kind === "video" && lesson.lesson.video && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
+        const lock = kind === "video" && lesson.lesson.video ? await lockRead(lockedFor(request, "products", "replace")) : false;
+        if (lock instanceof Response) return lock;
+        if (lock) return refusedJson("locked");
         // The file has to sit in this account's folder for this very lesson,
         // and what it is is read from storage, not from the browser.
         const folder = await storeFolder(ref);
@@ -499,7 +543,7 @@ export async function POST(request: NextRequest) {
         // An assignment goes with its lesson, and the work handed in for it, as read before the save.
         for (const drop of taskDrops) {
           const files = await applyTaskDrop(drop, storeKey(store), store);
-          if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
+          if (files.length) await deleteOrSweep(files, "handed-in work");
         }
       }
       if (edit.op === "module-edit" || edit.op === "module-remove" || edit.op === "lesson-add" || edit.op === "outline") {
@@ -512,7 +556,7 @@ export async function POST(request: NextRequest) {
         if (filesInCourse(result.course).some((f) => f.pathname === file.pathname)) continue;
         // A video the video service keeps is taken away there; anything else, from the file store.
         if (await dropStream(file.pathname, store).catch(() => false)) continue;
-        await del(file.pathname).catch((error: unknown) => console.error("could not delete a lesson file", error));
+        await deleteOrSweep(file.pathname, "a lesson file");
       }
       return Response.json({ ok: true, course: result.course, addedId: result.addedId, ...(stream ? { stream } : {}) });
     });

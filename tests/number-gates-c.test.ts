@@ -101,10 +101,31 @@ const SET_INCR_UNKNOWN: [string, unknown][] = [
   ["a counter that never answers", "throw"],
 ];
 
+/** A window count's replies (lib/window-count.ts: INCR, then EXPIRE NX) that are not a count. */
+const WINDOW_UNKNOWN: [string, unknown][] = [
+  ["an EXPIRE answered false", [1, false]],
+  ["an EXPIRE answered as text", [1, "1"]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a count of zero after INCR", [0, 1]],
+  ["a count that is true", [true, 1]],
+  ["a count that is not whole", [1.5, 1]],
+  ["a count that is negative", [-1, 1]],
+  ["a count written as empty text", ["", 1]],
+  ["a reply that is not a list", { x: 1 }],
+  ["a reply cut short", [1]],
+  ["an empty reply", []],
+  ["a reply too long", [1, 1, 1]],
+  ["a counter that never answers", "throw"],
+];
+
 const key = (command: Command | undefined) => String(command?.[1] ?? "");
 /** A SET ... NX then INCR pipeline on a key starting with `prefix`. */
 const setIncr = (prefix: string) => (commands: Command[]) =>
   commands.length === 2 && commands[0]?.[0] === "SET" && key(commands[0]).startsWith(prefix) && commands[1]?.[0] === "INCR";
+/** A window count (lib/window-count.ts: INCR, then EXPIRE NX) on a key starting with `prefix`. */
+const windowIncr = (prefix: string) => (commands: Command[]) =>
+  commands.length === 2 && commands[0]?.[0] === "INCR" && key(commands[0]).startsWith(prefix) && commands[1]?.[0] === "EXPIRE";
 const wroteSince = (from: number, test: (c: Command) => boolean) => seen.slice(from).filter(test).length;
 
 async function main(): Promise<void> {
@@ -208,22 +229,22 @@ async function main(): Promise<void> {
     const ask = () => outcome(() => requestAffiliateLink({ store: base, email: `applicant${(n += 1)}@numbergatesc.example`, note: "", ip: ip(), origin: ORIGIN }));
     const linkWrites = (from: number) => wroteSince(from, (c) => c[0] === "SET" && key(c).startsWith("nl:aff:link:"));
     for (const [which, prefix] of [["per connection", "nl:rl:aff:ip:"], ["per address", "nl:rl:aff:addr:"]] as const) {
-      for (const [label, reply] of SET_INCR_UNKNOWN) {
-        counter = { match: setIncr(prefix), reply };
+      for (const [label, reply] of WINDOW_UNKNOWN) {
+        counter = { match: windowIncr(prefix), reply };
         const [calls, sent, from] = [counterCalls, mails.length, seen.length];
         const got = await ask();
         const want = reply === "throw" ? "threw Error" : "error";
         is(`${which}, ${label}: "error", no email, no link kept`, [got, counterCalls - calls, mails.length - sent, linkWrites(from)], [want, 1, 0, 0]);
       }
     }
-    counter = { match: setIncr("nl:rl:aff:ip:"), reply: ["OK", 1] };
+    counter = { match: windowIncr("nl:rl:aff:ip:"), reply: [1, 1] };
     {
       const sent = mails.length;
       is("a confirmed count within both ceilings: the link is emailed", [await ask(), mails.length - sent], ["sent", 1]);
     }
-    counter = { match: setIncr("nl:rl:aff:ip:"), reply: [null, 11] };
+    counter = { match: windowIncr("nl:rl:aff:ip:"), reply: [11, 0] };
     is("a confirmed count past the connection's ceiling is limited, as before", await ask(), "limited");
-    counter = { match: setIncr("nl:rl:aff:addr:"), reply: [null, 6] };
+    counter = { match: windowIncr("nl:rl:aff:addr:"), reply: [6, 0] };
     is("a confirmed count past the address's ceiling is limited, as before", await ask(), "limited");
     counter = null;
   }
@@ -237,23 +258,23 @@ async function main(): Promise<void> {
       ["HSET", `nl:aff:${statsId}:codes`, "ana", ANA],
       ["HSET", `nl:aff:${statsId}:emails`, "ana@numbergatesc.example", ANA],
     ]);
-    const isClick = setIncr("nl:rl:aff:click:");
+    const isClick = windowIncr("nl:rl:aff:click:");
     let n = 0;
     const click = () => outcome(() => recordClick(base, "ana", { ip: "198.51.100.4", userAgent: `agent-${(n += 1)}`, session: undefined }));
     const counted = (from: number) => wroteSince(from, (c) => (c[0] === "HINCRBY" && key(c).endsWith(":clicks")) || key(c).startsWith("nl:aff:seen:"));
-    for (const [label, reply] of SET_INCR_UNKNOWN) {
+    for (const [label, reply] of WINDOW_UNKNOWN) {
       counter = { match: isClick, reply };
       const [calls, from] = [counterCalls, seen.length];
       const got = await click();
       const want = reply === "throw" ? "threw Error" : "threw UnknownReplyError";
       is(`${label}: not counted, thrown to the visit's log`, [got, counterCalls - calls, counted(from)], [want, 1, 0]);
     }
-    counter = { match: isClick, reply: ["OK", 1] };
+    counter = { match: isClick, reply: [1, 1] };
     {
       const from = seen.length;
       is("a confirmed first click is counted", [await click(), counted(from) > 0], [true, true]);
     }
-    counter = { match: isClick, reply: [null, 31] };
+    counter = { match: isClick, reply: [31, 0] };
     {
       const from = seen.length;
       is("a confirmed count past the hour's clicks is not counted, as before", [await click(), counted(from)], [false, 0]);
@@ -267,22 +288,22 @@ async function main(): Promise<void> {
     const ask = () => outcome(() => requestOrdersLink({ store: base, email: `buyer${(n += 1)}@numbergatesc.example`, ip: ip(), origin: ORIGIN }));
     const after = (from: number) => wroteSince(from, (c) => key(c).startsWith("nl:orders:"));
     for (const [which, prefix] of [["per connection", "nl:rl:orders:ip:"], ["per address", "nl:rl:orders:addr:"]] as const) {
-      for (const [label, reply] of SET_INCR_UNKNOWN) {
-        counter = { match: setIncr(prefix), reply };
+      for (const [label, reply] of WINDOW_UNKNOWN) {
+        counter = { match: windowIncr(prefix), reply };
         const [calls, sent, stripe, from] = [counterCalls, mails.length, stripeCalls, seen.length];
         const got = await ask();
         const want = reply === "throw" ? "threw Error" : "error";
         is(`${which}, ${label}: "error", nothing taken, read or emailed`, [got, counterCalls - calls, mails.length - sent, stripeCalls - stripe, after(from)], [want, 1, 0, 0, 0]);
       }
     }
-    counter = { match: setIncr("nl:rl:orders:ip:"), reply: ["OK", 1] };
+    counter = { match: windowIncr("nl:rl:orders:ip:"), reply: [1, 1] };
     {
       const got = await ask();
       is("a confirmed count within both ceilings goes on past the limits, as before", got === "sent" || got === "busy", true);
     }
-    counter = { match: setIncr("nl:rl:orders:ip:"), reply: [null, 11] };
+    counter = { match: windowIncr("nl:rl:orders:ip:"), reply: [11, 0] };
     is("a confirmed count past the connection's ceiling is limited, as before", await ask(), "limited");
-    counter = { match: setIncr("nl:rl:orders:addr:"), reply: [null, 6] };
+    counter = { match: windowIncr("nl:rl:orders:addr:"), reply: [6, 0] };
     is("a confirmed count past the address's ceiling is limited, as before", await ask(), "limited");
     counter = null;
   }
@@ -304,23 +325,23 @@ async function main(): Promise<void> {
       );
       return [response.status, ((await response.json()) as { error?: string }).error ?? "ok"];
     };
-    const isRate = setIncr("nl:rl:creators:");
+    const isRate = windowIncr("nl:rl:creators:");
     const kept = (from: number) => wroteSince(from, (c) => c[0] === "LPUSH" && key(c) === RESPONSES_KEY);
     const quiet = console.error;
     console.error = () => {};
-    for (const [label, reply] of SET_INCR_UNKNOWN) {
+    for (const [label, reply] of WINDOW_UNKNOWN) {
       counter = { match: isRate, reply };
       const [calls, from] = [counterCalls, seen.length];
       const got = await ask();
       is(`${label}: 500 server_error, nothing kept`, [got, counterCalls - calls, kept(from)], [[500, "server_error"], 1, 0]);
     }
     console.error = quiet;
-    counter = { match: isRate, reply: ["OK", 1] };
+    counter = { match: isRate, reply: [1, 1] };
     {
       const from = seen.length;
       is("a confirmed first answer is kept", [await ask(), kept(from)], [[201, "ok"], 1]);
     }
-    counter = { match: isRate, reply: [null, 6] };
+    counter = { match: isRate, reply: [6, 0] };
     {
       const from = seen.length;
       is("a confirmed sixth answer in the hour is refused as before", [await ask(), kept(from)], [[429, "rate_limited"], 0]);
@@ -356,6 +377,9 @@ async function main(): Promise<void> {
   const [record] = await redis.pipeline([["HGET", `nl:cm:${cid}:m`, memberKey]]);
   await redis.pipeline([["HSET", `nl:cm:${cid}:m`, memberKey, JSON.stringify({ ...JSON.parse(String(record)), n: "Member One" })]]);
   if (!(await readMember(cid, memberKey))?.n) throw new Error("no name");
+  // A second member, for a message that opens a conversation (a request): only that spends the day's openings (dmNew).
+  const OTHER = "0123456789abcdef0123456789abcdef";
+  await redis.pipeline([["HSET", `nl:cm:${cid}:m`, OTHER, JSON.stringify({ ...JSON.parse(String(record)), k: OTHER, e: "other@number-gates.example", n: "Member Two", h: "member-two", t: "" })]]);
   const es = communityWords("es").notices;
   const en = communityWords("en").notices;
   const rateIs = (kind: string) => (commands: Command[]) =>
@@ -420,13 +444,18 @@ async function main(): Promise<void> {
         }),
       );
     const send = () => post({ action: "send", to: "creator", text: `A private message ${(n += 1)}` })();
+    // The day's openings are read only for a new request: a message to the creator never is one.
+    const opening = () => post({ action: "send", to: OTHER, text: `A private message ${(n += 1)}` })();
     const dmWrites = (from: number) => wroteSince(from, (c) => key(c).includes(":dm:"));
+    // An opening is known only once the pair is read (send's checks), so for it the reads come first: none may write.
+    const READS = new Set(["SISMEMBER", "EXISTS", "ZCARD", "ZSCORE", "LLEN", "LINDEX", "GET", "HGET", "SCARD"]);
+    const dmChanges = (from: number) => wroteSince(from, (c) => key(c).includes(":dm:") && !READS.has(String(c[0])));
     for (const kind of ["dm", "dmNew"]) {
       for (const [label, reply] of SET_INCR_UNKNOWN) {
         counter = { match: rateIs(kind), reply };
         const from = seen.length;
-        const got = await read(send);
-        is(`${kind}, ${label}: 503 "nothing was changed" in Spanish, nothing sent`, [got, dmWrites(from)], [{ status: 503, store: "no-store", cookie: false, location: null, body: es.error }, 0]);
+        const got = await read(kind === "dmNew" ? opening : send);
+        is(`${kind}, ${label}: 503 "nothing was changed" in Spanish, nothing sent`, [got, kind === "dmNew" ? dmChanges(from) : dmWrites(from)], [{ status: 503, store: "no-store", cookie: false, location: null, body: es.error }, 0]);
       }
     }
     // Once the message is being written, whether it went in is not known: the person is asked to look first.

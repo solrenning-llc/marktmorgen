@@ -21,11 +21,20 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   const name = affiliateCookieName(store.handle);
-  await endAffiliateSession(request.cookies.get(name)?.value).catch(() => {});
+  // This browser's cookie goes whatever happens; "signed out" is said only when ending the session at the server did
+  // not fail. Otherwise the page says it may still be open, never signed out (CX-123 rule 24, as app/api/auth/signout;
+  // tests/affiliate-signout-exact.test.ts).
+  let ended = true;
+  try {
+    await endAffiliateSession(request.cookies.get(name)?.value);
+  } catch (error) {
+    console.error("affiliate sign-out failed", error);
+    ended = false;
+  }
   return new Response(null, {
     status: 303,
     headers: {
-      Location: `${origin}/@${store.handle}/affiliates?status=signedout`,
+      Location: `${origin}/@${store.handle}/affiliates?status=${ended ? "signedout" : "signedout-unknown"}`,
       "Cache-Control": "no-store",
       "Set-Cookie": `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
     },

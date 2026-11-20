@@ -20,7 +20,7 @@ import {
   setReplay,
   withinEventWrites,
 } from "@/lib/community-events";
-import { advanceEventJob, cancelNoticeSending, queueEventNotice } from "@/lib/community-event-mail";
+import { type EventMailJob, advanceEventJob, cancelNoticeSending, queueEventNotice } from "@/lib/community-event-mail";
 import { eventMeeting, eventMeetingAfterEdit, eventMeetingCancelled } from "@/lib/event-meetings";
 import { usableProviders } from "@/lib/meet-connect";
 import type { EventInput } from "@/lib/community-events";
@@ -45,6 +45,11 @@ const ACTIONS = new Set(["create", "edit", "cancel", "delete", "replay"]);
  * "cancel", event }` calls it off and emails them, once; `{ action:
  * "delete", event }` takes a cancelled or finished one away; `{ action:
  * "replay", event, url }` sets or clears its recording.
+ *
+ * Once a move or a cancellation is written, the answer says it was made,
+ * never 500: with `notice: "waiting"` when who is coming could not be read
+ * just now (the email is written down and goes out once it can, rule 30), or
+ * `notice: "failed"` when the email could not even be written down.
  *
  * The events are always found through the creator's own store, so nothing
  * here can reach anyone else's.
@@ -85,11 +90,24 @@ export async function POST(request: NextRequest) {
       });
 
     // Sends a move's or a cancellation's email now, after the answer; the
-    // five-minute job finishes whatever this one does not.
-    const notify = (job: { id: string } | null) => {
+    // five-minute job finishes whatever this one does not, a notice still
+    // waiting for who is coming included, which the answer then tells of.
+    let notice = null as "waiting" | "failed" | null;
+    const notify = (job: EventMailJob | null) => {
       if (!job) return;
+      if (job.waiting) notice = "waiting";
       const jobId = job.id;
-      after(() => advanceEventJob(jobId, storeForHandle, Date.now() + 25_000).then(() => undefined, (error) => console.error("sending an event notice failed", error)));
+      try {
+        after(() => advanceEventJob(jobId, storeForHandle, Date.now() + 25_000).then(() => undefined, (error) => console.error("sending an event notice failed", error)));
+      } catch (error) {
+        // The send is written down: the five-minute job sends it.
+        console.error("handing an event notice to after failed", error);
+      }
+    };
+    // The change is written by then: its notice failing to start is told, never a 500.
+    const unsent = (error: unknown) => {
+      console.error("starting an event notice failed", action, error);
+      notice = "failed";
     };
 
     if (action === "create") {
@@ -134,16 +152,25 @@ export async function POST(request: NextRequest) {
       // removed when another place is chosen — before anybody is told.
       const record = await meeting(eventMeetingAfterEdit(store, changed.before, changed.event));
       if (changed.moved) {
-        notify(await queueEventNotice(store, changed.event, "moved", { start: changed.before.start, minutes: changed.before.minutes }));
+        try {
+          notify(await queueEventNotice(store, changed.event, "moved", { start: changed.before.start, minutes: changed.before.minutes }));
+        } catch (error) {
+          unsent(error);
+        }
       }
-      return Response.json({ ok: true, moved: changed.moved, meeting: record ? { made: record.made, error: record.error } : null });
+      return Response.json({ ok: true, moved: changed.moved, ...(notice ? { notice } : {}), meeting: record ? { made: record.made, error: record.error } : null });
     }
 
     if (action === "cancel") {
       const changed = await cancelEvent(store, eventId);
       if (!changed.ok) return fail(changed.reason, changed.reason === "gone" ? 404 : 409);
       await meeting(eventMeetingCancelled(store, changed.event));
-      notify(await queueEventNotice(store, changed.event, "cancelled", null));
+      try {
+        notify(await queueEventNotice(store, changed.event, "cancelled", null));
+      } catch (error) {
+        unsent(error);
+      }
+      if (notice) return Response.json({ ok: true, notice });
       return Response.json({ ok: true });
     }
 

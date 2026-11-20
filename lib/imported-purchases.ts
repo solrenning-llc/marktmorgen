@@ -34,8 +34,11 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, needData } from "@/lib/store-data";
-import { orderWrite } from "@/lib/order-data";
+import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { HASH_DEL_IF, HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
+import { repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -68,6 +71,72 @@ export function addressHash(email: string): string {
 
 export const importedKey = (statsId: string, email: string) => `nl:imp:buy:${statsId}:${addressHash(email)}`;
 export const importedWhoKey = (statsId: string) => `nl:imp:who:${statsId}`;
+
+/**
+ * Grants written only for addresses not deleted from the store, in one step
+ * with the check (review of #3383, as lib/suppression.ts KEEP_UNLESS_ERASED):
+ * KEYS[1] the store's prints (nl:erased:<listId>), KEYS[2] the buyers an
+ * import brought, KEYS[3..] each grant's address key; ARGV[1] when they were
+ * brought ("" for a grant that is not an import's), then for each grant its
+ * print, its address, its product and its record. One HMGET; a grant whose
+ * print is found writes nothing and answers -1; otherwise its address is
+ * noted once among the buyers brought (HSETNX) and its product written
+ * (HSETNX: 1 new, 0 already). Billed 1 + 1 + 2 a grant at most, the same two
+ * HSETNX a grant cost before; lib/redis-memory.ts runs it the same way.
+ */
+export const GRANT_UNLESS_ERASED = `-- marktmorgen:grant-unless-erased:v1
+local n = #KEYS - 2
+local prints = {}
+for i = 1, n do prints[i] = ARGV[4 * i - 2] end
+local found = redis.call("HMGET", KEYS[1], unpack(prints))
+local out = {}
+local noted = {}
+for i = 1, n do
+  if found[i] then
+    out[i] = -1
+  else
+    local who = ARGV[4 * i - 1]
+    if ARGV[1] ~= "" and not noted[who] then
+      redis.call("HSETNX", KEYS[2], who, ARGV[1])
+      noted[who] = true
+    end
+    out[i] = redis.call("HSETNX", KEYS[i + 2], ARGV[4 * i], ARGV[4 * i + 1])
+  end
+end
+return out`;
+
+/** What one grant checked against the store's deleted people became: written, had already, or nothing written. */
+export type GrantAnswer = "new" | "already" | "erased";
+
+/**
+ * grantImported for an import or the API's gift (both take from the store's
+ * data room), with the store's deleted people checked in the same step as
+ * each write (GRANT_UNLESS_ERASED): `erased` is the store's prints key and
+ * how one address is printed (lib/suppression.ts). Throws when the step
+ * cannot run or its answer is not exactly one of -1, 0 or 1 for each grant:
+ * the caller writes nothing more and refuses (CX-123 rule 24).
+ */
+export async function grantUnlessErased(
+  statsId: string,
+  job: string,
+  grants: { email: string; productId: string; items: string[] | null }[],
+  erased: { key: string; print: (email: string) => string },
+  room: DataStore,
+  atSeconds = Math.floor(Date.now() / 1000),
+): Promise<GrantAnswer[]> {
+  if (!grants.length || !isRedisConfigured()) return grants.map(() => "already");
+  // Each grant at the most it weighs, as grantImported takes it.
+  await needData(room, [{ slot: "imp", bytes: grants.reduce((sum, g) => sum + dataBytes([g.productId, JSON.stringify({ at: atSeconds, job, items: g.items, option: null }), g.email], 3), 0) }]);
+  const keys = grants.map((g) => importedKey(statsId, g.email));
+  const args = grants.flatMap((g) => [erased.print(g.email), normaliseEmail(g.email), g.productId, JSON.stringify({ at: atSeconds, job, items: g.items })]);
+  const brought = IMPORT_JOB.test(job) ? String(atSeconds) : "";
+  const replies = await redisPipeline([["EVAL", GRANT_UNLESS_ERASED, keys.length + 2, erased.key, importedWhoKey(statsId), ...keys, brought, ...args]]);
+  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(reply) || reply.length !== grants.length || !reply.every((a) => a === -1 || a === 0 || a === 1)) {
+    throw new Error("the grants could not be checked where they are written");
+  }
+  return (reply as number[]).map((a) => (a === 1 ? "new" : a === 0 ? "already" : "erased"));
+}
 /** An import's own job id (lib/imports.ts): only those are brought over; a gift, a place or a PayPal sale is not. */
 const IMPORT_JOB = /^[0-9a-f]{24}$/;
 
@@ -143,11 +212,41 @@ export async function importedFor(store: Store, email: string): Promise<Imported
   return found;
 }
 
+/** Where what an import or the API's gift gives is counted in the store's data room (lib/store-data.ts). */
+const IMPORTED_SLOT = "imp";
+
+/** What one grant taken from the store's room was counted at (grantImported), and is given back at when it is deleted. */
+const grantBytes = (productId: string, v: { at?: unknown; job?: unknown; items?: unknown; option?: unknown }, email: string) =>
+  dataBytes([productId, JSON.stringify({ at: v.at, job: v.job, items: v.items, option: v.option ?? null }), email], 3);
+
+/** Whether a grant was taken from the store's room (an import, the API's gift) rather than written as an order's (lib/order-data.ts). */
+const fromRoom = (job: string) => IMPORT_JOB.test(job) || job.startsWith("api:");
+
 /**
  * Gives many addresses their products in one round trip. Returns, for each
- * grant, whether it was new (false: that address already had that product).
+ * grant, whether it was new (false: that address already had that product,
+ * or the answer was not known; grantImportedOutcomes tells the two apart).
  */
 export async function grantImported(
+  statsId: string,
+  job: string,
+  grants: { email: string; productId: string; items: string[] | null; option?: string | null }[],
+  atSeconds = Math.floor(Date.now() / 1000),
+  sid = "",
+  room: DataStore | null = null,
+): Promise<boolean[]> {
+  return (await grantImportedOutcomes(statsId, job, grants, atSeconds, sid, room)).map((outcome) => outcome === "taken");
+}
+
+/**
+ * What became of each grant, read exactly (Claude 5 on #2576): "taken" when
+ * it was written (HSETNX answered 1), "exists" when that address already
+ * held that product (0, its room given back), "unknown" for any other answer
+ * (its room kept), so a caller can say "not confirmed" instead of either.
+ */
+export type GrantOutcome = "taken" | "exists" | "unknown";
+
+export async function grantImportedOutcomes(
   statsId: string,
   job: string,
   grants: { email: string; productId: string; items: string[] | null; option?: string | null }[],
@@ -161,10 +260,10 @@ export async function grantImported(
    * really adds (lib/order-data.ts).
    */
   room: DataStore | null = null,
-): Promise<boolean[]> {
-  if (!grants.length || !isRedisConfigured()) return grants.map(() => false);
+): Promise<GrantOutcome[]> {
+  if (!grants.length || !isRedisConfigured()) return grants.map(() => "unknown");
   // Each grant at the most it weighs: its field, the address's key and place among those brought over, its library.
-  if (room) await needData(room, [{ slot: "imp", bytes: grants.reduce((sum, g) => sum + dataBytes([g.productId, JSON.stringify({ at: atSeconds, job, items: g.items, option: g.option ?? null }), g.email], 3), 0) }]);
+  if (room) await needData(room, [{ slot: IMPORTED_SLOT, bytes: grants.reduce((sum, g) => sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email), 0) }]);
   // Only what was bought on Marktmorgen puts a store in a buyer's library: a gift, a place, a pre-order,
   // a PayPal purchase (no room given); not an import or the API's gift, which take from the store's room.
   if (sid && !room) await rememberBuyers(sid, grants.map((g) => g.email));
@@ -179,7 +278,16 @@ export async function grantImported(
   ]);
   // An order's grant (no room given) is counted at what it really adds (lib/order-data.ts).
   const answers = room ? await redisPipeline(writes) : await orderWrite({ sid, statsId }, writes);
-  return answers.map((a) => Number(a) === 1);
+  // A grant refused for certain (HSETNX answered exactly 0: the address already holds the product) gives back
+  // what it took from the room; any other answer keeps it, so the room is never below what is held (Claude 5 on #2576).
+  // The replies are read once, from their own data slots, into a fresh list that both decisions use: a getter, a
+  // Proxy or an inherited slot is not a reply, so every grant stays unknown and keeps its room (Codex G on #2576).
+  const list = repliesFor(answers, grants.length);
+  if (room && list) {
+    const back = grants.reduce((sum, g, i) => (list[i] === 0 ? sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email) : sum), 0);
+    if (back > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: back }]);
+  }
+  return grants.map((_, i) => (list?.[i] === 1 ? "taken" : list?.[i] === 0 ? "exists" : "unknown"));
 }
 
 /**
@@ -187,14 +295,22 @@ export async function grantImported(
  * `prefix`'s kind of grant ("api:" for the creator's own tools): never an
  * import, a gift, a place or a PayPal purchase. Says whether it took it.
  */
-export async function takeGiven(statsId: string, email: string, productId: string, prefix: string): Promise<boolean> {
+export async function takeGiven(statsId: string, email: string, productId: string, prefix: string, room?: DataStore): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const key = importedKey(statsId, email);
   const [raw] = await redisPipeline([["HGET", key, productId]]);
   const given = parse(productId, raw);
-  if (!given || !given.job.startsWith(prefix)) return false;
-  const [gone] = await redisPipeline([["HDEL", key, productId]]);
-  return Number(gone) === 1;
+  if (!given || !given.job.startsWith(prefix) || typeof raw !== "string") return false;
+  // Deleted only as it was read, so two takes at once (or a take beside a
+  // deletion of the person) give its room back once.
+  const [gone] = await redisPipeline([["EVAL", HASH_DEL_IF, 1, key, productId, raw]]);
+  if (Number(gone) !== 1) return false;
+  if (room) {
+    const value = json(raw);
+    if (value && typeof value.job === "string" && fromRoom(value.job)) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: grantBytes(productId, value, normaliseEmail(email)) }]);
+    else await releaseOrderData(room, fieldReleaseBytes(productId, raw));
+  }
+  return true;
 }
 
 /**
@@ -203,8 +319,37 @@ export async function takeGiven(statsId: string, email: string, productId: strin
  * that an import brought them. Nothing was paid here for these, so no order
  * of ours stands behind them; the person loses access to them.
  */
-export async function forgetImportedPerson(statsId: string | null, email: string): Promise<number> {
+export async function forgetImportedPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const address = normaliseEmail(email);
+  // Read and deleted in one step: two deletions at once give back once. A
+  // reply that is not exactly the two asked for throws (UnknownReply): nothing
+  // is taken for gone and nothing is given back.
+  const what = "the deletion of a person's imported purchases";
+  const [taken, who] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), address]]), 2, what);
+  const given = takenPairs(taken, what);
+  const unlisted = replyCount(who, what);
+  if (room && given.length) {
+    // What an import or the API's gift took from the room comes back as it was
+    // counted; what an order wrote comes back to the orders' part, at the field's own share.
+    let imported = 0;
+    let ordered = 0;
+    for (const [productId, raw] of given) {
+      const value = json(raw);
+      if (value && typeof value.job === "string" && fromRoom(value.job)) imported += grantBytes(productId, value, address);
+      else ordered += fieldReleaseBytes(productId, raw);
+    }
+    if (imported > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: imported }]);
+    await releaseOrderData(room, ordered);
+  }
+  return (given.length ? 1 : 0) + unlisted;
+}
+
+function json(raw: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }

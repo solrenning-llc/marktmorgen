@@ -24,7 +24,8 @@ is("hydration is observed before the first fill", observed > field && observed <
 is(
   "the shared helper waits for React's installed change handler",
   helper.includes('key.startsWith("__reactProps$")') &&
-    helper.includes('typeof element[key]?.onChange==="function"'),
+    helper.includes('typeof element[key]?.[name]==="function"') &&
+    helper.includes('await waitForReactHandler(page,control,"onChange");'),
   true,
 );
 is("the regression introduces no fixed sleep", /setTimeout|waitForTimeout/.test(source), false);

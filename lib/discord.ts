@@ -184,8 +184,10 @@ export type RoleChange = "ok" | "gone" | "failed";
 
 function changed(answer: Answer | null): RoleChange {
   if (answer && answer.status >= 200 && answer.status < 300) return "ok";
-  // 10007: the person is not in the server any more; 10011: the role is gone.
-  const code = Number((answer?.data as { code?: unknown } | null)?.code);
+  // 10007: the person is not in the server any more; 10011: the role is gone; 10004: the server is.
+  // Only Discord's own whole number says so: a code of another shape ("10007", [10007]) is not known, never "gone",
+  // which would forget somebody still in the server with their role (CX-123 rule 24).
+  const code = (answer?.data as { code?: unknown } | null)?.code;
   if (answer?.status === 404 && (code === 10007 || code === 10011 || code === 10004)) return "gone";
   return "failed";
 }
@@ -203,8 +205,15 @@ export async function removeMember(serverId: string, userId: string, reason: str
   return changed(await call(`/guilds/${serverId}/members/${userId}`, { method: "DELETE", reason }).catch(() => null));
 }
 
-/** The bot leaves the server: the creator disconnected it. Roles already given stay as they are. */
+/**
+ * The bot leaves the server: the creator disconnected it. Roles already given stay as they are. True only on
+ * Discord's exact answer that it is out: a 2xx, or 404 with Discord's code 10004 (Unknown Guild) when it was no
+ * longer there; anything else (no answer, a refusal, a 5xx, a 404 without that code, such as a proxy's page) is
+ * false, and the bot may still be in the server (independent review of #2994).
+ */
 export async function leaveServer(serverId: string): Promise<boolean> {
   const answer = await call(`/users/@me/guilds/${serverId}`, { method: "DELETE" }).catch(() => null);
-  return Boolean(answer && (answer.status === 204 || answer.status === 404));
+  if (answer && answer.status >= 200 && answer.status < 300) return true;
+  // Discord's own whole number only, as in `changed`: "10004" or [10004] is not known (CX-123 rule 24).
+  return answer?.status === 404 && (answer.data as { code?: unknown } | null)?.code === 10004;
 }

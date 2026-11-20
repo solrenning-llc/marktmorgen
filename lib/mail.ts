@@ -14,12 +14,13 @@
  * has a published number of emails, counted before each batch goes out.
  */
 import { bodyHtml, bodyText } from "@/lib/mail-body";
-import { lookColours } from "@/lib/store-look";
+import { emailTheme } from "@/lib/email-theme";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
-import { tokensFor } from "@/lib/contacts";
+import { stopWriting, tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { calendarWindow, windowId } from "@/lib/allowance-window";
@@ -86,10 +87,26 @@ export function inTrial(store: Store, nowSeconds = Date.now() / 1000): boolean {
   return store.trialEnds > nowSeconds;
 }
 
-export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
+/**
+ * The emails the month has used, read exactly, for what decides whether an email may go (lib/broadcasts.ts): GET
+ * answers the counter's text, which a give-back can take below zero, or nil before the first one is counted. Any
+ * other answer throws (CX-123 rule 24), never an untouched month.
+ */
+export async function usedThisMonthExact(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
   if (!listId || !window || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", usedKey(listId, window)]]);
-  return Number(raw) || 0;
+  const replies = repliesFor(await redisPipeline([["GET", usedKey(listId, window)]]), 1);
+  const raw = replies?.[0];
+  if (replies && raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|-?[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError("the month's emails used");
+  return Number(raw);
+}
+
+/**
+ * This month's list emails used: the same exact reader as usedThisMonthExact. It THROWS UnknownReplyError on a
+ * reply it cannot trust (rule 24), never answers 0 for it: a caller that must stay up catches it (#3727).
+ */
+export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
+  return usedThisMonthExact(listId, window);
 }
 
 /**
@@ -109,6 +126,21 @@ function dailyCap(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_DAILY_CAP;
 }
 const dayKey = (now = new Date()) => `nl:mail:day:${now.toISOString().slice(0, 10)}`;
+
+/**
+ * The company's day a reservation is taken from, handed to both the reservation and its give-back. It is a memoized
+ * token: making it reads no clock; its first use, inside reserve or reserveDay right before the counters' pipeline
+ * (after every await before it: admission, the paid window, the sender), fixes the UTC day, and every rollback or
+ * give-back reuses that exact key. So a reservation that waits across 00:00 UTC counts on the day it is counted on,
+ * never on the day before while the new day's cap does not see it (Codex U on #3928), and a send that crosses 00:00
+ * UTC gives back to the day it took from: never to the next day's counter (which would go below zero and let that
+ * day send past MARKETING_DAILY_CAP), never leaving the old one inflated.
+ */
+export type MailDay = (() => string) & { readonly mailDay: unique symbol };
+export function mailDay(now?: Date): MailDay {
+  let key = now ? dayKey(now) : undefined;
+  return (() => (key ??= dayKey())) as MailDay;
+}
 
 /** How many more list emails the company may send today. */
 async function dailyRoom(): Promise<number> {
@@ -247,7 +279,7 @@ function confirmedCount(raw: unknown, minimum: number): number | null {
  * sender — the one email to buyers brought over from another platform
  * (lib/imports.ts). False, and nothing taken, when it would pass the cap.
  */
-export async function reserveDay(n: number): Promise<boolean> {
+export async function reserveDay(n: number, day: MailDay = mailDay()): Promise<boolean> {
   if (!Number.isSafeInteger(n) || n<0) return false;
   if (n===0) return true;
   if (!isRedisConfigured()) return false;
@@ -255,25 +287,25 @@ export async function reserveDay(n: number): Promise<boolean> {
     if (!(await senderTakes(n))) return false;
     const cap=dailyCap();
     if(cap===0)return true;
-    const day=dayKey();
-    const result=await redisPipeline([["INCRBY",day,n],["EXPIRE",day,3*86400]]);
+    const reservedDay=day();
+    const result=await redisPipeline([["INCRBY",reservedDay,n],["EXPIRE",reservedDay,3*86400]]);
     if(result.length!==2 || result[1]!==1)return false;
     const today=confirmedCount(result[0],n);
     if(today===null)return false;
     if(today<=cap)return true;
-    await redisPipeline([["DECRBY",day,n]]);
+    await redisPipeline([["DECRBY",reservedDay,n]]);
     return false;
   } catch { return false; }
 }
 
-/** Gives back what reserveDay took, for a send that did not go out. */
-export async function releaseDay(n: number): Promise<void> {
+/** Gives back what reserveDay took on `day` (the same MailDay it was given), for a send that did not go out. */
+export async function releaseDay(n: number, day: MailDay): Promise<void> {
   if (dailyCap() === 0 || n <= 0) return;
-  await redisPipeline([["DECRBY", dayKey(), n]]);
+  await redisPipeline([["DECRBY", day(), n]]);
 }
 
 /** Takes `n` from the month (and the company's day), or nothing when that would pass either. */
-export async function reserve(store: Store, n: number, listOnly = false): Promise<Reserved> {
+export async function reserve(store: Store, n: number, listOnly = false, day: MailDay = mailDay()): Promise<Reserved> {
   if (!Number.isSafeInteger(n) || n<0) return "month";
   if(n===0)return "ok";
   if(!store.listId)return "month";
@@ -286,16 +318,17 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
   if(!Number.isSafeInteger(allowance) || allowance<0 || n>allowance)return "month";
   if(store.period?.funded===true && !(await reservePaidResourceWindow(store)))return "unavailable";
   try {
-    const key=usedKey(store.listId,window),cap=dailyCap(),day=dayKey();
+    const key=usedKey(store.listId,window),cap=dailyCap();
     if(!listOnly) {
       if(!(await senderTakes(n)))return "sender";
-      const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",day,n],["EXPIRE",day,3*86400]]);
+      const reservedDay=day();
+      const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",reservedDay,n],["EXPIRE",reservedDay,3*86400]]);
       if(results.length!==4 || results[1]!==1 || results[3]!==1)return "unavailable";
       const total=confirmedCount(results[0],n),today=confirmedCount(results[2],n);
       if(total===null || today===null)return "unavailable";
       const overMonth=total>allowance,overDay=cap>0 && today>cap;
       if(!overMonth && !overDay)return "ok";
-      await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
+      await redisPipeline([["DECRBY",key,n],["DECRBY",reservedDay,n]]);
       return overMonth?"month":"day";
     }
     // No SES setup is a known sender wait and needs no temporary ledger work.
@@ -305,7 +338,8 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
     }
     // For list delivery, reserve the local limits before reading provider
     // capacity. A known month/day wait needs no SES 24-hour usage read.
-    const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",day,n],["EXPIRE",day,3*86400]]);
+    const reservedDay=day();
+    const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",reservedDay,n],["EXPIRE",reservedDay,3*86400]]);
     // A missing acknowledgement may still have consumed capacity. Never
     // refund it or dispatch a provider call on an ambiguous response.
     if(results.length!==4 || results[1]!==1 || results[3]!==1)return "unavailable";
@@ -313,12 +347,12 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
     if(total===null || today===null)return "unavailable";
     const overMonth=total>allowance,overDay=cap>0 && today>cap;
     if(overMonth || overDay) {
-      await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
+      await redisPipeline([["DECRBY",key,n],["DECRBY",reservedDay,n]]);
       return overMonth?"month":"day";
     }
     if(!(await senderTakes(n, true))) {
       // No provider was attempted, so the confirmed reservation returns.
-      await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
+      await redisPipeline([["DECRBY",key,n],["DECRBY",reservedDay,n]]);
       return "sender";
     }
     return "ok";
@@ -336,40 +370,85 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
  * Zero when the store has no allowance or the count cannot be written.
  */
 export async function takeFromMonth(store: Store, n: number): Promise<number> {
-  if (!Number.isSafeInteger(n) || n <= 0 || !store.listId || !isRedisConfigured()) return 0;
-  const allowance = monthlyAllowance(store);
-  const window = windowOf(store);
-  if (!Number.isSafeInteger(allowance) || allowance <= 0 || !window) return 0;
-  if (!(await admitNonPaying(store))) return 0;
-  if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return 0;
+  const month = await monthToTake(store, n);
+  if (!month) return 0;
   try {
-    const key = usedKey(store.listId, window);
-    const results = await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 70 * 86400]]);
-    const total = confirmedCount(results[0], n);
-    if (results.length !== 2 || total === null) return 0;
-    const over = Math.min(n, Math.max(0, total - allowance));
-    if (over > 0) await redisPipeline([["DECRBY", key, over]]);
-    return n - over;
+    return await takeCounted(month.key, n, month.allowance);
   } catch {
     return 0;
   }
 }
 
-/** Gives back to the store's month what takeFromMonth took for emails that did not go. */
-export async function giveBackToMonth(store: Store, n: number): Promise<void> {
-  const window = windowOf(store);
-  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["DECRBY", usedKey(store.listId, window), n]]);
+/**
+ * takeFromMonth for a caller that refuses on an unknown answer (a members import's start, lib/imports.ts): the same
+ * rules and the same counter, but a count whose reply has another shape throws UnknownReplyError (CX-123 rule 24)
+ * instead of answering 0. What that reply may have taken is not given back, as in takeFromMonth.
+ */
+export async function takeFromMonthExact(store: Store, n: number): Promise<number> {
+  const month = await monthToTake(store, n);
+  return month ? takeCounted(month.key, n, month.allowance) : 0;
 }
 
-/** Gives back what was taken for a batch that was not sent. */
-export async function release(store: Store, n: number): Promise<void> {
+/** The month takeFromMonth takes from, or null when it can send none: no allowance, window, list or place, or a funded period not reserved. */
+async function monthToTake(store: Store, n: number): Promise<{ key: string; allowance: number } | null> {
+  if (!Number.isSafeInteger(n) || n <= 0 || !store.listId || !isRedisConfigured()) return null;
+  const allowance = monthlyAllowance(store);
   const window = windowOf(store);
-  if (store.listId && window && n > 0) {
-    await redisPipeline([
-      ["DECRBY", usedKey(store.listId, window), n],
-      ["DECRBY", dayKey(), n],
-    ]);
-  }
+  if (!Number.isSafeInteger(allowance) || allowance <= 0 || !window) return null;
+  if (!(await admitNonPaying(store))) return null;
+  if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return null;
+  return { key: usedKey(store.listId, window), allowance };
+}
+
+/** Takes up to `n` under `allowance` on the month's counter; a count in another shape throws UnknownReplyError. */
+async function takeCounted(key: string, n: number, allowance: number): Promise<number> {
+  const results = repliesFor(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 70 * 86400]]), 2);
+  const total = results ? confirmedCount(results[0], n) : null;
+  if (total === null) throw new UnknownReplyError("the month's emails used");
+  const over = Math.min(n, Math.max(0, total - allowance));
+  if (over > 0) await redisPipeline([["DECRBY", key, over]]);
+  return n - over;
+}
+
+/**
+ * Gives back up to ARGV[1] of a count, never below zero (second review on #3384, HIGH): a give-back that comes twice,
+ * or for more than was taken, never leaves the month's count below what went, so nothing else can send past the plan
+ * on it. The count is read exactly (CX-123 rule 24): absent is nothing to give back; a whole number is taken down by
+ * at most itself; any other value is an error, and nothing is changed. Answers how many were given back.
+ */
+export const GIVE_BACK_FLOOR = `-- marktmorgen:give-back-floor:v1
+local held = redis.call('GET', KEYS[1])
+if not held then return 0 end
+if not string.match(held, '^-?%d+$') then return redis.error_reply('ERR give-back-floor: not a count') end
+local back = math.min(tonumber(ARGV[1]), tonumber(held))
+if back <= 0 then return 0 end
+redis.call('DECRBY', KEYS[1], back)
+return back`;
+/** What GIVE_BACK_FLOOR costs beside the DECRBY it replaces: the EVAL and its GET, which Upstash bills one by one beside the DECRBY. */
+export const GIVE_BACK_FLOOR_EXTRA_COMMANDS = 2;
+
+/** Gives back to the store's month what takeFromMonth took for emails that did not go, never below zero (GIVE_BACK_FLOOR). */
+export async function giveBackToMonth(store: Store, n: number): Promise<void> {
+  const window = windowOf(store);
+  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n]]);
+}
+
+/**
+ * Gives back what reserve took on `day` (the same MailDay it was given) for a batch that was not sent, never below zero
+ * on the month or the day (GIVE_BACK_FLOOR): a give-back that lands on a window or day holding less than it (the window
+ * turned between the reserve and this, or it came twice) once left the count negative, and later batches could send past
+ * the plan by that much. True when there was nothing to give back or both counters answered a whole number (rule 24);
+ * false when the give-back could not be confirmed, so a caller that must know (lib/product-updates.ts) does not take it
+ * as done. Throws when the pipeline does.
+ */
+export async function release(store: Store, n: number, day: MailDay): Promise<boolean> {
+  const window = windowOf(store);
+  if (!store.listId || !window || !Number.isSafeInteger(n) || !(n > 0)) return true;
+  const replies = repliesFor(await redisPipeline([
+    ["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n],
+    ["EVAL", GIVE_BACK_FLOOR, 1, day(), n],
+  ]), 2);
+  return !!replies && replies.every((r) => typeof r === "number" && Number.isSafeInteger(r));
 }
 
 function escape(text: string): string {
@@ -426,13 +505,22 @@ export function render(
   // Said only in a sequence's email to somebody who allowed it, with the way to stop it.
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><body style="margin:0;padding:0;background:#f7f5f0">
-<div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
-<div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
-<div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
+  // The store's own look, every color checked to read at 7:1 (lib/email-theme.ts, 369 [SU2]); the text version does not change.
+  // The store's name in words, never its photo: no picture of this site in the header (lib/email-theme.ts).
+  const t = emailTheme(store.look, { name: store.name ?? fromName });
+  const top = `<p style="margin:0;font-family:${t.headFont};font-size:18px;font-weight:700;line-height:1.3">${escape(t.name)}</p>`;
+  const header = t.band
+    ? `<div style="background:${t.band.fill};color:${t.band.ink};border-radius:16px;padding:16px 24px;margin:0 0 12px">${top}</div>`
+    : `<div style="color:${t.text};padding:0 4px 16px">${top}</div>`;
+  // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
+<div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:${t.bodyFont};font-size:16px;line-height:1.6;color:${t.text};background:${t.page}">
+${header}
+<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => { const tagged = taggedLink(href, store, tag, counting ? readerKey : undefined); return tag.via ? tag.via(href, tagged) : tagged; } : undefined, t.button.fill, t)}</div>
+<div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:${t.muted}">
 <p style="margin:0 0 8px">${escape(why)}</p>
-<p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:#57534e;text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
-${counting ? `<p style="margin:0 0 8px">${escape(a.clicksOn(fromName))} <a href="${escape(stopCounting)}" style="color:#57534e;text-decoration:underline">${escape(a.clicksStop)}</a></p>` : ""}
+<p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:${t.muted};text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
+${counting ? `<p style="margin:0 0 8px">${escape(a.clicksOn(fromName))} <a href="${escape(stopCounting)}" style="color:${t.muted};text-decoration:underline">${escape(a.clicksStop)}</a></p>` : ""}
 ${address ? `<p style="margin:0 0 8px">${escape(fromName)} · ${escape(address)}</p>` : ""}
 <p style="margin:0">${escape(sent)}</p>
 </div></div></body></html>`;
@@ -494,7 +582,26 @@ export type SendOutcome = {
    * of retrying automatically after that checkpoint is confirmed.
    */
   uncertain?: string[];
+  /**
+   * Addresses the email service refused for good, in a batch it answered for
+   * every email (lib/email.ts ListBatchOutcome): not sent, and never
+   * uncertain. In neither `done` nor `rest`. `removed` when it refused the
+   * address itself and the address was then taken off the list (lib/contacts.ts
+   * stopWriting, "refused"). What was taken from the month for each stays
+   * taken: it paid for asking the sender, reading back who took the batch
+   * and taking the address off, all before they were done; since the address
+   * is off the list, it is never paid for again.
+   */
+  refused?: { email: string; removed: boolean }[];
 };
+
+/**
+ * What a send says in the studio when the service that sends our email did not take a batch just now (a "retry":
+ * down, slow, or not confirmed): never that it "asked us to slow down", which it may not have (outage drill,
+ * 13 November 2026). Nothing of the batch was sent; it is tried again by the scheduled job.
+ */
+export const SENDER_RETRY_NOTE =
+  "Paused for a moment: the service that sends our email did not take this batch just now. It is tried again by itself.";
 
 /** What a send that met the sender's ceiling says in the studio. */
 export const SENDER_WAIT_NOTE =
@@ -515,6 +622,9 @@ export async function sendTo(
   tag?: MailTag,
 ): Promise<SendOutcome> {
   const done: string[] = [];
+  const refused: { email: string; removed: boolean }[] = [];
+  // Whatever stops it, those refused before the stop are told too.
+  const told = (outcome: SendOutcome): SendOutcome => refused.length ? { ...outcome, refused } : outcome;
   // A store whose addresses turned out to be bad ones waits its week out
   // (lib/mail-health.ts). Nothing is taken from its month for it.
   const watched = healthId(store);
@@ -525,20 +635,31 @@ export async function sendTo(
   const tags = healthTags(store, true, tag?.campaign);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
-    if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
+    if (room <= 0) return told({ done, rest: emails.slice(i), stopped: "day" });
     // A list with addresses lately brought in goes out in portions that
     // double (lib/mail-health.ts); for any other store this is every one asked for.
     const portion = await rampRoom(watched, Math.min(BATCH_SIZE, room, emails.length - i));
-    if (portion <= 0) return { done, rest: emails.slice(i), stopped: "portion" };
+    if (portion <= 0) return told({ done, rest: emails.slice(i), stopped: "portion" });
     const chunk = emails.slice(i, i + portion);
-    const reserved = await reserve(store, chunk.length, true);
+    const day = mailDay();
+    const reserved = await reserve(store, chunk.length, true, day);
     if (reserved !== "ok") {
       await rampBack(watched, chunk.length);
-      return { done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved };
+      return told({ done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved });
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
-    const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    // Who may still be written to, and their links, read in their exact shape (lib/contacts.ts tokensFor): an
+    // unknown answer is not "they all left", so nobody in this batch is counted as gone. Nothing went to the
+    // provider, so what was taken for it is given back and the batch is tried again later.
+    let tokens: Map<string, string>;
+    try {
+      tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    } catch {
+      await release(store, chunk.length, day);
+      await rampBack(watched, chunk.length);
+      return told({ done, rest: emails.slice(i), stopped: "retry" });
+    }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))
@@ -552,20 +673,45 @@ export async function sendTo(
     if (outcome === "waiting") {
       // This invocation made no provider send. Existing allowance/portion
       // reservations may be returned; unknown acceptance never uses this path.
-      await release(store, chunk.length);
+      await release(store, chunk.length, day);
       await rampBack(watched, chunk.length);
-      return { done, rest: emails.slice(i), stopped: "sender" };
+      return told({ done, rest: emails.slice(i), stopped: "sender" });
     }
-    if (outcome !== "sent") {
+    const refusedHere: { email: string; removed: boolean }[] = [];
+    if (typeof outcome === "object") {
+      // The email service answered for every email of the batch: the ones it
+      // refused are known not sent, never uncertain, and every other one went.
+      // An address it refused as an address is refused again by every email,
+      // so it is taken off the list, saying why, and the next email does not
+      // stop on it (nor pay for it again). What was taken from the month for
+      // a refused one stays taken: it paid, before they were done, for asking
+      // the sender, the read-back of who took the batch (lib/email.ts) and
+      // the removal (tests/plan-cost-registry.ts, "list-email").
+      for (const r of outcome.refused) {
+        let removed = false;
+        if (r.address) {
+          try {
+            await stopWriting(store.listId as string, r.to, "refused");
+            removed = true;
+          } catch (error) {
+            console.error("taking a refused address off the list failed", error);
+          }
+        }
+        refusedHere.push({ email: r.to, removed });
+      }
+    } else if (outcome !== "sent") {
       // Dispatch may have succeeded before its acknowledgement was lost.
       // Keep attempted capacity reserved; retries consume new capacity.
-      return { done, rest: emails.slice(i), stopped: outcome, ...(outcome === "retry" ? { uncertain: messages.map((m) => m.to) } : {}) };
+      return told({ done, rest: emails.slice(i), stopped: outcome, ...(outcome === "retry" ? { uncertain: messages.map((m) => m.to) } : {}) });
     }
-    if (messages.length < chunk.length) await release(store, chunk.length - messages.length);
+    const refusedTo = new Set(refusedHere.map((r) => r.email));
+    const accepted = messages.filter((m) => !refusedTo.has(m.to));
+    refused.push(...refusedHere);
+    if (messages.length < chunk.length) await release(store, chunk.length - messages.length, day);
     // What a bounce or a complaint is later measured against.
-    await noteSent(watched, messages.length);
-    for (const m of messages) done.push(m.to);
+    await noteSent(watched, accepted.length);
+    for (const m of accepted) done.push(m.to);
     i += chunk.length;
   }
-  return { done, rest: [], stopped: null };
+  return told({ done, rest: [], stopped: null });
 }

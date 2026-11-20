@@ -57,7 +57,12 @@ function main(): void {
   part("The refuse-consumers drafts");
   is("sales blocks and the embedded card are no longer listed as open", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("sales blocks")), false);
   is("calls are no longer listed as open", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("call bookings")), false);
-  is("the one-click offer is still open (unit C)", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("the one-click offer")), true);
+  // Unit C entered with #4921 (offerGate) and 790 [IV2] unit 2 with #4943 (the address and the card's country): the
+  // one-click offer asks the gate on the offered product before anything is charged, so no path is left open.
+  is("RED: the one-click offer is no longer listed as open", REFUSE_CONSUMERS_OPEN.some((line) => line.startsWith("the one-click offer")), false);
+  is("RED: no path is left open", REFUSE_CONSUMERS_OPEN, []);
+  const upsell = readFileSync("lib/upsell.ts", "utf8");
+  is("the offer asks the gate before it charges (takeUpsell, funnelView)", (upsell.match(/offerGate\(target, /g) ?? []).length, 2);
   for (const draft of REFUSE_CONSUMERS_DRAFTS) is(`${draft.jurisdiction}: this test is named`, draft.evidence.includes("tests/eu-vat-open-paths.test.ts"), true);
 
   done();

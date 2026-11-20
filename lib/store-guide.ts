@@ -20,6 +20,7 @@ import { STORE_PAGE, answersOn, deliveryWords, keepAnswer, keptAnswer, priceWord
 import { MAX_FACTS_CHARS, questionKey, readQuestion } from "@/lib/answers-rules";
 import { heldToFacts } from "@/lib/store-assistant-rules";
 import type { Listing, Store } from "@/lib/store";
+import { isDemoStore, DEMO_EXAMPLE_LABEL, DEMO_EXAMPLE_PICK_WHY } from "@/lib/demo-ai-rules";
 
 const GUIDE_TIMEOUT_MS = 20_000;
 /** How many products the model is shown at most: the store's first ones, in its own order. */
@@ -74,7 +75,7 @@ const SYSTEM = [
 ].join("\n");
 
 export type GuidePick = { id: string; why: string };
-export type Guided = { ok: true; picks: GuidePick[] } | { ok: false; reason: "off" | "question" | "closed" | "failed" };
+export type Guided = { ok: true; picks: GuidePick[]; example?: string } | { ok: false; reason: "off" | "question" | "closed" | "failed" };
 
 /**
  * Picks the products that fit what a visitor said. Counted against the
@@ -98,7 +99,12 @@ export async function guideVisitor(input: { store: Store; products: Listing[]; g
     } catch {}
   }
 
-  if (!(await takeAnswer(store, now))) return { ok: false, reason: "closed" };
+  if (!(await takeAnswer(store, now))) {
+    // The demo store's month of answers is used up: its products are shown as picks made in advance, labeled as an
+    // example (lib/demo-ai-rules.ts). No model is asked.
+    if (isDemoStore(store)) return { ok: true, picks: products.map((p) => ({ id: p.id, why: DEMO_EXAMPLE_PICK_WHY })), example: DEMO_EXAMPLE_LABEL };
+    return { ok: false, reason: "closed" };
+  }
   let text: string | null = null;
   try {
     text = await askModel(store, SYSTEM, `The catalog:\n\n${facts}\n\nWhat the visitor is looking for:\n${goal}`, 400, answerModel(), GUIDE_TIMEOUT_MS);

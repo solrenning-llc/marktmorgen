@@ -1,3 +1,4 @@
+import { DEMO_AI_CEILING_MICRO_USD, DEMO_AI_OWNER_CAP_MICRO_USD } from "@/lib/demo-ai-rules";
 /** Owner SR,27 October2026 08:00 Fortaleza: existing mailbox/registered-agent
  * observations below do not establish a Stripe-accepted real business address
  * or US-resident legal representative. ITIN/acceptance-agent and other required
@@ -40,6 +41,15 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * line's reviewed ceiling in CURRENT_LLC_FIXED_COST_CEILINGS stays unknown, and with it the company total. */
  accountMoves: { currency: "USD", model: "tests/plan-cost-registry.ts MOVES_MONTH_COST", unknowns: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", checked: "2026-11-11", source: "tests/move-cost.test.ts", approvedCeiling: false,
   boundedPartApproval: { monthlyUsdCents: 1700, covers: "tests/plan-cost-registry.ts MOVES_MONTH_COST", excludes: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", approvedBy: "owner", decided: "2026-11-11T11:32:00-03:00", decision: "Aprovar US$ 17/mês" } },
+ /** The demo store's AI (lib/demo-ai-rules.ts), a company cost since the demo earns nothing (owner, 20/11/2026,
+  * decision 1 to Claude 4): every visitor answer and store-guide reply of its month at the answer model's worst request,
+  * no writing job, computed from the cost table and taken before each call. Fully bounded by code. The owner approved a
+  * cap of US$3.35 a month. Not yet a line of LLC_FIXED_COST_IDS: every id is bound into the commercial terms, which a
+  * contract restart encodes many times under a 1 MiB bound (lib/contract-funding-rules.ts canonicalFinancialSnapshot)
+  * that a line more would pass (reported to the coordinator on #4931, 20/11/2026). It joins the list, and so the
+  * minimum customer base, once that bound is fixed; until then no company total is known anyway (every line is null). */
+ demoStoreAi: { currency: "USD", model: "lib/demo-ai-rules.ts DEMO_AI_CEILING_MICRO_USD", monthlyMicroUsd: DEMO_AI_CEILING_MICRO_USD, checked: "2026-11-20", source: "tests/demo-ai-ceiling.test.ts", approvedCeiling: false,
+  boundedPartApproval: { monthlyMicroUsd: DEMO_AI_OWNER_CAP_MICRO_USD, covers: "lib/demo-ai-rules.ts DEMO_AI_CEILING_MICRO_USD", approvedBy: "owner", decided: "2026-11-20", decision: "Teto próprio de US$ 3,35 por mês" } },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

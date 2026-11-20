@@ -110,8 +110,8 @@ export const DEMO_STORE = {
    * The plan the demo is on: Studio, so a visitor sees what AI does in a
    * store (visitor answers, drafting in the studio), which Store does not
    * include. It is ours to give, and pays nothing, so what it uses is a
-   * company cost held by Studio's own automatic ceilings
-   * (lib/ai-spend-policy.ts, lib/traffic-rules.ts); it writes to nobody
+   * company cost: its AI has an allowance of its own, under the owner's cap
+   * (lib/demo-ai-rules.ts), and its visits Studio's (lib/traffic-rules.ts); it writes to nobody
    * (lib/house-store.ts). Here, not in the step, so a change to it changes
    * the seed's fingerprint and is brought in line on the next deployment.
    */

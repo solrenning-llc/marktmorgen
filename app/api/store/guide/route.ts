@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       const product = byId.get(pick.id);
       return product ? [{ title: product.title, href: productPath(store, product), price: salePill(store, product), why: pick.why }] : [];
     });
-    return Response.json({ ok: true, picks }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, picks, ...(result.example ? { example: result.example } : {}) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("guiding a visitor failed", error);
     return Response.json({ ok: false, error: "failed" }, { status: 502 });

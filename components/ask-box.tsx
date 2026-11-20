@@ -32,7 +32,7 @@ export function AskBox({ handle, product, words }: { handle: string; product: st
   const here = useSyncExternalStore(never, () => true, () => false);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
-  const [answer, setAnswer] = useState<{ asked: string; text: string; known: boolean } | null>(null);
+  const [answer, setAnswer] = useState<{ asked: string; text: string; known: boolean; example: string | null } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   if (!here) return null;
 
@@ -60,9 +60,9 @@ export function AskBox({ handle, product, words }: { handle: string; product: st
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ handle, product, question: asked }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; answer?: string; known?: boolean; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; answer?: string; known?: boolean; example?: string; error?: string };
       if (data.ok && data.answer) {
-        setAnswer({ asked, text: data.answer, known: data.known === true });
+        setAnswer({ asked, text: data.answer, known: data.known === true, example: typeof data.example === "string" && data.example ? data.example : null });
         setQuestion("");
       } else {
         setNote(NOTES[data.error ?? ""] ?? NOTES.failed);
@@ -100,6 +100,8 @@ export function AskBox({ handle, product, words }: { handle: string; product: st
         {answer ? (
           <div className="st-ask-answer mt-3">
             <p className="st-muted text-xs font-semibold">{answer.asked}</p>
+            {/* The demo store's month of AI answers is used up: an answer written in advance, said so above it (lib/demo-ai-rules.ts). */}
+            {answer.example ? <p className="st-note mt-1 text-sm font-semibold">{answer.example}</p> : null}
             <p className="mt-1 leading-relaxed">{answer.text}</p>
           </div>
         ) : null}

@@ -30,6 +30,7 @@ import { timed } from "@/lib/fetch-timeout";
 import { ANSWER_MODEL, WRITING_MODEL, boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { inTrial } from "@/lib/mail";
+import { isDemoStore, DEMO_AI_WRITING_JOBS_MONTHLY } from "@/lib/demo-ai-rules";
 import type { Store } from "@/lib/store";
 import { LANGUAGES } from "@/lib/store-language";
 import { MAX_SUMMARY_LENGTH } from "@/lib/catalog";
@@ -117,9 +118,17 @@ export function aiOffReason(store: Store, now = Date.now()): AiOff | null {
 }
 
 export function aiAvailableFor(store: Store | null | undefined, now = Date.now()): boolean {
-  if (!store || !isAiConfigured() || aiAllowance(store, now) <= 0) return false;
-  // Only a paying plan has a spending allocation (lib/ai-spend-policy.ts).
-  // Not while a renewal is unpaid either (232 [CA1] unit 4, costStandingOf).
+  return !!store && aiAllowance(store, now) > 0 && aiFundedFor(store, now);
+}
+
+/**
+ * Whether the model can be paid for this store at all, whatever its writing jobs: configured, a paying plan with a
+ * spending allocation (lib/ai-spend-policy.ts), and not while a renewal is unpaid (232 [CA1] unit 4, costStandingOf).
+ * Visitor answers ask this with their own allowance (lib/answers.ts), so a store whose answers are included but whose
+ * writing jobs are not (the demo store, lib/demo-ai-rules.ts) still answers.
+ */
+export function aiFundedFor(store: Store | null | undefined, now = Date.now()): boolean {
+  if (!store || !isAiConfigured()) return false;
   if (costStandingOf(store, now / 1000) !== "paid") return false;
   const policy = currentAiSpendPolicy(new Date(now));
   return !!policy && policy.storeMicroUsd[store.tier] > 0 && policy.fundedStores[store.tier] > 0;
@@ -128,6 +137,8 @@ export function aiAvailableFor(store: Store | null | undefined, now = Date.now()
 /** Writing jobs this store may ask for this month. */
 export function aiAllowance(store: Store, now = Date.now()): number {
   if (inTrial(store, now / 1000)) return AI_MONTHLY.trial;
+  // The demo store's studio is the operator's only, so it runs no writing job (lib/demo-ai-rules.ts).
+  if (isDemoStore(store)) return Math.min(AI_MONTHLY[store.tier], DEMO_AI_WRITING_JOBS_MONTHLY);
   return AI_MONTHLY[store.tier];
 }
 

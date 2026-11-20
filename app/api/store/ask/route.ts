@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     ]);
     const result = await answerQuestion({ store, product, about, page, question });
     if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "failed" ? 502 : 400 });
-    return Response.json({ ok: true, answer: result.answer, known: result.known }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, answer: result.answer, known: result.known, ...(result.example ? { example: result.example } : {}) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("answering a question failed", error);
     return Response.json({ ok: false, error: "failed" }, { status: 502 });

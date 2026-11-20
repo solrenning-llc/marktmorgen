@@ -22,8 +22,9 @@ import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
+import { aiFundedFor, answerModel, askModel, jsonIn } from "@/lib/ai";
 import { inTrial } from "@/lib/mail";
+import { isDemoStore, DEMO_AI_ANSWERS_MONTHLY, DEMO_EXAMPLE_ANSWER, DEMO_EXAMPLE_LABEL } from "@/lib/demo-ai-rules";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
 import { heldToFacts, speaksOfTerms } from "@/lib/store-assistant-rules";
@@ -59,12 +60,15 @@ const missedKey = (statsId: string) => `nl:ask:missed:${statsId}`;
 
 /** Whether this store's product pages offer the box at all. */
 export function answersOn(store: Store): boolean {
-  return store.answers.on && aiAvailableFor(store) && answersAllowance(store) > 0 && isRedisConfigured() && Boolean(store.statsId);
+  return store.answers.on && aiFundedFor(store) && answersAllowance(store) > 0 && isRedisConfigured() && Boolean(store.statsId);
 }
 
 /** Answers this store's visitors may be given this month. */
 export function answersAllowance(store: Store, now = Date.now()): number {
   if (inTrial(store, now / 1000)) return ANSWERS_MONTHLY.trial;
+  // The demo store earns nothing, so its answers are a fixed cost of the LLC with an allowance of its own
+  // (lib/demo-ai-rules.ts), never more than its plan's.
+  if (isDemoStore(store)) return Math.min(ANSWERS_MONTHLY[store.tier], DEMO_AI_ANSWERS_MONTHLY);
   return ANSWERS_MONTHLY[store.tier];
 }
 
@@ -338,7 +342,7 @@ const SYSTEM = [
 ].join("\n");
 
 export type Answered =
-  | { ok: true; answer: string; known: boolean }
+  | { ok: true; answer: string; known: boolean; example?: string }
   | { ok: false; reason: "off" | "question" | "closed" | "failed" };
 
 /**
@@ -376,7 +380,12 @@ export async function answerQuestion(input: {
     } catch {}
   }
 
-  if (!(await takeAnswer(store, now))) return { ok: false, reason: "closed" };
+  if (!(await takeAnswer(store, now))) {
+    // The demo store's month of answers is used up: it shows an answer written in advance, labeled as an example,
+    // never an error and never one that looks generated now (lib/demo-ai-rules.ts). No model is asked.
+    if (isDemoStore(store)) return { ok: true, answer: DEMO_EXAMPLE_ANSWER, known: false, example: DEMO_EXAMPLE_LABEL };
+    return { ok: false, reason: "closed" };
+  }
   let text: string | null = null;
   try {
     text = await askModel(store, SYSTEM, `The facts:\n\n${facts}\n\nThe visitor's question:\n${question}`, 350, answerModel(), ANSWER_TIMEOUT_MS);

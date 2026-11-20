@@ -21,7 +21,7 @@ export function StoreGuideBox({ handle, storeName, lang }: { handle: string; sto
   const w = guideWords(lang);
   const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ asked: string; picks: Pick[] } | null>(null);
+  const [result, setResult] = useState<{ asked: string; picks: Pick[]; example: string | null } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   if (!here) return null;
 
@@ -43,8 +43,8 @@ export function StoreGuideBox({ handle, storeName, lang }: { handle: string; sto
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ handle, goal: asked }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; picks?: Pick[]; error?: string };
-      if (data.ok && Array.isArray(data.picks)) setResult({ asked, picks: data.picks });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; picks?: Pick[]; example?: string; error?: string };
+      if (data.ok && Array.isArray(data.picks)) setResult({ asked, picks: data.picks, example: typeof data.example === "string" && data.example ? data.example : null });
       else setNote(NOTES[data.error ?? ""] ?? w.failed);
     } catch {
       setNote(w.failed);
@@ -84,6 +84,8 @@ export function StoreGuideBox({ handle, storeName, lang }: { handle: string; sto
         {result ? (
           <div className="mt-4">
             <p className="st-muted text-xs font-semibold">{result.asked}</p>
+            {/* The demo store's month of AI answers is used up: picks made in advance, said so above them (lib/demo-ai-rules.ts). */}
+            {result.example ? <p className="st-note mt-2 text-sm font-semibold">{result.example}</p> : null}
             {result.picks.length ? (
               <>
                 <p className="mt-2 text-sm font-bold">{w.picks}</p>

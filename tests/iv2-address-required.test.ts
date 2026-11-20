@@ -54,8 +54,9 @@ const FIELD = "billing_address_collection";
  * - setup: a card update (mode=setup), not a purchase.
  * - demo: a verification on the demo account; the ones built by the real builders follow them.
  * - read / guard: not a creation.
+ * - list: lib/sale-openings.ts, the typed list of every place that opens a sale; it names the endpoint, it posts nothing.
  */
-type Kind = "paid" | "paid-unless-package" | "pending-reserved" | "replay" | "setup" | "demo" | "read" | "guard";
+type Kind = "paid" | "paid-unless-package" | "pending-reserved" | "replay" | "setup" | "demo" | "read" | "guard" | "list";
 const SITES: Record<string, Kind[]> = {
   "lib/assistant-billing.ts": ["paid", "read"],
   "lib/billing.ts": ["paid", "paid"],
@@ -65,6 +66,7 @@ const SITES: Record<string, Kind[]> = {
   "lib/cart-checkout.ts": ["paid"],
   "lib/order-confirmation-outbox.ts": ["replay"],
   "lib/payment-requests.ts": ["paid"],
+  "lib/sale-openings.ts": Array<Kind>(10).fill("list"),
   "lib/store-checkout.ts": ["paid"],
   "lib/store-tip-checkout.ts": ["paid"],
   "lib/stripe-account.ts": ["guard"],

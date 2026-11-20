@@ -121,6 +121,39 @@ async function main(): Promise<void> {
   is("its own link to leave is kept", exists(leaveKey), true);
   is("the new link to confirm is not left", tokens.filter((t) => t !== leaveKey).filter(exists), []);
   is("what was counted for it is given back", room(), roomBefore);
+  // Codex X6's LOW on #4894 (@1592fc4f9f): the cleanup of an unproved bundle's tokens was swallowed with no trace.
+  // Now a failed DEL is logged; the tokens it leaves still expire on their own (EX) and are noted for erasure.
+  part("A new address whose bundle throws and whose token cleanup fails too: the failure is logged, the tokens still expire");
+  {
+    const email = `cleanup-${n}@example.com`;
+    const original = redis.pipeline;
+    const logged: string[] = [];
+    const error = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+    const tokens: string[] = [];
+    redis.pipeline = async (commands: Commands) => {
+      if (isBundle(commands)) {
+        tokens.push(...tokensIn(commands));
+        await original.call(redis, commands);
+        throw new Error("synthetic lost link-bundle reply");
+      }
+      if (commands.length === 1 && commands[0]?.[0] === "DEL" && commands[0].slice(1).every((k) => String(k).startsWith("nl:wl:t:"))) {
+        throw new Error("synthetic token cleanup failure");
+      }
+      return original.call(redis, commands);
+    };
+    let result: unknown;
+    try {
+      result = await join(email).catch(() => "threw");
+    } finally {
+      redis.pipeline = original;
+      console.error = error;
+    }
+    is("not certified as sent", result, "error");
+    is("the failed cleanup is logged, naming the waitlist tokens", logged.some((line) => /waitlist/i.test(line) && /token/i.test(line)), true);
+    const left = tokens.filter(exists);
+    is("whatever it left still expires on its own", left.every((key) => Number(redis.run(["TTL", key])) > 0), true);
+  }
   done();
 }
 

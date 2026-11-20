@@ -67,11 +67,17 @@ async function balanceOf(customer: string, currency: string): Promise<number | n
   return read.balance;
 }
 
-type Marks = { debit?: number; fix?: number; sent?: { id: string; amount: number } };
+/**
+ * `after`: the credit added to the balance after this credit's own send, from any source (other shares, bonuses,
+ * Stripe's prorations), in cents; read only once the send is found, newer rows coming first in the history.
+ */
+type Marks = { debit?: number; fix?: number; sent?: { id: string; amount: number }; after?: number };
 
 /** The credit's send, its debit and its correction already on a customer's balance, by their marks, read exactly. */
-async function marksFor(customer: string, creditId: string): Promise<Marks> {
+async function marksFor(customer: string, creditId: string, txn?: string): Promise<Marks> {
   const found: Marks = {};
+  // Stripe lists a balance's history newest first: what comes before this credit's own send was added after it.
+  let newer = 0;
   let after = "";
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
@@ -99,6 +105,14 @@ async function marksFor(customer: string, creditId: string): Promise<Marks> {
           found.sent = { id, amount };
         } else found[key] = amount;
       }
+      // The credit's send as the record names it (txn), when its mark was not read on it.
+      if (!found.sent && txn && id === txn) {
+        if (!whole(amount) || amount >= 0) throw new UnknownReplyError("invite clawback: a credit read back");
+        found.sent = { id, amount };
+      }
+      if (found.sent && found.after === undefined) found.after = newer;
+      else if (!found.sent && whole(amount) && amount < 0) newer += -amount;
+      else if (!found.sent && !whole(amount)) throw new UnknownReplyError("invite clawback: a balance history row");
       last = id;
     }
     if (list.has_more === false) return found;
@@ -139,14 +153,19 @@ async function clawOne(credit: Credit, nowSeconds: number): Promise<number> {
     if (!customer && credit.state === "owed") return 0;
     // A credit marked done went on a customer: one that does not read now is unknown, never "nothing to take".
     if (!customer) throw new UnknownReplyError(`invite clawback: the customer ${credit.id} went to`);
-    const marks = await marksFor(customer, credit.id);
+    const marks = await marksFor(customer, credit.id, credit.txn);
     if (credit.state === "owed") {
       if (!marks.sent) return 0;
       sent = { ...credit, cents: -marks.sent.amount, state: "done", txn: marks.sent.id, doneAt: nowSeconds };
     }
     if (marks.debit === undefined) {
+      // A credit sent must be found in the history read: unknown otherwise, never guessed.
+      if (!marks.sent || marks.after === undefined) throw new UnknownReplyError(`invite clawback: the send of ${credit.id}`);
       const balance = await balanceOf(customer, credit.cur);
-      const left = balance === null ? 0 : Math.max(0, -balance);
+      // Stripe spends a balance oldest credit first: what is left of this credit is the balance less every credit added
+      // after it, never more than the credit (Claude 5's MEDIUM on #4514). So its used part is never taken from newer
+      // credit (another share, a bonus, a proration): it stays the company's exposure.
+      const left = balance === null ? 0 : Math.max(0, -balance - marks.after);
       const take = Math.min(sent.cents, left);
       marks.debit = take > 0
         ? await post(customer, take, credit.cur, DEBIT_MARK, credit.id, "Marktmorgen invite credit taken back: the payment it was earned on was lost in a dispute")

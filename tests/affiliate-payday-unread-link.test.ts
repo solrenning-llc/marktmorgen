@@ -17,6 +17,7 @@ import { connectPayPal, setAutoPay } from "@/lib/paypal-payouts";
 import { paydayEmail, sendPaydayEmails } from "@/lib/affiliate-payday";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "c0dec0dec0dec0dec0dec0dec0dec0d5";
@@ -57,6 +58,7 @@ async function seed(store: Store, auto: boolean): Promise<void> {
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff: "aaaaaaaaaaaa", at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })],
     ["SET", `nl:store:owner:${OWNER}`, JSON.stringify(store)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
   await setAutoPay(store, auto);
@@ -141,7 +143,7 @@ async function main(): Promise<void> {
   is("no batch, nothing failed, claimed", [created.length, off.failed, await claimed()], [0, 0, true]);
 
   part("The reminder says the connection could not be read, only when it could not");
-  const base = { storeName: "Harbor Kitchen", payday: 5, people: 1, totalCents: 3000, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true };
+  const base = { storeName: "Harbor Kitchen", payday: 5, people: 1, totalCents: 3000, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true, invoicesChecked: true };
   const unread = paydayEmail({ ...base, linkUnread: true });
   is("it says so, and that nothing left their PayPal", [unread.text.includes(UNREAD), unread.text.includes("Nothing left your PayPal")], [true, true]);
   is("it is still the reminder with the amount to pay", unread.subject, "$30 to pay your affiliates today");

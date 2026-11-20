@@ -1,4 +1,5 @@
-import {waitForReactChangeHandler} from "./react-hydration.mjs";
+import {waitForReactChangeHandler,waitForReactClickHandler,waitForReactHydrated} from "./react-hydration.mjs";
+
 /** Local calculations only; provider links are read, never submitted. */
 export async function checkToolsCalculator({browser,LOCAL,is}){
  const check=(condition,name)=>is(name,condition,true);
@@ -9,14 +10,13 @@ export async function checkToolsCalculator({browser,LOCAL,is}){
    await page.route("**/api/**",async route=>{apiRequests++;await route.abort();});
    await page.goto(LOCAL+"/pricing",{waitUntil:"domcontentloaded"});
    const calculator=page.getByRole("region",{name:"One plan instead of several tools?"});
-   // The tool list and "Add tool" are server-rendered: a choice made before React
-   // hydrates is reset to the default tool and the press adds nothing (seen on CI in
-   // WebKit at 1280, where the ClickFunnels fields never appeared). The select's
-   // React change handler proves the calculator is live; no sleep, no second press.
-   const toolList=calculator.getByLabel("Tool to add",{exact:true});
-   await waitForReactChangeHandler(page,toolList);
-   await toolList.selectOption("clickfunnels");
-   await calculator.getByRole("button",{name:"Add tool",exact:true}).click();
+   // The page is read at DOMContentLoaded: a choice made before React commits its hydration is put
+   // back to the server value by that commit, and "Add tool" then adds another tool (WebKit lost the
+   // ClickFunnels group this way). Choose only after the commit.
+   const toolChoice=calculator.getByLabel("Tool to add",{exact:true}),addTool=calculator.getByRole("button",{name:"Add tool",exact:true});
+   await waitForReactHydrated(page,toolChoice);await waitForReactChangeHandler(page,toolChoice);await waitForReactClickHandler(page,addTool);
+   await toolChoice.selectOption("clickfunnels");
+   await addTool.click();
    const group=calculator.getByRole("group",{name:"ClickFunnels",exact:true});
    await group.getByLabel("Monthly gross sales (USD)",{exact:true}).fill("1000");
    await group.getByLabel("Paid transactions per month",{exact:true}).fill("10");

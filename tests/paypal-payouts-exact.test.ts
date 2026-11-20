@@ -17,6 +17,7 @@ import { connectPayPal, disconnectPayPal, onTheirWay, payWithPayPal, paysAutomat
 import { addPayout, readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsexact01";
@@ -71,6 +72,7 @@ async function seed(store: Store): Promise<void> {
     ["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", person("aaaaaaaaaaaa", "sara@example.com", "sara")],
     ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", "aaaaaaaaaaaa", 10000)],
   ]);
+  await markLive(store);
   const linked = await connectPayPal(store, CLIENT, SECRET);
   if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
 }
@@ -226,9 +228,11 @@ async function main(): Promise<void> {
     await seed(store);
     await real([["SET", `nl:pp:${STATS}`, stored]]);
     is("the stored link is unreadable", await rejects(() => readPayPal(store)), true);
+    await markLive(store);
     is("connecting again is not refused", await connectPayPal(store, CLIENT, SECRET), { ok: true });
     is("and an unknown switch is never carried over as on", [(await readPayPal(store))?.client, await paysAutomatically(store)], ["AbCdEf…6789", false]);
     await real([["SET", `nl:pp:${STATS}`, stored]]);
+    await markLive(store);
     await disconnectPayPal(store);
     is("Disconnect deletes it whatever it held", [await readPayPal(store), await paysAutomatically(store)], [null, false]);
     is("nothing sent", created.length, 0);

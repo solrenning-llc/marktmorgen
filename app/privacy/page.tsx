@@ -62,8 +62,13 @@ export default function PrivacyPage() {
           <strong className="text-black">Payment information.</strong> Payments
           are processed by Stripe, our payment processor. We do not store your
           full credit or debit card number, CVC, or equivalent payment
-          credentials. Stripe may collect billing name, address, and
-          payment method details as needed to complete the transaction. We may
+          credentials. Stripe may ask for your billing address when you pay on
+          its checkout page (see{" "}
+          <a href="#billing-address" className="underline">
+            how we use your billing address
+          </a>
+          ), and may collect other payment method details as needed to
+          complete the transaction. We may
           receive limited payment metadata, such as the last four digits of a
           card, payment status, and subscription period.
         </p>
@@ -422,9 +427,24 @@ export default function PrivacyPage() {
           When a buyer chooses a payment plan, Stripe keeps their card on the
           creator&apos;s account for the remaining payments, and we keep the
           checkout on a list until the plan has been given its end date, so it
-          stops after the last payment. When a creator switches on sales tax,
-          Stripe asks the buyer for the address it needs to work the tax out,
-          under Stripe&apos;s own privacy policy; we do not keep it.
+          stops after the last payment.
+        </p>
+        <p id="billing-address">
+          <strong className="text-black">Your billing address.</strong>{" "}
+          Stripe asks for your billing address on every paid checkout on its
+          page, except, for now, when you buy a package of calls. PayPal asks
+          for what it needs on its own page. Stripe keeps the address with the
+          payment, on the Stripe account of whoever is paid:
+          the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
+          plan or add-on. Stripe&apos;s own privacy policy applies. It is not
+          asked when
+          something is free. We read only the country in it, to work out where
+          you are buying from: for the VAT or sales tax that applies to the
+          sale, and to decide whether an offer after paying can be shown to
+          you. We do not keep the address, and it is never used for marketing.
+          Before we start keeping the tax records the law asks for on sales to
+          the European Union, which must be kept for 10 years, this policy will
+          say so.
         </p>
         <p id="podcasts">
           <strong className="text-black">Private podcasts.</strong>{" "}
@@ -1935,9 +1955,11 @@ export default function PrivacyPage() {
             the student wrote for it, never the student&apos;s name, address
             or file. When a creator asks for the month&apos;s summary of what
             their customers say, it receives the words members wrote when
-            canceling, questions a page could not answer, the words of
-            reviews and the words searched for on the store that found
-            nothing, from the last 90 days, never with a name, and with any
+            canceling, questions a page or the store&apos;s assistant could
+            not answer, the words of reviews, the words searched for on the
+            store that found nothing, from the last 90 days, and the names of
+            products coming soon with how many are on their waitlists so far,
+            confirmed or not (never who), never with a name, and with any
             email address, phone number or web address in them taken out
             first. When a creator asks for the summary of one product&apos;s
             reviews, it receives the words of up to 60 of that product&apos;s
@@ -2052,7 +2074,11 @@ export default function PrivacyPage() {
           creator&apos;s store may set these, each for that store alone: a pass
           that lets a
           browser into a course or a community, named <code>nl_learn_</code>{" "}
-          followed by a code for the store, for 90 days; the code and time of
+          followed by a code for the store, for 90 days; a student&apos;s
+          &quot;No thanks&quot; to the next step a course&apos;s creator suggests,
+          named <code>nl_ns_</code> followed by a code for the course, holding
+          only that answer, for a year, so it is not suggested again in that
+          browser; the code and time of
           an affiliate link a visitor followed, named <code>nl_via_</code>{" "}
           followed by the store&apos;s address, for up to {MAX_COOKIE_DAYS} days,
           subject to the browser&apos;s own limits; it may expire sooner. The store also keeps an

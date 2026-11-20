@@ -262,12 +262,12 @@ export async function forgetPodcastPerson(store: Store, catalogIds: string[], em
   // Read exactly before anything is deleted (CX-123 rule 24): the index is the only way back to the grant that holds
   // the address, so on an unknown read both stay, the step throws and the erasure says it is not finished.
   const held = (await indexedTokens(sid, productIds, email)).filter((t): t is string => t !== null);
-  const reply = repliesFor(
-    await redisPipeline([["DEL", ...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)]]),
-    1,
-  );
+  const keys = [...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)];
+  const reply = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
   const gone = reply ? countOf(reply[0]) : null;
-  if (gone === null) throw new UnknownReplyError("the deletion of a person's podcast feeds");
+  // A DEL deletes at most the distinct keys it names: a larger count is no evidence of this command, so it is unknown
+  // and the erasure stays not finished (rule 24; Codex V, #4791).
+  if (gone === null || gone > new Set(keys).size) throw new UnknownReplyError("the deletion of a person's podcast feeds");
   return gone;
 }
 

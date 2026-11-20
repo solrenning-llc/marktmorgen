@@ -17,18 +17,27 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.92 | $31.86 | $5.41 | 9.95% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $91.72 | $313.26 | $52.67 | 9.69% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $29.54 | $227.23 | $40.80 | 11.54% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $338.65 | $2,242.93 | $399.87 | 11.31% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $59.93 | $510.71 | $92.21 | 11.72% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $688.84 | $5,041.49 | $903.99 | 11.49% | $1.00 | positive | no |
+| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $5.95 | $33.40 | $5.84 | 10.74% | $0.25 | positive | no |
+| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $67.96 | $331.83 | $57.86 | 10.64% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $27.59 | $228.76 | $41.22 | 11.65% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $315.12 | $2,261.32 | $405.01 | 11.45% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $58.02 | $512.20 | $92.63 | 11.77% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $665.86 | $5,059.46 | $909.00 | 11.55% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |
 | AI captions, 3 languages (2 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.80 | $19.00 | $3.48 | 12.27% | $0.00 | positive | no |
 
 Caption rows select their worst modeled net share under the binding reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.
+
+## What each plan keeps in its worst month, under the LC reading
+
+A month's receipts after every fee and reserve (netOf), less every cost line at its limit (worstCost), then IRPF 15% and IOF 0.38% on that profit (MOST_CORRECT_READING, the LC rule of 1 November 2026). tests/switch-keeps-window.test.ts section 11 holds each one above zero (rule MR); this table holds the exact figures, through this document's staleness test (tests/worst-month-kept.ts, one formula for both).
+
+| Interval | Store | Studio | Scale |
+| --- | --- | --- | --- |
+| Monthly plan | US$45.98 | US$311.11 | US$695.32 |
+| A month of a yearly plan | US$37.93 | US$255.98 | US$572.05 |
 
 ## LLC fixed costs — owner decision22 October2026
 
@@ -46,6 +55,7 @@ Allocation:100% Marktmorgen;0% Hazelsong. Owner22/10/2026 05:10 Fortaleza: "esqu
 | tools | unknown | unknown |
 | deployment-artifact-retention | unknown | unknown |
 | backup | unknown | unknown |
+| account-moves | unknown | unknown |
 | us-mailbox | unknown | unknown |
 | eu-gdpr-representative | unknown | unknown |
 | eu-dsa-representative | unknown | unknown |

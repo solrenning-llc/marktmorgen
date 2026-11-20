@@ -22,6 +22,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
+import { readsKey } from "./listing-reads";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
@@ -78,6 +79,8 @@ Date.now = () => realNow() + ahead;
 const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
 type Commands = (string | number)[][];
 const single = (c: Commands, op: string, key: string) => c.length === 1 && c[0][0] === op && c[0][1] === key;
+/** One read of a product's listing alone: a GET, or the one-key MGET lib/catalog.ts getMany sends since 10 November 2026. */
+const readsListing = (c: Commands, key: string) => c.length === 1 && readsKey(c[0], key);
 
 /** One PayPal purchase through the real return route, with `fault` on while the return runs. */
 async function buy(store: Store, productId: string, buyer: string, fault: (c: Commands) => Promise<unknown[]> | null): Promise<string> {
@@ -149,7 +152,7 @@ async function main(): Promise<void> {
     swept = 0;
     const buyer = `slow-${label.replace(/\W+/g, "-")}@example.com`;
     const order = await buy(store, id, buyer, (c) =>
-      single(c, "GET", listingKey) ? timeout() : single(c, "ZADD", handOverKey(statsId)) ? zadd() : null,
+      readsListing(c, listingKey) ? timeout() : single(c, "ZADD", handOverKey(statsId)) ? zadd() : null,
     );
     is("paid, written down, nothing handed over yet", [Boolean(await readPaid(order)), await owned(buyer)], [true, 0]);
     is("the order is in the hand-over list all the same", ((await queued()) as string[]).includes(order), true);
@@ -167,7 +170,7 @@ async function main(): Promise<void> {
     part(`Claude 6: an order waiting in the hand-over list, its paid record read as ${label}: kept, then handed over once`);
     swept = 0;
     const buyer = `wait-${label.replace(/\W+/g, "-")}@example.com`;
-    const order = await buy(store, id, buyer, (c) => (single(c, "GET", listingKey) ? timeout() : null));
+    const order = await buy(store, id, buyer, (c) => (readsListing(c, listingKey) ? timeout() : null));
     is("nothing handed over on the return", await owned(buyer), 0);
     const pipeline = redis.pipeline.bind(redis);
     redis.pipeline = (async (c: Commands) => {

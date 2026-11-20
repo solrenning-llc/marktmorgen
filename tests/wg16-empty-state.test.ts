@@ -44,7 +44,10 @@ const store = readFileSync("app/[handle]/page.tsx", "utf8");
 is("the empty store: heading and sentence, no action", /<EmptyState title=\{w\.nothingYet\} body=\{w\.nothingYetBody\(store\.name\)\} \/>/.test(store), true);
 const blog = readFileSync("app/[handle]/blog/page.tsx", "utf8");
 is("a blog page past the last post: heading, sentence and the link to all posts", blog.includes('<EmptyState title={w.blogPastEnd} body={w.blogPastEndBody} action={{ href: base, label: w.blogAll }} className="mt-8" />'), true);
-is("a store with no posts still has no blog page", /const \{ posts, total \} = await publishedPosts\(store\.statsId, page\);\s*if \(total === 0\) notFound\(\);/.test(blog), true);
+// The exact reader distinguishes an unavailable listing before destructuring it.
+// Keep the confirmed-empty 404 contract, without requiring the old await spelling.
+is("a store with no posts still has no blog page",
+  /const listing = await publishedPosts\(store\.statsId, page\)\.catch\(\(\) => null\);\s*if \(listing === null\) return <BlogUnavailable[^;]+;\s*const \{ posts, total \} = listing;\s*if \(total === 0\) notFound\(\);/.test(blog), true);
 is("no bare sentence left where the blog is empty", blog.includes("{w.blogEmpty}</p>"), false);
 
 done();

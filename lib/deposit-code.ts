@@ -27,8 +27,16 @@
 import { onAccount } from "@/lib/stripe-account";
 import { type Currency, currencyRule } from "@/lib/money";
 import { CODES_API_VERSION, codeProblem, readCode } from "@/lib/discount";
+import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 
 /** A code as read for a deposit: only what this file decides on. */
+/**
+ * Public requests of the store's window one deposit code's read counts as (lib/traffic.ts, takeBuyerRead), taken
+ * before the creator's Stripe account is read (app/api/store/book/route.ts; rule MR, audit G2): the same figure as a
+ * returning code's or the next product's read, priced in tests/plan-cost-registry.ts.
+ */
+export const DEPOSIT_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
+
 export type DepositCode = {
   id: string;
   code: string;
@@ -115,6 +123,21 @@ export function readDepositCodeRow(row: Record<string, unknown>): DepositCode | 
 }
 
 /**
+ * `percent` of `priceCents`, to the nearest cent with a half cent up, worked out from the percent's own decimal digits
+ * in whole numbers: a code made in the Stripe dashboard can be 33.3% or 12.5%, and in floating point
+ * 1500 × 33.3 / 100 is 499.49999999999994, which Math.round made 499 instead of 500. A percent that has no short
+ * decimal form (none Stripe sends) keeps the floating-point figure.
+ */
+function percentOf(priceCents: number, percent: number): number {
+  const digits = /^(\d{1,3})(?:\.(\d{1,6}))?$/.exec(String(percent));
+  if (!digits || !Number.isSafeInteger(priceCents) || priceCents < 0) return Math.round((priceCents * percent) / 100);
+  const fraction = digits[2] ?? "";
+  const n = BigInt(priceCents) * BigInt(digits[1] + fraction);
+  const d = BigInt(`100${"0".repeat(fraction.length)}`);
+  return Number((BigInt(2) * n + d) / (BigInt(2) * d));
+}
+
+/**
  * The figures of a booking with a deposit and a code, or why the code is
  * refused. The deposit is the one the creator set, already checked against
  * the whole price (lib/call-deposit.ts, chargeNow); this only applies the
@@ -133,7 +156,7 @@ export function depositWithCode(
     if (input.priceCents < code.minimum.cents) return { ok: false, why: "unknown" };
   }
   let off: number;
-  if (code.off.kind === "percent") off = Math.round((input.priceCents * code.off.percent) / 100);
+  if (code.off.kind === "percent") off = percentOf(input.priceCents, code.off.percent);
   else {
     const cents = code.off.currency === input.currency ? code.off.cents : code.off.options[input.currency];
     if (typeof cents !== "number") return { ok: false, why: "unknown" };

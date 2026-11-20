@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   await ensureStatsId("metalock@example.com");
   const store = (await storeForEmail("metalock@example.com"))!;
   const statsId = store.statsId!;
-  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: "metalock@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: "metalock@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   if (!connected.ok) throw new Error(`not connected: ${connected.error}`);
   const lock = `nl:metaads:reading:${statsId}`;
   const held = async () => (await pipeline([["GET", lock]]))[0];

@@ -22,6 +22,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/takedown/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, addStoreLink, claimHandle, ensureStatsId, setKit, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, takeDown, unsentNotices } from "@/lib/takedown";
@@ -29,6 +30,7 @@ import { transparencyCounts } from "@/lib/transparency";
 import { KIND } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readsKey, rewriteKeys } from "./listing-reads";
 import { paidPeriod } from "./billing-period-fixture";
 
 const ORIGIN = "https://marktmorgen.com";
@@ -58,10 +60,11 @@ const realPipeline = redis.pipeline;
 let fault: { key: string; mode: "throw" | "null" } | null = null;
 redis.pipeline = async (commands: (string | number)[][]) => {
   const hit = fault;
-  if (hit && commands.some((c) => c[0] === "GET" && c[1] === hit.key)) {
+  // The key read alone (GET) or among others (MGET, lib/catalog.ts getMany since 10 November 2026).
+  if (hit && commands.some((c) => readsKey(c, hit.key))) {
     if (hit.mode === "throw") throw new Error("Redis request timed out (test)");
     const answers = await realPipeline(commands);
-    return commands.map((c, i) => (c[0] === "GET" && c[1] === hit.key ? null : answers[i]));
+    return rewriteKeys(commands, answers, (key) => (key === hit.key ? null : undefined));
   }
   return realPipeline(commands);
 };
@@ -115,8 +118,10 @@ async function main(): Promise<void> {
   sent.length = 0;
   tried.length = 0;
 
+  // Only the operator acts on a notice (#4036; tests/takedown-operator-only.test.ts): every request is the operator's.
+  const cookie = `${SESSION_COOKIE}=${await openSession(process.env.DEMO_STUDIO_ADMIN ?? "")}`;
   const ask = (action: unknown) => POST(new NextRequest(`${ORIGIN}/api/takedown`, {
-    method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN, Host: "marktmorgen.com" }, body: JSON.stringify({ token, action }),
+    method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN, Host: "marktmorgen.com", Cookie: cookie }, body: JSON.stringify({ token, action }),
   }));
   const answer = async (action: unknown) => {
     const response = await ask(action);

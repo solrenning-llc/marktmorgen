@@ -5,7 +5,7 @@
  *   nl:gift:pi:<payment>        string  the gift a payment paid for, so a refund finds it
  *   nl:gift:<store>:any         string  present once the store has sold a gift
  *   nl:gift:<store>:refunds     string  how far the refunds were read for gifts
- *   nl:gift:<store>:seen        set     refunds already handled
+ *   nl:gift:<store>:seen        set     refunds already handled, thirty days from the last
  *
  * A paid gift is handed over the way a purchase brought over from another
  * platform is (lib/imported-purchases.ts): written down under the
@@ -24,7 +24,7 @@ import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, replyList, repliesFor, stringList } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -72,17 +72,57 @@ const anchorKey = (sid: string) => `nl:gift:${sid}:refunds`;
  */
 export const GIFT_REFUND_PAGES_PER_STORE = 3;
 const seenKey = (sid: string) => `nl:gift:${sid}:seen`;
+/** The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts): each mark
+ * gives the set its expiry again. Past it a row is only read again, and handling it again changes nothing (the record
+ * it took back is marked revoked and kept on its own). */
+const SEEN_KEEP_SECONDS = 30 * 86_400;
 /** Where a pass over the refunds stands between runs (revokeRefundedGifts), in the store's nl:gift: keys (erased with it). */
 const passKey = (sid: string) => `nl:gift:${sid}:refunds:pass`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const REFUND_PASS_SECONDS = 7 * 86_400;
 /**
+ * Refunds Stripe finished (succeeded) whose work could not be done, refund id to payment, in the store's nl:gift: keys (erased
+ * with it): read again from Stripe and tried again first on every run, and let go only once handled or once Stripe says
+ * there is nothing to take back, never in silence, so one row that can never
+ * be handled (a record that does not read, a course removal that always fails) does not hold the anchor forever (r24
+ * money inventory, item 1). At most REFUND_RETRY_CAP; with the list full, the row holds the anchor at its time instead. Kept as long as the records a refund on it could take
+ * back (GIFT_KEPT_SECONDS, renewed with every row put on it): past that there is nothing left for it to take back.
+ */
+const retryKey = (sid: string) => `nl:gift:${sid}:refunds:retry`;
+/**
+ * The last refund on the list to try again that a run read again (focal review of #3302, comment 6786660350, MEDIUM),
+ * in the store's nl:gift: keys (erased with it): the next run of this store reads on from the one after it, in the
+ * order of their ids, and back to the first after the last, so the place moves with this store's own runs, never with
+ * the clock, and every refund on the list is read again within a bounded number of runs however often the sweep
+ * reaches the store. Kept as long as the list (GIFT_KEPT_SECONDS); a place absent or in another shape reads from the first:
+ * read again, never skipped.
+ */
+const retryFromKey = (sid: string) => `nl:gift:${sid}:refunds:retry:from`;
+/**
+ * The time a run gives the refunds on the list to try again before it reads its pages (focal review of #3302, LOW 1):
+ * past it the run reads none more (at least one is read whenever the deadline allows), and the next run reads on from
+ * where this one stopped, so a list of rows kept on every read never takes the time the pages need.
+ */
+const REFUND_REREAD_MS = 2_000;
+const REFUND_RETRY_CAP = 100;
+/**
+ * Refunds on the list to try again read again from Stripe (GET /refunds/{id}, its charge expanded) per store per run,
+ * before any is taken back (review of #3302, Claude 2 MEDIUM; the owner's decision 18 of 9 November 2026): in the order of
+ * their ids from the one after the last a run of this store read (retryFromKey), so each on the list is read in turn
+ * whatever the time of the runs. Priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ */
+export const GIFT_REFUND_REREADS_PER_STORE = 10;
+const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]{3,250}$/;
+const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
+/** The anchor in its exact shape: the whole seconds of the newest refund a pass read to its end. */
+const ANCHOR = /^\d{1,12}$/;
+/**
  * A pass: the window it reads (created since), the last refund it read, the newest refund it read, the connected
  * account it reads (a pass kept from the store's earlier account is started over: its cursor names a refund the
  * account it has now does not have; review of #3301, Claude 2 M2), the time the anchor waits at when the pass ends
  * (absent: nothing to wait for), that of the oldest refund it read that Stripe had not finished (heldAt) or that could
- * not be handled, and whether it read a row that is not readable (then the anchor stays where it was when the pass
- * ends), so the next pass reads each of those rows again.
+ * not be handled and was not kept on the list to try again, and whether it read a row that is not readable (then the
+ * anchor stays where it was when the pass ends), so the next pass reads each of those rows again.
  */
 type RefundPass = { since: number; after: string; newest: number; account: string; waiting?: number; unread?: true };
 /** A kept pass in its exact shape; null when there is none or it is in any other shape (then the pass starts over). */
@@ -137,7 +177,10 @@ function heldAt(refund: Record<string, unknown>): number | null {
 /** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
 /** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
-const markRead = async (sid: string, id: string): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+const markRead = async (sid: string, id: string): Promise<boolean> => {
+  const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
+  return !!marked && oneWrite(marked[0]) && marked[1] === 1;
+};
 const now = () => Math.floor(Date.now() / 1000);
 
 export function newGiftId(): string {
@@ -150,6 +193,18 @@ export async function readGift(id: string): Promise<Gift | null> {
   return typeof raw === "string" ? parseKeptGift(raw, id) : null;
 }
 
+/**
+ * A gift's record for handing it over, read exactly (sweep A3; CX-123 rules 24 and 30): no record is null, and an
+ * answer that is not one reply of text or nothing is unknown and throws, never "no gift", so a paid checkout is
+ * never said as having nothing to hand over because Redis answered in another shape.
+ */
+async function readGiftExactly(id: string): Promise<Gift | null> {
+  if (!GIFT_ID.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a gift's record");
+  return typeof replies[0] === "string" ? parseKeptGift(replies[0], id) : null;
+}
+
 /** A kept gift's record, when it is one and is this id's. */
 function parseKeptGift(raw: string, id: string): Gift | null {
   try {
@@ -158,28 +213,6 @@ function parseKeptGift(raw: string, id: string): Gift | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Whether a gift is given, read exactly, for a run that found another run's
- * giving mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the record as
- * text, JSON of this gift, and `given` a positive whole number of seconds
- * (true) or absent (false). Anything else is unknown and throws, so nothing
- * is said as given that is not.
- */
-async function givenExactly(id: string): Promise<boolean> {
-  const raw = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
-  let record: unknown = null;
-  try {
-    record = typeof raw === "string" ? JSON.parse(raw) : null;
-  } catch {
-    record = null;
-  }
-  if (!record || typeof record !== "object" || Array.isArray(record) || (record as { id?: unknown }).id !== id) throw new UnknownReplyError("a gift's record");
-  const given = (record as { given?: unknown }).given;
-  if (given === undefined) return false;
-  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
-  throw new UnknownReplyError("a gift's record");
 }
 
 /** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
@@ -211,7 +244,10 @@ export async function startGift(store: Store, product: Listing, input: GiftInput
     message: cleanText(input.message, MAX_GIFT_MESSAGE),
     at: now(),
   };
-  await saveGift(gift, GIFT_PENDING_SECONDS);
+  // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
+  // shape may not have landed, and a gift paid for with no record is never handed over. Refused instead, as
+  // "unavailable" (the page says nothing was charged), and no checkout is made.
+  if (!(await saveGift(gift, GIFT_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
   return { ok: true, gift };
 }
 
@@ -249,24 +285,59 @@ export async function deliverGift(input: {
   recordStart: (email: string, courseProductId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
 }): Promise<GiftOutcome> {
-  const { store, session, product, base } = input;
+  const { store, session, product } = input;
   const id = session.metadata?.gift ?? "";
-  const gift = await readGift(id);
-  if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  const seen = await readGiftExactly(id);
+  if (!seen || seen.s !== store.statsId || seen.p !== product.id) return "skip";
+  // Given already. Its emails come after the write that marks it given, so a run whose reply to that write came back
+  // in another shape threw before sending them (#2872 review M1): a later run with no "sent" mark (the caller checked)
+  // still tells, once (the emails' own idempotency keys), while that is recent. Taken back by a refund, or given
+  // longer ago than a run is retried, there is nothing to tell.
+  if (seen.given && (seen.revoked || now() - seen.given >= TELL_WITHIN_SECONDS)) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
   const value = claimValue();
   const claimed = await claimMark(mark, 300, value);
   if (claimed === "taken") {
-    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
-    // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
-    // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
-    if (await givenExactly(id)) return "already";
+    // Another run holds the mark: thrown, even once the gift is given (Claude 2 K and Claude 6 on #2872).
+    // confirmGift (lib/purchase-email.ts) keeps its "sent" mark on "already", and the run holding the mark may have
+    // written the gift given and died before its emails: "already" here would certify an email never sent, and
+    // nothing would tell it again. Thrown, no "sent" mark is kept; the run holding the mark keeps its own once it has
+    // told, and if it died, the next run takes the mark once it runs out and tells from the given record (M1's path).
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
+  // Read again now that the mark is ours, as handOverPreorder does (Claude 7's race hunt): a run that read the gift
+  // before another run gave it, and took the mark once that run let it go, must not give it again from its old copy.
+  // A refund taken back in between would be undone: the purchase granted again, {...gift, given} written over the
+  // revoked mark, and the refund, already read, never read again. Read exactly (CX-123 rule 24): unknown throws.
+  let kept: Gift | null;
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
+    if (reply === undefined || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError("a gift");
+    kept = typeof reply === "string" ? parseKeptGift(reply, id) : null;
+  } catch (error) {
+    await releaseMark(mark, value);
+    throw error;
+  }
+  if (!kept || kept.s !== store.statsId || kept.p !== product.id) {
+    await releaseMark(mark, value);
+    return "skip";
+  }
+  // Taken back by a refund, or given longer ago than a run is retried: nothing to give or tell.
+  if (kept.revoked || (kept.given && now() - kept.given >= TELL_WITHIN_SECONDS)) {
+    await releaseMark(mark, value);
+    return "already";
+  }
+  // The mark is kept, not let go, once the gift is given: it runs out by itself, after the caller has kept its
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and throws instead of telling and confirming a second
+  // time (#2872 review M1), and never certifies an email this run may not have sent (Claude 6 on #2872).
+  if (kept.given) {
+    await tellGift(input, kept, kept.session ?? (typeof session.id === "string" ? session.id : ""));
+    return "given";
+  }
+  const gift = kept;
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
@@ -278,15 +349,35 @@ export async function deliverGift(input: {
   // A course, or a course inside a bundle, is dated from the day it was paid.
   for (const id of [gift.p, ...(grant.items ?? [])]) await input.recordStart(gift.to, id, created);
 
+  // What a refund looks up (the payment's gift, and that this store sold one) is written first and the gift marked
+  // given last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of the
+  // mark and throws, so confirmGift keeps no "sent" mark and the next run does it again, never "already" on a gift
+  // whose payment a refund could not find.
+  const records: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(records), records.length);
+  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+    await releaseMark(mark, value);
+    throw new UnknownReplyError("a given gift's payment record");
+  }
   const given: Gift = { ...gift, session: sessionId, pi, given: now() };
-  await saveGift(given, GIFT_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(gift.s), "1"],
-  ]);
-  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
-  await releaseMark(mark, value);
+  if (!(await saveGift(given, GIFT_KEPT_SECONDS))) {
+    await releaseMark(mark, value);
+    throw new UnknownReplyError("a given gift's record");
+  }
+  await tellGift(input, gift, sessionId);
+  return "given";
+}
 
+/**
+ * How long after a gift was given a run still tells about it when the caller kept no "sent" mark: the window the
+ * checkout sweep confirms in (lib/purchase-email.ts CONFIRM_WITHIN_SECONDS, one day), inside the emails' own
+ * idempotency, so a late run never sends them a second time.
+ */
+const TELL_WITHIN_SECONDS = 24 * 60 * 60;
+
+/** Emails the recipient that a gift is theirs, and the buyer their receipt, each under its own idempotency key. */
+async function tellGift(input: Parameters<typeof deliverGift>[0], gift: Gift, sessionId: string): Promise<void> {
+  const { store, session, product, base } = input;
   const g = givingWords(store.language);
   const who = gift.from || g.someone;
   // Given at one of the product's prices: named with it, as on the receipt.
@@ -313,8 +404,14 @@ export async function deliverGift(input: {
 
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (buyer) {
-    const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
-    const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+    // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+    // three-letter currency. Anything else leaves the line out, never the catalog's current price or the store's own
+    // currency.
+    const amount = session.amount_total;
+    const currency = session.currency;
+    const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+      ? formatMoney(Number(amount), currency, speech(store).lang.locale)
+      : null;
     await sendEmail({ meter: { by: "order" },
       from: input.from,
       to: buyer,
@@ -324,11 +421,11 @@ export async function deliverGift(input: {
         "",
         g.aGift(title),
         g.giftFor(gift.to),
-        g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+        ...(paid ? [g.paidLine(paid)] : []),
         g.orderRef(sessionId),
         ...consentEmailLines(store, session.metadata),
         "",
-        g.weEmailed(gift.to, Boolean(gift.message)),
+        g.weEmailed(gift.to, Boolean(gift.from), Boolean(gift.message)),
         "",
         g.chargedBy(store.name),
       ].join("\n"),
@@ -336,7 +433,6 @@ export async function deliverGift(input: {
       idempotencyKey: `nimbus-gift-receipt:${gift.id}`,
     }).catch((error) => console.error("a gift receipt failed", error));
   }
-  return "given";
 }
 
 /** The buyer's name on a gift, for the recipient's list of purchases. */
@@ -365,7 +461,12 @@ export async function revokeRefundedGifts(
   if (!begun) return 0;
   const [any, anchorRaw, passRaw] = begun;
   if (!any) return 0;
-  const fresh = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
+  // The anchor read exactly (r24 money inventory, item 1), as lib/group-buy.ts does: in another shape this run asks
+  // nothing of Stripe and writes no pass or anchor, never a pass from a week back that would skip the refunds older
+  // than that; only the list to try again, which does not depend on it, is read (review of #3302, Claude 5 LEVE 2).
+  // Only a confirmed absent anchor (the store's first pass) starts from a week back.
+  const anchorKnown = anchorRaw === null || (typeof anchorRaw === "string" && ANCHOR.test(anchorRaw));
+  const fresh = Math.max(0, (anchorKnown && anchorRaw !== null ? Number(anchorRaw) : now() - 7 * 86_400) - 300);
   // A pass over the refunds longer than one run goes on where the last run stopped (r24 money inventory, item 1, the
   // gap left by #3188), as lib/group-buy.ts does: without it a store with more refunds since the anchor than one run
   // reads read the same newest pages every run and never reached the older ones. A pass kept in an unknown shape (not
@@ -374,7 +475,7 @@ export async function revokeRefundedGifts(
   const keptPass = readRefundPass(passRaw);
   const pass = keptPass && keptPass.account === account && (anchorRaw === null || keptPass.since === fresh) ? keptPass : null;
   const since = pass ? pass.since : fresh;
-  let newest = pass ? pass.newest : Number(anchorRaw) || since;
+  let newest = pass ? pass.newest : anchorKnown && anchorRaw !== null ? Number(anchorRaw) : since;
   let after = pass ? pass.after : "";
   // The oldest refund the pass read that Stripe had not finished (heldAt; Infinity: none), kept with the pass.
   let waiting = pass?.waiting ?? Infinity;
@@ -412,6 +513,10 @@ export async function revokeRefundedGifts(
         // No record: nothing of this gift is held as a purchase any more (null). A record that does not read is
         // unknown, never "no items" (rule 30, Claude 4 on #2781).
         let items: string[] = [];
+        // Only what this gift gave (as lib/group-buy.ts and lib/preorders.ts): grantImported writes with HSETNX, so a
+        // gift to an address that already held the product another way (a PayPal purchase, a place, a pre-order, an
+        // import, an earlier gift) wrote nothing, and its refund must leave that other purchase and its course alone.
+        let ours = false;
         if (typeof given === "string") {
           let v: unknown;
           try {
@@ -420,8 +525,17 @@ export async function revokeRefundedGifts(
             v = undefined;
           }
           if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+          const job = (v as { job?: unknown }).job;
+          // A job that is not text is unknown, never "came another way": the row waits to be tried again.
+          if (typeof job !== "string") return false;
+          ours = job === `gift:${gift.id}`;
           const listed = (v as { items?: unknown }).items;
           items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
+        }
+        if (typeof given === "string" && !ours) {
+          // Nothing of this gift is held: it is marked taken back, and what came another way stays.
+          if (!(await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS))) return false;
+          return markRead(sid, id);
         }
         // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
         // purchase, so the next run takes both away again; taking a course away twice is harmless.
@@ -449,13 +563,131 @@ export async function revokeRefundedGifts(
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`);
+      const latest = now() + 300;
+      return readStripePage(raw, row => refundRowKnown(row) && (row.created as number) <= latest);
     } catch (error) {
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading refunds for gifts: a page in another shape", error);
       return null;
     }
   };
+
+  /**
+   * Puts refunds Stripe finished whose work could not be done on the list to try again; true only when every one is
+   * kept for sure. Only a refund that succeeded (reviews of #3302, Claude 6 and Claude 5 LEVE 1; the owner's decision 18
+   * of 9 November 2026): the list tries a row again as finished, so a refund not final yet is never put on it.
+   */
+  const keepForLater = async (rows: Record<string, unknown>[]): Promise<boolean> => {
+    const fields: string[] = [];
+    for (const row of rows) {
+      const { id, payment_intent: pi } = row;
+      if (row.status !== "succeeded" || typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) return false;
+      fields.push(id, pi);
+    }
+    // Only rows not on the list yet count against its cap (Claude 5 on #3302): a page read again puts back rows already
+    // there, which HLEN holds. Each already there is read in its exact shape (its payment), a new one as nil.
+    const ids = fields.filter((_, i) => i % 2 === 0);
+    const read = repliesFor(await redisPipeline([["HLEN", retryKey(sid)], ["HMGET", retryKey(sid), ...ids]]), 2);
+    const counted = countOf(read?.[0]);
+    const there = read?.[1];
+    // Read slot by slot from the reply's own data (replyList; Codex X6 on #3302, LOW): a sparse reply would let every and
+    // filter skip its holes and count too few new rows. Any text already there is a field HLEN counts, so the HSET below
+    // puts the payment read from Stripe over it, a malformed one included (Codex X6, LOW), and it adds nothing to the
+    // count; only nil is a new row.
+    const slots = replyList(there);
+    let fresh: number | null = slots && slots.length === ids.length ? 0 : null;
+    for (const value of slots ?? []) {
+      if (fresh === null) break;
+      if (value === null) fresh += 1;
+      else if (typeof value !== "string") fresh = null;
+    }
+    if (counted === null || fresh === null || counted + fresh > REFUND_RETRY_CAP) {
+      console.error("reading refunds for gifts: the list to try again is full or unknown; the anchor waits at the rows");
+      return false;
+    }
+    const kept = repliesFor(await redisPipeline([["HSET", retryKey(sid), ...fields], ["EXPIRE", retryKey(sid), GIFT_KEPT_SECONDS]]), 2);
+    const added = countOf(kept?.[0]);
+    return added !== null && added <= rows.length && kept?.[1] === 1;
+  };
+
+  /**
+   * A refund on the list read again from Stripe before anything is taken back (review of #3302, Claude 2 MEDIUM; the
+   * owner's decision 18 of 9 November 2026): the list keeps which refund it was, never whether it still gives the money
+   * back. Read in its exact shape (refundRowKnown, the same refund and payment): the row itself when it succeeded on a
+   * charge refunded in full; "drop" when Stripe failed or canceled it, or its charge is not refunded in full (nothing
+   * to take back); "keep" when it is not final yet, read in another shape, or Stripe could not be asked (nothing taken
+   * back, read again next run).
+   */
+  const reread = async (id: string, pi: string): Promise<Record<string, unknown> | "drop" | "keep"> => {
+    let row: Record<string, unknown>;
+    try {
+      row = await onAccount("GET", account, `/refunds/${id}?${new URLSearchParams([["expand[]", "charge"]])}`);
+    } catch (error) {
+      console.error("reading refunds for gifts: a row to try again could not be read again; kept", error);
+      return "keep";
+    }
+    if (row.object !== "refund" || row.id !== id || row.payment_intent !== pi || !refundRowKnown(row)) return "keep";
+    if (row.status === "failed" || row.status === "canceled") return "drop";
+    const charge = row.charge as { refunded?: unknown } | null;
+    if (row.status !== "succeeded" || !charge) return "keep";
+    return charge.refunded === true ? row : "drop";
+  };
+
+  // The refunds Stripe finished whose work could not be done, first, at most GIFT_REFUND_REREADS_PER_STORE a run
+  // and at most REFUND_REREAD_MS of the run, in the order of their ids from the one after the last this store's runs
+  // read (retryFromKey; focal review of #3302, MEDIUM: a place taken from the clock read the same rows on every run of
+  // a store reached every ten minutes, and the refunds behind rows never handled stayed with the buyer): each read
+  // again from Stripe and handled as the row Stripe sends only when it succeeded on a charge refunded in full; let go once handled, or once Stripe failed or canceled it or its
+  // charge is not refunded in full, nothing taken back. A list read in another shape, or a row on it that is not a
+  // refund and a payment, is left as it is and read again next run: never taken as empty or dropped.
+  const retrying = repliesFor(await redisPipeline([["HGETALL", retryKey(sid)], ["GET", retryFromKey(sid)]]), 2);
+  const flat = retrying ? stringList(retrying[0]) : null;
+  if (!flat || flat.length % 2 !== 0) console.error("reading refunds for gifts: the list to try again was read in another shape; read again next run");
+  else {
+    const listed: [string, string][] = [];
+    for (let i = 0; i < flat.length; i += 2) {
+      if (REFUND_ID.test(flat[i]) && PAYMENT_ID.test(flat[i + 1])) listed.push([flat[i], flat[i + 1]]);
+      else console.error("reading refunds for gifts: a row to try again in another shape; kept");
+    }
+    // In the order of their ids, whatever order the store keeps the list in; from the one after the last read.
+    listed.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const from = retrying?.[1] ?? null;
+    const place = typeof from === "string" && REFUND_ID.test(from) ? from : null;
+    if (from !== null && place === null) console.error("reading refunds for gifts: the place on the list to try again was read in another shape; read from its first row");
+    const past = place === null ? 0 : listed.findIndex(([id]) => id > place);
+    const start = past < 0 ? 0 : past;
+    const until = Math.min(deadline, Date.now() + REFUND_REREAD_MS);
+    let last = "";
+    let late = false;
+    for (let k = 0; k < Math.min(listed.length, GIFT_REFUND_REREADS_PER_STORE); k += 1) {
+      if (Date.now() >= deadline) {
+        late = true;
+        break;
+      }
+      if (k > 0 && Date.now() >= until) break;
+      const [id, pi] = listed[(start + k) % listed.length];
+      last = id;
+      const verdict = await reread(id, pi);
+      if (verdict === "keep") continue;
+      if (verdict !== "drop" && !(await handle(verdict))) continue;
+      // Handled and marked read, or nothing to take back: one left on the list by a reply lost here is read again.
+      const gone = repliesFor(await redisPipeline([["HDEL", retryKey(sid), id]]), 1);
+      if (!oneWrite(gone?.[0])) console.error("reading refunds for gifts: letting go of a row was left unknown; read again next run");
+    }
+    // The place moves past every row read this run, kept or not, also when the deadline cut the run short. A write left
+    // unknown reads the same rows again next run: never one skipped.
+    if (last) {
+      const moved = repliesFor(await redisPipeline([["SET", retryFromKey(sid), last, "EX", GIFT_KEPT_SECONDS]]), 1);
+      if (moved?.[0] !== "OK") console.error("reading refunds for gifts: the place on the list to try again was left unknown; read from it again next run");
+    }
+    if (late) return revoked;
+  }
+
+  if (!anchorKnown) {
+    console.error("reading refunds for gifts: the anchor was read in another shape; only the list to try again was read this run");
+    return revoked;
+  }
 
   // A dispute closed as lost takes a gift back as a full refund does, whatever its amount (lib/refunds.ts, the
   // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
@@ -471,8 +703,9 @@ export async function revokeRefundedGifts(
 
   // Every page of the refunds since the anchor (CX-123 rule 24; r24 money inventory, item 1), newest first, read in
   // its exact shape. The pass moves past a page once every row on it was read and handled as far as it can be (kept in
-  // passKey, a week); a row not readable or not handled holds the anchor, never the pass, and a page in another shape
-  // or a run out of time leaves the pass on that page, read again next run. A run that resumes a pass
+  // passKey, a week); a refund Stripe finished whose work could not be done goes on the list to try again (retryKey),
+  // any other row not handled or not readable holds the anchor, never the pass, and a page in another shape or a run
+  // out of time leaves the pass on that page, read again next run. A run that resumes a pass
   // first reads the newest page, so a refund made meanwhile does not wait for the pass: what it reads there never
   // moves the pass or the anchor, and the next pass reads it again (each handled one stays handled).
   let pages = GIFT_REFUND_PAGES_PER_STORE;
@@ -489,20 +722,27 @@ export async function revokeRefundedGifts(
     if (Date.now() >= deadline) return revoked;
     const read = await readPage(after);
     if (!read) break;
-    // One row that cannot be handled, or that is not readable at all, never holds the pages behind it (reviews of
-    // #3301, Claude 2 M1 and Claude 5): the pass goes on, the row is never marked read, and the anchor waits for it.
-    // A row not handled holds the anchor at its time, as a refund Stripe had not finished does; a row not readable,
-    // whose time is not known, keeps the anchor where it was. The next pass reads it again either way:
-    // never taken as refunded, never as not refunded, never passed over.
-    let unhandled = Infinity;
+    const failed: Record<string, unknown>[] = [];
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
-      if (!(await handle(refund))) unhandled = Math.min(unhandled, typeof refund.created === "number" ? refund.created : since);
+      if (!(await handle(refund))) failed.push(refund);
     }
+    // One row that cannot be handled, or that is not readable at all, never holds the pages behind it (reviews of
+    // #3301, Claude 2 M1 and Claude 5; of #3302, Claude 5 MEDIUM 1): the pass goes on and the row is never marked read.
+    // A refund Stripe finished goes on the list to try again, so the anchor need not wait for it. Any other row not
+    // handled (a refund not final yet, or one the list could not keep for sure: full, or a reply left unknown) holds
+    // the anchor at its time, as a refund Stripe had not finished does; a row not readable, whose time is not known,
+    // keeps the anchor where it was. The next pass reads each again: never taken as refunded, never as not refunded,
+    // never passed over.
+    const finished = failed.filter((refund) => refund.status === "succeeded");
+    const listed = finished.length > 0 && (await keepForLater(finished));
+    for (const refund of failed) {
+      if (listed && refund.status === "succeeded") continue;
+      waiting = Math.min(waiting, typeof refund.created === "number" ? refund.created : since);
+    }
+    if (read.unreadable > 0) unread = true;
     // The page read and handled as far as it can be moves the pass, and what it read moves with it: its newest refund,
     // and the time the anchor waits at, however far the pass goes on (the pass skips no page; the anchor waits on it).
-    waiting = Math.min(waiting, unhandled);
-    if (read.unreadable > 0) unread = true;
     for (const refund of read.rows) {
       newest = Math.max(newest, typeof refund.created === "number" ? refund.created : 0);
       const held = heldAt(refund);

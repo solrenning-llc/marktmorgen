@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { SiteFooter } from "@/components/site-footer";
 import { type Store, storeForId } from "@/lib/store";
 import { photoUrl } from "@/lib/photo-limits";
@@ -119,7 +119,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                           </span>
                         )}
                         <div className="min-w-0">
-                          <p className="truncate text-lg font-semibold">{store.name}</p>
+                          <h2 className="text-lg font-semibold [overflow-wrap:anywhere]">{store.name}</h2>
                           <p className="text-sm text-ink-soft">{on ? STANDING[affiliate.status] : "Program switched off by the creator"}</p>
                         </div>
                       </div>
@@ -152,10 +152,12 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                         {open ? (
                           <a href={open} className="btn btn-primary btn-sm">
                             Open your numbers
+                            <span className="sr-only"> for {store.name}</span>
                           </a>
                         ) : null}
                         <a href={storeBase(store)} className="btn btn-secondary btn-sm">
                           Visit the store
+                          <span className="sr-only">: {store.name}</span>
                         </a>
                       </div>
                     </li>

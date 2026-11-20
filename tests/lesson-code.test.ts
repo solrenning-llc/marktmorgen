@@ -37,15 +37,15 @@ is("many openings never closed are read at once: each is not searched to the end
 is("a smaller opening after a bigger one never closed still finds its own close", lessonBlocks(`${"`".repeat(5)}\nnot code\n${F}\ncode\n${F}`), [{ kind: "paragraph", lines: ["`".repeat(5), "not code"] }, { kind: "code", language: "", code: "code" }]);
 is("a long line of backticks and spaces is read at once (no pattern that goes back over itself)", (() => { const t = Date.now(); lessonBlocks(F + " ".repeat(20000) + "!"); return Date.now() - t < 50; })(), true);
 part("On the page");
-const html = renderToStaticMarkup(createElement(LessonText, { text: code + "\n\nSee https://example.com/x" }));
+const html = renderToStaticMarkup(createElement(LessonText, { text: code + "\n\nSee https://example.com/x", lang: "en-US" }));
 is("shown as text, never markup: the script is escaped", [html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"), html.includes("<script>")], [true, false]);
 is("scrolled sideways, reachable by keyboard to scroll, in the store's colors with its own focus ring", [/<pre tabindex="0" role="group" aria-label="Code: js" translate="no" data-language="js" class="[^"]*overflow-x-auto[^"]*"><code>const a = 1;\n\n  if \(a &lt; 2\) \{ run\(\); \}/.test(html), html.includes("bg-[var(--st-item)]") && html.includes("text-[var(--st-text)]") && html.includes("focus-visible:outline-[var(--st-accent-text)]"), html.includes('role="region"')], [true, true, false]);
 is("the stop it makes has a name, in the page's language, and the browser never translates the code (4.1.2, 3.1.2)", [
-  renderToStaticMarkup(createElement(LessonText, { text: `${F}\nx\n${F}` })).includes('role="group" aria-label="Code" translate="no"'),
-  renderToStaticMarkup(createElement(LessonText, { text: `${F}py\nx\n${F}`, codeLabel: coursesWords("pt").codeBlock })).includes('aria-label="Código: py"'),
+  renderToStaticMarkup(createElement(LessonText, { text: `${F}\nx\n${F}`, lang: "en-US" })).includes('role="group" aria-label="Code" translate="no"'),
+  renderToStaticMarkup(createElement(LessonText, { text: `${F}py\nx\n${F}`, codeLabel: coursesWords("pt").codeBlock, lang: "en-US" })).includes('aria-label="Código: py"'),
   (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => coursesWords(l).codeBlock.length > 0),
 ], [true, true, true]);
-is("the lesson page names it in the store's language", readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("<LessonText text={body} codeLabel={w.codeBlock} />"), true);
-is("a web address outside code is still a link; inside code, it stays text", [html.includes('href="https://example.com/x"'), renderToStaticMarkup(createElement(LessonText, { text: `${F}\nhttps://example.com/y\n${F}` })).includes("href=")], [true, false]);
+is("the lesson page names it in the store's language", readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("<LessonText text={body} codeLabel={w.codeBlock} lang={said.lang.locale} />"), true);
+is("a web address outside code is still a link; inside code, it stays text", [html.includes('href="https://example.com/x"'), renderToStaticMarkup(createElement(LessonText, { text: `${F}\nhttps://example.com/y\n${F}`, lang: "en-US" })).includes("href=")], [true, false]);
 
 done();

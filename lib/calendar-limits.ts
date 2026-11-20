@@ -34,8 +34,10 @@ export const CALENDAR_RETRIES_PER_DAY = 1;
 export const CALENDAR_POLLS_PER_HOUR = 4;
 /**
  * Answers refused past the pace in an hour before the address stops (inbox
- * C4-33, light a): the most the first-payment refund the owner funds allows
- * (tests/plan-margin.test.ts, US$ 65), priced in the feed's line. Two apps
+ * C4-33, light a): the most the first-payment refund the owner funds allowed
+ * (tests/plan-margin.test.ts, sized under US$ 65; the US$ 66 of 6 November
+ * 2026, C4-20261106-2640-DONO-156, is room for picture uploads, not for more
+ * of these), priced in the feed's line. Two apps
  * asking every fifteen minutes never reach it; one asking every five minutes
  * (Apple Calendar's shortest) does, and the studio's editor says so. Past it
  * the address is let go, as "Make a new address" does, and the studio shows a

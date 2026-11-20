@@ -55,6 +55,20 @@ class FullTreeProofTests(unittest.TestCase):
             else: reply["jobs"][0]["started_at"]=None
             self.assertFalse(prove_full_tree(A,T,data.__getitem__))
 
+    def test_a_pull_request_run_that_deferred_its_accessibility_jobs_never_proves_a_tree(self):
+        # On a pull request the six accessibility workflows skip their heavy jobs on purpose and the
+        # final check passes; such a run proves nothing, so a push to main reuses only the merge queue.
+        for index, (workflow, names) in enumerate(WORKFLOWS.items(), 1):
+            if not workflow.startswith("accessibility-"):
+                continue
+            with self.subTest(workflow=workflow):
+                data = fixture()
+                reply = data["actions/runs/"+str(index)+"/jobs?filter=latest&per_page=100"]
+                for job in reply["jobs"]:
+                    if job["name"] in names and not job["name"].startswith("All checks ("):
+                        job["conclusion"] = "skipped"
+                self.assertFalse(prove_full_tree(A,T,data.__getitem__))
+
     def test_wrong_source_event_repository_or_head_refuses(self):
         for field,value in [("event","push"),("head_sha","e"*40),("display_title","owner supplied title"),
                             ("conclusion","failure"),("repository",{"id":1,"full_name":"other/repo"}),

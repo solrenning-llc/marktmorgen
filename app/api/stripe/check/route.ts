@@ -15,7 +15,9 @@ export async function POST(request: NextRequest) {
   try {
     const state = await readAccount(store.stripeAccountId);
     // Said only once the record took it (CX-123 rule 24): that record opens the store's checkout.
-    const saved = await setStripeAccount(ref, store.stripeAccountId, state.chargesEnabled);
+    // Written only while the store still points at the account asked about: one forgotten, or replaced,
+    // while Stripe was being asked is never written back with card payments on.
+    const saved = await setStripeAccount(ref, store.stripeAccountId, state.chargesEnabled, { expected: store.stripeAccountId });
     if (!saved.ok) return away(origin, studio("stripe=error"));
     return away(origin, studio(`stripe=${state.chargesEnabled ? "ready" : "pending"}`));
   } catch (error) {

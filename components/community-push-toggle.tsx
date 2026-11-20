@@ -101,6 +101,9 @@ export function CommunityPushToggle({
               ? t.noroom
             : data.error === "unavailable"
               ? t.unavailable
+            // This browser's subscription is not one a device may be kept with: pressing again makes the same one.
+            : data.error === "invalid"
+              ? t.refused
               : t.failed,
         );
         setState("off");

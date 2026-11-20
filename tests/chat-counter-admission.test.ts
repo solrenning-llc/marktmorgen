@@ -35,16 +35,16 @@ async function main() {
     return new Response(null, { status: 204 });
   };
   try {
-    const inherited = Object.setPrototypeOf([, 1], { 0: "OK" });
+    const inherited = Object.setPrototypeOf([, 1], { 0: 1 });
     let getterCalls = 0;
-    const getter = ["OK", 1];
+    const getter = [1, 1];
     Object.defineProperty(getter, "1", { get() { getterCalls++; return 1; } });
     const malformed: [string, unknown][] = [
-      ["missing", undefined], ["null", null], ["object", {}], ["empty", []], ["partial", ["OK"]],
-      ["unknown SET", [false, 1]], ["null count", ["OK", null]], ["text count", ["OK", "1"]],
-      ["zero", ["OK", 0]], ["negative", ["OK", -1]], ["NaN", ["OK", NaN]], ["infinite", ["OK", Infinity]],
-      ["fraction", ["OK", 1.5]], ["unsafe", ["OK", Number.MAX_SAFE_INTEGER + 1]],
-      ["extra", ["OK", 1, true]], ["sparse", [, 1]], ["inherited", inherited], ["getter", getter],
+      ["missing", undefined], ["null", null], ["object", {}], ["empty", []], ["partial", [1]],
+      ["unknown EXPIRE", [1, false]], ["null count", [null, 1]], ["text count", ["1", 1]],
+      ["zero", [0, 1]], ["negative", [-1, 1]], ["NaN", [NaN, 1]], ["infinite", [Infinity, 1]],
+      ["fraction", [1.5, 1]], ["unsafe", [Number.MAX_SAFE_INTEGER + 1, 1]],
+      ["extra", [1, 1, true]], ["sparse", [, 1]], ["inherited", inherited], ["getter", getter],
     ];
     for (const [name, reply] of malformed) await check(`unknown ${name} refuses before chat POST/write`, async () => {
       reset(); state.override = true; state.reply = reply;
@@ -68,8 +68,8 @@ async function main() {
       reset(); const response = await ask(); assert.equal(response.status, 200);
       assert.equal(state.posts, 1); assert.ok(state.postBytes > 0); assert.equal(settings().length, 1);
       assert.match(String(settings()[0][2]), /^s1\./);
-      assert.deepEqual(counters().map(c => c[0]), ["SET", "INCR"]);
-      assert.deepEqual(counters()[0].slice(2), ["0", "EX", 3600, "NX"]);
+      assert.deepEqual(counters().map(c => c[0]), ["INCR", "EXPIRE"]);
+      assert.deepEqual(counters()[1].slice(2), [3600, "NX"]);
       assert.equal(counters()[0][1], counters()[1][1]);
       assert.equal(response.headers.get("Cache-Control"), "no-store");
     });
@@ -78,7 +78,7 @@ async function main() {
       assert.equal((await ask()).status, 429); assert.equal(state.posts, 10); assert.equal(settings().length, 10);
     });
     await check("confirmed exceeded counter keeps its refusal", async () => {
-      reset(); state.override = true; state.reply = [null, 11]; await refused(429);
+      reset(); state.override = true; state.reply = [11, 0]; await refused(429);
     });
     await check("sales toggle remains outside provider-test counter", async () => {
       reset(); state.throws = true; assert.equal((await ask({ sales: true })).status, 200);
@@ -114,7 +114,7 @@ async function main() {
     }
     // Claude 5 LOW1 (6701833468): stopping must remain available after refused saves.
     for (const mode of ["unknown", "exceeded", "whitespace"] as const) await check(`removal bypasses only the provider-test counter: ${mode}`, async () => {
-      reset(); state.override = true; state.reply = mode === "unknown" ? ["OK", null] : [null, 11];
+      reset(); state.override = true; state.reply = mode === "unknown" ? [null, 1] : [11, 0];
       const response = await ask({ url: mode === "whitespace" ? "  " : "" });
       assert.equal(response.status, 200);
       assert.deepEqual(await response.json(), { ok: true, result: "removed" });

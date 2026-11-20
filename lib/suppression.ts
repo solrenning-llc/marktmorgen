@@ -4,7 +4,8 @@
  * again (CAN-SPAM's opt-out, the GDPR's objection to direct marketing) and
  * no import, API call or list from another platform puts them back.
  *
- *   nl:erased:<listId>   hash  fingerprint -> when they were deleted (seconds)
+ *   nl:erased:<listId>   hash  fingerprint -> when they were deleted (seconds), and, when the person asked for it
+ *                              themselves, "own:" + fingerprint -> when (seconds; ownErasureCommand)
  *
  * Kept under the store's list id (lib/contacts.ts), which every path that
  * emails a store's people already reads; deleting somebody gives a store
@@ -14,7 +15,11 @@
  * characters. It cannot be read back into an address; it can only answer
  * "is this address the one that was deleted?" when the address is typed
  * again. It holds nothing else: not their name, not what they bought, not
- * who deleted them.
+ * who on the team deleted them. Beside it, a person who asked for their own
+ * deletion has the same fingerprint noted as theirs ("own:"), because a
+ * team's deletion keeps their purchases and theirs does not
+ * (lib/person-erasure.ts): an order paid before it and still owed is then
+ * not handed over to them (lib/paypal-delivery.ts).
  *
  * Only the person can lift it, by giving their own yes again: asking for
  * something free and confirming by the emailed link, or ticking the box to
@@ -55,9 +60,47 @@ export function suppressCommand(listId: string, email: string, nowSeconds?: numb
   return ["EVAL", ERASED_PRINT, 1, suppressedKey(listId), suppressionPrint(listId, email)];
 }
 
-/** Lifts it: the person's own yes, given again. */
+/** A command that answers when this address was deleted from this store (seconds), or nil. */
+export function suppressedAtCommand(listId: string, email: string): Command {
+  return ["HGET", suppressedKey(listId), suppressionPrint(listId, email)];
+}
+
+/**
+ * Whether this address was deleted from this store within the last ARGV[2] seconds, on Redis's own clock (TIME), in
+ * one step: 1 when it was, 0 when it never was or longer ago, -1 when its mark is not whole seconds. The mark is
+ * written on that same clock (ERASED_PRINT), so the two times are never one instance's wall clock against Redis's
+ * (Claude 1 cloud's LEVE on #2576). Billed 1 + 2; lib/redis-memory.ts runs it the same way.
+ */
+export const ERASED_WITHIN = `-- marktmorgen:erased-within:v1
+local at = redis.call('HGET', KEYS[1], ARGV[1])
+if not at then return 0 end
+if not string.match(at, '^%d+$') then return -1 end
+local now = tonumber(redis.call('TIME')[1])
+if tonumber(at) >= now - tonumber(ARGV[2]) then return 1 end
+return 0`;
+
+/** Whether this address was deleted from this store within the last `seconds`, on Redis's clock (ERASED_WITHIN). */
+export function erasedWithinCommand(listId: string, email: string, seconds: number): Command {
+  return ["EVAL", ERASED_WITHIN, 1, suppressedKey(listId), suppressionPrint(listId, email), seconds];
+}
+
+
+/** The field beside a deleted person's fingerprint that says they asked for the deletion themselves. */
+export function ownErasureField(listId: string, email: string): string {
+  return `own:${suppressionPrint(listId, email)}`;
+}
+
+/**
+ * Notes that this address's deletion from this store was asked for by the person themselves (lib/person-erasure.ts,
+ * written with the fingerprint, before anything is deleted). HSET: answers 1, or 0 for one noted before.
+ */
+export function ownErasureCommand(listId: string, email: string, nowSeconds = Math.floor(Date.now() / 1000)): Command {
+  return ["HSET", suppressedKey(listId), ownErasureField(listId, email), nowSeconds];
+}
+
+/** Lifts it, and the note that it was their own: the person's own yes, given again. */
 export function liftCommand(listId: string, email: string): Command {
-  return ["HDEL", suppressedKey(listId), suppressionPrint(listId, email)];
+  return ["HDEL", suppressedKey(listId), suppressionPrint(listId, email), ownErasureField(listId, email)];
 }
 
 /**

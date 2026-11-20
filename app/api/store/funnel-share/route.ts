@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio, jsonAccess } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
-import { fileHeaders } from "@/lib/request-guard";
+import { fileHeaders, fromAnotherSite } from "@/lib/request-guard";
 import { FUNNEL_ID } from "@/lib/page-funnel";
 import { type BundleOutline, type FunnelBundle, type PlanLine, leftOutWords, outlineOf, planImport, readBundle } from "@/lib/funnel-bundle";
 import { collectBundle, importBundle, receiverOf } from "@/lib/funnel-bundle-store";
@@ -301,6 +301,9 @@ export async function POST(request: NextRequest) {
  * out, in the versioned format any Marktmorgen store can bring in.
  */
 export async function GET(request: NextRequest) {
+  // A download that spends one of the month's exports: another site sending a signed-in creator here (a GET passes
+  // the global guard, and the session cookie is Lax) must not spend it, as creatorFrom refuses for the other downloads.
+  if (fromAnotherSite(request)) return refuse("forbidden", 403);
   const access = await jsonAccess(request, "page");
   if (access instanceof Response) return access;
   const store = access.store;

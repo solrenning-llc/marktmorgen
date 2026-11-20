@@ -6,7 +6,7 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { FOCUS_CLEAR_ROOM, focusScrollBy, visibleTop } from "@/lib/studio-focus-clear";
+import { FOCUS_CLEAR_ROOM, focusScrollBy, stuckBarsBottom, visibleTop } from "@/lib/studio-focus-clear";
 
 const base = { barsBottom: 124, inDialog: false, inBars: false, fromPointer: false };
 
@@ -58,4 +58,19 @@ test("a visually hidden control is measured by its visible label, never by its c
   // A hidden control with no label: nothing to bring clear, so no reading (NaN), and the rule answers 0.
   assert.ok(Number.isNaN(visibleTop({ top: 40, width: 1, height: 1 }, null)));
   assert.equal(focusScrollBy({ ...base, controlTop: visibleTop({ top: 40, width: 1, height: 1 }, null) }), 0);
+});
+
+test("every stuck sticky bar counts, never only the first <header>; one not yet at its place covers nothing", () => {
+  // Claude 5's LOW on #3757: document.querySelector("header") took the first <header> in the document. A store page's
+  // hero <header> (not sticky) or a sticky <header> lower in the page must neither hide the stuck site header nor
+  // stand in for it.
+  const site = { top: 0, bottom: 64, stickTop: 0 };
+  const nav = { top: 64, bottom: 124, stickTop: 64 };
+  assert.equal(stuckBarsBottom([site, nav]), 124);
+  assert.equal(stuckBarsBottom([nav, site]), 124, "order in the document does not matter");
+  assert.equal(stuckBarsBottom([{ top: 700, bottom: 760, stickTop: 0 }, site, nav]), 124, "a sticky header further down, not yet stuck, is left out");
+  assert.equal(stuckBarsBottom([{ top: 700, bottom: 760, stickTop: 0 }]), null, "nothing stuck: no bar");
+  assert.equal(stuckBarsBottom([]), null);
+  assert.equal(stuckBarsBottom([{ top: 0.5, bottom: 64, stickTop: 0 }]), 64, "within a pixel of its place is stuck");
+  assert.equal(stuckBarsBottom([{ top: Number.NaN, bottom: 64, stickTop: 0 }, nav]), 124, "an unreadable bar is left out");
 });

@@ -48,3 +48,14 @@ export function visibleTop(own: Readonly<{ top: number; width: number; height: n
   if (own.width > 1 && own.height > 1) return own.top;
   return label ? label.top : Number.NaN;
 }
+
+/**
+ * The lowest bottom of the sticky bars that are stuck right now, in viewport pixels, or null when none is. A bar is
+ * read only while it sits at its own sticky top (its rect's top within a pixel of the computed `top`): a sticky
+ * <header> lower in the page that has not reached its place yet covers nothing at the top of the viewport. Every
+ * sticky header and section bar counts, never only the first <header> in the document (Claude 5's LOW on #3757).
+ */
+export function stuckBarsBottom(bars: ReadonlyArray<Readonly<{ top: number; bottom: number; stickTop: number }>>): number | null {
+  // RED: the old reading, the first bar only.
+  return bars.length === 0 ? null : bars[0].bottom;
+}

@@ -1,0 +1,12 @@
+{
+  "@/lib/studio-route": "submission-studio-world.ts",
+  "@/lib/store-request": "submission-studio-world.ts",
+  "@/lib/catalog": "submission-studio-world.ts",
+  "@/lib/course": "submission-studio-world.ts",
+  "@/lib/store": "submission-studio-world.ts",
+  "@/lib/store-allowance": "submission-studio-world.ts",
+  "@/lib/submission-switch": "submission-switch-on.ts",
+  "@/lib/upload-budget": "submission-upload-world.ts",
+  "@/lib/vault-storage": "submission-upload-world.ts",
+  "@/lib/vault": "submission-upload-world.ts"
+}

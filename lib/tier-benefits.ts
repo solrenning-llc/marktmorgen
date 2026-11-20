@@ -536,6 +536,12 @@ export async function forgetStoreBenefits(statsId: string | null): Promise<void>
   // Who has marks unread: nothing is deleted blind, so the marks are not left without their list.
   if (!listed) throw new UnknownReplyError("the people with benefit marks");
   const people = listed.filter((p) => PERSON.test(p));
-  for (let i = 0; i < people.length; i += 500) await redisPipeline([["DEL", ...people.slice(i, i + 500).map((p) => marksKey(statsId, p))]]);
-  await redisPipeline([["DEL", whoKey(statsId), benefitsKey(statsId)]]);
+  // Each DEL confirms only a count from 0 up to the keys it named (as forgetRecentSales, #4752): anything else leaves
+  // the store's deletion step unconfirmed.
+  const deleted = async (keys: string[]) => {
+    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+    if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a store's benefit marks");
+  };
+  for (let i = 0; i < people.length; i += 500) await deleted(people.slice(i, i + 500).map((p) => marksKey(statsId, p)));
+  await deleted([whoKey(statsId), benefitsKey(statsId)]);
 }

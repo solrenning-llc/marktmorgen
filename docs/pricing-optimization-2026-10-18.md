@@ -10,8 +10,8 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$159 / $1,590** | every #553 figure, none cut | 60.69% / 60.57% | 12.25% | 132 | $69 / $690 |
-| Studio | **$819 / $8,190** | every #553 figure, none cut | 61.22% / 60.94% | 12.46% | 16 | $449 / $4,490 |
+| Store | **$159 / $1,590** | every #553 figure, none cut | 60.69% / 60.57% | 12.25% | 133 | $69 / $690 |
+| Studio | **$819 / $8,190** | every #553 figure, none cut | 61.22% / 60.93% | 12.46% | 16 | $449 / $4,490 |
 | Scale | **$1,729 / $17,290** | every #553 figure, none cut | 61.30% / 60.98% | 12.49% | 8 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).
@@ -152,14 +152,14 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
-| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.20%; 62.18% / 62.00%; 62.30% / 62.12%) | yes |
+| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.19%; 62.18% / 62.00%; 62.30% / 62.12%) | yes |
 | ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.89% / 61.86%; 62.98% / 62.90%; 63.08% / 63.00%) | yes |
-| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.20%; 62.18% / 62.00%; 62.30% / 62.12%) | yes |
+| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.19%; 62.18% / 62.00%; 62.30% / 62.12%) | yes |
 | ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.89% / 61.86%; 62.98% / 62.90%; 63.08% / 63.00%) | yes |
-| ε = -1.5 | A | $139 | $619 | $1,279 | yes (60.26% / 60.12%; 60.43% / 60.05%; 60.46% / 60.03%) | yes |
-| ε = -1.5 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $289 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $559 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.41% / 60.36%; 60.41% / 60.06%; 60.47% / 60.02%) | yes |
-| ε = -2 | A | $139 | $619 | $1,279 | yes (60.26% / 60.12%; 60.43% / 60.05%; 60.46% / 60.03%) | yes |
-| ε = -2 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $289 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $559 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.41% / 60.36%; 60.41% / 60.06%; 60.47% / 60.02%) | yes |
+| ε = -1.5 | A | $139 | $619 | $1,279 | yes (60.25% / 60.12%; 60.43% / 60.05%; 60.46% / 60.02%) | yes |
+| ε = -1.5 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $289 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $559 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.41% / 60.35%; 60.41% / 60.05%; 60.47% / 60.01%) | yes |
+| ε = -2 | A | $139 | $619 | $1,279 | yes (60.25% / 60.12%; 60.43% / 60.05%; 60.46% / 60.02%) | yes |
+| ε = -2 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $289 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $559 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.41% / 60.35%; 60.41% / 60.05%; 60.47% / 60.01%) | yes |
 
 **What the scenarios agree on, and where they part.** Under A the lowest price that keeps 60% with every #553 figure is Store $139, Studio $619, Scale $1,279 (today $69, $449, $999): nothing near the band medians is possible without cutting figures. With |ε| at most 1 (−0.5, −1), constant-elasticity demand has no finite best price, and the program goes to the top of the grid: that is the model's shape, not a finding that the market would pay it. With |ε| above 1 (−1.5, −2) the best price is that lowest one. So the scenarios disagree on direction and agree only on the floor.
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $159 | 12.0% | 11.5% / 1.0% / 5.8% / 12.0% | 132 |
+| Store | $159 | 11.9% | 11.5% / 1.0% / 5.8% / 11.9% | 133 |
 | Studio | $819 | 23.4% | 23.0% / 1.5% / 11.9% / 23.4% | 16 |
 | Scale | $1,729 | 25.2% | 25.2% / 1.6% / 12.8% / 25.0% | 8 |
 
@@ -214,7 +214,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Scale | store-email | 80 | $1,259 | 1.01× | 1.02× |
 | Scale | transactional-email | 100 | $1,259 | 1.01× | 1.02× |
 | Scale | list-email | 1,000 | $1,089 | 1.08× | 1.17× |
-| Scale | visits | 4,000 | $1,049 | 1.10× | 1.22× |
+| Scale | visits | 4,000 | $1,059 | 1.10× | 1.21× |
 
 ## 4. At least the best competitor in the band, on every attribute (alternative B)
 

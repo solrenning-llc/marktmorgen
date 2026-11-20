@@ -32,6 +32,8 @@ import {
 } from "@/components/course-editor";
 import { readListing, readTitles, visibleIds } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
+import { CourseNextStep } from "@/components/course-next-step";
+import { MAX_NEXT_STEP_LINE } from "@/lib/course-next-step-rules";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
@@ -113,6 +115,13 @@ export default async function StudioCoursePage({
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
+  // The store's products by title, read once for both pickers below, the "Next step" (560 [AS1]) and the "More from"
+  // shelf (628 [HN4](b)) (lib/catalog.ts readTitles). Null when they could not be read: each section says so, never
+  // offering an empty list as if the store sold nothing else (rule 24).
+  const storeTitles = await readTitles(store).catch(() => null);
+  const nextChoices = storeTitles
+    ? [...storeTitles].filter(([pid]) => pid !== product.id).map(([pid, title]) => ({ id: pid, title })).sort((a, b) => a.title.localeCompare(b.title, "en"))
+    : null;
   // An unread allowance is said as unknown by every AiOn reader, never as 0 left (rule 24; lib/ai-on-value.ts).
   const aiState = aiAvailableFor(store) ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
@@ -132,7 +141,7 @@ export default async function StudioCoursePage({
   const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
   // The "More from" shelf (628 [HN4](b)): the store's listed products to pick from, the course left out, by name.
   // Null when the names could not be read: the section says so instead of an empty list (rule 24).
-  const shelfTitles = await readTitles(store).catch(() => null);
+  const shelfTitles = storeTitles;
   const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const byId = new Map(recent.comments.map((c) => [c.id, c]));
@@ -351,6 +360,23 @@ export default async function StudioCoursePage({
               </table>
             </div>
             </>
+          )}
+        </section>
+
+        <section className="card mt-8 p-6 sm:p-8" aria-labelledby="next-step-title" data-next-step="">
+          <h2 id="next-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Next step</h2>
+          <p className="mt-2 max-w-2xl text-ink-soft">
+            Suggest one of your products for students who are ready for more. They see it on the course&apos;s page, with its
+            price and your line, and can say &quot;No thanks&quot;.
+          </p>
+          {nextChoices === null ? (
+            <p className="notice notice-error mt-4" role="status">
+              Your products could not be read just now, so the next step cannot be changed. Reload this page in a moment.
+            </p>
+          ) : nextChoices.length === 0 && !course.nextStep ? (
+            <p className="mt-4 text-sm text-ink-soft">Add another product to your store to suggest it here.</p>
+          ) : (
+            <CourseNextStep productId={product.id} current={course.nextStep ?? null} choices={nextChoices} maxLine={MAX_NEXT_STEP_LINE} />
           )}
         </section>
 

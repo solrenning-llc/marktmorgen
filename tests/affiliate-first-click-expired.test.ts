@@ -1,13 +1,9 @@
 /**
- * On first click, a first click whose window has passed no longer holds the
- * buyer: the affiliate who brought them back, inside the window, is credited.
- *
- * The cookie keeps its first click for as long as the browser keeps the cookie
- * (up to 400 days, rewritten on every click), while the store's window is
- * usually 30. attributedAffiliate gave up as soon as the first click was out of
- * its window, and fell back to the last click only when the first affiliate was
- * no longer approved. So once a buyer's first click was older than the window,
- * every later affiliate's link in that browser earned nothing, for good.
+ * On first click, a first click whose window has passed credits nobody: the sale is not moved to a later affiliate
+ * (Codex X3 7004858529 and Codex L 7029564415 on #4413). That was the rule before this PR, and moving the credit to
+ * the link that brought the buyer back changes who is paid a commission, which needs the owner's decision (a queue
+ * item or "Depende do dono"); until then the earlier outcome holds. A declined or removed first affiliate still leaves
+ * the sale to the last click inside its window, as on main.
  */
 import { attributedAffiliate } from "@/lib/affiliates";
 import { viaCookieValue } from "@/lib/affiliate-setting";
@@ -49,7 +45,7 @@ async function main(): Promise<void> {
   is("on last click the last link earns", await id("last", fresh), BRUNO);
 
   const stale = viaCookieValue(viaCookieValue(undefined, "ana", now - 41 * DAY), "bruno", now - DAY);
-  is("a first click past its window leaves the sale to the link that brought the buyer back", await id("first", stale), BRUNO);
+  is("a first click past its window credits nobody: the sale is not moved to a later affiliate", await id("first", stale), null);
   is("on last click nothing changes", await id("last", stale), BRUNO);
 
   const both = viaCookieValue(viaCookieValue(undefined, "ana", now - 60 * DAY), "bruno", now - 45 * DAY);

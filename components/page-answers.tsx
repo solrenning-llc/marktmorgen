@@ -69,7 +69,7 @@ export function PageAnswers({
       <p className="mt-2 text-xs text-ink-soft">
         {`When it is on, a visitor who has seen the buy box, stayed ${25} seconds and not started to pay is asked once, in your store's language, with five answers to tap. Only one visitor in ${READ_SAMPLE} is measured, so at most one in ${READ_SAMPLE} is ever asked, and once per product on a device. `}
         {canSet ? (
-          <button type="button" className="font-semibold text-violet-deep underline underline-offset-4" disabled={busy} onClick={() => void toggle()}>
+          <button type="button" className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4" disabled={busy} onClick={() => void toggle()}>
             {on ? "Stop asking" : "Ask on my sales pages"}
           </button>
         ) : null}

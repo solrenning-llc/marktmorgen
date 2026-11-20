@@ -163,6 +163,13 @@ export type Settled = {
   /** Not reached: Stripe could not be asked, or the time ran out. Tried again. */
   failed: number;
   left: number;
+  /**
+   * What made those fail, as thrown (Claude 6's N1 on #3463): the closing reads it with lib/stripe-silence.ts, so the
+   * creator's account giving no answer, or refusing us, counts toward the closing's deadline as on its renewals.
+   */
+  errors?: unknown[];
+  /** Whether the creator's account answered on this run (its balance was read): a run of silence or refusals is over. */
+  answered?: boolean;
 };
 
 /**
@@ -360,7 +367,7 @@ export async function giveBackUnused(
       rows = rows.filter((r) => wanted.has(r.sub));
     }
     if (options.mark !== undefined && options.mark !== reviewMark(rows)) return "changed";
-    const out: Settled = { done: [], short: [], unmade: [], pending: 0, disputed: 0, none: 0, over: 0, failed: 0, left: Math.max(0, rows.length - REFUNDS_PER_REQUEST) };
+    const out: Settled = { done: [], short: [], unmade: [], pending: 0, disputed: 0, none: 0, over: 0, failed: 0, left: Math.max(0, rows.length - REFUNDS_PER_REQUEST), errors: [], answered: false };
     rows = rows.slice(0, REFUNDS_PER_REQUEST);
     if (!rows.length) return out;
     let funds: Map<string, number>;
@@ -368,8 +375,9 @@ export async function giveBackUnused(
       funds = await available(account);
     } catch (error) {
       console.error("reading a closing store's Stripe balance failed", error);
-      return { ...out, failed: rows.length };
+      return { ...out, failed: rows.length, errors: [error] };
     }
+    out.answered = true;
     /**
      * What one charge's disputes took to the buyer: 0 for a charge not disputed. For a disputed one, its own disputes,
      * read whole (rules 24 and 30): each one in a status Stripe gives and that takes the creator's money
@@ -507,8 +515,20 @@ export async function giveBackUnused(
       // Owed more than the readable charges can give back while some of the invoice's payments did not read: the rest
       // may be on those, so the member is tried again (what was given now is counted then), never settled short.
       if (left > 0 && !whole) throw new Error("part of an invoice's payments did not read, and the readable ones cannot give back all that is owed");
-      // What could be given is given: a charge with nothing left to give back, or a disputed one, cannot be asked for
-      // more. A member who got nothing from this closing because a dispute had already taken it is settled disputed.
+      // Even a full payment list can leave an unpaid part: a partial dispute does not make the rest of its charge
+      // refundable, and the other charges may not cover what is left. Keep trying before closing, then report only
+      // the unpaid remainder through the existing notice for refunds that could not be made automatically.
+      if (left > 0 && !pending) {
+        if (ops.final) {
+          await ops.settle("over", left);
+          out.unmade.push({ sub: row.sub, amount: left, cur: row.paid.cur, email: row.paid.e });
+        } else {
+          console.error("a closing refund could not give back the full unused amount; the member stays to be reconciled");
+          out.failed += 1;
+        }
+        return;
+      }
+      // A member who got nothing from this closing because a dispute had already taken it is settled disputed.
       if (given <= 0 && disputed) {
         await ops.settle("disputed");
         out.disputed += 1;
@@ -714,6 +734,7 @@ export async function giveBackUnused(
       } catch (error) {
         console.error("giving a member's unused time back failed; tried again", error);
         out.failed += 1;
+        out.errors?.push(error);
       } finally {
         await giveCallsBack();
       }

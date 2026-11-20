@@ -233,7 +233,8 @@ async function main(): Promise<void> {
     const record = sale();
     // A catalog held in its own records, whose listing read fails as a request: tell() throws before telling anything.
     const store = { ...base, catalog: { ...base.catalog, inline: null, head: [], id: "cat_r24", items: [{ id: "p_r24" }] } } as unknown as Store;
-    const outcome = await settle(() => withFailing("GET", "nl:catalog:cat_r24:", () => noteSales(store, [record])));
+    // Read in an MGET since 10 November 2026 (lib/catalog.ts getMany; a GET each until then).
+    const outcome = await settle(() => withFailing("MGET", "nl:catalog:cat_r24:", () => noteSales(store, [record])));
     is("the failure is said", outcome.told, null);
     is("nothing told and no mark kept", [posted.length, shown(base), marked(record)], [0, 0, 0]);
     is("told once on the next pass", [await noteSales(base, [record]), posted.length, shown(base)], [1, 1, 1]);

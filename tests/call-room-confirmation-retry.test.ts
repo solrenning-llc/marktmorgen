@@ -56,7 +56,8 @@ const OWED = ["sending", "booked", "buyer", "moved"];
 let fault: "none" | "shape" | "transport" = "none";
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = async commands => {
-  if (fault !== "none" && commands.some(command => command[0] === "GET" && String(command[1]).startsWith("nl:call:room:"))) {
+  // A room read is a GET or, since the rooms are read in shared MGETs (lib/call-rooms.ts), an MGET holding room keys.
+  if (fault !== "none" && commands.some(command => (command[0] === "GET" || command[0] === "MGET") && command.slice(1).some(key => String(key).startsWith("nl:call:room:")))) {
     if (fault === "transport") throw new Error("Synthetic room read unavailable");
     return [null, null, null] as never;
   }
@@ -164,7 +165,7 @@ async function main() {
       const roomTimes: string[] = [];
       const reading = redis.pipeline;
       redis.pipeline = async commands => {
-        for (const command of commands) if (command[0] === "GET" && String(command[1]).startsWith(`nl:call:room:${store.callsId}:t:`)) roomTimes.push(String(command[1]).split(":").at(-1)!);
+        for (const command of commands) if (command[0] === "GET" || command[0] === "MGET") for (const key of command.slice(1)) if (String(key).startsWith(`nl:call:room:${store.callsId}:t:`)) roomTimes.push(String(key).split(":").at(-1)!);
         return reading(commands);
       };
       try { await confirmBooking(input2); } finally { redis.pipeline = reading; }

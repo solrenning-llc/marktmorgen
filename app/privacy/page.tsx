@@ -5,6 +5,7 @@ import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
+import { MAX_SUBMISSION_KEEP_DAYS } from "@/lib/submission-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -62,8 +63,13 @@ export default function PrivacyPage() {
           <strong className="text-black">Payment information.</strong> Payments
           are processed by Stripe, our payment processor. We do not store your
           full credit or debit card number, CVC, or equivalent payment
-          credentials. Stripe may collect billing name, address, and
-          payment method details as needed to complete the transaction. We may
+          credentials. Stripe may ask for your billing address when you pay on
+          its checkout page (see{" "}
+          <a href="#billing-address" className="underline">
+            how we use your billing address
+          </a>
+          ), and may collect other payment method details as needed to
+          complete the transaction. We may
           receive limited payment metadata, such as the last four digits of a
           card, payment status, and subscription period.
         </p>
@@ -422,9 +428,29 @@ export default function PrivacyPage() {
           When a buyer chooses a payment plan, Stripe keeps their card on the
           creator&apos;s account for the remaining payments, and we keep the
           checkout on a list until the plan has been given its end date, so it
-          stops after the last payment. When a creator switches on sales tax,
-          Stripe asks the buyer for the address it needs to work the tax out,
-          under Stripe&apos;s own privacy policy; we do not keep it.
+          stops after the last payment.
+        </p>
+        <p id="billing-address">
+          <strong className="text-black">Your billing address.</strong>{" "}
+          Stripe asks for your billing address on every paid checkout on its
+          page, a package of calls included. PayPal asks
+          for what it needs on its own page. Stripe keeps the address with the
+          payment, on the Stripe account of whoever is paid:
+          the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
+          plan or add-on. Stripe&apos;s own privacy policy applies. It is not
+          asked when
+          something is free. We read the country in it and, for a buyer in the
+          United States or Canada, the state or province. We use them to work
+          out where you are buying from: for the VAT or sales tax that applies
+          to the sale, for the creator&apos;s tax summary, and to decide whether
+          an offer after paying can be shown to you. The country also appears
+          in the creator&apos;s sales figures and sales export, and, where the
+          creator switches it on, in{" "}
+          <a href="#recent-purchases">the card of a store&apos;s latest purchases</a>.
+          We do not keep the street address, and it is never used for marketing.
+          Before we start keeping the tax records the law asks for on sales to
+          the European Union, which must be kept for 10 years, this policy will
+          say so.
         </p>
         <p id="podcasts">
           <strong className="text-black">Private podcasts.</strong>{" "}
@@ -953,7 +979,8 @@ export default function PrivacyPage() {
           saying what moved and how to open it. We send it on the
           creator&apos;s instruction and on their word that these people
           bought from them and may be told so, which we cannot check against
-          the other platform. A store may send up to 20,000 of these in 30
+          the other platform. Nobody who left that creator&apos;s list is
+          written to. A store may send up to 20,000 of these in 30
           days, and for that we keep only a count.
         </p>
         <p id="moved-members">
@@ -975,7 +1002,12 @@ export default function PrivacyPage() {
           the membership, so somebody who kept it is not written to. We send
           these on the creator&apos;s instruction and on their word that these
           people are their members, which we cannot check against the other
-          platform; they count within the same 20,000 in 30 days. Keeping the
+          platform; they count within the same 20,000 in 30 days. Nobody who
+          left that creator&apos;s list is written to. Each of these emails
+          carries the creator&apos;s postal address and a link that stops
+          them, tied to the address and the store, for 400 days; pressing it
+          keeps a one-way hash of the address for that store for good, so
+          that store never sends them a reminder again. Keeping the
           membership is a checkout on the creator&apos;s own Stripe account,
           like any purchase in their store.
         </p>
@@ -1306,6 +1338,25 @@ export default function PrivacyPage() {
           asks AI to draft a reply, the assignment and what the student wrote
           are sent to Anthropic to write it, never the file. A student who
           wants their work deleted asks the creator.
+        </p>
+        <p id="lesson-submissions">
+          <strong className="text-black">Files sent for review.</strong> When a
+          creator asks the buyers of a course to send a video, a photo or a PDF
+          for review on a lesson, we keep each file a buyer sends with its
+          name, size and type, the note they wrote with it, when they sent it,
+          their email address, and the creator&apos;s reply once there is
+          one. The file goes straight from the buyer&apos;s browser to the
+          creator&apos;s private store files, where it counts toward the
+          creator&apos;s storage. When the keeping time the creator chose ends
+          (at most {MAX_SUBMISSION_KEEP_DAYS} days after the file was sent),
+          the file is deleted within about a day, and its record with it; if
+          the file could not be deleted that day, we try again every day until
+          it is. When a buyer is deleted from the store, their files and
+          records are deleted at once (a file within a day, if the file
+          store does not answer right away), and an upload they had started
+          is canceled. A buyer who wants what they sent deleted sooner can delete
+          themselves from the store with the privacy link at the foot of its
+          page, or ask the creator.
         </p>
         <p id="discord">
           <strong className="text-black">Discord access.</strong> When a
@@ -1929,9 +1980,11 @@ export default function PrivacyPage() {
             the student wrote for it, never the student&apos;s name, address
             or file. When a creator asks for the month&apos;s summary of what
             their customers say, it receives the words members wrote when
-            canceling, questions a page could not answer, the words of
-            reviews and the words searched for on the store that found
-            nothing, from the last 90 days, never with a name, and with any
+            canceling, questions a page or the store&apos;s assistant could
+            not answer, the words of reviews, the words searched for on the
+            store that found nothing, from the last 90 days, and the names of
+            products coming soon with how many are on their waitlists so far,
+            confirmed or not (never who), never with a name, and with any
             email address, phone number or web address in them taken out
             first. When a creator asks for the summary of one product&apos;s
             reviews, it receives the words of up to 60 of that product&apos;s
@@ -2046,7 +2099,11 @@ export default function PrivacyPage() {
           creator&apos;s store may set these, each for that store alone: a pass
           that lets a
           browser into a course or a community, named <code>nl_learn_</code>{" "}
-          followed by a code for the store, for 90 days; the code and time of
+          followed by a code for the store, for 90 days; a student&apos;s
+          &quot;No thanks&quot; to the next step a course&apos;s creator suggests,
+          named <code>nl_ns_</code> followed by a code for the course, holding
+          only that answer, for a year, so it is not suggested again in that
+          browser; the code and time of
           an affiliate link a visitor followed, named <code>nl_via_</code>{" "}
           followed by the store&apos;s address, for up to {MAX_COOKIE_DAYS} days,
           subject to the browser&apos;s own limits; it may expire sooner. The store also keeps an
@@ -2085,7 +2142,9 @@ export default function PrivacyPage() {
           The files a creator sells, their lessons&apos; videos and their
           podcast&apos;s episodes, the files their students hand in and the
           pictures in their community&apos;s posts are kept until they are
-          removed with what they belong to. Where a
+          removed with what they belong to. Files buyers send for review are
+          kept only for the keeping time their creator chose, at most{" "}
+          {MAX_SUBMISSION_KEEP_DAYS} days. Where a
           store&apos;s plan has ended, they are deleted 30 days after the plan
           ended, after three emails to the store&apos;s owner; for a plan that
           ended before October 18, 2026, only where the store keeps more than a

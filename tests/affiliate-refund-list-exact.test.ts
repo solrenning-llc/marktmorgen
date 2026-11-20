@@ -21,6 +21,7 @@ import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsidrl01";
@@ -121,6 +122,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_only";
   await seed();
   const store = shop();
+  await markLive(store);
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("PayPal stand-in not connected");
 
   part("Controls: lists Stripe gave whole");

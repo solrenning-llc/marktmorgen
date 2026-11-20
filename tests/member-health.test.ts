@@ -21,6 +21,7 @@ import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setNudge, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readsKeyWhere } from "./listing-reads";
 import { ROOM } from "./data-room";
 
 const DAY = 86_400;
@@ -247,7 +248,7 @@ async function main(): Promise<void> {
     redis.pipeline = async (commands) => {
       const isTarget = commands.some((command) => boundary === "community configuration"
         ? command[0] === "GET" && command[1] === `nl:cm:${communityId}:cfg`
-        : command[0] === "GET" && String(command[1]).startsWith("nl:catalog:"));
+        : readsKeyWhere(command, (key) => key.startsWith("nl:catalog:")));
       if (isTarget) { targeted = true; throw new Error("synthetic scoring prerequisite unavailable"); }
       return originalPipeline(commands);
     };

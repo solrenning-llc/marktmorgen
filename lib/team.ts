@@ -31,8 +31,9 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { type PipelineAccessCopy, PipelineAccessCopyUnconfirmed, copyPipelineAccess, forgetPipelineAccess, undoPipelineAccessCopy, undoUnconfirmedCopy } from "@/lib/pipeline-access";
+import { type AccessLog, parseAccessLog } from "@/lib/pipeline-access-rules";
 import { windowCount, windowCountOf } from "@/lib/window-count";
-import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { liveSecondStep } from "@/lib/second-step-gate";
@@ -48,10 +49,22 @@ import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, pars
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
+/**
+ * The most stores memberStores reads for one person: memberStoresExact throws past it (each is three reads), and its
+ * caller takes that as not known, never as "no other store" (lib/closed-store-data.ts, servesAnother, which keeps the
+ * person's own calendar and lets the rest of the closing go on; Claude 4 on #3660: nothing bounds a person's index).
+ */
+export const MEMBER_STORES_READ = 50;
 /** How long an invitation works (kept in lib/team-roles.ts, so a page can say it). */
 export { INVITE_DAYS };
 /** How many lines of the activity log are kept. */
 export const LOG_LINES = 500;
+/**
+ * The most one stored log line weighs, its JSON in UTF-8 bytes (logTeam):
+ * with what Redis keeps beside a list entry, within the 512 bytes a line
+ * tests/store-data-registry.ts counts for the log.
+ */
+export const LOG_LINE_BYTES = 448;
 /** Invitations one store may send in a day, so an inbox is never flooded from here. */
 const INVITES_PER_DAY = 20;
 
@@ -78,6 +91,17 @@ function withTeam<T>(sid: string, work: () => Promise<T>): Promise<T> {
  * to the same team, which already holds the lock.
  */
 export function withTeamLock<T>(sid: string, work: () => Promise<T>): Promise<T> {
+  return withTeam(sid, work);
+}
+
+/**
+ * The same lock, for a change outside this file that must see the team as it
+ * is while it writes (639 [GL7](7): a teammate's pipeline access, so a
+ * sign-in moving at the same moment never leaves the new address without
+ * it). Throws LockBusyError when the team stays busy. Never call
+ * logTeam or another function of this file that takes the lock inside it.
+ */
+export function withTeamLocked<T>(sid: string, work: () => Promise<T>): Promise<T> {
   return withTeam(sid, work);
 }
 
@@ -117,11 +141,16 @@ export type LogLine = {
   role: Role;
   /** What they did, in a few words. */
   what: string;
+  /**
+   * A change of a teammate's pipeline access (639 [GL7](7)), by pipeline id:
+   * the team page words it with the pipelines' names as they are when shown
+   * (accessLogWords), `what` being the same words with the names then.
+   */
+  access?: AccessLog;
 };
 
 const EMPTY: Team = { members: [], invites: [] };
 
-/** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
 /** Whether a team GET's text is a team record as the writers make it: a JSON object whose invitations, if any, are a list. */
 function readsAsTeamRecord(raw: string): boolean {
   try {
@@ -134,65 +163,73 @@ function readsAsTeamRecord(raw: string): boolean {
   }
 }
 
+/**
+ * A team record as read, keeping only members and invitations the studio accepts (a valid address and role,
+ * MAX_TEAM at most); lib/api-keys.ts reads the team with it too. Only null is "no team yet" (a store nobody
+ * was invited to). Anything else that is not the record's JSON object (another type, broken JSON, a list, a
+ * members or invites field that is not a list, an entry that is not an object, a rule that is not true or
+ * false) is unknown and throws UnknownReplyError (CX-123 rule 24): never read as an empty team, which would
+ * let a member past the owner's second step, write the team back with nobody on it, or drop the store from
+ * a member's index.
+ */
 export function parseTeam(raw: unknown): Team {
-  if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
+  if (raw === null) return { members: [], invites: [] };
+  const unknown = () => new UnknownReplyError("a team record");
+  if (typeof raw !== "string") throw unknown();
+  let parsed: unknown;
   try {
-    const value = JSON.parse(raw) as { members?: unknown; invites?: unknown };
-    const members: Member[] = [];
-    for (const entry of Array.isArray(value.members) ? value.members : []) {
-      const m = entry as Record<string, unknown>;
-      const role = parseTeamRole(m.role);
-      if (typeof m.email !== "string" || !EMAIL_PATTERN.test(m.email) || !role) continue;
-      members.push({ email: normaliseEmail(m.email), role, joinedAt: typeof m.joinedAt === "string" ? m.joinedAt : "" });
-    }
-    const invites: Invite[] = [];
-    for (const entry of Array.isArray(value.invites) ? value.invites : []) {
-      const i = entry as Record<string, unknown>;
-      const role = parseTeamRole(i.role);
-      if (typeof i.id !== "string" || !INVITE_ID.test(i.id) || typeof i.email !== "string" || !role) continue;
-      invites.push({
-        id: i.id,
-        email: normaliseEmail(i.email),
-        role,
-        createdAt: typeof i.createdAt === "string" ? i.createdAt : "",
-        expiresAt: typeof i.expiresAt === "number" ? i.expiresAt : 0,
-      });
-    }
-    const required = (value as { requireTwoStep?: unknown }).requireTwoStep === true;
-    return { members: members.slice(0, MAX_TEAM), invites: invites.slice(0, MAX_TEAM), ...(required ? { requireTwoStep: true } : {}) };
+    parsed = JSON.parse(raw);
   } catch {
-    return { members: [], invites: [] };
+    throw unknown();
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw unknown();
+  const value = parsed as { members?: unknown; invites?: unknown; requireTwoStep?: unknown };
+  // Every team record ever written carries both lists (saveTeam): one without them, or {}, is not an empty team,
+  // which would let a member past the owner's second step or be written back with nobody on it (Codex G on #2036).
+  for (const entries of [value.members, value.invites]) {
+    if (!Array.isArray(entries)) throw unknown();
+    for (const entry of entries as unknown[]) if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw unknown();
+  }
+  if (value.requireTwoStep !== undefined && typeof value.requireTwoStep !== "boolean") throw unknown();
+  const members: Member[] = [];
+  for (const entry of value.members as Record<string, unknown>[]) {
+    const role = parseTeamRole(entry.role);
+    if (typeof entry.email !== "string" || !EMAIL_PATTERN.test(entry.email) || !role) continue;
+    members.push({ email: normaliseEmail(entry.email), role, joinedAt: typeof entry.joinedAt === "string" ? entry.joinedAt : "" });
+  }
+  const invites: Invite[] = [];
+  for (const entry of value.invites as Record<string, unknown>[]) {
+    const role = parseTeamRole(entry.role);
+    if (typeof entry.id !== "string" || !INVITE_ID.test(entry.id) || typeof entry.email !== "string" || !role) continue;
+    invites.push({
+      id: entry.id,
+      email: normaliseEmail(entry.email),
+      role,
+      createdAt: typeof entry.createdAt === "string" ? entry.createdAt : "",
+      expiresAt: typeof entry.expiresAt === "number" ? entry.expiresAt : 0,
+    });
+  }
+  const required = value.requireTwoStep === true;
+  return { members: members.slice(0, MAX_TEAM), invites: invites.slice(0, MAX_TEAM), ...(required ? { requireTwoStep: true } : {}) };
+}
+
+/** The team record's own reply, exactly one for the one GET sent; any other answer is unknown (rule 24). */
+async function teamRecord(sid: string): Promise<unknown> {
+  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
+  if (!replies) throw new UnknownReplyError("a team record");
+  return replies[0];
 }
 
 const now = () => Math.floor(Date.now() / 1000);
 
 /**
- * The team record exactly as stored (rule 24): no record is no team; a reply in
- * another shape, or text that is not a team record as saveTeam writes it (a
- * JSON object with its members list), throws UnknownReplyError, never an empty
- * team, so nothing reads "nobody on it" or "two-step not required" from it and
- * nothing writes over it.
+ * A store's team as it is now. Invitations past their seven days are left out. A record that cannot be read
+ * in its exact shape throws UnknownReplyError (parseTeam): what depends on it refuses instead of acting on
+ * an empty team.
  */
-async function readTeamRecord(sid: string): Promise<Team> {
-  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
-  if (!replies) throw new UnknownReplyError("a store's team");
-  const raw = replies[0];
-  if (raw === null) return { members: [], invites: [] };
-  let stored: unknown = null;
-  try {
-    stored = typeof raw === "string" ? JSON.parse(raw) : null;
-  } catch {
-    stored = null;
-  }
-  if (!stored || typeof stored !== "object" || Array.isArray(stored) || !Array.isArray((stored as { members?: unknown }).members)) throw new UnknownReplyError("a store's team");
-  return parseTeam(raw);
-}
-
-/** A store's team as it is now. Invitations past their seven days are left out. Unknown throws (readTeamRecord). */
 export async function readTeam(sid: string): Promise<Team> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { ...EMPTY };
-  const team = await readTeamRecord(sid);
+  const team = parseTeam(await teamRecord(sid));
   return { members: team.members, invites: team.invites.filter((i) => i.expiresAt > now()), ...(team.requireTwoStep ? { requireTwoStep: true } : {}) };
 }
 
@@ -204,7 +241,10 @@ export async function readTeam(sid: string): Promise<Team> {
  */
 async function saveTeam(sid: string, team: Team): Promise<void> {
   let required = team.requireTwoStep;
-  if (required === undefined) required = (await readTeamRecord(sid)).requireTwoStep === true;
+  if (required === undefined) {
+    // Unreadable, nothing is written: the rule is never switched off by a save that could not read it.
+    required = parseTeam(await teamRecord(sid)).requireTwoStep === true;
+  }
   const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
   await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);
 }
@@ -346,7 +386,7 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   const found: { store: Store; role: TeamRole }[] = [];
   const stale: string[] = [];
-  for (const sid of list.slice(0, 50)) {
+  for (const sid of list.slice(0, MEMBER_STORES_READ)) {
     // A store whose team answers in an unknown shape is left out of this answer and kept in the index: it is
     // neither "on it" nor "gone", and one other store's unreadable record never stops the person's own studio.
     const team = await readTeam(sid).catch((error: unknown) => {
@@ -368,13 +408,133 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 
+/**
+ * Takes ids out of a person's team index only where the same Redis step reads the store's team as gone or as listing
+ * everyone but them (Codex U's MEDIUM on #3660). A join that lands before this step keeps its id; one that lands after
+ * it adds the id itself with its own SADD. A team record that does not read as a team keeps the id: unknown is never
+ * "not on the team". The read past (memberStoresExact) calls it for the ids it read off their team; one command.
+ */
+export const TEAM_INDEX_OFF_TEAM = `-- marktmorgen:team-index-off-team:v1
+local address, removed = ARGV[1], 0
+for i = 2, #KEYS do
+  local raw = redis.call('GET', KEYS[i])
+  local off = false
+  if not raw then
+    off = true
+  else
+    local ok, team = pcall(cjson.decode, raw)
+    if ok and type(team) == 'table' and type(team.members) == 'table' and type(team.invites) == 'table' then
+      off = true
+      for _, member in ipairs(team.members) do
+        if type(member) == 'table' and type(member.email) == 'string' and string.lower(string.match(member.email, '^%s*(.-)%s*$')) == address then
+          off = false
+          break
+        end
+      end
+    end
+  end
+  if off then removed = removed + redis.call('SREM', KEYS[1], ARGV[i]) end
+end
+return removed`;
+
+/** Runs TEAM_INDEX_OFF_TEAM for `sids`; throws on a reply that is not a count of at most that many (rule 24). */
+async function dropOffTeam(address: string, sids: string[]): Promise<void> {
+  if (!sids.length) return;
+  const replies = repliesFor(await redisPipeline([["EVAL", TEAM_INDEX_OFF_TEAM, 1 + sids.length, indexKey(address), ...sids.map(teamKey), address, ...sids]]), 1);
+  const removed = replies ? countOf(replies[0]) : null;
+  if (removed === null || removed > sids.length) throw new UnknownReplyError("ids taken out of a teammate's store index");
+}
+
+/**
+ * memberStores read exactly, for a caller that deletes what a person keeps across the stores they serve when they
+ * serve no other (lib/closed-store-data.ts, prepareStore: a host's own calendar; Claude 6 on #3156). Nothing is left
+ * out: a store whose team or record does not read, or an index of more than MEMBER_STORES_READ stores, throws
+ * UnknownReplyError instead of being skipped, since a store skipped may be the live one they still serve. Only a team
+ * read exactly without them, an id with no store (nil) or a store they own is not one. Its one caller takes a throw as
+ * not known (servesAnother): the person's calendar is kept and decided again on a later run, and the closing store is
+ * still erased, never held back a walk for it (Claude 4 on #3660). With `other`, it stops at the first store other
+ * than `other` the person serves, so a longer index than is read is unknown only when none was found. An id in the
+ * index that is not a store's id makes the whole index unknown (Codex G on #3660): it is not proof of no other store.
+ * A longer index than is read is read past, run after run (Codex G on #3660): the ids read exactly that are no store
+ * the person serves (a team without them or none, no store by that id, a store they own) leave the index, so the
+ * next read reaches the ones after them, until the whole index is read in one go and decides. Only those: an id not
+ * read, or read as a store they are on (`other` among them), stays. Each read past drops all it read but `other`
+ * (tests/plan-cost-registry.ts, decideCalendarRuns). memberStores itself is unchanged for its other callers (the
+ * studio's store list, sign-in and alerts), where one unreadable store must not stop the person's own studio.
+ */
+export async function memberStoresExact(email: string, other?: string): Promise<{ store: Store; role: TeamRole }[]> {
+  if (!isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  // An id that is not a store's is not proof of no membership: the whole index is unknown (Codex G on #3660).
+  if (ids.some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores (an id that is not a store's)");
+  const over = () => new UnknownReplyError(`a teammate's stores, more than the ${MEMBER_STORES_READ} read,`);
+  // Without `other`, the whole list or nothing. With it, the first store found other than `other` is enough, so an
+  // index longer than is read is unknown only when none was found among those read (Claude 4 on #3660).
+  if (other === undefined && ids.length > MEMBER_STORES_READ) throw over();
+  const found: { store: Store; role: TeamRole }[] = [];
+  // The ids read exactly that are no store this person serves: out of the index when it is longer than is read.
+  const stale: string[] = [];
+  // Of those, the ones whose team was read without them: only these can have been joined between the read and their
+  // removal, so only these leave through TEAM_INDEX_OFF_TEAM, which reads the team again in the same step (Claude 4's
+  // LEVE and Codex U's MEDIUM on #3660). An id with no store (nil) or a store
+  // they own, whose team still lists them, is no store they serve whoever joins: it leaves the index for good, so the
+  // read past gets further every read (decideCalendarRuns).
+  const offTeam: string[] = [];
+  for (const sid of ids.slice(0, MEMBER_STORES_READ)) {
+    const member = (await readTeam(sid)).members.find((m) => m.email === address);
+    if (!member) {
+      stale.push(sid);
+      offTeam.push(sid);
+      continue;
+    }
+    const store = await storeForIdExact(sid);
+    if (store && normaliseEmail(store.email) !== address) {
+      found.push({ store, role: member.role });
+      if (other !== undefined && store.sid !== other) return found;
+    } else stale.push(sid);
+  }
+  if (ids.length > MEMBER_STORES_READ) {
+    // Read past (Codex G on #3660): the next read starts after these. One not confirmed is only no progress this
+    // time; the answer is unknown either way, so this read never decides.
+    if (stale.length) {
+      // An id with no store, or a store they own, is no store they serve whoever joins: it leaves for good.
+      const forGood = stale.filter((sid) => !offTeam.includes(sid));
+      if (forGood.length) await redisPipeline([["SREM", indexKey(address), ...forGood]]).catch(() => {});
+      // An id read off its team leaves only where the same Redis step still reads them off it, so a join that landed
+      // after the read is never taken out, and there is no repair write to fail (Codex U's MEDIUM on #3660; before it,
+      // Claude 1 C3's join race). A step that does not confirm is only no progress this time.
+      await dropOffTeam(address, offTeam).catch(() => {});
+    }
+    throw over();
+  }
+  return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
+}
+
+/**
+ * One log line as stored, never over LOG_LINE_BYTES: a pipeline-access
+ * change's details (`access`) are kept only while the line fits, and the
+ * line's own words (`what`, which name every pipeline) stay; past that, the
+ * words, then the address, are shortened. So the log's room is what the
+ * data registry counts, whatever a line holds.
+ */
+export function logLineRecord(entry: LogLine): string {
+  const bytes = (value: LogLine) => Buffer.byteLength(JSON.stringify(value), "utf8");
+  let line: LogLine = entry;
+  if (bytes(line) > LOG_LINE_BYTES && line.access) line = { at: line.at, who: line.who, role: line.role, what: line.what };
+  while (bytes(line) > LOG_LINE_BYTES && line.what.length) line = { ...line, what: [...line.what].slice(0, -8).join("") };
+  while (bytes(line) > LOG_LINE_BYTES && line.who.length) line = { ...line, who: [...line.who].slice(0, -8).join("") };
+  return JSON.stringify(line);
+}
+
 /** Writes one line into a store's activity log. Never throws. */
 export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<void> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return;
-  const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200) };
+  const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200), ...(line.access ? { access: line.access } : {}) };
   try {
     await redisPipeline([
-      ["LPUSH", logKey(sid), JSON.stringify(entry)],
+      ["LPUSH", logKey(sid), logLineRecord(entry)],
       ["LTRIM", logKey(sid), 0, LOG_LINES - 1],
     ]);
   } catch (error) {
@@ -402,7 +562,8 @@ export async function readLogWhole(sid: string): Promise<{ lines: LogLine[]; ski
         continue;
       }
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
-      lines.push({ at: value.at, who: value.who, role, what: value.what });
+      const access = parseAccessLog(value.access);
+      lines.push({ at: value.at, who: value.who, role, what: value.what, ...(access ? { access } : {}) });
     } catch {
       // A line that cannot be read is skipped, not shown half.
       skipped += 1;
@@ -606,11 +767,15 @@ export async function removeMember(store: Store, email: string, options: { repea
   const { leftTeam, tellOwnerOfExit, undoExit } = await import("@/lib/api-key-pause");
   const first = await leftTeam(store, address);
   let removed: boolean;
+  let forgot = false;
   try {
     removed = await withTeam(store.sid, async () => {
       const team = await readTeam(store.sid);
       if (!team.members.some((m) => m.email === address)) return false;
       await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
+      // What they could do with each pipeline (639 [GL7](7)) goes with them, under the same lock, so someone
+      // added back at once and restricted again never has that new restriction deleted by this removal.
+      forgot = await forgetPipelineAccess(store, address).then(() => true, () => false);
       return true;
     });
   } catch (error) {
@@ -631,10 +796,18 @@ export async function removeMember(store: Store, email: string, options: { repea
   );
   // The store leaves their index, and what they could do with each pipeline (639 [GL7](7)) goes with them; a repeat
   // does it again, as a removal whose cleanup failed is repeated. Either failing is said as not finished, never removed.
+  // The pipeline access was forgotten under the team's lock above; when that did not happen (it failed, or this is a
+  // repeat), it is forgotten here under the lock again, and only while they are not back on the team, so a restriction
+  // set for someone added back at once is never deleted by this removal.
   if (removed || options.repeat) {
     try {
       await redisPipeline([["SREM", indexKey(address), store.sid]]);
-      await forgetPipelineAccess(store, address);
+      if (!forgot) {
+        await withTeam(store.sid, async () => {
+          if ((await readTeam(store.sid)).members.some((m) => m.email === address)) return;
+          await forgetPipelineAccess(store, address);
+        });
+      }
     } catch (error) {
       console.error("closing a former teammate's index or pipeline access failed; the removal is to be repeated", error);
       throw new KeysNotSwept();
@@ -741,11 +914,13 @@ export async function spendInvite(token: string): Promise<JoinResult> {
 }
 
 /**
- * Forgets a store's team, its invitations and its log, when the store itself goes. A team that answers in an
- * unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the teammates' index entries,
- * which could not be read, are left, and memberStores drops each on the confirmed absence that follows.
+ * Forgets a store's team, its invitations and its log, when the store itself goes. `apply` sends the deletes: the
+ * closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy). A team
+ * that answers in an unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the
+ * teammates' index entries, which could not be read, are left, and memberStores drops each on the confirmed absence
+ * that follows.
  */
-export async function dropTeam(store: Store): Promise<void> {
+export async function dropTeam(store: Store, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!store.sid) return;
   const members = await readTeam(store.sid).then(
     (team) => team.members,
@@ -754,7 +929,7 @@ export async function dropTeam(store: Store): Promise<void> {
       throw error;
     },
   );
-  await redisPipeline([
+  await apply([
     ...members.map((m) => ["SREM", indexKey(m.email), store.sid]),
     ["DEL", teamKey(store.sid)],
     ["DEL", logKey(store.sid)],
@@ -822,8 +997,9 @@ export async function moveMemberships(from: string, to: string, unswept: Map<str
       // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
       // be confirmed, this store's membership stays on the old address: the new one never has the store without
       // its restrictions.
+      let copied: PipelineAccessCopy | null = null;
       try {
-        await copyPipelineAccess(store, before, after);
+        copied = await copyPipelineAccess(store, before, after);
         // The API keys they made follow them (owner C3-100); left behind, they would read as a former teammate's.
         // Cut short, the keys already moved are moved back, so they and the membership stay on the old address together.
         const { movedMaker } = await import("@/lib/api-key-pause");
@@ -833,6 +1009,11 @@ export async function moveMemberships(from: string, to: string, unswept: Map<str
         });
       } catch (error) {
         console.error("copying pipeline access or the maker of their API keys failed; the membership stays on the old address", error);
+        // A copy that landed goes back too, with its room: the new address keeps only what it had (Codex N, #2036).
+        if (copied) await undoPipelineAccessCopy(store, after, copied).catch((undo: unknown) => console.error("putting back the new address's pipeline access failed", undo));
+        // One whose write may have landed with its answer lost goes back the same way, from what the copy read under
+        // this lock; its room is given back only once that is confirmed (Codex G, #2036).
+        else if (error instanceof PipelineAccessCopyUnconfirmed) await undoUnconfirmedCopy(store, after, error).catch((undo: unknown) => console.error("putting back the new address's pipeline access failed", undo));
         stayed.push(sid);
         return null;
       }
@@ -844,6 +1025,9 @@ export async function moveMemberships(from: string, to: string, unswept: Map<str
         await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
         throw error;
       }
+      // The old address's restrictions go only once the team names the new one, still under the lock, so
+      // someone who joins on the old address at once and is restricted never has that restriction deleted.
+      await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
       return { moved: mine.role };
     });
     if (!outcome) continue;
@@ -868,8 +1052,6 @@ export async function moveMemberships(from: string, to: string, unswept: Map<str
       });
       continue;
     }
-    // The old address's restrictions go only once the team names the new one.
-    await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role: outcome.moved, what: `Moved their sign-in from ${before}` });
   }

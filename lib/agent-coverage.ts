@@ -232,6 +232,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/phone": row("settings", never(BROWSER)),
   "POST store/photo": row("pages", draft),
   "POST store/physical-legal": row("products", draft),
+  "POST store/pipeline-access": row("access", never(ACCESS)),
   "POST store/pixels": row("settings", draft),
   "POST store/podcast": row("podcast", draft),
   "POST store/podcast/public-settings": row("podcast", execute, "Turning a podcast's public feed on, or putting an episode in it, publishes it to podcast apps outside the studio, which keep their copies after it is turned off: confirmed one change at a time, after the notice the studio shows."),

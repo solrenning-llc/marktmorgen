@@ -2,6 +2,7 @@ import {emptyCatalog,itemOf,productWrites,readProductsStrict,parseProduct} from 
 import type {Store} from "@/lib/store";
 import {store as redis,redisPipeline} from "./redis-stub";
 import {done,is,part} from "./check";
+import {rewriteKeys} from "./listing-reads";
 async function main(){
  redis.clear();
  const product=parseProduct({id:"knife00001",title:"Knife guide",priceCents:1000,summary:"A useful guide"});
@@ -15,7 +16,8 @@ async function main(){
  try{
   redis.pipeline=async commands=>{
    const values=await real(commands);
-   return values.map((value,index)=>index===1?"{":value);
+   // The product's extras record (nl:catalog:<id>:x:<product>), read beside its listing in one MGET (lib/catalog.ts getMany).
+   return rewriteKeys(commands,values,key=>key.includes(":x:")?"{":undefined);
   };
   try{await readProductsStrict(store,[product.id]);}catch{refused=true;}
   is("malformed extras unavailable",refused,true);

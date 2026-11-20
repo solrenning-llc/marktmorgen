@@ -17,12 +17,13 @@
  * Nothing here changes MAX_PRODUCTS or any other limit.
  */
 import { readAllListings, searchStore, STORE_PAGE_SIZE } from "@/lib/catalog";
-import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { type Store, addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { listingKeysRead } from "./listing-reads";
 
 let commands: (string | number)[][] = [];
 let bytes = 0;
@@ -30,7 +31,10 @@ const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: (string | number)[][]) => {
   commands.push(...batch);
   const replies = await pipeline(batch);
-  for (const reply of replies as unknown[]) if (typeof reply === "string") bytes += Buffer.byteLength(reply);
+  // A GET's answer is its text; an MGET's is a list with one value a key (lib/catalog.ts getMany): each text counts.
+  for (const reply of replies as unknown[]) {
+    for (const value of Array.isArray(reply) ? reply : [reply]) if (typeof value === "string") bytes += Buffer.byteLength(value);
+  }
   return replies;
 }) as typeof redis.pipeline;
 
@@ -71,14 +75,17 @@ async function storeOf(count: number): Promise<Store> {
   } as unknown as Store;
 }
 
-const listingGets = () => commands.filter((c) => c[0] === "GET" && String(c[1]).startsWith(`nl:catalog:${CATALOG}:l:`)).length;
+/** The product records read, whether one GET carries each or an MGET carries many (tests/listing-reads.ts). */
+const listingGets = () => commands.flatMap(listingKeysRead).filter((key) => key.startsWith(`nl:catalog:${CATALOG}:l:`)).length;
+/** The round-trip commands that carried them. */
+const listingCommands = () => commands.filter((c) => listingKeysRead(c).some((key) => key.startsWith(`nl:catalog:${CATALOG}:l:`))).length;
 
-async function measure(read: () => Promise<unknown>): Promise<{ gets: number; bytes: number; ms: number }> {
+async function measure(read: () => Promise<unknown>): Promise<{ gets: number; carriers: number; bytes: number; ms: number }> {
   commands = [];
   bytes = 0;
   const started = performance.now();
   await read();
-  return { gets: listingGets(), bytes, ms: Math.round(performance.now() - started) };
+  return { gets: listingGets(), carriers: listingCommands(), bytes, ms: Math.round(performance.now() - started) };
 }
 
 async function main(): Promise<void> {
@@ -91,17 +98,19 @@ async function main(): Promise<void> {
 
     const search = await measure(() => searchStore(store, "watercolor"));
     is("one search reads one listing per product outside the first page, today", search.gets, outside);
+    is("carried LISTINGS_PER_MGET at one MGET (listingReads)", search.carriers, listingReads(outside));
     is("and moves no more than the review ceiling per listing", search.bytes <= outside * LISTING_READ_BYTES, true);
 
     const all = await measure(() => readAllListings(store));
     is("reading the whole catalog reads the same listings", all.gets, outside);
+    is("in the same number of MGETs", all.carriers, listingReads(outside));
     if (count === 100_000) {
       // Asking for ids must not cost more than the read itself (unit 5): readListings' `wanted` dedupes the ids it is given,
       // and a dedupe that scans the list for each id grows with the square of the catalog. A ratio of two timings in the
       // same run, not a time, so a slower machine does not change the verdict; 5x leaves room for the search's own matching.
       is("searching asks for ids at no more than five times the cost of reading them all", search.ms <= 5 * Math.max(all.ms, 50), true);
     }
-    console.log(`  baseline ${count}: search ${search.gets} GET, ${search.bytes} bytes, ${search.ms} ms; whole read ${all.gets} GET, ${all.bytes} bytes, ${all.ms} ms`);
+    console.log(`  baseline ${count}: search ${search.gets} listings in ${search.carriers} commands, ${search.bytes} bytes, ${search.ms} ms; whole read ${all.gets} listings in ${all.carriers} commands, ${all.bytes} bytes, ${all.ms} ms`);
   }
   done();
 }

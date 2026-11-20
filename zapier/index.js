@@ -167,6 +167,13 @@ const verifiedMessage = async (z, bundle) => {
 /** What each action's answer must be, exactly as lib/api-write.ts gives it. */
 const SUBSCRIBER = (data) => text(data.email) && (data.status === "added" || data.status === "already");
 const LABELS = (data) => text(data.email) && Array.isArray(data.labels) && data.labels.every((label) => typeof label === "string");
+/** A code as lib/api-codes.ts codeOut gives it: made, switched on, and with what it takes off. */
+const CODE = (data) =>
+  text(data.id) &&
+  text(data.code) &&
+  data.active === true &&
+  plain(data.off) &&
+  ((data.off.kind === "percent" && Number.isInteger(data.off.percent)) || (data.off.kind === "amount" && Number.isInteger(data.off.amount_cents) && text(data.off.currency)));
 const ACCESS = (data) => text(data.email) && text(data.product) && (data.status === "given" || data.status === "already") && typeof data.emailed === "boolean";
 
 const authentication = {
@@ -458,6 +465,48 @@ const giveAccess = {
   },
 };
 
+/**
+ * A discount code on the creator's own Stripe account, made exactly as the
+ * studio makes one (POST /api/v1/codes, lib/discount-input.ts readCodeAsked):
+ * the same letters, limits and refusals, and only while the store is taking
+ * payments. Letters already used on that account are refused as taken, so a
+ * Zap run twice never makes two codes.
+ */
+const createDiscountCode = {
+  key: "create_discount_code",
+  noun: "Discount Code",
+  display: {
+    label: "Create Discount Code",
+    description: "Makes a discount code on your own Stripe account, as making one in your studio does.",
+  },
+  operation: {
+    inputFields: [
+      { key: "code", label: "Code", required: true, type: "string", helpText: "The letters buyers type at checkout, such as SPRING20." },
+      { key: "kind", label: "Takes Off", required: false, choices: { percent: "A percent of the price", amount: "An amount of money" }, default: "percent" },
+      { key: "percent", label: "Percent Off", required: false, type: "string", helpText: "A whole number from 1 to 100. Used when it takes off a percent." },
+      { key: "amount", label: "Amount Off", required: false, type: "string", helpText: "In your store's currency, such as 10 or 9.50. Used when it takes off an amount." },
+      { key: "uses", label: "Times It Can Be Used", required: false, type: "integer", helpText: "Leave empty for no limit." },
+      { key: "minimum", label: "Smallest Order", required: false, type: "string", helpText: "In your store's currency. Leave empty for any order." },
+    ],
+    perform: async (z, bundle) => {
+      const input = bundle.inputData || {};
+      const given = (value) => (value === undefined || value === null || value === "" ? null : String(value));
+      const body = { code: given(input.code) || "" };
+      if (input.kind === "amount") {
+        body.kind = "amount";
+        body.amount = given(input.amount) || "";
+      } else {
+        body.percent = given(input.percent) || "";
+      }
+      if (given(input.uses)) body.uses = given(input.uses);
+      if (given(input.minimum)) body.minimum = given(input.minimum);
+      const response = await z.request({ url: `${API}/codes`, method: "POST", body });
+      return hookResult(response, z, CODE);
+    },
+    sample: { id: "promo_1Q2w3E4r5T6y7U8i", code: "SPRING20", off: { kind: "percent", percent: 20 }, times_redeemed: 0, max_redemptions: null, expires_at: null, active: true, minimum: null, first_order: false, duration: null, other_rules: false },
+  },
+};
+
 const byKey = (list) => Object.fromEntries(list.map((item) => [item.key, item]));
 
 module.exports = {
@@ -468,7 +517,7 @@ module.exports = {
   afterResponse: [explain],
   triggers: byKey(triggers),
   searches: {},
-  creates: byKey([addSubscriber, changeLabels, giveAccess]),
+  creates: byKey([addSubscriber, changeLabels, giveAccess, createDiscountCode]),
   resources: {},
   // For the site's own checks: which events the triggers stand for.
   EVENTS: EVENTS.map((e) => ({ key: e.key, event: e.event })),

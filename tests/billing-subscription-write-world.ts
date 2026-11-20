@@ -25,6 +25,7 @@ export async function setCancelAtPeriodEnd(subscription:string,cancel:boolean){
 }
 /** Mirrors lib/billing.ts: the change was sent to Stripe and its outcome is not known. */
 export class SwitchUnconfirmedError extends Error{constructor(cause:unknown){super("TEST ONLY switch sent, outcome unknown",{cause});this.name="SwitchUnconfirmedError";}}
+export async function endLapsed(ids:string[]){for(const id of ids)world.provider.push(["end",id]);}
 export async function readSubscription(subscription:string){world.provider.push(["read",subscription]);return {state:world.readState};}
 export async function switchPlan(subscription:string,choice:{tier:string;cycle:string},grant:unknown){
  world.provider.push(["switch",subscription,choice,grant]);

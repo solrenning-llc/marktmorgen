@@ -1,29 +1,50 @@
 import { countTaxSales, type TaxSalesLedger } from "@/lib/tax-sales-counter";
 
 /**
- * TX3 arithmetic for two separately researched thresholds, not a registration,
+ * TX3 arithmetic for separately researched thresholds, not a registration,
  * nexus decision, rolling counter, tax calculator or permission to sell.
  * Sources/scopes: docs/tx-legal-source-review-2026-10-27.md, points15/17.
+ * `scope` says what a rule's total counts: "country" is the supplies to that
+ * country's consumers, from one country's ledger; "worldwide" is the whole
+ * worldwide turnover the rule names, which no single-country ledger can show.
  * Production integration must classify applicable supplies, aggregate the
  * correct sellers, prove complete rolling coverage and reserve atomically.
  * Unknown evidence never becomes a zero total. No provider or storage IO.
  */
 export const TAX_THRESHOLD_RULES = Object.freeze({
   "ca-specified-supplies": Object.freeze({
-    currency: "CAD", thresholdMinor: 3_000_000, comparison: "gt",
+    currency: "CAD", thresholdMinor: 3_000_000, comparison: "gt", scope: "country",
     source: "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/gst-hst-businesses/digital-economy-gsthst/find-out-need-register/cross-border-threshold-amounts.html",
     checkedOn: "2026-10-27",
   }),
   "no-remote-services": Object.freeze({
-    currency: "NOK", thresholdMinor: 5_000_000, comparison: "gte",
+    currency: "NOK", thresholdMinor: 5_000_000, comparison: "gte", scope: "country",
     source: "https://www.skatteetaten.no/en/business-and-organisation/vat-and-duties/vat/foreign/e-commerce-voec/register/",
     checkedOn: "2026-10-27",
+  }),
+  // AFC, read 27/10/2026 (docs/tx-legal-source-review-2026-10-27.md, point 15): a foreign business supplying in
+  // Switzerland is liable from CHF 100,000 of worldwide turnover from supplies that are not excluded; a local
+  // representative may be required, at a cost not known. Reached at 100,000, never "above" it.
+  "ch-worldwide-turnover": Object.freeze({
+    currency: "CHF", thresholdMinor: 10_000_000, comparison: "gte", scope: "worldwide",
+    source: "https://www.estv.admin.ch/fr/tva-assujettissement-entreprises-etrangeres",
+    checkedOn: "2026-10-27",
+  }),
+  // Ministry of Finance decree of 07/04/2025, no. 11404515420, items 1-3 (Business Tax Act art. 28-1): a foreign
+  // supplier of electronic services to individuals in Taiwan registers once its annual sales exceed NT$600,000, in the
+  // previous or the current year (FAQ FOUR, Q1, 14/05/2025). Read in Codex V's report V-20261119-1512 (19/11/2026).
+  // "Exceeds" is read the stricter way, reached at exactly 600,000 (coordinator, C5-20261120-2110-9a-other-u4). Who
+  // answers for a sale (supplier or platform, §4.2 versus §4.3 of the Directions) is the scope review's, not this rule's.
+  "tw-cross-border-e-services": Object.freeze({
+    currency: "TWD", thresholdMinor: 60_000_000, comparison: "gte", scope: "country",
+    source: "https://law-out.mof.gov.tw/EngLawContent.aspx?KW=Business+Tax&id=20732&lan=E",
+    checkedOn: "2026-11-19",
   }),
 } as const);
 export type TaxThresholdRuleId = keyof typeof TAX_THRESHOLD_RULES;
 export type TaxThresholdSnapshot = {
   ruleId: TaxThresholdRuleId;
-  currency: "CAD" | "NOK";
+  currency: "CAD" | "NOK" | "CHF" | "TWD";
   /** Same UTC day as the assessment; stale counters are not current evidence. */
   recordedOn: string;
   /** Includes every applicable supply over the legally reviewed 12-month scope.
@@ -51,8 +72,10 @@ const money = (value: unknown): value is number =>
  * other nexus tests, tax rules, filings, costs and all release gates still apply.
  * Reaching a boundary requires implemented treatment before completing the sale;
  * this helper never claims a registration exists or submits one.
+ * `expectedRuleId`, when given, must be the rule this one capture names: a caller that chose a rule (a country's)
+ * never has the evidence assessed under another (Codex X5 on #4890).
  */
-export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresholdAssessment {
+export function assessTaxThreshold(value: unknown, now = Date.now(), expectedRuleId?: TaxThresholdRuleId): TaxThresholdAssessment {
   if (!Number.isSafeInteger(now) || now < 0 || now > 253_402_300_799_999) return stop("invalid");
   let data: Record<string, unknown>;
   try {
@@ -71,6 +94,7 @@ export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresho
     }
   } catch { return stop("unknown"); }
   if (typeof data.ruleId !== "string" || !Object.hasOwn(TAX_THRESHOLD_RULES, data.ruleId)) return stop("unknown");
+  if (expectedRuleId !== undefined && data.ruleId !== expectedRuleId) return stop("unknown");
   const rule = TAX_THRESHOLD_RULES[data.ruleId as TaxThresholdRuleId];
   const today = new Date(now).toISOString().slice(0, 10);
   if (today < rule.checkedOn || data.recordedOn !== today || data.currency !== rule.currency
@@ -96,8 +120,8 @@ export type TaxSalesThresholdEvidence = {
 };
 /** Derive threshold amounts from the complete supplied ledger instead of
  * accepting caller-provided totals. This is still an assessment of evidence,
- * never a nexus decision, registration or permission to complete a sale. */
-export function assessTaxSalesThreshold(value: unknown, now = Date.now()): TaxThresholdAssessment {
+ * never a nexus decision, registration or permission to complete a sale. `expectedRuleId` as in assessTaxThreshold. */
+export function assessTaxSalesThreshold(value: unknown, now = Date.now(), expectedRuleId?: TaxThresholdRuleId): TaxThresholdAssessment {
   try {
     if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
     if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return stop("unknown");
@@ -113,9 +137,14 @@ export function assessTaxSalesThreshold(value: unknown, now = Date.now()): TaxTh
     }
     if (typeof evidence.ruleId !== "string" || !Object.hasOwn(TAX_THRESHOLD_RULES, evidence.ruleId)
       || evidence.completeRollingCoverage !== true || evidence.applicableScopeReviewed !== true) return stop("unknown");
+    if (expectedRuleId !== undefined && evidence.ruleId !== expectedRuleId) return stop("unknown");
     const totals = countTaxSales(evidence.ledger);
     if (totals.status !== "known") return stop(totals.status);
-    const country = evidence.ruleId === "ca-specified-supplies" ? "CA" : "NO";
+    // A worldwide rule (Switzerland) counts more than any one country's ledger can hold.
+    if (TAX_THRESHOLD_RULES[evidence.ruleId as TaxThresholdRuleId].scope !== "country") return stop("unknown");
+    const country = evidence.ruleId === "ca-specified-supplies" ? "CA" : evidence.ruleId === "no-remote-services" ? "NO"
+      : evidence.ruleId === "tw-cross-border-e-services" ? "TW" : null;
+    if (country === null) return stop("unknown");
     // Neither national threshold may be assessed from a single-state subset.
     if (totals.place.country !== country || totals.place.state !== null) return stop("unknown");
     return assessTaxThreshold({

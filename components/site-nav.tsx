@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
-import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
 import { moveFocus } from "@/lib/menu-keys";
 
 type MenuItem = {
@@ -188,7 +187,17 @@ const PLAIN_LINKS = [
   { href: "/blog", label: "Blog" },
 ];
 
-export function SiteNav() {
+/**
+ * What lib/opening.ts says about the plans, handed over by the server
+ * (components/site-nav-server.tsx). Read there, not imported here: lib/opening.ts
+ * reaches every gate and margin review, and importing it from this client file
+ * sent about 90 KB of that code to every public page's visitor, who only needs
+ * these three values.
+ */
+export type NavOpening = { onSale: boolean; line: string; link: { href: string; label: string } };
+
+export function SiteNav({ opening }: { opening: NavOpening }) {
+  const { onSale: PLANS_ON_SALE, line: PREVIEW_LINE, link: PREVIEW_LINK } = opening;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -353,16 +362,21 @@ export function SiteNav() {
       {/* What the site is today, before anything else it says
           (lib/opening.ts). It scrolls away with the page; the menu stays. */}
       {PLANS_ON_SALE ? null : (
-        <div className="bg-ink text-white" data-preview-bar="">
+        // A named region, so its words are inside a landmark (AX274 Part A; axe "region"). It stays outside the
+        // sticky header below so that it scrolls away while the menu stays (tests/public-header-targets.test.ts).
+        <section aria-label="What is built today" className="bg-ink text-white" data-preview-bar="">
           <p className="container-page py-2.5 text-center text-[0.8125rem] leading-snug sm:text-sm">
             {PREVIEW_LINE}{" "}
             <Link prefetch={false} href={PREVIEW_LINK.href} className="whitespace-nowrap font-semibold underline underline-offset-2">
               {PREVIEW_LINK.label}
             </Link>
           </p>
-        </div>
+        </section>
       )}
-    <div className="sticky top-0 z-50">
+    {/* The header landmark is the sticky part itself, so the logo, the menu, Log in and Start your store are all
+        inside it and it still sticks for the whole page (a <header> around the line above would end the sticking at
+        its own bottom). */}
+    <header className="sticky top-0 z-50">
 
       <div
         ref={headerRef}
@@ -393,7 +407,7 @@ export function SiteNav() {
                 aria-controls={`menu-${menu.id}`}
                 onMouseEnter={() => hoverOpen(menu.id)}
                 onClick={() => clickMenu(menu.id)}
-                className={`flex h-10 items-center gap-1 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
+                className={`flex h-11 items-center gap-1 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
                   openMenu === menu.id ? "bg-sand text-ink" : "text-ink-soft hover:bg-sand hover:text-ink"
                 }`}
               >
@@ -410,7 +424,7 @@ export function SiteNav() {
                 key={l.href}
                 href={l.href}
                 onMouseEnter={() => setOpenMenu(null)}
-                className="flex h-10 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink"
+                className="flex h-11 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink"
               >
                 {l.label}
               </Link>
@@ -420,7 +434,7 @@ export function SiteNav() {
           <div className="flex items-center gap-1 sm:gap-2">
             <Link prefetch={false}
               href="/signin?to=login"
-              className="hidden h-10 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink sm:flex"
+              className="hidden h-11 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink sm:flex"
             >
               Log in
             </Link>
@@ -607,7 +621,7 @@ export function SiteNav() {
         </div>
         </> : null}
       </div>
-    </div>
+    </header>
     </>
   );
 }

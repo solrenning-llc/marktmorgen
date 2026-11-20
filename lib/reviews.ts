@@ -46,9 +46,10 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
-import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { MAX_DELIVERED } from "@/lib/bundle-rules";
 import {
   EMPTY_SUMMARY,
   MAX_REPLY_TEXT,
@@ -79,6 +80,15 @@ const allKey = (s: string) => `nl:rev:all:${s}`;
 const newKey = (s: string) => `nl:rev:new:${s}`;
 const payKey = (s: string) => `nl:rev:pay:${s}`;
 const lockKey = (s: string, p: string) => `nl:rev:lock:${s}:${p}`;
+/** A payment's list of reviews being read and written (payEntry, the erasure's removal): one writer at a time. */
+const payLockKey = (s: string, pi: string) => `nl:rev:lock:${s}:pay:${pi}`;
+/**
+ * The creator's "hide" of a review its buyer then deleted, by review id: the reason, or "" for none. Written again
+ * from the same order, the review comes back hidden, so deleting and rewriting never undoes the creator's decision.
+ * Taken off once the review carries it again, and with the person (forgetReviewsPerson).
+ */
+const hiddenKey = (s: string, p: string) => `nl:rev:hid:${s}:${p}`;
+const hideMarkBytes = (id: string) => dataBytes([id, "x".repeat(16)], 1);
 /**
  * How many new photos each review of a product has been granted (MAX_REVIEW_PHOTOS), by review id: kept beside the
  * product's reviews so that a buyer's delete, which HDELs the review, does not reset it (review M1 on #2863). The id is
@@ -390,6 +400,14 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     if (!replies || (raw !== null && typeof raw !== "string") || size === null) throw new UnknownReplyError("a product's reviews or their count");
     const before = parseReview(raw);
     if (!before && size >= MAX_REVIEWS_PER_PRODUCT) return { state: "full" };
+    // A new review: the hide its buyer deleted it under (deleteReview), as text, or null when there is none. Read
+    // exactly (rule 24): an unknown reply writes nothing, so a hidden review is never brought back by a failed read.
+    let mark: string | null = null;
+    if (!before) {
+      const marked = repliesFor(await redisPipeline([["HGET", hiddenKey(statsId, input.productId), id]]), 1)?.[0];
+      if (marked !== null && typeof marked !== "string") throw new UnknownReplyError("a deleted review's hide");
+      mark = marked;
+    }
     const review: Review = {
       id,
       productId: input.productId,
@@ -400,9 +418,11 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
       name: cleanReviewName(input.name),
       createdAt: before?.createdAt || now,
       editedAt: before ? now : 0,
-      hidden: before?.hidden ?? false,
-      hiddenReason: before?.hiddenReason ?? null,
-      refunded: false,
+      hidden: before ? before.hidden : mark !== null,
+      hiddenReason: before ? before.hiddenReason : mark !== null && isHideReason(mark) ? mark : null,
+      // A full refund of an order is final: a review written again from that same order stays refunded (the sweep
+      // marks each refund once, and never again). Written from another order, it rests on that one.
+      refunded: Boolean(before?.refunded && before.reference === input.reference),
       reply: before?.reply ?? null,
       // A photo stays through an edit; it is added or taken off by setReviewPhoto.
       photo: before?.photo ?? null,
@@ -427,21 +447,42 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
     const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
     if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
-    // Read before any room is taken or anything is written: an index that does not read stops the save whole, with
-    // the store's room as it was, never half (rule 24; review of #3862).
-    const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
-    const grown = reviewBytes(review) - reviewBytes(before) + countBytes;
-    if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
-    // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
-    // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
-    await write(statsId, review, [...keepCount, ...(before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : [])]);
-    await redisPipeline([
-      ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
-      ["SADD", REVIEW_STORES_KEY, statsId],
-    ]);
-    // Which reviews a payment paid for, kept for its refund: counted in the
-    // store's room at what it really adds (lib/order-data.ts).
-    if (review.pi && entry !== null) await orderWrite(room, [["HSET", payKey(statsId), review.pi, entry]]);
+    // The payment's list is read and written under its own lock (two reviews of one order saved at once each added
+    // theirs to the same list read, and the second write lost the first; Claude 7's reviews hunt), let go of on
+    // every way out below.
+    let payHeld: Awaited<ReturnType<typeof takeLock>> | null = null;
+    if (review.pi) {
+      try {
+        payHeld = await takeLock(payLockKey(statsId, review.pi), 10, 1_600);
+      } catch (error) {
+        if (error instanceof LockBusyError) return { state: "busy" };
+        throw error;
+      }
+    }
+    try {
+      // Read before any room is taken or anything is written: an index that does not read stops the save whole, with
+      // the store's room as it was, never half (rule 24; review of #3862).
+      const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
+      const grown = reviewBytes(review) - reviewBytes(before) + countBytes;
+      if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
+      // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
+      // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
+      await write(statsId, review, [...keepCount, ...(before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : [])]);
+      await redisPipeline([
+        ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
+        ["SADD", REVIEW_STORES_KEY, statsId],
+      ]);
+      // Which reviews a payment paid for, kept for its refund: counted in the
+      // store's room at what it really adds (lib/order-data.ts).
+      if (review.pi && entry !== null) await orderWrite(room, [["HSET", payKey(statsId), review.pi, entry]]);
+    } finally {
+      if (payHeld) await releaseLock(payHeld);
+    }
+    // The review carries the creator's hide again: the mark goes, and its room with it.
+    if (mark !== null) {
+      await redisPipeline([["HDEL", hiddenKey(statsId, input.productId), id]]);
+      await giveData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: hideMarkBytes(id) }], now);
+    }
     await recount(statsId, input.productId);
     return { state: before ? "updated" : "created", review, photoGranted };
   });
@@ -464,7 +505,9 @@ async function payMembers(statsId: string, pi: string): Promise<string[]> {
 async function payEntry(statsId: string, pi: string, member: string): Promise<string> {
   const list = await payMembers(statsId, pi);
   if (!list.includes(member)) list.push(member);
-  return list.slice(-20).join(";");
+  // Whole up to the most products one order hands over (MAX_DELIVERED); it kept only twenty, so a refund of a larger
+  // order left the first reviews counted (Claude 7's reviews hunt).
+  return list.slice(-MAX_DELIVERED).join(";");
 }
 
 /**
@@ -502,8 +545,12 @@ function exactWriteReplies(replies: unknown, commands: (string | number)[][]): u
   return list;
 }
 
-/** Deletes a buyer's own review. Its stars leave the average with it. */
-export async function deleteReview(statsId: string, productId: string, id: string, room: DataStore): Promise<"deleted" | "missing" | "busy"> {
+/**
+ * Deletes a buyer's own review. Its stars leave the average with it. One the creator hid leaves its hide behind
+ * (hiddenKey), so the same buyer writing it again cannot bring it back into view; `forget` (the person's erasure)
+ * leaves nothing behind.
+ */
+export async function deleteReview(statsId: string, productId: string, id: string, room: DataStore, forget = false): Promise<"deleted" | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   const what = "a buyer's review (its deletion)";
   const result = await locked(statsId, productId, async () => {
@@ -513,6 +560,9 @@ export async function deleteReview(statsId: string, productId: string, id: strin
     if (!read) throw new UnknownReplyError(what);
     const gone = storedReview(read[0], what);
     if (!gone) return "missing" as const;
+    const keepHide = gone.hidden && !forget;
+    // Counted before it is written, never refused (a deletion always goes): more room counted than used, never less.
+    if (keepHide) await noteData(room, [{ slot: REVIEWS_SLOT(productId), bytes: hideMarkBytes(id) }]);
     const deletion: (string | number)[][] = [
       ["HDEL", productKey(statsId, productId), id],
       ["ZREM", visibleKey(statsId, productId), id],
@@ -521,6 +571,7 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it. One hidden or
       // refunded was never counted, and takes none away.
       ...(counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
+      ...(keepHide ? [["HSET", hiddenKey(statsId, productId), id, gone.hiddenReason ?? ""]] : []),
     ];
     // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
     // (below) before it is said as deleted or thrown.
@@ -805,11 +856,14 @@ export async function dropReviews(statsId: string | null, productId: string, tri
   }
 }
 
-/** A product's reviews, their index entries and their AI summary, deleted in one request. */
+/** A product's reviews, their index entries, their hide marks and their AI summary, deleted in one request. */
 async function dropReviewRecords(statsId: string, productId: string, members: string[]): Promise<void> {
   await redisPipeline([
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
+    // Its reviews' hide marks too: nothing else reaches them once the product is gone (person erasure lists only
+    // the products that still exist).
+    ["DEL", hiddenKey(statsId, productId)],
     ["DEL", photoCountKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
     ...summaryGone(statsId, productId, "all"),
@@ -871,13 +925,25 @@ export async function forgetReviewsPerson(
     // and does every step once more (each is the same the second time).
     if (review.pi) {
       const member = `${wanted[i]}|${ids[i]}`;
-      const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), review.pi]]), 1);
-      const raw = read?.[0];
-      // An unknown read is never an empty list: that would delete the other reviews this payment paid for.
-      if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError(`${what} (its payment's list)`);
-      const rest = (raw === null ? [] : raw.split(";")).filter((m) => m && m !== member);
-      const change: (string | number)[][] = [rest.length ? ["HSET", payKey(statsId), review.pi, rest.join(";")] : ["HDEL", payKey(statsId), review.pi]];
-      if (!exactWriteReplies(await redisPipeline(change), change)) throw new UnknownReplyError(`${what} (its payment's list)`);
+      // Under the payment's lock, as a review's save writes the same list (payEntry): busy is tried again by the caller.
+      let payHeld;
+      try {
+        payHeld = await takeLock(payLockKey(statsId, review.pi), 10, 1_600);
+      } catch (error) {
+        if (error instanceof LockBusyError) throw new Error(`${what} (its payment's list is being written)`);
+        throw error;
+      }
+      try {
+        const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), review.pi]]), 1);
+        const raw = read?.[0];
+        // An unknown read is never an empty list: that would delete the other reviews this payment paid for.
+        if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError(`${what} (its payment's list)`);
+        const rest = (raw === null ? [] : raw.split(";")).filter((m) => m && m !== member);
+        const change: (string | number)[][] = [rest.length ? ["HSET", payKey(statsId), review.pi, rest.join(";")] : ["HDEL", payKey(statsId), review.pi]];
+        if (!exactWriteReplies(await redisPipeline(change), change)) throw new UnknownReplyError(`${what} (its payment's list)`);
+      } finally {
+        await releaseLock(payHeld);
+      }
     }
     // Its photo is handed to the eraser's files before the delete is tried: the review is being erased anyway, and a
     // delete that ran but answered in an unknown shape leaves nothing for the retry to find the photo by.
@@ -885,8 +951,16 @@ export async function forgetReviewsPerson(
       photos.push(review.photo.path);
       files?.push(review.photo.path);
     }
-    if ((await deleteReview(statsId, wanted[i], ids[i], room)) !== "deleted") throw new Error("a review could not be deleted just now");
+    if ((await deleteReview(statsId, wanted[i], ids[i], room, true)) !== "deleted") throw new Error("a review could not be deleted just now");
     records += 1;
+  }
+  // A hide left by a review they deleted themselves goes with the person too (its room stays counted: more, never less).
+  // Read first, exactly: only one there is deleted, so a person with none takes no write.
+  if (wanted.length) {
+    const held = repliesFor(await redisPipeline(wanted.map((p, i) => ["HEXISTS", hiddenKey(statsId, p), ids[i]])), wanted.length);
+    if (!held || held.some((reply) => reply !== 0 && reply !== 1)) throw new UnknownReplyError(`${what} (a hide it left)`);
+    const marks: (string | number)[][] = wanted.flatMap((p, i) => (held[i] === 1 ? [["HDEL", hiddenKey(statsId, p), ids[i]]] : []));
+    if (marks.length && !exactWriteReplies(await redisPipeline(marks), marks)) throw new UnknownReplyError(`${what} (a hide it left)`);
   }
   return { records, photos };
 }

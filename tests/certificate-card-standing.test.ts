@@ -14,6 +14,7 @@
  *   - a store past its requests, or an address that names no store, draws
  *     nothing and reads no certificate.
  */
+import { mock } from "node:test";
 import OpengraphImage from "@/app/[handle]/certificate/[id]/opengraph-image";
 import { certKey, issueCertificate, withdrawCertificate, type Certificate } from "@/lib/certificate";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
@@ -29,6 +30,10 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+// A connection's share is counted by the UTC day, read again at each picture: a run crossing 00:00 UTC (any day) between
+// the pictures counted below and the ones past the share counted them on another day, and the last one was drawn. Only
+// Date is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 const OWNER = "card-owner@example.com";
 const HANDLE = "cardschool";

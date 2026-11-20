@@ -30,6 +30,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/takedown/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, addStoreLink, claimHandle, ensureStatsId, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, unsentNotices } from "@/lib/takedown";
@@ -116,9 +117,11 @@ async function main(): Promise<void> {
   sent.length = 0;
   tried.length = 0;
 
+  // Only the operator acts on a notice (#4036; tests/takedown-operator-only.test.ts): every request is the operator's.
+  const cookie = `${SESSION_COOKIE}=${await openSession(process.env.DEMO_STUDIO_ADMIN ?? "")}`;
   const answer = async (action: unknown, owed = false) => {
     const response = await POST(new NextRequest(`${ORIGIN}/api/takedown`, {
-      method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN, Host: "marktmorgen.com" },
+      method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN, Host: "marktmorgen.com", Cookie: cookie },
       body: JSON.stringify(owed ? { token, action, owed: true } : { token, action }),
     }));
     const body = (await response.json()) as Record<string, unknown>;

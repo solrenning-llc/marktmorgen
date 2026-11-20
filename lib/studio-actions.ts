@@ -118,6 +118,7 @@ export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",
   notifications: "The owner's own alert emails: its screen asks for Settings, which an Admin also has, but sends everyone but the owner away, so an Admin would be shown an action the screen refuses. Opened from the owner's card on the studio home.",
   students: "Needs both Products and Orders, and an action asks for one permission: an Editor would be shown an action the screen refuses.",
+  devices: "Logs out the person's other devices after asking first, an account action rather than a part of the store.",
 };
 
 /** Words that say nothing about what to do, left out of a search. */

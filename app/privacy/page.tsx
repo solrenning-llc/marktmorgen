@@ -438,10 +438,15 @@ export default function PrivacyPage() {
           the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
           plan or add-on. Stripe&apos;s own privacy policy applies. It is not
           asked when
-          something is free. We read only the country in it, to work out where
-          you are buying from: for the VAT or sales tax that applies to the
-          sale, and to decide whether an offer after paying can be shown to
-          you. We do not keep the address, and it is never used for marketing.
+          something is free. We read the country in it and, for a buyer in the
+          United States or Canada, the state or province. We use them to work
+          out where you are buying from: for the VAT or sales tax that applies
+          to the sale, for the creator&apos;s tax summary, and to decide whether
+          an offer after paying can be shown to you. The country also appears
+          in the creator&apos;s sales figures and sales export, and, where the
+          creator switches it on, in{" "}
+          <a href="#recent-purchases">the card of a store&apos;s latest purchases</a>.
+          We do not keep the street address, and it is never used for marketing.
           Before we start keeping the tax records the law asks for on sales to
           the European Union, which must be kept for 10 years, this policy will
           say so.

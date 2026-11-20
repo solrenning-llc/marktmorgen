@@ -92,6 +92,7 @@ export const SERIAL_TEST_FILES = Object.freeze([
   'checkout-focus-browser.test.ts',
   'embed-editor-contrast.test.ts',
   'mail-access-review-browser.test.ts',
+  'studio-search-label-browser.test.ts',
   'wg14-path-milestone-browser.test.ts',
 ]);
 

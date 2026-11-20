@@ -86,6 +86,27 @@ is("a redirector path or host is not kept even without a destination", [
   url("https://l.instagram.com/ana"),
   url("https://www.youtube.com/redirect?q=evil.example"),
 ], [null, null, null]);
+// Codex N4's LOWs on #3024 (16/11, still open in Codex T's and X6's re-checks): an escaped redirector path, a
+// destination written without a scheme, an explicit port and the other networks' own redirectors.
+is("an escaped redirector path is still a redirector", [
+  url("https://www.youtube.com/%72edirect?q=evil.example"),
+  url("https://www.instagram.com/%6Cinkshim/?u=evil.example"),
+  url("https://www.linkedin.com/%2572edir/redirect"),
+], [null, null, null]);
+is("a query value that names another site without a scheme is not kept", [
+  url("https://x.com/ana?u=evil.example"),
+  url("https://x.com/ana?next=www.evil.example/page"),
+  url("https://www.tiktok.com/@ana?target=evil.example%2Fpage"),
+  url("https://www.facebook.com/profile.php?id=100012345&u=evil.example:8080/x"),
+], [null, null, null, null]);
+is("an explicit port is not kept, and the default one is the plain address", [url("https://www.instagram.com:8443/ana"), url("https://github.com:444/ana"), url("https://www.instagram.com:443/ana")], [null, null, "https://www.instagram.com/ana"]);
+is("Pinterest's, TikTok's and Substack's own redirectors are not kept", [
+  url("https://www.pinterest.com/offsite/?token=1&url=evil.example"),
+  url("https://www.tiktok.com/link/v2?aid=1&lang=en"),
+  url("https://ana.substack.com/redirect/2/eyJlIjoiZXZpbCJ9"),
+  url("https://www.pinterest.com/offsite"),
+], [null, null, null, null]);
+is("a profile whose own query has a plain value still passes", [url("https://www.facebook.com/profile.php?id=100012345"), url("https://ana.substack.com/p/first-post")], ["https://www.facebook.com/profile.php?id=100012345", "https://ana.substack.com/p/first-post"]);
 is("a stored redirector is left out when read back", parseMemberLinks([{ network: "facebook", url: `https://l.facebook.com/l.php?u=${away}` }, { network: "youtube", url: `https://www.youtube.com/redirect?q=${away}` }]), []);
 is("a profile's own query and path still pass", [url("https://www.facebook.com/profile.php?id=100012345"), url("https://www.youtube.com/@ana/videos"), url("https://www.linkedin.com/in/ana")], ["https://www.facebook.com/profile.php?id=100012345", "https://www.youtube.com/@ana/videos", "https://www.linkedin.com/in/ana"]);
 is("an address with a user and password is not kept", url("https://user:pw@www.instagram.com/ana"), null);

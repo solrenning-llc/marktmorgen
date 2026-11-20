@@ -11,11 +11,15 @@
 import { readFileSync } from "node:fs";
 import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_PUT_TRIES, BLOB_LIST_MEASURES_A_MONTH, BLOB_TALLY_OPEN_COMMANDS, COMMAND } from "./plan-cost-registry";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
+import { BLOB_LIST_PAGES as CODE_BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { done, is, part } from "./check";
 
 const line = COST_LINES.find((each) => each.id === "blob-list");
 const store = readFileSync("lib/file-store.ts", "utf8");
-const pages = Number(/for \(let page = 0; page < (\d+); page \+= 1\)/.exec(store.slice(store.indexOf("export async function blobHeld(")))?.[1] ?? Number.NaN);
+// Merge with main (#3502): the loop reads its cap from lib/storage-rules.ts BLOB_LIST_PAGES instead of a written 20 (rule 23):
+// the cap is taken from the code either way, and the registry's own figure must equal it.
+const cap = /for \(let page = 0; page < (\d+|BLOB_LIST_PAGES); page \+= 1\)/.exec(store.slice(store.indexOf("export async function blobHeld(")))?.[1];
+const pages = cap === "BLOB_LIST_PAGES" ? CODE_BLOB_LIST_PAGES : Number(cap ?? Number.NaN);
 
 part("The line exists and reads the code's own page cap");
 is("blobHeld lists at most 20 pages", pages, 20);

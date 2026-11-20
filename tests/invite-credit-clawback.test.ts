@@ -104,7 +104,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const list = (data: unknown[]) => ({ object: "list", data, has_more: false });
 const dispute = (status: string) => ({
-  id: "du_bea_claw", object: "dispute", status, amount: 2900, currency: "usd", payment_intent: PI, created: nowS - 2 * DAY,
+  id: "du_BeaClaw01", object: "dispute", status, amount: 2900, currency: "usd", payment_intent: PI, created: nowS - 2 * DAY,
   charge: { id: "ch_bea_claw", invoice: { id: INVOICE, subscription: BEA_SUB, lines: { data: [{ period: { start: nowS - 30 * DAY, end: nowS } }] } } },
   balance_transactions: status === "lost" ? [{ id: "txn_out", object: "balance_transaction", amount: -2900, currency: "usd" }] : [],
 });
@@ -160,8 +160,7 @@ async function main(): Promise<void> {
   is("the Terms say a late dispute takes back only unused credit, and never charges a card", /taken back by a dispute[\s\S]{0,400}not yet used[\s\S]{0,400}never charged/.test(terms), true);
 
   part("Control: the share and the bonus reached Ana and Bea");
-  const beaSid = await sent();
-  const bonusId = `bonus_${beaSid}`;
+  let bonusId = `bonus_${await sent()}`;
   const share = inviteShare(2900, currentInviteTerms());
   is("Ana's share and Bea's bonus are on their balances, both done", [posts.get("cus_AnaClaw01"), recordOf(INVOICE)?.state, recordOf(bonusId)?.state], [[-share], "done", "done"]);
   const bonus = -(posts.get("cus_BeaClaw01")?.[0] ?? 0);
@@ -176,7 +175,7 @@ async function main(): Promise<void> {
   is("asked again: nothing more is sent", [posts.get("cus_AnaClaw01")?.length, posts.get("cus_BeaClaw01")?.length], [2, 2]);
 
   part("A lost dispute, the credit partly used: only what is left is taken back");
-  await sent();
+  bonusId = `bonus_${await sent()}`;
   balances.set("cus_AnaClaw01", -500);
   balances.set("cus_BeaClaw01", 0);
   await quiet(() => clawBackInviteCredits(INVOICE, nowS));
@@ -184,13 +183,13 @@ async function main(): Promise<void> {
   is("the records say what was taken back, the rest is the company's", [clawed(INVOICE), clawed(bonusId)], [500, 0]);
 
   part("More credit on the balance than this one: never more than the credit itself");
-  await sent();
+  bonusId = `bonus_${await sent()}`;
   balances.set("cus_AnaClaw01", -10_000);
   await quiet(() => clawBackInviteCredits(INVOICE, nowS));
   is("only the share is taken back", [posts.get("cus_AnaClaw01")?.slice(1), balances.get("cus_AnaClaw01")], [[share], -10_000 + share]);
 
   part("The debit applied but its reply lost: found in the history, never sent twice");
-  await sent();
+  bonusId = `bonus_${await sent()}`;
   lostReply.add("cus_AnaClaw01");
   await quiet(() => clawBackInviteCredits(INVOICE, nowS)).catch(() => undefined);
   is("one debit reached Stripe, the share not marked yet", [posts.get("cus_AnaClaw01")?.slice(1), clawed(INVOICE)], [[share], undefined]);
@@ -198,21 +197,21 @@ async function main(): Promise<void> {
   is("the next try finds it: no second debit, the share marked with it", [posts.get("cus_AnaClaw01")?.slice(1), clawed(INVOICE), balances.get("cus_AnaClaw01")], [[share], share, 0]);
 
   part("A balance that does not read: nothing debited, nothing marked, asked again later");
-  await sent();
+  bonusId = `bonus_${await sent()}`;
   unreadable.add("cus_AnaClaw01");
   let threw = false;
   await quiet(() => clawBackInviteCredits(INVOICE, nowS)).catch(() => { threw = true; });
   is("it throws, nothing debited to Ana, the share not marked", [threw, posts.get("cus_AnaClaw01")?.length, clawed(INVOICE)], [true, 1, undefined]);
 
   part("Credit spent between the read and the debit: the balance is put back to zero, never owing");
-  await sent();
+  bonusId = `bonus_${await sent()}`;
   spentAfterPost.set("cus_AnaClaw01", 1_000);
   await quiet(() => clawBackInviteCredits(INVOICE, nowS));
   is("Ana's balance ends at zero, not owing", balances.get("cus_AnaClaw01"), 0);
   is("what was taken back is what is not used: the share less what was spent", clawed(INVOICE), share - 1_000);
 
   part("Found by the daily reading of plan disputes");
-  await sent();
+  bonusId = `bonus_${await sent()}`;
   disputes = list([dispute("needs_response")]);
   await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
   is("an open dispute takes nothing back", [posts.get("cus_AnaClaw01")?.length, clawed(INVOICE)], [1, undefined]);

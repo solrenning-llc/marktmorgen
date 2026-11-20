@@ -178,7 +178,7 @@ export default async function StudioInvitePage({ searchParams }: Params) {
                   <ul className="mt-4 space-y-3 text-sm leading-relaxed text-ink-soft">
                     {[
                       `Each payment they make earns you ${INVITE_SHARE_PERCENT}% of what they actually paid, monthly or yearly, on any plan, for as long as they pay.`,
-                      `It is added ${INVITE_HOLD_DAYS} days after each payment, once its refund window has closed. A refunded payment earns nothing.`,
+                      `It is added ${INVITE_HOLD_DAYS} days after each payment, once the time for a refund or a card dispute on it has passed. A refunded or disputed payment earns nothing. If a bank takes a payment back later, the credit it earned that you have not used yet comes off your balance; what you already used is not charged to you.`,
                       "It is credit on your Marktmorgen plan, not cash. Stripe uses it on your next bills by itself; what is left over stays on your account for the months after.",
                       "It counts for creators making their first store whose account has not paid us before. Your own stores do not count.",
                       `They get ${money(INVITE_BONUS_CENTS)} of credit on their own plan ${INVITE_HOLD_DAYS} days after their first payment.`,

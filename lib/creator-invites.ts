@@ -91,6 +91,13 @@ export type Credit = {
   state: "owed" | "done" | "none" | "gone";
   txn?: string;
   doneAt?: number;
+  /**
+   * Once the payment it was earned on was lost in a dispute after it was sent (lib/creator-invite-clawback.ts): what
+   * was taken back off the balance, in cents (what was not used yet), and when. The rest of `cents` was already used:
+   * the company's funded exposure, never charged to the creator.
+   */
+  clawed?: number;
+  clawedAt?: number;
 };
 
 export function parseCredit(raw: unknown): Credit | null {

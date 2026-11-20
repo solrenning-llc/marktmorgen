@@ -106,7 +106,7 @@ function isPaidInvoice(row: unknown): row is PaidInvoice {
 export type InviteCounts = { invited: number; earned: number; added: number; failed: number; complete: boolean };
 
 /** The customer a store's credit goes on: its own, or its account's first store's. */
-async function customerFor(store: Store): Promise<string | null> {
+export async function customerFor(store: Store): Promise<string | null> {
   if (store.stripeCustomerId && CUSTOMER_PATTERN.test(store.stripeCustomerId)) return store.stripeCustomerId;
   if (!store.extra) return null;
   const first = await storeForEmail(store.email);

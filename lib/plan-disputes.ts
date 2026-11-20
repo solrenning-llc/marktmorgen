@@ -27,6 +27,7 @@ import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
 import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
 import { type StripePage, readStripePage } from "@/lib/stripe-list";
+import { CLAWBACKS_PER_RUN, clawBackInviteCredits } from "@/lib/creator-invite-clawback";
 
 /** The version whose charge still names its invoice and whose invoice names its subscription. */
 const DISPUTE_VERSION = "2024-06-20";
@@ -64,8 +65,27 @@ async function remember(id: string, what: string): Promise<void> {
   await redisPipeline([["HSET", SEEN_KEY, id, what], ["EXPIRE", SEEN_KEY, SEEN_SECONDS]]);
 }
 
+/**
+ * A lost dispute on a plan invoice gives back the invite credit earned on it that is still unused (the owner's decision
+ * of 19 November 2026 on #4514, part (b); lib/creator-invite-clawback.ts). Not done (a reply that does not read): the
+ * dispute is still written on the store, but remembered as open, so the next run asks about it again by id.
+ */
+async function clawBack(status: PlanDisputeStatus, invoiceId: string, nowSeconds: number, room: { left: number }): Promise<boolean> {
+  if (status !== "lost" || !invoiceId) return true;
+  // Past this run's ceiling (CLAWBACKS_PER_RUN): kept open and handled the next day, never skipped.
+  if (room.left <= 0) return false;
+  room.left -= 1;
+  try {
+    await clawBackInviteCredits(invoiceId, nowSeconds);
+    return true;
+  } catch (error) {
+    console.error(`taking back the invite credit of ${invoiceId} failed`, error);
+    return false;
+  }
+}
+
 /** Writes a dispute's status on a store already known. Answers whether it changed. */
-async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, at: number, coversUntil: number, nowSeconds: number): Promise<boolean> {
+async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, at: number, coversUntil: number, nowSeconds: number, clawed = true): Promise<boolean> {
   const store = await storeForId(sid);
   if (!store) {
     await remember(id, `unmatched:${nowSeconds}`);
@@ -74,12 +94,13 @@ async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, a
   const before = JSON.stringify(store.planDisputes ?? []);
   const after = await recordPlanDispute(storeRef(store), { id, status, at, coversUntil }, nowSeconds);
   if (!after) throw new Error("the dispute could not be written down");
-  await remember(id, status === "open" ? `open:${sid}` : "final");
+  await remember(id, status === "open" || !clawed ? `open:${sid}` : "final");
+  if (!clawed) throw new Error("the invite credit of a lost dispute is not taken back yet");
   return JSON.stringify(after.planDisputes ?? []) !== before;
 }
 
 /** Writes one listed dispute on its store. Answers what came of it. */
-async function applyDispute(dispute: Record<string, unknown>, known: string | undefined, nowSeconds: number): Promise<"recorded" | "unchanged" | "unmatched"> {
+async function applyDispute(dispute: Record<string, unknown>, known: string | undefined, nowSeconds: number, room: { left: number }): Promise<"recorded" | "unchanged" | "unmatched"> {
   const id = typeof dispute.id === "string" ? dispute.id : "";
   const created = Number.isSafeInteger(dispute.created) ? (dispute.created as number) : 0;
   if (!DISPUTE_ID.test(id) || created <= 0) return "unmatched";
@@ -89,7 +110,8 @@ async function applyDispute(dispute: Record<string, unknown>, known: string | un
   const invoice = objectOf(objectOf(dispute.charge)?.invoice);
   const status = disputeStatusOf(dispute.status);
   if (known?.startsWith("open:")) {
-    return (await writeStatus(known.slice(5), id, status, created, coveredUntil(invoice), nowSeconds)) ? "recorded" : "unchanged";
+    const clawed = await clawBack(status, idOf(invoice), nowSeconds, room);
+    return (await writeStatus(known.slice(5), id, status, created, coveredUntil(invoice), nowSeconds, clawed)) ? "recorded" : "unchanged";
   }
   const subscriptionId = idOf(invoice?.subscription);
   if (!invoice || !SUBSCRIPTION_ID.test(subscriptionId)) {
@@ -107,7 +129,8 @@ async function applyDispute(dispute: Record<string, unknown>, known: string | un
     await remember(id, known?.startsWith("unmatched:") ? known : `unmatched:${nowSeconds}`);
     return "unmatched";
   }
-  return (await writeStatus(store.sid, id, status, created, coveredUntil(invoice), nowSeconds)) ? "recorded" : "unchanged";
+  const clawed = await clawBack(status, idOf(invoice), nowSeconds, room);
+  return (await writeStatus(store.sid, id, status, created, coveredUntil(invoice), nowSeconds, clawed)) ? "recorded" : "unchanged";
 }
 
 function sameCustomer(customerId: string | null | undefined, subscription: Record<string, unknown>): boolean {
@@ -122,6 +145,7 @@ function sameCustomer(customerId: string | null | undefined, subscription: Recor
  */
 export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<DisputeCounts> {
   const counts: DisputeCounts = { seen: 0, recorded: 0, unmatched: 0, reread: 0, failed: 0, complete: false };
+  const room = { left: CLAWBACKS_PER_RUN };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
   const [raw] = await redisPipeline([["HGETALL", SEEN_KEY]]);
   const seen = new Map<string, string>();
@@ -159,7 +183,7 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       const id = typeof dispute.id === "string" ? dispute.id : "";
       if (id) listed.add(id);
       try {
-        const result = await applyDispute(dispute, seen.get(id), nowSeconds);
+        const result = await applyDispute(dispute, seen.get(id), nowSeconds, room);
         if (result === "recorded") counts.recorded += 1;
         if (result === "unmatched") counts.unmatched += 1;
       } catch (error) {
@@ -181,11 +205,14 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
   for (const [id, what] of stale) {
     if (Date.now() > deadline) return counts;
     try {
-      const dispute = await onPlatformAt(DISPUTE_VERSION, "GET", `/disputes/${encodeURIComponent(id)}`);
+      // The same read, with its invoice, so a dispute lost late still gives back the invite credit earned on it.
+      const dispute = await onPlatformAt(DISPUTE_VERSION, "GET", `/disputes/${encodeURIComponent(id)}?${new URLSearchParams({ "expand[]": "charge.invoice" })}`);
       if (dispute.id !== id) throw new Error("Stripe answered another dispute");
       counts.reread += 1;
       const created = Number.isSafeInteger(dispute.created) ? (dispute.created as number) : 0;
-      if (await writeStatus(what.slice(5), id, disputeStatusOf(dispute.status), created, 0, nowSeconds)) counts.recorded += 1;
+      const status = disputeStatusOf(dispute.status);
+      const clawed = await clawBack(status, idOf(objectOf(objectOf(dispute.charge)?.invoice)), nowSeconds, room);
+      if (await writeStatus(what.slice(5), id, status, created, 0, nowSeconds, clawed)) counts.recorded += 1;
     } catch (error) {
       counts.failed += 1;
       console.error(`re-reading plan dispute ${id} failed`, error);

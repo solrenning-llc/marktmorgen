@@ -67,6 +67,7 @@ import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { CLAWBACKS_PER_RUN, CLAWBACK_COMMANDS, CLAWBACK_STRIPE_CALLS } from "@/lib/creator-invite-clawback";
 import { INVITE_EVERY_DAYS, INVITE_OWED_COMMANDS, INVITE_RUN_COMMANDS, INVITE_WALK_COMMANDS } from "@/lib/creator-invite-credit";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS, MOVED_EMAIL_EXTRA_COMMANDS, MOVE_HELD_PASSES, MOVE_HELD_PASS_COMMANDS } from "@/lib/imports";
@@ -328,6 +329,17 @@ export const INVITE_JOB_MAX_SECONDS = 60;
  * id 38), never the whole list.
  */
 export const INVITE_JOB_LIST_BYTES = (INVITE_WALK_COMMANDS + INVITE_OWED_COMMANDS) * 255;
+/**
+ * A late lost dispute's invite credit taken back (lib/creator-invite-clawback.ts; the owner's decision of 19 November
+ * 2026 on #4514, part (b)), inside the daily reading of plan disputes, so every day of the month: at most
+ * CLAWBACKS_PER_RUN a run, each with at most CLAWBACK_COMMANDS Redis commands (held by lib/redis-ceiling.ts) and
+ * CLAWBACK_STRIPE_CALLS calls to Stripe, each waited on at STRIPE_WAIT_SECONDS, and its two credit records written back
+ * with CLAWBACK_RECORD_BYTES more each, kept a month at most here (the record's own life is the invite credit's).
+ */
+export const INVITE_CLAWBACK_RUNS_PER_MONTH = 31;
+export const CLAWBACK_RECORD_BYTES = 64;
+export const INVITE_CLAWBACK_MONTH_USD = INVITE_CLAWBACK_RUNS_PER_MONTH * CLAWBACKS_PER_RUN *
+  (CLAWBACK_COMMANDS * COMMAND + CLAWBACK_STRIPE_CALLS * STRIPE_WAIT_SECONDS * MEMORY_SECOND + 2 * CLAWBACK_RECORD_BYTES * (DB_BYTE + DB_BYTE_MONTH));
 /**
  * The membership or payment plan an order may start, stopped at Stripe when
  * its store closes (lib/closed-store-data.ts, stopRenewals): its share of a
@@ -2887,14 +2899,16 @@ export const OPEN: OpenItem[] = [];
 export const INVITE_CREDIT_JOB = {
   id: "invite-credit-reads",
   feature: "The daily invite-credit job: its Stripe reads and its credits sent (Claude 7's money review of #4514)",
-  monthlyUsd: () => INVITE_JOB_RUNS_PER_MONTH * (INVITE_JOB_MAX_SECONDS * MEMORY_SECOND + INVITE_RUN_COMMANDS * COMMAND + INVITE_JOB_LIST_BYTES * DB_BYTE),
+  monthlyUsd: () => INVITE_JOB_RUNS_PER_MONTH * (INVITE_JOB_MAX_SECONDS * MEMORY_SECOND + INVITE_RUN_COMMANDS * COMMAND + INVITE_JOB_LIST_BYTES * DB_BYTE) + INVITE_CLAWBACK_MONTH_USD,
   sources: [
     { file: "lib/creator-invite-credit.ts", names: ["settleInvites", "paidInvoices", "takenBackOn", "disputedOn", "paidNow", "stillOwed", "creditedAt", "INVOICE_PAGES", "HISTORY_PAGES", "INVITE_RUN_COMMANDS", "INVITE_WALK_COMMANDS", "INVITE_OWED_COMMANDS"] },
+    { file: "lib/creator-invite-clawback.ts", names: ["clawBackInviteCredits", "CLAWBACKS_PER_RUN", "CLAWBACK_COMMANDS", "CLAWBACK_STRIPE_CALLS", "withCommandCeiling(CLAWBACK_COMMANDS"] },
+    { file: "lib/plan-disputes.ts", names: ["clawBackInviteCredits(invoiceId, nowSeconds)", "room.left -= 1"] },
     { file: "lib/redis-ceiling.ts", names: ["withCommandCeiling", "spendCommands", "CommandCeilingError"] },
     { file: "app/api/cron/plans/route.ts", names: ["maxDuration = 60", "settleInvites(deadline)"] },
     { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
   ],
-  basis: `Every read the job makes waits on Stripe inside the plans cron (app/api/cron/plans), which runs once a day and is ended at maxDuration (60 s), the job working only every ${INVITE_EVERY_DAYS} days (owner, 17 November 2026): the invited stores' paid invoices (INVOICE_PAGES pages), each new payment's refunds and disputes, a credit's invoice read again with its refunds and disputes before it is sent, and the balance history (HISTORY_PAGES pages) and POST it is sent with. However many invoices, payments or credits there are, the whole job holds at most ${INVITE_JOB_RUNS_PER_MONTH} runs of ${INVITE_JOB_MAX_SECONDS} s a month at 2 GB, at the registry's function-memory rate (STRIPE_WAIT_SECONDS a call, the same rate): counted whole on every plan, as if one store took all of it. Its Redis commands (Claude 7 and Claude 5 on #4514) are held in code to INVITE_RUN_COMMANDS (${INVITE_RUN_COMMANDS}) a run, whatever module sends them (lib/redis-ceiling.ts: a pipeline that would pass it is refused before it is sent), at the registry's COMMAND rate, and its two list reads to a window of ${INVITE_WALK_COMMANDS} invited stores and a draw of ${INVITE_OWED_COMMANDS} owed credits, at 255 bytes a member and DB_BYTE. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search.`,
+  basis: `Every read the job makes waits on Stripe inside the plans cron (app/api/cron/plans), which runs once a day and is ended at maxDuration (60 s), the job working only every ${INVITE_EVERY_DAYS} days (owner, 17 November 2026): the invited stores' paid invoices (INVOICE_PAGES pages), each new payment's refunds and disputes, a credit's invoice read again with its refunds and disputes before it is sent, and the balance history (HISTORY_PAGES pages) and POST it is sent with. However many invoices, payments or credits there are, the whole job holds at most ${INVITE_JOB_RUNS_PER_MONTH} runs of ${INVITE_JOB_MAX_SECONDS} s a month at 2 GB, at the registry's function-memory rate (STRIPE_WAIT_SECONDS a call, the same rate): counted whole on every plan, as if one store took all of it. Its Redis commands (Claude 7 and Claude 5 on #4514) are held in code to INVITE_RUN_COMMANDS (${INVITE_RUN_COMMANDS}) a run, whatever module sends them (lib/redis-ceiling.ts: a pipeline that would pass it is refused before it is sent), at the registry's COMMAND rate, and its two list reads to a window of ${INVITE_WALK_COMMANDS} invited stores and a draw of ${INVITE_OWED_COMMANDS} owed credits, at 255 bytes a member and DB_BYTE. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search. With it, the credit a late lost dispute takes back (INVITE_CLAWBACK_MONTH_USD: at most CLAWBACKS_PER_RUN (${CLAWBACKS_PER_RUN}) a day in the daily reading of plan disputes, ${CLAWBACK_COMMANDS} Redis commands and ${CLAWBACK_STRIPE_CALLS} Stripe calls each), a company fixed cost by the owner's decision of 19 November 2026 on #4514.`,
 };
 /** The invite-credit job's whole month at the most, in dollars: a company fixed cost (INVITE_CREDIT_JOB). */
 export const INVITE_JOB_MONTH_USD = INVITE_CREDIT_JOB.monthlyUsd();

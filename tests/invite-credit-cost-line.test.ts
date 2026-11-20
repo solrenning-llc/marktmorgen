@@ -9,8 +9,9 @@
  * is that bound at the registry's own function-memory rate, for every plan.
  */
 import { readFileSync } from "node:fs";
-import { COMMAND, COST_LINES, DB_BYTE, INVITE_CREDIT_JOB, INVITE_JOB_LIST_BYTES, INVITE_JOB_MONTH_USD, INVITE_JOB_RUNS_PER_MONTH, NOT_A_COST, STRIPE_WAIT_SECONDS } from "./plan-cost-registry";
+import { CLAWBACK_RECORD_BYTES, COMMAND, COST_LINES, DB_BYTE, DB_BYTE_MONTH, INVITE_CLAWBACK_MONTH_USD, INVITE_CLAWBACK_RUNS_PER_MONTH, INVITE_CREDIT_JOB, INVITE_JOB_LIST_BYTES, INVITE_JOB_MONTH_USD, INVITE_JOB_RUNS_PER_MONTH, NOT_A_COST, STRIPE_WAIT_SECONDS } from "./plan-cost-registry";
 import { INVITE_RUN_COMMANDS } from "@/lib/creator-invite-credit";
+import { CLAWBACKS_PER_RUN, CLAWBACK_COMMANDS, CLAWBACK_STRIPE_CALLS } from "@/lib/creator-invite-clawback";
 import { VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR } from "@/lib/spend-cost-table";
 import { done, is, part } from "./check";
 
@@ -33,7 +34,11 @@ const memorySecondUsd = (VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR / 1e6) * VERCEL_FUN
 // Since #4514 (Claude 7's and Claude 5's MEDIUM): the run's Redis commands, held in code to INVITE_RUN_COMMANDS, and
 // its two list windows' bytes are priced with its memory (tests/invite-credit-command-ceiling.test.ts holds the code).
 // Every second day since the owner's decision of 17 November 2026: at most 16 runs a month (invite-every-second-day).
-const ceiling = INVITE_JOB_RUNS_PER_MONTH * (60 * memorySecondUsd + INVITE_RUN_COMMANDS * COMMAND + INVITE_JOB_LIST_BYTES * DB_BYTE);
-is("16 runs of at most 60 s at 2 GB, INVITE_RUN_COMMANDS commands and their list bytes", INVITE_JOB_RUNS_PER_MONTH === 16 && Math.abs(INVITE_JOB_MONTH_USD - ceiling) < 1e-9 && INVITE_JOB_MONTH_USD > 16 * 60 * memorySecondUsd, true);
+// Since the owner's decision of 19 November 2026 on #4514 (part (b)), with the credit a late lost dispute takes back:
+// every day, at most CLAWBACKS_PER_RUN, each at its command, Stripe-wait and record-byte ceilings (lib/creator-invite-clawback.ts).
+const clawback = 31 * CLAWBACKS_PER_RUN * (CLAWBACK_COMMANDS * COMMAND + CLAWBACK_STRIPE_CALLS * STRIPE_WAIT_SECONDS * memorySecondUsd + 2 * CLAWBACK_RECORD_BYTES * (DB_BYTE + DB_BYTE_MONTH));
+is("the clawback's month: every day, its runs at their ceilings, never zero", [INVITE_CLAWBACK_RUNS_PER_MONTH, Math.abs(INVITE_CLAWBACK_MONTH_USD - clawback) < 1e-9, INVITE_CLAWBACK_MONTH_USD > 0], [31, true, true]);
+const ceiling = INVITE_JOB_RUNS_PER_MONTH * (60 * memorySecondUsd + INVITE_RUN_COMMANDS * COMMAND + INVITE_JOB_LIST_BYTES * DB_BYTE) + clawback;
+is("16 runs of at most 60 s at 2 GB, INVITE_RUN_COMMANDS commands and their list bytes, and the clawback", INVITE_JOB_RUNS_PER_MONTH === 16 && Math.abs(INVITE_JOB_MONTH_USD - ceiling) < 1e-9 && INVITE_JOB_MONTH_USD > 16 * 60 * memorySecondUsd, true);
 is("each Stripe call is counted as a wait the registry already uses", STRIPE_WAIT_SECONDS > 0, true);
 done();

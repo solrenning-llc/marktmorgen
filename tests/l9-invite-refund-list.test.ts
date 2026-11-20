@@ -94,8 +94,8 @@ async function main() {
     const made = await claimHandle(`${c.handle}@example.com`, c.handle, c.handle, "");
     if (!made.ok) throw new Error(`fixture failed: ${c.handle}`);
     await setSubscription(`${c.handle}@example.com`, { customerId: c.customer, subscriptionId: `sub_${c.handle.replace(/-/g, "")}01`, active: true });
-    redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - 60 * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
-    redis.run(["ZADD", ALL_KEY, NOW - 60 * DAY, made.store.sid]);
+    redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - (INVITE_HOLD_DAYS + 60) * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
+    redis.run(["ZADD", ALL_KEY, NOW - (INVITE_HOLD_DAYS + 60) * DAY, made.store.sid]);
     const row = invoice(c.invoice, c.customer, c.payment);
     if ("payments" in c && c.payments === null) delete row.payments;
     if ("payments" in c && c.payments === "more") row.payments = { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: c.payment } }], has_more: true };

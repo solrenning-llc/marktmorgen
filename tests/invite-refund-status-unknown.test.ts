@@ -89,8 +89,8 @@ async function main() {
     const made = await claimHandle(`${handle}@example.com`, handle, handle, "");
     if (!made.ok) throw new Error(`fixture failed: ${handle}`);
     await setSubscription(`${handle}@example.com`, { customerId: `cus_${c.key}001`, subscriptionId: `sub_${c.key}001`, active: true });
-    redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - 60 * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
-    redis.run(["ZADD", ALL_KEY, NOW - 60 * DAY, made.store.sid]);
+    redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - (INVITE_HOLD_DAYS + 60) * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
+    redis.run(["ZADD", ALL_KEY, NOW - (INVITE_HOLD_DAYS + 60) * DAY, made.store.sid]);
     invoice(`in_${c.key}001`, `cus_${c.key}001`, `pi_${c.key.toLowerCase()}`);
     refundAnswerByPayment.set(`pi_${c.key.toLowerCase()}`, { object: "list", data: [{ amount: 10_000, status: c.status }], has_more: false });
   }

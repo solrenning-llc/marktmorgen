@@ -22,7 +22,7 @@ import { INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 const DAY = 86_400;
 const NOW_MS = Date.UTC(2026, 9, 16, 12);
 const NOW = Math.floor(NOW_MS / 1000);
-const INVITED_AT = NOW - 60 * DAY;
+const INVITED_AT = NOW - (INVITE_HOLD_DAYS + 60) * DAY;
 const CUSTOMER = "cus_Invited01";
 
 type Reply = (startingAfter: string | null, page: number) => unknown;

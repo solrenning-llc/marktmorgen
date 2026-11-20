@@ -195,8 +195,9 @@ async function clawOne(credit: Credit, nowSeconds: number): Promise<number> {
  * nothing on a payment taken back. Throws when anything does not read; nothing is then marked, and it is asked again.
  */
 export async function clawBackInviteCredits(invoiceId: string, nowSeconds: number): Promise<number> {
-  // Credit is only ever written for an invoice id of this shape (lib/creator-invite-credit.ts): another has none.
-  if (!INVOICE_PATTERN.test(invoiceId)) return 0;
+  // A lost dispute with no readable invoice cannot prove that it earned no credit. Keep it retriable until its
+  // invoice is known, rather than letting the daily job remember it as final and lose the next read by id.
+  if (!INVOICE_PATTERN.test(invoiceId)) throw new UnknownReplyError("invite clawback: a lost dispute's invoice");
   return withCommandCeiling(CLAWBACK_COMMANDS, () => clawBackWithin(invoiceId, nowSeconds));
 }
 

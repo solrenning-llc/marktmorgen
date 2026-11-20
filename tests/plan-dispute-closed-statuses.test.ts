@@ -21,6 +21,7 @@ import { claimHandle, ensureStatsId, recordPlanDispute, setSubscription, storeFo
 import { costPauseCode } from "@/lib/plan-standing";
 import { disputeStatusOf } from "@/lib/plan-dispute-rules";
 import { MAX_REREADS, SEEN_KEY, syncPlanDisputes } from "@/lib/plan-disputes";
+import { CLAWBACKS_PER_RUN } from "@/lib/creator-invite-clawback";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -122,7 +123,7 @@ async function main() {
     const before = (await storeForEmail(owner))!;
     await recordPlanDispute(storeRef(before), { id, status: "open", at: NOW - 200 * DAY, coversUntil: NOW - 170 * DAY }, NOW);
     await redis.run(["HSET", SEEN_KEY, id, `open:${before.sid}`]);
-    byId = { [id]: { id, object: "dispute", status, created: NOW - 200 * DAY } };
+    byId = { [id]: { ...dispute(id, status), created: NOW - 200 * DAY } };
     const read = await syncPlanDisputes(Date.now() + 10_000, NOW);
     is("re-read and recorded", [read.reread, read.recorded, read.failed], [1, 1, 0]);
     const after = (await storeForEmail(owner))!;
@@ -141,10 +142,11 @@ async function main() {
     const late = "du_StuckWonLater";
     for (const id of [...stuck, late]) {
       await redis.run(["HSET", SEEN_KEY, id, `open:${store.sid}`]);
-      byId[id] = { id, object: "dispute", status: id === late ? "won" : "prevented", created: NOW - 200 * DAY };
+      byId[id] = { ...dispute(id, id === late ? "won" : "prevented"), created: NOW - 200 * DAY };
     }
     await recordPlanDispute(storeRef(store), { id: late, status: "open", at: NOW - 200 * DAY, coversUntil: NOW - 170 * DAY }, NOW);
-    for (let run = 0; run < 3; run += 1) await syncPlanDisputes(Date.now() + 10_000, NOW);
+    // Every lost dispute now proves its invoice before retiring; respect the existing per-run clawback ceiling.
+    for (let run = 0; run < Math.ceil(MAX_REREADS / CLAWBACKS_PER_RUN) + 1; run += 1) await syncPlanDisputes(Date.now() + 10_000, NOW);
     const after = await seen();
     is("no stuck one is still open", stuck.filter((id) => after.get(id) !== "final"), []);
     is("the later win is read in a following run", after.get(late), "final");

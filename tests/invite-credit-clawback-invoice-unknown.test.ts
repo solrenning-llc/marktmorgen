@@ -49,7 +49,11 @@ for (const source of ["listed", "reread"] as const) for (const [label, unknownIn
       if (init?.method === "GET" && path === "/disputes") return answer({ object: "list", data: listed ? [dispute()] : [], has_more: false });
       if (init?.method === "GET" && path === `/disputes/${DISPUTE}`) { rereads++; return answer(dispute()); }
       if (init?.method === "GET" && path === `/customers/${CUSTOMER}`) return answer({ id: CUSTOMER, object: "customer", balance, currency: "usd" });
-      if (init?.method === "GET" && path === `/customers/${CUSTOMER}/balance_transactions`) return answer({ object: "list", data: [], has_more: false });
+      // The credit's own send, as lib/creator-invite-credit.ts wrote it: the clawback finds it before counting what is
+      // left of it (Claude 5's MEDIUM on #4514, oldest credit spent first).
+      if (init?.method === "GET" && path === `/customers/${CUSTOMER}/balance_transactions`) return answer({ object: "list", data: [
+        { id: "cbtxn_credit", object: "customer_balance_transaction", amount: -1000, currency: "usd", metadata: { nimbus_invite_credit: INVOICE } },
+      ], has_more: false });
       if (init?.method === "POST" && path === `/customers/${CUSTOMER}/balance_transactions`) {
         const amount = Number(new URLSearchParams(String(init.body)).get("amount"));
         writes++;

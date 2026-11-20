@@ -71,7 +71,7 @@ async function remember(id: string, what: string): Promise<void> {
  * dispute is still written on the store, but remembered as open, so the next run asks about it again by id.
  */
 async function clawBack(status: PlanDisputeStatus, invoiceId: string, nowSeconds: number, room: { left: number }): Promise<boolean> {
-  if (status !== "lost" || !invoiceId) return true;
+  if (status !== "lost") return true;
   // Past this run's ceiling (CLAWBACKS_PER_RUN): kept open and handled the next day, never skipped.
   if (room.left <= 0) return false;
   room.left -= 1;

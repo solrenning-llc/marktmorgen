@@ -80,7 +80,7 @@ export async function lessonsFound(
         viewer.email,
         `nl:cm:${communityId}:sg:${productId}:${viewer.key}`,
         String(config.v),
-      ).catch(() => false);
+      ).catch((error) => { console.error("checking lesson access in community search failed", error); return false; });
       if (ok) allowed.add(productId);
     }),
   );
@@ -94,7 +94,7 @@ export async function lessonsFound(
   const courses = new Map<string, Course>();
   await Promise.all(
     courseIds.map(async ([productId, courseId]) => {
-      const course = await readCourse(courseId).catch(() => null);
+      const course = await readCourse(courseId).catch((error) => { console.error("reading a course for community search failed", error); return null; });
       if (course) courses.set(productId, course);
     }),
   );
@@ -133,13 +133,13 @@ export async function eventsFound(
 ): Promise<FoundEvent[]> {
   const communityId = store.community?.id;
   if (!communityId || !ids.length) return [];
-  const events: CommunityEvent[] = await readEvents(communityId, ids).catch(() => []);
+  const events: CommunityEvent[] = await readEvents(communityId, ids).catch((error) => { console.error("reading events for community search failed", error); return []; });
   const byId = new Map(events.map((e) => [e.id, e]));
   const kept: FoundEvent[] = [];
   for (const id of ids) {
     const event = byId.get(id);
     if (!event) continue;
-    if (!(await mayAttend(store, config, event, viewer).catch(() => false))) continue;
+    if (!(await mayAttend(store, config, event, viewer).catch((error) => { console.error("checking event access in community search failed", error); return false; }))) continue;
     kept.push({ event, state: event.cancelled ? "cancelled" : isOver(event, now) ? "over" : "upcoming" });
   }
   return kept;
@@ -148,7 +148,7 @@ export async function eventsFound(
 /** The members among these keys who are still listed, in the index's order. */
 export async function membersFound(communityId: string, keys: string[]): Promise<Member[]> {
   if (!keys.length) return [];
-  const found = await readMembers(communityId, keys).catch(() => new Map<string, Member>());
+  const found = await readMembers(communityId, keys).catch((error) => { console.error("reading members for community search failed", error); return new Map<string, Member>(); });
   return keys
     .map((k) => found.get(k))
     .filter((m): m is Member => Boolean(m && m.dir && m.n && !m.removed));

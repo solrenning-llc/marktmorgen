@@ -67,7 +67,8 @@ async function main() {
     const live = await memberHealth(store, true);
     const current = (await storeForEmail(owner))!;
     is(`${mode}: the completed erasure has an id that the captured snapshot lacks`, [erased, store.listId, typeof current.listId], [true, null, "string"]);
-    is(`${mode}: the live source still answered, so this is not a failed refresh`, live?.members.length, 2);
+    // #4749: a snapshot that cannot certify its members answers nothing, never the erased address.
+    is(`${mode}: the stale snapshot cannot certify a member-bearing answer`, live, null);
     is(`${mode}: the stale snapshot never repopulates the local copy`, copy(key), null);
     await memberHealth(current, true);
     is(`${mode}: a new snapshot uses the saved namespace and keeps only the remaining member`, copy(key)?.members.map(member => member.email), ["remaining@example.test"]);

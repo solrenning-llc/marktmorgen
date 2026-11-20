@@ -1,6 +1,6 @@
 /**
- * Claude 2's second review of #2980 (CX-116, MEDIUM), kept as the regression test: the store's checkouts never set
- * billing_address_collection (lib/store-checkout.ts, lib/tax.ts), so with
+ * Claude 2's second review of #2980 (CX-116, MEDIUM), kept as the regression test: the store's checkouts did not set
+ * billing_address_collection before 790 [IV2] (20/11/2026; it is now required on every paid checkout), so with
  * Stripe Tax on, Checkout "will collect the minimum number of fields required
  * for tax calculation" (Stripe API reference, billing_address_collection=auto,
  * read 7 Nov 2026), which for the United States is the country and the ZIP

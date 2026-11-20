@@ -208,10 +208,10 @@ async function main(): Promise<void> {
     currency: "usd",
     customer: "cus_Buyer0001",
     metadata: { store: "harbor", product: ids.Course, upsell_key: fingerprint(SECRET) },
-    customer_details: { email: "buyer@example.com" },
-    payment_intent: { id: "pi_front0001", payment_method: { id: "pm_card0001", type: "card", customer: "cus_Buyer0001" } },
+    customer_details: { email: "buyer@example.com", address: { country: "US" } },
+    payment_intent: { id: "pi_front0001", payment_method: { id: "pm_card0001", type: "card", customer: "cus_Buyer0001", card: { country: "US" } } },
   };
-  const take = async (step: string, answer: "yes" | "no", secret = SECRET, at: Store = store) => takeUpsell({ store: at, session: SESSION, secret, origin: "https://marktmorgen.com", step: await shownRef(at, step), answer, consent: TEST_CONSENT });
+  const take = async (step: string, answer: "yes" | "no", secret = SECRET, at: Store = store) => takeUpsell({ headers: new Headers(), store: at, session: SESSION, secret, origin: "https://marktmorgen.com", step: await shownRef(at, step), answer, consent: TEST_CONSENT });
   is("another browser, without the buyer's secret, can charge nothing", (await take("offerone", "yes", "someone-else")).kind, "unavailable");
   is("with sales tax on, nothing is offered after paying", (await take("offerone", "yes", SECRET, { ...store, tax: { ...store.tax, enabled: true } })).kind, "unavailable");
   session = { ...session, currency: "eur" };

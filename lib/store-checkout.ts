@@ -11,6 +11,7 @@ import { everyOf } from "@/lib/product-recurring";
 import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
+import { askBillingAddress } from "@/lib/billing-address";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
@@ -416,6 +417,9 @@ export async function createCheckout(
   });
 
   if (recurring) body.set("subscription_data[billing_mode][type]", "classic");
+  // Every sale here charges (a free product is never sold, canSellProduct; a trial still keeps the card for the
+  // payments): the buyer's full billing address, 790 [IV2]. Set before the confirmation digest below binds the body.
+  askBillingAddress(body);
 
   // Which option was bought decides which file is handed over later, so it
   // travels with the charge rather than being worked out again afterward.

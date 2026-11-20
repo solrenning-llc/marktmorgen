@@ -16,10 +16,12 @@ const IMPLEMENTED_IN = [
   "app/api/store/checkout/route.ts",
   "app/api/store/paypal/checkout/route.ts",
   "app/api/store/cart/route.ts",
+  "app/api/store/pay-request/route.ts",
+  "app/api/store/tip/route.ts",
   "components/billing-country-field.tsx",
 ].join("; ");
 
-const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts"].join("; ");
+const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts"].join("; ");
 
 export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
   { jurisdiction: "EU", treatment: "refuse-consumers", implementedIn: IMPLEMENTED_IN, recordedOn: "2026-11-13", registration: "", evidence: EVIDENCE },
@@ -28,8 +30,6 @@ export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
 
 /** The paid paths a buyer can still reach without consumerGate: each must be gated, or shown not to need it. */
 export const REFUSE_CONSUMERS_OPEN: readonly string[] = [
-  "payment requests (lib/payment-requests.ts): free text, kind not readable; awaiting the coordinator's answer",
-  "store tips (lib/store-tip-checkout.ts): not a supply for consideration; awaiting the coordinator's answer",
   "call bookings and call packages (lib/calls.ts, lib/call-packages.ts): live services, outside art. 9a, to be shown so in a test",
   "sales blocks and the embedded card (components/sales-blocks.tsx, app/embed): sent to the product page, where the field is asked",
   "the one-click offer after paying (app/api/store/upsell, lib/upsell.ts): charged to the card just used, with no billing country of its own; to be gated with the first checkout's evidence, or refused for an electronic offer (Claude 7 on #4572)",

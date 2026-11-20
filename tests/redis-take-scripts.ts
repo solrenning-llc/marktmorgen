@@ -39,6 +39,12 @@ const SCRIPTS: Record<string, Script> = {
     run(["DEL", set]);
     return n;
   },
+  // lib/store-live-cache.ts SET_IF_STORE_LIVE: a store's cache written only while its key exists and it is not erasing.
+  "store-cache-live:v1": (run, [live, erasing, key], [field, value, seconds]) => {
+    if (Number(run(["EXISTS", live])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
+    run(["SET", key, value, "EX", seconds]);
+    return 1;
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);
@@ -51,12 +57,22 @@ const SCRIPTS: Record<string, Script> = {
     run(listed === "1" ? ["ZADD", dir, at, member] : ["ZREM", dir, member]);
     return 1;
   },
+  "recovery-report-live:v1": (run, [storeId, erasing, report], [field, value, seconds]) => {
+    if (Number(run(["EXISTS", storeId])) !== 1 || run(["HGET", erasing, field]) !== null) return 0;
+    run(["SET", report, value, "EX", seconds]);
+    return 1;
+  },
   "set-and-values-take:v1": (run, [set, ...plain]) => {
     const members = Number(run(["SCARD", set])) > 0 ? (run(["SMEMBERS", set]) as string[]) : [];
     const values = plain.map((k) => run(["GET", k]) ?? null);
     const gone = (members.length ? 1 : 0) + values.filter((v) => v !== null).length;
     run(["DEL", set, ...plain]);
     return [members, values, gone];
+  },
+  "recent-feed-live:v1": (run, [live, erasing, feed], [field, json, seconds]) => {
+    if (Number(run(["EXISTS", live])) !== 1 || Number(run(["HEXISTS", erasing, field])) === 1) return "gone";
+    run(["SET", feed, json, "EX", seconds]);
+    return 1;
   },
 };
 

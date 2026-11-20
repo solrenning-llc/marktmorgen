@@ -102,7 +102,7 @@ import { lookupKey as shareLookupKey } from "@/lib/funnel-share-store";
 import { broadcastKeys } from "@/lib/broadcasts";
 import { paypalOrderKeys } from "@/lib/paypal-sales";
 import { calendarKeys } from "@/lib/calendar-sync";
-import { packageKeys } from "@/lib/call-packages";
+import { PACKAGE_TOKEN, packageKeys } from "@/lib/call-packages";
 import { requestRecordKey } from "@/lib/payment-request-store";
 import { agreementKeys } from "@/lib/agreement-store";
 import { letterRecordKey } from "@/lib/letters";
@@ -112,6 +112,8 @@ import { forgetPath } from "@/lib/path";
 export const DUE_KEY = "nl:closed:due";
 export const BATCH_KEY = "nl:closed:batch";
 export const WALK_KEY = "nl:closed:walk";
+/** The phases a walk writes in WALK_KEY (eraseClosed); "" is a field never written, a walk that never ran. */
+const WALK_PHASES: ReadonlySet<string> = new Set(["", "idle", "walk", "finish"]);
 /** Keys one SCAN of the walk asks for. */
 export const WALK_COUNT = 1000;
 /** The most pages of the database one run of the walk reads. */
@@ -223,9 +225,23 @@ async function sharedAccount(store: Store): Promise<boolean> {
   return others.some((other) => other.sid !== store.sid && other.stripeAccountId === store.stripeAccountId);
 }
 
-/** Puts a store in line for the next walk. */
+/**
+ * Puts a store in line for the next walk. Only Redis's exact answer confirms it (#4221, Codex U): ZADD NX's integer,
+ * 1 put in line, 0 already in line (its first time kept). Any other reply is resolved by an exact read-back of the
+ * store's score; when that does not show it in line either, it throws UnknownReplyError, so a caller never saves
+ * `due` (lib/plan-closing.ts) for a store the walk would never reach, and the next run asks again.
+ */
 export async function markDue(ref: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]);
+  const added = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]), 1);
+  if (added && (added[0] === 0 || added[0] === 1)) return;
+  const back = repliesFor(await redisPipeline([["ZSCORE", DUE_KEY, ref]]), 1);
+  const score = back?.[0];
+  // A score is a finite number or decimal text, never JavaScript's hex/binary/octal coercion.
+  const scoreRead = typeof score === "number"
+    ? Number.isFinite(score)
+    : typeof score === "string" && /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(score) && Number.isFinite(Number(score));
+  if (scoreRead) return;
+  throw new UnknownReplyError("a closed store's place in line for the walk");
 }
 
 /**
@@ -1221,15 +1237,15 @@ async function membersOf(key: string): Promise<string[]> {
   else if (type === "hash") await scanAll("HSCAN", key, (flat) => void out.push(...flat.filter((_, i) => i % 2 === 0)));
   return out;
 }
-/** String keys' values, READ_BATCH at a command; "" for a key that is gone or of another kind (MGET's null), which no follower reads as one. */
-async function stringsOf(keys: string[]): Promise<string[]> {
-  const out: string[] = [];
+/** String keys' values, READ_BATCH at a command; keep MGET's null distinct from a stored empty string. */
+async function stringsOf(keys: string[]): Promise<(string | null)[]> {
+  const out: (string | null)[] = [];
   for (let i = 0; i < keys.length; i += READ_BATCH) {
     const some = keys.slice(i, i + READ_BATCH);
     // One value for each key asked, each a string or null: anything else is not MGET's answer.
     const values = repliesFor(repliesFor(await redisPipeline([["MGET", ...some]]), 1)?.[0], some.length);
     if (!values || values.some((value) => value !== null && typeof value !== "string")) throw new UnknownReplyError("the closing walk's MGET of a family's keys");
-    for (const value of values) out.push(typeof value === "string" ? value : "");
+    for (const value of values) out.push(typeof value === "string" ? value : null);
   }
   return out;
 }
@@ -1298,14 +1314,14 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
     find: async (keys) => {
       const members = keys.filter((key) => key.endsWith(":m"));
       const posts = keys.filter((key) => !key.endsWith(":m"));
-      const marks = (await stringsOf(posts)).map((raw) => postPicture(raw)).filter(Boolean).map(pictureNoteKey);
+      const marks = (await stringsOf(posts)).map((raw) => postPicture(raw ?? "")).filter(Boolean).map(pictureNoteKey);
       return [...(await fieldsOf(members, "t")).map(communityUnsubKey), ...marks];
     },
   },
   // A conversation in the inbox: what its visitor's chat opens.
   "nl:inbox:": {
     match: (key) => /^nl:inbox:[^:]+:c:[^:]+$/.test(key),
-    find: async (keys) => (await stringsOf(keys)).map((raw) => fieldOf(raw, "token")).filter(Boolean).map(chatTokenKey),
+    find: async (keys) => (await stringsOf(keys)).map((raw) => fieldOf(raw ?? "", "token")).filter(Boolean).map(chatTokenKey),
   },
   // Members invited over from another platform: each invite's link.
   "nl:mv:": {
@@ -1320,7 +1336,7 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
   // A listener's private feed: the token it opens by.
   "nl:pod:by:": {
     match: () => true,
-    find: async (keys) => (await stringsOf(keys)).filter(Boolean).map(feedTokenKey),
+    find: async (keys) => (await stringsOf(keys)).filter((raw): raw is string => raw !== null && raw !== "").map(feedTokenKey),
   },
   // The records made for one address: every link the store emailed them.
   "nl:erase:ix:": {
@@ -1392,8 +1408,15 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
     match: () => true,
     find: async (keys) => {
       const checkouts = await unionOf(keys);
-      const tokens = await stringsOf(checkouts.map((checkout) => packageKeys(checkout, "")[0]));
-      return checkouts.flatMap((checkout, i) => packageKeys(checkout, fieldOf(tokens[i] ?? "", "token")));
+      const records = await stringsOf(checkouts.map((checkout) => packageKeys(checkout, "")[0]));
+      return checkouts.flatMap((checkout, i) => {
+        const raw = records[i];
+        if (raw === null) return packageKeys(checkout, "");
+        const token = fieldOf(raw, "token");
+        // The record is the only way from the store's index to the package's token and spent sessions.
+        if (!PACKAGE_TOKEN.test(token)) throw new UnknownReplyError("a closing store's call package token");
+        return packageKeys(checkout, token);
+      });
     },
   },
 };
@@ -1739,8 +1762,14 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   let unsure = false;
   // An entry naming another store's key not confirmed out of the batch (EntryNotWithdrawnError): no walk starts in this run.
   let entryLeft = false;
-  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
-  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
+  // The walk's own state, read exactly (rule 24/30; #4220, Codex U): one reply of four slots, each a string or nil (a
+  // field never written), with a phase a walk writes and a cursor of digits. Anything else is unknown: it throws before
+  // anything is scanned, deleted or written, so a walk in progress is never restarted from 0 over its saved place.
+  const stateReplies = repliesFor(await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]), 1);
+  const slots = stateReplies ? repliesFor(stateReplies[0], 4) : null;
+  if (!slots || slots.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("the closed-store walk's state");
+  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = slots.map((v) => (typeof v === "string" ? v : ""));
+  if (!WALK_PHASES.has(phaseRaw) || (cursorRaw !== "" && !/^[0-9]+$/.test(cursorRaw))) throw new UnknownReplyError("the closed-store walk's state");
   let phase = phaseRaw || "idle";
   let cursor = cursorRaw || "0";
 

@@ -1559,6 +1559,19 @@ function exactStore(raw: unknown, what: string): Store {
 }
 
 /**
+ * Every store of the account, read exactly (SG2 rule 24; Claude 5's LOW 3 on #2271), for a caller that decides by
+ * every store of it (app/api/auth/move: whether any of them pays). Since #3889 main's accountStores reads exactly
+ * too (storeIdList, exactStore); this adds what the move needs besides: Redis not configured is unknown, never "no
+ * store", and a first store's record kept under this address that names another address (only a half-finished move
+ * leaves one) is left out, as storeForEmail leaves it out.
+ */
+export async function accountStoresExact(email: string): Promise<Store[]> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("an account's stores");
+  const address = email.toLowerCase();
+  return (await accountStores(email)).filter((store) => store.extra || storeRef(store).toLowerCase() === address);
+}
+
+/**
  * Gives a store its own id, if it has none yet, and returns it. Called from
  * the owner's own studio and before a store is first named anywhere by id,
  * so a store made before there could be several gets one the first time it
@@ -1770,6 +1783,15 @@ async function catalogIdFor(email: string, createdAt: string): Promise<string> {
 /** The store record as it is written: the catalog as its index and head, never inline. */
 function recordJson(store: Store): string {
   return JSON.stringify({ ...store, catalog: catalogRecord(store.catalog) });
+}
+
+/**
+ * A store record's fingerprint without its address: what a move writes at its
+ * new address, so that a copy left behind by a broken move can be known for
+ * one nobody edited since (settleDoubledStore).
+ */
+export async function copyPrint(store: Store): Promise<string> {
+  return sha256Hex(`nimbus-move-copy:${recordJson({ ...store, email: "" })}`);
 }
 
 function byteLength(text: string): number {
@@ -2180,7 +2202,7 @@ export async function settleDeletedStore(gone: { ref: string; sid: string; email
 export type DeleteResult =
   /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
   | { ok: true; store: Store; unsure?: true }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" | "closing" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -2189,7 +2211,12 @@ export type DeleteResult =
  * Only a store with no products, no subscription in good standing and no
  * domain of its own can go: a store that has sold something has buyers who
  * will come back to it, and a store that is paying would be deleted with
- * money still running. Its addresses are let go the way a released address
+ * money still running. A Store assistant add-on that still renews holds the
+ * store too: once its address is let go nothing finds that subscription again
+ * (lib/assistant-billing.ts, applyListedAssistant reads the store by
+ * `assistant_for`), so it would charge every month for a store that is gone
+ * (#4080). Set to stop at the end of its month, or ended, it charges nothing
+ * more and does not hold it. Its addresses are let go the way a released address
  * is — dark for a month before anyone else may take them — so a link
  * already shared leads nowhere rather than to a stranger. An account's first
  * store is its home, and is never deleted here.
@@ -2216,6 +2243,13 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
     if (!store.extra) return { ok: false, reason: "first" };
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
+    if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
+    // Not active is not "stopped": a past_due or unpaid add-on (lib/assistant-billing.ts assistantPlanOf) is written
+    // down as not active while Stripe may still charge it, and once the store is gone nothing finds it again. It holds
+    // the store until it is known to stop: set to stop at the end of its month, or ended at Stripe (`terminal`). A
+    // period unread or run out is not proof of an end, as Stripe renews a past_due one (Codex X6 and T on #4202).
+    const plan = store.assistantPlan;
+    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.terminal !== true) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
     // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
     // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused
@@ -2685,41 +2719,78 @@ async function closingUnderway(store: Store): Promise<boolean> {
  * account's other stores keep their folders as they are, because their keys
  * never held the address.
  */
+/** Deletes only the unchanged losing copy, with both locks, the handle and stable id still agreeing. */
+const SETTLE_MOVE_COPY = '-- marktmorgen:move-copy-settle:v1\nif redis.call("GET", KEYS[1]) ~= ARGV[1] or redis.call("GET", KEYS[2]) ~= ARGV[2] then return 0 end\nif redis.call("GET", KEYS[3]) ~= ARGV[3] or redis.call("GET", KEYS[4]) ~= ARGV[3] or redis.call("GET", KEYS[5]) ~= ARGV[4] then return 0 end\nreturn redis.call("DEL", KEYS[5])';
+
 /**
  * A move that wrote the store at its new address and could not take it off
  * the old one leaves it on both (lib/move-repair.ts). With both stores' locks
  * held: the address the store's handle points to (written in the same step
  * that takes the old record away) is the store; the copy on the other is
  * deleted (fenced), and the account's other stores, rewritten for the new
- * address before that step, are written back to it or listed under it. When
- * the two records differ in anything but the address (somebody edited one of
- * them since), nothing is deleted and null is answered: the record stays for
- * a person (scripts/move-repair.mjs). Answers the address that keeps it, or
- * null when that cannot be told.
+ * address before that step, are written back to it or listed under it. The
+ * copy is deleted when it is still what the move wrote (`copy`, its
+ * copyPrint noted with the move's record, and its whole stored record exactly
+ * what its reader gives back, at its own address), however the store itself changed
+ * since (its daily jobs and Stripe's answers write to it by its id); without
+ * that print, only when the two records are the same but for the address.
+ * A copy somebody edited is never deleted: null is answered and the record
+ * stays for a person (scripts/move-repair.mjs). Answers the address that
+ * keeps it, or null when that cannot be told.
  */
-export async function settleDoubledStore(fromEmail: string, toEmail: string): Promise<string | null> {
+export async function settleDoubledStore(fromEmail: string, toEmail: string, copy?: string): Promise<string | null> {
   const from = fromEmail.toLowerCase();
   const to = toEmail.toLowerCase();
   const settled = await withStore(from, (a, _saveA, heldA) =>
     withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
-      if (!a.handle || a.handle !== b.handle) return null;
-      if (recordJson({ ...a, email: "" }) !== recordJson({ ...b, email: "" })) return null;
-      const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
+      if (!a.handle || a.handle !== b.handle || !STORE_ID_PATTERN.test(a.sid) || a.sid !== b.sid || a.email.toLowerCase() !== from || b.email.toLowerCase() !== to) return null;
+      const identity = repliesFor(await redisPipeline([["GET", handleKey(a.handle)], ["GET", storeIdKey(a.sid)]]), 2);
+      if (!identity) throw new UnknownReplyError("a doubled store's identity");
+      const [points, byId] = identity;
       const home = typeof points === "string" ? points.toLowerCase() : "";
-      if (home !== from && home !== to) return null;
+      if ((home !== from && home !== to) || byId !== home) return null;
+      // The copy left behind: deleted only while it is still what the move wrote (review of #2140), or, with no
+      // print noted, while both records are the same but for the address.
+      const left = home === from ? b : a;
+      const leftAt = home === from ? to : from;
+      // With a print, the whole stored record is compared too, not only its print, which is taken without the
+      // address (Claude 7 on #2271, MEDIUM): the copy is deleted only while the record kept there is exactly what
+      // its reader gives back, at its own address, so a field the reader drops or another address in it is kept.
+      const record = repliesFor(await redisPipeline([["GET", await ownerKey(leftAt)]]), 1);
+      if (!record) throw new UnknownReplyError("a doubled store's losing copy");
+      const untouched = record[0] === recordJson(left) && (copy
+        ? (await copyPrint(left)) === copy
+        : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" }));
+      if (!untouched) return null;
       const read = repliesFor(await redisPipeline([["SMEMBERS", await accountKey(from)]]), 1);
       // Rule 30: the same exact read as accountStores; an unknown member stops the repair before any write.
       const extras = read ? storeIdList(read[0]) : null;
       if (!extras) throw new UnknownReplyError("an account's stores");
       for (const sid of extras) {
         const back = await withStore(extraRef(sid), async (extra, _save, held) => {
+          if (!extra.extra || extra.sid !== sid || ![from, to].includes(extra.email.toLowerCase())) {
+            throw new UnknownReplyError("a doubled store's other-store identity");
+          }
           if (extra.email.toLowerCase() === home) return true;
           return setIfHeld(held, await ownerKey(extraRef(sid)), recordJson({ ...extra, email: home }));
         });
-        if (back === false) throw new StoreBusyError();
+        if (back !== true) throw new StoreBusyError();
       }
-      if (home === to && extras.length) await redisPipeline([["SADD", await accountKey(to), ...extras], ["DEL", await accountKey(from)]]);
-      if (!(await deleteIfHeldOnly(home === from ? heldB : heldA, [await ownerKey(home === from ? to : from)]))) throw new StoreBusyError();
+      if (home === to && extras.length) {
+        // A pipeline is not a transaction: retain the source index until its destination is confirmed.
+        const added = repliesFor(await redisPipeline([["SADD", await accountKey(to), ...extras]]), 1);
+        const count = added ? countOf(added[0]) : null;
+        if (count === null || count > extras.length) throw new UnknownReplyError("a repaired account's destination index");
+        const removed = repliesFor(await redisPipeline([["DEL", await accountKey(from)]]), 1);
+        if (removed?.[0] !== 1) throw new UnknownReplyError("a repaired account's source index");
+      }
+      // Identity, both locks and the whole losing record are checked together with deletion.
+      // A late change after the reads above is kept for manual repair, never deleted.
+      const receipt = repliesFor(await redisPipeline([["EVAL", SETTLE_MOVE_COPY, 5,
+        heldA.key, heldB.key, handleKey(a.handle), storeIdKey(left.sid), await ownerKey(leftAt),
+        heldA.token, heldB.token, home, recordJson(left),
+      ]]), 1);
+      if (receipt?.[0] !== 1) throw new StoreBusyError();
       return home;
     }),
   );
@@ -2729,6 +2800,8 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string): Pr
 export async function moveAccount(
   fromEmail: string,
   toEmail: string,
+  /** Told, before the old record is taken away, the fingerprint of what was written at the new address (copyPrint). */
+  onCopy?: (print: string) => Promise<void>,
 ): Promise<MoveResult> {
   const from = fromEmail.toLowerCase();
   const to = toEmail.toLowerCase();
@@ -2768,6 +2841,12 @@ export async function moveAccount(
       // record only where there is none: a store made there in the meantime
       // is never written over. A write refused here leaves the old records
       // as they were, still the account, at its old address.
+      // What will be written at the new address is noted with the move's record first (lib/auth.ts noteMoveCopy),
+      // so a repair can tell the copy left behind from the store edited since, and the call to note it is never in
+      // the window between the last lock renewal and the writes (Claude 5 on #2271, LOW 1). Noted before the record
+      // exists there, it is harmless: the repair compares only when both records are there. Best effort: without
+      // it the repair compares the two records whole.
+      if (onCopy) await onCopy(await copyPrint(next)).catch((error) => console.error("noting a move's copy failed", error));
       for (const lock of [held, ...moved.map((one) => one.lock)]) {
         if (!(await holdLock(lock))) throw new StoreBusyError();
       }
@@ -2787,6 +2866,11 @@ export async function moveAccount(
         }
         written.push(one);
       }
+      // The last step deletes the old record unfenced: the old address's lock is made to last again right before it,
+      // after the other stores' writes, which hold their own locks, not this one. A lock that ran out meanwhile, and
+      // a write that may have landed on the old address with it, stops the move here as busy, the old record kept,
+      // so the route keeps the move marked for a repair (Claude 5 on #2271, LOW 1 and its rule 30 sibling).
+      if (!(await holdLock(held))) throw new StoreBusyError();
       const handles = [store.handle, ...store.previousHandles];
       await redisPipeline([
         ...handles.map((handle) => ["SET", handleKey(handle), to]),

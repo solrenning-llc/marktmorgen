@@ -206,14 +206,14 @@ async function main(): Promise<void> {
       customer: "cus_TestBuyer01",
       currency: "usd",
       metadata: { store: store.handle, product: front, upsell_key: browser.fingerprint },
-      customer_details: { email: BUYER },
+      customer_details: { email: BUYER, address: { country: "US" } },
       payment_intent: { id: `pi_test_front${String(serial).padStart(5, "0")}`, payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
     };
     return id;
   };
   // The form names the step by the terms the page drew (lib/upsell.ts, offerRef), as the thanks page posts it.
   const take = async (session: string) =>
-    takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
+    takeUpsell({ headers: new Headers(), store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
 
   part("A paid one-click offer (takeUpsell): control");
   {

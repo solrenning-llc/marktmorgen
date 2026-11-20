@@ -83,7 +83,7 @@ function paidCheckout(id: string, product: string, fingerprint: string, over: Re
     currency: "usd",
     metadata: { store: "harbor", product, upsell_key: fingerprint },
     customer_details: { email: BUYER, address: { country: "US" } },
-    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01", card: { country: "US" } } },
     ...over,
   };
 }
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
   const noteFor = async (session: string) => {
     // What the thanks page does on load: settle first, then draw the notes (app/[handle]/thanks/page.tsx).
     await settleUpsells(store, session);
-    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US" }, store, session, product: (await readListing(store, front))!, alsoOwned: [], eligible: true, created: NOW - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    const view = await funnelView({ evidence: { headers: new Headers(), billing: "US", card: "US" }, store, session, product: (await readListing(store, front))!, alsoOwned: [], eligible: true, created: NOW - 60, secret: browser.secret, upsellKey: browser.fingerprint });
     const note = view.notes[0];
     const t = thanksWords("en");
     const shown = note ? (note.state === "checking" ? t.stillHearing(note.title) : note.state === "unconfirmed" ? t.bankNotConfirmed(note.title) : t.notChargedCard(note.title)) : "";

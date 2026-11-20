@@ -7,7 +7,7 @@
  */
 import { NO_AFFILIATES, RECURRING_ALWAYS } from "@/lib/affiliate-setting";
 import { readBook } from "@/lib/affiliates";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, erasingField, ERASING_KEY, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, erasingField, ERASING_KEY, ownerKey, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -72,7 +72,7 @@ const inv = (id: string, at: number, meta: Record<string, string>, status = "pai
 });
 
 /** What happens to the store just before its invoices are written: nothing, its erasure begun, or its id gone with its record. */
-let before: null | "erasing" | "gone" = null;
+let before: null | "erasing" | "gone" | "legacy-done" = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const touches = commands.some((c) => c.map(String).some((w) => /^nl:aff:[0-9a-f]+:invoices$/.test(w)) && (c[0] === "SET" || c[0] === "EVAL"));
@@ -81,6 +81,9 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
     const now = before;
     before = null;
     if (now === "erasing") await real([["HSET", ERASING_KEY, await erasingField(storeRef(store)), String(Date.now())]]);
+    // A store from before ids whose erasure has finished: its record is gone and its erasing field removed with it, as
+    // closeStoreRecord leaves them (Claude 4's MEDIUM on #4951).
+    else if (now === "legacy-done") await real([["DEL", await ownerKey(storeRef(store))], ["HDEL", ERASING_KEY, await erasingField(storeRef(store))]]);
     else await real([["DEL", `nl:store:id:${store.sid}`]]);
   }
   return real(commands);
@@ -121,6 +124,22 @@ async function main(): Promise<void> {
     const statsId = await setUp();
     before = what;
     await readBook((await storeForEmail(OWNER))!).catch(() => null);
+    is("the erasure step ran during the reading", before, null);
+    is("the store's invoices are not written back", await keptOf(statsId), null);
+  }
+  // A store kept from before ids (its sid is ""): fenced on its record, under its owner's address, as
+  // lib/store-live-cache.ts setWhileStoreLive reads it (Claude 4's MEDIUM on #4951).
+  part("A store from before ids: live, it keeps its walk");
+  {
+    const statsId = await setUp();
+    await readBook({ ...(await storeForEmail(OWNER))!, sid: "" }).catch(() => null);
+    is("the invoices are kept", typeof (await keptOf(statsId)), "string");
+  }
+  part("A store from before ids: a reading in flight when its erasure has finished");
+  {
+    const statsId = await setUp();
+    before = "legacy-done";
+    await readBook({ ...(await storeForEmail(OWNER))!, sid: "" }).catch(() => null);
     is("the erasure step ran during the reading", before, null);
     is("the store's invoices are not written back", await keptOf(statsId), null);
   }

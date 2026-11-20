@@ -164,6 +164,16 @@ const STATS_FIELD_BYTES = 128;
 const TOTALS_PAYPAL_SALES = 20 * 100;
 const TOTALS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
 /**
+ * Every reading is kept only while its store is live, looked at where it is written (lib/store-readings.ts,
+ * keepCopy and READING_COPY_LIVE; Codex L-20261119-2235): the store's key (EXISTS) and its erasing mark (HGET),
+ * billed one by one beside the write. A reading kept by a plain SET also takes the EVAL that runs them (+1, the
+ * visits'); one kept by a script already counts its EVAL (READING_COPY_EXTRA_COMMANDS, MEMBER_WORDS_COMMANDS),
+ * and when it names nobody its HMGET is not run, which covers that EVAL. The memberships' cache is kept the same way
+ * (lib/membership-numbers.ts, keepUnlessErasedWhileLive or setWhileStoreLive): 2 more in a members reading, whose
+ * script it already counts, and its EVAL too where it was a plain SET (TOTALS_STORE_SHAPE).
+ */
+export const READING_LIVE_FENCE_COMMANDS = 2;
+/**
  * One store's numbers for the totals, read by read:
  *
  *   lib/stats.ts, readStats   STATS_DAYS HGETALL of the days, STATS_DAYS
@@ -183,12 +193,15 @@ const TOTALS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
  *                             disputes (three);
  *   lib/membership-numbers.ts the kept numbers (GET) and, when not kept, the
  *                             memberships and their invoices (twenty pages
- *                             each) and the numbers kept (SET): 2.
+ *                             each) and the numbers kept (SET): 2; kept only
+ *                             while the store is live, behind its fence in
+ *                             the same step (its EVAL, EXISTS and HGET: 3 more;
+ *                             READING_LIVE_FENCE_COMMANDS above).
  */
 export const TOTALS_STORE_SHAPE: ReadShape = {
   seconds: 2,
   cpu: 1,
-  commands: (3 * STATS_DAYS + 6) + 4 + 2 + (1 + TOTALS_PAYPAL_REFUNDS) + 2,
+  commands: (3 * STATS_DAYS + 6) + 4 + 2 + (1 + TOTALS_PAYPAL_REFUNDS) + 2 + 1 + READING_LIVE_FENCE_COMMANDS,
   dbBytes:
     STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32
     + LIFE_WRITE_MAX * STATS_FIELD_BYTES
@@ -210,14 +223,6 @@ export const TOTALS_STORE_SHAPE: ReadShape = {
  */
 /** The commands a reading takes beside what it reads (above): GET, the count, SET. */
 export const READING_COUNT_COMMANDS = { light: 1 + 3 + 1, heavy: 1 + 5 + 1 } as const;
-/**
- * Every reading is kept only while its store is live, looked at where it is written (lib/store-readings.ts,
- * keepCopy and READING_COPY_LIVE; Codex L-20261119-2235): the store's key (EXISTS) and its erasing mark (HGET),
- * billed one by one beside the write. A reading kept by a plain SET also takes the EVAL that runs them (+1, the
- * visits'); one kept by a script already counts its EVAL (READING_COPY_EXTRA_COMMANDS, MEMBER_WORDS_COMMANDS),
- * and when it names nobody its HMGET is not run, which covers that EVAL.
- */
-export const READING_LIVE_FENCE_COMMANDS = 2;
 export const STATS_READ_SHAPE: ReadShape = {
   seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + READING_COUNT_COMMANDS.light + 1 + READING_LIVE_FENCE_COMMANDS, outBytes: 0, stripePages: 0,
   dbBytes: STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32 + LIFE_WRITE_MAX * STATS_FIELD_BYTES + READING_COPY_MAX_BYTES,
@@ -254,7 +259,7 @@ export const MEMBER_WORDS_NAMES = 70 * (1 + 2);
  */
 export const MEMBER_WORDS_COMMANDS = 1 + 2 + 2 + LIST_TRY_COMMANDS;
 export const MEMBERS_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light + MEMBER_WORDS_COMMANDS + READING_LIVE_FENCE_COMMANDS, outBytes: 0, stripePages: 2 * 20,
+  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light + MEMBER_WORDS_COMMANDS + 2 * READING_LIVE_FENCE_COMMANDS, outBytes: 0, stripePages: 2 * 20,
   dbBytes: 2 * 65_536 + READING_COPY_MAX_BYTES + 3 * MEMBER_WORDS_NAMES * (64 + 64),
 };
 export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SALES_READ_SHAPE, MEMBERS_READ_SHAPE];

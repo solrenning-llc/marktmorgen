@@ -31,7 +31,8 @@
 import { DISCOUNT_KINDS, type DiscountKind, entryOf } from "@/lib/discount-impact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
-import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
+import { keepUnlessErasedWhileLive, setWhileStoreLive } from "@/lib/store-live-cache";
+import { suppressedAmong } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { type Invoice, type Movements, movementsFrom, pricesFrom, UnreadInvoiceError } from "@/lib/mrr-movements";
@@ -717,13 +718,14 @@ async function readMemberships(
     if (store.listId && said && named.length) {
       // Kept only when nobody the words may name was deleted since they were looked up, in one step with the write;
       // otherwise, or when the step cannot run, nothing is kept and the words are not shown (Codex E2 on #2111).
-      const gone = await keepUnlessErased(cacheKey(store), store.listId, text, CACHE_SECONDS, named).catch(async () => {
+      // Behind the store's fence in the same step: a store gone or being erased keeps nothing (sibling of Codex L-20261119-2235).
+      const gone = await keepUnlessErasedWhileLive(store, cacheKey(store), store.listId, text, CACHE_SECONDS, named).catch(async () => {
         await redisPipeline([["DEL", cacheKey(store)]]).catch(() => {});
         return null;
       });
       if (gone === null || gone.size) numbers = withoutMemberWords(numbers) as Numbers;
     } else {
-      await redisPipeline([["SET", cacheKey(store), text, "EX", CACHE_SECONDS]]);
+      await setWhileStoreLive(store, cacheKey(store), text, CACHE_SECONDS);
     }
   }
   return { numbers, named };

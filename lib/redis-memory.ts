@@ -1595,8 +1595,8 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
-        // lib/store-readings.ts, READING_COPY_LIVE: READING_COPY for a whole store, fenced on its erasure in the same
-        // step: the store's key gone or its erasing mark set, the copy goes and [0] is answered.
+        // lib/store-live-cache.ts, KEEP_UNLESS_ERASED_LIVE: READING_COPY behind the store's fence in the same step:
+        // the store's key gone or its erasing mark set, the copy goes and [0] is answered.
         if (key.startsWith("-- marktmorgen:reading-copy-live:v1\n") && args[0] === "4" && args.length >= 9) {
           const [, live, erasing, copy, erased, field, value, seconds, ...prints] = args;
           this.scriptCalls += 2;

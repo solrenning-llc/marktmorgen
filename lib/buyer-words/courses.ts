@@ -20,6 +20,14 @@ const S = " ";
 type Notice = { title: string; body: string };
 
 const en = {
+  /** 24 [E7]: when a course's access ends; `{when}` is the date and time in UTC (lib/course-access-end.ts). */
+  accessEndsOn: "Your access ends on {when}.",
+  accessEndedTitle: "Your access to this course has ended",
+  accessEndedBody: "Access to this course ended on {when}, as stated when you joined. Your progress is kept.",
+  accessEndsFact: "Access to the course ends on {when}.",
+  accessUncheckedTitle: "We could not check your access",
+  accessUncheckedBody: "We could not check your access to this course just now. Nothing has changed. Please try again in a moment.",
+  accessEndChanged: "This course's terms changed. Please review them and try again.",
   // ---- The tab's title ----------------------------------------------------------
   metaCourse: "Course — Marktmorgen",
   metaLesson: "Lesson — Marktmorgen",
@@ -77,6 +85,11 @@ const en = {
   uncheckedRetry: "Check my access again",
   doneOf: (done: number, total: number) => `${done} of ${total} done`,
   yourProgress: "Your progress",
+  /** A course's "Next step" (560 [AS1]): the one product its creator suggests next, and the way to say no to it. */
+  nextStepLabel: "Next step",
+  nextStepSee: (title: string) => `See ${title}`,
+  nextStepNoThanks: "No thanks",
+  nextStepNoThanksDone: "Done. It will not be suggested again in this browser.",
   /** Said instead of the count when the lessons done could not be read (rule 24). */
   progressUnknown: "We could not check your progress just now. Your lessons are all here. Reload the page to try again.",
   /** Said in the certificate box when the lessons done could not be read. */
@@ -168,6 +181,8 @@ const en = {
   pausedStrong: "This video is paused for now.",
   pausedRest: (store: string) =>
     `${store} has no paid plan, and its videos have been watched for all the hours a store without one has this month. It plays again as soon as the store's plan is paid, or when the month turns. The rest of the lesson is here as usual.`,
+  // A preview played free, paused with the store's other free copies (lib/serve-file.ts): true whatever the plan.
+  freePausedRest: "Free previews and downloads from this store are paused until next month. Anything you have bought is unaffected. The rest of the lesson is here as usual.",
   videoFailed: (store: string) => `This lesson's video could not be prepared. ${store} has to upload it again.`,
   videoNotLoaded: "The video could not be loaded just now. Refresh the page in a moment.",
   /** The button under a stamped lesson video (602 [WP1]): puts the video and the buyer's mark in full screen together. */
@@ -178,6 +193,11 @@ const en = {
   resumeStopped: (at: string) => `You stopped at ${at} last time.`,
   resumeContinue: (at: string) => `Continue at ${at}`,
   resumeStartOver: "Start over",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Focus mode",
+  focusOff: "Leave focus mode",
+  focusOnSaid: "Focus mode is on. Only the lesson is shown.",
+  focusOffSaid: "Focus mode is off. The course outline is back.",
   openSite: (host: string) => `Open ${host}`,
   downloads: "Downloads",
   /** A file's size: the units, and a size under a kilobyte. */
@@ -367,6 +387,13 @@ export type CoursesWords = typeof en;
 
 // ------------------------------------------------------------------------- Spanish
 const es: CoursesWords = {
+  accessEndsOn: "Tu acceso termina el {when}.",
+  accessEndedTitle: "Tu acceso a este curso terminó",
+  accessEndedBody: "El acceso a este curso terminó el {when}, como se indicaba cuando te inscribiste. Tu progreso se conserva.",
+  accessEndsFact: "El acceso al curso termina el {when}.",
+  accessUncheckedTitle: "No pudimos comprobar tu acceso",
+  accessUncheckedBody: "No pudimos comprobar tu acceso a este curso en este momento. No ha cambiado nada. Vuelve a intentarlo en un momento.",
+  accessEndChanged: "Las condiciones de este curso cambiaron. Revísalas y vuelve a intentarlo.",
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Lección — Marktmorgen",
   codeBlock: "Código",
@@ -412,6 +439,10 @@ const es: CoursesWords = {
   uncheckedRetry: "Comprobar mi acceso de nuevo",
   doneOf: (done, total) => `${done} de ${total} completadas`,
   yourProgress: "Tu progreso",
+  nextStepLabel: "Siguiente paso",
+  nextStepSee: (title) => `Ver ${title}`,
+  nextStepNoThanks: "No, gracias",
+  nextStepNoThanksDone: "Listo. No se volverá a sugerir en este navegador.",
   progressUnknown: "No pudimos comprobar tu progreso en este momento. Todas tus lecciones siguen aquí. Vuelve a cargar la página para intentarlo de nuevo.",
   certProgressUnknown: "No pudimos comprobar en este momento si terminaste el curso, así que todavía no puedes pedir el certificado. Vuelve a cargar la página para intentarlo de nuevo.",
   startFirst: "Empezar la primera lección",
@@ -496,6 +527,7 @@ const es: CoursesWords = {
   pausedStrong: "Este video está en pausa por ahora.",
   pausedRest: (store) =>
     `${store} no tiene un plan de pago, y sus videos ya se vieron durante todas las horas que tiene este mes una tienda sin plan. Se vuelve a reproducir en cuanto se pague el plan de la tienda, o cuando empiece el mes siguiente. El resto de la lección está aquí como siempre.`,
+  freePausedRest: "Las vistas previas y descargas gratuitas de esta tienda están en pausa hasta el mes que viene. Lo que hayas comprado no se ve afectado. El resto de la lección está aquí como siempre.",
   videoFailed: (store) => `No se pudo preparar el video de esta lección. ${store} tiene que volver a subirlo.`,
   videoNotLoaded: "No se pudo cargar el video en este momento. Actualiza la página en un momento.",
   fullScreen: "Pantalla completa",
@@ -504,6 +536,11 @@ const es: CoursesWords = {
   resumeStopped: (at: string) => `La última vez te detuviste en ${at}.`,
   resumeContinue: (at: string) => `Continuar en ${at}`,
   resumeStartOver: "Empezar de nuevo",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Modo concentración",
+  focusOff: "Salir del modo concentración",
+  focusOnSaid: "El modo concentración está activado. Solo se muestra la lección.",
+  focusOffSaid: "El modo concentración está desactivado. El índice del curso vuelve a mostrarse.",
   openSite: (host) => `Abrir ${host}`,
   downloads: "Descargas",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -677,6 +714,13 @@ const es: CoursesWords = {
 const frPlural = (n: number, one: string, many: string) => (n < 2 ? one : many);
 
 const fr: CoursesWords = {
+  accessEndsOn: "Votre accès prend fin le {when}.",
+  accessEndedTitle: "Votre accès à ce cours a pris fin",
+  accessEndedBody: "L'accès à ce cours a pris fin le {when}, comme indiqué lors de votre inscription. Votre progression est conservée.",
+  accessEndsFact: "L'accès au cours prend fin le {when}.",
+  accessUncheckedTitle: "Nous n'avons pas pu vérifier votre accès",
+  accessUncheckedBody: "Nous n'avons pas pu vérifier votre accès à ce cours pour le moment. Rien n'a changé. Réessayez dans un instant.",
+  accessEndChanged: "Les conditions de ce cours ont changé. Relisez-les et réessayez.",
   metaCourse: "Formation — Marktmorgen",
   metaLesson: "Leçon — Marktmorgen",
   codeBlock: "Code",
@@ -722,6 +766,10 @@ const fr: CoursesWords = {
   uncheckedRetry: "Vérifier à nouveau mon accès",
   doneOf: (done, total) => `${done} sur ${total} ${frPlural(done, "terminée", "terminées")}`,
   yourProgress: "Votre progression",
+  nextStepLabel: "Étape suivante",
+  nextStepSee: (title) => `Voir ${title}`,
+  nextStepNoThanks: "Non merci",
+  nextStepNoThanksDone: "C'est noté. Elle ne vous sera plus proposée dans ce navigateur.",
   progressUnknown: "Nous n'avons pas pu vérifier votre progression pour le moment. Toutes vos leçons sont bien là. Rechargez la page pour réessayer.",
   certProgressUnknown: "Nous n'avons pas pu vérifier pour le moment si vous avez terminé la formation. Le certificat ne peut donc pas encore être demandé. Rechargez la page pour réessayer.",
   startFirst: "Commencer la première leçon",
@@ -807,6 +855,7 @@ const fr: CoursesWords = {
   pausedStrong: "Cette vidéo est en pause pour le moment.",
   pausedRest: (store) =>
     `${store} n'a pas de forfait payant, et ses vidéos ont été regardées pendant toutes les heures dont dispose ce mois-ci une boutique sans forfait. Elle sera de nouveau lue dès que le forfait de la boutique sera payé, ou au début du mois prochain. Le reste de la leçon est disponible comme d'habitude.`,
+  freePausedRest: "Les aperçus et téléchargements gratuits de cette boutique sont en pause jusqu'au mois prochain. Ce que vous avez acheté n'est pas concerné. Le reste de la leçon est disponible comme d'habitude.",
   videoFailed: (store) => `La vidéo de cette leçon n'a pas pu être préparée. ${store} doit la mettre en ligne à nouveau.`,
   videoNotLoaded: "La vidéo n'a pas pu être chargée pour le moment. Actualisez la page dans un instant.",
   fullScreen: "Plein écran",
@@ -815,6 +864,11 @@ const fr: CoursesWords = {
   resumeStopped: (at: string) => `La dernière fois, vous en étiez à ${at}.`,
   resumeContinue: (at: string) => `Reprendre à ${at}`,
   resumeStartOver: "Recommencer",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Mode concentration",
+  focusOff: "Quitter le mode concentration",
+  focusOnSaid: "Le mode concentration est activé. Seule la leçon est affichée.",
+  focusOffSaid: "Le mode concentration est désactivé. Le plan du cours est de nouveau affiché.",
   openSite: (host) => `Ouvrir ${host}`,
   downloads: "Téléchargements",
   sizeUnits: { gb: "Go", mb: "Mo", kb: "Ko" },
@@ -981,6 +1035,13 @@ const fr: CoursesWords = {
 
 // ------------------------------------------------------------------------- German
 const de: CoursesWords = {
+  accessEndsOn: "Ihr Zugang endet am {when}.",
+  accessEndedTitle: "Ihr Zugang zu diesem Kurs ist beendet",
+  accessEndedBody: "Der Zugang zu diesem Kurs endete am {when}, wie bei Ihrer Anmeldung angegeben. Ihr Fortschritt bleibt erhalten.",
+  accessEndsFact: "Der Zugang zum Kurs endet am {when}.",
+  accessUncheckedTitle: "Wir konnten Ihren Zugang nicht prüfen",
+  accessUncheckedBody: "Wir konnten Ihren Zugang zu diesem Kurs gerade nicht prüfen. Nichts hat sich geändert. Bitte versuchen Sie es gleich noch einmal.",
+  accessEndChanged: "Die Bedingungen dieses Kurses haben sich geändert. Bitte lesen Sie sie und versuchen Sie es erneut.",
   metaCourse: "Kurs — Marktmorgen",
   metaLesson: "Lektion — Marktmorgen",
   codeBlock: "Code",
@@ -1026,6 +1087,10 @@ const de: CoursesWords = {
   uncheckedRetry: "Meinen Zugang erneut prüfen",
   doneOf: (done, total) => `${done} von ${total} erledigt`,
   yourProgress: "Ihr Fortschritt",
+  nextStepLabel: "Nächster Schritt",
+  nextStepSee: (title) => `${title} ansehen`,
+  nextStepNoThanks: "Nein, danke",
+  nextStepNoThanksDone: "Erledigt. Es wird Ihnen in diesem Browser nicht mehr vorgeschlagen.",
   progressUnknown: "Wir konnten Ihren Fortschritt gerade nicht prüfen. Alle Ihre Lektionen sind noch da. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
   certProgressUnknown: "Wir konnten gerade nicht prüfen, ob Sie den Kurs abgeschlossen haben. Das Zertifikat kann deshalb noch nicht angefordert werden. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
   startFirst: "Erste Lektion beginnen",
@@ -1112,6 +1177,7 @@ const de: CoursesWords = {
   pausedStrong: "Dieses Video ist vorerst pausiert.",
   pausedRest: (store) =>
     `${store} hat keinen bezahlten Tarif, und seine Videos wurden in diesem Monat bereits so viele Stunden angesehen, wie ein Shop ohne Tarif hat. Es wird wieder abgespielt, sobald der Tarif des Shops bezahlt ist oder der neue Monat beginnt. Der Rest der Lektion ist wie gewohnt hier.`,
+  freePausedRest: "Kostenlose Vorschauen und Downloads dieses Shops sind bis zum nächsten Monat pausiert. Was Sie gekauft haben, ist davon nicht betroffen. Der Rest der Lektion ist wie gewohnt hier.",
   videoFailed: (store) => `Das Video dieser Lektion konnte nicht vorbereitet werden. ${store} muss es erneut hochladen.`,
   videoNotLoaded: "Das Video konnte gerade nicht geladen werden. Laden Sie die Seite gleich neu.",
   fullScreen: "Vollbild",
@@ -1120,6 +1186,11 @@ const de: CoursesWords = {
   resumeStopped: (at: string) => `Zuletzt haben Sie bei ${at} aufgehört.`,
   resumeContinue: (at: string) => `Bei ${at} weiterschauen`,
   resumeStartOver: "Von vorn beginnen",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Fokusmodus",
+  focusOff: "Fokusmodus beenden",
+  focusOnSaid: "Der Fokusmodus ist an. Nur die Lektion wird angezeigt.",
+  focusOffSaid: "Der Fokusmodus ist aus. Die Kursübersicht wird wieder angezeigt.",
   openSite: (host) => `${host} öffnen`,
   downloads: "Downloads",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -1290,6 +1361,13 @@ const de: CoursesWords = {
 
 // ------------------------------------------------------------------------- Italian
 const it: CoursesWords = {
+  accessEndsOn: "Il tuo accesso termina il {when}.",
+  accessEndedTitle: "Il tuo accesso a questo corso è terminato",
+  accessEndedBody: "L'accesso a questo corso è terminato il {when}, come indicato quando ti sei iscritto. I tuoi progressi sono conservati.",
+  accessEndsFact: "L'accesso al corso termina il {when}.",
+  accessUncheckedTitle: "Non siamo riusciti a verificare il tuo accesso",
+  accessUncheckedBody: "Non siamo riusciti a verificare il tuo accesso a questo corso in questo momento. Non è cambiato nulla. Riprova tra un momento.",
+  accessEndChanged: "Le condizioni di questo corso sono cambiate. Rileggile e riprova.",
   metaCourse: "Corso — Marktmorgen",
   metaLesson: "Lezione — Marktmorgen",
   codeBlock: "Codice",
@@ -1335,6 +1413,10 @@ const it: CoursesWords = {
   uncheckedRetry: "Verifica di nuovo il mio accesso",
   doneOf: (done, total) => `${done} di ${total} completate`,
   yourProgress: "I tuoi progressi",
+  nextStepLabel: "Prossimo passo",
+  nextStepSee: (title) => `Vedi ${title}`,
+  nextStepNoThanks: "No, grazie",
+  nextStepNoThanksDone: "Fatto. Non ti verrà più suggerito in questo browser.",
   progressUnknown: "Non siamo riusciti a controllare i tuoi progressi in questo momento. Tutte le tue lezioni sono ancora qui. Ricarica la pagina per riprovare.",
   certProgressUnknown: "Non siamo riusciti a controllare in questo momento se hai finito il corso, quindi non puoi ancora chiedere il certificato. Ricarica la pagina per riprovare.",
   startFirst: "Inizia la prima lezione",
@@ -1419,6 +1501,7 @@ const it: CoursesWords = {
   pausedStrong: "Questo video è in pausa per ora.",
   pausedRest: (store) =>
     `${store} non ha un piano a pagamento, e i suoi video sono già stati guardati per tutte le ore che un negozio senza piano ha questo mese. Si potrà riprodurre di nuovo non appena il piano del negozio sarà pagato, o all'inizio del mese prossimo. Il resto della lezione è qui come sempre.`,
+  freePausedRest: "Le anteprime e i download gratuiti di questo negozio sono in pausa fino al mese prossimo. Ciò che hai acquistato non è interessato. Il resto della lezione è qui come sempre.",
   videoFailed: (store) => `Non è stato possibile preparare il video di questa lezione. ${store} deve caricarlo di nuovo.`,
   videoNotLoaded: "Non è stato possibile caricare il video in questo momento. Ricarica la pagina tra un momento.",
   fullScreen: "Schermo intero",
@@ -1427,6 +1510,11 @@ const it: CoursesWords = {
   resumeStopped: (at: string) => `L'ultima volta il video era a ${at}.`,
   resumeContinue: (at: string) => `Continua da ${at}`,
   resumeStartOver: "Ricomincia dall'inizio",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Modalità concentrazione",
+  focusOff: "Esci dalla modalità concentrazione",
+  focusOnSaid: "La modalità concentrazione è attiva. Viene mostrata solo la lezione.",
+  focusOffSaid: "La modalità concentrazione è disattivata. L'indice del corso è di nuovo visibile.",
   openSite: (host) => `Apri ${host}`,
   downloads: "Download",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -1597,6 +1685,13 @@ const it: CoursesWords = {
 
 // ------------------------------------------------------------------------- Dutch
 const nl: CoursesWords = {
+  accessEndsOn: "Je toegang eindigt op {when}.",
+  accessEndedTitle: "Je toegang tot deze cursus is afgelopen",
+  accessEndedBody: "De toegang tot deze cursus is geëindigd op {when}, zoals vermeld toen je je aanmeldde. Je voortgang blijft bewaard.",
+  accessEndsFact: "De toegang tot de cursus eindigt op {when}.",
+  accessUncheckedTitle: "We konden je toegang niet controleren",
+  accessUncheckedBody: "We konden je toegang tot deze cursus nu niet controleren. Er is niets veranderd. Probeer het zo meteen opnieuw.",
+  accessEndChanged: "De voorwaarden van deze cursus zijn gewijzigd. Lees ze opnieuw en probeer het nog eens.",
   metaCourse: "Cursus — Marktmorgen",
   metaLesson: "Les — Marktmorgen",
   codeBlock: "Code",
@@ -1642,6 +1737,10 @@ const nl: CoursesWords = {
   uncheckedRetry: "Mijn toegang opnieuw controleren",
   doneOf: (done, total) => `${done} van ${total} afgerond`,
   yourProgress: "Je voortgang",
+  nextStepLabel: "Volgende stap",
+  nextStepSee: (title) => `Bekijk ${title}`,
+  nextStepNoThanks: "Nee, bedankt",
+  nextStepNoThanksDone: "Klaar. Het wordt je in deze browser niet meer voorgesteld.",
   progressUnknown: "We konden je voortgang op dit moment niet controleren. Al je lessen staan er nog. Laad de pagina opnieuw om het nog eens te proberen.",
   certProgressUnknown: "We konden op dit moment niet controleren of je de cursus hebt afgerond, dus je kunt het certificaat nog niet aanvragen. Laad de pagina opnieuw om het nog eens te proberen.",
   startFirst: "Begin met de eerste les",
@@ -1727,6 +1826,7 @@ const nl: CoursesWords = {
   pausedStrong: "Deze video is voorlopig gepauzeerd.",
   pausedRest: (store) =>
     `${store} heeft geen betaald abonnement, en de video's van deze winkel zijn deze maand al bekeken voor alle uren die een winkel zonder abonnement heeft. Hij speelt weer af zodra het abonnement van de winkel is betaald, of wanneer de nieuwe maand begint. De rest van de les staat hier zoals gewoonlijk.`,
+  freePausedRest: "Gratis voorproefjes en downloads van deze winkel zijn gepauzeerd tot volgende maand. Wat je hebt gekocht, blijft gewoon beschikbaar. De rest van de les staat hier zoals gewoonlijk.",
   videoFailed: (store) => `De video van deze les kon niet worden voorbereid. ${store} moet hem opnieuw uploaden.`,
   videoNotLoaded: "De video kon nu niet worden geladen. Vernieuw de pagina zo.",
   fullScreen: "Volledig scherm",
@@ -1735,6 +1835,11 @@ const nl: CoursesWords = {
   resumeStopped: (at: string) => `De vorige keer stopte je bij ${at}.`,
   resumeContinue: (at: string) => `Verder vanaf ${at}`,
   resumeStartOver: "Opnieuw beginnen",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Focusmodus",
+  focusOff: "Focusmodus verlaten",
+  focusOnSaid: "De focusmodus staat aan. Alleen de les wordt getoond.",
+  focusOffSaid: "De focusmodus staat uit. Het overzicht van de cursus is weer zichtbaar.",
   openSite: (host) => `Open ${host}`,
   downloads: "Downloads",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -1905,6 +2010,13 @@ const nl: CoursesWords = {
 
 // ------------------------------------------------------------------------- Portuguese (Portugal)
 const pt: CoursesWords = {
+  accessEndsOn: "O seu acesso termina a {when}.",
+  accessEndedTitle: "O seu acesso a este curso terminou",
+  accessEndedBody: "O acesso a este curso terminou a {when}, como indicado quando se inscreveu. O seu progresso fica guardado.",
+  accessEndsFact: "O acesso ao curso termina a {when}.",
+  accessUncheckedTitle: "Não foi possível verificar o seu acesso",
+  accessUncheckedBody: "Não foi possível verificar o seu acesso a este curso neste momento. Nada mudou. Tente novamente daqui a pouco.",
+  accessEndChanged: "As condições deste curso mudaram. Reveja-as e tente novamente.",
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Aula — Marktmorgen",
   codeBlock: "Código",
@@ -1950,6 +2062,10 @@ const pt: CoursesWords = {
   uncheckedRetry: "Verificar o meu acesso novamente",
   doneOf: (done, total) => `${done} de ${total} concluídas`,
   yourProgress: "O seu progresso",
+  nextStepLabel: "Próximo passo",
+  nextStepSee: (title) => `Ver ${title}`,
+  nextStepNoThanks: "Não, obrigado",
+  nextStepNoThanksDone: "Pronto. Não voltará a ser sugerido neste navegador.",
   progressUnknown: "Não foi possível verificar o seu progresso agora. Todas as suas aulas continuam aqui. Recarregue a página para tentar de novo.",
   certProgressUnknown: "Não foi possível verificar agora se concluiu o curso, por isso o certificado ainda não pode ser pedido. Recarregue a página para tentar de novo.",
   startFirst: "Começar a primeira aula",
@@ -2035,6 +2151,7 @@ const pt: CoursesWords = {
   pausedStrong: "Este vídeo está em pausa por agora.",
   pausedRest: (store) =>
     `${store} não tem um plano pago, e os vídeos desta loja já foram vistos durante todas as horas que uma loja sem plano tem este mês. Volta a ser reproduzido assim que o plano da loja for pago, ou quando começar o próximo mês. O resto da aula está aqui como de costume.`,
+  freePausedRest: "As pré-visualizações e transferências gratuitas desta loja estão em pausa até ao próximo mês. O que comprou não é afetado. O resto da aula está aqui como de costume.",
   videoFailed: (store) => `Não foi possível preparar o vídeo desta aula. ${store} tem de o carregar novamente.`,
   videoNotLoaded: "Não foi possível carregar o vídeo neste momento. Atualize a página daqui a pouco.",
   fullScreen: "Tela cheia",
@@ -2043,6 +2160,11 @@ const pt: CoursesWords = {
   resumeStopped: (at: string) => `Da última vez, você parou em ${at}.`,
   resumeContinue: (at: string) => `Continuar em ${at}`,
   resumeStartOver: "Começar do início",
+  // 295 [SQ6]: the lesson page's focus mode (components/lesson-focus.tsx).
+  focusOn: "Modo de foco",
+  focusOff: "Sair do modo de foco",
+  focusOnSaid: "O modo de foco está ativo. Só a lição é mostrada.",
+  focusOffSaid: "O modo de foco está desativado. O índice do curso voltou a ser mostrado.",
   openSite: (host) => `Abrir ${host}`,
   downloads: "Transferências",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },

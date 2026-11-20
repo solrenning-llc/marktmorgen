@@ -200,15 +200,75 @@ function decodeEntities(text: string): string {
   });
 }
 
+/**
+ * How much of a page is read for its words and links (#4592): a business prints where to write near the top or in
+ * its menu and footer, never past half a megabyte of markup, and every pattern below stays linear in this much.
+ */
+export const PAGE_READ_CHARS = 500_000;
+
+/**
+ * The page with every block from `open` to `close` (as "<script" and "</script>", any letter case) put out, in one
+ * pass with indexOf (#4592). A lazy regex to a closing mark that is not there backtracked over the rest of the page
+ * from every opening, so a page of "<script" or "<!--" with no end took time with the square of its length. A block
+ * that never closes runs to the end of the page, as the regex did not: what follows it was the block's own text.
+ */
+function dropBlocks(html: string, open: string, close: string): string {
+  // Only A–Z lowered, so every index in `lower` is the same in `html`: toLowerCase() turns "İ" into two code units,
+  // and every cut after one would land beside the mark (Claude 6 on #4619).
+  const lower = asciiLower(html);
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const start = lower.indexOf(open, at);
+    if (start < 0) return out + html.slice(at);
+    // "<script" must be the whole name: "<scripts" is another tag.
+    const next = lower.charCodeAt(start + open.length);
+    if (open[1] !== "!" && start + open.length < lower.length && !/[\s>/]/.test(String.fromCharCode(next))) {
+      out += html.slice(at, start + open.length);
+      at = start + open.length;
+      continue;
+    }
+    const end = lower.indexOf(close, start + open.length);
+    out += `${html.slice(at, start)} `;
+    if (end < 0) return out;
+    at = end + close.length;
+  }
+}
+
+/** A–Z lowered, nothing else, so the text keeps its length and each index means the same in both. */
+const asciiLower = (text: string): string => text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+
+/**
+ * Every whole opening tag `<name ...>` of a page, with where it starts, in linear time: `[^<>]*` ends at the next
+ * "<" or ">", so a run with no ">" is scanned once from its own "<name". What a tag holds is then read inside it
+ * alone, with no pattern that backtracks to the end of the page (Claude 6 on #4619: one "<a" holding many href=
+ * and no ">" was quadratic).
+ */
+export function* openingTags(html: string, name: string): Generator<{ tag: string; at: number }> {
+  for (const match of html.matchAll(new RegExp(`<${name}\\b[^<>]*>`, "gi"))) yield { tag: match[0], at: match.index ?? 0 };
+}
+
+/**
+ * The tags of a page put out, each with " ", in linear time (#4592): `<[^>]+>` backtracked over the rest of the page
+ * from every "<" with no ">" after it; `<[^<>]*>` stops at the next "<", so each "<" is looked at once. A "<" that
+ * opens nothing is left as text.
+ */
+export const stripTags = (html: string): string => html.replace(/<[^<>]*>/g, " ");
+
 /** A page's HTML as the words a reader sees, with what a mailto: link points at kept beside it. */
 export function pageText(html: string): string {
-  const stripped = html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    // The whole opening tag gives way to the address, or it would go with the tag.
-    .replace(/<a\b[^>]*\bhref\s*=\s*["']mailto:([^"'?]+)[^"']*["'][^>]*>/gi, (_, to: string) => ` ${to.replace(/%40/gi, "@")} `)
-    .replace(/<[^>]+>/g, " ");
+  let page = html.slice(0, PAGE_READ_CHARS);
+  page = dropBlocks(page, "<script", "</script>");
+  page = dropBlocks(page, "<style", "</style>");
+  page = dropBlocks(page, "<!--", "-->");
+  const stripped = stripTags(
+    // The whole opening tag gives way to the address, or it would go with the tag. Each whole tag is read once, and
+    // the address is looked for inside it alone (openingTags).
+    page.replace(/<a\b[^<>]*>/gi, (tag: string) => {
+      const to = /\bhref\s*=\s*["']mailto:([^"'?<>]+)/i.exec(tag)?.[1];
+      return to === undefined ? tag : ` ${to.replace(/%40/gi, "@")} `;
+    }),
+  );
   return decodeEntities(stripped).replace(/\s+/g, " ").trim();
 }
 
@@ -268,16 +328,27 @@ function contactRank(path: string, text: string): number {
 export function contactPages(html: string, base: string): string[] {
   const home = new URL(base);
   const found = new Map<string, number>();
-  for (const match of html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+  // Each whole tag read once and its href looked for inside it, and a link's words looked for in the 2,000 characters
+  // after it only, so a page of "<a " with no ">", of one "<a" holding many href=, or of links with no "</a>" is read
+  // in linear time (#4592; Claude 6 on #4619).
+  const page = html.slice(0, PAGE_READ_CHARS);
+  const lower = asciiLower(page);
+  for (const { tag, at } of openingTags(page, "a")) {
+    const href = /\bhref\s*=\s*["']([^"'#<>]+)["']/i.exec(tag)?.[1];
+    if (href === undefined) continue;
+    const start = at + tag.length;
+    const close = lower.slice(start, start + 2_000 + 4).indexOf("</a>");
+    if (close < 0) continue;
+    const words = page.slice(start, start + close);
     let url: URL;
     try {
-      url = new URL(match[1], home);
+      url = new URL(href, home);
     } catch {
       continue;
     }
     if (url.protocol !== "https:" || siteDomain(url.hostname) !== siteDomain(home.hostname)) continue;
     if (NOT_A_CONTACT_PAGE.test(url.pathname)) continue;
-    const text = match[2].replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
+    const text = stripTags(dropBlocks(dropBlocks(words, "<script", "</script>"), "<style", "</style>")).replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
     const rank = contactRank(url.pathname.toLowerCase(), text);
     if (rank === 0) continue;
     const key = `${url.origin}${url.pathname}`;
@@ -537,6 +608,11 @@ export type Pitch = {
   status: PitchStatus;
   createdAt: number;
   sentAt: number;
+  /**
+   * When the business pressed the stop link, 0 if never. Kept beside the status, so a pitch the creator marked
+   * replied or deal keeps that mark and is still counted as asked to stop (Codex X7 on #4123).
+   */
+  stoppedAt: number;
 };
 
 export function parsePitch(raw: unknown): Pitch | null {
@@ -564,6 +640,7 @@ export function parsePitch(raw: unknown): Pitch | null {
       status: PITCH_STATUSES.includes(v.status as PitchStatus) ? (v.status as PitchStatus) : "draft",
       createdAt: num(v.createdAt),
       sentAt: num(v.sentAt),
+      stoppedAt: num(v.stoppedAt),
     };
   } catch {
     return null;

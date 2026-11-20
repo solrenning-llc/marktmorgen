@@ -43,6 +43,7 @@ import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAG
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
 import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
+import { BOOK_KEPT_SLICE } from "@/lib/paypal-sales";
 
 /** Database commands one further API request pays for. */
 export const API_UNIT_COMMANDS = 20;
@@ -173,6 +174,14 @@ export const AFFILIATE_ENTRY_BYTES = 4_096;
 export const AFFILIATE_SENT_BYTES = 512;
 /** PayPal refunds readBook reads at the most (lib/paypal-sales.ts, readPayPalRefundsWithCoverage). */
 export const BOOK_PAYPAL_REFUNDS = 500;
+/**
+ * What the book's two questions about one PayPal payment weigh (lib/affiliates.ts, readBook): the name it sends to the
+ * refunds kept for good (lib/paypal-sales.ts, backKey: "paypal:" and a capture id of up to 64 characters) and the
+ * answer (null, or a time of up to 12 digits), and the order it sends to the set (up to 36 characters) and its score
+ * (up to 24), each a bulk string with at most 8 bytes of framing ("$NN\r\n" and "\r\n"): 175, rounded up. Counted for
+ * every entry, a ceiling of the payments.
+ */
+export const BOOK_KEPT_REFUND_BYTES = 192;
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
 /** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */
@@ -181,6 +190,30 @@ export const BOOK_MOVES = 200;
 export const BOOK_INVOICES = 1_000;
 /** A product's listing, read for its title. */
 export const LISTING_BYTES = 16_384;
+/**
+ * The paid invoices readBook keeps between readings at the most (lib/affiliates.ts, INVOICES_KEPT_MAX_BYTES, audit
+ * A1): read whole and written back whole, once each, by a reading of a store with Stripe and affiliates.
+ */
+export const BOOK_INVOICES_KEPT_BYTES = 2_000_000;
+/** And the most invoices it keeps (lib/affiliates.ts, INVOICES_KEPT_MAX_LINES), each a line of the book at the most. */
+export const BOOK_INVOICES_KEPT_LINES = 5_000;
+/**
+ * The studio requests a reading of the book that was not counted ahead takes before it reads and writes back those
+ * kept invoices (lib/affiliates.ts, readBook): the studio's affiliates page, its spreadsheet, the payout file and its
+ * confirmation, the PayPal press, payday and the PayPal settling. Two commands and BOOK_INVOICES_KEPT_BYTES each way
+ * at a heavy request's price, held in tests/affiliate-kept-invoices-counted.test.ts. The API and MCP readers count
+ * them in bookWork, and the affiliate's own page in affiliatePageCost (AFFILIATE_KEPT_INVOICES_UNITS).
+ */
+export const KEPT_INVOICES_STUDIO_UNITS = 4;
+
+/**
+ * A refund kept on a sale's, a share's or a lead's record when it was read on its own account (lib/affiliates.ts,
+ * AFFILIATE_REFUND_MARK): at most this many records in one reading of the book (the rest at the next), in one script
+ * per hash, all in one pipeline; and what one record's mark sends at the most (the record's whole new text, its field
+ * and the SHA-1 of the text read).
+ */
+export const REFUND_MARKS_PER_READ = 200;
+export const REFUND_MARK_BYTES = 2_048;
 
 /** What one reading of the affiliate program does (lib/affiliates.ts, readBook), counted from its sizes and the Stripe pages it may wait on. */
 export function bookWork(s: BookSizes, stripePages: number): ReadWork {
@@ -190,14 +223,23 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const moves = Math.min(s.leads, BOOK_MOVES);
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
+  // The invoices kept between readings (BOOK_INVOICES_KEPT_BYTES): read, then written back, one command and one trip each.
+  const kept = stripe ? 1 : 0;
+  // Up to REFUND_MARKS_PER_READ records could have their refund kept, one script for each of the three hashes: one trip.
+  const marks = s.stripe && any ? 3 : 0;
   return {
     // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
-    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
+    // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
+    // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling. Main's refund marks
+    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The invoices kept between readings
+    // (2 * kept, audit A1 on #3378) are counted on top of both.
+    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + 2 * kept + marks,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + 2 * kept * BOOK_INVOICES_KEPT_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
+    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + 2 * kept + (marks ? 1 : 0),
   };
 }
 
@@ -393,19 +435,33 @@ export const MAIL_REVENUE_BYTES = 64_000;
 
 /**
  * What get_emails reads, sized first: its broadcasts and its sequences
- * measured by their bytes (one LRANGE and a STRLEN each), then the list's
+ * measured by their bytes (one LRANGE and a STRLEN), then the list's
  * counts, the records, each sequence's counts at the most and what they sold
  * at the size it is kept at (`revenueBytes`, measured: 0 when it is not kept),
- * and every one told back.
+ * and every one told back. Each broadcast's size is not in it: asking those
+ * is taken before it is sent (emailsSizesWork).
  */
 export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flowBytes: number; revenueBytes: number }): ReadWork {
   return {
-    commands: 2 + s.broadcasts + 3 + 1 + 1 + s.broadcasts + MAX_FLOWS + 1,
+    commands: 2 + 3 + 1 + 1 + s.broadcasts + MAX_FLOWS + 1,
     bytes: s.broadcastBytes + s.flowBytes + MAX_FLOWS * FLOW_STATS_BYTES + s.revenueBytes,
     sent: (s.broadcasts + MAX_FLOWS) * EMAIL_SENT_BYTES,
     stripePages: 0,
     roundTrips: 2 + 4,
   };
+}
+/** get_emails' read through lib/broadcasts.ts BROADCAST_HEADS (its emails without their bodies), beside the GETs inside it that emailsWork counts. */
+export const EMAILS_HEADS_WORK: ReadWork = { commands: 1, bytes: 0, sent: 0, stripePages: 0, roundTrips: 0 };
+/**
+ * Asking get_emails' `broadcasts` emails' sizes without their bodies
+ * (lib/broadcasts.ts, BROADCAST_HEADS "size": the script and a GET inside it
+ * for each, `bytes` both ways as broadcastSizesBytes says, one trip): taken
+ * before the script is sent, apart from what is set aside after it (Codex J
+ * 5811457165 on #3034: thirty sizes were asked inside the door's one
+ * request). Nothing when there is no broadcast.
+ */
+export function emailsSizesWork(broadcasts: number, bytes: number): ReadWork {
+  return broadcasts > 0 ? { commands: 1 + broadcasts, bytes, sent: 0, stripePages: 0, roundTrips: 1 } : { ...NONE };
 }
 /** What get_emails looks up before it sets aside: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
 export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 1 };
@@ -463,11 +519,13 @@ export const EVENTS_MOST: EventsSize = {
 /**
  * What the recent events do: the store's log read (LRANGE), each delivery in
  * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
- * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
- * and the messages of the type asked for sent. Without an argument, its most.
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH),
+ * the store's deletion marks read for the people in them (one HMGET, since 14
+ * November 2026: lib/webhooks.ts, recentMessagesOf), and the messages of the
+ * type asked for sent. Without an argument, its most.
  */
 export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
-  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+  return { commands: s.deliveries > 0 ? 3 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 4 : 1 };
 }
 
 /**
@@ -561,9 +619,9 @@ export function pageTestWork(): ReadWork {
   return { commands: 2, bytes: PAGE_BYTES + TEST_COUNTS_BYTES, sent: TEST_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
 }
 
-/** get_page_reading: the listing, then the page and its depth record in one go. */
+/** get_page_reading: the listing, then the page, its depth record and the time record beside it (639 [GL7](25)) in one go. */
 export function pageReadingWork(): ReadWork {
-  return { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return { commands: 3, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
 }
 
 /** get_page_versions: the listing, how many versions are kept (LLEN), then those versions; one sent whole, or the list. */

@@ -1,3 +1,4 @@
+import { shareAddress, visitorAddress } from "@/lib/traffic-rules";
 import { type NextRequest, after } from "next/server";
 import { allowedBy, newLeadId, sendServerLead, sendsFromServer } from "@/lib/ad-events";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -7,8 +8,14 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { countHit, isStorePeople } from "@/lib/visit";
 import { markFromReferer } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
+import { withinStore } from "@/lib/metered-limits";
+
+/** The copies of one store a connection (its /64) may ask for in an hour, the same as lib/free.ts IP_LIMIT. */
+const CONNECTION_PER_HOUR = 20;
+/** The copies of one store that a whole IPv6 /48 can ask for in an hour: ten connections' worth. */
+const NET_PER_HOUR = 200;
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -82,10 +89,21 @@ export async function POST(request: NextRequest) {
   // learns nothing, and no email goes anywhere.
   if (honeypot.trim()) return away(`${page}&status=sent`);
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  // Two counts, as each copy is one of the month's orders that paid orders share (lib/order-rules.ts; #4626). The
+  // raw address let every address of an IPv6 network have its own 20 copies an hour. One connection is its /64
+  // (visitorAddress), the least one customer is handed: its 20 copies an hour (lib/free.ts). Not a /48, which a mobile
+  // carrier shares among thousands of subscribers, so one of them would use up every other's copies (Claude 7 on
+  // #4636). And a whole /48, which a tunnel hands one person with 65,536 /64s in it, at most NET_PER_HOUR copies of
+  // this store an hour, counted before anything else is read. An IPv4 address counts by itself in both.
+  const address = clientAddress(request);
+  const ip = visitorAddress(address) || "unknown";
+  const net = shareAddress(address) || "unknown";
+  // The connection's own 20 first, so an ask its /64 is refused never reaches the /48's count: one phone asking 200
+  // times can add at most 20 to it and never locks its carrier's other subscribers out (Claude 6 on #4636).
+  // Each count is one of the store's public requests (withinStore), so the commands an ask runs before requestCopy
+  // sit in the store's measured public-requests line, not in a guard with no price (Claude 7 on #4636).
+  if (!(await withinStore("free-conn", `${ip}|${store.handle}`, CONNECTION_PER_HOUR, 3_600, store))) return away(`${page}&status=limited`);
+  if (!(await withinStore("free-net", `${net}|${store.handle}`, NET_PER_HOUR, 3_600, store))) return away(`${page}&status=limited`);
 
   try {
     // Sent by an affiliate, where the store pays per free product claimed: credited only once the emailed link is used.
@@ -96,12 +114,12 @@ export async function POST(request: NextRequest) {
     // and its id on the page it lands on, so the pixel's lead and this one count once.
     // Without the address: it is not confirmed yet, so it may be someone else's, who never said yes.
     const lead = result === "sent" && sendsFromServer(store) && allowedBy(request, store) ? newLeadId() : "";
-    if (lead) after(() => sendServerLead(store, request, { id: lead, email: "", product: product.id }).catch((error) => console.error("sending a lead failed", error)));
+    if (lead) after(() => sendServerLead(store, request, { id: lead, email: "", typed: email, product: product.id }).catch((error) => console.error("sending a lead failed", error)));
     if (result === "sent" && here && store.statsId) {
       const statsId = store.statsId;
       after(async () => {
         if (await isStorePeople(request, store)) return;
-        await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, ip, request.headers.get("user-agent") ?? ""));
+        await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, address, request.headers.get("user-agent") ?? ""));
       });
     }
     return away(`${page}&status=${result}${lead ? `&e=${lead}` : ""}`);

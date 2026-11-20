@@ -31,10 +31,12 @@ import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
+import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
+import { runCallLockWaitsAtOnce } from "./calls-lock-wait";
 
 const HOUR = 3_600_000;
 const NY = "America/New_York";
@@ -92,6 +94,8 @@ redis.pipeline = async (commands) => {
   }
   return out;
 };
+// The 250 ms waits between a held lock's retries run at once; every retry still runs (tests/calls-lock-wait.ts).
+runCallLockWaitsAtOnce();
 function unhook(): void {
   delete hooks.afterGet;
   delete hooks.script;
@@ -139,8 +143,10 @@ async function sell(w: World, start: number): Promise<Sold> {
 
 const lockOf = (w: World) => `nl:call:lock:${w.store.callsId}`;
 const diaryOf = (w: World) => `nl:call:busy:${w.store.callsId}`;
+/** The store owner's own claims (lib/calls.ts, claimOwner): a weekly hold claims the owner's time there too. */
+const ownerClaimsOf = (w: World) => claimsKey(hostId(w.store.email));
 async function clear(w: World): Promise<void> {
-  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)]]);
+  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)], ["DEL", ownerClaimsOf(w)]]);
 }
 async function lockValue(w: World): Promise<unknown> {
   return (await run([["GET", lockOf(w)]]))[0];

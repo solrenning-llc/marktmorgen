@@ -40,7 +40,7 @@ import { MAX_CHAT_TEXT, MAX_CHAT_KEPT, CHAT_PAGE, MAX_SLOW, type ChatRefusal } f
 export { MAX_CHAT_TEXT, MAX_CHAT_KEPT, CHAT_PAGE, MAX_SLOW, type ChatRefusal } from "@/lib/community-chat-rules";
 import { isProxy } from "node:util/types";
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor } from "@/lib/redis-reply";
 import { cleanText, linkCount } from "@/lib/community-text";
 import { holdsAll } from "@/lib/community-search";
 import { stringList } from "@/lib/redis-reply";
@@ -347,8 +347,11 @@ export function refusalWords(reason: ChatRefusal, slow: number, wait?: number): 
 
 /** How many messages the room holds right now. */
 export async function roomSize(id: string): Promise<number> {
-  const [n] = await redisPipeline([["ZCARD", roomKey(id)]]);
-  return Number(n) || 0;
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", roomKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the count of the community room's messages");
+  return n;
 }
 
 /**
@@ -395,7 +398,8 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
   const commands: (string | number)[][] = [["DEL", spokeKey(id, who)], ...(theirs.length ? [["ZREM", roomKey(id), ...theirs]] : [])];
   // Each deletion answered with its count, or the erasure is not said done.
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+  // Each count only within what its command could remove (#4796): a DEL of one key answering 2 is unknown.
+  if (!replies || replies.some((reply, i) => countWithin(reply, commands[i]) === null)) throw new UnknownReplyError(what);
   return theirs.length;
 }
 

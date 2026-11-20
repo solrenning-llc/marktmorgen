@@ -15,6 +15,7 @@ import {
   bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { MAX_CODES } from "@/lib/discount";
 
 /** What each reading that reads more than a page counts as, from the code that takes it (lib/api-read-rules.ts). */
 const STUDENTS_PAGE_COUNTS = 1 + apiReadUnits(studentsPageWork(API_PAGE, 1));
@@ -116,7 +117,8 @@ export default function DevelopersPage() {
         <p>
           Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
-          the next page, until it is <code className="font-mono">null</code>.
+          the next page, until it is <code className="font-mono">null</code>. A cursor a list did not give is answered 400{" "}
+          <code className="font-mono">invalid_cursor</code>: start again without one.
           {` A page holds about ${API_PAGE} rows. Products never has more; your list, your members and a course's students can have a few more on a page, and a page can come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
@@ -148,7 +150,7 @@ export default function DevelopersPage() {
 429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
 429  {"error": "monthly_limit", "message": "This read may take up to ${n(LIST_PAGE_HELD)} of your store's API requests, more than your store has left, so nothing was read."}
 400  {"error": "unknown_field", "message": "No item in this answer has a field named “nothing_here”."}
-400  {"error": "fields", "message": "“bad-name” cannot be a field name. Use letters, digits and underscores, at most 30 fields."}
+400  {"error": "fields", "message": "“bad-name” cannot be a field name. A field name is lowercase letters, digits and underscores, starting with a letter, up to ${FIELD_NAME_MAX} characters; ask for at most ${MAX_FIELDS_ASKED} fields."}
 429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
 403  {"error": "key_paused", "message": "This key is paused: the store's team now logs in with a second step, and the key was made without one. …"}
@@ -193,6 +195,7 @@ export default function DevelopersPage() {
       "currency": "usd",
       "kind": "one_time",
       "interval": null,
+      "interval_count": null,
       "hidden": false,
       "url": "https://marktmorgen.com/@harbor/p/k3j9x2p1ab"
     }
@@ -203,7 +206,9 @@ export default function DevelopersPage() {
           <code className="font-mono">kind</code> is one of <code className="font-mono">one_time</code>,{" "}
           <code className="font-mono">free</code>, <code className="font-mono">membership</code>,{" "}
           <code className="font-mono">course</code> or <code className="font-mono">call</code>.{" "}
-          <code className="font-mono">interval</code> is set for a membership.
+          <code className="font-mono">interval</code> is set for a membership, and{" "}
+          <code className="font-mono">interval_count</code> says how many of them one charge covers: 3 with{" "}
+          <code className="font-mono">month</code> is every 3 months.
         </p>
       </LegalSection>
 
@@ -450,9 +455,9 @@ export default function DevelopersPage() {
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
         </p>
         <p>
-          It has twenty-two tools. One prepares a change: a new description for a product, kept as a proposal you read beside the
-          current one and confirm under What the AI proposes in your studio, with undo; nothing changes until you confirm, and it
-          needs a key you allowed to prepare changes. The other twenty-one read only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
+          It has twenty-four tools. Three prepare a change: a new description, title or short summary for a product, each kept as a proposal you read beside the
+          current one and confirm under What the AI proposes in your studio, with undo; nothing changes until you confirm, and they
+          need a key you allowed to prepare changes. The other twenty-one read only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
           your products, revenue by channel read three ways, the funnel from visit to sale, each product&apos;s numbers and
           what buyers buy next, your buyers in numbers, what is worth knowing, your memberships (MRR, churn, why members
           left, month by month), your emails and sequences with what they sold, your affiliates by their codes, a product&apos;s description
@@ -464,7 +469,7 @@ export default function DevelopersPage() {
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
         <p>
-          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. A product's description, its sales page, a course's outline or one lesson, a page test and how far a page is read each count as a few, by the most they could read; a page's earlier versions and your saved sections count more as more are kept. A page of products for a bundle and your imports each count as a few, by the most they could read. Preparing a description counts as a few, more as more proposals wait or are kept. Which store the key belongs to counts as one.`}
+          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. A product's description, its sales page, a course's outline or one lesson, a page test and how far a page is read each count as a few, by the most they could read; a page's earlier versions and your saved sections count more as more are kept. A page of products for a bundle and your imports each count as a few, by the most they could read. Preparing a description, a title or a short summary counts as a few, more as more proposals wait or are kept. Which store the key belongs to counts as one.`}
         </p>
       </LegalSection>
 
@@ -475,6 +480,8 @@ export default function DevelopersPage() {
         <Code>{`{
   "currency": "usd",
   "refunds_checked": true,
+  "invoices_checked": true,
+  "unlinked_invoices": 0,
   "data": [
     {
       "id": "0123456789ab",
@@ -499,7 +506,12 @@ export default function DevelopersPage() {
           <code className="font-mono">payable</code> is what can be paid today; <code className="font-mono">waiting</code>{" "}
           is still inside the wait you set before a sale can be paid. When <code className="font-mono">refunds_checked</code>{" "}
           is <code className="font-mono">false</code>, Stripe could not be asked about refunds just now and the amounts may
-          be high: read again before paying anyone from them.
+          be high: read again before paying anyone from them. When <code className="font-mono">invoices_checked</code> is{" "}
+          <code className="font-mono">false</code>, not every membership and plan payment could be read and the amounts may
+          be low: do not pay from them either. <code className="font-mono">unlinked_invoices</code> counts paid membership
+          and plan payments that could not be matched to one card payment, so their commission is not in the amounts;
+          while it is above 0, <code className="font-mono">invoices_checked</code> is <code className="font-mono">false</code>{" "}
+          too: check those payments in Stripe and pay the affiliates they belong to by hand.
         </p>
       </LegalSection>
 
@@ -561,7 +573,9 @@ export default function DevelopersPage() {
       <LegalSection title="Discount codes">
         <Endpoint path="/api/v1/codes">
           Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
-          times it was used, its limit, its smallest order and whether it is live.
+          times it was used, its limit, its smallest order and whether it is live. One answer holds your{" "}
+          {MAX_CODES} newest codes; <code className="font-mono">has_more</code> is true when you have older ones too,
+          which you can see in your Stripe dashboard.
         </Endpoint>
         <p>{`Reading them asks your Stripe account, so it counts as ${n(CODES_COUNT)} of your API requests; making a code counts as ${n(CODE_MAKE_COUNT)} and switching one off as ${n(CODE_STOP_COUNT)}, taken before Stripe is asked.`}</p>
         <Endpoint method="POST" path="/api/v1/codes">
@@ -574,7 +588,12 @@ export default function DevelopersPage() {
         </Endpoint>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
-          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          the list, switched off. A code set to start later loses its start date too, so it never comes back on by itself;
+          while that start is being handled the answer is 409 <code className="font-mono">busy</code>, and trying again
+          a moment later works. If it was switched off but your codes could not be read back from Stripe, the answer
+          has <code className="font-mono">stopped</code> with its id, <code className="font-mono">listed: false</code> and{" "}
+          <code className="font-mono">data: null</code>: read them again with GET. Making and switching off need a key
+          that writes; all three answer 409{" "}
           <code className="font-mono">not_selling</code> while your store is not taking payments.
         </Endpoint>
       </LegalSection>

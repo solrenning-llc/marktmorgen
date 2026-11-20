@@ -40,6 +40,7 @@ import { feedToken } from "@/lib/podcast-access";
 import { saveReview } from "@/lib/reviews";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { noteForErasure } from "@/lib/erasure-index";
+import { benefitJson } from "@/lib/tier-benefit-rules";
 import { normaliseEmail } from "@/lib/auth";
 import { storeKey } from "@/lib/learn";
 import { changeRequest, createRequest } from "@/lib/payment-request-store";
@@ -221,7 +222,8 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await award(id, learner, 1, store);
   await tell(id, [learner], { kind: "reply", post: "p00001", comment: "", by: "creator", words: "Welcome in" } as never, ROOM);
   await redisPipeline([
-    ["SET", `nl:cm:${id}:ps:${learner}`, JSON.stringify([{ endpoint: "https://push.example.com/1", keys: { p256dh: "x", auth: "y" }, kid: "k1", live: false }])],
+    // A device as rememberDevice (lib/community-push.ts) has always kept it: a hash from endpoint to device.
+    ["HSET", `nl:cm:${id}:ps:${learner}`, "https://push.example.com/1", JSON.stringify({ endpoint: "https://push.example.com/1", keys: { p256dh: "x", auth: "y" }, kid: "k1", addedAt: now })],
     ["ZADD", `nl:cm:${id}:ch`, 1, JSON.stringify({ i: Date.now(), a: learner, text: "hello room", at: now, n: "Tess" })],
     ["SET", `nl:cm:${id}:chs:${learner}`, "1", "EX", 60],
     ["SET", `nl:cm:${id}:rg:${learner}`, JSON.stringify({ u: Date.now() + 60_000, w: 1 }), "EX", 600],
@@ -315,6 +317,14 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await redisPipeline([
     ["SET", `nl:stats:${statsId}:ledger`, JSON.stringify({ c: "usd", p: false, r: [[email, 4_900, Date.now(), ""]] }), "EX", 600],
     ["SET", `nl:health:${statsId}`, JSON.stringify({ rows: [{ email }] }), "EX", 600],
+  ]);
+  // A membership benefit the creator marked as handed to them (lib/tier-benefits.ts, 422 [PT2]), by the owner, so the
+  // copy and the erasure journeys read and delete a real mark (Claude 6, 903aa431f; Claude 1 on #3014).
+  const benefit = "b0000000000e1";
+  await redisPipeline([
+    ["HSET", `nl:tben:${statsId}`, benefit, benefitJson({ id: benefit, product: w.plain, text: "A signed print", cadence: "once", since: 1_790_000_000, retired: 0 })],
+    ["HSET", `nl:tben:given:${statsId}:${person}`, `${benefit}:sub_${sha(email).slice(0, 14)}:once`, JSON.stringify({ at: 1_790_000_100, by: OWNER })],
+    ["SADD", `nl:tben:who:${statsId}`, person],
   ]);
   // A review (lib/reviews.ts) and the library across stores (lib/buyer-library.ts).
   const saved = await saveReview(statsId, { productId: w.plain, email, reference: `cs_test_${hex(10)}`, pi: `pi_${hex(10)}`, rating: 5, text: "Loved it", name: "Tess" }, ROOM);

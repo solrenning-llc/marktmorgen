@@ -37,7 +37,9 @@ export async function POST(request: NextRequest) {
     const font = isFont(guarded.body.font) ? guarded.body.font : guarded.store.look.font;
     // And the backdrop too.
     const backdrop = isBackdrop(guarded.body.backdrop) ? guarded.body.backdrop : guarded.store.look.backdrop;
-    const result = await updateLook(guarded.ref, { theme, accent, badge, sold: guarded.body.sold === true, font, backdrop });
+    // The store-age line (lib/store-trust.ts): left unsaid, it stays as it is.
+    const since = typeof guarded.body.since === "boolean" ? guarded.body.since : guarded.store.look.since === true;
+    const result = await updateLook(guarded.ref, { theme, accent, badge, sold: guarded.body.sold === true, since, font, backdrop });
     if (!result.ok) {
       return Response.json({ ok: false, error: result.reason }, { status: 400 });
     }

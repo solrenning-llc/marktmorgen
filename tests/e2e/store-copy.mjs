@@ -251,6 +251,30 @@ try {
     const context = await createIsolatedContext({ ...options, serviceWorkers: "block" });
     await context.addInitScript(() => {
       window.__mmNavigationRsc = [];
+      // A navigation of the test's own (page.goto, a link) can cut off an RSC fetch still in flight. WebKit reports the
+      // cut-off as a rejected fetch ("... due to access control checks") that Next does not catch, so it reached
+      // "no page threw" although nothing in the page failed (CV (e), 17 November 2026, #4843 and others). Only such a
+      // same-origin _rsc fetch, and only once the document is leaving, is dropped; every other failure still throws.
+      // beforeunload can be canceled (the page's own unload protection, which Playwright's dialog handling answers
+      // by staying): a failure in its grace second waits for the decision. pagehide is the real unload, and drops it;
+      // if the document stays, the failure is thrown once the second ends (Codex V's MEDIUM on #4844). pageshow (a
+      // page restored from the back/forward cache) reports failures again.
+      let leaving = false;
+      let leaveTimer, pendingLeave, resolveLeave;
+      const finishLeave = (didLeave) => {
+        clearTimeout(leaveTimer);
+        leaving = didLeave;
+        resolveLeave?.(didLeave);
+        pendingLeave = undefined;
+        resolveLeave = undefined;
+      };
+      addEventListener("beforeunload", () => {
+        if (leaving || pendingLeave) return;
+        pendingLeave = new Promise((resolve) => { resolveLeave = resolve; });
+        leaveTimer = setTimeout(() => finishLeave(false), 1000);
+      });
+      addEventListener("pagehide", () => finishLeave(true));
+      addEventListener("pageshow", () => finishLeave(false));
       const original = window.fetch;
       window.fetch = async function (...args) {
         const input = args[0], url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, location.href);
@@ -260,7 +284,14 @@ try {
           const response = await original.apply(this,args);
           if (entry) response.clone().text().then(() => {entry.done=true;},() => {entry.done=true;});
           return response;
-        } catch(error) {if(entry)entry.done=true;throw error;}
+        } catch(error) {
+          if (entry) {
+            const didLeave = leaving || (pendingLeave ? await pendingLeave : false);
+            entry.done = true;
+            if (didLeave) return new Promise(() => {});
+          }
+          throw error;
+        }
       };
     });
     const newPage = context.newPage.bind(context);
@@ -427,9 +458,12 @@ try {
   });
   await owner.getByLabel("What do you want to do?").selectOption("sales");
   await owner.getByLabel("Find a campaign").fill("digital toolkit");
-  await owner.getByRole("button", { name: "See the journey and what you need", exact: true }).click();
+  // Each journey button names its campaign for assistive technology after its visible words (#3799, WCAG 2.4.6).
+  const journey = owner.getByRole("button", { name: /^See the journey and what you need\s*: \S/ });
+  is("the one matching campaign's journey button names it", await journey.count(), 1);
+  await journey.click();
   is("campaign requirements come from the actual bundle", await owner.getByText("Your download or toolkit (paid)", { exact: true }).isVisible(), true);
-  is("the journey is keyboard accessible", await owner.getByRole("button", { name: "Hide the journey", exact: true }).getAttribute("aria-expanded"), "true");
+  is("the journey is keyboard accessible", await owner.getByRole("button", { name: /^Hide the journey\s*: \S/ }).getAttribute("aria-expanded"), "true");
   await owner.getByLabel("Find a campaign").fill("no-such-campaign");
   is("unmatched search can be reset", await owner.getByText("No campaigns match these filters.", { exact: true }).isVisible(), true);
   await owner.getByRole("button", { name: "Show all campaigns", exact: true }).click();
@@ -563,7 +597,7 @@ try {
     is(`copy page at ${width}: axe`, await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"] } })).violations.map((v) => v.id)), []);
     await open(page, `${LOCAL}/studio/funnels`);
     await page.getByLabel("Find a campaign").fill("launch waitlist");
-    await page.getByRole("button", { name: "See the journey and what you need", exact: true }).click();
+    await page.getByRole("button", { name: /^See the journey and what you need\s*: \S/ }).click();
     const nextAtWidth=page.locator('details[aria-label="Suggested next funnel check"]').first();
     await nextAtWidth.locator("summary").click();
     // Stress a long unbroken customer title at the actual mobile and desktop widths.

@@ -37,6 +37,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMMAND, DB_BYTE, DB_BYTE_MONTH, ORDER_COST, ORDER_LIBRARY, PER_PAYMENT_LINES, UNIT_COST, closureCost, exportCommands, exportCost, nonPayingWorst } from "./plan-cost-registry";
 import { FAMILIES, lifetimeByteMonths, partAverage } from "./store-data-registry";
+import { MAX_TEAM } from "@/lib/team";
+import { STORE_LOCK_TRIES } from "@/lib/read-ceilings";
+import { PLAN_RUNS_READ_COMMANDS, PREPARE_COMMANDS } from "./plan-cost-registry";
 
 test("a closing's worst cost, part by part, for each plan and for a free trial", () => {
   for (const tier of TIERS) {
@@ -91,7 +94,7 @@ test("an export a paying store takes from its studio figure costs no more than t
 test("once a plan has ended, its whole exports are its own: counted for the store, never refused for want of a figure or a place, and priced in its closing", () => {
   const route = readFileSync(join(process.cwd(), "app/api/store/export/route.ts"), "utf8");
   const ended = route.slice(route.indexOf('if (standingOf(store) === "ended")'), route.indexOf("} else {", route.indexOf('if (standingOf(store) === "ended")')));
-  assert.ok(ended.includes("ENDED_STORE_EXPORTS") && ended.includes("INCR"), "counted for the store");
+  assert.ok(ended.includes("ENDED_STORE_EXPORTS") && ended.includes("windowCount("), "counted for the store"); // INCR, then EXPIRE NX (lib/window-count.ts)
   assert.ok(!ended.includes("takeAllowance") && !ended.includes("admitNonPaying"), "never from a figure or the share of stores that pay nothing");
   assert.ok(ENDED_STORE_EXPORTS >= 1);
   for (const tier of TIERS) assert.equal(closureCost(tier).exports, ENDED_STORE_EXPORTS * exportCost(DATA_ROOM_BYTES[tier] + 1_000_000));
@@ -101,4 +104,85 @@ test("the walk, the company's: what it costs a walk for every million keys the d
   const perWalk = (1_000_000 / WALK_COUNT) * COMMAND + 1_000_000 * 80 * DB_BYTE;
   console.log(`a walk reads a million keys for $${perWalk.toFixed(4)}; at one a day, $${(31 * perWalk).toFixed(3)} a month for every million keys`);
   assert.ok(perWalk < 0.01);
+});
+
+test("a closing's last steps pay for the record's going under the store's lock, its read again and the entry written again", () => {
+  const source = readFileSync(join(process.cwd(), "lib/store.ts"), "utf8");
+  const close = source.slice(source.indexOf("export async function closeStoreRecord"), source.indexOf("export type RenameResult"));
+  // The lock is the store's own, tried again for LOCK_WAIT_MS (8 seconds): at most STORE_LOCK_TRIES, as ensureListId's.
+  assert.match(close, /takeLock\(lockKeyOf\(owner\), LOCK_SECONDS, LOCK_WAIT_MS\)/);
+  assert.match(source, /const LOCK_WAIT_MS = 8_000;/);
+  assert.match(close, /\["GET", owner\]/);
+  // The record's closing (its addresses held back, its id and places released, the record deleted) in steps fenced by the lock (#3156 on #3643).
+  assert.match(close, /applyIfHeld\(held, changes\)/);
+  assert.match(close, /releaseLock\(held\)/);
+  // Its id leaves the account's list at both addresses read: one more SREM than the first read's (Claude 6 on #3643).
+  // The id is the record's own: a store from before ids given one while it closes releases that one (Claude 7 on #3643).
+  assert.match(close, /const sid = sameLegacy && fresh \? fresh\.sid : store\.sid;/);
+  assert.match(close, /\{ op: "SREM", key: account, words: \[sid\] \}/);
+  const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
+  // The lock's tries, the GET, the entry's HSET again, the second account's SREM, the fenced delete's script (EVAL, GET,
+  // DEL) and the release's (EVAL, GET, DEL), and the walk's own read of the record before it starts (one GET per entry,
+  // startableBatch: Codex L, Codex P and Claude 2 cloud L on #3643).
+  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3 + 1, `last steps priced at ${PREPARE_COMMANDS} commands`);
+  const walkStart = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const startable = walkStart.slice(walkStart.indexOf("async function startableBatch"), walkStart.indexOf("async function moveBack"));
+  assert.match(startable, /storeRecordAt\(entry\.ref\)/);
+  assert.doesNotMatch(startable, /for \(let tries/);
+});
+
+test("a running plan's place in the final closing line is read once before a store is prepared, and priced (Claude 5 on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const prepare = source.slice(source.indexOf("export async function prepareStore"), source.indexOf("export const DELETE_SETTLES_MS"));
+  // One ZSCORE, only for a plan that reads running, before anything of the store is touched; the lock's check reads the
+  // record closeStoreRecord already read and the ZREM's own answer, with no command of its own.
+  assert.equal(prepare.match(/\["ZSCORE", FINAL_INDEX, ref\]/g)?.length, 1);
+  assert.ok(prepare.indexOf("planRuns(store, now)") < prepare.indexOf("readTeam("), "read before anything is touched");
+  assert.match(prepare, /planRuns\(fresh, now\) && finalGone !== 1/);
+  assert.equal(PLAN_RUNS_READ_COMMANDS, 1);
+  const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
+  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3 + 1 + PLAN_RUNS_READ_COMMANDS, `priced at ${PREPARE_COMMANDS} commands`);
+});
+
+test("an entry taken out, with another store at the key, costs no more than the record's going it replaces (Revisor 2 on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const tries = Number(source.match(/const WITHDRAW_TRIES = (\d+);/)?.[1]);
+  assert.ok(Number.isInteger(tries) && tries >= 1, "WITHDRAW_TRIES is read from lib/closed-store-data.ts");
+  // Each try is one script (EVAL, HGET, HDEL), priced as the fenced delete's is. With another store at the key none of
+  // the record's going runs, and each is priced in PREPARE_COMMANDS: at least one address held back (SET), the id's
+  // DEL, its SREM at both accounts, the ZREM and SREM of the company's lists, the entry's HSET again and the fenced
+  // delete's script (EVAL, GET, DEL).
+  const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
+  assert.ok(tries * 3 <= replaced, `${tries} tries (${tries * 3} commands) priced inside the ${replaced} they replace`);
+});
+
+test("an entry whose record is still there at the walk's start costs no more than the record's going it replaces (Claude 7's LEVE on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const startable = source.slice(source.indexOf("async function startableBatch"), source.indexOf("async function moveBack"));
+  // Its own record still there: one WITHDRAW_ENTRY script (EVAL, HGET, HDEL) and one ZADD back in line, never retried
+  // within the run; it is then prepared again on a later run, the preparation already priced in PREPARE_COMMANDS.
+  assert.match(startable, /\["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw\]/);
+  assert.match(startable, /\["ZADD", DUE_KEY, "NX", now, entry\.ref\]/);
+  // Another store's record there (ALTO 1): one REWRITE_ENTRY script (EVAL, HGET, HSET), once, and no preparation at all.
+  assert.match(startable, /\["EVAL", REWRITE_ENTRY, 1, BATCH_KEY, field, raw, next\]/);
+  assert.match(startable, /if \(entry\.marksOnly\) continue;/);
+  assert.doesNotMatch(startable, /for \(let tries/);
+  // Either way the record's going did not land, so the commands of it that did not run (as in the tests above) cover it.
+  const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
+  const own = 3 + 1;
+  const other = 3;
+  assert.ok(Math.max(own, other) <= replaced, `${own} or ${other} commands priced inside the ${replaced} they replace`);
+});
+
+test("a pending entry is taken out by the idle pass at one script a run, inside the record's going it replaces (Codex on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const tries = Number(source.match(/const WITHDRAW_TRIES = (\d+);/)?.[1]);
+  const pending = source.slice(source.indexOf("async function withdrawPending"), source.indexOf("export async function eraseClosed"));
+  // One WITHDRAW_ENTRY script (EVAL, HGET, HDEL) per pending entry, never retried within the run.
+  assert.match(pending, /\["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw\]/);
+  assert.doesNotMatch(pending, /for \(let tries/);
+  // With another store at the key, the preparation's tries and the idle pass's one script of that same run stay inside
+  // the commands of the record's going that do not run (as in the test above).
+  const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
+  assert.ok((tries + 1) * 3 <= replaced, `${tries} tries and one idle script (${(tries + 1) * 3} commands) priced inside the ${replaced} they replace`);
 });

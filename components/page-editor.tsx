@@ -8,8 +8,9 @@ import { pasteExceedsLimit } from "@/lib/paste-limit";
 import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
+import { PageTime } from "@/components/page-time";
 
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -18,7 +19,9 @@ import { IMAGE_ACCEPT, MAX_ALT_LENGTH, MAX_SOURCE_BYTES, imagePath, imageUrl } f
 import { Icon } from "@/components/icons";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { toast } from "@/components/toast";
-import { AiAssist, AiOn } from "@/components/ai-assist";
+import { AiOn } from "@/components/ai-assist";
+import { AiStepsAssist } from "@/components/ai-steps-assist";
+import { pageSteps } from "@/lib/ai-steps";
 import { TranslatePage } from "@/components/translate-page";
 import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
@@ -353,6 +356,12 @@ export function PageEditor({
   const [reach, setReach] = useState<{ shares: Record<string, number>; visitors: number } | null>(null);
   // What stopped measured visitors, how far the video was watched, and whether the page asks (components/page-answers.tsx).
   const [answers, setAnswers] = useState<{ whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; asking: boolean } | null>(null);
+  // How long measured visitors stayed (639 [GL7](25)), in ranges.
+  const [stay, setStay] = useState<{ words: string; count: number; share: number }[] | null>(null);
+  // Set when this month's readings went past their ceiling, so the time and depth are partial (lib/page-read.ts).
+  const [partial, setPartial] = useState<{ counted: number; opens: number; resumed?: boolean } | "unknown" | null>(null);
+  // Set when the time record could not be read: said, never shown as no stays (lib/page-depth.ts).
+  const [stayUnread, setStayUnread] = useState(false);
   // The key the page's blocks and earlier versions are kept under.
   const pageKey = site ? `site-${site.id}` : product.id;
   useEffect(() => {
@@ -360,7 +369,11 @@ export function PageEditor({
     let live = true;
     fetch(`/api/store/depth?id=${encodeURIComponent(product.id)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((data: { ok?: boolean; shares?: Record<string, number>; visitors?: number; whyNot?: Partial<Record<WhyNot, number>>; videos?: Record<string, VideoReach>; asking?: boolean }) => {
+      .then((data: { ok?: boolean; shares?: Record<string, number>; visitors?: number; whyNot?: Partial<Record<WhyNot, number>>; videos?: Record<string, VideoReach>; asking?: boolean; time?: { words: string; count: number; share: number }[]; timeUnread?: boolean; partial?: { counted: number; opens: number; resumed?: boolean } | "unknown" | null }) => {
+        if (live && data.ok && Array.isArray(data.time)) setStay(data.time);
+        if (live && data.ok && data.timeUnread === true) setStayUnread(true);
+        if (live && data.ok && data.partial === "unknown") setPartial("unknown");
+        else if (live && data.ok && data.partial && data.partial !== "unknown" && Number.isSafeInteger(data.partial.counted) && Number.isFinite(data.partial.opens)) setPartial(data.partial);
         if (live && data.ok && data.shares) setReach({ shares: data.shares, visitors: data.visitors ?? 0 });
         if (live && data.ok) setAnswers({ whyNot: data.whyNot ?? {}, videos: data.videos ?? {}, asking: data.asking === true });
       })
@@ -567,6 +580,20 @@ export function PageEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  // The focus through the clear question (WCAG 2.4.3): opening it puts the focus on Keep it, the choice that changes
+  // nothing; Keep it puts it back on Clear the page. After Yes, clear it, focusAfterClear sends it on instead.
+  const clearKeep = useRef<HTMLButtonElement>(null);
+  const clearOpen = useRef<HTMLButtonElement>(null);
+  const clearBack = useRef(false);
+  // The question's own id, unique per editor, so a second editor on one screen never names its group by this one's.
+  const clearQuestionId = useId();
+  useEffect(() => {
+    if (confirmClear) clearKeep.current?.focus();
+    else if (clearBack.current) {
+      clearBack.current = false;
+      clearOpen.current?.focus();
+    }
+  }, [confirmClear]);
   // Which template the empty page would start from, and the block being dragged.
   const templates = site ? [] : PAGE_TEMPLATES.filter((t) => t.free === product.free);
   const [dragged, setDragged] = useState<number | null>(null);
@@ -2335,6 +2362,8 @@ export function PageEditor({
             />
           ) : null}
 
+          {stay || stayUnread ? <PageTime ranges={stay ?? []} least={MIN_DEPTH_VISITORS} partial={partial} unread={stayUnread} /> : null}
+
           {answers && !product.free ? (
             <PageAnswers
               whyNot={answers.whyNot}
@@ -2359,22 +2388,37 @@ export function PageEditor({
           */}
           {site ? null : (
           <div className="mt-6">
-            <AiAssist<DraftCopy>
+            <AiStepsAssist<DraftCopy>
               title="Write the whole page with AI"
               hint={`A full draft — headline, what the buyer gets, what is inside, questions and buttons — from ${product.title}'s name, price and description. Add anything else it should know below, or leave the box empty. It replaces the blocks here; nothing is saved until you press Save.`}
               placeholder="Who it is for, what makes it different, what buyers ask you most. Your refund promise, if you have one."
               allowEmpty
               payload={() => ({ kind: "page", product: product.id, readFile: product.pdf === true && readFile })}
+              steps={pageSteps(product.pdf === true && readFile)}
               extra={
-                product.pdf ? (
-                  <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-ink">
-                    <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-violet-brand" checked={readFile} onChange={(e) => setReadFile(e.target.checked)} />
-                    <span>
-                      <span className="font-semibold">{`Read the first ${READ_PDF_PAGES} pages of ${product.title}'s PDF too`}</span>
-                      <span className="block text-ink-soft">{`So \u201cWhat's inside\u201d lists its real contents. Takes ${1 + READ_PDF_JOBS} of your writing jobs instead of 1. Only those pages are read, and nothing is kept.`}</span>
-                    </span>
-                  </label>
-                ) : undefined
+                product.pdf
+                  ? (busy: boolean) => (
+                      // Unavailable while a draft is being written: the run was sent with this choice, and its steps and Stop
+                      // follow it (Claude 5 on #3435, MEDIUM). aria-disabled, not disabled, so focus is never dropped; the
+                      // words keep their colors and nothing moves.
+                      <label className={`flex min-h-11 items-start gap-3 text-sm text-ink ${busy ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-violet-brand"
+                          checked={readFile}
+                          aria-disabled={busy}
+                          onChange={(e) => {
+                            if (!busy) setReadFile(e.target.checked);
+                          }}
+                        />
+                        <span>
+                          <span className="font-semibold">{`Read the first ${READ_PDF_PAGES} pages of ${product.title}'s PDF too`}</span>
+                          <span className="block text-ink-soft">{`So \u201cWhat's inside\u201d lists its real contents. Takes ${1 + READ_PDF_JOBS} of your writing jobs instead of 1. Only those pages are read, and nothing is kept.`}</span>
+                          {busy ? <span className="sr-only"> This cannot be changed while the draft is being written.</span> : null}
+                        </span>
+                      </label>
+                    )
+                  : undefined
               }
               onResult={(draft) => {
                 const page = blocksFromDraft(draft, Boolean(product.picture));
@@ -2870,17 +2914,27 @@ export function PageEditor({
         ) : null}
         {initial.blocks.length > 0 && !dirty && !site ? (
           confirmClear ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              Back to the plain page?
+            <span role="group" aria-labelledby={clearQuestionId} className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+              <span id={clearQuestionId}>
+                Back to the plain page?
+              </span>
               <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>
                 Yes, clear it
               </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
+              <button
+                ref={clearKeep}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  clearBack.current = true;
+                  setConfirmClear(false);
+                }}
+              >
                 Keep it
               </button>
             </span>
           ) : (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
+            <button ref={clearOpen} type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
               Clear the page
             </button>
           )
@@ -2962,6 +3016,7 @@ function RowEditor({
   // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
   // begun in an earlier drawing of the row keeps its place (lib/row-edit-rules.ts, shiftHeld).
   const mine = useRef([0, 0, 0]);
+  // oxlint-disable-next-line react/refs -- initial state copied once from a constant ref value; pre-existing and not flagged by the former ESLint React Compiler rule
   const [mineShown, setMineShown] = useState(mine.current);
   // Whether this drawing is still on screen, so what happens after it closed is said by the page editor instead.
   const drawn = useRef(true);

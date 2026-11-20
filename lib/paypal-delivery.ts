@@ -9,15 +9,17 @@
 import { createHmac } from "node:crypto";
 import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
-import { dropEnrollment, recordEnrollment } from "@/lib/learn";
+import { dropEnrollment, recordOpenEnrollment } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { forgetBoughtCommands } from "@/lib/buyer-library";
 import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
-import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_OPEN_ORDER_SECONDS, type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
+import { tellCanceled } from "@/lib/paypal-cancel";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
-import { type Store, ensureListId, storeRef } from "@/lib/store";
+import { type Store, ensureListId, forgetPayPalPast, storeRef } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
@@ -74,23 +76,43 @@ export const RECEIPT_TRIES_AT_MOST = (() => {
   return tries;
 })();
 
+/** What follows the first try's time on receiptTryKey once the receipt was accepted and the order kept only for its webhook event. */
+const SENT_SUFFIX = ":sent";
+
 /**
  * Whether a receipt may be sent now, before anything of it is: the time of its first try, kept on its first ask (SET NX,
  * read back by the same pipeline's GET), and no for a try at or past RECEIPT_RETRY_SECONDS after it, or for a payment
- * RECEIPT_MARK_SECONDS old. Throws UnknownReplyError when a reply is not exactly what those commands answer (CX-123
- * rule 24): nothing is sent, and the order stays on the list.
+ * RECEIPT_MARK_SECONDS old. `sent` when an earlier try's receipt was accepted and the order stayed on the list only for
+ * its webhook event (markReceiptSent): no receipt is sent again. Throws UnknownReplyError when a reply is not exactly
+ * what those commands answer (CX-123 rule 24): nothing is sent, and the order stays on the list.
  */
-async function receiptMayGo(paid: Paid, now: number): Promise<{ go: boolean; firstAt: number }> {
-  if (now >= paid.at + RECEIPT_MARK_SECONDS) return { go: false, firstAt: paid.at };
+async function receiptMayGo(paid: Paid, now: number): Promise<{ go: boolean; firstAt: number; sent: boolean }> {
+  if (now >= paid.at + RECEIPT_MARK_SECONDS) return { go: false, firstAt: paid.at, sent: false };
   const key = receiptTryKey(paid.order);
   const replies = repliesFor(await redisPipeline([["SET", key, String(now), "NX", "EX", RECEIPT_MARK_SECONDS], ["GET", key]]), 2);
   const kept = replies?.[1];
-  if (!replies || (replies[0] !== "OK" && replies[0] !== null) || typeof kept !== "string" || !/^[0-9]{1,12}$/.test(kept)) {
+  const read = typeof kept === "string" ? /^([0-9]{1,12})(:sent)?$/.exec(kept) : null;
+  if (!replies || (replies[0] !== "OK" && replies[0] !== null) || !read) {
     throw new UnknownReplyError("a PayPal receipt's first try");
   }
-  const firstAt = Number(kept);
-  if (replies[0] === "OK" && firstAt !== now) throw new UnknownReplyError("a PayPal receipt's first try");
-  return { go: now < firstAt + RECEIPT_RETRY_SECONDS, firstAt };
+  const firstAt = Number(read[1]);
+  if (replies[0] === "OK" && kept !== String(now)) throw new UnknownReplyError("a PayPal receipt's first try");
+  return { go: now < firstAt + RECEIPT_RETRY_SECONDS, firstAt, sent: read[2] === SENT_SUFFIX };
+}
+
+/**
+ * Notes on receiptTryKey that the order's receipt was accepted, when the order stays on the list only because its
+ * webhook event is still owed (issue #3937), so its next try sends no receipt again (receiptMayGo). XX: a mark gone is
+ * never made again; never kept past RECEIPT_MARK_SECONDS after the payment. A write that fails or is not confirmed only
+ * means the next try asks the sender again, under the same idempotency key and the one sender kept for it.
+ */
+async function markReceiptSent(paid: Paid, firstAt: number, now: number): Promise<void> {
+  const seconds = paid.at + RECEIPT_MARK_SECONDS - now;
+  if (seconds <= 0) return;
+  const replies = await redisPipeline([["SET", receiptTryKey(paid.order), `${firstAt}${SENT_SUFFIX}`, "XX", "EX", seconds]]).catch(() => null);
+  if (!Array.isArray(replies) || replies[0] !== "OK") {
+    console.error("a PayPal receipt accepted could not be noted as sent; its next try asks the sender again under the same key", paid.order);
+  }
 }
 
 /**
@@ -176,8 +198,9 @@ return {written and 1 or 0, redis.call("GET", KEYS[1])}`;
  * The store's list id, where the prints of its deleted people are kept (lib/suppression.ts). A store from before lists
  * is given its list first (ensureListId, as an erasure does), so a deletion is always checked where it is written.
  * Throws UnknownReplyError when the store does not read: nothing of the order is handed over, and it stays owed.
+ * Also read by the sweep's pass over PayPal orders whose affiliate link is pending (lib/affiliates.ts notePayPalPendings).
  */
-async function deletionListId(store: Store): Promise<string> {
+export async function deletionListId(store: Store): Promise<string> {
   const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
   if (!listId) throw new UnknownReplyError("the store's list, to check a deletion before a PayPal hand-over");
   return listId;
@@ -191,7 +214,7 @@ async function deletionListId(store: Store): Promise<string> {
  * is none, or when they were deleted before they paid again. One HGET, read exactly (CX-123 rule 24): nothing, or a
  * time in seconds; any other reply throws UnknownReplyError, so nothing of them is written and the order stays owed.
  */
-async function erasedSincePaid(listId: string, paid: Paid, own = false): Promise<boolean> {
+export async function erasedSincePaid(listId: string, paid: Paid, own = false): Promise<boolean> {
   const field = own ? ownErasureField(listId, paid.email) : suppressionPrint(listId, paid.email);
   const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), field]]), 1);
   const mark = replies?.[0];
@@ -349,6 +372,42 @@ async function handedOver(statsId: string, order: string): Promise<void> {
 }
 
 /**
+ * A PayPal sale whose affiliate or partner credit failed after it was handed over (an unknown read of the affiliate,
+ * rule 24, or Redis trouble): kept in the same list as `credit:<order>`, so the sweep credits it again from the paid
+ * record (creditAgain), never by handing the order over or emailing the buyer twice. Its own read is the one the list
+ * already costs a sweep. Best effort, as the hand-over's own retry mark is.
+ */
+const CREDIT_PREFIX = "credit:";
+async function oweCredit(store: Store, order: string, error: unknown): Promise<void> {
+  console.error("crediting a PayPal sale failed; credited again at the next sweep", order, error);
+  if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), dueNow(), `${CREDIT_PREFIX}${order}`]]).catch(() => undefined);
+}
+
+/** Credits again a sale kept by oweCredit; true once it is credited or there is nothing left to credit. Throws while unknown. */
+async function creditAgain(store: Store, order: string): Promise<boolean> {
+  const paid = await readPaidExact(order);
+  if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
+  // Erased, or past its time: nothing left to credit from.
+  if (paid === null) return true;
+  // The person deleted from the store at their own request since paying: credited for the sale paid, with nothing that
+  // names them (no bond), as the hand-over does (Claude 1 cloud, MEDIUM on #3858). An unknown mark throws: the credit
+  // stays owed for the next sweep, never made on a guess (rule 24).
+  const listId = await deletionListId(store);
+  const erased = await erasedSincePaid(listId, paid, true);
+  const product = await readListing(store, paid.product);
+  await creditPayPalSale(store, paid, product?.title ?? "", !erased);
+  // Read once more after the bond, as the hand-over does (Claude 6, MEDIUM on #3858): a deletion that wrote its mark
+  // between the read above and the bond did not see that bond, so it is taken back here. Also when the first read said
+  // erased, so a bond an earlier try wrote before stopping is taken back too. One HGET a try; the forget's reply is
+  // read exactly, and anything but 0 or 1 throws, so the credit stays owed for the next sweep (rule 24).
+  if (paid.via && store.statsId && (erased || (await erasedSincePaid(listId, paid, true)))) {
+    const replies = repliesFor(await redisPipeline([forgetBondCommand(store.statsId, paid.email, paid.via.aff)]), 1);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("taking back the bond of a person deleted during a PayPal credit's retry");
+  }
+  return true;
+}
+
+/**
  * Gives the buyer what they paid for and emails the receipt. False when the product is gone (Redis answered that
  * its record is not there). Everything it hands over is read first, a bundle's products too; a read that is
  * unknown throws before anything is handed over, and the order is kept for the sweep to hand over, never taken
@@ -362,8 +421,17 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
   return (await handOver(store, paid)) !== "gone";
 }
 
-/** handOverPayPal, saying whether the order left the list handed over, its product gone, or its receipt still owed. */
-async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "receipt owed"> {
+/**
+ * handOverPayPal, saying whether the order left the list handed over, its product gone, or its receipt or its webhook
+ * event still owed. A "sale.completed" emitEvent could not record (it throws so its caller tries again: its once-only
+ * mark unknown, or its deliveries not written) keeps the order on the list as a receipt not accepted does, due again at
+ * receiptDue and only inside RECEIPT_RETRY_SECONDS after the receipt's first try (issue #3937). A receipt already
+ * accepted is noted so (markReceiptSent) and not asked of the sender again; the event's id is made from the order, so
+ * it is recorded once whatever the tries. A person deleted at their own request is checked on every try, the first
+ * and each one again, before and after the hand-over's writes (erasedSincePaid, own), so one deleted between tries is
+ * never written back nor told to the webhooks.
+ */
+async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "owed"> {
   let product: Listing | null;
   let bundled: Map<string, Listing>;
   try {
@@ -400,8 +468,8 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
   const base = storeBase(store);
   // What receiptMayGo answered, when the receipt was asked about (not when the hand-over stopped before it), and
   // whether the receipt was refused because its person was deleted from the store at or after the payment.
-  const asked: { window: { go: boolean; firstAt: number } | null; erased: boolean } = { window: null, erased: false };
-  const receipted = await deliverPayPal({
+  const asked: { window: { go: boolean; firstAt: number; sent: boolean } | null; erased: boolean } = { window: null, erased: false };
+  const receiptedNow = await deliverPayPal({
     store,
     paid,
     product,
@@ -409,13 +477,13 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     from: fromStore(store),
     recordStart: async (email, productId, start) => {
       const course = productId === product.id ? product : bundled.get(productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
     },
     ordersLink: (email) => receiptLink(store, email, base, paid.order),
     mayEmail: async () => {
       if (!isRedisConfigured()) return true;
       asked.window = await receiptMayGo(paid, Math.floor(Date.now() / 1000));
-      return asked.window.go;
+      return asked.window.go && !asked.window.sent;
     },
     // deliverPayPal makes no receipt without a stats id; with none, nothing could be noted for deletion, and none is kept.
     keep: async (receipt) => {
@@ -425,7 +493,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
       return null;
     },
   });
-  await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
+  await creditPayPalSale(store, paid, product.title).catch((error) => oweCredit(store, paid.order, error));
   // The person's own deletion completed during this try, after its check (finding 3): what the try wrote of them is
   // taken back, the webhooks are not told, and the order leaves the list. Read once more, after every write that names
   // them (the bond last), so a deletion that writes its mark after this read deletes those writes itself. One HGET a try.
@@ -435,7 +503,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     await handedOver(store.statsId, paid.order);
     return "handed";
   }
-  await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
+  const told = await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
     paypal_order: paid.order,
     paypal_capture: paid.capture,
     paid_with: "paypal",
@@ -448,21 +516,35 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     buyer: { email: paid.email, name: null },
     channel: paid.meta?.channel ?? null,
     paid_at: new Date(paid.at * 1000).toISOString(),
-  }, paid.at * 1000).catch((error) => console.error("telling the webhooks of a PayPal sale failed", error));
+  }, paid.at * 1000).then(
+    () => true,
+    (error) => {
+      console.error("telling the webhooks of a PayPal sale failed", error);
+      return false;
+    },
+  );
   if (!store.statsId) return "handed";
   const window = asked.window;
-  if (receipted || !window?.go || asked.erased) {
+  // An earlier try's receipt accepted, the order kept only for its event, counts as accepted.
+  const receipted = receiptedNow || window?.sent === true;
+  // Tried again only inside the receipt's window, and never for a person deleted from the store, as their receipt.
+  const eventOwed = !told && !asked.erased && window?.go === true;
+  if ((receipted || !window?.go || asked.erased) && !eventOwed) {
     if (asked.erased) console.error("a PayPal purchase's person was deleted from the store; its receipt is not kept or sent, and not tried again", store.handle, paid.order);
     else if (!receipted) console.error("a PayPal purchase's receipt was not accepted within its retry window; no longer tried", store.handle, paid.order);
+    if (!told) console.error("WEBHOOK EVENT LOST: a PayPal sale could not be told to the store's webhooks within its retry window; no longer tried", store.handle, paid.order);
     await handedOver(store.statsId, paid.order);
-  } else {
+  } else if (window) {
     // Still in the list since settle wrote it: this only sets when it is due again (receiptDue; the list's score is
     // the due time less the grace handOverAgain waits). XX: one a concurrent run took out is not put back. A ZADD that
     // fails leaves it due as it was; its next try is still held to the window (receiptMayGo).
-    console.error("a PayPal purchase's receipt was not accepted; tried again later", store.handle, paid.order);
-    const due = receiptDue(window.firstAt, Math.floor(Date.now() / 1000)) - HAND_OVER_GRACE_SECONDS;
+    const now = Math.floor(Date.now() / 1000);
+    if (eventOwed) console.error("a PayPal sale could not be told to the store's webhooks; tried again later", store.handle, paid.order);
+    if (!receipted) console.error("a PayPal purchase's receipt was not accepted; tried again later", store.handle, paid.order);
+    else if (receiptedNow) await markReceiptSent(paid, window.firstAt, now);
+    const due = receiptDue(window.firstAt, now) - HAND_OVER_GRACE_SECONDS;
     await redisPipeline([["ZADD", handOverKey(store.statsId), "XX", String(due), paid.order]]).catch(() => undefined);
-    return "receipt owed";
+    return "owed";
   }
   return "handed";
 }
@@ -484,6 +566,15 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
   let handed = 0;
   for (const order of orders) {
     if (Date.now() >= deadline) break;
+    if (order.startsWith(CREDIT_PREFIX)) {
+      try {
+        if (await creditAgain(store, order.slice(CREDIT_PREFIX.length))) await redisPipeline([["ZREM", key, order]]);
+      } catch (error) {
+        console.error("crediting a PayPal sale again failed; tried again at the next sweep", store.handle, order, error);
+        await redisPipeline([["ZADD", key, dueNow(), order]]).catch(() => undefined);
+      }
+      continue;
+    }
     try {
       const paid = await readPaidExact(order);
       if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
@@ -500,8 +591,9 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
         await redisPipeline([["ZREM", key, order]]);
         continue;
       }
-      // Handed over with its receipt accepted, or its product gone: handOver takes it out of the list. Its receipt
-      // not accepted: kept and tried again later, inside RECEIPT_RETRY_SECONDS, and not counted as handed over yet.
+      // Handed over with its receipt accepted and its sale told to the webhooks, or its product gone: handOver takes it
+      // out of the list. Its receipt not accepted or its event not recorded: kept and tried again later, inside
+      // RECEIPT_RETRY_SECONDS, and not counted as handed over yet.
       if ((await handOver(store, paid)) === "handed") handed += 1;
     } catch (error) {
       // Still unknown: kept, moved behind the others, tried at the next sweep (XX: one a concurrent run took out is not
@@ -518,7 +610,26 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
  * whose product could not be read handed over (counted as cleared).
  */
 export async function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number }> {
+  // PayPal disconnected (lib/store.ts, paypalPast): its orders are still answered, but only while some are left on the
+  // store's three lists and within PAYPAL_PAST_SECONDS of the disconnection (three ZCARD in one round trip first,
+  // PAYPAL_PAST_WATCH in tests/plan-cost-registry.ts). With none left, or past the window, the account is forgotten
+  // and the store is no longer swept for PayPal; an unknown count is asked again next run, never taken for "none".
+  // Not before PAYPAL_OPEN_ORDER_SECONDS after the disconnection, though: an order opened just before it is on none of
+  // the lists until its buyer comes back (openOrder keeps it that long), and a payment PayPal holds as pending then
+  // must still be asked about with this account (review of #3924, MEDIUM).
+  if (!store.paypalSeller && store.paypalPast) {
+    const past = store.paypalPast;
+    const left = paypalPastWatched(store) && store.statsId ? await paypalOrdersLeft(store.statsId) : 0;
+    if (left === null) return { cleared: 0, revoked: 0 };
+    if (left === 0) {
+      const openable = paypalPastWatched(store) && Date.now() < past.at + PAYPAL_OPEN_ORDER_SECONDS * 1000;
+      if (!openable) await forgetPayPalPast(storeRef(store), past.at).catch((error) => console.error("forgetting a disconnected PayPal account failed", store.handle, error));
+      return { cleared: 0, revoked: 0 };
+    }
+  }
   const done = await watchPayPal(store, deadline, {
+    // An order PayPal never confirmed: the buyer and the creator are told it is canceled (lib/paypal-cancel.ts).
+    canceled: (order, who) => tellCanceled(store, order, who),
     handOver: async (paid) => {
       await handOverPayPal(store, paid);
     },
@@ -527,7 +638,7 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     // still there, and no email; only for a product that is a course, as handing over does.
     restoreStart: async (email, productId, start) => {
       const course = await readListing(store, productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
     },
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);
@@ -545,9 +656,28 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
         currency: paid.currency,
         buyer: { email: erased ? null : paid.email, name: null },
         refunded_at: new Date().toISOString(),
-      });
+        // Nobody the store deleted at or after the payment is named (R38, rule 30; review of #3491).
+      }, Date.now(), { email: paid.email, paidAt: paid.at });
     },
   });
   done.cleared += await handOverAgain(store, deadline);
   return done;
+}
+
+/**
+ * Tries again, once a run of the five-minute job, the notices of canceled PayPal orders the sender refused, to their
+ * buyers and their creators (lib/paypal-sales.ts, retryCancelNotices): each told from its store as it is now, found by the handle kept with the
+ * order and checked by its stats id. A store that cannot be read is tried again next time; a store that is gone, or is
+ * another store now, leaves nobody to send from, and the page the buyer comes back to still says the order was
+ * canceled.
+ */
+export async function retryPayPalCancelNotices(deadline: number): Promise<number> {
+  return retryCancelNotices(deadline, async (canceled, who) => {
+    // Read exactly (rule 24): a reply out of shape is not "no store". It throws, and retryCancelNotices reads the
+    // throw as "refused", so both notices wait for the next run instead of being dropped for good.
+    const store = await storeForHandleExactly(canceled.handle);
+    if (store === "unknown") throw new UnknownReplyError("the store of a canceled PayPal order");
+    if (store === "none" || store.statsId !== canceled.store) return { buyer: "none", creator: "none" };
+    return tellCanceled(store, canceled, who);
+  });
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
+import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT, INVOICES_UNLINKED_TEXT } from "@/components/affiliate-commission-history";
+import { AffiliateUnconfirmed, type WaitingLine } from "@/components/affiliate-unconfirmed";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
 import { useState } from "react";
@@ -37,6 +38,7 @@ import {
   creatorKeeps,
 } from "@/lib/partner-share";
 import type { Affiliate, AffiliateStatus, HoldFlag, Payout } from "@/lib/affiliates";
+import { MAX_TERM_DAYS, changeOpen, lastDaySeconds, lastDayWords, shareRunning, stepWords, termWords } from "@/lib/partner-terms-rules";
 import { StoreField } from "@/components/studio-store-pin";
 import { LeadReview, type LeadRow, LeadTerms, type LeadTermsState } from "@/components/affiliate-leads-studio";
 import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS, MIN_LEAD_BUDGET_CENTS, MIN_LEAD_CENTS, MIN_LEAD_HOLD_DAYS } from "@/lib/affiliate-lead-rules";
@@ -60,6 +62,11 @@ const MESSAGES: Record<string, string> = {
   share_products: SHARE_PROBLEMS.products,
   share_crowded: SHARE_PROBLEMS.crowded,
   share_committed: SHARE_PROBLEMS.committed,
+  share_ends: `Pick an end date after today and within ${MAX_TERM_DAYS / 365} years, or leave it empty so the share runs until you end it, or they ask you to.`,
+  share_term_held:
+    "This partner was not removed: their share runs to a set end date, and you agreed it would not end before then without their yes. To end it sooner, open their partner share and press End the partnership; it ends once they accept. Or wait until the end date, then remove them.",
+  unsure: "We could not confirm whether this was saved. Reload the page: it shows their share as it stands now.",
+  share_many: SHARE_PROBLEMS.many,
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
   offer_committed: `That store has promised other partners too much of these products since it made this offer: partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. Nothing was saved and the offer is kept. Ask the store to lower a share, then accept again.`,
@@ -77,10 +84,15 @@ const MESSAGES: Record<string, string> = {
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
+  invoices:
+    "Not every membership and plan payment could be read from Stripe just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
+  invoices_ceiling: INVOICES_CEILING_TEXT,
+  invoices_unlinked: INVOICES_UNLINKED_TEXT,
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "This could not be done just now, so nothing was saved. Try again in a moment.",
+  suspended: "Your store is switched off after notices about its content, so it takes no new partners. Nothing was sent. You can invite them once your store is back on.",
   store_full: "Your store is full. Remove something before adding more.",
   server_error: "Something went wrong on our side. Try again in a moment.",
   lead_kind: "Pick what counts as a lead, or no pay per lead.",
@@ -131,18 +143,19 @@ const STATUS_TAG: Record<AffiliateStatus, { label: string; tone: string }> = {
   removed: { label: "Removed", tone: "" },
 };
 
-async function post(payload: Record<string, unknown>): Promise<string | null> {
+/** What a save answered: a problem in words, or none and the state the route reported (a partner's share: started, same, applied or waiting). */
+async function post(payload: Record<string, unknown>): Promise<{ problem: string | null; state: string }> {
   try {
     const response = await fetch("/api/store/affiliates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    if (data.ok) return null;
-    return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; state?: string };
+    if (data.ok) return { problem: null, state: typeof data.state === "string" ? data.state : "" };
+    return { problem: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error, state: "" };
   } catch {
-    return MESSAGES.server_error;
+    return { problem: MESSAGES.server_error, state: "" };
   }
 }
 
@@ -196,6 +209,8 @@ export function AffiliateStudio({
   payouts,
   refundsChecked,
   invoicesChecked = true,
+  invoicesPastCeiling = false,
+  unlinkedInvoices = 0,
   today,
   currency = "usd",
   elsewhere = 0,
@@ -206,6 +221,9 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  unconfirmed = [],
+  unconfirmedTotal = 0,
+  unconfirmedDays = 14,
 }: {
   handle: string;
   setting: AffiliateSetting;
@@ -217,6 +235,10 @@ export function AffiliateStudio({
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked?: boolean;
+  /** Not all read because past what the book can keep between readings (Book.invoicesPastCeiling): reloading will not help. */
+  invoicesPastCeiling?: boolean;
+  /** Paid invoices read whole with no one payment to link them to: no commission on them (Book.unlinkedInvoices). */
+  unlinkedInvoices?: number;
   today: string;
   /** The store's currency: what the totals and new payouts are in. */
   currency?: Currency;
@@ -235,6 +257,10 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** Second-level lines waiting as "buyer not confirmed" (newest first, some), how many in all, and the days the job keeps looking. */
+  unconfirmed?: WaitingLine[];
+  unconfirmedTotal?: number;
+  unconfirmedDays?: number;
 }) {
   const router = useRouter();
   const pending = rows.filter((r) => r.affiliate.status === "pending");
@@ -246,7 +272,11 @@ export function AffiliateStudio({
   // Everyone who can be paid today: what one batch file holds. A sale still
   // inside the wait is owed but not payable, so the two totals differ while
   // anything is clearing.
-  const owedNow = pendingPayoutsChecked ? rows.filter((r) => r.payable > 0 && r.affiliate.status === "approved" && !away.includes(r.affiliate.id)) : [];
+  // Never on a book the batch's confirmation would refuse (app/api/store/affiliates/payout-batch, unsettledBook): a
+  // file paid and then not recorded would come back with the same lines and be paid twice (review of #3378, HIGH).
+  // Nor with a paid invoice left out with its commission not known (Codex X5 and Claude 1 cloud on #3378).
+  const settled = refundsChecked && invoicesChecked && unlinkedInvoices === 0;
+  const owedNow = pendingPayoutsChecked && settled ? rows.filter((r) => r.payable > 0 && r.affiliate.status === "approved" && !away.includes(r.affiliate.id)) : [];
   const batchTotal = owedNow.reduce((sum, r) => sum + r.payable, 0);
   const waitingTotal = rows.reduce((sum, r) => sum + r.waiting, 0);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -297,16 +327,16 @@ export function AffiliateStudio({
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
 
-  async function act(where: string, payload: Record<string, unknown>, confirmation: string): Promise<boolean> {
+  async function act(where: string, payload: Record<string, unknown>, confirmation: string | ((state: string) => string)): Promise<boolean> {
     setBusy(where);
     setError(null);
-    const problem = await post(payload);
+    const { problem, state } = await post(payload);
     setBusy(null);
     if (problem) {
       setError({ where, text: problem });
       return false;
     }
-    toast(confirmation);
+    toast(typeof confirmation === "string" ? confirmation : confirmation(state));
     router.refresh();
     return true;
   }
@@ -355,6 +385,17 @@ export function AffiliateStudio({
             <span className="text-sm text-ink-soft">{`Owed now, in all: ${money(owedTotal, currency)}`}</span>
           </div>
           {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. Your saved records and full export remain available.</p>}
+          {pendingPayoutsChecked && !settled ? (
+            <p className="notice notice-warn mt-5" role="status">
+              {!refundsChecked
+                ? "Stripe could not be asked about every refund just now, so what is owed is not settled. Batch files are off until it is: reload in a moment."
+                : invoicesChecked && unlinkedInvoices > 0
+                  ? INVOICES_UNLINKED_TEXT
+                  : invoicesPastCeiling
+                  ? INVOICES_CEILING_TEXT
+                  : "Not every membership and plan payment could be read from Stripe yet, so what is owed is not settled. Batch files are off until they are: reload in a moment."}
+            </p>
+          ) : null}
           {owedNow.length ? (
             <div className="mt-5 rounded-2xl border border-line bg-paper p-4">
               <h3 className="font-semibold text-ink">Pay everyone at once</h3>
@@ -624,7 +665,9 @@ export function AffiliateStudio({
 
         {leadsTotal > 0 ? <LeadReview leads={leads} total={leadsTotal} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} /> : null}
 
-        <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} />
+        <AffiliateUnconfirmed lines={unconfirmed} total={unconfirmedTotal} days={unconfirmedDays} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} />
+
+        <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} invoicesPastCeiling={invoicesPastCeiling} unlinkedInvoices={unlinkedInvoices} />
 
         {payouts.length ? (
           <section aria-labelledby="payouts-title" className="card p-6 sm:p-8">
@@ -1430,7 +1473,7 @@ function Member({
   row: Row;
   today: string;
   busy: string | null;
-  act: (where: string, payload: Record<string, unknown>, confirmation: string) => Promise<boolean>;
+  act: (where: string, payload: Record<string, unknown>, confirmation: string | ((state: string) => string)) => Promise<boolean>;
   error: React.ReactNode;
   codes: StoreCode[];
   /** Which of those codes this affiliate has, by Stripe's promotion code id. */
@@ -1448,6 +1491,17 @@ function Member({
   const [sharing, setSharing] = useState(false);
   const [percent, setPercent] = useState(affiliate.share ? String(affiliate.share.percent) : "");
   const [shared, setShared] = useState<string[]>(affiliate.share?.products ?? []);
+  // The share's end as a date field reads it: its last day while it still runs, or empty for until ended (630
+  // [HN6](39)). A share already over (by its date, or ended by the store) starts the field empty: a new one is new.
+  // Only read once the form is opened, so the moment it is worked out at is the creator's own.
+  const [ends, setEnds] = useState(() =>
+    affiliate.share?.until && affiliate.share.until > Date.now() / 1000 ? new Date(lastDaySeconds(affiliate.share.until) * 1000).toISOString().slice(0, 10) : "",
+  );
+  // Day-exact: an end is always at a day's start in UTC, and so is `today`.
+  const todaySeconds = Date.parse(`${today}T00:00:00Z`) / 1000;
+  const tomorrow = new Date((todaySeconds + 86400) * 1000).toISOString().slice(0, 10);
+  const waiting = affiliate.terms?.change && changeOpen(affiliate.terms.change, todaySeconds) ? affiliate.terms.change : null;
+  const history = affiliate.terms?.history ?? [];
   const [paying, setPaying] = useState(false);
   const [amount, setAmount] = useState(row.owed > 0 ? moneyField(row.owed, currency) : "");
   const [date, setDate] = useState(today);
@@ -1560,8 +1614,13 @@ function Member({
                 e.preventDefault();
                 const done = await act(
                   where,
-                  { action: "share", id: affiliate.id, percent: Number(percent.trim()), products: shared },
-                  "Partner share saved. It applies to sales from now on.",
+                  { action: "share", id: affiliate.id, percent: Number(percent.trim()), products: shared, ends },
+                  (state) =>
+                    state === "waiting"
+                      ? "Sent to them to accept on their affiliate page. Their current share stays until they say yes; if they do not answer in 30 days, nothing changes."
+                      : state === "same"
+                        ? "Nothing changed: that is the share they already have."
+                        : "Partner share saved. It applies to sales from now on.",
                 );
                 if (done) setSharing(false);
               }}
@@ -1611,6 +1670,23 @@ function Member({
                   })}
                 </ul>
               </fieldset>
+              <label className="mt-3 block" htmlFor={`${where}-ends`}>
+                <span className="field-label">Last day it earns (optional)</span>
+                <input
+                  id={`${where}-ends`}
+                  type="date"
+                  min={tomorrow}
+                  value={ends}
+                  onChange={(e) => setEnds(e.target.value)}
+                  aria-describedby={`${where}-ends-help`}
+                  className="field w-48"
+                />
+                <span id={`${where}-ends-help`} className="mt-1 block text-xs">
+                  {affiliate.share
+                    ? "Empty: it runs until you end it, or they ask you to. Any change to an agreed share, this date included, is sent to them to accept first; until they do, their current share stays."
+                    : "Empty: it runs until you end it, or they ask you to. With a date, it earns on sales through that day, and you cannot end it sooner without their yes."}
+                </span>
+              </label>
               <p className="mt-2 text-xs">
                 {`${MIN_PARTNER_SHARE}% to ${MAX_PARTNER_SHARE}% of what a buyer pays before tax, on every sale of the products you select — whoever brought the buyer. Partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. "You keep" already counts the affiliate commission on that product, and Stripe's fee comes out of your part. They are paid by you, in the same batch as your affiliates, on the same day.`}
               </p>
@@ -1627,15 +1703,24 @@ function Member({
                     className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
                     disabled={busy !== null}
                     onClick={async () => {
+                      let asked = false;
                       const done = await act(
                         where,
                         { action: "share", id: affiliate.id, percent: null },
-                        "Partner share ended. What they already earned stays owed to them.",
+                        (state) => {
+                          asked = state === "waiting";
+                          return asked
+                            ? "It runs to a date you both agreed, so they are asked to agree to end it early. It stays until they say yes."
+                            : "Partner share ended. What they already earned stays owed to them.";
+                        },
                       );
                       if (done) {
                         setSharing(false);
-                        setPercent("");
-                        setShared([]);
+                        if (!asked) {
+                          setPercent("");
+                          setShared([]);
+                          setEnds("");
+                        }
                       }
                     }}
                   >
@@ -1647,7 +1732,7 @@ function Member({
           ) : (
             <p className="mt-1">
               {affiliate.share
-                ? `Takes ${affiliate.share.percent}% of every sale of ${affiliate.share.products.length} ${affiliate.share.products.length === 1 ? "product" : "products"}, whoever brought the buyer. `
+                ? `${shareRunning(affiliate.share, todaySeconds) ? "Takes" : "Took"} ${affiliate.share.percent}% of every sale of ${affiliate.share.products.length} ${affiliate.share.products.length === 1 ? "product" : "products"}, whoever brought the buyer. ${termWords(affiliate.share, todaySeconds)}. `
                 : "No share. A partner earns on every sale of a product, not only the ones they send you — for helping make it, or for lending their audience to it. "}
               <button
                 type="button"
@@ -1658,6 +1743,24 @@ function Member({
               </button>
             </p>
           )}
+          {waiting ? (
+            <p className="notice mt-2" role="status">
+              {waiting.share
+                ? `Waiting for their yes: ${waiting.share.percent}% of ${waiting.share.products.length} ${waiting.share.products.length === 1 ? "product" : "products"}, ${waiting.share.until ? `through ${lastDayWords(waiting.share.until)}` : "until ended"}. `
+                : "Waiting for their yes to end it early. "}
+              {"Their current share stays until then. Save their current share again to take the request back."}
+            </p>
+          ) : null}
+          {history.length ? (
+            <details className="mt-2">
+              <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold text-ink">History of this partnership</summary>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 text-xs">
+                {history.map((step, i) => (
+                  <li key={`${step.at}-${i}`}>{stepWords(step)}</li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
         </div>
       ) : null}
 
@@ -1832,6 +1935,8 @@ function PartnerInvite({
   const [email, setEmail] = useState("");
   const [percent, setPercent] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
+  // An end the partner agrees to with the rest, or empty for until either side ends it (630 [HN6](39)).
+  const [inviteEnds, setInviteEnds] = useState("");
   const share = Number(percent.trim());
 
   if (!open) {
@@ -1859,7 +1964,7 @@ function PartnerInvite({
           e.preventDefault();
           const done = await act(
             "invite",
-            { action: "invite", email: email.trim(), percent: share, products: chosen },
+            { action: "invite", email: email.trim(), percent: share, products: chosen, ends: inviteEnds },
             "Invitation sent. They become a partner when they open it.",
           );
           if (done) {
@@ -1867,6 +1972,7 @@ function PartnerInvite({
             setEmail("");
             setPercent("");
             setChosen([]);
+            setInviteEnds("");
           }
         }}
       >
@@ -1925,6 +2031,21 @@ function PartnerInvite({
             })}
           </ul>
         </fieldset>
+
+        <label className="mt-4 block" htmlFor="partner-ends">
+          <span className="field-label">Last day it earns (optional)</span>
+          <input
+            id="partner-ends"
+            type="date"
+            value={inviteEnds}
+            onChange={(e) => setInviteEnds(e.target.value)}
+            aria-describedby="partner-ends-help"
+            className="field w-48"
+          />
+          <span id="partner-ends-help" className="mt-1 block text-xs text-ink-soft">
+            Empty: it runs until you end it, or they ask you to. With a date, it earns on sales through that day, the email says so, and you cannot end it sooner without their yes.
+          </span>
+        </label>
 
         <p className="mt-3 text-xs text-ink-soft">
           {`The email states the share and the products, and opening it is how they accept — so what you type here is what they are agreeing to. Partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. "You keep" already counts the affiliate commission on that product, and Stripe's fee comes out of your part. A refunded sale earns them nothing.`}

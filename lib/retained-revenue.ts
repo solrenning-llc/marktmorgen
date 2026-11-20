@@ -48,6 +48,27 @@
 export const DISPUTE_TAKES: ReadonlySet<string> = new Set(["needs_response", "under_review", "lost", "prevented"]);
 
 /**
+ * The documented dispute states that take nothing from the creator: an
+ * inquiry (warning_*), a dispute won, and the legacy `charge_refunded`
+ * (see DISPUTE_TAKES). With DISPUTE_TAKES they are every status of stripe-node
+ * v22.6.0 Dispute.Status and the legacy one, the set lib/refunds.ts reads.
+ */
+export const DISPUTE_KEEPS: ReadonlySet<string> = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "won", "charge_refunded"]);
+
+/**
+ * The dispute states that never change again: won and warning_closed gave the
+ * money back or never took it, lost and prevented took it for good, and the
+ * legacy charge_refunded went back through a refund. Every other state, an
+ * inquiry (warning_*) that can still become a chargeback, a dispute the bank
+ * holds (needs_response, under_review) that can still be won, or one that does
+ * not read, can still change, so what it takes is never kept as if final: the
+ * affiliate book's refund mark (lib/affiliates.ts, AFFILIATE_REFUND_MARK) keeps
+ * only what was refunded or taken in a settled state. Statuses: stripe-node
+ * v22.6.0 Dispute.Status.
+ */
+export const DISPUTE_SETTLED: ReadonlySet<string> = new Set(["won", "lost", "prevented", "warning_closed", "charge_refunded"]);
+
+/**
  * Whether a dispute's own balance transactions took money from the creator
  * and did not put it back. Stripe's `prevented` is either a `resolution`,
  * "resolved (refunded) before it could become a chargeback", or a `block`,
@@ -87,12 +108,15 @@ export function disputeMoneyGone(dispute: unknown): boolean | null {
  * Whether one dispute Stripe listed takes the creator's money, for a reader
  * that has the dispute itself (lib/stats.ts). A prevented one by its own
  * money (disputeMoneyGone; null when that cannot be read, so the reader
- * says it is partial instead of guessing); every other status as
- * DISPUTE_TAKES says.
+ * says it is partial instead of guessing); every other documented status as
+ * DISPUTE_TAKES and DISPUTE_KEEPS say; null for a missing or unknown status.
  */
 export function disputeTakes(dispute: { status?: unknown; balance_transactions?: unknown }): boolean | null {
   if (dispute.status === "prevented") return disputeMoneyGone(dispute);
-  return typeof dispute.status === "string" && DISPUTE_TAKES.has(dispute.status);
+  if (typeof dispute.status === "string" && DISPUTE_TAKES.has(dispute.status)) return true;
+  if (typeof dispute.status === "string" && DISPUTE_KEEPS.has(dispute.status)) return false;
+  // A missing or undocumented status is not read as either (CX-123 rule 24).
+  return null;
 }
 
 /** A channel name for a renewal, refund or dispute that no sale read explains. */
@@ -107,8 +131,14 @@ export const DISPUTE_NOTE =
 export type Window = "d7" | "d30" | "d90";
 export const WINDOWS: readonly Window[] = ["d7", "d30", "d90"];
 
-/** One amount in the smallest unit of its currency, with the day (UTC) it was recorded and the channel it is under. */
-export type Entry = { day: string; cents: number; currency: string; source: string };
+/**
+ * One amount in the smallest unit of its currency, with the day (UTC) it was
+ * recorded and the channel it is under. `unconfirmed` marks a refund or
+ * dispute whose payment is not among the store's own payments read: it may
+ * belong to a payment made outside the store (a payment link, another
+ * store), so it is neither taken off the kept total nor left out of it.
+ */
+export type Entry = { day: string; cents: number; currency: string; source: string; unconfirmed?: boolean };
 
 export type Readings = {
   /** Checkouts and one-click extras. Complete when every page was read. */
@@ -164,12 +194,15 @@ const DAY_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
  * of the smallest unit or a currency that is not named. A refund, renewal or
  * dispute is never for nothing, so a zero there is an amount not read too.
  * Such an entry makes the reading incomplete: left out, the money would make
- * the kept figure look exactly like a real one.
+ * the kept figure look exactly like a real one. So does a refund or dispute
+ * in the window marked `unconfirmed`.
  */
 function holdsUnread(entries: Entry[], from: string, positive: boolean): boolean {
   return entries.some((e) => {
     if (typeof e.day !== "string" || !DAY_SHAPE.test(e.day)) return true;
     if (e.day < from) return false;
+    // An adjustment whose origin in the store is not confirmed leaves the kept figure unknown (X8-2325).
+    if (e.unconfirmed) return true;
     return !Number.isSafeInteger(e.cents) || e.cents < (positive ? 1 : 0) || typeof e.currency !== "string" || !e.currency;
   });
 }

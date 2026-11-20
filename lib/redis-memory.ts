@@ -1090,7 +1090,9 @@ export class MemoryRedis {
         // the provider request still exists and its erasure has not begun.
         if (key.startsWith("-- marktmorgen:watch-write-live:v1\n") && args[0] === "2" && args.length === 6) {
           const [, idKey, erasingKey, ref, field, json] = args;
-          if (this.run(["GET", idKey]) !== ref || this.run(["HEXISTS", erasingKey, field]) === 1) return 0;
+          // An empty match: a store kept from before ids, fenced on its owner record existing (Claude 6 on #4888).
+          const live = ref === "" ? this.run(["EXISTS", idKey]) === 1 : this.run(["GET", idKey]) === ref;
+          if (!live || this.run(["HEXISTS", erasingKey, field]) === 1) return 0;
           const commands = JSON.parse(json) as (string | number)[][];
           if (!Array.isArray(commands) || commands.some((command) => !Array.isArray(command) || command.length < 2)) throw new Error("invalid watch writes");
           for (const command of commands) this.run(command);

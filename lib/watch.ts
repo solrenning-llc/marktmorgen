@@ -42,7 +42,7 @@
  */
 import { storeKeysOf } from "@/lib/delivery";
 import { WINDOW_ID, allowanceWindow, calendarWindow } from "@/lib/allowance-window";
-import { ERASING_KEY, erasingField, storeFolder, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeFolder, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -57,12 +57,15 @@ const DUE = "nl:watch:due";
 
 /**
  * Applies one measurement only while the store identity resolved before the
- * video-service request is still live. Store erasure removes the id key first
+ * video-service request is still live: its id key still names this store or, for a store kept from before ids
+ * (sid ""), its owner record still exists (ARGV[1] empty; Claude 6's MEDIUM on #4888). Store erasure removes both first
  * and keeps the erasing field for the walk, so neither a stale service answer
  * nor a stale due snapshot can recreate usage after deletion.
  */
 const WATCH_WRITE_IF_LIVE = `-- marktmorgen:watch-write-live:v1
-if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('HEXISTS', KEYS[2], ARGV[2]) == 1 then return 0 end
+local live
+if ARGV[1] == '' then live = redis.call('EXISTS', KEYS[1]) == 1 else live = redis.call('GET', KEYS[1]) == ARGV[1] end
+if not live or redis.call('HEXISTS', KEYS[2], ARGV[2]) == 1 then return 0 end
 local ok, commands = pcall(cjson.decode, ARGV[3])
 if not ok or type(commands) ~= 'table' then return redis.error_reply('invalid watch writes') end
 for _, command in ipairs(commands) do redis.call(unpack(command)) end
@@ -153,7 +156,7 @@ export async function watchedFolders(month = calendarWindow().id): Promise<strin
  * rule 24): the calendar month then would put the seconds where the store's
  * own window, which the video admission reads, never sees them.
  */
-type WatchScope = { window: string; live?: { idKey: string; ref: string; erasing: string } };
+type WatchScope = { window: string; live?: { idKey: string; match: string; erasing: string } };
 
 async function scopeOfFolder(folder: string, now: number): Promise<WatchScope | null> {
   try {
@@ -163,7 +166,12 @@ async function scopeOfFolder(folder: string, now: number): Promise<WatchScope | 
       const ref = storeRef(store);
       if ((await storeFolder(ref)) !== folder) return null;
       const window = allowanceWindow(store, now)?.id;
-      return window ? { window, live: { idKey: storeIdCommand(store.sid)[1], ref, erasing: await erasingField(ref) } } : null;
+      // A store kept from before ids (sid "") has no id key: it is fenced on its owner record existing, which erasure
+      // deletes, as lib/store-live-cache.ts does (Claude 6's MEDIUM on #4888); an empty match tells the script so.
+      // Otherwise a live legacy store read as erased. The script still makes one read either way (GET or EXISTS).
+      const hasId = STORE_ID_PATTERN.test(store.sid);
+      const idKey = hasId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+      return window ? { window, live: { idKey, match: hasId ? ref : "", erasing: await erasingField(ref) } } : null;
     }
     // An owner mapping without a readable store is unknown, not an orphan.
     if (key) return null;
@@ -248,7 +256,7 @@ async function measureOne(folder: string, now: number): Promise<MeasureResult | 
     else {
       const read = repliesFor(await redisPipeline([[
         "EVAL", WATCH_WRITE_IF_LIVE, 2, scope.live.idKey, ERASING_KEY,
-        scope.live.ref, scope.live.erasing, JSON.stringify(writes),
+        scope.live.match, scope.live.erasing, JSON.stringify(writes),
       ]]), 1);
       const kept = read ? countOf(read[0]) : null;
       if (kept === 0) return { added: 0, live: false };

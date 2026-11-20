@@ -302,6 +302,14 @@ async function main(): Promise<void> {
   await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
   is("the next run takes it back", [clawed(INVOICE), balances.get("cus_AnaClaw01")], [share, 0]);
 
+  part("A send not in the history read is unknown: nothing taken, the dispute stays open (Claude 4's LOW on #4514)");
+  bonusId = `bonus_${await sent()}`;
+  // The send outside what is read: the history Stripe answers no longer holds it.
+  history.set("cus_AnaClaw01", (history.get("cus_AnaClaw01") ?? []).filter((r) => r.metadata.nimbus_invite_credit !== INVOICE));
+  disputes = list([dispute("lost")]);
+  const unseen = await quiet(() => syncPlanDisputes(Date.now() + 60_000, nowS));
+  is("nothing debited, not marked, the run not clean, the dispute still open", [posts.get("cus_AnaClaw01")?.length, clawed(INVOICE), unseen.failed > 0, String(redis.run(["HGET", SEEN_KEY, "du_BeaClaw01"])).startsWith("open:")], [1, undefined, true, true]);
+
   part("At most CLAWBACKS_PER_RUN lost disputes are taken back in one run; the rest stay open for the next");
   await sent();
   disputes = list(Array.from({ length: CLAWBACKS_PER_RUN + 1 }, (_, i) => dispute("lost", `du_BeaMany${String(i).padStart(2, "0")}`, `in_BeaMany${String(i).padStart(5, "0")}`)));

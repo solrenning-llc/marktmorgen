@@ -87,8 +87,9 @@ const rolloverBody = script.slice(script.indexOf("export async function rollover
 const beforeWrites = rolloverBody.slice(rolloverBody.indexOf("// Reads and checks"), rolloverBody.indexOf("// Writes."));
 is("in a rollover, every read and check comes before the first write, and the dry run returns before it",
   [rolloverBody.includes("// Writes."), beforeWrites.match(/api\("(POST|PATCH|DELETE)"|putPointer|editPanel|warnOnce/g) ?? [], beforeWrites.includes("if (dryRun) {")], [true, [], true]);
-is("a 5xx or a lost reply is retried only where repeating is safe: never the POST of an issue or comment, never the PAINEL's PATCH",
-  /const safe = method === "GET" \|\| method === "DELETE" \|\| path\.endsWith\("\/labels"\) \|\| \(method === "PATCH" && !path\.startsWith\("issues\/comments\/"\)\);/.test(script), true);
+is("a 5xx or a lost reply is retried only where repeating is safe (reads and the label calls): never a POST of an issue or comment, never a PATCH",
+  /const safe = method === "GET" \|\| method === "DELETE" \|\| path\.endsWith\("\/labels"\);/.test(script), true);
+is("every request gives up after 20 s without a reply", [/signal: AbortSignal\.timeout\(REQUEST_MS\)/.test(script), /export const REQUEST_MS = 20000;/.test(script)], [true, true]);
 is("only this workflow's own comments count as its markers", (script.match(/byBot\(c\) && String\(c\?\.body/g) ?? []).length, 3);
 
 part("thresholds and fixed identifiers");
@@ -389,6 +390,31 @@ async function wholeRuns() {
     const result = await rollover({ api: gh.api, now: NOW, log: quiet });
     is("a label DELETE that answers 404 (already applied) still finishes the switch: never zero labeled issues", [result.next, labeled(gh.issues)], [5000, [5000]]);
   }
+  for (const applied of [true, false]) {
+    const gh = github({ comments: ROLL_AT });
+    const real = gh.api;
+    const api: Api = async (method, path, payload) => {
+      if (method === "DELETE" && path.endsWith(`/labels/${LABEL}`)) {
+        if (applied) await real(method, path, payload);
+        throw new Error("DELETE " + path + ": HTTP 502 Bad Gateway");
+      }
+      return real(method, path, payload);
+    };
+    const error = await (async () => { try { await rollover({ api, now: NOW, log: quiet }); return ""; } catch (e) { return String(e); } })();
+    is(applied ? "a label DELETE answered 502 but applied: the old part's own labels show it, and the switch goes on"
+      : "a label DELETE answered 502 and not applied: the label stays on the old part and the run fails",
+      [error === "", labeled(gh.issues), gh.calls.some((c) => c.method === "GET" && c.path === "issues/4932/labels")], [applied, applied ? [5000] : [4932], true]);
+  }
+  {
+    const gh = github({ comments: ROLL_AT, agentEditAfterPatch: true });
+    await fails(gh);
+    const back = gh.panel().replace(/^[^\n]*/, firstLine(REAL_PANEL));
+    const fix = github({ comments: 3, panel: back });
+    fix.issues.splice(0, fix.issues.length, ...gh.issues);
+    const result = await rollover({ api: fix.api, now: NOW, log: quiet });
+    is("a manual run (mode run) after a rollover whose PAINEL edit did not hold changes the PAINEL's first line then, and only it",
+      [result.action, firstLine(fix.panel()).startsWith("**CANAL ATIVO: #5000 (parte 8)"), restBytes(fix.panel()).equals(restBytes(back))], ["finished", true, true]);
+  }
   {
     const gh = github({ comments: ROLL_AT, activeBody: pointerLine(4980) + "\n\nContinuation of #4858.", outsiderNext: true });
     const error = await fails(gh);
@@ -464,13 +490,14 @@ async function serverErrors() {
     const seen = { n: 0, calls: [] as string[] };
     const api = httpApi({ fetch: synthFetch(gh, { index: 0, when: "before", times: 3 }, seen) as unknown as typeof fetch, token: "t", base, wait: async () => {} });
     let error = "";
-    try { await api("PATCH", "issues/4932", { body: "x" }); } catch (e) { error = String(e); }
+    try { await api("GET", "issues/4932"); } catch (e) { error = String(e); }
     is("three 502s in a row give up with the status, after three tries", [error.includes("HTTP 502"), seen.n], [true, 3]);
   }
   for (const [what, method, path, payload] of [
     ["a POST of an issue", "POST", "issues", { title: "Agent coordination — part 8 (continues #4932)", body: "b" }],
     ["a POST of a comment", "POST", "issues/4932/comments", { body: "c" }],
     ["the PAINEL's PATCH", "PATCH", `issues/comments/${PANEL_COMMENT_ID}`, { body: "#1\n## PAINEL DA FILA" }],
+    ["an issue body's PATCH", "PATCH", "issues/4932", { body: "x" }],
   ] as const) {
     const gh = github({ comments: 100 });
     const seen = { n: 0, calls: [] as string[] };

@@ -42,6 +42,8 @@ const POINTER = /^\*\*Canal ativo: #(\d+)\*\*/;
 /** The PAINEL's first line: "#N" or "Canal ativo: #N"; an old "(parte P), desde ... (Fortaleza)" after it is kept in step. */
 const PANEL_LINE = /^(\**\s*(?:canal ativo: )?)#(\d+)( \(parte \d+\), desde [^)]*\))?/i;
 const PAGES = 25;
+/** The longest wait for one GitHub reply. */
+export const REQUEST_MS = 20000;
 
 /** The part number in "Agent coordination — part 7 (continues #4858)", or null. */
 export function partOf(title) {
@@ -207,12 +209,23 @@ export async function warnOnce(api, number, problem) {
   await api("POST", `issues/${number}/comments`, { body: panelWarning(problem) });
 }
 
-/** Writes the pointer line on top of an issue's body as it is NOW (read just before), so no edit made meanwhile is lost. */
+/**
+ * Writes the pointer line on top of an issue's body as it is NOW (read just before), so no edit made meanwhile is lost.
+ * The PATCH is never repeated with an old text: after a failure the body is read again and the line computed again.
+ */
 async function putPointer(api, number, next, pending) {
-  const fresh = await api("GET", `issues/${number}`);
-  const body = fresh?.body ?? "";
-  const target = fits(withPointer(body, next, pending), `#${number}'s body`);
-  if (target !== body) await api("PATCH", `issues/${number}`, { body: target });
+  for (let attempt = 0; ; attempt += 1) {
+    const fresh = await api("GET", `issues/${number}`);
+    const body = fresh?.body ?? "";
+    const target = fits(withPointer(body, next, pending), `#${number}'s body`);
+    if (target === body) return;
+    try {
+      await api("PATCH", `issues/${number}`, { body: target });
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
 }
 
 /**
@@ -425,20 +438,22 @@ export async function rollover({ api, now, log = console.log, dryRun = false, ev
 }
 
 /**
- * The GitHub REST client. A 5xx, or a request that never got a reply, is retried twice (after wait(5000), then
- * wait(15000)) only for calls that are safe to repeat: reads, the label calls and the issue-body PATCHes, which set a
- * state. A POST of an issue or comment is never repeated (it may have been made): the next run finds it by the pointer,
- * the title or the marker. The PAINEL's PATCH is never repeated either: the script reads the PAINEL back and decides.
+ * The GitHub REST client. A 5xx, or a request that got no reply within REQUEST_MS, is retried twice (after wait(5000),
+ * then wait(15000)) only for calls that are safe to repeat: reads and the label calls, which set a state. A POST of an
+ * issue or comment is never repeated (it may have been made): the next run finds it by the pointer, the title or the
+ * marker. No PATCH is repeated here: the caller reads the body again and decides, so an old text never overwrites a new one.
  * @returns {Api}
  */
 export function httpApi({ fetch: get, token, base, wait = (ms) => new Promise((ok) => setTimeout(ok, ms)) }) {
   return async function api(method, path, body) {
-    const safe = method === "GET" || method === "DELETE" || path.endsWith("/labels") || (method === "PATCH" && !path.startsWith("issues/comments/"));
+    const safe = method === "GET" || method === "DELETE" || path.endsWith("/labels");
     for (let attempt = 0; ; attempt += 1) {
       let reply;
       try {
         reply = await get(base + path, {
           method,
+          // A request that gets no reply in 20 s is given up (and retried only where safe), never left to the job's 5 minutes.
+          signal: AbortSignal.timeout(REQUEST_MS),
           headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
           body: body ? JSON.stringify(body) : undefined,
         });

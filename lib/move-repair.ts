@@ -17,18 +17,20 @@
 import { clearBrokenMove, endAllSessions, moveRunning, readBrokenMove } from "@/lib/auth";
 import { listPasskeys, movePasskeys, pendingNow, repointPasskeys } from "@/lib/passkeys";
 import { moveTwoStep, twoStepOn } from "@/lib/two-step";
-import { settleDoubledStore, storeForEmail } from "@/lib/store";
+import { settleDoubledStore, storeForRefExact } from "@/lib/store";
 
 /** True when this address holds no broken move any more (repaired now, or there was none). */
 export async function repairMove(email: string): Promise<boolean> {
-  const broken = await readBrokenMove(email);
+  // A record that cannot be read exactly is not "no broken move": it is not repaired, and the callers refuse.
+  const broken = await readBrokenMove(email).catch((error: unknown) => (console.error("reading a broken move failed", error), undefined));
+  if (broken === undefined) return false;
   if (!broken) return true;
-  const { from, to } = broken;
+  const { from, to, copy, op } = broken;
   try {
     if ((await moveRunning(from)) || (await moveRunning(to))) return false;
-    const [atFrom, atTo] = await Promise.all([storeForEmail(from), storeForEmail(to)]);
+    const [atFrom, atTo] = await Promise.all([storeForRefExact(from), storeForRefExact(to)]);
     if (!atFrom && !atTo) return false;
-    const home = atFrom && atTo ? await settleDoubledStore(from, to) : atFrom ? from : to;
+    const home = atFrom && atTo ? await settleDoubledStore(from, to, copy) : atFrom ? from : to;
     if (!home) return false;
     const away = home === from ? to : from;
     const holdsKeys = async (address: string) => (await listPasskeys(address)).length > 0 || (await pendingNow(address)) !== null;
@@ -45,7 +47,8 @@ export async function repairMove(email: string): Promise<boolean> {
     // The record is the lock on both addresses: it is cleared only once the away address's
     // sessions are known to be logged out. An unknown logout (null) keeps it for a later try (rule 30).
     if ((await endAllSessions(away)) === null) return false;
-    await clearBrokenMove(from, to);
+    // Only the move read here: one that replaced it since is never cleared by this late repair (Codex X5 on #2271).
+    await clearBrokenMove(from, to, op ?? null);
     return true;
   } catch (error) {
     console.error("repairing a broken move failed", error);
@@ -55,12 +58,14 @@ export async function repairMove(email: string): Promise<boolean> {
 
 /** What a person looking at a broken move needs to see (scripts/move-repair.mjs). */
 export async function describeMove(email: string): Promise<Record<string, unknown>> {
-  const broken = await readBrokenMove(email);
+  const read = await readBrokenMove(email);
+  // The move's token is for its own clear only, never shown (Codex X5 on #2271).
+  const broken = read ? { from: read.from, to: read.to, ...(read.copy ? { copy: read.copy } : {}) } : read;
   const addresses = broken ? [broken.from, broken.to] : [email];
   const each = await Promise.all(
     addresses.map(async (address) => ({
       address,
-      store: Boolean(await storeForEmail(address)),
+      store: Boolean(await storeForRefExact(address)),
       passkeys: (await listPasskeys(address)).length,
       removalWaiting: (await pendingNow(address)) !== null,
       app: await twoStepOn(address),
@@ -88,7 +93,7 @@ export async function clearBrokenMoveByHand(
   // Never while a move of either address is running: its own record is this one (app/api/auth/move).
   if ((await moveRunning(broken.from)) || (await moveRunning(broken.to))) return "running";
   const holds = async (address: string) => ({
-    store: Boolean(await storeForEmail(address)),
+    store: Boolean(await storeForRefExact(address)),
     ways: (await listPasskeys(address)).length > 0 || (await pendingNow(address)) !== null || (await twoStepOn(address)),
   });
   const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
@@ -106,6 +111,6 @@ export async function clearBrokenMoveByHand(
   const fromOut = await loggedOut(broken.from);
   const toOut = await loggedOut(broken.to);
   if (!fromOut || !toOut) return "logout";
-  await clearBrokenMove(broken.from, broken.to);
+  await clearBrokenMove(broken.from, broken.to, broken.op ?? null);
   return "cleared";
 }

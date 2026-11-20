@@ -59,12 +59,16 @@ import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
+import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
 import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
+import { AI_MONTHLY } from "@/lib/ai-rules";
+import { AI_STEP_EXTRA_BYTES, AI_STOP_COMMANDS } from "@/lib/ai-steps";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, SES_WAKE_JOB_COMMANDS, SES_WAKE_JOBS_PER_DAY, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
@@ -86,13 +90,13 @@ import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES, MOVE_BESIDE_BATCH, MOVE_BESIDE_BATCHES, MOVE_BESIDE_BATCH_COMMANDS, MOVE_BESIDE_SWEEP_COMMANDS } from "@/lib/store";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_LEADS } from "@/lib/contact-rules";
-import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
+import { BESIDE_POOL_BYTES, DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { ORDER_KEY_BYTES } from "@/lib/order-data";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
@@ -100,7 +104,7 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
-import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
@@ -110,6 +114,7 @@ import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
 import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
+import { REFUND_CHECK_WAITS, TICKET_CUSTOMERS, TICKET_PAYMENT_PAGES, TICKET_PAYMENT_PAGE_BYTES, TICKET_REFUND_CHECKS, TICKET_REFUND_READ_BYTES, TICKET_SESSION_PAGES, TICKET_SESSION_PAGE_BYTES, TICKET_STRIPE_WAITS } from "@/lib/community-read-rules";
 import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
 import { MAX_MENTIONS } from "@/lib/community-mentions";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
@@ -120,7 +125,8 @@ import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_TELL_TRIES_AT_MOST } from "@/lib/paypal-sales";
+import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST } from "@/lib/stats-report";
@@ -143,7 +149,7 @@ import { BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_KEPT_REFUND_BY
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
-import { MAX_EMAIL_LENGTH } from "@/lib/auth";
+import { MAX_EMAIL_LENGTH, MAX_OPEN_BROKEN_MOVES, MOVES_PER_MONTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
@@ -152,6 +158,7 @@ import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POL
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { PATH_LEAD_COMMANDS } from "@/lib/path-lead";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { SUPPORT_ANNOUNCED_DAILY, SUPPORT_DAILY, SUPPORT_FILE_BYTES_DAILY, SUPPORT_HELD_NOTICES_DAILY } from "@/lib/inbound-mail";
 import { UNWRITTEN_LINKS_PER_RUN, UNWRITTEN_LINK_COMMANDS } from "@/lib/winback-send";
 
 export const GB = 1024 * 1024 * 1024;
@@ -1067,9 +1074,10 @@ export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LO
  * only a message too large to keep, which writes its line instead of a try, reads it with none. A read with no answer
  * takes the event's mark back: a Stripe event is read again next run, as the watcher's other lookups are (one event
  * waits a store a run, inside the five-minute job's own schedule, STRIPE_WAIT_RUNS in lib/webhooks.ts); PayPal's
- * refund is owed: its order stays on the refund watch and is told again when it is looked at an hour later
- * (REFUND_TELL_AGAIN_SECONDS in lib/paypal-sales.ts; review of #3491, MEDIUM), each look priced by PAYPAL_REFUND_WATCH
- * and PAYPAL_REFUND_TOLD, so each try reads this print once more.
+ * refund is owed: what the payment gave is taken back at once, and its order stays on the refund watch, told again when
+ * it is looked at an hour later (REFUND_TELL_AGAIN_SECONDS in lib/paypal-sales.ts; review of #3491, MEDIUM), at most
+ * REFUND_TELL_TRIES_AT_MOST times (PAYPAL_REFUND_TELL_RETRY, #3499), each look priced by PAYPAL_REFUND_WATCH and
+ * PAYPAL_REFUND_TOLD, so each try reads this print once more.
  */
 export const WEBHOOK_ERASED_READ_COMMANDS = 1;
 /**
@@ -1086,6 +1094,60 @@ export const COMMUNITY_DEVICES_READ = {
   deviceBytes: DEVICE_SENT_BYTES,
   bytes: (2 + MAX_MENTIONS) * MAX_MEMBER_DEVICES * DEVICE_SENT_BYTES,
 } as const;
+/**
+ * PayPal's refund.issued told again when telling it failed (lib/paypal-sales.ts watchPayPal, REFUND_TELL_RETRY_SECONDS;
+ * Claude 5's L4 on #3491), in Redis commands, each held to what the real sweep sends by
+ * tests/paypal-refund-told-retry.test.ts:
+ * - triesAtMost: one telling an hour, the first included, for REFUND_TELL_RETRY_SECONDS (REFUND_TELL_TRIES_AT_MOST);
+ * - ownCommandsPerFailedTry: a failed try's own commands: the SET NX and GET of the first failure's time
+ *   (nl:ppsell:tell:; after the try at the first look, before it at every later one, which tells only once that time
+ *   reads back known, not ahead of the clock and inside the bound: Codex C2's M1 on #3499) and the write that keeps
+ *   the order watched an hour, put back only while the store is live (PAYPAL_WATCH_IF_LIVE, #4892: the EVAL and its
+ *   EXISTS, HEXISTS and ZADD, putBackCommandsPerTry; none at the last try, which goes on). A later look whose time
+ *   is not known tells nothing and sends these same commands, plus unknownNoticeDateReadCommands below. The
+ *   independent durable refund date ends this retry once its existing window elapsed (N1 on #3499), without
+ *   authorizing a telling while the notice mark is unknown. If both dates are unreadable, the look remains unknown like the paid record or capture,
+ *   inside the job's 25 orders a store a run; that storage-failure reconciliation is not certified as a bounded retry;
+ * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and the
+ *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
+ *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);
+ * - notSentCommandsAtMost: once, at the last try, the "Not sent" lines (lib/webhooks.ts notSentLines): the SET NX of
+ *   the event's mark and, when its answer is lost, the GET that reads it back (lib/claim-mark.ts; Codex L and Codex U
+ *   on #3499), one SET of a line a live endpoint (MAX_ENDPOINTS at most), the log's LRANGE when a line was already
+ *   there, one LPUSH a line and the LTRIM, and the EVAL that lets go of the mark when the lines could not be written,
+ *   besides the configuration read emitEvent makes too.
+ * A telling that works writes none of them. The work is the five-minute job's sweep, bounded by the tries a refunded
+ * order: a company fixed cost like NOT_A_COST.HAND_OVER_BATCH, not a plan's allowance; like the job's other per-store
+ * work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
+ */
+export const PAYPAL_REFUND_TELL_RETRY = {
+  triesAtMost: REFUND_TELL_TRIES_AT_MOST,
+  ownCommandsPerFailedTry: 6,
+  /** Of those, the fenced put-back on the watch (PAYPAL_WATCH_IF_LIVE): the EVAL and its three calls. */
+  putBackCommandsPerTry: 4,
+  /** One HGET of the immutable backKey observation, only when the notice's date cannot be read. */
+  unknownNoticeDateReadCommands: 1,
+  lookCommandsPerFailedTry: 3,
+  notSentCommandsAtMost: 2 + 2 * MAX_ENDPOINTS + 2 + 1,
+} as const;
+/**
+ * One sweep of a store's beside pool at its most (lib/store.ts, moveBesideToPool; C1-20261117-1500-c6c4-1, PR 2):
+ * MOVE_BESIDE_BATCHES batches, each a heavy request's time with MOVE_BESIDE_BATCH_COMMANDS commands, the store's
+ * record read at MAX_STORE_BYTES and each of its MOVE_BESIDE_BATCH products' pool field, room slot and two changes at
+ * 256 bytes, plus the sweep's mark read and written. A store sweeps once; priced whole in every month.
+ */
+export const BESIDE_SWEEP_USD =
+  MOVE_BESIDE_BATCHES * request("heavy", MOVE_BESIDE_BATCH_COMMANDS, MAX_STORE_BYTES + MOVE_BESIDE_BATCH * 256) + MOVE_BESIDE_SWEEP_COMMANDS * COMMAND;
+
+/**
+ * The beside pool's commands on product saves (lib/store-data.ts, BESIDE_SAVE_COMMANDS), at Upstash's count of a
+ * script's inner commands, priced on every studio request of the month as if each were a product save that the room
+ * refused (C1-20261117-1500-c6c4-1; Claude 4 on #4847).
+ */
+export function besideSaveUsd(tier: Tier): number {
+  return STORE_ALLOWANCES[tier].studio * BESIDE_SAVE_COMMANDS * COMMAND;
+}
+
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -1459,7 +1521,8 @@ export const PLAN_SETTLE_RUN = { readCommandsPerRun: 2, plansPerRun: 200, ownCom
  * - ordersPerStoreRun: at most REFUND_WATCH_BATCH due orders read from it a run;
  * - payPalReadsPerOrderLook: one GET of the order's capture at PayPal each time it is looked at (inside the job's run
  *   deadline; no dated source here gives PayPal's price per API call, so it is an open gap, never zero);
- * - ownCommandsPerOrderLook: the paid record's GET and one write of the list (ZADD for the next look, or ZREM);
+ * - ownCommandsPerOrderLook: the paid record's GET and one write of the list: ZREM, or, for the next look, the order put
+ *   back only while the store is live (PAYPAL_WATCH_IF_LIVE, Codex G-1144: the EVAL and its EXISTS, HEXISTS and ZADD), 5;
  * - looksPerOrderPerDayAtMost: nextLook asks hourly the first week (24 a day), every six hours until day 30 (4 a day)
  *   and daily until PayPal's 180 days (looksPerOrderPerDayAfter30Days); a capture in a status not known here is asked
  *   daily until its paid record ends (daysWatchedAtMost, PAID_KEPT_SECONDS).
@@ -1473,7 +1536,7 @@ export const PAYPAL_REFUND_WATCH = {
   listReadsPerStoreRun: 1,
   ordersPerStoreRun: 25,
   payPalReadsPerOrderLook: 1,
-  ownCommandsPerOrderLook: 2,
+  ownCommandsPerOrderLook: 5,
   looksPerOrderPerDayAtMost: 24,
   looksPerOrderPerDayAfter30Days: 1,
   daysWatchedAtMost: 400,
@@ -1488,8 +1551,9 @@ export const PAYPAL_REFUND_WATCH = {
  * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, the refund
  *   set's ZADD and EXPIRE and, for a capture reversed, failed or declined, the reversed set's ZADD and EXPIRE: at most 4
  *   a look, on the first look and on every retry (Claude 6 on #3464, MEDIUM);
- * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on (one ZADD) and
- *   tells nothing, so its worst is the marks, one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
+ * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on, only while the
+ *   store is live (PAYPAL_WATCH_IF_LIVE: the EVAL and its EXISTS, HEXISTS and ZADD, 4 commands; Codex G-1144) and
+ *   tells nothing, so its worst is the marks, one script and that fenced write an hour (looksPerDayAtMost, the watch's own hourly look),
  *   for as long as the watch keeps the order (daysAtMost, the paid record's 400 days): no count of tries, bounded by
  *   the watch itself and by its REFUND_WATCH_BATCH orders a run.
  * A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
@@ -1500,7 +1564,7 @@ export const PAYPAL_REFUND_KEPT = {
   writesPerScript: 1,
   commandsPerScriptAtMost: 11,
   markCommandsPerRefundLookAtMost: 4,
-  retryWritesPerFailedLook: 1,
+  retryWritesPerFailedLook: 4,
   looksPerDayAtMost: 24,
   daysAtMost: 400,
 } as const;
@@ -1624,8 +1688,30 @@ export function searchRead(size: { room: boolean; conversations: number }): numb
     + (size.room ? COMMAND + searchBodyWork(MAX_CHAT_KEPT * READ_ROOM_MESSAGE_BYTES) : 0)
     + size.conversations * (COMMAND + searchBodyWork(SEARCH_MESSAGES * READ_DM_MESSAGE_BYTES));
 }
-/** One check of who holds a product or an event: its cached answer read and written, and up to three calls to Stripe waited on at 2 GB. */
-export const ACCESS_CHECK_READ = 4 * COMMAND + 3 * (EXPORT_PAGE_SECONDS * MEMORY_SECOND + searchBodyWork(64_000));
+/**
+ * One reading of what a member holds (lib/community-access.ts, holdingsOf; paidHoldings): its kept reading looked for
+ * and written, and every call to Stripe it may wait on one after another (TICKET_STRIPE_WAITS,
+ * lib/community-read-rules.ts) at 2 GB, with every body it may read: both ways of the address, each
+ * TICKET_SESSION_PAGES pages of checkouts of at most TICKET_SESSION_PAGE_BYTES each (a heavier page is refused as it
+ * streams in, lib/stripe-account.ts); the pages of payments of TICKET_CUSTOMERS customers (only those of a checkout
+ * that carried the offers after paying), TICKET_CUSTOMERS_SIDE_BY_SIDE at a time, each group waited on in turn, of at
+ * most TICKET_PAYMENT_PAGE_BYTES each; TICKET_REFUND_CHECKS refund questions of REFUND_CHECK_WAITS calls of at most TICKET_REFUND_READ_BYTES each, both enforced
+ * (lib/refunds.ts refundReader; a payment plan's question read about twenty-two with no ceiling before Claude 2's review
+ * of #3395). One reading
+ * answers the door, the spaces, the events and the lessons of a page (the pre-review of 9 November 2026, P1). It was
+ * priced at three calls of 64 KB while it read up to twelve pages; then at 24 KB a checkout with nothing holding a page
+ * to it; then for ten customers of 300 KB each, all side by side (round 2 of that pre-review: forty of 60 KB, four
+ * groups, cost the same within a hundredth of a request). A door whose products that reading ran out of refund questions
+ * for (lib/community-access.ts, doorAnswer) reads them on its own, at most one more such reading a set of products in a
+ * view (every door kept for the same products waits on it, as main's events page asked once a set: Claude 6's review of
+ * #3395 measured 150 calls for fifty events before), kept under the first such door's own key, and a "more than is read"
+ * from it kept a minute: paid as one more check (checkUnits(1)) on the search, and on the community's own page as each
+ * set's reading was before the shared one (Claude 1 cloud's review of #3395).
+ */
+export const ACCESS_CHECK_READ = 4 * COMMAND + TICKET_STRIPE_WAITS * EXPORT_PAGE_SECONDS * MEMORY_SECOND
+  + searchBodyWork(2 * TICKET_SESSION_PAGES * TICKET_SESSION_PAGE_BYTES)
+  + searchBodyWork(TICKET_CUSTOMERS * TICKET_PAYMENT_PAGES * TICKET_PAYMENT_PAGE_BYTES)
+  + searchBodyWork(TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS * TICKET_REFUND_READ_BYTES);
 /** One step of the walk of a community's archive: its commands, the bytes it reads, and its round trip waited on. */
 export function walkRead(commands: number, bytes: number): number {
   return commands * COMMAND + searchBodyWork(bytes) + 0.05 * MEMORY_SECOND;
@@ -1727,7 +1813,8 @@ export const CLOSING_DEADLINE_WORK = {
  * still-retained outside-room keys are charged at peak for the whole month. */
 export function heldStoreMonthlyExposure(tier: Tier) {
   const fileBytes = paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES;
-  const databaseBytes = DATA_ROOM_BYTES[tier] + reservePeakBytes(tier) + HELD_EXPOSURE.indexBytesPerStore;
+  // The room, the beside pool a held store keeps outside it (C1-20261117; Claude 4 Z on #4846), the peak outside-room keys.
+  const databaseBytes = DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reservePeakBytes(tier) + HELD_EXPOSURE.indexBytesPerStore;
   const retentionUsd = fileBytes / GB * STORAGE_PER_GB * 31 / 30 + databaseBytes * DB_BYTE_MONTH * 31 / 30;
   const retryUsd = heldRecheckMemoryUsd() + HELD_EXPOSURE.retryCommands * COMMAND + HELD_EXPOSURE.retryReplyBytes * DB_BYTE;
   return { fileBytes, databaseBytes, retentionUsd, retryUsd, modeledMonthlyUsd: retentionUsd + 31 * retryUsd, completeMonthlyUsd: null };
@@ -1741,6 +1828,59 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
   return { modeledUsd: caseCap * retention + HELD_EXPOSURE.monthlyAttempts * retry + HELD_EXPOSURE.globalCounterBytes * DB_BYTE_MONTH, completeUsd: null };
 }
 
+
+/**
+ * ALTO 1 of Claude 5's email audit (9 November 2026) and its pre-review: mail
+ * written to our own support addresses is sent on through SES as a company
+ * email (lib/inbound-mail.ts, forwardInbound), a company fixed cost under MR
+ * item 2, never a plan's. Every UTC day of a 31-day month, at the most:
+ * SUPPORT_ANNOUNCED_DAILY announcements read at Resend, each at
+ * SUPPORT_HELD_READ_COMMANDS commands and a call waited on for the read's
+ * RESEND_TIMEOUT_MS and a second more; of them SUPPORT_DAILY forwards plus
+ * SUPPORT_HELD_NOTICES_DAILY notice, each at PER_EMAIL (Resend's overage,
+ * dearer than SES's $0.10 a thousand), the route's whole maxDuration (60 s)
+ * of CPU and memory and SUPPORT_FORWARD_COMMANDS commands (the route's 3, the
+ * announcement's SUPPORT_ANNOUNCEMENT_COMMANDS, the counts and their marks 18, four for each of up to 100
+ * files, the sender's own 64); files SUPPORT_FILE_BYTES_DAILY bytes (before
+ * base64, sent as base64). Both command figures are held by
+ * tests/support-forward-ceiling.test.ts against what the code sends.
+ * Attachments at SES's $0.12 a GB, read 18 October 2026
+ * (docs/pack-cost-decomposition-2026-10-18.md), not read again on
+ * 9 November 2026 (aws.amazon.com blocked in that session). Not in the
+ * figure, so the complete one stays unknown, never zero: announcements past
+ * SUPPORT_ANNOUNCED_DAILY (a call and the route's 3 commands each, no counter
+ * after the first on an instance, one EXISTS more with a From and one MGET of
+ * store names more beside a creators'-domain address, no read at Resend;
+ * bounded only by the webhook's per-connection
+ * limit and Resend's receiving quota), transfer
+ * out of the function to SES, and Resend's count of received mail.
+ */
+/**
+ * The announcement's worst path, a paying store owner's (cloud J's review of #3481, MEDIUM): the MGET of the store
+ * names it shows beside support@ (anyStoreNamed, Codex P's review of #3481, HIGH), the EXISTS of ownsAStore, the
+ * owner's own share of the reserve (SET and INCR), the reserve and then the public share (SET and INCR each):
+ * 1 + 1 + 2 + 2 + 2.
+ */
+export const SUPPORT_ANNOUNCEMENT_COMMANDS = 8;
+export const SUPPORT_FORWARD_COMMANDS = 3 + SUPPORT_ANNOUNCEMENT_COMMANDS + 18 + 100 * 4 + 64;
+/**
+ * A message held after its read, at its worst: a paying store owner's, the reserve spent, held by the company's day
+ * with the day's notice, measured at 32 by tests/support-forward-ceiling.test.ts (the route's 3 included; 24 before
+ * cloud J's review of #3481 counted only a sender with no store).
+ */
+export const SUPPORT_HELD_READ_COMMANDS = 32;
+export const SES_ATTACHMENT_PER_GB = 0.12;
+export function supportForwardMonthlyUsd(): { perForwardUsd: number; perReadUsd: number; modeledUsd: number; completeUsd: null } {
+  const perForwardUsd = PER_EMAIL + SUPPORT_FORWARD_COMMANDS * COMMAND + CALL + 60 * (CPU_SECOND + MEMORY_SECOND);
+  const perReadUsd = SUPPORT_HELD_READ_COMMANDS * COMMAND + CALL + (RESEND_TIMEOUT_MS / 1000 + 1) * (CPU_SECOND + MEMORY_SECOND);
+  const forwards = UTC_DAYS * (SUPPORT_DAILY + SUPPORT_HELD_NOTICES_DAILY);
+  const reads = UTC_DAYS * SUPPORT_ANNOUNCED_DAILY;
+  const fileGb = (UTC_DAYS * SUPPORT_FILE_BYTES_DAILY * 4) / 3 / GB;
+  // Each announcement read also reads the sender's store record to tell a paid plan (one GET), at the record's
+  // largest size, whatever the answer (2nd pre-review of 9 November 2026).
+  const storeReadsUsd = reads * MAX_STORE_BYTES * DB_BYTE;
+  return { perForwardUsd, perReadUsd, modeledUsd: forwards * perForwardUsd + reads * perReadUsd + storeReadsUsd + fileGb * SES_ATTACHMENT_PER_GB, completeUsd: null };
+}
 
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
  * This is not a verified bound on provider bytes, replay, invoice rates or taxes. */
@@ -1763,6 +1903,9 @@ export type CostLine = {
 };
 
 const ALL_TIERS_SAME = (usd: number) => () => usd;
+
+/** What a writing job told in steps adds at the most to the AI line: its database commands and the bytes its answer adds (lib/ai-steps.ts). */
+export const AI_STEP_JOB_USD = AI_STOP_COMMANDS * COMMAND + AI_STEP_EXTRA_BYTES * ORIGIN_PER_BYTE;
 
 export const COST_LINES: CostLine[] = [
   {
@@ -1905,7 +2048,7 @@ export const COST_LINES: CostLine[] = [
       // A contact an order writes is written only over the row it was decided from (consent audit of 9 November 2026; review of #3448): its worst case, a script counted as 1 plus the calls inside it, held in tests/contacts-write-cost.test.ts.
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_FENCED_WRITE_CALLS", "CONTACT_WRITE_CALLS"] },
     ],
-    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. A free copy's Path lead (lib/path-lead.ts, 13 [D10]) is PATH_LEAD_COMMANDS more inside the same order, once the link's use first records that address as having got that product, and a one-way mark kept at most PATH_LEAD_DAYS (tests/store-data-registry.ts). Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. Since 8 November 2026 the record is written only while that lock is still the writer's (lib/payment-request-store.ts, SAVE): a change's three writes become one script that runs five inside it, three commands more a change with Lua's own counted, and the request is made under its lock too, seven more (the lock, the script's three over the plain write, the release's three); at most 43 commands more a request, $0.000086 at Upstash's $2 a million, no other command and nothing more kept. A booked call's confirmation (lib/calls.ts, confirmBooking; Claude 5, 9 November 2026) writes its once-only mark and the time kept for good in one ORDER_WRITE_ONCE (lib/order-data.ts: ORDER_WRITE behind a GET of the mark, and a DEL of it only when a command was refused), in place of the two ORDER_WRITEs it took before, so one script and one charge of the room fewer; then it moves the mark on, at most three SETs (booked, buyer, done), and with Amazon each of its two emails takes lib/email.ts's own once-only claim (a SET NX each, as an order's confirmation does): a handful of commands more a booked call, which is CALL_ORDER_UNITS orders, inside the same ORDER_COMPUTE. A try that failed after the mark is finished by the next one (the thanks page, the studio's catch-up, the mail job, which read the mark with a GET in place of the EXISTS), which reads the diary's entry (one HGET) and does only what is still owed: the orders by their own seen marks, the lead by its HSETNX, the webhook and the phone alert by their own once-only marks, each email at most once; a page refreshed writes and charges nothing more Each move of the mark is one CONFIRM_STEP script (a GET and at most one SET of the same mark, in place of the SET it was), from the stage its writer read. A move before the confirmation was done writes the mark \"moved\" (five bytes, charged in the move's own ORDER_WRITE, in place of the \"1\" it wrote) and, when a confirmation was already begun, one CONFIRM_STEP more, which only shortens it; the next try then does what a booking does besides its two emails, which the move's emails stand in for (the same commands as a first confirmation, fewer emails), and moves \"moved\" on only to \"done\": no value outgrows what the room was charged for. A contact an order puts on the creator's list is written only over the row it was decided from (consent audit of 9 November 2026): at the most CONTACT_COMMANDS_MOST.upsert commands, a script counted as one plus every call inside it (CONTACT_WRITE_CALLS), inside ORDER_COMPUTE (a quarter of it at the most), with the order's checks two reads more inside ORDER_WRITE_IF_SAME; held in tests/contacts-write-cost.test.ts. A course's checkout sent from a page that said the course's end date (24 [E7], 9 November 2026) reads the course record once more, exactly: one GET of at most the course record, inside the same ORDER_COMPUTE, nothing kept and nothing sent; the end shown rides on the Stripe session as one more metadata field.",
+    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. A free copy's Path lead (lib/path-lead.ts, 13 [D10]) is PATH_LEAD_COMMANDS more inside the same order, once the link's use first records that address as having got that product, and a one-way mark kept at most PATH_LEAD_DAYS (tests/store-data-registry.ts). Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. Since 8 November 2026 the record is written only while that lock is still the writer's (lib/payment-request-store.ts, SAVE): a change's three writes become one script that runs five inside it, three commands more a change with Lua's own counted, and the request is made under its lock too, seven more (the lock, the script's three over the plain write, the release's three); at most 43 commands more a request, $0.000086 at Upstash's $2 a million, no other command and nothing more kept. Since 15 November 2026 the creator's delete of a request that is no longer open (issue #4775) takes the same lock and reads the request again under it, once a request (its record is gone after): at most 24 SET NX tries in its five-second wait (20 ms doubling to 250 ms), the GET again and the release's three, 28 commands more; the atomic observed-generation deletion adds seven billed commands over the five removals (EVAL + two GET + four TYPE + five removals = 12); 78 a request in all, $0.000156, within the same ORDER_COMPUTE ceiling, nothing more kept. A press on a request that is gone or still open reads it once without the lock, as before. A booked call's confirmation (lib/calls.ts, confirmBooking; Claude 5, 9 November 2026) writes its once-only mark and the time kept for good in one ORDER_WRITE_ONCE (lib/order-data.ts: ORDER_WRITE behind a GET of the mark, and a DEL of it only when a command was refused), in place of the two ORDER_WRITEs it took before, so one script and one charge of the room fewer; then it moves the mark on, at most three SETs (booked, buyer, done), and with Amazon each of its two emails takes lib/email.ts's own once-only claim (a SET NX each, as an order's confirmation does): a handful of commands more a booked call, which is CALL_ORDER_UNITS orders, inside the same ORDER_COMPUTE. A try that failed after the mark is finished by the next one (the thanks page, the studio's catch-up, the mail job, which read the mark with a GET in place of the EXISTS), which reads the diary's entry (one HGET) and does only what is still owed: the orders by their own seen marks, the lead by its HSETNX, the webhook and the phone alert by their own once-only marks, each email at most once; a page refreshed writes and charges nothing more Each move of the mark is one CONFIRM_STEP script (a GET and at most one SET of the same mark, in place of the SET it was), from the stage its writer read. A move before the confirmation was done writes the mark \"moved\" (five bytes, charged in the move's own ORDER_WRITE, in place of the \"1\" it wrote) and, when a confirmation was already begun, one CONFIRM_STEP more, which only shortens it; the next try then does what a booking does besides its two emails, which the move's emails stand in for (the same commands as a first confirmation, fewer emails), and moves \"moved\" on only to \"done\": no value outgrows what the room was charged for. A contact an order puts on the creator's list is written only over the row it was decided from (consent audit of 9 November 2026): at the most CONTACT_COMMANDS_MOST.upsert commands, a script counted as one plus every call inside it (CONTACT_WRITE_CALLS), inside ORDER_COMPUTE (a quarter of it at the most), with the order's checks two reads more inside ORDER_WRITE_IF_SAME; held in tests/contacts-write-cost.test.ts. A course's checkout sent from a page that said the course's end date (24 [E7], 9 November 2026) reads the course record once more, exactly: one GET of at most the course record, inside the same ORDER_COMPUTE, nothing kept and nothing sent; the end shown rides on the Stripe session as one more metadata field.",
   },
   {
     id: "list-email",
@@ -1921,6 +2064,18 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
     basis: "Every monthly email sent, at the most an email costs. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+  },
+  {
+    id: "winback-commands",
+    feature: "A come-back offer's sending, in Redis commands: the membership's claim, the list token, the once-mark taken only while the address was not erased, then the offer's link and its erasure notes, the print read again before the email (#4807), the count (15 November 2026)",
+    // Every store email of the plan sent as a come-back offer from a run of its own (the dearest way).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].email * WINBACK_OFFER_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/winback.ts", names: ["WINBACK_OFFER_COMMANDS"] },
+      { file: "lib/winback-send.ts", names: ["WINBACK_CLAIM", "claimOffer", "stillFree"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
+    ],
+    basis: "Each offer takes one of the store's emails before it goes (lib/email.ts EmailMeter), so the plan's store emails bound them; each is priced at WINBACK_OFFER_COMMANDS, a store's run that sends one at its dearest (the list token's contact write lost twice and read back, both claims read back), every script's own command counted (tests/i4807-winback-erased.test.ts). Offers that send nothing (came back, no consent, heard one lately, erased, or a token not handed out after three lost writes) take no email: their reads are a store's daily run, bounded by its ended memberships of the window and OFFERS_PER_RUN, each membership claimed once; one erased at its claim also lets its membership's mark go (a RELEASE script, three commands, Codex X7 on #4877), tried once more when not confirmed (six at most), and a release still not confirmed stops the store's run there (Codex L on #4877).",
   },
   {
     id: "transactional-email",
@@ -1966,21 +2121,22 @@ export const COST_LINES: CostLine[] = [
     feature: "A come-back offer whose link was not written as asked: the whole offer, from its first mark to the link taken back and the run's two marks let go, with nothing sent (Claude 7 and Claude 5 on #3889, 16 November 2026)",
     monthlyUsd: () => COME_BACK_RUNS_PER_MONTH * UNWRITTEN_LINKS_PER_RUN * UNWRITTEN_LINK_COMMANDS * COMMAND,
     sources: [
-      { file: "lib/winback-send.ts", names: ["UNWRITTEN_LINK_COMMANDS", "UNWRITTEN_LINKS_PER_RUN", "if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;", "releaseMark(onceKey(statsId, email, product.id), onceValue)", "releaseMark(sentKey(account, subId), claim)"] },
+      { file: "lib/winback-send.ts", names: ["UNWRITTEN_LINK_COMMANDS", "UNWRITTEN_LINKS_PER_RUN", "ERASED_LINK_COMMANDS", "if (unwritten >= UNWRITTEN_LINKS_PER_RUN) break;", "releaseMark(onceKey(statsId, email, product.id), onceValue)", "releaseMark(sentKey(account, subId), claim)"] },
       { file: "lib/claim-mark.ts", names: ["claimMark", "[\"GET\", key]"] },
       { file: "lib/contacts.ts", names: ["round < 3", "CAS_HSET", "a contact write's read-back"] },
       { file: "lib/erasure-index.ts", names: ["noteForErasure"] },
       { file: "lib/redis-lock.ts", names: ["RELEASE"] },
       { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
     ],
-    basis: "At its worst a run's offer fails its link write after every step at its worst: UNWRITTEN_LINK_COMMANDS commands from its first mark to the end (both marks read back, the unsubscribe token lost twice and read back the third time, the link and its three erasure notes, the link's DEL and two RELEASE scripts at one plus their two calls). The first such failure stops the store's run (UNWRITTEN_LINKS_PER_RUN), and the offer is looked at again on the next run, one run a day (the plans cron at 09:00 UTC), COME_BACK_RUNS_PER_MONTH runs a month. A failure that sends nothing takes nothing from the store's email figure, so it is priced here, not in store-email. Held, measured at every step's worst, in tests/winback-link-write-exact.test.ts.",
+    basis: "At its worst a run's offer fails its link write after every step at its worst: UNWRITTEN_LINK_COMMANDS commands from its first mark to the end (both marks read back, the unsubscribe token lost twice and read back the third time, the link and its three erasure notes, the link's DEL and two RELEASE scripts at one plus their two calls). The first such failure stops the store's run (UNWRITTEN_LINKS_PER_RUN), and the offer is looked at again on the next run, one run a day (the plans cron at 09:00 UTC), COME_BACK_RUNS_PER_MONTH runs a month. A failure that sends nothing takes nothing from the store's email figure, so it is priced here, not in store-email. Held, measured at every step's worst, in tests/winback-link-write-exact.test.ts. An offer whose address was erased after its link was written (#4807) sends nothing either: its link is taken back and its once-mark let go, ERASED_LINK_COMMANDS, no more than UNWRITTEN_LINK_COMMANDS (tests/i4807-winback-erased.test.ts), and it counts toward the same UNWRITTEN_LINKS_PER_RUN, so this line holds it.",
   },
   {
     id: "ai",
     feature: "AI: writing jobs and visitor answers, AI funnel drafts (#517) and every other AI route",
-    monthlyUsd: (tier) => micro(AUTOMATIC_AI_STORE_MICRO_USD[tier]),
+    monthlyUsd: (tier) => micro(AUTOMATIC_AI_STORE_MICRO_USD[tier]) + AI_MONTHLY[tier] * AI_STEP_JOB_USD,
     sources: [
       { file: "lib/ai-spend-policy.ts", names: ["AUTOMATIC_AI_STORE_MICRO_USD"] },
+      { file: "lib/ai-steps.ts", names: ["AI_STOP_COMMANDS", "AI_STEP_EXTRA_BYTES"] },
       { file: "lib/ai-rules.ts", names: ["AI_MONTHLY", "AI_PER_MINUTE"] },
       { file: "lib/answers-rules.ts", names: ["ANSWERS_MONTHLY", "ASKS_PER_DAY"] },
       { file: "lib/ai-request-rules.ts", names: ["AI_REQUEST_LIMITS"] },
@@ -1988,14 +2144,18 @@ export const COST_LINES: CostLine[] = [
       // An AI explanation of one funnel check (26 [E9]): one writing job (FUNNEL_EXPLAIN_JOBS), taken before its one bounded request (tests/funnel-explain.test.ts).
       { file: "lib/funnel-explain.ts", names: ["askModel", "counted", "FUNNEL_EXPLAIN_JOBS", "FUNNEL_EXPLAIN_CALL"] },
     ],
-    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other.",
+    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out.",
   },
   {
     id: "uploads",
     feature: "Upload operations",
     monthlyUsd: (tier) => micro(uploadWorstCostMicroUsd(tier)),
-    sources: [{ file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] }],
-    basis: "Every upload operation the automatic upload allowance can start.",
+    sources: [
+      { file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] },
+      { file: "lib/spend-cost-table.ts", names: ["UPLOAD_OPEN_CLASS_A_OPS", "UPLOAD_OPEN_CLASS_B_OPS", "UPLOAD_OPEN_BLOB_ADVANCED_OPS", "BLOB_ADVANCED_MICRO_USD_PER_MILLION", "UPLOAD_REQUESTS_PER_OPEN", "VAULT_LIST_PAGES", "VAULT_MEASURE_REQUESTS", "BLOB_LIST_PAGES", "VAULT_CONTROL_CALLS_PER_UPLOAD", "UPLOAD_OPEN_STREAM_API_READS", "STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION"] },
+      { file: "lib/stream-rules.ts", names: ["STREAM_HELD_REQUESTS"] },
+    ],
+    basis: "Every upload operation the automatic upload allowance can start, each start priced at the most operations its own path makes: on R2, every page of the vault listing admission reads, the multipart create and complete, and three file measurements; on Vercel Blob, every page of the host file store's listing admission reads, as Advanced Operations at the top regional rate; on Bunny Stream, the read of the store's collection admission makes, at a stated allowance, since no rate for it is cited (tests/vault-open-class-a.test.ts). Two finish or cancel requests per upload: a finish and a confirmed cancel are written down and a repeat answered from that record, an unconfirmed cancel may be asked again inside the two, a finish refused for its piece list asks R2 nothing, and a request past them is refused before R2 is asked (tests/vault-control-once.test.ts).",
   },
   {
     id: "workflows",
@@ -2113,6 +2273,18 @@ export const COST_LINES: CostLine[] = [
     basis: "Each host's calendar read at most once a sync interval all month (about seven commands and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
   },
   {
+    id: "own-call-host-claims",
+    feature: "An ordinary weekly call checked against its store owner's time on other stores' teams at the reservation, inside ORDER_COMPUTE (lib/host-claims.ts, 9 November 2026; read only at the checkout since 16 November 2026)",
+    // No visit reads the owner's claims (owner's decision of 16 November 2026 on #3490, "ler só no checkout"): they are
+    // read at the hold and the move, inside the order they are admitted as (ORDER_COMPUTE), so nothing a visit.
+    monthlyUsd: () => 0,
+    sources: [
+      { file: "lib/calls.ts", names: ["ownerClaims", "claimOwner", "bookingOwn", "OWN_CLAIM_CAP"] },
+      { file: "lib/host-claims.ts", names: ["readClaims", "claimHosts", "confirmClaim", "releaseClaim"] },
+    ],
+    basis: "Nothing a visit, since the owner's decision of 16 November 2026 on #3490 (\"ler só no checkout\"): an ordinary weekly call's page, its embedded calendar, its move page and a checkout reminder's check for an open time (lib/checkout-recovery.ts, hasOpenTime, through slotsForProduct) no longer read the store owner's claims. They are read at the reservation, inside the order it is admitted as (CALL_ORDER_UNITS, ORDER_COMPUTE): the hold reads the claims and runs the claim script (two commands) and refuses a time sold on another store as just taken, with nothing charged; the confirmation reads its diary entry and writes the claim and its lifetime (at most four); a move reads and writes again (two) and refuses the same way; a hold given back or a refund lets it go (one). A few commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page.",
+  },
+  {
     id: "quizzes",
     feature: "Course quiz submissions",
     monthlyUsd: ALL_TIERS_SAME(QUIZ_MONTHLY_SUBMISSIONS * request("light", 8)),
@@ -2173,8 +2345,11 @@ export const COST_LINES: CostLine[] = [
       // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
       { file: "lib/licence-activations.ts", names: ["ACTIVATION_COMMANDS", "ACTIVATION_REQUEST_UNITS", "MAX_ACTIVATION_RECORD_BYTES", "needData(store"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
-      { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
+      { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "TICKET_SESSION_PAGE_BYTES", "TICKET_PAYMENT_PAGE_BYTES", "REFUND_CHECK_WAITS", "TICKET_REFUND_READ_BYTES", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
+      // Each refund question of that reading inside the calls and bytes it is priced at, enforced (Claude 2's review of #3395).
+      { file: "lib/community-access.ts", names: ["const REFUND_READ: RefundReadLimits = { calls: REFUND_CHECK_WAITS, maxBytes: TICKET_REFUND_READ_BYTES }", "purchaseRefunded(account, session, REFUND_READ)", "keptUnlessLost(account, intent, refundReader(account, REFUND_READ))"] },
+      { file: "lib/refunds.ts", names: ["if (left <= 0) throw new RefundReadCapped(", "limits.maxBytes"] },
       { file: "lib/community-walk.ts", names: ["walkUnits(", "indexedWords(", "INDEXED_WORDS_BYTES"] },
       // A member's locked spaces read their products as a collection page reads its cards, paid before they are read (542 [CM1], 6 November 2026);
       // read in rounds since 7 November 2026, each round paying what its first reads add; nothing is read twice (the pre-orders once, every
@@ -2317,10 +2492,15 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/pdf-preview.ts", names: ["if (await roomNotedOut(file)) return null;", "writeWithinStorage(file, pathname, bytes, \"application/pdf\", store, meter)"] },
       { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },
-      { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
-      { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
+      { file: "lib/file-store.ts", names: ["for (let page = 0; page < BLOB_LIST_PAGES; page += 1)"] },
+      { file: "lib/vault.ts", names: ["for (let page = 0; page < VAULT_LIST_PAGES; page += 1)"] },
       // A waitlist's confirm press writes its entry back in WAIT_CONFIRM (#4268), one EVAL and WAIT_CONFIRM_CALLS inside it, and takes WAIT_CONFIRM_UNITS more of the store's requests before it writes (#4404).
       { file: "lib/waitlist.ts", names: ["WAIT_CONFIRM", "WAIT_CONFIRM_CALLS", "WAIT_CONFIRM_UNITS", "takePublicRequest(store, \"public\", Date.now(), WAIT_CONFIRM_UNITS)"] },
+      // A join's place is written in WAIT_JOIN, fenced by the coming-soon mark (#4462, 16 November 2026; since the merge
+      // of main of 18 November 2026, over main's exact join): one EVAL and at most WAIT_JOIN_CALLS inside it, a coming-soon
+      // check more where the HSETNX of a new place or the HASH_SWAP_IF of a place asked again was, inside the join's own
+      // request (withinStore "waitlist-ip").
+      { file: "lib/waitlist.ts", names: ["WAIT_JOIN", "WAIT_JOIN_CALLS", "withinStore(\"waitlist-ip\""] },
       // A link of a sent email that goes through its redirect (124 [F2-EDIT-SENT-LINKS], 6 November 2026): one request, counted before the change is read.
       { file: "app/go/[handle]/[id]/[link]/route.ts", names: ["takePublicRequest(store, \"public\", Date.now(), SENT_LINK_REQUEST_UNITS)", "readSentLinks(id)"] },
       { file: "lib/sent-link-rules.ts", names: ["SENT_LINK_REQUEST_UNITS = 1"] },
@@ -2343,11 +2523,24 @@ export const COST_LINES: CostLine[] = [
   {
     id: "studio",
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8),
+    // And the beside pool's read, take and give-back on a product save while the store pays, priced on every studio
+    // request (besideSaveUsd; TAKE_DATA's inner commands, as Upstash bills them).
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8) + besideSaveUsd(tier),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
+      { file: "lib/store-data.ts", names: ["BESIDE_SAVE_COMMANDS", "poolTakeCommands"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // A product's removal admits its ordinary request and WAITLIST_DROP_UNITS together before anything goes, for its
+      // waitlist's hold and drop (or its drop finished when asked again): at most WAITLIST_DROP_COMMANDS commands and
+      // WAITLIST_DROP_BYTES bytes inside the additional unit (#4462; tests/waitlist-removed-drop-pending.test.ts).
+      { file: "lib/waitlist.ts", names: ["WAITLIST_DROP_UNITS", "WAITLIST_DROP_COMMANDS", "WAITLIST_DROP_BYTES", "holdWaitlistDrop", "finishWaitlistDrop"] },
+      { file: "app/api/store/product/route.ts", names: ["1 + WAITLIST_DROP_UNITS"] },
+      // A person's erasure reads the store's waitlist marks (two SCARD and two SMEMBERS, in ERASE_FIXED_COMMANDS) and
+      // counts each mark read (ERASE_PER.waitlists), capped at MAX_WAITLIST_MARKS; paid with the rest of the erasure.
+      { file: "lib/erasure-rules.ts", names: ["ERASE_FIXED_COMMANDS = 575", "waitlists: [3, 1_000]"] },
+      { file: "lib/waitlist.ts", names: ["MAX_WAITLIST_MARKS", "waitlistMarks"] },
+      { file: "lib/person-erasure.ts", names: ["waitlists: scope.waitlistMarks ?? 0"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },
@@ -2555,7 +2748,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
-      // 543 [CM2]: a post or comment held for approval is the same action, a few commands lighter than one published, inside the community's and the member's ceilings;
+      // 543 [CM2]: a post or comment held for approval is the same action, inside the community's and the member's ceilings; since unit 2 it also puts its store on
+      // the daily notice's list and line (two ZADDs), and a hold with its HOLD_SWEEP sweep at its most stays inside one action's 100 commands (tests/cm2-u2-daily-notice.test.ts);
       // a hold first sweeps at most HOLD_SWEEP expired items. A member's visit to the community reads their own held items with one read (heldOf), MGET only when they have some.
       { file: "lib/community-approval.ts", names: ["holdPost", "holdComment", "MAX_HELD", "MAX_MINE", "needData", "HOLD_SWEEP", "heldOf", "ZREVRANGEBYSCORE"] },
       { file: "app/api/store/community/rsvp/route.ts", names: ["takeBuyerAction(store)"] },
@@ -2571,6 +2765,10 @@ export const COST_LINES: CostLine[] = [
       // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
       // a listing it may take back), after its buyer action is taken (9 November 2026).
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
+      // A buyer's file for review (750 [CD1] unit 2): every step takes one public request first (takeBuyerRead), opening
+      // and closing one buyer action each; this route's own commands are SUBMISSION_STEP_COMMANDS, inside the hundred.
+      { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store)", "takeBuyerAction(store)"] },
+      { file: "lib/submission-store.ts", names: ["SUBMISSION_STEP_COMMANDS"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
@@ -2613,9 +2811,13 @@ export const COST_LINES: CostLine[] = [
   {
     id: "database-storage",
     feature: "What a store keeps in the database: its data room, and every record kept outside it (18 October 2026: a room by plan)",
-    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] + reserveBytes(tier)) * DB_BYTE_MONTH,
+    // The beside pool (C1-20261117) is kept beside the room, never inside it: MAX_PRODUCTS products' worth, all held.
+    // Its sweep (PR 2), once in a store's life, priced whole in every month: every batch reads the store and moves
+    // MOVE_BESIDE_BATCH products' fields, slots and shares (BESIDE_SWEEP_USD).
+    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES + reserveBytes(tier)) * DB_BYTE_MONTH + BESIDE_SWEEP_USD,
     sources: [
-      { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "NON_PAYING_DATA_ROOM_BYTES", "ORDER_DATA_BYTES", "ITEM_DATA_BYTES", "orderReserveFor", "contentRoomFor"] },
+      { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "NON_PAYING_DATA_ROOM_BYTES", "ORDER_DATA_BYTES", "ITEM_DATA_BYTES", "orderReserveFor", "contentRoomFor", "BESIDE_POOL_BYTES"] },
+      { file: "lib/store.ts", names: ["moveBesideToPool", "MOVE_BESIDE_BATCH", "MOVE_BESIDE_BATCHES", "MOVE_BESIDE_BATCH_COMMANDS", "MOVE_BESIDE_SWEEP_COMMANDS"] },
       { file: "lib/store-data.ts", names: ["TAKE_DATA", "needData", "keepFor"] },
       { file: "lib/order-data.ts", names: ["ORDER_WRITE", "orderWrite", "ORDER_KEY_BYTES", "ORDER_ENTRY_BYTES"] },
       { file: "lib/order-admission.ts", names: ["used + holding + bytes > room", "orderDataBytes(items)"] },
@@ -2670,9 +2872,9 @@ export const PER_PAYMENT_LINES: CostLine[] = [
   {
     id: "retained-data",
     feature: "What a store keeps in the database after its plan ends, until its closing day (18 October 2026)",
-    monthlyUsd: (tier) => (DATA_ROOM_BYTES[tier] * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30) + cappedByteMonths(tier, CLOSING_DAYS + WARN_WEEK_DAYS)) * DB_BYTE_MONTH,
+    monthlyUsd: (tier) => ((DATA_ROOM_BYTES[tier] + BESIDE_POOL_BYTES) * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30) + cappedByteMonths(tier, CLOSING_DAYS + WARN_WEEK_DAYS)) * DB_BYTE_MONTH,
     sources: [
-      { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "NON_PAYING_DATA_ROOM_BYTES"] },
+      { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "NON_PAYING_DATA_ROOM_BYTES", "BESIDE_POOL_BYTES"] },
       { file: "lib/plan-closing-rules.ts", names: ["CLOSING_DAYS"] },
       { file: "tests/store-data-registry.ts", names: ["cappedByteMonths", "lifetimeByteMonths", "partAverage"] },
       { file: "docs/funded-exposure-review.md", names: ["What a store keeps in the database after its closing day"] },
@@ -2907,13 +3109,16 @@ export function endedListDownloadCost(bytes: number): number {
  */
 export function closureCost(tier: Tier, trial = false): { deletes: number; follows: number; exports: number; lists: number; prepare: number; visits: number; total: number } {
   const room = trial ? NON_PAYING_DATA_ROOM_BYTES.trial : DATA_ROOM_BYTES[tier];
-  const roomKeys = room / ORDER_KEY_BYTES;
+  // A paying store's beside pool (C1-20261117): the records it holds for are deleted and followed with the room's;
+  // they are not in an export or a list download, which read what the room holds.
+  const kept = room + (trial ? 0 : BESIDE_POOL_BYTES);
+  const roomKeys = kept / ORDER_KEY_BYTES;
   const keys = roomKeys + closingBytes(tier, trial) / MARK;
   const outside = followedBytes(tier, trial);
-  const names = ((room + closingBytes(tier, trial)) * KEY_NAME_BYTES) / (ORDER_KEY_BYTES + KEY_NAME_BYTES);
+  const names = ((kept + closingBytes(tier, trial)) * KEY_NAME_BYTES) / (ORDER_KEY_BYTES + KEY_NAME_BYTES);
   const out = {
     deletes: names * DB_BYTE + Math.ceil(keys / DEL_BATCH) * COMMAND,
-    follows: (room + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
+    follows: (kept + outside) * DB_BYTE + (Math.ceil((roomKeys + outside / MARK) / FOLLOW_BATCH) + FOLLOWED_FAMILIES.length * 4) * COMMAND,
     exports: ENDED_STORE_EXPORTS * exportCost(room + MAX_STORE_BYTES),
     lists: ENDED_LIST_DOWNLOADS * endedListDownloadCost(room + MAX_STORE_BYTES),
     prepare: PREPARE_COMMANDS * COMMAND,
@@ -3041,6 +3246,101 @@ export const ADD_ON_LINES: AddOnLine[] = [
 ];
 
 /**
+ * A move of the sign-in address (app/api/auth/move), the company's cost: not a line of any plan, since the sign-in
+ * records it rewrites are keyed by address, and admitted at most MOVES_PER_MONTH times a calendar month, all stores
+ * together, before any of its work (lib/auth.ts takeMoveRoom; #2271, Codex G2's and Codex G's MEDIUM). Priced here
+ * from the same rates as every line (COMMAND, DB_BYTE, DB_BYTE_MONTH, the call, CPU and memory), and held in
+ * tests/move-cost.test.ts against the real route: every command the stand-in Redis runs, the commands each EVAL runs
+ * inside included, every byte of every pipeline both ways, for an account at every bound the code keeps (five stores
+ * at MAX_STORE_BYTES, nine earlier handles, ten passkeys at the passkey route's 16,000-byte body, two-step login, a
+ * recovery address, a hundred browsers). It is the "account-moves" line of the LLC fixed costs (lib/llc-fixed-costs.ts,
+ * FX275: 100% Marktmorgen), whose reviewed ceiling stays unknown while MOVE_COST_UNKNOWNS are open.
+ */
+/** The most tries lib/redis-lock.ts takeLock makes for a lock held by somebody else, in its whole wait: its waits grow 20, 40, 80, 160, then 250 ms, never less (the random part only lengthens them), and it stops once the next would pass the wait. */
+export function lockTriesMost(waitMs: number): number {
+  let tries = 1;
+  let slept = 0;
+  for (let wait = 20; slept + wait <= waitMs; wait = Math.min(wait * 2, 250)) {
+    slept += wait;
+    tries += 1;
+  }
+  return tries;
+}
+/** Each lock a tap takes, how often, and how long its code waits for it (the text that says so, held in tests/move-cost.test.ts). */
+export const MOVE_TAP_LOCKS: Record<string, { takes: number; waitMs: number; source: { file: string; text: string } }> = {
+  // moveAccount: the store at the old address and each of the account's other stores, each under its own lock.
+  "nl:store:lock:": { takes: MAX_STORES_PER_ACCOUNT, waitMs: 8_000, source: { file: "lib/store.ts", text: "const LOCK_WAIT_MS = 8_000;" } },
+  // movePasskeys: the passkeys of both addresses.
+  "nl:pk:lock:": { takes: 2, waitMs: 4_000, source: { file: "lib/passkeys.ts", text: "return withLock(lockKey(email), 5, 4_000, work);" } },
+  // moveTwoStep: the two-step login of both addresses.
+  "nl:2fa:lock:": { takes: 2, waitMs: 4_000, source: { file: "lib/two-step.ts", text: "return withLock(lockKey(email), 5, 4_000, work);" } },
+};
+/**
+ * Commands a tap runs when no lock is waited on, every EVAL's own commands included: measured 234 (tests/move-cost.test.ts)
+ * since the merge of main's per-store pace (lib/move-pace.ts takeMove reads the store and takes its count first; the
+ * owner's decision of 18 November 2026 on #2271), 226 before it, 213 before #2271's place among the open broken moves
+ * and the exact read of every store of the account.
+ */
+export const MOVE_TAP_COMMANDS_UNCONTENDED = 240;
+/** Pipelines a tap sends, each a trip to the database one after another: measured 101 (tests/move-cost.test.ts). */
+export const MOVE_TAP_PIPELINES = 105;
+/**
+ * Bytes a tap moves through the database both ways, as the REST API carries them, with every store at MAX_STORE_BYTES:
+ * measured 26,374,335 since main's per-store pace reads the store once more (takeMove), 25,372,214 before it, 21,369,012
+ * before #2271 read every store of the account to know whether any pays.
+ */
+export const MOVE_TAP_BYTES_UNCONTENDED = 26_500_000;
+/** A lock's try (SET NX EX and its answer), in bytes, at the most. */
+export const LOCK_TRY_BYTES = 256;
+const lockRetries = (each: (lock: { takes: number; waitMs: number }, retries: number) => number) =>
+  Object.values(MOVE_TAP_LOCKS).reduce((sum, lock) => sum + each(lock, lock.takes * (lockTriesMost(lock.waitMs) - 1)), 0);
+/** The most commands a tap runs: the measured tap and every try of every lock. */
+export const MOVE_TAP_COMMANDS_MOST = MOVE_TAP_COMMANDS_UNCONTENDED + lockRetries((_, retries) => retries);
+/** The most bytes: twice the measured tap and every lock's try, since a record's quote or backslash is two bytes on the wire. */
+export const MOVE_TAP_BYTES_MOST = 2 * (MOVE_TAP_BYTES_UNCONTENDED + lockRetries((_, retries) => retries * LOCK_TRY_BYTES));
+/** The most seconds: every trip one after another at ROUND_TRIP_SECONDS, and every lock's whole wait with its tries. */
+export const MOVE_TAP_SECONDS_MOST = MOVE_TAP_PIPELINES * ROUND_TRIP_SECONDS
+  + lockRetries((lock, retries) => lock.takes * (lock.waitMs / 1000) + retries * ROUND_TRIP_SECONDS);
+/** One tap in dollars: its call, CPU and memory for every second (CPU the whole time, as lib/backup-cost.ts prices its route), its commands and bytes. */
+export const MOVE_TAP_COST = CALL + MOVE_TAP_SECONDS_MOST * (CPU_SECOND + MEMORY_SECOND) + MOVE_TAP_COMMANDS_MOST * COMMAND + MOVE_TAP_BYTES_MOST * DB_BYTE;
+/**
+ * A broken move's record (lib/auth.ts markBrokenMove), key and value, noted with its copy, at the most: two addresses
+ * of MAX_EMAIL_LENGTH, its time, its token and the copy's print of 64 hex each (tests/move-cost.test.ts).
+ */
+export const MOVE_BROKEN_RECORD_BYTES = 1_024;
+/** A month's count of moves (lib/auth.ts takeMoveRoom, nl:auth:move-room:), key and value, at the most. */
+export const MOVE_ROOM_KEY_BYTES = 128;
+/** The broken moves' places the code keeps at the most (lib/auth.ts MAX_OPEN_BROKEN_MOVES, held in tests/move-broken-stock.test.ts). */
+export const MOVE_BROKEN_OPEN_MOST = MAX_OPEN_BROKEN_MOVES;
+/** One place in the index of open broken moves (nl:auth:move-broken:open): its token of 64 hex, its score and the set's own bytes, at the most. */
+export const MOVE_BROKEN_PLACE_BYTES = 128;
+/**
+ * What the month's moves keep: the broken-move records of every move holding a place, two a move, at most
+ * MOVE_BROKEN_OPEN_MOST of them at any time, each with its place, kept the whole month (they have no expiry: they are
+ * the evidence that keeps a split account from a login without its second step until it is repaired, and a new move
+ * is refused, writing nothing, while every place is held, #2271); and a count a store that moved and the company's
+ * two, each kept 32 days, so into the next month too. Since the owner's decision of 18 November 2026 on #2271 this
+ * file writes only the company's two (the per-store count is main's lib/move-pace.ts); the count a store is kept here
+ * as an upper bound, so this never says less than before.
+ */
+export const MOVES_MONTH_KEPT = MOVE_BROKEN_OPEN_MOST * (2 * MOVE_BROKEN_RECORD_BYTES + MOVE_BROKEN_PLACE_BYTES) * DB_BYTE_MONTH + 2 * (MOVES_PER_MONTH + 2) * MOVE_ROOM_KEY_BYTES * DB_BYTE_MONTH;
+/**
+ * The month's moves in dollars: MOVES_PER_MONTH taps at their worst and what they keep. The "account-moves" line of the
+ * LLC fixed costs, whose bounded part the owner approved at US$17 a month (11/11/2026 11:32 Fortaleza,
+ * lib/llc-fixed-costs.ts accountMoves.boundedPartApproval): tests/move-cost.test.ts fails when this, rounded up to the
+ * cent, passes it. MOVE_COST_UNKNOWNS are outside that approval.
+ */
+export const MOVES_MONTH_COST = MOVES_PER_MONTH * MOVE_TAP_COST + MOVES_MONTH_KEPT;
+/** What MOVES_MONTH_COST does not bound, each open, never zero: while any is, the fixed-cost line's reviewed ceiling stays unknown. */
+export const MOVE_COST_UNKNOWNS: readonly string[] = [
+  "Sessions: the tap logs out every session of both addresses (lib/auth.ts endAllSessions: one SMEMBERS, then two DEL a session); no count of an account's sessions bounds them. Priced with the one session the move was asked from.",
+  "Memberships: each team the address is on (lib/team.ts moveMemberships) takes its team's lock (4 s), reads and writes the team, copies its pipeline access and moves its API keys (lib/api-key-pause.ts movedMaker); no count bounds the teams one address may be on. Priced with none.",
+  "Phone devices: lib/phone-alerts.ts movePhoneDevices reads every store of the account and every store the address helps run, with up to four compare-and-set tries of each one's device list; the lists' bytes are not bounded here and the member stores are counted with the memberships. Priced with no device lists.",
+  "Undo and failures: a move refused or failing after the ways in moved (app/api/auth/move finishMove, undo and the catch that reads both addresses again) moves passkeys and two-step login back and logs out; not measured, priced as the tap that moved.",
+  "Repairs before the room: app/api/auth/move repairs both addresses (lib/move-repair.ts repairMove) before takeMoveRoom, at every tap of a link, so that work is not counted by MOVES_PER_MONTH.",
+  "The ask and refused taps: the link's ask (app/api/store/address/route.ts, two company emails, MOVE_ASKS_PER_HOUR) is counted by the hour for an address, not by the month; and every tap reads the link, the second step and the room before it is refused. Neither is in MOVES_PER_MONTH.",
+];
+/**
  * The PayPal watch's two list reads (lib/paypal-sales.ts, watchPayPal, swept by lib/checkout-sweep.ts through
  * lib/paypal-delivery.ts, sweepPayPal; Claude 5 on #2909), in Redis commands, held to what the real sweep sends by
  * tests/paypal-watch-cost.test.ts:
@@ -3151,6 +3451,10 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  MOVES_PER_MONTH_PAID: "The company's moves of the sign-in address in a calendar month (UTC) for stores with a running paid plan, all together (lib/auth.ts takeMoveRoom): one of the two parts of MOVES_PER_MONTH, kept apart so stores made for free never use up the paying stores' moves (Claude 5's focal review of #2271). Priced with MOVES_PER_MONTH.",
+  MOVES_PER_MONTH_UNPAID: "The same for every other store (no plan, in a trial, or a plan that ended), all together: the other part of MOVES_PER_MONTH. Priced with MOVES_PER_MONTH.",
+  MOVES_PER_MONTH: "The company's ceiling on moves of the sign-in address in a calendar month (UTC), all stores together (MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID: lib/auth.ts takeMoveRoom, one SET NX EX and one INCR of the store's kind's room taken at the tap before anything moves, after main's per-store pace (lib/move-pace.ts takeMove; the owner's decision of 18 November 2026 on #2271); a count that does not read refuses): the move's own work, its NOTE_MOVE_COPY EVAL (five commands at the most) and the rest of the tap, is never done past it (Codex G2's MEDIUM on #2271, Claude 1's decision). Not a plan's cost: a company cost, priced in dollars by MOVES_MONTH_COST (MOVES_PER_MONTH taps at MOVE_TAP_COST, every command counted with each EVAL's own, every byte, every lock's whole wait, for an account at every bound the code keeps, tests/move-cost.test.ts; and the records they keep, MOVES_MONTH_KEPT), the \"account-moves\" line of the LLC fixed costs (lib/llc-fixed-costs.ts, FX275), whose reviewed ceiling stays unknown, never zero, while MOVE_COST_UNKNOWNS are open (Codex G's MEDIUM on #2271). The two emails of the ask before it are company emails of the address-change request (app/api/store/address/route.ts, MOVE_ASKS_PER_HOUR), named among those unknowns.",
+  SPIKE_ALERTS_PER_DAY: "At most this many emails a UTC day, for the whole site, telling the operator that a store used a mark of its window of requests early (TODOS-51 D, lib/traffic-spike.ts): no store's cost and no plan's; a company cost under MR item 2, one Resend email each at most SPIKE_ALERTS_PER_DAY a day, and none without the operator configured. It only ever tells; no count, store or page changes.",
   HOLDS_PER_ADDRESS: "lib/stock.ts: how many limited units one connection may hold on a store within one hold's time, an abuse bound that keeps a never-paying connection from holding a drop. Not a plan allowance; each press is still counted by the checkout's own lines.",
   TURN_LIMITS: "lib/studio-agent-rules.ts (631 [AA1], studio assistant, unit 1): the byte, step and token ceilings of one turn of the studio's assistant, pure rules. Nothing calls the model yet. They bound turnHoldMicroUsd, the whole turn at its most, which a turn reserves from the store's monthly AI budget (line ai, AUTOMATIC_AI_STORE_MICRO_USD) before its first call once a later unit wires it. Not a monthly figure of its own; unknown cost is not zero, and the wiring unit must cite its route here.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",
@@ -3171,6 +3475,14 @@ export const NOT_A_COST: Record<string, string> = {
   BACKUP_DAYS_PER_MONTH: "The UTC days a billing month touches for the daily backup, a company cost (273 [BK1], inbox C4-49): its worst month is priced by lib/backup-cost.ts among the LLC fixed costs (lib/llc-fixed-costs.ts, line backup, 100% Marktmorgen under FX275), never a plan's allowance.",
   BACKUP_RUNS_PER_DAY: "The backup's runs a UTC day at the most, a run and one new try after a failure, counted before any cost (lib/backup-run.ts, 273 [BK1], inbox C4-49); priced in the company's backup line (lib/backup-cost.ts, lib/llc-fixed-costs.ts line backup), never a plan's allowance.",
   BACKUP_REPORT_READS_PER_DAY: "The daily report's two reads of the backup's outcome, counted in the backup's company cost line (lib/backup-cost.ts, lib/llc-fixed-costs.ts line backup), never a plan's allowance (273 [BK1], inbox C4-44).",
+  SUPPORT_SENDER_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_FILE_BYTES_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_HELD_NOTICES_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_CREATOR_SENDER_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_ANNOUNCED_CREATOR_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_PUBLIC_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_ANNOUNCED_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   HELD_RECHECKS_PER_DAY: "Company recovery work plus separate post_cancellation retention exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
   PAGE_INCLUDED_BYTES: "What one studio request's own price already moves through the database and on to the browser (lib/sent-bytes.ts; UNIT_COST.studio prices fifty kilobytes): spent once a request, whatever its parts (IncludedBytes, made once by the page and handed to each reading and sending; C3-112 (2)): a part that fits in what is left counts nothing beyond the request that asked, and one that does not counts one studio request a megabyte (LEDGER_BYTES_PER_UNIT, STUDIO_UNIT_SENT_BYTES, AGENDA_UNIT_BYTES, held in tests/plan-cost-registry.test.ts). A threshold inside the studio line, not a figure of its own.",
   FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
@@ -3223,6 +3535,7 @@ export const NOT_A_COST: Record<string, string> = {
   MEET_CHARGE_READS: "Calls to the creator's Stripe account one run of the meetings' refund job makes to read a charge's refunds (GET /refunds?charge=, up to 100 rows, lib/call-meetings.ts chargeRefundsSettled, at the pinned STRIPE_LIST_VERSION), only for a call's refund that succeeded on a charge read refunded in full without covering it by itself (a refund in parts, the owner's decision 18), each charge once a run, apart from the checkout lookups (REFUND_LOOKUPS), so a part held for later never takes the lookups of new refunds; no store command is sent for it. A scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call.",
   MEET_REFUND_STORES: "The stores one run of the meetings' refund job (lib/call-meetings.ts, readRefunds, in the five-minute meetings job) reads the refunds of, at the most: the 20 whose turn is oldest (the stores never read first, in the order they came in, then the ones read longest ago), so every store with meetings to come has its turn in a known order (before: ZRANGEBYSCORE nl:meet:stores ... LIMIT 0 20 by the last meeting's end took the same twenty every run and the 21st onwards never had a refund read). 20 is a ceiling, not the rate: the meetings get six seconds of the run in all (app/api/cron/mail/route.ts), so the stores really read a run are as many as fit in what is left of them, often five to twelve, and the rotation takes ceil(stores / that) runs; a store not reached keeps its turn, a store whose read failed or that did not read keeps an anchor (written before Stripe is asked, or one a day back), so its next turn reads from there however long the rotation, and a turn that waited more than a day is said in the log once a day. Each store read costs what MEET_REFUND_PLACE_COMMANDS, MEET_REFUND_ROW_COMMANDS, MEET_CHARGE_READS, REFUND_PAGES, REFUND_LOOKUPS and LOST_DISPUTE_PAGES price, as before (at most 20 stores a run before too). Held by tests/call-meetings-refund-stores.test.ts. A scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call.",
   MEET_REFUND_TURN_COMMANDS: "The Redis commands one run of the meetings' refund job (lib/call-meetings.ts, readRefunds) sends on the store list and its rotation, outside each store's own refunds: the ZRANGEBYSCORE and ZREM of the stores whose last meeting ended a day ago (as before), one ZUNIONSTORE and one ZINTERSTORE that keep the rotation (nl:meet:refund-turns, one member a member of nl:meet:stores, no more, with a time each: the list's members a second time, under 100 bytes each, in tests/store-data-registry.ts) in step with the list, one ZRANGEBYSCORE of the stores new to it (at most 1,000) and one ZADD XX GT stamping them with the time they came in, one ZRANGEBYSCORE WITHSCORES of the 20 oldest turns, one ZADD XX of the turns taken, only when the oldest turn waited more than a day one SET NX EX of the day's log line (nl:meet:refund-turns:said): 9 a run at most, where it was 3 before; plus one SET NX EX of the anchor of each store of the turn that did not read (at most MEET_REFUND_STORES, in the same pipeline as the ZADD). Held by tests/call-meetings-refund-stores.test.ts. A scheduled job, bounded by its schedule (a company fixed cost).",
+  NOTICE_STORES_PER_RUN: "The stores one run of the daily notice of held community items reads, at the most (543 [CM2] unit 2, lib/community-held-notice.ts, noticeHeldStores, in the courses job; Claude 2's MEDIUM on #3033): 500, in their turn, the store that waited longest first, and only stores whose community held something in the last HELD_DAYS + 1 days. A run sends storesWithHeld's three commands (ZREMRANGEBYSCORE, ZUNIONSTORE, ZRANGEBYSCORE), one ZSCORE a store in line and, for stores let go, one pipeline of a ZREM and their ZSCOREs and at most one ZADD; each store visited is its store read (storeForId: the GET of its id and the store's own read) and NOTICE_VISIT_COMMANDS more, the queue counted read only (heldWaiting: one ZRANGEBYSCORE and one MGET of at most MAX_HELD records, each at most the bytes its hold took from the data room), the day's mark (SET NX) and its turn passed (ZADD). Nothing is swept, claimed, noted or deleted by the run: an expired item is refused by the sweeps a member's hold and the creator's queue already run. Its email is the store's own figure (EMAIL_SITES). Held by tests/cm2-u2-daily-notice.test.ts. A scheduled job, bounded by its schedule and this ceiling, a company fixed cost like MEET_REFUND_STORES, not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
   SKIPPED_LINES_PER_DAY: "A cap on the lines a store's log gets in a UTC day for messages not kept (too large to keep, or made with the month's webhook deliveries used), each reason on its own, past which one summary line an endpoint counts the rest (lib/webhooks.ts, skippedLines): no endpoint is called and no delivery taken; what the lines and the day's counts keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:wait:).",
   DISCORD_DUE_PER_RUN: "People the Discord job checks again in one run (lib/discord-store.ts, dueMembers; lib/discord-access.ts, sweepDiscord, every 30 minutes; #4239): one ZRANGEBYSCORE of the line and one ZADD XX that leases those handed out (DUE_LEASE_SECONDS), with at most one ZREM of entries that are nobody, so the line itself is at most 3 commands a run whatever its length (held by tests/discord-due-lease.test.ts); then for each person at most three commands more than before the lease: the ZREM of dropDue when their store, server or member record is gone, the second readMember of a rejoin and the ZADD of checkSoon putting them back, besides the check's own work (the member and role reads and Discord's calls, unchanged). At most DISCORD_DUE_PER_RUN people a run. A scheduled job, bounded by its schedule and the batch, a company fixed cost like HAND_OVER_BATCH, not a plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
@@ -3231,6 +3544,7 @@ export const NOT_A_COST: Record<string, string> = {
   EMAIL_CODE_TRIES_PER_ADDRESS_HOUR: "Code tries one address may take in the hour, all its requests together (652 [WG12], Claude 4): the bound on the commands above for one address, past which a try is refused after its count; the requests themselves are bounded by the sign-in limits (RATE_LIMIT, ADDRESS_LIMIT).",
   EMAIL_CODE_TRIES_PER_ADDRESS_DAY: "Code tries one address may take in a day from its first, all its requests together (Claude 3 on #2736): past them only the link opens, so the guesses against one address stay at this many a day, whatever the hourly limit renews.",
   EMAIL_CODE_TRIES_PER_IP_HOUR: "Code tries one machine may take in the hour (Claude 3 on #2736), counted before any record is read: the bound on the reads a machine can buy with made-up request ids, two commands each past it.",
+  OLD_PAYMENT_LOOKUPS_PER_READING: "Lookups of a refunded or disputed payment's own invoice (GET /invoice_payments filtered by the payment, the invoice expanded, one call each) one reading of a store's numbers may ask the creator's Stripe account (lib/stats.ts, paymentOfStoreInvoice; #4549), only for a refund or dispute in the reading's window whose payment the invoices it already read do not confirm, at most OLD_PAYMENT_LOOKUPS_PER_READING (10) a reading, so at most 10 more calls than before per reading. Past it, or when Stripe cannot be asked or answers in another shape, the payment stays unconfirmed and the kept total reads unknown. No store command; Stripe bills no API call: bounded by the readings of the store's numbers its own pages and jobs already make, whose costs are their own lines. Held by tests/stats-old-payment-confirm.test.ts (10 calls at most). Its dollar figure is not a line of lib/llc-fixed-costs.ts, not certified, never zero.",
   DISPUTE_READS_PER_READING: "Questions about a dispute (GET /disputes?charge=) one reading of a store's booked calls may ask Stripe, only for a charge Stripe marks as disputed (lib/calls.ts, callOrLost; lib/refunds.ts, keptUnlessLost); one for a booking read alone (paidCall). Past it, or when Stripe cannot be asked, the booking keeps its time. No store command and no other call; Stripe bills no API call: bounded by the readings the store's own pages and jobs already make, whose costs are their own lines.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   BACKUP_FILES_PAGES_PER_STORE: "The provider pages one complete listing of one source of one store may take in the backup files route (273 [BK1] files part 1, lib/backup-files-contract.ts, lib/backup-files-source.ts): a bound that only refuses (a store past it is answered over_bound, never complete), not a figure of its own. What the route spends is a company cost (the company's backup, 100% Marktmorgen under FX275), priced by backupFilesRouteWorstMonth (lib/backup-files-source.ts, held by tests/backup-files-cost.test.ts; Claude 7's MÉDIO on #3313): each admitted page, counted by takeDayPage against the review's maxPagesPerDay a source a UTC day before any provider call, at BACKUP_FILES_PAGE_MICRO_USD (1,548, the dated review's ceiling per call of docs/backup-costs-2026-11-08.md section 5b: the function held its whole maxDuration at 2 GB on CPU in the dearest region, a full page of answer as Fast Origin Transfer and Fast Data Transfer with its CDN Request, the two Upstash commands of the count and a page of Upstash bandwidth, one listing and one Blob signing token as Advanced Operations, no free quota), for each source on, and the one call a source a day the Worker may be refused past it (BACKUP_FILES_DAY_CEILING_REFUSALS, lib/backup-files-contract.ts: the Worker stops that source for the rest of the UTC day; priced at a whole page; Codex N1's LOW 1 on #3313), 32 UTC days a month, plus R2's rounding block and 10% room; 0 while BACKUP_FILES_ROUTE_REVIEW (lib/backup-files-review.ts) is null, since the route answers 404 before any command; unknown (null), never zero, if Bunny Stream, whose listing price is not read, is turned on. At a review of 40 pages a day that is 9,418,148 micro-dollars, $9.42 a month. It joins LLC_FIXED_COST_IDS (lib/llc-fixed-costs.ts) once #3481, which changes that same line, is in (rule 3: one pull request at a time on it); until then the owner's review of the route is what admits any of it, and nothing calls the route.",
@@ -3325,6 +3639,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "erase-address": METERED_EMAIL, "erase-ip": METERED_EMAIL,
   "podcast-link-address": METERED_EMAIL, "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
   "remind-store": METERED_EMAIL, "assist-remind-store": METERED_EMAIL, "resend-sale": METERED_EMAIL, "resend-store": METERED_EMAIL, "creator-inbound": METERED_EMAIL,
+  "support-sender-hour": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-sender-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-forward": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-public": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-creator-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced-creator": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced-from": guard("Mail to our own support sent on through SES: one store owner's address's share of the creators' reserve of announcements a day, counted before the message is read (lib/inbound-mail.ts; review of #3481): a company fixed cost inside the announcements' ceilings priced by supportForwardMonthlyUsd, never a plan's."),
   "inbox-reply": METERED_EMAIL, "inbox-tell": METERED_EMAIL,
   // The Store assistant (an add-on, ADD_ON_LINES): its asks are burst limits under its month's pool, the rest public requests.
   assist: guard("A burst limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
@@ -3332,7 +3647,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-ask": PUBLIC, "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
   "quiz-connection": BURST("public-requests"), "quiz-student": BURST("public-requests"),
-  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
+  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "submission-open": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "picture-door": BURST("studio"),
@@ -3380,7 +3695,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   // at most MOVES_PER_30_DAYS (10) an account, by its store's id (lib/move-pace.ts, scope move-done; Claude 7's review
   // of #3326): at most 2 x 10 x 2 = 40 end emails an account in any calendar month. The asks are paced by move-ask.
   "app/api/auth/move/route.ts": COMPANY,
-  "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
+  "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/traffic-spike.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],
   "app/api/store/mail/route.ts": MONTHLY, "lib/api-write.ts": MONTHLY, "lib/community-mail.ts": MONTHLY, "lib/flows.ts": MONTHLY,
@@ -3396,7 +3711,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE, "lib/plan-stuck-notice.ts": STORE, "lib/plan-late-notice.ts": STORE,
-  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
+  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/community-held-notice.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,
   "lib/payment-recovery.ts": STORE, "lib/podcast-access.ts": STORE, "lib/quiet-sales.ts": STORE, "lib/store-contact.ts": STORE,
   "lib/store-join.ts": STORE, "lib/team.ts": STORE, "lib/api-key-pause.ts": STORE, "lib/tier-switch.ts": STORE, "lib/waitlist.ts": STORE,

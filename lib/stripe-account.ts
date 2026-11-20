@@ -13,7 +13,7 @@
  * one of them quietly missing a header.
  */
 
-import { stripeJson } from "@/lib/stripe-http-error";
+import { parseStripeText, stripeJson } from "@/lib/stripe-http-error";
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { DEMO_CONNECTED_ACCOUNT, demoKey } from "@/lib/demo-account";
 
@@ -80,6 +80,50 @@ export class StripeError extends Error {
 }
 
 /**
+ * A Stripe answer heavier than its reader's ceiling (onAccount's `maxBytes`): stopped as it streams in, never read
+ * whole into memory, and so not known (CX-123 rule 24, 9 November 2026). The same answer would be as heavy again,
+ * so asking again tells no more.
+ */
+export class StripeBodyTooLarge extends Error {
+  readonly maxBytes: number;
+  constructor(maxBytes: number) {
+    super(`Stripe answered with more than ${maxBytes} bytes`);
+    this.name = "StripeBodyTooLarge";
+    this.maxBytes = maxBytes;
+  }
+}
+
+/** A Stripe answer's JSON, read up to `maxBytes` (none when 0): past it the reading stops and StripeBodyTooLarge is thrown. */
+async function jsonWithin(response: Response, maxBytes: number): Promise<Record<string, unknown>> {
+  if (!maxBytes) return stripeJson(response);
+  const declared = Number(response.headers?.get?.("content-length") ?? NaN);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw new StripeBodyTooLarge(maxBytes);
+  }
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    // A response with no stream to read (a stand-in in a test): its whole text, measured before it is parsed.
+    const text = typeof response.text === "function" ? await response.text() : JSON.stringify(await response.json());
+    if (Buffer.byteLength(text, "utf8") > maxBytes) throw new StripeBodyTooLarge(maxBytes);
+    return parseStripeText(text, response);
+  }
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new StripeBodyTooLarge(maxBytes);
+    }
+    parts.push(value);
+  }
+  return parseStripeText(Buffer.concat(parts).toString("utf8"), response);
+}
+
+/**
  * Whether work may have asked Stripe to open a checkout (Claude 4's review of
  * #1732, 6 November 2026): a stock hold is given back at once when its
  * checkout failed before that request was made, since nothing can exist at
@@ -130,6 +174,8 @@ export async function onAccount(
   idempotencyKey?: string,
   /** A read-only workflow may choose a shorter ceiling; existing callers keep the default. */
   timeoutMs = STRIPE_TIMEOUT_MS,
+  /** The most bytes of the answer read (0: no ceiling); past it StripeBodyTooLarge is thrown (jsonWithin). */
+  maxBytes = 0,
 ): Promise<Record<string, unknown>> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > STRIPE_TIMEOUT_MS) {
     throw new Error("Invalid Stripe request ceiling");
@@ -161,8 +207,9 @@ export async function onAccount(
       cache: "no-store",
       signal,
     });
-    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts).
-    return { response, data: await stripeJson(response) };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts), read within
+    // maxBytes when the caller gives one (jsonWithin).
+    return { response, data: await jsonWithin(response, maxBytes) };
   });
   if (!response.ok) {
     const error = data.error as

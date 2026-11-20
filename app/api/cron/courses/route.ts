@@ -11,16 +11,16 @@ import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
 import { noticeHeldStores } from "@/lib/community-held-notice";
-import { settleSubmissionSlots } from "@/lib/submission-store";
+import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store";
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
  * course opens for them. Once per student and module, one run at a time.
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
- * (lib/community-files.ts), a day on. And sets back the room a buyer's
- * upload opened and left still held, once its day is over
- * (lib/submission-store.ts, settleSubmissionSlots). And tells each creator
+ * (lib/community-files.ts), a day on. And deletes the files buyers sent for
+ * review whose keeping time ended, and their records (lib/submission-store.ts), and sets back the room a buyer's
+ * upload opened and left still held, once its day is over (settleSubmissionSlots). And tells each creator
  * whose community has posts or comments waiting for approval, once a day
  * (lib/community-held-notice.ts, 543 [CM2]).
  */
@@ -53,6 +53,11 @@ export async function GET(request: NextRequest) {
       console.error("could not sweep unused community pictures", error);
       return null;
     });
+    // Not swept (the list could not be read exactly): said, never "0 deleted"; the next run sweeps.
+    const submissions = await sweepSubmissions(Math.floor(Date.now() / 1000)).catch((error: unknown) => {
+      console.error("could not sweep submissions past their keeping time", error);
+      return null;
+    });
     // Not read exactly: said, never "0 settled"; every slot keeps its turn for the next run.
     const slots = await settleSubmissionSlots(Math.floor(Date.now() / 1000)).then(
       (done) => done.settled,
@@ -73,6 +78,8 @@ export async function GET(request: NextRequest) {
         ...(stale === null ? { uploadsFailed: true } : {}),
         unusedPictures: pictures,
         ...(pictures === null ? { picturesFailed: true } : {}),
+        expiredSubmissions: submissions,
+        ...(submissions === null ? { submissionsFailed: true } : {}),
         submissionSlots: slots,
         ...(slots === null ? { submissionSlotsFailed: true } : {}),
         heldNotices: held,

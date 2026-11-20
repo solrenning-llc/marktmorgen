@@ -115,9 +115,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
-  // Nothing is kept yet: no code writes a lesson's setup until the studio's setting (#3571), so no buyer can send a file,
-  // and the deletion and the copy of what they send arrive before it (#3570, "erased", with lib/person-copy.ts).
-  { file: "lib/submission-store.ts", how: "none", what: "Files buyers send for review on a lesson: nothing is kept yet, since no lesson can ask for one until its deletion and its copy are in place" },
+  { file: "lib/submission-store.ts", how: "erased", what: "Files they sent you for review on a lesson, with their note, your reply and their address; an upload still open is stopped. Kept files are deleted by themselves when the keeping time you chose ends" },
   { file: "lib/backup-deletions.ts", how: "kept", what: "Built but off: once the file backup is turned on, deleting a file they handed in keeps a note of that file's name, which holds a one-way fingerprint of their address (never the address), as for every deleted file, whose name may hold your original file name. The note stays in our database for 14 days after the last deletion of that day, and in the backup for 92 days", why: "The note is how the backup finds the copy of the deleted file and deletes it too, a deletion they asked for included. It holds nothing else about them and is used for nothing else." },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },

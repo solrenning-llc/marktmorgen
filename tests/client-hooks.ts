@@ -20,11 +20,37 @@ const same = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.leng
 
 export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void };
 
+type RefNode = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
+/** Every ref object a host element of the tree is given (`ref={someRef}`), with that element. */
+function refsOf(node: unknown, out: [{ current: unknown }, RefNode][] = []): [{ current: unknown }, RefNode][] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    node.forEach((child) => refsOf(child, out));
+    return out;
+  }
+  const n = node as RefNode;
+  const ref = n.props?.ref;
+  if (typeof n.type === "string" && ref && typeof ref === "object" && "current" in ref) out.push([ref as { current: unknown }, n]);
+  refsOf(n.props?.children, out);
+  return out;
+}
+
 /**
  * Renders `component(props)`, runs its effects, and re-renders on every state change.
  * `contexts` gives a context the value a provider above would; any other reads its default.
+ * `beforeEffects`, when given, is called with each render's tree before its effects run, as React attaches refs before
+ * it runs effects.
+ * With `attach`, each ref object a host element is given is set, as React does, before
+ * the effects run: to what `attach` answers for that element (a stand-in with focus(),
+ * for example), and back to null once the element is no longer rendered.
  */
-export async function mount<P>(component: (props: P) => unknown, props: P, contexts?: Map<unknown, unknown>): Promise<Mounted> {
+export async function mount<P>(
+  component: (props: P) => unknown,
+  props: P,
+  contexts?: Map<unknown, unknown>,
+  options: { beforeEffects?: (tree: unknown) => void; attach?: (node: RefNode) => unknown } = {},
+): Promise<Mounted> {
+  let attached = new Set<{ current: unknown }>();
   const slots: Slot[] = [];
   let index = 0;
   let dirty = false;
@@ -92,6 +118,16 @@ export async function mount<P>(component: (props: P) => unknown, props: P, conte
     } finally {
       internals.H = before;
     }
+    if (options.attach) {
+      const now = new Set<{ current: unknown }>();
+      for (const [ref, node] of refsOf(last)) {
+        now.add(ref);
+        if (!attached.has(ref)) ref.current = options.attach(node);
+      }
+      for (const ref of attached) if (!now.has(ref)) ref.current = null;
+      attached = now;
+    }
+    options.beforeEffects?.(last);
     while (pending.length) pending.shift()!();
   };
   const settle = async () => {

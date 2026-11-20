@@ -56,6 +56,6 @@ export function visibleTop(own: Readonly<{ top: number; width: number; height: n
  * sticky header and section bar counts, never only the first <header> in the document (Claude 5's LOW on #3757).
  */
 export function stuckBarsBottom(bars: ReadonlyArray<Readonly<{ top: number; bottom: number; stickTop: number }>>): number | null {
-  // RED: the old reading, the first bar only.
-  return bars.length === 0 ? null : bars[0].bottom;
+  const stuck = bars.filter((bar) => Number.isFinite(bar.top) && Number.isFinite(bar.bottom) && Number.isFinite(bar.stickTop) && bar.top <= bar.stickTop + 1);
+  return stuck.length === 0 ? null : Math.max(...stuck.map((bar) => bar.bottom));
 }

@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
-import { focusScrollBy, visibleTop } from "@/lib/studio-focus-clear";
+import { focusScrollBy, stuckBarsBottom, visibleTop } from "@/lib/studio-focus-clear";
 
 /**
  * Keeps a focused control clear of the studio's sticky header and section bar where the browser does not
  * (WebKit ignores scroll-padding-top when it scrolls to focus; WCAG 2.4.11, 2.4.12; #3757). Rendered by StudioNav, so
- * only on pages that draw the bar. On focusin it reads the control's top and the sticky bars' bottoms once and, when
+ * only on pages that draw the bar. On focusin it reads the control's top and the bottoms of the sticky bars stuck at the top once and, when
  * the control is under them, scrolls the page by the overlap, at once (no smooth motion, so prefers-reduced-motion
  * holds). It never moves focus, changes the tab order, or acts inside a dialog; where the browser already brought
  * the control clear (Chromium, Firefox) the rule answers 0 and nothing happens. A focus that comes with a mouse or
@@ -38,16 +38,20 @@ export function StudioFocusClear() {
     const onFocusIn = (event: FocusEvent) => {
       const control = event.target;
       if (!(control instanceof Element)) return;
-      const bars = [document.querySelector("header"), document.querySelector("[data-studio-nav]")].filter(
-        (bar): bar is Element => bar !== null && getComputedStyle(bar).position === "sticky",
-      );
+      // Every sticky <header> and section bar, never only the first <header> in the document (Claude 5 on #3757).
+      const bars = Array.from(document.querySelectorAll("header, [data-studio-nav]")).filter((bar) => getComputedStyle(bar).position === "sticky");
       const inBars = bars.some((bar) => bar.contains(control));
       const inDialog = control.closest('dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]') !== null;
       if (pressing || inBars || inDialog || bars.length === 0) return;
       const by = focusScrollBy({
         // A visually hidden control (an sr-only radio inside its label) is measured by the label a person sees.
         controlTop: visibleTop(control.getBoundingClientRect(), labelOf(control)?.getBoundingClientRect() ?? null),
-        barsBottom: Math.max(...bars.map((bar) => bar.getBoundingClientRect().bottom)),
+        barsBottom: stuckBarsBottom(
+          bars.map((bar) => {
+            const rect = bar.getBoundingClientRect();
+            return { top: rect.top, bottom: rect.bottom, stickTop: Number.parseFloat(getComputedStyle(bar).top) };
+          }),
+        ),
         inDialog,
         inBars,
         fromPointer: pressing,

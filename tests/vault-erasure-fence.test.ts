@@ -124,6 +124,38 @@ test("an erasure between the record's write and the bind: the session is retired
   assert.deepEqual([await keys("nl:vault:up:*"), await keys("nl:storage:pending:*")], [[], []], "its record is forgotten and no row is written back");
 });
 
+// Claude 4 on #4937 @59a37b3486 (LOW, a test gap): the store's erasure begins after the record's fenced write, while
+// its walk has not yet reached the storage rows. The bind's own write is then the fence's -1 (storage_store_gone):
+// without that refusal the bind would answer bound with nothing written, and the browser would be handed signatures.
+test("an erasure begun before the bind, its storage row still there: the bind is refused as gone and nothing is handed out", async () => {
+  redis.clear();
+  sessions.clear();
+  asked.length = 0;
+  await redis.pipeline([["SET", LIVE, REF]]);
+  const field = await erasingField(REF);
+  const fence = { live: LIVE, erasing: ERASING_KEY, field };
+  const pipeline = redis.pipeline.bind(redis);
+  let erased = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await pipeline(commands);
+    if (!erased && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-cache-live:"))) {
+      erased = true;
+      // Only the mark and the live key: the walk has not reached the storage family yet.
+      await pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", LIVE]]);
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const outcome = await openReservedVault({ folder: folder(5), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure)
+    .then((r) => r, (e: unknown) => e)
+    .finally(() => { redis.pipeline = pipeline; });
+  assert.equal(erased, true, "the erasure began after the record was written");
+  assert.match(String(outcome), /storage_store_gone/, "the bind's write is refused by the store's fence");
+  assert.ok(asked.includes("DELETE session") && sessions.size === 0, "the session is retired at the provider");
+  assert.deepEqual(await keys("nl:vault:up:*"), [], "its record is forgotten");
+  const rows = await redis.pipeline([["GET", `nl:storage:pending:${folder(5)}`]]);
+  assert.deepEqual(JSON.parse(String(rows[0])).map((r: { pathname?: string }) => r.pathname ?? null), [null], "the row is never bound to the upload");
+});
+
 test("control: a live store's upload opens, with its record and its storage row", async () => {
   redis.clear();
   sessions.clear();

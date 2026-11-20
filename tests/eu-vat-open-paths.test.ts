@@ -50,7 +50,7 @@ function main(): void {
   const bundle: EuSupplyFields = { ...blank, bundle: ["c", "d"] };
   const members = new Map<string, EuSupplyFields>([["c", call], ["d", download]]);
   is("a bundle of a call and a download, from the EU: refused", consumerGate({ product: bundle, members, ...eu() }).ok, false);
-  is("a call with a download ticked beside it, from the EU: refused", consumerGate({ product: call, boxes: [{ product: download }], ...eu() }).ok, false);
+  is("a call with a download checked beside it, from the EU: refused", consumerGate({ product: call, boxes: [{ product: download }], ...eu() }).ok, false);
   const calls = readFileSync("lib/calls.ts", "utf8");
   is("the call checkout carries one line, the call itself", [calls.includes('"line_items[0][price_data][unit_amount]"'), /line_items\[[1-9]\]/.test(calls)], [true, false]);
 

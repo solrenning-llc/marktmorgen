@@ -6,7 +6,8 @@
 # 6929670678 on #4827, the owner's one exception to "never edits comments") and moves the label last. It never closes or
 # locks an issue and never deletes or edits any other comment. Every read and check comes before the first write; a
 # failure leaves the run red and the channel where it was, and the next comment on the same part retries. A PAINEL it may
-# not edit never stops the rollover: the PAINEL is left as it is, one warning goes to the new channel and the run is red.
+# not edit never stops the rollover: the PAINEL is left as it is, the new part's first comment says why with the first
+# line found, and the run ends with a warning annotation, not a failure (owner, 20/11/2026 18h23).
 #
 # It is off until the repository variable COORDINATION_ROLLOVER is set (owner, 20/11/2026: tested before it is turned on):
 #   - unset: comments run nothing; a manual run (Actions, Coordination rollover, Run workflow) is a dry run by default,

@@ -17,7 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
   LABEL, ROLL_AT, COMMENT_LIMIT, PANEL_COMMENT_ID, PANEL_MARK, BODY_LIMIT, BOT, partOf, nextTitle, pointerLine, withPointer, pointedTo,
-  panelProblem, panelWith, firstLine, fenced, fortaleza, trusted, previousOf, warnOnce, rollover, httpApi, type Api,
+  panelProblem, panelWith, firstLine, fenced, fortaleza, trusted, previousOf, warnOnce, warningLine, rollover, httpApi, type Api,
 } from "../scripts/coordination_rollover.mjs";
 
 const read = (path: string) => readFileSync(path, "utf8");
@@ -45,6 +45,9 @@ is("the values GitHub evaluates for the condition, and the switch, reach the scr
   /\n {10}EVENT_IS_PR: \$\{\{ github\.event\.issue\.pull_request != null \}\}\n/.test(workflow),
   new RegExp(`\\n {10}EVENT_AT_ROLL: \\$\\{\\{ github\\.event\\.issue\\.comments >= ${ROLL_AT} \\}\\}\\n`).test(workflow),
   /\n {10}EVENT_COMMENTS: \$\{\{ github\.event\.issue\.comments \}\}\n/.test(workflow)], [true, true, true, true, true, true]);
+is("a PAINEL left as it is ends the run with a GitHub warning annotation on one line, never a failure",
+  [/if \(result\.panelLeft\) console\.log\(warningLine\(result\.panelLeft\)\);/.test(script), warningLine("a\nb%c"), /throw new Error\(`[^`]*PAINEL/.test(script)],
+  [true, "::warning title=PAINEL not updated::a b c", false]);
 is("the script refuses an unknown mode, and a manual run in mode run while the switch is not on",
   [/if \(mode !== "dry-run" && mode !== "run" && mode !== "on"\) throw/.test(script), /if \(mode === "run" && process\.env\.SWITCH !== "on"\) throw/.test(script)], [true, true]);
 is("one job only", (workflow.match(/\n {2}[a-z-]+:\n {4}name:/g) ?? []).length, 1);
@@ -293,9 +296,10 @@ async function wholeRuns() {
   }
   {
     const gh = github({ comments: ROLL_AT, agentEditAfterPatch: true });
-    const error = await fails(gh);
-    is("a PAINEL edit landing right after the write is caught on the read-back: the channel still rolls over, the run ends red and warns once",
-      [error.includes("the PAINEL changed while this run was editing"), labeled(gh.issues), gh.panel().endsWith(agentLine), botPosts(gh.issues, 5000, WARN).length], [true, [5000], true, 1]);
+    const result = await rollover({ api: gh.api, now: NOW, log: quiet });
+    is("a PAINEL edit landing right after the write is caught on the read-back: the channel still rolls over, the run ends with a warning and one warning comment",
+      [result.action, String(result.panelLeft).includes("the PAINEL changed while this run was editing"), labeled(gh.issues), gh.panel().endsWith(agentLine),
+        botPosts(gh.issues, 5000, WARN).length], ["rolled", true, [5000], true, 1]);
   }
   {
     const gh = github({ comments: ROLL_AT, existingNext: "An agent's note." });
@@ -343,11 +347,18 @@ async function wholeRuns() {
   ] as const) {
     const gh = github({ comments: ROLL_AT, ...options });
     const before = gh.panel();
-    const error = await fails(gh);
-    is(`a PAINEL ${what}: never edited, but the channel still rolls over (it must never fill); the run ends red and warns once in the new channel`,
-      [error.includes(expect), error.includes("rolled over to #5000"), gh.calls.some((c) => c.method === "PATCH" && c.path.startsWith("issues/comments/")), gh.panel() === before,
-        labeled(gh.issues), botPosts(gh.issues, 5000, WARN).length, (botPosts(gh.issues, 5000, FIRST)[0]?.body ?? "").includes("is not changed by this rollover")],
-      [true, true, false, true, [5000], 1, true]);
+    const result = await rollover({ api: gh.api, now: NOW, log: quiet });
+    const first = botPosts(gh.issues, 5000, FIRST)[0]?.body ?? "";
+    // Owner, 20/11/2026 18h23: the rollover goes on in full; only the PAINEL is not edited; the run ends with a warning,
+    // and the new part's first comment says the PAINEL was not updated, why, and the first line found.
+    is(`a PAINEL ${what}: the rollover is complete (new part, label, pointer, first comment) and the PAINEL is untouched`,
+      [result.action, labeled(gh.issues), gh.issues.find((i) => i.number === 4932)!.body, botPosts(gh.issues, 5000, FIRST).length,
+        gh.calls.some((c) => c.method === "PATCH" && c.path.startsWith("issues/comments/")), gh.panel() === before],
+      ["rolled", [5000], pointerLine(5000) + "\n\nContinuation of #4858.", 1, false, true]);
+    is(`a PAINEL ${what}: the run ends with a warning, and the first comment says the PAINEL was not updated, why, and the first line found`,
+      [String(result.panelLeft).includes(expect), first.includes("The PAINEL was not updated by this rollover"), first.includes(expect),
+        options.panelGone ? first.includes("Its first line could not be read.") : first.includes(fenced(firstLine(before))), first.includes("The coordinator fixes the PAINEL's first line by hand"),
+        botPosts(gh.issues, 5000, WARN).length], [true, true, true, true, true, 0]);
   }
   {
     const gh = github({ comments: 150 });
@@ -437,10 +448,9 @@ async function dryRuns() {
   {
     const gh = github({ comments: 100, panel: "## PAINEL DA FILA\n" });
     const lines: string[] = [];
-    let error = "";
-    try { await rollover({ api: gh.api, now: NOW, log: (line: string) => lines.push(line), dryRun: true }); } catch (e) { error = String(e); }
-    is("a dry run with a PAINEL out of format prints that it would not change it, ends red, and writes nothing",
-      [lines.some((l) => l.startsWith("4. NOT change the PAINEL")), error.includes("dry run: the PAINEL could not be changed"), writesOf(gh.calls).length], [true, true, 0]);
+    const result = await rollover({ api: gh.api, now: NOW, log: (line: string) => lines.push(line), dryRun: true });
+    is("a dry run with a PAINEL out of format prints that it would not change it and would say so in the first comment, ends with a warning, and writes nothing",
+      [lines.some((l) => l.startsWith("4. NOT change the PAINEL") && l.includes("first comment")), String(result.panelLeft).includes('not "#N"'), writesOf(gh.calls).length], [true, true, 0]);
   }
 }
 
@@ -551,9 +561,14 @@ function agentsRule() {
     p.includes("canal de coordenação em vigor (o de (y): a issue com o rótulo canal-ativo (gh issue list --label canal-ativo), conferida antes de cada escrita)"), true);
   is("no fixed channel number is left in it", /hoje o #\d+/.test(p), false);
   is("it records the workflow, the one exception and its conditions", [p.includes(".github/workflows/coordination-rollover.yml"), p.includes("com uma única exceção, decidida pelo dono"),
-    p.includes("6929670678"), p.includes("\"#N\" ou \"Canal ativo: #N\""), p.includes("o resto do comentário fica idêntico"), p.includes("avisa no canal ativo"),
-    p.includes("a troca de parte continua"), p.includes("COORDINATION_ROLLOVER"), p.includes("a execução à mão só lê e mostra o que faria")],
-  [true, true, true, true, true, true, true, true, true]);
+    p.includes("6929670678"), p.includes("\"#N\" ou \"Canal ativo: #N\""), p.includes("o resto do comentário fica idêntico"),
+    p.includes("a troca de parte continua completa"), p.includes("a execução fica marcada como aviso, visível no GitHub"),
+    p.includes("diz que o painel não foi atualizado, por quê e qual 1ª linha encontrou"), p.includes("COORDINATION_ROLLOVER"), p.includes("a execução à mão só lê e mostra o que faria")],
+  [true, true, true, true, true, true, true, true, true, true]);
+  part("AC (y): one channel, the issue labeled canal-ativo, and no other definition anywhere in AGENTS.md");
+  const y = /\n\(y\) \*\*Um canal só, conferido antes de escrever\.\*\*[^\n]*/.exec(agents)?.[0] ?? "";
+  is("(y) names the label, in the owner's words", y.includes("conferir qual é a issue de coordenação em vigor (a issue com o rótulo canal-ativo (gh issue list --label canal-ativo), e só ela"), true);
+  is("no rule defines the channel as the newest open part, or by a fixed number", [/mais nova[^.]{0,40}(parte|part|aberta)/i.test(agents), /hoje (o|a) #\d+/.test(agents)], [false, false]);
 }
 
 wholeRuns().then(dryRuns).then(serverErrors).then(() => { agentsRule(); done(); },

@@ -9,7 +9,8 @@
 // It never closes or locks an issue and never deletes, edits or hides a comment, with one exception the owner decided
 // (20/11/2026): the PAINEL's first line, and only that line. The PAINEL is found by its fixed id AND its fixed mark; its
 // first line must be "#N" or "Canal ativo: #N" (any case, bold or not); otherwise the PAINEL is not edited, the channel
-// still rolls over (it must never fill), the run ends red and the active channel gets one warning. The PAINEL is re-read
+// still rolls over completely (it must never fill), the new part's first comment says why with the first line found, and
+// the run ends with a warning annotation, not a failure (owner, 20/11/2026 18h23). The PAINEL is re-read
 // just before the write, its current first line is kept in the new part first (to undo), the write is never repeated
 // blindly, and it is read back: every other byte must be the same. The text of the comment that triggered a run never
 // reaches this script, and only this workflow's own comments count as its markers.
@@ -135,19 +136,28 @@ function newPartBody(active, count, now) {
   ].join("\n\n");
 }
 
-function firstComment(active, next, oldPanelLine) {
+function firstComment(active, next, panelBody, problem = null) {
   return [
     MARKER,
     `**The coordination channel moved: #${active.number} is nearly full; the active channel is #${next}.**`,
     `Before you write in the channel, check which issue has the label \`${LABEL}\`: \`${FIND}\`. The label is on one issue only, and this ` +
       `workflow moves it before each part fills, with a pointer line on top of the previous part and the PAINEL's first line updated.`,
-    ...(oldPanelLine === null ? [`The PAINEL (comment ${PANEL_COMMENT_ID}) is not changed by this rollover: see the warning below.`]
-      : [`To undo the PAINEL change, put back its first line (comment ${PANEL_COMMENT_ID}) as it was before this rollover:`, fenced(oldPanelLine)]),
+    ...(problem ? panelNotUpdated(problem, panelBody)
+      : [`To undo the PAINEL change, put back its first line (comment ${PANEL_COMMENT_ID}) as it was before this rollover:`, fenced(firstLine(panelBody))]),
   ].join("\n\n");
 }
 
 const undoNote = (line) => [UNDO_MARKER, `The PAINEL's first line (comment ${PANEL_COMMENT_ID}) right before this rollover changed it, to undo:`,
   fenced(line)].join("\n\n");
+
+/** What a new part says when its rollover could not update the PAINEL (owner, 20/11/2026 18h23): why, and the line found. */
+function panelNotUpdated(problem, panelBody) {
+  return [
+    `**The PAINEL was not updated by this rollover** (comment ${PANEL_COMMENT_ID}): ${problem}. The channel itself rolled over: the label \`${LABEL}\` shows where.`,
+    ...(typeof panelBody === "string" ? ["Its first line, as this run found it:", fenced(firstLine(panelBody))] : ["Its first line could not be read."]),
+    `The coordinator fixes the PAINEL's first line by hand. The workflow edits it only when it is "#N" or "Canal ativo: #N" and the comment carries "${PANEL_MARK}".`,
+  ];
+}
 
 function panelWarning(problem) {
   return [
@@ -294,8 +304,8 @@ async function editPanel(api, next, part, now, comments) {
  * rollover: the next part, then the pointer on the active part (which records the next part's number for a retry),
  * then the first comment, the PAINEL, and the label last; the label is what agents follow, so until it moves they
  * keep writing in the active part and each of their comments retries. A dry run stops after the reads and prints the plan.
- * A PAINEL that cannot be edited never stops the rollover (the channel must not fill): the PAINEL is left as it is, one
- * warning goes to the active channel and the run ends red.
+ * A PAINEL that cannot be edited never stops the rollover (the channel must not fill): the PAINEL is left as it is, the
+ * new part says why (with the first line found) and the result carries `panelLeft`, which main() turns into a warning.
  * @param {{ api: Api, now: Date, log?: (line: string) => void, dryRun?: boolean,
  *   event?: null | { issue?: string, labeled?: string, pullRequest?: string, count?: string, atRoll?: string } }} options
  */
@@ -321,8 +331,8 @@ export async function rollover({ api, now, log = console.log, dryRun = false, ev
     log(`#${active.number} (part ${part}) has ${active.comments} comments, below ${ROLL_AT}: nothing to roll over` +
       (finished ? `; the line on top of #${finished} now says it no longer takes coordination` : "") +
       (panelLeft === null ? "" : panelLeft === "done" ? "; the PAINEL's first line now names it" : `; the PAINEL: ${panelLeft}`));
-    if (panelLeft !== null && panelLeft !== "done") throw new Error(`the PAINEL: ${panelLeft}`);
-    return { action: finished || panelLeft === "done" ? "finished" : "none", active: active.number };
+    const left = panelLeft !== null && panelLeft !== "done" ? panelLeft : null;
+    return { action: finished || panelLeft === "done" ? "finished" : "none", active: active.number, ...(left ? { panelLeft: left } : {}) };
   }
 
   // Reads and checks, all before any write.
@@ -357,13 +367,12 @@ export async function rollover({ api, now, log = console.log, dryRun = false, ev
       next ? `1. use #${next.number}, already open: "${title}"` : `1. open "${title}" (#N)`,
       `2. put on top of #${active.number}: ${pointerLine(n, true)}`,
       `3. write #${n}'s first comment` + (panel.problem ? "" : `, keeping the PAINEL's current first line: ${firstLine(panel.body)}`),
-      panel.problem ? `4. NOT change the PAINEL (${panel.problem}); warn in #${n} and end red`
+      panel.problem ? `4. NOT change the PAINEL (${panel.problem}); say so in #${n}'s first comment, with its first line as found, and end with a warning`
         : `4. change the PAINEL's first line to: ${firstLine(panelWith(panel.body, next?.number ?? PROBE, part + 1, now)).replace(String(PROBE), "N")}`,
       `5. move the label ${LABEL} from #${active.number} to #${n}, then make the line on #${active.number}: ${pointerLine(n)}`,
     ];
     for (const line of plan) log(line);
-    if (panel.problem) throw new Error(`dry run: the PAINEL could not be changed: ${panel.problem}`);
-    return { action: "dry-run", active: active.number, next: next?.number ?? null, due: atRoll, plan };
+    return { action: "dry-run", active: active.number, next: next?.number ?? null, due: atRoll, plan, ...(panel.problem ? { panelLeft: panel.problem } : {}) };
   }
 
   // Writes.
@@ -375,10 +384,12 @@ export async function rollover({ api, now, log = console.log, dryRun = false, ev
   await putPointer(api, active.number, next.number, true);
 
   const comments = await all(api, `issues/${next.number}/comments?sort=created`, "next part's comments");
+  let toldInFirst = false;
   if (!comments.some((c) => byBot(c) && String(c?.body ?? "").startsWith(MARKER))) {
-    const body = firstComment(active, next.number, panel.problem ? null : firstLine(panel.body));
+    const body = firstComment(active, next.number, panel.body, panel.problem);
     await api("POST", `issues/${next.number}/comments`, { body });
     comments.push({ body, user: { login: BOT } });
+    toldInFirst = Boolean(panel.problem);
   }
 
   const panelLeft = panel.problem ?? await editPanel(api, next.number, part + 1, now, comments);
@@ -431,8 +442,11 @@ export async function rollover({ api, now, log = console.log, dryRun = false, ev
   await putPointer(api, active.number, next.number, false);
 
   if (panelLeft) {
-    await warnOnce(api, next.number, panelLeft);
-    throw new Error(`the channel rolled over to #${next.number}, but the PAINEL: ${panelLeft}; one warning is in #${next.number}`);
+    // The rollover is complete; only the PAINEL is not. The new part says why (in its first comment, or in one warning
+    // when that comment was already written), and the run ends with a warning, not a failure (owner, 20/11/2026 18h23).
+    if (!toldInFirst) await warnOnce(api, next.number, panelLeft);
+    log(`the PAINEL was not updated: ${panelLeft}`);
+    return { action: "rolled", active: active.number, next: next.number, panelLeft };
   }
   return { action: "rolled", active: active.number, next: next.number };
 }
@@ -479,8 +493,13 @@ async function main() {
   if (mode === "run" && process.env.SWITCH !== "on") throw new Error("mode run needs the repository variable COORDINATION_ROLLOVER set to on; run a dry run instead");
   const event = process.env.EVENT_ISSUE ? { issue: process.env.EVENT_ISSUE, labeled: process.env.EVENT_LABELED, pullRequest: process.env.EVENT_IS_PR,
     count: process.env.EVENT_COMMENTS, atRoll: process.env.EVENT_AT_ROLL } : null;
-  await rollover({ api: httpApi({ fetch, token, base }), now: new Date(), dryRun: mode === "dry-run", event });
+  const result = await rollover({ api: httpApi({ fetch, token, base }), now: new Date(), dryRun: mode === "dry-run", event });
+  // A PAINEL left as it is marks the run with a warning, visible in GitHub, and never fails it.
+  if (result.panelLeft) console.log(warningLine(result.panelLeft));
 }
+
+/** A GitHub Actions warning annotation, on one line. */
+export const warningLine = (problem) => "::warning title=PAINEL not updated::" + String(problem).replace(/[\r\n%]/g, " ");
 
 if (process.argv[1]?.endsWith("coordination_rollover.mjs")) {
   main().catch((error) => {

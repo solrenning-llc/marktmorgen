@@ -419,6 +419,49 @@ async function main(): Promise<void> {
     is(`${label}: the message counted once for the day`, await skipCount(), overflow ? SKIPPED_LINES_PER_DAY + 1 : 1);
   }
 
+  part("A message not kept: its day's count applied with a reply in another shape is counted once (Codex X6 on #3446, MEDIUM)");
+  for (const overflow of [false, true]) {
+    // A reply of 1 can be INCR's own answer, so it is left out: every other one is not a count.
+    for (const [name, value] of LANDED.filter(([named]) => named !== "1")) {
+      store = await setup();
+      const skipKey = `nl:hooks:wait:${statsId}:skip:large:${day}`;
+      await real([["SET", skipKey, overflow ? SKIPPED_LINES_PER_DAY : 0]]);
+      // The count is applied, and its reply is lost or comes back in another shape.
+      landed = (c) => (c.includes(skipKey) && (c[0] === "INCR" || c[0] === "EVAL") ? { reply: value } : undefined);
+      const first = await outcome(emitEvent(store, "sale.completed", "cs_CountLarge01", tooLarge));
+      landed = null;
+      const label = overflow ? "the day's count line" : "its own line";
+      is(`${label}, the count answered as ${name}: not done, and the event's mark let go`, [first === "done", await get(saleMarkKey("cs_CountLarge01"))], [false, null]);
+      await emitEvent(store, "sale.completed", "cs_CountLarge01", tooLarge);
+      is(`${label}, the count answered as ${name}: noticed again, its line in the log once`, (await lineWords()).length, 1);
+      is(`${label}, the count answered as ${name}: the message counted once for the day`, await skipCount(), overflow ? SKIPPED_LINES_PER_DAY + 1 : 1);
+    }
+  }
+
+  part("The store's log: a push answered in another shape, and not applied, is unknown; the line goes in once (Codex X6 on #3446, MEDIUM)");
+  // 42 can be LPUSH's own answer (the list's length), so it is left out: every other one is not a length.
+  for (const [name, value] of OFF_SHAPES.filter(([named]) => named !== "42")) {
+    for (const large of [false, true]) {
+      store = await setup();
+      const session = large ? "cs_PushLarge01" : "cs_Push01";
+      const body = large ? tooLarge : { amount_cents: 4900 };
+      // The push is not run, and its reply comes back in another shape.
+      swap = (c) => (c[0] === "LPUSH" && c[1] === `nl:hooks:log:${statsId}` ? { reply: value } : undefined);
+      const first = await outcome(emitEvent(store, "sale.completed", session, body));
+      swap = null;
+      const label = large ? "a message not kept" : "an event's delivery";
+      is(`${label}, LPUSH as ${name}: unknown, and the event's mark let go`, [first, await get(saleMarkKey(session))], ["unknown", null]);
+      await emitEvent(store, "sale.completed", session, body);
+      is(`${label}, LPUSH as ${name}: noticed again, its line in the log once`, (await logIds()).length, 1);
+      if (large) is(`${label}, LPUSH as ${name}: counted once for the day`, await skipCount(), 1);
+    }
+  }
+  store = await setup();
+  swap = (c) => (c[0] === "LTRIM" && c[1] === `nl:hooks:log:${statsId}` ? { reply: 1 } : undefined);
+  const trimmed = await outcome(emitEvent(store, "sale.completed", "cs_Trim01", { amount_cents: 4900 }));
+  swap = null;
+  is("the log's trim answered as 1: unknown, never taken as done", trimmed, "unknown");
+
   part("The store's log: another shape is unknown, never an empty log; no line is put in it twice");
   for (const [name, value] of [['"x"', "x"], ["[1]", [1]], ["an object", { x: 1 }], ["undefined", undefined], ["null", null]] as [string, unknown][]) {
     store = await setup();

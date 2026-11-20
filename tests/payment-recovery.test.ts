@@ -21,10 +21,10 @@
  */
 import { cardLapsesBefore, cardNoticeDue, parseDunning, reminderDue } from "@/lib/dunning-rules";
 import { cardNoticeEmail, failedPaymentEmail, recoverFailedPayments } from "@/lib/payment-recovery";
-import { cardGrant, cardView, finishCardUpdate, openCardUpdate } from "@/lib/card-update";
+import { KEEP_CARD_OPEN_IF_LIVE, cardGrant, cardLink, cardView, finishCardUpdate, openCardUpdate, openKey } from "@/lib/card-update";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ownerKey, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -37,6 +37,7 @@ Date.now = () => realNow() + shift;
 type Mail = { to: string[] | string; subject: string; text: string };
 const mails: Mail[] = [];
 const posts: { path: string; body: URLSearchParams }[] = [];
+let eraseStoreDuringSetup: { liveKey: string; openKey: string } | null = null;
 
 /** What Stripe holds, changed as the test goes. */
 const state = {
@@ -78,6 +79,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/checkout/sessions" && method === "POST") {
     const id = `cs_test_${"c".repeat(20)}${state.sessions.size}`;
     state.sessions.set(id, { id, mode: "setup", status: "open", customer: "cus_Member000001", metadata: Object.fromEntries([...new URLSearchParams(String(init?.body))].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) });
+    if (eraseStoreDuringSetup) await redis.pipeline([["DEL", eraseStoreDuringSetup.liveKey, eraseStoreDuringSetup.openKey]]);
     return answer({ id, url: `https://checkout.stripe.com/c/setup/${id}` });
   }
   const session = path.match(/^\/checkout\/sessions\/(cs_test_\w+)$/);
@@ -97,6 +99,7 @@ async function main(): Promise<void> {
   redis.clear();
 
   part("The setting");
+  is("keeping a setup page has three billed Redis calls at worst", [...KEEP_CARD_OPEN_IF_LIVE.matchAll(/redis\.call\(/g)].length, 3);
   is("a store that never chose: one email, and the card notice", parseDunning(undefined), { reminders: 1, cardNotice: true });
   is("only what is offered", [parseDunning({ reminders: 3, cardNotice: false }), parseDunning({ reminders: 5, cardNotice: "yes" })], [{ reminders: 3, cardNotice: false }, { reminders: 1, cardNotice: true }]);
 
@@ -236,7 +239,7 @@ async function main(): Promise<void> {
   is("saved: the card is set on that membership", await finishCardUpdate(store, sessionId), "updated");
   is("on the membership itself", posts.filter((p) => p.path === "/subscriptions/sub_Running000001").map((p) => p.body.get("default_payment_method")), ["pm_NewCard0000001"]);
 
-  state.subs.set("sub_Running000001", { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } });
+  state.subs.set("sub_Running000001", { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900, customer: "cus_Member000001", parent: { type: "subscription_details", subscription_details: { subscription: "sub_Running000001" } } } });
   is("a payment already failed is paid with it", await finishCardUpdate(store, sessionId), "paid");
   state.payDeclines = true;
   is("declined: the card is still set, and it says so", await finishCardUpdate(store, sessionId), "declined");
@@ -273,6 +276,40 @@ async function main(): Promise<void> {
   const mark = posts.length;
   is("control: its own page and membership still set the card", [await finishCardUpdate(store, sessionId), touched(mark)], ["updated", ["/subscriptions/sub_Running000001"]]);
 
+  part("A setup page cannot recreate its pointer after store erasure");
+  const erasedToken = await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001");
+  eraseStoreDuringSetup = {
+    liveKey: `nl:store:id:${store.sid}`,
+    openKey: openKey("acct_1TestHarbor0001", "sub_Running000001"),
+  };
+  const erasedOpen = await openCardUpdate(store, erasedToken, "https://marktmorgen.com");
+  eraseStoreDuringSetup = null;
+  const [recreatedOpen] = await redis.pipeline([["GET", openKey("acct_1TestHarbor0001", "sub_Running000001")]]);
+  is("the erased store gets no URL and no recreated open pointer", [erasedOpen.ok, recreatedOpen], [false, null]);
+  await redis.pipeline([
+    ["SET", `nl:store:id:${store.sid}`, OWNER],
+    ["SET", openKey("acct_1TestHarbor0001", "sub_Running000001"), sessionId, "EX", 3600],
+  ]);
+
+  part("A store from before ids (sid \"\") still opens its card page, fenced on its record (Claude 3's MEDIUM on #4906)");
+  const legacy = { ...store, sid: "", extra: false };
+  const legacyOpenKey = openKey("acct_1TestHarbor0001", "sub_Running000001");
+  await redis.pipeline([["DEL", legacyOpenKey]]);
+  const legacyOpen = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001"), "https://marktmorgen.com");
+  const [legacyKept] = await redis.pipeline([["GET", legacyOpenKey]]);
+  is("a store from before ids opens its card page, and its page is kept", [legacyOpen.ok, typeof legacyKept === "string" && legacyKept.startsWith("cs_test_")], [true, true]);
+  const legacyRecord = await ownerKey(OWNER);
+  const [legacySaved] = await redis.pipeline([["GET", legacyRecord]]);
+  eraseStoreDuringSetup = { liveKey: legacyRecord, openKey: legacyOpenKey };
+  const legacyErased = await openCardUpdate(legacy, await cardLink("acct_1TestHarbor0001", "cus_Member000001", "sub_Running000001"), "https://marktmorgen.com");
+  eraseStoreDuringSetup = null;
+  const [legacyRecreated] = await redis.pipeline([["GET", legacyOpenKey]]);
+  is("a store from before ids whose record went during the setup gets no URL and no recreated open pointer", [legacyErased.ok, legacyRecreated], [false, null]);
+  await redis.pipeline([
+    ["SET", legacyRecord, String(legacySaved)],
+    ["SET", legacyOpenKey, sessionId, "EX", 3600],
+  ]);
+
   part("Rule 24: a membership whose status Stripe has no name for is unknown, never \"not ended\"");
   for (const [label, status] of [["a status Stripe never named", "a_status_stripe_never_named"], ["a status that is a number", 7], ["no status", undefined]] as const) {
     const row: Record<string, unknown> = { ...running, customer: "cus_Member000001", latest_invoice: null, status };
@@ -287,7 +324,7 @@ async function main(): Promise<void> {
   part("Rules 24 and 30: what Stripe answers the card's setting and the payment decides only when it is read");
   // The card is set, but Stripe's answer to it is not its own membership with that card: the page never says it is
   // set, nothing is paid with it, and the page stays open for the daily job to finish it.
-  const owedHere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } };
+  const owedHere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900, customer: "cus_Member000001", parent: { type: "subscription_details", subscription_details: { subscription: "sub_Running000001" } } } };
   state.subs.set("sub_Running000001", owedHere);
   for (const [label, reply] of [
     ["another membership's id", { id: "sub_Another0000001", default_payment_method: "pm_NewCard0000001" }],

@@ -122,8 +122,9 @@ export function lineProblem(line: string): NextStepProblem | null {
   const any = (pattern: RegExp) => read.some((text) => pattern.test(text));
   // Any web address: a scheme, "www.", an email address, or a name, a dot and an ending of letters ("site.de").
   if (any(/https?:|www\.|@|[\p{L}\p{N}-]+\.\p{L}{2,24}(?![\p{L}\p{N}])/iu)) return "link";
-  if (any(DEAL_WORDS)) return "deal";
+  // Pressure first: the assistant's deal words also hold scarcity ("before it's gone"), which on a line here is pressure.
   if (any(PRESSURE)) return "pressure";
+  if (any(DEAL_WORDS)) return "deal";
   if (any(/\p{N}/u)) return "number";
   if (any(/["“”«»„‟]/)) return "quote";
   if (any(/[!¡]/)) return "exclaim";

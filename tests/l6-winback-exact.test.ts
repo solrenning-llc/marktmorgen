@@ -52,6 +52,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   // The customers of one address (lib/winback-send.ts reads every one of them, audit R43): those set above.
   if (path === "/customers") return answer({ object: "list", data: [...customers].filter(([, e]) => e === url.searchParams.get("email")).map(([id, email]) => ({ id, object: "customer", email })), has_more: false });
+  if (path === "/customers/search") {
+    const address = (url.searchParams.get("query")?.match(/^email:"([^"]*)"$/)?.[1] ?? "").toLowerCase();
+    return answer({ object: "search_result", data: [...customers].filter(([, e]) => e.toLowerCase() === address).map(([id, email]) => ({ id, object: "customer", email })), has_more: false, next_page: null });
+  }
   const customer = path.match(/^\/customers\/(cus_\w+)$/);
   if (customer) {
     lookedUp += 1;

@@ -16,6 +16,7 @@ import { dropTeam } from "@/lib/team";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetStorePhones } from "@/lib/phone-alerts";
 import { forgetPersonNotes } from "@/lib/buyer-profile";
+import { forgetStoreBenefits } from "@/lib/tier-benefits";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { revokeAllKeys } from "@/lib/api-keys";
 import { endLapsed, findStoreSubscriptions, isBillingConfigured } from "@/lib/billing";
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
       };
       await Promise.all([
         forgetStoreFiles(result.store).catch((error: unknown) => console.error("forgetting a deleted store's files failed", error)),
-        Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
+        Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetStoreBenefits(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),
         forgetHooksAndKeys().catch(async (error: unknown) => {

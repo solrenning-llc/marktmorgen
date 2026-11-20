@@ -59,6 +59,8 @@ function startInput(body: Record<string, unknown>) {
     tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string").slice(0, 10) : [],
     email: body.email === true,
     stopped: body.stopped === true,
+    // Only an explicit false says the file has no status column; anything else is read as having one.
+    statusColumn: body.statusColumn !== false,
     dateOrder: text(body.dateOrder, 3),
     source: body.source === "clickfunnels" ? ("clickfunnels" as const) : ("csv" as const),
   };

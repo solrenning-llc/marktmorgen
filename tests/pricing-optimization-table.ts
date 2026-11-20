@@ -266,8 +266,6 @@ export const profit = (tier: Tier, monthCents: number, shares: Shares, e: number
 /** The lower share of each #553 figure an alternative allows: A keeps every one; C allows cuts down to a tenth (the proposal's MIN_INCLUDED_SHARE). */
 export const ALTERNATIVES = { A: 1, C: 0.1 } as const;
 export type Alternative = keyof typeof ALTERNATIVES;
-// Reserve exceeds the measured four-cent rounding gap; it reduces both solver budgets.
-export const SAFETY_CENTS = 5;
 
 export type MilpInput = {
   generatedBy: string;
@@ -279,11 +277,42 @@ export type MilpInput = {
   plans: Record<Tier, {
     anchorCents: number;
     figures: Record<Printed, number>;
+    /** Each figure's lowest share under each alternative, never below what a page prints for it (a printed figure has a floor: an hour of video, half a GiB). */
+    lowest: Record<Alternative, Record<Printed, number>>;
     options: { monthCents: number; roomMonth: number; roomYear: number; netAtOnes: number; usageMonthAtOnes: number; exactKeepsAtOnes: boolean; demand: Record<string, number> }[];
     baseMonth: number; baseYear: number; coefMonth: Record<Printed, number>; coefYear: Record<Printed, number>;
   }>;
 };
 const firstFigure = (tier: Tier, id: Printed) => figures(tier)[id].find((n) => n > 0) ?? 0;
+/** The lowest share of a figure the program may choose: the alternative's, raised to what a page prints there when its printed
+ * floor (tidy) rounds that figure up, so a solution never prints more usage than the program counted. At or above it, a page
+ * only rounds down. */
+export function lowestShare(tier: Tier, id: Printed, share: number): number {
+  if (firstFigure(tier, id) <= 0 || share >= 1) return 1;
+  return Math.min(1, Math.max(share, printedShares(tier, { ...ones(), [id]: share })[id]));
+}
+/** The most usageCents exceeds the program's linear usage, in cents, at any share the program may choose: every figure at its
+ * lowest share or kept, on both intervals of every plan (rounding only). */
+export function cornerGap(): number {
+  let worst = 0;
+  for (const tier of TIERS) for (const c of ["month", "year"] as const) {
+    const base = usageFor(tier, c, zeros());
+    const coef = Object.fromEntries(ORDER.map((id) => [id, usageFor(tier, c, { ...zeros(), [id]: 1 }) - base])) as Record<Printed, number>;
+    for (const alt of Object.keys(ALTERNATIVES) as Alternative[]) {
+      const cut = ORDER.filter((id) => lowestShare(tier, id, ALTERNATIVES[alt]) < 1);
+      for (let mask = 0; mask < 1 << cut.length; mask += 1) {
+        const shares = ones();
+        cut.forEach((id, i) => { if (mask & (1 << i)) shares[id] = lowestShare(tier, id, ALTERNATIVES[alt]); });
+        worst = Math.max(worst, usageFor(tier, c, shares) - ORDER.reduce((sum, id) => sum + coef[id] * shares[id], base));
+      }
+    }
+  }
+  return worst;
+}
+/** The reserve both solver budgets lose: never under five cents, and always a cent more than the largest rounding gap measured at
+ * the shares the program may choose (cornerGap), so a cost that moves the rounding never leaves the program counting too little. */
+export const SAFETY_CENTS = Math.max(5, cornerGap() + 1);
+
 /** The program's coefficients, each read from the repository's code: rooms from unitUnder, usage from usageCents. */
 export function milpInput(): MilpInput {
   const plans = {} as MilpInput["plans"];
@@ -293,6 +322,7 @@ export function milpInput(): MilpInput {
     plans[tier] = {
       anchorCents: anchorCents(tier),
       figures: Object.fromEntries(ORDER.map((id) => [id, firstFigure(tier, id)])) as Record<Printed, number>,
+      lowest: Object.fromEntries((Object.keys(ALTERNATIVES) as Alternative[]).map((alt) => [alt, Object.fromEntries(ORDER.map((id) => [id, lowestShare(tier, id, ALTERNATIVES[alt])]))])) as Record<Alternative, Record<Printed, number>>,
       options: grid(tier).map((monthCents) => ({
         monthCents,
         roomMonth: unitUnder(monthCents, 0, SIZING_READING, true).usageRoomCents - PLAN_ROOM.month - SAFETY_CENTS,
@@ -330,7 +360,7 @@ let exhaustiveInput: MilpInput | null = null;
 export function exhaustive(tier: Tier, alt: Alternative, e: number): { monthCents: number; shares: Shares; profit: number } | null {
   const input = exhaustiveInput ??= milpInput();
   const plan = input.plans[tier];
-  const lowest = Object.fromEntries(ORDER.map(id => [id, plan.figures[id] > 0 ? ALTERNATIVES[alt] : 1])) as Shares;
+  const lowest = { ...plan.lowest[alt] } as Shares;
   const used = (cycle: "Month" | "Year") => (cycle === "Month" ? plan.baseMonth : plan.baseYear) +
     ORDER.reduce((sum, id) => sum + (cycle === "Month" ? plan.coefMonth : plan.coefYear)[id] * lowest[id], 0);
   let best: { monthCents: number; shares: Shares; profit: number } | null = null;

@@ -15,7 +15,16 @@ import {gateReading} from '@/lib/tax-gate';
 import {reviewedReceivingTaxInput} from './reviewed-receiving-fixture';
 import {syntheticTaxContext} from './customer-tax-review-fixture';
 import {netOf} from './plan-cost-model';
+import {worstMonthKept} from './worst-month-kept';
 
+test('the dated report holds the worst month each plan keeps under the LC reading, exactly (Claude 4 LOW on #4854)',()=>{
+ const doc=readFileSync('docs/margin-alignment-2026-10-18.md','utf8');
+ for(const cycle of ['month','year'] as const){
+  const label=cycle==='month'?'Monthly plan':'A month of a yearly plan';
+  const row=['',label,...worstMonthKept(cycle).map((v)=>'US$'+v),''].join(' | ').trim();
+  assert.ok(doc.includes(row),'the document lists '+row);
+ }
+});
 test('the dated report remains explicitly historical and matches its reproducible figures',()=>{
  const generated=renderMarginAlignment(PLANS_ON_SALE,ASSISTANT_ON_SALE);
  assert.ok(generated.startsWith(HISTORICAL_TAX_NOTICE));
@@ -69,6 +78,8 @@ test('archived thresholds preserve historical figures without proposing current 
 });
 test('the value presentation retains owner quotations and its dated tax-model rows',()=>{
  const doc=readFileSync('docs/value-presentation-2026-10-18.md','utf8');
- for(const row of currentPriceMarginRows(PLANS_ON_SALE,ASSISTANT_ON_SALE))assert.ok(doc.includes(row));
+ // Whole lines, not substrings: a prefix before a row shifts every column of the table.
+ const lines=new Set(doc.split('\n'));
+ for(const row of currentPriceMarginRows(PLANS_ON_SALE,ASSISTANT_ON_SALE))assert.ok(lines.has(row),row);
  assert.match(doc,/preço: o que maximiza o meu lucro/);assert.doesNotMatch(doc,/\bsmall\b|unlimited (visits|orders|emails|storage) on (Store|Studio|Scale)/i);
 });

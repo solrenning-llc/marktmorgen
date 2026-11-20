@@ -22,7 +22,8 @@
  * allowance, and a claim says only that the move may now be made.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import {
   type MoveRequest,
   type MoveSide,
@@ -55,6 +56,8 @@ const requestKey = (id: string) => `nl:pm:r:${id}`;
 const tokenKey = (token: string) => `nl:pm:t:${sha(token)}`;
 const confirmKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:${side}`;
 const doneKey = (id: string) => `nl:pm:done:${id}`;
+/** The current address's link was sent, once, after the new address confirmed (a mark kept under the confirmations). */
+const sentKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:sent-${side}`;
 /** One address's count of the day (UTC), under a fingerprint that cannot be turned back into the address. */
 const dayKey = (address: string, nowMs: number) => `nl:pm:day:${sha(`nimbus-pm-day:${Math.floor(nowMs / 86_400_000)}:${address}`).slice(0, 32)}`;
 const seconds = (ms: number) => Math.floor(ms / 1000);
@@ -98,6 +101,27 @@ local n = redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[1])
 return n`;
 
+const DAY_TAKEN = Symbol("purchase move day taken");
+export type MoveDayTaken = { ok: true; from: string; now: number; [DAY_TAKEN]: true };
+export type MoveDay = MoveDayTaken | { ok: false; reason: "email" | "over" | "unknown" };
+
+/**
+ * Takes one of an address's daily attempts without making a request. The
+ * opaque result lets a caller do a privacy check after the count, then make
+ * the request without counting it twice.
+ */
+export async function takePurchaseMoveDay(rawFrom: unknown, now = Date.now()): Promise<MoveDay> {
+  if (typeof rawFrom !== "string") return { ok: false, reason: "email" };
+  const from = normaliseEmail(rawFrom);
+  if (!from || from.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(from)) return { ok: false, reason: "email" };
+  if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
+  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, dayKey(from, now), MOVE_MARK_SECONDS]]), 1);
+  const count = counted ? countOf(counted[0]) : null;
+  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
+  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  return { ok: true, from, now, [DAY_TAKEN]: true };
+}
+
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };
 
 /**
@@ -105,7 +129,16 @@ export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string
  * store (its id) or "all". Counts against the old address's three a day
  * before anything is written; the request and both links end with its day.
  */
-export async function askPurchaseMove(input: { from: unknown; to: unknown; scope: unknown; now?: number }): Promise<MoveAsk> {
+type MoveAskInput = { from: unknown; to: unknown; scope: unknown; now?: number; day?: MoveDayTaken };
+/** An ask that made only the new address's link: the current address's comes later (issueMoveLink). */
+export type MoveAskTo = { ok: true; id: string; fromToken: null; toToken: string } | Extract<MoveAsk, { ok: false }>;
+export async function askPurchaseMove(input: MoveAskInput & { links: "to" }): Promise<MoveAskTo>;
+export async function askPurchaseMove(input: MoveAskInput & { links?: "both" }): Promise<MoveAsk>;
+/**
+ * `links: "to"`: only the new address's link is made now; the current address's comes from issueMoveLink once the new
+ * address confirmed (Codex L on #3621, decision (C): the asking buyer's inbox must not tell an erased new address apart).
+ */
+export async function askPurchaseMove(input: MoveAskInput & { links?: "both" | "to" }): Promise<MoveAsk | MoveAskTo> {
   const now = input.now ?? Date.now();
   const made = newMoveRequest({ from: input.from, to: input.to, scope: readMoveScope(input.scope), now: seconds(now) });
   if (typeof made === "string") return { ok: false, reason: made };
@@ -114,26 +147,25 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   const json = JSON.stringify(record);
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
-  const day = dayKey(made.from, now);
-  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
-  const count = counted ? countOf(counted[0]) : null;
-  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
-  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  if (input.day) {
+    if (input.day[DAY_TAKEN] !== true || input.day.from !== made.from || input.day.now !== now) return { ok: false, reason: "unknown" };
+  } else {
+    const day = await takePurchaseMoveDay(made.from, now);
+    if (!day.ok) return { ok: false, reason: day.reason === "email" ? "unknown" : day.reason };
+  }
 
   const id = randomBytes(16).toString("hex");
-  const fromToken = randomBytes(24).toString("hex");
+  const fromToken = input.links === "to" ? null : randomBytes(24).toString("hex");
   const toToken = randomBytes(24).toString("hex");
-  const wrote = repliesFor(
-    await redisPipeline([
-      ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
-      ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-      ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-    ]),
-    3,
-  );
+  const writes: (string | number)[][] = [
+    ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
+    ...(fromToken ? [["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]] : []),
+    ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+  ];
+  const wrote = repliesFor(await redisPipeline(writes), writes.length);
   // Not exactly written: no link goes out.
   if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
-  return { ok: true, id, fromToken, toToken };
+  return fromToken ? { ok: true, id, fromToken, toToken } : { ok: true, id, fromToken: null, toToken };
 }
 
 /**
@@ -207,6 +239,32 @@ export async function confirmPurchaseMove(token: string, now = Date.now()): Prom
     if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
     throw error;
   }
+}
+
+export type MoveLinkIssue = { ok: true; token: string; undo: () => Promise<void> } | { ok: false; reason: "sent" | "unknown" };
+
+/**
+ * One address's link made after the request was asked, once: the current address's, sent only after the new
+ * address confirmed. "sent" when it was made before (a Confirm pressed again sends nothing more); `undo` lets the
+ * mark and the link go when the email may not have gone, so the next Confirm makes a new one. Ends with the request's day.
+ */
+export async function issueMoveLink(id: string, side: MoveSide, now = Date.now()): Promise<MoveLinkIssue> {
+  if (!ID.test(id) || !isRedisConfigured()) return { ok: false, reason: "unknown" };
+  const value = claimValue(now);
+  const claimed = await claimMark(sentKey(id, side), MOVE_CONFIRM_SECONDS, value);
+  if (claimed === "taken") return { ok: false, reason: "sent" };
+  if (claimed === "unknown") return { ok: false, reason: "unknown" };
+  const token = randomBytes(24).toString("hex");
+  const undo = async () => {
+    await redisPipeline([["DEL", tokenKey(token)]]).catch(() => undefined);
+    await releaseMark(sentKey(id, side), value).catch(() => undefined);
+  };
+  const wrote = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify({ id, side } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") {
+    await undo();
+    return { ok: false, reason: "unknown" };
+  }
+  return { ok: true, token, undo };
 }
 
 export type MoveClaim = { ok: true; request: MoveRequest } | { ok: false; reason: "gone" | "not-ready" | "done" | "expired" | "unknown" };

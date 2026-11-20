@@ -70,6 +70,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const one = /^\/payment_intents\/(pi_[A-Za-z0-9_]+)$/.exec(path);
   if (one) {
     const found = made.find((pi) => pi.id === one[1]);
+    // A purchase for several reads its payment before handing out places (lib/group-buy.ts settleGroup): paid, its own charge.
+    if (!found && one[1].startsWith("pi_R48Group")) {
+      return answer({ id: one[1], object: "payment_intent", status: "succeeded", latest_charge: { id: "ch_R48Group0001", object: "charge", payment_intent: one[1], refunded: false, amount_refunded: 0, disputed: false } });
+    }
     return found ? answer(found) : answer({ error: { message: "no such payment" } }, 404);
   }
   if (path === "/payment_intents" && method === "GET") return answer({ object: "list", data: [], has_more: false });

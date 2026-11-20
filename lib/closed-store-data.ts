@@ -68,8 +68,9 @@ import { idsIn } from "@/lib/data-recount";
 import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
-import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
+import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
+import { standingOf } from "@/lib/plan-standing";
+import { type Store, accountStores, closeStoreRecord, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForRefExact, storeRecordAt, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -86,6 +87,7 @@ import { problemKey } from "@/lib/pdf-stamp";
 import { tokenKey as unsubTokenKey, parseContact } from "@/lib/contacts";
 import { keyIndex as linkKeyIndex, linkKeyOf } from "@/lib/mail-clicks";
 import { unsubKey as communityUnsubKey } from "@/lib/community-mail";
+import { pictureNoteKey } from "@/lib/community-files";
 import { tokenKey as chatTokenKey } from "@/lib/inbox";
 import { linkKey as inviteLinkKey } from "@/lib/move-members";
 import { linkKey as pitchStopKey } from "@/lib/outreach";
@@ -133,6 +135,19 @@ export type Batched = {
    * is never walked by its ids again, since by then another store may hold its address or key.
    */
   unfinished?: number;
+  /**
+   * Written before the store's record goes and not yet confirmed as this store's (prepareStore): rewritten without it
+   * under the store's lock right before the record is deleted. One still pending names a store whose record has not
+   * gone by this closing, or a key another store holds now (Codex on #3643): it is never walked, never finished and
+   * never starts a walk, and the idle pass takes it out (withdrawPending).
+   */
+  pending?: true;
+  /**
+   * Its record went, and another store was found at its key before its walk started (Claude 7's ALTO 1 on #3643): it is
+   * walked by its own ids only (marks), never by its address or its handles, which may be the new store's now, and its
+   * finish writes nothing at its address. Set only over the exact entry read (REWRITE_ENTRY).
+   */
+  marksOnly?: true;
   /** Deleted from the studio (queueDeleted), not closed: no closing record is written and nobody is emailed when its walk is done. */
   deleted?: true;
   /** Waits for the next walk to begin (admitDeleted): it is never walked or finished by a walk already under way, which may have passed its keys. */
@@ -169,14 +184,19 @@ export async function marksOf(store: Store): Promise<{ marks: string[]; files: {
   const flows = store.listId ? await readFlows(store.listId) : [];
   const courseIds = listings.flatMap((l) => (l.course ? [l.course.id] : []));
   const courses = courseIds.length ? [...(await readCourses(courseIds)).values()] : [];
-  const own = [store.sid, store.statsId, store.listId, store.callsId, store.catalog?.id, store.community?.id, await storeFolder(storeRef(store)), store.photoId];
-  const found = new Set<string>([...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store), JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
+  const found = new Set<string>([...(await recordIds(store)), ...idsIn(JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
   for (const id of [...courseIds, ...listings.flatMap((l) => (l.podcast ? [l.podcast.id] : [])), ...flows.map((f) => f.id)]) if (id) found.add(id);
   for (const ours of [store.stripeCustomerId, store.subscriptionId]) if (ours) found.delete(ours);
   if (store.stripeAccountId && (await sharedAccount(store))) found.delete(store.stripeAccountId);
   // The owner's address and the store's addresses are not ids: the walk matches them only where a family says so.
   found.delete(store.email);
   return { marks: [...found].sort(), files: filesIn([listings, courses]) };
+}
+
+/** The ids the store record itself names: its own (store, stats, list, calls, catalog, community, files' folder, photo) and every id-like word in it. */
+async function recordIds(store: Store): Promise<string[]> {
+  const own = [store.sid, store.statsId, store.listId, store.callsId, store.catalog?.id, store.community?.id, await storeFolder(storeRef(store)), store.photoId];
+  return [...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store))];
 }
 
 /** Whether another store of the same owner sells through the same Stripe account: then its account's records are not this store's to delete. */
@@ -190,6 +210,50 @@ async function sharedAccount(store: Store): Promise<boolean> {
 export async function markDue(ref: string, now = Date.now()): Promise<void> {
   await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]);
 }
+
+/**
+ * Takes this call's own walk entry out of the batch, only while it still holds the exact bytes this call wrote
+ * (another preparation's entry for the same ref is never taken). 1 taken, 0 not this call's; anything else unknown.
+ */
+const WITHDRAW_ENTRY = `-- marktmorgen:closing-withdraw-entry:v1
+if #KEYS ~= 1 or #ARGV ~= 2 then return -1 end
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+return redis.call("HDEL", KEYS[1], ARGV[1])`;
+
+/**
+ * Rewrites a closing store's walk entry only while it still holds the exact bytes read (Claude 7's ALTO 1 on #3643):
+ * 1 written, 0 not the entry read; anything else unknown.
+ */
+const REWRITE_ENTRY = `-- marktmorgen:closing-rewrite-entry:v1
+if #KEYS ~= 1 or #ARGV ~= 3 then return -1 end
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
+/**
+ * Another store (another sid) is kept at a closing store's key by the time its record is read again, and its walk entry,
+ * which names that store's ref and its owner's folder, could not be confirmed taken out of the batch (rule 24). The
+ * caller takes the ref out of line all the same (never prepared again under it: that is the other store) and starts no
+ * walk in this run.
+ */
+export class EntryNotWithdrawnError extends UnknownReplyError {}
+
+/**
+ * The store's plan runs again (paid or in trial) and its closing day has not begun (not in FINAL_INDEX), read before
+ * anything of it is touched and again under its lock right before its record goes (Claude 5's MEDIUM on #3643): nothing
+ * of it was prepared past that read, and its record stays. The caller takes it out of line, never moved back a walk,
+ * as lib/plan-closing.ts closeOne does for a plan that runs again ("running").
+ */
+export class PlanRunsAgainError extends Error {}
+
+/** A plan that runs, as closeOne reads it: paid or in trial (standingOf). One ended, or never had, is not running. */
+function planRuns(store: Store, now: number): boolean {
+  const standing = standingOf(store, now / 1000);
+  return standing === "paid" || standing === "trial";
+}
+
+/** How many times prepareStore tries to take such an entry out before it throws EntryNotWithdrawnError. */
+const WITHDRAW_TRIES = 2;
 
 /** Takes a store out of line: its plan was started again before its walk began. */
 export async function unmarkDue(ref: string): Promise<void> {
@@ -232,28 +296,26 @@ async function del(keys: string[]): Promise<void> {
 /**
  * The first step for one store, while its record can still be read: what
  * is found only through it, and then the record. Answers what the walk
- * needs of it. Safe to run again.
+ * needs of it, or null when another store is kept at its key by the time its
+ * record is read again: then nothing of it is walked. Safe to run again.
  */
-export async function prepareStore(store: Store, now = Date.now()): Promise<Batched> {
+export async function prepareStore(store: Store, now = Date.now()): Promise<Batched | null> {
   const ref = storeRef(store);
+  // A plan that runs again keeps the store (Claude 5's MEDIUM on #3643): a preparation that stopped after its entry was
+  // confirmed, an entry not confirmed out, and the walk's start (startableBatch) put a store back in line after
+  // closeOne had taken it out for a running plan, and the next run erased it. Read before anything of it is touched:
+  // a closing day that has begun (FINAL_INDEX) is seen through whatever happens to the plan since, as closeOne does;
+  // otherwise a running plan throws PlanRunsAgainError. The place in the final line read exactly (finalScoreOf): one that
+  // does not read throws UnknownReplyError, neither ended nor running (rule 24), and the store waits a walk untouched.
+  // One command, and only for a store whose plan reads running (PLAN_RUNS_READ_COMMANDS, tests/plan-cost-registry.ts).
+  if (planRuns(store, now) && finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) === null) {
+    throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
+  }
   const { marks } = await marksOf(store);
   const extra: string[] = [];
-  // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
   // Read whole or not at all: a team not read is never "no teammates" (rule 24); it throws, and the walk waits.
   const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
-  for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
-    // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
-    // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
-    // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
-    await scanAll("HSCAN", claimsKey(host), async (flat) => {
-      const mine: string[] = [];
-      for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (!mine.length) return;
-      const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
-      if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
-    });
-  }
   // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
   // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
   for (const email of [store.email, ...team.members.map((m) => m.email)]) {
@@ -261,21 +323,42 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       || (await accountStores(email)).some((other) => other.sid !== store.sid);
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
-  await dropTeam(store);
-  if (store.sid) await revokeAllKeys(store.sid);
-  await forgetStoreWebhooks(store.statsId);
-  await forgetStoreSync(store.statsId);
-  await forgetShipmentMail(store.statsId);
-  await forgetOrderConfirmationMail(store.statsId);
-  await forgetStorePhones(store.statsId);
-  // The owner's path: their answers and the days they showed up (lib/path.ts).
-  await forgetPath(store);
   if (store.domain?.name) extra.push(domainKey(store.domain.name));
-  await del(extra);
+  // What the live store holds (its hosts' claims for it, its team, API keys, webhooks, email sync, mail outboxes, phones,
+  // its owner's path, its hosts' calendars and its domain) is deleted only under the store's lock, once the record read
+  // there again says its plan does not run (below). Deleted here, before that read, a plan started in between kept the
+  // record but left the store partly wiped (Codex X4's MEDIUM on #3643). Any of these that fails throws there, before
+  // the record goes: the record stays, its entry stays pending, and the walk tries the store again later.
+  const forgetLive = async () => {
+    // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
+    for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
+      // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
+      // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
+      // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
+      await scanAll("HSCAN", claimsKey(host), async (flat) => {
+        const mine: string[] = [];
+        for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
+        if (!mine.length) return;
+        const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
+        if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
+      });
+    }
+    await dropTeam(store);
+    if (store.sid) await revokeAllKeys(store.sid);
+    await forgetStoreWebhooks(store.statsId);
+    await forgetStoreSync(store.statsId);
+    await forgetShipmentMail(store.statsId);
+    await forgetOrderConfirmationMail(store.statsId);
+    await forgetStorePhones(store.statsId);
+    // The owner's path: their answers and the days they showed up (lib/path.ts).
+    await forgetPath(store);
+    await del(extra);
+  };
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
-  await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
+  // Its answer says whether its closing day had begun (1: it was in that line), read again under the lock below.
+  const finalGone = countOf(repliesFor(await redisPipeline([["ZREM", FINAL_INDEX, ref]]), 1)?.[0]);
   const entry: Batched = {
     ref,
     email: store.email,
@@ -292,10 +375,63 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // keys. A write that fails throws with the record still there, and the walk tries the store again later.
   // Only HSET's own count (0 for an entry rewritten, 1 for a new one) is a write; any other answer is not known to
   // have landed and throws before the record goes (Codex T on #3181).
-  const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
-  if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
-  await closeStoreRecord(store);
-  return entry;
+  let wrote = "";
+  const write = async (batched: Batched) => {
+    const bytes = JSON.stringify(batched);
+    const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, bytes]]), 1)?.[0];
+    if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
+    wrote = bytes;
+  };
+  // Pending until the record's going confirms it this store's (below): a pending entry is never walked (Codex on #3643).
+  await write({ ...entry, pending: true });
+  // The record is read again under its lock right before it goes (closeStoreRecord), since all of the above worked
+  // from the walk's first read: an id it names now and the entry does not (a photo put on meanwhile, through the photo
+  // route's setPhotoId; an id made since) becomes a mark, and an address it moved to since one of the entry's, before
+  // the record goes, so the walk erases their keys too and nothing is left that no record names (Codex G on #3614).
+  // Only ids never to be marks stay out: our own Stripe customer and subscription, its Stripe account (a mark already,
+  // unless another store shares it) and its owner's address. The entry rewritten is confirmed or this throws, with the
+  // record still there, and the store waits a walk.
+  // The entry is always written again here, without `pending`, under the lock and before the record goes: only an entry
+  // so confirmed is walked (Codex on #3643). A step that fails after it (the addresses' hold, the id's release, the fenced
+  // delete) or a rewrite whose answer is lost leaves the entry as it is: whether the record went is not known here, since
+  // a delete or a rewrite may land with its answer lost (Codex L and Codex P on #3643). It is never taken out for it: the
+  // walk reads the record before it starts (startableBatch) and walks the entry only once the record is confirmed gone.
+  const closed = await closeStoreRecord(store, [], async (fresh) => {
+    // A plan started since the read above, seen under the lock before the record goes (Claude 5's MEDIUM on #3643):
+    // unless its closing day had begun (the ZREM above took it out of that line), the record stays and the store leaves
+    // the line; its entry, still pending, is never walked and is taken out by the idle pass (withdrawPending). That
+    // ZREM's answer not known is neither (rule 24): the record stays and the store waits a walk. No command is added:
+    // the record is the one closeStoreRecord read again.
+    if (fresh && planRuns(fresh, now) && finalGone !== 1) {
+      if (finalGone === 0) throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
+      throw new UnknownReplyError("a closing store's place in the final closing line (ZREM)");
+    }
+    // Only now, past that read and with the lock held (a plan's start waits on it), is anything of the live store deleted.
+    await forgetLive();
+    if (fresh) {
+      const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
+      const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
+      const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
+      entry.marks = [...new Set([...marks, ...added])].sort();
+      entry.handles = [...entry.handles, ...moved];
+    }
+    await write(entry);
+  });
+  if (closed) return entry;
+  // Another store (another sid) is kept at this one's key: this one's record is already gone, and its ref and its
+  // owner's folder are the other store's now. Its entry, left in the batch, made the walk erase the other store's keys
+  // by that ref (its break and its last break, nl:pause:<ref> and nl:pause:last:<ref>) and finish it under that ref
+  // (Revisor 2 on #3643): it is taken out, only while it still holds the bytes written here, and nothing of it is
+  // walked. At most WITHDRAW_TRIES scripts, no more commands than the record's going they replace (its addresses held
+  // back, its id and places released, the entry's rewrite, the fenced delete), so inside PREPARE_COMMANDS
+  // (tests/closing-cost.test.ts).
+  // Tried WITHDRAW_TRIES times: 0 after a try whose answer was unknown is that try having taken it, or another
+  // preparation's entry, which is not this call's either way.
+  for (let tries = 0; tries < WITHDRAW_TRIES; tries += 1) {
+    const taken = repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, ref, wrote]]).catch(() => null), 1)?.[0];
+    if (taken === 0 || taken === 1) return null;
+  }
+  throw new EntryNotWithdrawnError("a closing store's walk entry, taken out with another store at its key (EVAL)");
 }
 
 /**
@@ -440,8 +576,10 @@ type Owners = { byMark: Map<string, string>; byHandle: Map<string, string>; byRe
 function ownersOf(batch: Batched[]): Owners {
   const owners: Owners = { byMark: new Map(), byHandle: new Map(), byRef: new Map() };
   for (const entry of batch) {
-    if (entry.unfinished || entry.queued) continue;
+    if (entry.unfinished || entry.pending || entry.queued) continue;
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
+    // A store walked by its own ids only (marksOnly): its address and handles may be another store's now.
+    if (entry.marksOnly) continue;
     for (const handle of entry.handles) owners.byHandle.set(handle, entry.ref);
     owners.byRef.set(entry.ref, entry.ref);
   }
@@ -602,6 +740,16 @@ async function fieldsOf(keys: string[], name: string): Promise<string[]> {
   return out.filter(Boolean);
 }
 
+/** A community post's picture path, read from the post as kept; "" for anything else. */
+function postPicture(raw: string): string {
+  try {
+    const path = (JSON.parse(raw) as { img?: { path?: unknown } | null } | null)?.img?.path;
+    return typeof path === "string" && /^community\/[0-9a-f]{24}\/[0-9a-f]{32}\.(webp|jpg)$/.test(path) ? path : "";
+  } catch {
+    return "";
+  }
+}
+
 export const FOLLOWERS: Readonly<Record<string, Follower>> = {
   // The list: each contact's stop link and the key its links carry.
   "nl:store:leads:": {
@@ -617,10 +765,16 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
       return out;
     },
   },
-  // A community's members: the link in their announcements that stops them.
+  // A community's members: the link in their announcements that stops them. And its posts: the mark each posted
+  // picture keeps for as long as its post keeps it (lib/community-files.ts, pictureNoteKey; Claude 6 on #3414).
   "nl:cm:": {
-    match: (key) => /^nl:cm:[^:]+:m$/.test(key),
-    find: async (keys) => (await fieldsOf(keys, "t")).map(communityUnsubKey),
+    match: (key) => /^nl:cm:[^:]+:m$/.test(key) || /^nl:cm:[^:]+:p:[^:]+$/.test(key),
+    find: async (keys) => {
+      const members = keys.filter((key) => key.endsWith(":m"));
+      const posts = keys.filter((key) => !key.endsWith(":m"));
+      const marks = (await stringsOf(posts)).map((raw) => postPicture(raw)).filter(Boolean).map(pictureNoteKey);
+      return [...(await fieldsOf(members, "t")).map(communityUnsubKey), ...marks];
+    },
   },
   // A conversation in the inbox: what its visitor's chat opens.
   "nl:inbox:": {
@@ -801,6 +955,100 @@ async function readBatch(): Promise<{ entries: Map<string, Batched>; raws: Map<s
   return { entries, raws, unreadable };
 }
 
+/** The entries a walk may walk and finish: never one still pending (Codex on #3643), whose store's record never went by its closing. */
+function walkable(entries: Map<string, Batched>): Map<string, Batched> {
+  return new Map([...entries].filter(([, entry]) => !entry.pending));
+}
+
+/**
+ * Takes every pending entry out of the batch (Codex on #3643): one a preparation left when another store was at its
+ * key and its own taking-out was never confirmed, or one whose preparation stopped before the record went (that store
+ * waits a walk and writes it again). Only while the field still holds the exact text read (WITHDRAW_ENTRY), so an entry
+ * written again since is never taken. One script each; true only when every one answered 0 or 1 (rule 24). One not
+ * taken out is still never walked, and is tried again on the next run.
+ */
+async function withdrawPending(batch: { entries: Map<string, Batched>; raws: Map<string, string> }): Promise<boolean> {
+  let confirmed = true;
+  for (const [field, entry] of batch.entries) {
+    if (!entry.pending) continue;
+    const raw = batch.raws.get(field);
+    const taken = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw]]).catch(() => null), 1)?.[0];
+    if (taken !== 0 && taken !== 1) {
+      console.error("a pending closing entry was not confirmed taken out of the batch; it is never walked and is tried again on the next run", taken);
+      confirmed = false;
+    }
+  }
+  return confirmed;
+}
+
+/**
+ * Before a walk starts (Codex L, Codex P and Claude 2 cloud L on #3643): every confirmed entry's record is read
+ * exactly. One whose record is confirmed gone is walked. One with anything still kept at its key (its own record, a
+ * delete or a rewrite not known to have landed, or another store's) is never walked: it is taken out, only while it
+ * still holds the exact text read (WITHDRAW_ENTRY), and its store is put back in line (ZADD NX) to be prepared again.
+ * True only when every record read and every taking-out was confirmed; otherwise no walk starts in this run. No
+ * preparation runs while a walk is on, so the entries a walk starts with are the ones it finishes. A deleted store's
+ * entry (queueDeleted) is never put in the closing line: one still waiting is left to its admission (admitDeleted), and
+ * one admitted is walked as before, or by its own ids only when another store's record is at its key.
+ */
+async function startableBatch(batch: { entries: Map<string, Batched>; raws: Map<string, string> }, now: number): Promise<boolean> {
+  let confirmed = true;
+  for (const [field, entry] of batch.entries) {
+    // A deleted store still waiting (queued) is read by its own admission (admitDeleted), never here: putting it in the
+    // closing line would close it instead, and taking its entry out would lose its ids.
+    if (entry.pending || entry.unfinished || entry.queued) continue;
+    let read: Awaited<ReturnType<typeof storeRecordAt>>;
+    try {
+      read = await storeRecordAt(entry.ref);
+    } catch (error) {
+      console.error("a closing store's record could not be read before the walk; no walk starts in this run", error);
+      confirmed = false;
+      continue;
+    }
+    if (read.state === "gone") continue;
+    const raw = batch.raws.get(field);
+    // Its own record (the same id, or, for a store from before ids, the same stats id) is still there: it is taken out
+    // and prepared again. Another store's record at its key (Claude 7's ALTO 1 on #3643): this store's record is gone,
+    // so its entry stays to be walked by its own ids only, and the other store is never put in line to be closed.
+    const own = read.sid === entry.sid || (entry.sid === "" && Boolean(entry.statsId) && read.statsId === entry.statsId);
+    if (!own) {
+      if (entry.marksOnly) continue;
+      const next = JSON.stringify({ ...entry, marksOnly: true });
+      const written = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", REWRITE_ENTRY, 1, BATCH_KEY, field, raw, next]]).catch(() => null), 1)?.[0];
+      if (written === 1) {
+        batch.entries.set(field, { ...entry, marksOnly: true });
+        batch.raws.set(field, next);
+        continue;
+      }
+      console.error("a closing entry with another store at its key was not confirmed set to its own ids; no walk starts in this run", written);
+      confirmed = false;
+      continue;
+    }
+    // A deleted store (queueDeleted), admitted once its record read gone, is never put in the closing line: that would
+    // close it, with a closing record and an email, though its owner deleted it. Its own record read there again is
+    // walked with it, by its ids and its key, as the walk does for every admitted deleted store (admitDeleted).
+    if (entry.deleted) continue;
+    // Put back in line first, and taken out of the batch only once that is confirmed (Codex L on #3643): the other
+    // order, with the ZADD's answer lost, left the store in neither, and its record was never erased. Back in line
+    // with its entry still there is safe: the entry is never walked while its record is read there, and it is taken
+    // out on this or a later run.
+    const back = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "NX", now, entry.ref]]).catch(() => null), 1)?.[0];
+    if (back !== 0 && back !== 1) {
+      console.error("a closing store whose record is still there was not confirmed put back in line; its entry stays, and no walk starts in this run", back);
+      confirmed = false;
+      continue;
+    }
+    const taken = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw]]).catch(() => null), 1)?.[0];
+    if (taken !== 0 && taken !== 1) {
+      console.error("a closing entry whose record is still there was not confirmed taken out; no walk starts in this run", taken);
+      confirmed = false;
+      continue;
+    }
+    batch.entries.delete(field);
+  }
+  return confirmed;
+}
+
 /**
  * Moves a closing store that could not be read or prepared back a walk (ZADD XX: never puts back one that left the
  * line meanwhile). True only on Redis's own answer, 0 or 1; anything else is not known to have moved (rule 24), so the
@@ -864,6 +1112,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   if (!isRedisConfigured()) return report;
   // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
   let unsure = false;
+  // An entry naming another store's key not confirmed out of the batch (EntryNotWithdrawnError): no walk starts in this run.
+  let entryLeft = false;
   const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
   const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
   let phase = phaseRaw || "idle";
@@ -897,35 +1147,61 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         continue;
       }
       if (store) {
+        let prepared: Batched | null;
         try {
-          await prepareStore(store, now);
+          prepared = await prepareStore(store, now);
         } catch (error) {
+          if (error instanceof PlanRunsAgainError) {
+            // Its plan runs again (Claude 5's MEDIUM on #3643): out of line, never prepared, as closeOne takes it out.
+            // An entry of it left in the batch is never walked while its record stands (startableBatch, withdrawPending).
+            console.error("a closing store's plan runs again; it leaves the line, not prepared", error);
+            await redisPipeline([["ZREM", DUE_KEY, ref]]);
+            continue;
+          }
+          if (error instanceof EntryNotWithdrawnError) {
+            // Never moved back: the record at this key is another store's, which must not be prepared under it.
+            console.error("a closing store's walk entry, with another store at its key, was not confirmed taken out; no walk starts in this run", error);
+            entryLeft = true;
+            unsure = true;
+            await redisPipeline([["ZREM", DUE_KEY, ref]]);
+            continue;
+          }
           // Something it needs could not be read (rule 24), such as whether a host still serves another store:
           // never taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
           console.error("a closed store could not be prepared; it waits for the next walk", error);
           if (!(await moveBack(ref, now))) unsure = true;
           continue;
         }
-        // prepareStore wrote the walk's entry before it closed the record.
-        report.stores += 1;
+        // prepareStore wrote the walk's entry before it closed the record; none when another store is kept at its key.
+        if (prepared) report.stores += 1;
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
+    if (entryLeft) return { ...report, done: false };
+    // A pending entry never starts a walk (Codex on #3643): it is taken out here, on this run and the next ones until
+    // Redis confirms it, and one not confirmed out leaves the run unsure.
+    const first = await readBatch();
+    if (!(await withdrawPending(first))) unsure = true;
     // Deleted stores waiting since the last walk join this one, once their records are gone (admitDeleted).
-    const read = await readBatch();
-    const waiting = await admitDeleted(read.entries, read.raws, now, deadline);
-    report.stores += waiting.admitted;
-    if (!waiting.sure) unsure = true;
+    const admission = await admitDeleted(first.entries, first.raws, now, deadline);
+    report.stores += admission.admitted;
+    if (!admission.sure) unsure = true;
+    // Read again: the admission rewrote its entries (BATCH_SWAP), and startableBatch changes an entry only over its
+    // exact text. Only entries whose record is confirmed gone are walked; anything not known stops the walk from starting.
+    const waiting = await readBatch();
+    if (!(await startableBatch(waiting, now))) return { ...report, done: false };
     // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again; one
-    // still waiting is not walked.
-    if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished && !entry.queued)) return { ...report, done: !unsure };
+    // still pending or waiting to be admitted is not walked.
+    if (![...waiting.entries.values()].some((entry) => !entry.unfinished && !entry.pending && !entry.queued)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
     report.started = true;
   }
 
-  const { entries: batch, unreadable } = await readBatch();
+  const read = await readBatch();
+  const batch = walkable(read.entries);
+  const { unreadable } = read;
   const owners = ownersOf([...batch.values()]);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     // A page that does not read is unknown, not a page with no keys nor the end of the database (rule 30): the run

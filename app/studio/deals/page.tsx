@@ -54,6 +54,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
   const fields = loadedFields ?? [];
   const available = inventory.available && loadedFields !== null && team !== null && shown.pipelines.length > 0;
   const assignees = [store.email, ...(team?.members ?? []).filter(m => can(m.role, "orders")).map(m => m.email)];
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const today = new Date().toISOString().slice(0, 10);
 
   return (

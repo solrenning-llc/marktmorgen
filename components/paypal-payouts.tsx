@@ -43,6 +43,7 @@ export function PayPalPayouts({
   initial,
   people,
   cents,
+  leftOutNote = "",
   currency,
   onTheirWay,
   checking = 0,
@@ -53,6 +54,11 @@ export function PayPalPayouts({
   /** Who can be paid right now, and how much in all. */
   people: number;
   cents: number;
+  /**
+   * Said when anyone owed is left out of every PayPal batch because PayPal cannot take their address (Claude 7 on
+   * #4318); empty when nobody is. Written by the server (paypalLeftOutText).
+   */
+  leftOutNote?: string;
   currency: string;
   /** Payments sent through PayPal and not yet confirmed. */
   onTheirWay: number;
@@ -170,9 +176,10 @@ export function PayPalPayouts({
                 </>
               )}
             </div>
-          ) : (
+          ) : leftOutNote ? null : (
             <p className="mt-3 text-sm text-ink-soft">Nobody is owed anything that has cleared right now.</p>
           )}
+          {leftOutNote ? <p className="notice notice-warn mt-3 text-sm">{leftOutNote}</p> : null}
           {onTheirWay > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-soft">
               <span>{`${onTheirWay} ${onTheirWay === 1 ? "payment is" : "payments are"} on the way through PayPal. Each shows as paid once PayPal confirms it; anyone PayPal cannot pay stays owed.`}</span>

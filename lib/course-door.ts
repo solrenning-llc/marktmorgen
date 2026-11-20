@@ -23,5 +23,6 @@ export function closedDoor(access: Access, selling: boolean, paypal: boolean): C
  * membership, taken off), never while it could not be checked, nor for the creator.
  */
 export function forgetsOnDevice(access: Access): boolean {
-  return access.state !== "open" && access.state !== "unknown" && Boolean(access.learner) && !access.learner!.owner;
+  // Nor while whether the course's end date applies could not be read ("unchecked", 24 [E7]): also a check not made.
+  return access.state !== "open" && access.state !== "unknown" && access.state !== "unchecked" && Boolean(access.learner) && !access.learner!.owner;
 }

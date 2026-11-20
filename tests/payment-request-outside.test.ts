@@ -145,11 +145,11 @@ async function main(): Promise<void> {
   is("the buyer's press: an error, and no second checkout opened beside the one still open", [buyer.ok ? "sent" : buyer.reason, openedCheckouts - before, sessions.cs_test_ownprobe5678?.status], ["error", 0, "open"]);
   expireReceipt = null;
 
-  part("A checkout Stripe no longer has (404): no checkout, marked");
+  part("A checkout the current Stripe account does not know (404): refused");
   const missing = await make();
   await changeRequest(store, missing, (r) => ({ next: { ...r, session: "cs_test_goneone1234", sessionAt: Date.now() }, answer: true }));
   const afterMissing = await markPaidOutside(store, missing, { method: "cash", note: "", paidAt: day });
-  is("404: marked paid outside, nothing closed", [afterMissing.ok, (await requestOf(store, missing))?.outside?.method, expired.includes("cs_test_goneone1234")], [true, "cash", false]);
+  is("404: still open, nothing closed", [afterMissing.ok ? "ok" : afterMissing.reason, (await requestOf(store, missing))?.state, expired.includes("cs_test_goneone1234")], ["error", "open", false]);
 
   part("A malformed 200 reply: an error, nothing marked, closed or written down");
   for (const [label, session, state] of [

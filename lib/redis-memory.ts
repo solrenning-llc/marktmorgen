@@ -2822,8 +2822,12 @@ export class MemoryRedis {
           return taken;
         }
         // lib/campaign-landing-store.ts WRITE_LANDINGS and DROP_LANDINGS: a product's landings and their slot in one step.
-        if (key.startsWith("-- marktmorgen:landings-write:v2\n") && args[0] === "3" && args.length === 10) {
-          const [, room, target, gone, limit, month, slot, size, expected, json] = args;
+        if (key.startsWith("-- marktmorgen:landings-write:v3\n") && args[0] === "5" && args.length === 13) {
+          const [, room, target, gone, live, erasing, limit, month, slot, size, expected, json, field] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", live]) !== 1) return [4, 0];
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) !== 0) return [4, 0];
           if (this.run(["EXISTS", gone]) === 1) return [4, 0];
           const held = this.run(["GET", target]);
           if ((typeof held === "string" ? held : "") !== expected) return [3, 0];

@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -943,7 +943,8 @@ export async function forgetTasksPerson(
   // batch: nothing is sent again on a guess and no room is given back, the files read go to the daily job that
   // deletes uploads nobody kept, and the erasure is told it could not finish, never "done".
   const receipt = repliesFor(await redisPipeline(batch), batch.length);
-  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) {
+  // Each count only within what its command could remove (#4794, Codex V): a DEL of one record answering 2 is unknown.
+  if (!receipt || !receipt.every((reply, i) => countWithin(reply, batch[i]) !== null)) {
     if (files.length) await redisPipeline([["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]]);
     throw new UnknownReplyError("the deletion of a student's work on a course's assignments");
   }

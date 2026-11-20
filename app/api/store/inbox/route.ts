@@ -10,6 +10,8 @@ import { REFUND_HISTORY_PER_DAY, REFUND_HISTORY_SCREEN, REFUND_HISTORY_UNITS, re
 import { withinLimit } from "@/lib/request-guard";
 import { countStudio } from "@/lib/studio-route";
 import { CONVERSATION_ID, parseInboxSetting } from "@/lib/inbox-rules";
+import { withinEssentialLimit } from "@/lib/request-guard";
+import { AI_PER_MINUTE } from "@/lib/ai-rules";
 
 /**
  * The studio's inbox (lib/inbox.ts), for whoever may answer buyers
@@ -62,6 +64,8 @@ export async function POST(request: NextRequest) {
       }
       case "suggest": {
         if (!id) return refuse("none", 404);
+        // The same per-minute writing limit, key and window as every other AI route in the studio (#4051).
+        if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return refuse("slow", 429);
         const result = await suggestReply(store, id);
         return result.ok ? answer({ ok: true, text: result.value, left: result.left }) : refuse(result.reason, result.reason === "used" ? 429 : 400);
       }

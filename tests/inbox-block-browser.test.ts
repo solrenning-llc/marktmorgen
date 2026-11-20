@@ -136,6 +136,37 @@ try {
   out.refusedText=await text(page);
   await page.close();
  }
+ // Codex G on #3840 (G-20261118-0611): a teammate lets them write again between this block and its read-back; the
+ // known state read back wins, never "You blocked this person".
+ {
+  const page=await open([{ok:true,blocked:false},{ok:true,blocked:true},{ok:true,blocked:false}]);
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  await press(page,'summary');
+  await press(page,'[data-inbox-block] button[type=submit]');
+  await until(page,()=>document.querySelector('[data-inbox-block] [role=status]')?.textContent.length>0);
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  out.unblockedDuringReadback=await text(page);
+  await page.close();
+ }
+ // Codex X4 on #3840 (X4-20261118-0557): a Block whose reply is lost may have blocked them; never "nothing changed".
+ {
+  const page=await open([{ok:true,blocked:false}]);
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  await press(page,'summary');
+  await press(page,'[data-inbox-block] button[type=submit]');
+  await until(page,()=>document.querySelector('[data-inbox-block] [role=status]')?.textContent.length>0);
+  out.lostBlockText=await text(page);
+  await page.close();
+ }
+ // ... and an Unblock whose reply is lost may have let them write; never "they are still blocked".
+ {
+  const page=await open([{ok:true,blocked:true,reason:'Spam',at:1}]);
+  await until(page,()=>document.querySelector('[data-inbox-block]')?.textContent.includes('You blocked this person'));
+  await press(page,'text=Let them write again');
+  await until(page,()=>document.querySelector('[data-inbox-block] [role=status]')?.textContent.length>0);
+  out.lostUnblockText=await text(page);
+  await page.close();
+ }
 } finally { await browser?.close(); }
 console.log(JSON.stringify(out));
 `;
@@ -161,6 +192,9 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   focusAfterUnblock: string;
   focusAfterCheck: string;
   keptNoteText: string;
+  unblockedDuringReadback: string;
+  lostBlockText: string;
+  lostUnblockText: string;
 };
 
 is("no page error and nothing reached outside", [result.errors, result.outside], [[], 0]);
@@ -187,5 +221,8 @@ is("after Let them write again, the focus is on the summary", result.focusAfterU
 is("after Check again, the focus is on what replaced it", result.focusAfterCheck, "SUMMARY:Block this person");
 is("review of #3840: the note shown is the one kept, never the one typed here", [result.keptNoteText.includes("Spam, from a teammate"), result.keptNoteText.includes("Typed here")], [true, false]);
 is("and the person stays not blocked", [result.refusedText.includes("You blocked this person"), result.refusedText.includes("Block this person")], [false, true]);
+is("Codex G on #3840: a known concurrent unblock is never shown as blocked", [result.unblockedDuringReadback.includes("Block this person"), result.unblockedDuringReadback.includes("You blocked this person")], [true, false]);
+is("Codex X4 on #3840: a lost Block reply never says nothing changed, and offers to check again", [result.lostBlockText.includes("nothing changed"), result.lostBlockText.includes("Block this person"), result.lostBlockText.includes("Check again")], [false, false, true]);
+is("... a lost Unblock reply never says they are still blocked, and offers to check again", [result.lostUnblockText.includes("still blocked"), result.lostUnblockText.includes("You blocked this person"), result.lostUnblockText.includes("Check again")], [false, false, true]);
 
 done();

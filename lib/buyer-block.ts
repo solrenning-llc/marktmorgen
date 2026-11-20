@@ -24,7 +24,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { giveData, takeData } from "@/lib/store-data";
+import { dataKey, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -41,17 +41,31 @@ export const blockKey = (sid: string) => `nl:blk:${sid}`;
 
 type BlockStore = Pick<Store, "sid"> & Parameters<typeof takeData>[0];
 
+/**
+ * An address as one person: normalised, and its "+tag" left out of the part before the "@" (Claude 7 on #3839:
+ * "x+tag@" was not blocked when "x@" was). Both spellings reach the same mailbox, so a block covers them all.
+ */
+function personAddress(email: string): string {
+  const address = normaliseEmail(email);
+  const at = address.lastIndexOf("@");
+  if (at <= 0) return address;
+  const local = address.slice(0, at).replace(/\+.*$/, "");
+  return local ? `${local}${address.slice(at)}` : address;
+}
+
 /** The HMAC of an address, or null when there is no key to make it with. */
 export function personMark(email: string): string | null {
   const key = deriveKey("buyer-block");
   if (!key) return null;
-  return createHmac("sha256", key).update(normaliseEmail(email)).digest("hex");
+  return createHmac("sha256", key).update(personAddress(email)).digest("hex");
 }
 
 /** A reason as kept: one line, at most BLOCK_REASON_MAX characters. */
 export function blockReason(raw: unknown): string {
   return typeof raw === "string"
-    ? raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, BLOCK_REASON_MAX)
+    ? // Well formed after the cut (Claude 7 on #3839): a lone surrogate is written by JSON as six bytes, past the entry's
+      // room, and a pair cut at the most would leave one; each becomes U+FFFD, three bytes.
+      raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, BLOCK_REASON_MAX).toWellFormed()
     : "";
 }
 
@@ -80,7 +94,9 @@ export const BLOCK_CHECK_COMMANDS = 2;
  * exactly. A store with no list blocks nobody, which needs no key to say.
  */
 export async function blockedState(store: Pick<Store, "sid">, email: string): Promise<BlockState> {
-  if (!store.sid || !isRedisConfigured()) return "unknown";
+  // A store with no sid has no list, so it blocks nobody (Claude 7 on #3839): never every visitor refused as unknown.
+  if (!store.sid) return { blocked: false };
+  if (!isRedisConfigured()) return "unknown";
   const key = blockKey(store.sid);
   const mark = personMark(email);
   let replies: unknown[] | null;
@@ -91,8 +107,9 @@ export async function blockedState(store: Pick<Store, "sid">, email: string): Pr
   }
   if (!replies) return "unknown";
   const exists = countOf(replies[0]);
-  if (exists === 0) return { blocked: false };
-  if (exists !== 1 || !mark) return "unknown";
+  if (exists !== 0 && exists !== 1) return "unknown";
+  if (!mark) return exists === 0 ? { blocked: false } : "unknown";
+  // With a mark, the row read is authoritative even if the list did not exist at the earlier EXISTS.
   if (replies[1] === null) return { blocked: false };
   const entry = parseEntry(replies[1]);
   return entry ? { blocked: true, ...entry } : "unknown";
@@ -116,6 +133,26 @@ export const BLOCK_LUA = `-- marktmorgen:buyer-block:v1
 if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then return 0 end
 if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return -1 end
 redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`;
+
+/**
+ * Removes one block and its fixed data-room charge in the same Redis step.
+ * That keeps the charge exact when the script applies but its reply is lost:
+ * a retry sees no block and does not subtract it twice.
+ */
+export const UNBLOCK_LUA = `-- marktmorgen:buyer-unblock:v1
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) ~= 1 then return 0 end
+local old = tonumber(redis.call('HGET', KEYS[2], ARGV[2]) or '0')
+local total = tonumber(redis.call('HGET', KEYS[2], '#') or '0')
+local bytes = tonumber(ARGV[3])
+if not old or not total or not bytes or bytes < 0 then return -1 end
+redis.call('HDEL', KEYS[1], ARGV[1])
+local next = math.max(0, old - bytes)
+local delta = next - old
+if old > 0 and next == 0 then delta = delta - 64 end
+if next > 0 then redis.call('HSET', KEYS[2], ARGV[2], next) else redis.call('HDEL', KEYS[2], ARGV[2]) end
+redis.call('HSET', KEYS[2], '#', math.max(0, total + delta))
 return 1
 `;
 
@@ -145,19 +182,19 @@ export async function blockPerson(store: BlockStore, email: string, reasonRaw: u
 }
 
 /** Lets a person write to the store again. true when an entry was removed, false when there was none. */
-export async function unblockPerson(store: BlockStore, email: string, now = Date.now()): Promise<boolean | "error"> {
+export async function unblockPerson(store: BlockStore, email: string): Promise<boolean | "error"> {
   if (!store.sid || !isRedisConfigured()) return "error";
   const mark = personMark(email);
-  if (!mark) return "error";
+  const room = dataKey(store);
+  if (!mark || !room) return "error";
   let removed: unknown[] | null;
   try {
-    removed = repliesFor(await redisPipeline([["HDEL", blockKey(store.sid), mark]]), 1);
+    removed = repliesFor(await redisPipeline([["EVAL", UNBLOCK_LUA, 2, blockKey(store.sid), room, mark, BLOCK_SLOT, BLOCK_ENTRY_BYTES]]), 1);
   } catch {
     return "error";
   }
   const count = removed ? countOf(removed[0]) : null;
   if (count === null || count > 1) return "error";
-  if (count === 1) await giveData(store, [{ slot: BLOCK_SLOT, bytes: BLOCK_ENTRY_BYTES }], now);
   return count === 1;
 }
 

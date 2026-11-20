@@ -37,6 +37,7 @@ import { StatsPanel } from "@/components/stats-panel";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { makePasskey } from "./passkey-world";
 import { store as redis } from "./redis-stub";
+import { readsKey, readsKeyWhere } from "./listing-reads";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
@@ -346,8 +347,9 @@ async function main(): Promise<void> {
     let faults = 0;
     redis.pipeline = async (commands) => {
       if (commands.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:reading:day:"))) spent += 1;
-      if (fault === "shelf" && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:"))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
-      if (fault === "listing" && spent > 0 && commands.some((c) => c[0] === "GET" && String(c[1]) === listing)) {
+      // A product record read alone (GET) or among others (MGET, lib/catalog.ts getMany since 10 November 2026).
+      if (fault === "shelf" && commands.some((c) => readsKeyWhere(c, (key) => key.startsWith("nl:catalog:")))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
+      if (fault === "listing" && spent > 0 && commands.some((c) => readsKey(c, listing))) {
         faults += 1;
         throw new Error("SYNTHETIC_LISTING_READ_FAULT");
       }

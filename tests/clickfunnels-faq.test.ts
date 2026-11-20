@@ -34,7 +34,8 @@ const none = { sid: "c".repeat(32), catalog: { items: [] }, subscriptionActive: 
 const go = (kind: Parameters<typeof startProblem>[1], extra: Record<string, unknown>) => startProblem(none, kind, { expected: 5, source: "clickfunnels", ...extra } as never)?.reason ?? null;
 is("with no plan, each ClickFunnels file starts; the email to past buyers does not", [go("products", {}), go("contacts", {}), go("purchases", { email: false }), go("purchases", { email: true })], [null, null, null, "email"]);
 is("the buyers' email box needs a paid-up plan and the sender, and says both", [read("app/studio/import/page.tsx").includes("canEmail={isPaidUp(store) && isSenderConfigured()}"), tool.includes("Needs your store's plan to be active and paid up, and our email sending switched on.")], [true, true]);
-is("the funnel import asks for no plan, only no paused costs", [/isPaidUp|canSell|PLANS_ON_SALE/.test(read("app/api/store/import/funnel/route.ts")), read("app/api/store/import/funnel/route.ts").includes("costPauseCode(store)")], [false, true]);
+// A store that never had a plan is let through newCostCode (lib/plan-standing.ts); a paused or ended plan is not (232 [CA1]).
+is("the funnel import asks for no plan, only no paused costs and no ended plan", [/isPaidUp|canSell|PLANS_ON_SALE/.test(read("app/api/store/import/funnel/route.ts")), read("app/api/store/import/funnel/route.ts").includes("newCostCode(store)")], [false, true]);
 
 part("The answers, in both states");
 const now = clickFunnelsBeginnerQuestions(false, TRIAL_DAYS);

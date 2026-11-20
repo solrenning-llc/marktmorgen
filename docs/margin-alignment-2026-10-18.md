@@ -1,4 +1,4 @@
-> **Historical tax model — superseded by TX.** These dated sizing/most-tax figures are retained for history. Current profit and capacity require complete scoped annual books, exchange operations, FX and applicable component facts through the real reviewed model; missing evidence is unknown, never a zero cost or permission to sell.
+> **TX tax reading, the legally correct one (owner, 27 October and 19 November 2026).** IRPF 15% and IOF 0.38% on the profit; no 27.5% floor, no most-tax reading, no ISS. These are registered-model figures, not a complete scoped tax review: real annual books, exchange operations and component facts are still required, and missing evidence is unknown, never a zero cost or permission to sell.
 
 # Margin alignment — current prices, MR27 October2026
 
@@ -8,8 +8,8 @@ Owner27/10/2026 07h42Fortaleza: every unit must retain positive net profit at100
 
 These are registered-model calculations, not certified actual costs or an approved commercial review. Unknown supplier coverage, retention, tax treatment, fixed cost or exposure fails approval; it is never entered as zero. Current prices and visible allowances are unchanged. No new price is proposed.
 
-Binding reading: most-tax; Most-tax reading: 27% VAT inside, 78.18% on profit, ISS 5% of revenue. Profit tax 78.18%; revenue tax 5%; sales tax inside 27%; sales tax on top 0%.
-The receiving model remains lib/receiving-costs.ts: dearer provider per charge, remittance, full refund/dispute reserves, the most onerous tax reading and ISS5%. No free supplier quota is treated as free usage. Annual usage includes12full monthly windows and retained post-plan records.
+Tax reading: most-correct (TX, the legally correct reading; rule LC). On the profit: IRPF 15% (Lei 14.754/2023, art. 5; IN RFB 1.037/2010, art. 2, VII) and IOF 0.38% on the whole profit sent home (Decreto 6.306/2007, arts. 14 and 15-B, XXV), 15.38% together. Revenue tax 0% (no ISS: LC 116/2003, arts. 2, I, 3 and 4); no US federal income tax; no 27.5% floor and no most-tax reading. The buyer's tax is added on top of the price, up to 27%, and is counted only where it raises the fees and the dispute reserve charged on the whole amount.
+The receiving model remains lib/receiving-costs.ts: dearer provider per charge, remittance allowance, full refund/dispute reserves. No free supplier quota is treated as free usage. Annual usage includes12full monthly windows and retained post-plan records.
 
 ## Each current unit at full registered use
 
@@ -17,18 +17,27 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.92 | $31.86 | $5.41 | 9.95% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $91.72 | $313.26 | $52.67 | 9.69% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $29.51 | $227.25 | $40.81 | 11.54% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $338.31 | $2,243.19 | $399.95 | 11.31% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $59.88 | $510.75 | $92.22 | 11.72% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $688.35 | $5,041.87 | $904.10 | 11.49% | $1.00 | positive | no |
-| Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
-| AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
-| AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |
-| AI captions, 3 languages (2 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.80 | $19.00 | $3.48 | 12.27% | $0.00 | positive | no |
+| Store monthly ($69) | $69.00 | $69.00 | $9.02 | $5.95 | $8.31 | $45.72 | 66.26% | $0.25 | positive | no |
+| Store yearly ($690) | $690.00 | $690.00 | $84.49 | $67.96 | $82.68 | $454.87 | 65.92% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $449.00 | $55.21 | $27.56 | $56.33 | $309.90 | 69.02% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $4,490.00 | $546.26 | $314.79 | $558.14 | $3,070.81 | 68.39% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $999.00 | $122.04 | $57.98 | $125.96 | $693.02 | 69.37% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $9,990.00 | $1,214.62 | $665.38 | $1,247.32 | $6,862.68 | 68.69% | $1.00 | positive | no |
+| Store assistant add-on ($69/mo, 700 replies) | $69.00 | $69.00 | $9.02 | $2.48 | $8.85 | $48.65 | 70.50% | $0.25 | positive | no |
+| AI captions, 1 language (6 min, $36.00) | $36.00 | $36.00 | $5.00 | $1.20 | $4.59 | $25.21 | 70.02% | $0.00 | positive | no |
+| AI captions, 2 languages (3 min, $36.00) | $36.00 | $36.00 | $5.00 | $0.90 | $4.63 | $25.47 | 70.75% | $0.00 | positive | no |
+| AI captions, 3 languages (2 min, $36.00) | $36.00 | $36.00 | $5.00 | $0.80 | $4.65 | $25.55 | 70.97% | $0.00 | positive | no |
 
-Caption rows select their worst modeled net share under the binding reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.
+Caption rows select their worst modeled net share under the TX reading across all allowed lengths for each language count. They are not a claim of independently verified provider bills.
+
+## What each plan keeps in its worst month, under the LC reading
+
+A month's receipts after every fee and reserve (netOf), less every cost line at its limit (worstCost), then IRPF 15% and IOF 0.38% on that profit (MOST_CORRECT_READING, the LC rule of 1 November 2026). tests/switch-keeps-window.test.ts section 11 holds each one above zero (rule MR); this table holds the exact figures, through this document's staleness test (tests/worst-month-kept.ts, one formula for both).
+
+| Interval | Store | Studio | Scale |
+| --- | --- | --- | --- |
+| Monthly plan | US$45.99 | US$311.13 | US$695.36 |
+| A month of a yearly plan | US$37.93 | US$256.00 | US$572.09 |
 
 ## LLC fixed costs — owner decision22 October2026
 
@@ -46,6 +55,7 @@ Allocation:100% Marktmorgen;0% Hazelsong. Owner22/10/2026 05:10 Fortaleza: "esqu
 | tools | unknown | unknown |
 | deployment-artifact-retention | unknown | unknown |
 | backup | unknown | unknown |
+| account-moves | unknown | unknown |
 | us-mailbox | unknown | unknown |
 | eu-gdpr-representative | unknown | unknown |
 | eu-dsa-representative | unknown | unknown |
@@ -68,6 +78,6 @@ SR3 must additionally establish the official costs and acceptance of ITIN/accept
 
 ## Closed conditions and actual monthly reporting
 
-PLANS_ON_SALE and OPENING_REQUESTED remain false. The commercial review is absent; contract/exposure coverage and the other existing funding gates remain incomplete; art9a treatments are not recorded. The tax reading is not lowered, EU hosting is not confirmed, and SR2 still requires a dated proved US-company Stripe platform account eligible for the required direct-charge regions. A positive modeled unit never opens a sale.
+PLANS_ON_SALE and OPENING_REQUESTED remain false. The commercial review is absent; contract/exposure coverage and the other existing funding gates remain incomplete; art9a treatments are not recorded. EU hosting is not confirmed (no longer a condition), and SR2 still requires a dated proved US-company Stripe platform account eligible for the required direct-charge regions. A positive modeled unit never opens a sale.
 
 The internal monthly report calculator accepts only complete reconciled actual accounting for the previous UTC month and outputs aggregates without personal data. Its actual dataset is still null. Ingestion, automatic scheduling and owner presentation are not delivered by that calculator; no actual60%achievement, company margin or finite customer base is asserted.

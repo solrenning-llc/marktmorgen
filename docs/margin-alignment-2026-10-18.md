@@ -56,6 +56,7 @@ Allocation:100% Marktmorgen;0% Hazelsong. Owner22/10/2026 05:10 Fortaleza: "esqu
 | deployment-artifact-retention | unknown | unknown |
 | backup | unknown | unknown |
 | account-moves | unknown | unknown |
+| support-forward | unknown | unknown |
 | us-mailbox | unknown | unknown |
 | eu-gdpr-representative | unknown | unknown |
 | eu-dsa-representative | unknown | unknown |

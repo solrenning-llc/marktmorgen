@@ -62,8 +62,9 @@ export default function PrivacyPage() {
           <strong className="text-black">Payment information.</strong> Payments
           are processed by Stripe, our payment processor. We do not store your
           full credit or debit card number, CVC, or equivalent payment
-          credentials. Stripe may collect billing name, address, and
-          payment method details as needed to complete the transaction. We may
+          credentials. Stripe asks for your billing address on every paid
+          checkout, and may collect other payment method details as needed to
+          complete the transaction. We may
           receive limited payment metadata, such as the last four digits of a
           card, payment status, and subscription period.
         </p>
@@ -422,9 +423,22 @@ export default function PrivacyPage() {
           When a buyer chooses a payment plan, Stripe keeps their card on the
           creator&apos;s account for the remaining payments, and we keep the
           checkout on a list until the plan has been given its end date, so it
-          stops after the last payment. When a creator switches on sales tax,
-          Stripe asks the buyer for the address it needs to work the tax out,
-          under Stripe&apos;s own privacy policy; we do not keep it.
+          stops after the last payment.
+        </p>
+        <p id="billing-address">
+          <strong className="text-black">Your billing address.</strong>{" "}
+          Stripe asks for your billing address on every paid checkout, and
+          keeps it with the payment, on the Stripe account of whoever is paid:
+          the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen
+          plan or add-on. Stripe&apos;s own privacy policy applies. It is not
+          asked when
+          something is free. We read only the country in it, to work out where
+          you are buying from: for the VAT or sales tax that applies to the
+          sale, and to decide whether an offer after paying can be shown to
+          you. We do not keep the address, and it is never used for marketing.
+          Before we start keeping the tax records the law asks for on sales to
+          the European Union, which must be kept for 10 years, this policy will
+          say so.
         </p>
         <p id="podcasts">
           <strong className="text-black">Private podcasts.</strong>{" "}

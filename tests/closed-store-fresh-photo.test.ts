@@ -21,6 +21,7 @@ import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/clo
 import { claimHandle, createStore, ensureStatsId, ensureStoreId, moveAccount, setPhotoId, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { deletePhoto, writePhoto } from "@/lib/store-photo";
 import { store as redis } from "./redis-stub";
+import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
@@ -49,7 +50,12 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     dueAddLost = false;
     return [null];
   }
-  if (deleteAckLost && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:fenced-del:v1")) {
+  // The record's delete: bare under the lock before (fenced-del), or among the record's closing changes in the step that
+  // reads the lock (CLOSING_FENCED, on #3156). It lands, and its answer is lost.
+  const deletesRecord = (c: (string | number)[]) =>
+    c[0] === "EVAL" && (String(c[1]).startsWith("-- marktmorgen:fenced-del:v1") ||
+      (String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).some((k) => String(k).startsWith("nl:store:owner:"))));
+  if (deleteAckLost && commands.length === 1 && deletesRecord(commands[0])) {
     deleteAckLost = false;
     await realPipeline(commands);
     return [null];
@@ -71,7 +77,12 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     rewriteUnconfirmed = false;
     return [null];
   }
-  if (releaseLost && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:"))) {
+  // The addresses' hold, made bare before, or as one of the record's closing changes in the step that reads the store's
+  // lock (lib/redis-lock.ts applyIfHeld, CLOSING_FENCED, on #3156): answered with nothing, and not run.
+  const holdsAddress = (c: (string | number)[]) =>
+    (c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:")) ||
+    (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).some((k) => String(k).startsWith("nl:store:handle:")));
+  if (releaseLost && commands.some(holdsAddress)) {
     releaseLost = false;
     return [];
   }
@@ -120,6 +131,7 @@ async function main(): Promise<void> {
     const email = "control@example.com";
     const store = await makeStore(email, "controlphoto");
     const shown = await putPhoto(email);
+    await closeForErasure(email);
     await markDue(email, Date.now() - 1000);
     const report = await erase(Date.now());
     is("the store is prepared and its walk finishes", [report.stores, report.finished], [1, 1]);
@@ -137,6 +149,7 @@ async function main(): Promise<void> {
     inWindow = async () => {
       second = await putPhoto(email);
     };
+    await closeForErasure(email);
     await markDue(email, Date.now() - 1000);
     const report = await erase(Date.now());
     is("the replacement landed in the window, after the first read", second.length === 32 && second !== first, true);
@@ -155,6 +168,7 @@ async function main(): Promise<void> {
     inWindow = async () => {
       put = await putPhoto(email);
     };
+    await closeForErasure(email);
     await markDue(email, Date.now() - 1000);
     const report = await erase(Date.now());
     is("the photo landed in the window", put.length, 32);
@@ -175,6 +189,7 @@ async function main(): Promise<void> {
       rereadUnknown = true;
     };
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     await erase(T);
     const score = redis.run(["ZSCORE", DUE_KEY, email]);
@@ -198,6 +213,7 @@ async function main(): Promise<void> {
       rewriteUnconfirmed = true;
     };
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     await erase(T);
     const score = redis.run(["ZSCORE", DUE_KEY, email]);
@@ -229,6 +245,7 @@ async function main(): Promise<void> {
     const otherBreak = JSON.stringify({ subscription: "sub_againother1", customer: "cus_againother1", paymentMethod: "pm_againother1", tier: "creator", from: 2_000_000_000, until: 2_005_000_000, told: 0 });
     const otherLast = "1900000000";
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const first = await erase(T);
     const now = await storeForEmail(email);
@@ -264,6 +281,7 @@ async function main(): Promise<void> {
     };
     withdrawUnknown = unknown;
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     const left = withdrawUnknown;
@@ -299,6 +317,7 @@ async function main(): Promise<void> {
       finished.push(entry.ref);
     }, now);
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     // Every taking-out of the entry answers what EVAL never says, in this run and in the next ones.
     withdrawUnknown = 99;
@@ -325,6 +344,7 @@ async function main(): Promise<void> {
     redis.run(["SET", `nl:zz:${store.statsId}:data`, "x"]);
     releaseLost = true;
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const first = await erase(T);
     const score = redis.run(["ZSCORE", DUE_KEY, email]);
@@ -353,6 +373,7 @@ async function main(): Promise<void> {
     releaseLost = true;
     withdrawUnknown = 2;
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const first = await erase(T);
     is("no walk starts, and the run is not said done", [first.started, first.finished, first.done], [false, 0, false]);
@@ -389,6 +410,7 @@ async function main(): Promise<void> {
       await ensureStoreId(email);
     };
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const report = await erase(T);
     is("it is prepared, walked and finished as itself", [report.stores, report.finished], [1, 1]);
@@ -406,6 +428,7 @@ async function main(): Promise<void> {
     const photo = await putPhoto(email);
     deleteAckLost = true;
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     await erase(T);
     is("the delete was answered with nothing", deleteAckLost, false);
@@ -424,6 +447,7 @@ async function main(): Promise<void> {
     redis.run(["SET", `nl:zz:${store.statsId}:data`, "p"]);
     unpendAckLost = true;
     const T = Date.now();
+    await closeForErasure(email);
     await markDue(email, T - 1000);
     const first = await erase(T);
     is("the rewrite was answered with nothing", unpendAckLost, false);
@@ -445,6 +469,7 @@ async function main(): Promise<void> {
     // As a run leaves it when its record stayed and the entry could not be taken out: confirmed, with its record there.
     const entry = { ref: email, email, sid: store.sid, statsId: store.statsId, name: store.name, handle: store.handle, handles: [store.handle], marks: [store.sid, store.statsId].sort(), endedAt: now, at: now };
     redis.run(["HSET", BATCH_KEY, email, JSON.stringify(entry)]);
+    await closeForErasure(email);
     await markDue(email, now + 10 * WALK_GAP_MS);
     // A run whose deadline is already past before it reaches any due store, then a run with all its time.
     await eraseClosed(Date.now() - 1, async () => {}, now);
@@ -460,6 +485,8 @@ async function main(): Promise<void> {
     const email = "lostdue@example.com";
     const store = await makeStore(email, "lostdue");
     redis.run(["SET", `nl:zz:${store.statsId}:data`, "w"]);
+    // Really closed: its plan ended and the closing job removed what it kept (dueForErasure, #3156).
+    await closeForErasure(email);
     const now = Date.now();
     // As a run leaves it after the store was prepared and its ref taken out of line (ZREM), with its record written
     // again by a late writer: a confirmed entry in the batch, the record there, and the ref out of the due line.
@@ -528,6 +555,7 @@ async function main(): Promise<void> {
     const made = await createStore(from, "moveextra", "Extra", "");
     if (!made.ok) throw new Error("setup: the extra store");
     const ref = storeRef(made.store);
+    await closeForErasure(ref);
     let moved = false;
     inWindow = async () => {
       moved = (await moveAccount(from, to)).ok;

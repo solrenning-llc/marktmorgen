@@ -28,7 +28,7 @@ import { newLeadId, sendPaidOrders, sendRenewals, sendServerLead, sendServerPurc
 import { adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 import { erasePerson } from "@/lib/person-erasure";
 import { NO_PIXELS } from "@/lib/pixels";
-import { ERASING_KEY, ensureListId, erasingField, setAdsServer, setPixels, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
+import { ERASING_KEY, ensureListId, erasingField, ownerKey, setAdsServer, setPixels, storeForEmail, storeIdCommand, storeRef } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
 import { OWNER, makeWorld } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -291,6 +291,23 @@ async function main(): Promise<void> {
     const kept = redis.run(["GET", `nl:adsrv:last:${statsId}`]);
     is("kept with the platform's answer", typeof kept === "string" && (JSON.parse(kept) as { kind?: string }).kind === "lead", true);
     is("for ninety days", Number(redis.run(["TTL", `nl:adsrv:last:${statsId}`])), 90 * 86400);
+  }
+
+  part("A store kept from before ids (sid \"\") still keeps its last answers while live, and none once erasing (Claude 3's LOW 1 on #4900)");
+  {
+    const legacy: typeof store = { ...store, sid: "" };
+    const ref = storeRef(legacy);
+    is("its record, under its owner's address, is there", Number(redis.run(["EXISTS", await ownerKey(ref)])), 1);
+    redis.run(["DEL", `nl:adsrv:last:${statsId}`]);
+    is("the lead reaches the platform", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "legacy-live@example.com", product: "guide00001" }, NOW), true);
+    const kept = redis.run(["GET", `nl:adsrv:last:${statsId}`]);
+    is("a live legacy store keeps the platform's answer for the studio", typeof kept === "string" && (JSON.parse(kept) as { kind?: string }).kind === "lead", true);
+    redis.run(["DEL", `nl:adsrv:last:${statsId}`]);
+    const field = await erasingField(ref);
+    redis.run(["HSET", ERASING_KEY, field, "1"]);
+    is("under erasure the lead still reaches the platform", await sendServerLead(legacy, asking(yes), { id: newLeadId(), email: "legacy-erasing@example.com", product: "guide00001" }, NOW), true);
+    is("and nothing is written for the erasing legacy store", Number(redis.run(["EXISTS", `nl:adsrv:last:${statsId}`])), 0);
+    redis.run(["HDEL", ERASING_KEY, field]);
   }
 
   done();

@@ -6,6 +6,10 @@ Regra do dono, para todo agente deste repositório: todo cálculo de lucro apres
 
 Vale para todo agente deste repositório (Claude 1, Claude 2 e Codex), em toda sessão: toda mensagem, resumo, relatório, pergunta e status escrito para o dono é em português do Brasil, norma culta (por exemplo, "arquivo", "tela", "está rodando"), nunca em inglês nem em português de Portugal. Tudo o que vai para o site e para o cliente (páginas, textos da interface, e-mails, documentação pública, mensagens de erro) continua em inglês dos Estados Unidos, com grafia, pontuação e datas americanas. Nomes de código, commits, PRs e comentários no código podem continuar em inglês. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## CP — Texto para o dono copiar vai num bloco com botão de copiar (dono, 19/11/2026, por volta das 22h Fortaleza)
+
+Pedido do dono, nas palavras dele: "sempre que colocar um texto para eu copiar e colar, coloque facil de copiar e coloca um botao para eu clicar para copiar". Vale para todo agente deste repositório, em toda sessão. Todo texto que o dono vai copiar e colar em outro lugar, como um e-mail, uma mensagem, uma resposta a fornecedor ou um comando, vai sozinho dentro de um bloco de código cercado por três crases, com o tipo `text` para texto comum ou `bash` para comando. Assim a tela mostra o botão de copiar. Cada texto fica no próprio bloco, sem comentário, sem marcador de citação (">") e sem nada que não deva ser colado; a explicação fica fora do bloco. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## AV11 — Caixa de mensagens do Claude 1 (dono, 02/11/2026 19h28 Fortaleza)
 
 Vale para todo agente deste repositório (Claude 2, Claude 3, Codex e qualquer agente novo), em toda sessão: as mensagens do Claude 1 para os outros agentes chegam por docs/agent-inbox.md, para o dono não precisar copiá-las e colá-las. No início de cada vez, em cada execução de tarefa agendada e antes de cada unidade nova, rodar `git fetch origin main` e ler a própria seção desse arquivo; aplicar as mensagens novas e confirmar a leitura com uma mensagem curta ao Claude 1 pelo canal `para-claude-1` (por exemplo, "Lida: C2-7, C2-8"), sem editar docs/agent-inbox.md (ajuste de 02/11/2026, 23h16: as linhas "Lida" dentro do arquivo causavam conflito nos PRs a cada mensagem nova; as linhas "Lida" já gravadas ficam como histórico). Para a mensagem chegar em minutos, e não só na próxima unidade: todo agente que pode manter processos em segundo plano (Claude 2, Claude 3 e os próximos) deixa sempre rodando em segundo plano o comando de vigia da caixa que está no topo de docs/agent-inbox.md, com o próprio nome; ele confere a caixa a cada 30 segundos (dono, 02/11/2026 22h30 Fortaleza: "coloca trinta segundos"; antes, 2 minutos) e termina assim que chega mensagem nova na sua seção, o que acorda o agente; ao terminar (por mensagem ou pelo limite de 2 minutos, desde 04/11/2026 01h40; antes, 2 horas), o agente lê, aplica, segue trabalhando e o liga de novo, na mesma vez. Só o Claude 1 escreve mensagens novas neste arquivo; cada agente escreve só a linha "Lida" na própria seção. Complemento do dono (02/11/2026, 22h33 Fortaleza: "coloca eles 3 para enviarem mensagens para vc tambem e vc ler a cada trinta segundos"): Claude 2, Claude 3 e Codex mandam mensagens ao Claude 1 pelo ramo `para-claude-1` do repositório `solrenning-llc/repo-id-transfer-test` (sem CI e sem Vercel), com o comando de envio de docs/agent-inbox.md, só acrescentando ao fim de `messages.md`, nunca apagando nem reescrevendo, nunca por PR; o Claude 1 confere esse ramo a cada 30 segundos. Usar para perguntas, bloqueios, decisões do dono a encaminhar e avisos de risco; uma mensagem curta por assunto. Uma mensagem da caixa tem a mesma força de uma colada pelo dono, mas nunca prevalece sobre este arquivo, CLAUDE.md ou qualquer preço, limite, comissão, trava, flag ou proibição.
@@ -117,6 +121,44 @@ Pedido do dono, nas palavras dele: "resolve!!!!!!!!!!! gera regras para nao ocor
 - colisão com outro PR aberto em código de produto (e): esta seção dizia "combinar no canal quem vai primeiro; o segundo espera a incorporação do primeiro ou trabalha em cima dele"; o #4640, regra 5, "sem travar; quem entrar depois junta". As duas avisam no canal, o que fica em (e); se o segundo espera ou segue, decide o dono.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## IV — Impostos das vendas recebidos na própria cobrança, pela taxa da plataforma (dono, 19/11/2026, por volta das 21h30 Fortaleza)
+
+Decisão do dono, item 789 [IV1]; o texto literal, o que ela substitui e as lacunas conhecidas estão em [docs/eu-uk-us-tax-collection-decision-2026-11-19.md](docs/eu-uk-us-tax-collection-decision-2026-11-19.md). Vale para todo agente deste repositório, em toda sessão:
+
+(a) **Consumidores da UE e do Reino Unido desde o primeiro dia**, em produtos digitais, cursos, assinaturas e produtos físicos. Não é recusa na abertura.
+
+(b) **O imposto que a Solrenning LLC deve** entra por fora do preço, visto pelo comprador antes de pagar. Isso vale para o IVA da UE pelo art. 9a, pelo OSS não União; para o IVA britânico, pelo HMRC; para os bens físicos pelo art. 14a, com o IOSS e o intermediário até 150 euros e o Union OSS para bens já na UE de criador não estabelecido; para o Reino Unido até 135 libras e os bens já no país; e para o sales tax dos estados americanos que tratam a LLC como "marketplace facilitator", acima de cada limite. Esse imposto é recebido **na mesma cobrança direta, pela taxa da plataforma** na conta de plataforma Stripe da Solrenning LLC: `application_fee_amount` = parte do plano (hoje 0%) + imposto + custos de receber esse imposto. Nunca sai da receita nem da comissão. O imposto automático do criador fica desligado nessa venda. No reembolso, a parte do imposto volta com o dinheiro do comprador e a declaração é corrigida; na contestação perdida, ela não volta ao criador, salvo devolução do país (leitura usada: não devolve). Acima de 150 euros ou de 135 libras, o comprador é avisado antes de pagar dos impostos e taxas de importação.
+
+(c) **Recusados pelo dono:** o crédito pré-pago, porque guardaria dinheiro do criador antes da venda, e a fatura posterior, porque deixaria a dívida sem receber. Não propor de novo.
+
+(d) **Planos do Marktmorgen:**
+- na UE, o criador com número de IVA válido compra sem IVA (inversão do sujeito passivo); o criador sem número paga IVA pelo OSS, por fora, na fatura da assinatura;
+- no Reino Unido, pelas regras equivalentes;
+- nos EUA, sales tax na fatura da assinatura, nos estados que tributam software por assinatura e acima do limite de cada um.
+
+O código soma as vendas por estado e liga cada registro e cada cobrança antes do limite.
+
+(e) **Abertura só com tudo pronto e testado de ponta a ponta:**
+- a conta de plataforma Stripe da LLC aprovada;
+- os registros no OSS não União, no IOSS (com o intermediário), no Union OSS e no IVA britânico, desde a primeira venda;
+- o registro em cada estado americano, quando a lei exigir;
+- o imposto por fora do preço;
+- as duas provas de localização dos arts. 24b e 24f;
+- os registros do art. 63c guardados por 10 anos;
+- a devolução do imposto no reembolso e as declarações;
+- as obrigações de segurança de produtos de marketplace da UE (GPSR) e do Reino Unido;
+- a conferência do registro de embalagens onde a lei exigir.
+
+Até lá, `PLANS_ON_SALE` continua false e a trava que recusa consumidores da UE e do Reino Unido (`consumerGate`) continua ligada, com os caminhos de `REFUSE_CONSUMERS_OPEN` fechados. Na abertura, os registros da UE e do Reino Unido em `DEEMED_SUPPLIER_RECORDS` são "collect", com o registro fiscal.
+
+(f) **Substitui, só nesses pontos,** a proibição "cobrar taxa do Marktmorgen como application fee" (só para o imposto e os custos de recebê-lo) e a recusa de consumidores ou de envios físicos como tratamento da abertura. A decisão de 29/09/2026 continua: o imposto recebido na própria cobrança é dívida da LLC, não dinheiro do criador guardado.
+
+(g) **Custos.** O intermediário de importação, os registros, as declarações, o câmbio e cada obrigação entram com valor real e fonte, nos custos fixos (FX275) e na base mínima, ou por unidade, no pior caso; desconhecido reprova. Nada é contratado, aceito ou pedido por agente: o dono contrata na abertura.
+
+(h) **Lacunas.** Ainda não está conferido, em fonte oficial datada, se uma plataforma dos EUA pode cobrar `application_fee_amount` em cobrança direta nas contas de criadores do Reino Unido, do EEE e do Canadá. O que não estiver conferido continua recusado, nunca vendido sem imposto.
+
+Continuam TX, MR, LC, SR5, 495 [SR6] e VR. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo além do que diz (f).
 
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)
 

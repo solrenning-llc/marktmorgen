@@ -75,5 +75,10 @@ part("(bb): the cost-PR window, until option D (coordinator C5-20261119-0150-bb)
   is("the red-main fix and GRAVE or ALTO fixes are never held", [bb.includes("MV (a)"), bb.includes("GRAVE ou ALTO")], [true, true]);
   is("the window's Store year stays under US$66, measured on the merge", [bb.includes("US$66"), bb.includes("plan-margin")], [true, true]);
   is("it lasts until option D, which the owner left for Claude 1's return", bb.includes("opção D"), true);
+  // Item 6: the owner's new sentence of 20/11/2026 ("DEVE TAMBEM APARECER COMO RESOLVIDO NO CLAUDE").
+  is("6: it keeps the owner's new sentence", bb.includes("DEVE TAMBEM APARECER COMO RESOLVIDO NO CLAUDE"), true);
+  is("6: resolved means mergeable_state read by REST after the push, not dirty", [bb.includes(".mergeable_state"), bb.includes("diferente de `dirty`"), bb.includes("depois do push")], [true, true, true]);
+  is("6: a clean local merge-tree or an unsent merge does not count", [bb.includes("`git merge-tree` limpo na árvore local"), bb.includes("ainda não enviada")], [true, true]);
+  is("6: every open PR of the author, and a stack against its base and main", [bb.includes("todos os PRs abertos do autor"), bb.includes("contra a própria base e contra o main (aa)")], [true, true]);
 }
 done();

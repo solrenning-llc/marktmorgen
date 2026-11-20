@@ -1,0 +1,226 @@
+/**
+ * Rule 30, synthetic only: no step of the closing walk's preparation (lib/closed-store-data.ts, prepareStore) deletes
+ * anything of a store whose plan runs again once the walk's lock on it ran out (Codex M's focal M1 on #3156, whose
+ * proof is tests/m-3156-expired-delete-observed.proof.ts, SHA256 4cabdc83...).
+ *
+ * On #3643's design (#3156 rebuilt on it) the walk holds no lock of its own: the store's own lock (lib/store.ts) is
+ * taken by closeStoreRecord, which reads the record again under it and only then hands it to prepareStore's callback
+ * (forgetLive), and every delete of every step there, and the record's closing itself (its addresses held back, its id
+ * and places released, the record deleted), is made only while that lock is still held, read in the same step
+ * (fencedBy, applyIfHeld, CLOSING_FENCED in lib/redis-lock.ts). Before, those deletes were bare pipelines: when the
+ * lock ran out between a renewal and a delete (a paused function, a slow network), the plan could start again in that
+ * moment, through the real writer, and the delete still landed on the store that runs again: its team, its hosts'
+ * claims, its keys for the API, its webhooks, its email platform, its phones, its Path, its hosts' calendars, and at
+ * the last step its address and its id.
+ *
+ * Here, every pipeline the record's lock covers that changes the database is found on a first run (the census), and
+ * then, one at a time, the lock runs out on the stand-in's own clock just before that pipeline is sent and the real
+ * setSubscription starts the plan again. What the database holds once the plan runs again must be exactly what it
+ * holds after the walk, the walk's own keys aside: nothing of the store that runs again is deleted or changed; the
+ * walk goes on, and the store waits a walk. No lock key is deleted by hand, no reply is forged.
+ */
+import { readFileSync } from "node:fs";
+import { eraseClosed, markDue, WALK_GAP_MS, WALK_KEY } from "@/lib/closed-store-data";
+import { ERASING_KEY } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail, storeRef } from "@/lib/store";
+import { putMember } from "@/lib/team";
+import { claimsKey, hostId } from "@/lib/host-claims";
+import { hostCalendarKeys } from "@/lib/host-calendar";
+import { makeKey } from "@/lib/api-keys";
+import { startPath } from "@/lib/path";
+import { readAnswers } from "@/lib/path-rules";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
+import { store as redis } from "./redis-stub";
+import { closeForErasure, reactivate } from "./closed-for-erasure";
+import { done, is, part } from "./check";
+
+globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+
+type Command = (string | number)[];
+const original = redis.pipeline.bind(redis);
+const owner = "fence-owner@example.test";
+const member = "fence-helper@example.test";
+const CHANGES = new Set(["DEL", "UNLINK", "HDEL", "SREM", "ZREM", "SET", "HSET", "SADD", "ZADD", "EXPIRE", "PEXPIRE", "LPUSH", "RPUSH", "LREM", "LTRIM", "EVAL"]);
+const LOCK_SCRIPTS = ["-- marktmorgen:extend:v1", "-- marktmorgen:release:v1", "-- marktmorgen:closing-take:v1"];
+
+/** Whether a pipeline changes the database: a command that writes, or a script that is not the lock's own. */
+const changes = (commands: Command[]) =>
+  commands.some((c) => CHANGES.has(String(c[0])) && !(c[0] === "EVAL" && LOCK_SCRIPTS.some((name) => String(c[1]).startsWith(name))));
+/** What a pipeline is, for the report: its first change and the keys it names. */
+const named = (commands: Command[]) => {
+  const c = commands.find((one) => CHANGES.has(String(one[0])))!;
+  if (c[0] !== "EVAL") return `${c[0]} ${String(c[1]).replace(/[0-9a-f]{24,}/g, "…")}`;
+  const script = String(c[1]).split("\n")[0].replace("-- marktmorgen:", "");
+  return `EVAL ${script} ${c.slice(3, 3 + Number(c[2])).map((k) => String(k).replace(/[0-9a-f]{24,}/g, "…")).join(" ")}`;
+};
+
+/** Every key of the stand-in and its value, read as a whole, but the store locks (the walk's and the writer's own). */
+async function everything(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const [[, keys]] = (await original([["SCAN", "0", "MATCH", "*", "COUNT", 1_000_000]])) as [string, string[]][];
+  for (const key of [...new Set(keys)].sort()) {
+    if (key.startsWith("nl:store:lock:")) continue;
+    const [type] = (await original([["TYPE", key]])) as string[];
+    const read: Command = type === "string" ? ["GET", key] : type === "hash" ? ["HGETALL", key] : type === "set" ? ["SMEMBERS", key]
+      : type === "zset" ? ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES"] : type === "list" ? ["LRANGE", key, 0, -1] : ["TYPE", key];
+    const [value] = await original([read]);
+    out.set(key, JSON.stringify(Array.isArray(value) && type === "set" ? [...value].map(String).sort() : value));
+  }
+  return out;
+}
+
+/** A store due for erasure with something in every step the preparation deletes from, made by the real writers where there is one. */
+async function seed(): Promise<void> {
+  redis.pipeline = original;
+  redis.clear();
+  await original([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "started", 1, "finished", 1]]);
+  await claimHandle(owner, "fenceshop", "Synthetic fence shop", "");
+  await ensureStoreId(owner);
+  await ensureStatsId(owner);
+  const store = (await storeForEmail(owner))!;
+  if (!(await putMember(store, member, "admin"))) throw new Error("Synthetic member setup failed");
+  if (!(await makeKey(store.sid, "Synthetic key")).ok) throw new Error("Synthetic API key setup failed");
+  const answers = readAnswers({ goalCents: 0, skills: "baking", subject: "bread", minutes: 15, audience: "none", timeZone: "UTC" }, store.currency);
+  if (!answers.ok || !(await startPath(store, answers.answers)).ok) throw new Error("Synthetic Path setup failed");
+  const later = Date.now() + 7 * 86_400_000;
+  await original([
+    // A host's claims on this store's calls, and a host's own calendar (as tests/closing-journey.ts writes them).
+    ["HSET", claimsKey(hostId(owner)), "kfenceowner01", `1|2|${later}|${store.sid}:slot`],
+    ["HSET", claimsKey(hostId(member)), "kfencehelp001", `1|2|${later}|${store.sid}:slot`],
+    ["SET", hostCalendarKeys(hostId(owner))[0], JSON.stringify({ email: owner })],
+    // Its webhooks, its email platform and its phones, by the keys their modules keep them under.
+    ["SET", `nl:hooks:cfg:${store.statsId}`, JSON.stringify({ endpoints: [] })],
+    ["SADD", "nl:hooks:stores", store.statsId!],
+    ["SET", `nl:esync:cfg:${store.statsId}`, JSON.stringify({ provider: "none" })],
+    ["SET", `nl:phone:cfg:${store.statsId}`, JSON.stringify({ phones: [] })],
+  ]);
+  await closeForErasure(owner);
+  await markDue(storeRef(store), Date.now() - 1000);
+}
+
+/** Runs the walk, calling `at` before each pipeline the preparation sends that changes the database, while the walk holds the store's lock. */
+async function walk(at: (index: number, commands: Command[]) => Promise<void>, now = Date.now()): Promise<string> {
+  let holding = false;
+  let index = 0;
+  let inside = false;
+  redis.pipeline = (async (commands: Command[]) => {
+    if (inside) return original(commands);
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1"))) holding = false;
+    if (holding && changes(commands)) {
+      inside = true;
+      try {
+        await at(index++, commands);
+      } finally {
+        inside = false;
+      }
+    }
+    const reply = await original(commands);
+    // The store's own lock, taken by closeStoreRecord (lib/store.ts) right before the live store's data and its record
+    // go, on #3643's design (the walk itself holds no lock): from its "OK" until its release, every change is counted.
+    const take = commands.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:lock:") && c.includes("NX"));
+    if (take >= 0 && (reply as unknown[])[take] === "OK") holding = true;
+    return reply;
+  }) as typeof redis.pipeline;
+  try {
+    await eraseClosed(Date.now() + 60_000, async () => {}, now);
+    return "completed";
+  } catch (error) {
+    return error instanceof Error ? error.name : "threw";
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+async function main() {
+  part("Control: a plan that runs again before the walk keeps the whole store");
+  await seed();
+  await reactivate(owner);
+  const untouched = await everything();
+  const control = await walk(async () => {});
+  const after = await everything();
+  is("the walk leaves it", control, "completed");
+  // The walk's own line and its record of the walk change (the store that runs again leaves the line, or waits a walk
+  // with its entry pending, #3643): not the store's.
+  const ours = (key: string) => key.startsWith("nl:closed:");
+  is("nothing of it is deleted or changed", [...untouched.keys()].filter((key) => !ours(key) && after.get(key) !== untouched.get(key)), []);
+
+  part("The census: every pipeline the preparation sends that changes the database, while it holds the lock");
+  await seed();
+  const store = (await storeForEmail(owner))!;
+  const census: string[] = [];
+  const touched = new Set<string>();
+  await walk(async (_, commands) => {
+    census.push(named(commands));
+    for (const c of commands) for (const part of c.slice(1)) touched.add(String(part));
+  });
+  console.log(census.map((line, i) => `  ${i}: ${line}`).join("\n"));
+  const reaches = (prefix: string) => [...touched].some((k) => k.startsWith(prefix));
+  is("it reaches every step that deletes", {
+    claims: reaches(claimsKey(hostId(owner))) && reaches(claimsKey(hostId(member))),
+    team: reaches(`nl:team:${store.sid}`),
+    apiKeys: reaches(`nl:api:keys:${store.sid}`),
+    webhooks: reaches(`nl:hooks:cfg:${store.statsId}`),
+    emailPlatform: reaches(`nl:esync:cfg:${store.statsId}`),
+    phones: reaches(`nl:phone:cfg:${store.statsId}`),
+    path: reaches(`nl:path:${store.sid}`),
+    calendar: reaches(hostCalendarKeys(hostId(owner))[0]),
+    record: reaches("nl:store:owner:"),
+  }, { claims: true, team: true, apiKeys: true, webhooks: true, emailPlatform: true, phones: true, path: true, calendar: true, record: true });
+
+  for (let n = 0; n < census.length; n += 1) {
+    part(`The lock runs out just before step ${n} (${census[n]}), and the plan tries to start again`);
+    await seed();
+    const seeded = await everything();
+    let reached = false;
+    let restarted = false;
+    let marked = false;
+    let running: Map<string, string> = new Map();
+    const outcome = await walk(async (index) => {
+      if (index !== n) return;
+      reached = true;
+      // The stand-in's own clock: the walk's lock runs out by its expiry, never deleted by hand.
+      redis.advance(120_001);
+      marked = Boolean(((await original([["HLEN", ERASING_KEY]])) as number[])[0]);
+      restarted = await reactivate(owner).then(() => true, () => false);
+      running = await everything();
+    });
+    const now = await everything();
+    const current = await storeForEmail(owner);
+    is("the lock ran out at that step", reached, true);
+    is("the walk goes on", outcome, "completed");
+    // Codex N1's HIGH on #3156 (7000625742): an earlier fenced step's deletes are never given back, so the store is never
+    // opened again once one of them is made. The erasing mark is the walk's very first fenced change (step 0): before
+    // it, the plan starts and the store keeps everything; from it on, the plan is refused (setSubscription), and the
+    // store is erased to the end by the next walk, its mark going with its record.
+    is("the plan starts again only before the erasing mark", [restarted, marked], [n === 0, n > 0]);
+    if (restarted) {
+      is("the store runs, its record there", [Boolean(current), Boolean(current?.subscriptionActive)], [true, true]);
+      is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => !ours(key) && now.get(key) !== running.get(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);
+      is("and it lost nothing", [...seeded.keys()].filter((key) => !ours(key) && !key.startsWith("nl:plan:closing:") && key !== "nl:plan:ended" && !now.has(key)).map((key) => key.replace(/[0-9a-f]{24,}/g, "…")), []);
+    } else {
+      is("the store does not run", Boolean(current?.subscriptionActive), false);
+      redis.advance(120_001);
+      // A walk later (moveBack puts it WALK_GAP_MS on).
+      const next = await walk(async () => {}, Date.now() + WALK_GAP_MS + 60_000);
+      const left = (await original([["HLEN", ERASING_KEY]])) as number[];
+      is("the next walk erases it to the end, and its mark goes with its record", [next, Boolean(await storeForEmail(owner)), left[0]], ["completed", false, 0]);
+    }
+  }
+  // The record's last step needs no check of its own here any more: on #3643's design the walk closes the record with
+  // lib/store.ts's closeStoreRecord itself, so it closes it exactly as closeStoreRecord does.
+
+  part("What is not fenced yet, and the order of the record's last step (Claude 5's two LOWs on #3156)");
+  {
+    const walkSource = readFileSync("lib/closed-store-data.ts", "utf8");
+    // forgetShipmentMail and forgetOrderConfirmationMail send their own pipelines, outside the store's lock. They delete
+    // nothing today; the day the mail outboxes go live they take the same `apply` as the other deletes.
+    is("the two mail outboxes delete nothing outside the lock: they are never activated", CURRENT_SHIPMENT_MAIL_LIFECYCLE, "never_activated");
+    is("and the walk names them as the exception", [walkSource.includes("await forgetShipmentMail(store.statsId);"), walkSource.includes("await forgetOrderConfirmationMail(store.statsId);"), walkSource.includes("The two mail outboxes (forgetShipmentMail, forgetOrderConfirmationMail) are the exception")], [true, true, true]);
+    // applyIfHeld splits the changes past FENCED_KEYS or FENCED_WORDS; a lock lost between two steps leaves the earlier
+    // ones made. The record is the last change, so it is never deleted while a later step could still be refused.
+    is("closeStoreRecord deletes the record as its very last change", readFileSync("lib/store.ts", "utf8").includes("...[beforeMoveKeyOf(owner), ...extraKeys, owner].map((key) => ({ op: \"DEL\", key, words: [] }))"), true);
+  }
+  done();
+}
+
+void main();

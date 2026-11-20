@@ -78,6 +78,8 @@ export async function POST(request: NextRequest) {
     step,
     answer,
     consent: answer === "yes" ? consent : null,
+    // The IP country the EU VAT gate reads with the order's billing country (lib/upsell.ts, offerGate).
+    headers: request.headers,
   });
   if (result.kind === "confirm") {
     return new Response(null, { status: 303, headers: { Location: result.url, "Cache-Control": "no-store" } });

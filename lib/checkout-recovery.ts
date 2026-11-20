@@ -42,7 +42,7 @@ import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { takeDataBytes } from "@/lib/store-data";
 import { saleHandles } from "@/lib/store";
 import { activeIntro } from "@/lib/intro-price";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -58,13 +58,15 @@ import { activePwyw } from "@/lib/pay-what-you-want";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import { readListing, readListings } from "@/lib/catalog";
-import { BUMP_KEYS } from "@/lib/bundle-rules";
+import { BUMP_KEYS, picks } from "@/lib/bundle-rules";
 import { cartable, readCartIds } from "@/lib/cart-rules";
 import { cartWords } from "@/lib/buyer-words/cart";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { cartAskIds } from "@/lib/checkout-ask-cart";
 import type { Listing } from "@/lib/store";
-import { membershipLine, speech } from "@/lib/buyer-words";
+import { membershipLine, planLine, speech } from "@/lib/buyer-words";
+import { activePlan } from "@/lib/product-extras";
+import { isComingSoon } from "@/lib/preorders";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { isTimeZone, readableTime, zoneName } from "@/lib/call-setup";
@@ -72,6 +74,7 @@ import { chargeNow } from "@/lib/call-deposit";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
+import { deriveKey } from "@/lib/secret-box";
 import { suppressedCommand } from "@/lib/suppression";
 import { assistRemindKey } from "@/lib/assistant-reminder-rules";
 
@@ -156,7 +159,57 @@ async function stopLink(store: Store, email: string): Promise<{ token: string; p
   };
 }
 
-type StopGrant = { k: string; e: string; n?: unknown; h?: unknown };
+type StopGrant = { k: string; e: string; n?: unknown; h?: unknown; w?: unknown };
+
+/**
+ * The stop link of an email to a member moved from another platform
+ * (lib/imports.ts, lib/move-members.ts): the same door, page and one-click
+ * address as a checkout reminder's, and the same mark, so pressing it stops
+ * every reminder from that store to that address, the move's among them.
+ *
+ * One link a store and address (review of #3476, MEDIUM 1), the same in the
+ * first email, its reminder and every pass that tries a send again: its
+ * token is signed with a key of our own, so nobody can make the link of an
+ * address, and writing it again only renews it. So a sender that answers
+ * "try again later" for a day leaves one link, not one a pass, and a link
+ * an email already carries is never taken back by a later pass. Its erasure
+ * note is written first and confirmed before the link: a link is never kept
+ * that erasure cannot find, and a note whose link was never written only
+ * names a key that is not there. Throws when either is not confirmed
+ * written, or when there is no key to sign with: nothing is sent then.
+ */
+export async function moveStopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
+  const key = deriveKey("move-stop");
+  if (!key || !store.statsId) throw new Error("no key to sign a moved member's stop link with");
+  const token = createHmac("sha256", key).update(`${store.statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40);
+  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name, w: "move" };
+  const notes = noteForErasure(store.statsId, email, linkKey(token));
+  const noted = repliesFor(await redisPipeline(notes), notes.length);
+  if (!noted || noted.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a moved member's stop link");
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a moved member's stop link");
+  return {
+    page: `${SITE_URL}/unsubscribe?r=${token}`,
+    oneClick: `${SITE_URL}/api/mail/unsubscribe?r=${token}`,
+  };
+}
+
+/**
+ * Which of these addresses pressed stop on this store's reminders: one
+ * EXISTS each, read exactly (markThere), so an unknown answer throws and is
+ * never "did not press stop". A store with no stats id has no marks.
+ */
+export async function remindersStoppedAmong(store: Pick<Store, "statsId">, emails: string[]): Promise<Set<string>> {
+  const stopped = new Set<string>();
+  if (!store.statsId || !emails.length) return stopped;
+  const statsId = store.statsId;
+  const marks = repliesFor(await redisPipeline(emails.map((email) => ["EXISTS", offKey(statsId, email)])), emails.length);
+  if (!marks) throw new UnknownReplyError("the reminders' stop marks");
+  marks.forEach((mark, i) => {
+    if (markThere(mark, "a reminder's stop mark")) stopped.add(emails[i]);
+  });
+  return stopped;
+}
 
 /**
  * A stop link's grant, read from its GET reply only in its exact shape
@@ -173,8 +226,8 @@ function stopGrantOf(replies: unknown): StopGrant | null {
   try {
     const grant = JSON.parse(raw) as unknown;
     if (!grant || typeof grant !== "object") return null;
-    const { k, e, n, h } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown };
-    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h } : null;
+    const { k, e, n, h, w } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown; w?: unknown };
+    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h, w } : null;
   } catch {
     return null;
   }
@@ -183,7 +236,7 @@ function stopGrantOf(replies: unknown): StopGrant | null {
 /** Who a stop link belongs to, without acting on it. */
 export async function readStopToken(
   token: string,
-): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
+): Promise<{ email: string; storeName: string; stopped: boolean; handle: string; move?: true } | null> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return null;
   const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
   if (!grant) return null;
@@ -193,7 +246,8 @@ export async function readStopToken(
   if (count !== 0 && count !== 1) throw new UnknownReplyError("a reminder's stop mark");
   // The store's handle, so the page can speak the store's language.
   const handle = typeof grant.h === "string" ? grant.h : "";
-  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle };
+  // A link from a moved member's email: the page names those emails (lib/buyer-words/move.ts).
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle, ...(grant.w === "move" ? { move: true as const } : {}) };
 }
 
 /**
@@ -205,9 +259,21 @@ export async function stopReminders(token: string): Promise<boolean> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return false;
   const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
   if (!grant) return false;
-  const set = repliesFor(await redisPipeline([["SET", offKey(grant.k, grant.e), new Date().toISOString()]]), 1);
-  if (!set || set[0] !== "OK") throw new UnknownReplyError("a reminder's stop mark");
+  await stopRemindersFor(grant.k, grant.e);
   return true;
+}
+
+/**
+ * The same stop, for an address whose email from that store (its stats id) bounced for good or was marked as spam:
+ * a moved member's first email or reminder (lib/imports.ts, tagged with lib/mail-health.ts moveTags), told by the
+ * sender (heardFromSender; review of #3476, MEDIUM 2). Such an email carries no list to be taken off, so its no is
+ * kept here, where the move's reminder reads it (remindersStoppedAmong), as a press of its stop link would. The mark's
+ * room was taken with the member's invitation (RECOVER_TRACE_BYTES, lib/move-members.ts). Throws unless Redis
+ * answered the write "OK" (CX-123 rule 24), so the sender's notice is not taken as heard.
+ */
+export async function stopRemindersFor(statsId: string, email: string): Promise<void> {
+  const set = repliesFor(await redisPipeline([["SET", offKey(statsId, email), new Date().toISOString()]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a reminder's stop mark");
 }
 
 /** Whether the address paid this store for any of these products after the checkout opened. */
@@ -366,7 +432,7 @@ export async function remindAbandoned(
   if (!product || product.call || !canSellProduct(store, product)) return "skip";
   if (!(await someLeftOrUnlimited(store, product))) return "skip";
 
-  return deliver(store, { kind: "product", product }, email, {
+  return deliver(store, { kind: "product", product, preorder: meta.preorder === "yes" }, email, {
     claim: id,
     since: created,
     why: givingWords(store.language).recoverWhyCheckout(store.name),
@@ -450,7 +516,7 @@ export async function remindAssisted(
   const product = meta.product ? await readListing(store, meta.product) : null;
   if (!product || product.call || meta.kind === "call" || !canSellProduct(store, product)) return "skip";
   if (!(await someLeftOrUnlimited(store, product))) return "skip";
-  return deliver(store, { kind: "product", product }, input.email, how);
+  return deliver(store, { kind: "product", product, preorder: meta.preorder === "yes" }, input.email, how);
 }
 
 /**
@@ -461,7 +527,7 @@ export async function remindAssisted(
  */
 async function deliver(
   store: Store,
-  about: { kind: "product"; product: Listing } | { kind: "cart"; items: Listing[] } | { kind: "call"; product: Listing; start: number; tz: string; minutes?: number },
+  about: { kind: "product"; product: Listing; preorder?: boolean } | { kind: "cart"; items: Listing[] } | { kind: "call"; product: Listing; start: number; tz: string; minutes?: number },
   email: string,
   how: {
     claim: string;
@@ -632,6 +698,13 @@ async function deliver(
       : product.recurring
         ? from(membershipLine(store, product.recurring, price, activeIntro(product, store.tiers)))
         : from(price);
+    // The plan the product page offers today, with the checkout's own condition (lib/product-extras.ts activePlan: one-off
+    // products only, covering every price): never for a pre-order, whose checkout takes no plan (lib/store-checkout.ts),
+    // nor for a product coming soon, whose page has a waitlist or a pre-order where the plan would be (lib/preorders.ts).
+    // Coming soon is one exact read, only for a product with a plan; unknown is "coming soon": no plan line on a guess.
+    // A bundle the buyer picks from is bought on PickBundleForm, which offers no plan (Claude 3, Claude 7, Codex N4).
+    const offered = about.preorder || picks(product) !== null ? null : activePlan(product);
+    const plan = offered && !(await isComingSoon(store, product.id).catch(() => true)) ? offered : null;
     subject = how.subject ?? g.recoverSubject(product.title);
     text = [
       how.lead ?? g.recoverLead(product.title, name),
@@ -641,6 +714,9 @@ async function deliver(
       productLink(store, product.id),
       "",
       g.recoverPrice(priceWords),
+      // A payment plan the product already offers on that page (630 [HN6](15)): said as the page says it, at today's
+      // amounts; never one it does not offer (a membership, a price the buyer chooses, a plan paused or short).
+      ...(plan ? [g.recoverPlan(planLine(store, plan))] : []),
       "",
       ...foot,
     ].join("\n");
@@ -708,8 +784,11 @@ export async function forgetRecoveryPerson(statsId: string | null, productIds: s
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
   // The count only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F5):
   // anything else is unknown, and the erasure says this step could not finish, never "nothing here".
-  const gone = repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1);
+  // A count above the distinct keys sent does not match the DEL that ran (#4797): unknown too. DEL removes at most one
+  // per distinct key, so a product named twice still allows only one (as lib/discord-access.ts).
+  const keys = productIds.map((p) => onceKey(statsId, email, p));
+  const gone = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
   const count = gone ? countOf(gone[0]) : null;
-  if (count === null) throw new UnknownReplyError("the deletion of an address's reminder marks");
+  if (count === null || count > new Set(keys).size) throw new UnknownReplyError("the deletion of an address's reminder marks");
   return count;
 }

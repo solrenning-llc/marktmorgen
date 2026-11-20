@@ -95,7 +95,7 @@ function paidCheckout(id: string, product: string, fingerprint: string, via = ""
     customer: "cus_TestBuyer01",
     currency: "usd",
     metadata: { store: "r24money", product, upsell_key: fingerprint, ...(via ? { via } : {}) },
-    customer_details: { email: "buyer@example.com" },
+    customer_details: { email: "buyer@example.com", address: { country: "US" } },
     payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
   };
 }
@@ -135,7 +135,7 @@ test("an offer with an affiliate nobody approved is charged, without a share (co
   const session = nextSession();
   sessions[session] = paidCheckout(session, front, browser.fingerprint, AFFILIATE);
   const before = charges.length;
-  const result = await takeUpsell({ store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT });
+  const result = await takeUpsell({ headers: new Headers(), store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT });
   assert.equal(result.kind, "done");
   assert.equal(charges.length, before + 1);
   assert.equal(charges.at(-1)?.get("metadata[via]"), null);
@@ -156,7 +156,7 @@ for (const [label, reply] of [
     sessions[session] = paidCheckout(session, front, browser.fingerprint, AFFILIATE);
     const before = charges.length;
     await withReply(isAffiliateRead, reply, async () => {
-      const outcome = await takeUpsell({ store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT }).then(
+      const outcome = await takeUpsell({ headers: new Headers(), store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT }).then(
         (result) => result.kind,
         () => "rejected",
       );
@@ -173,7 +173,7 @@ test("an offer's once-only claim already held (null) charges nothing and says do
   const session = nextSession();
   sessions[session] = paidCheckout(session, front, browser.fingerprint);
   const before = charges.length;
-  const result = await withReply(isClaim(session), null, () => takeUpsell({ store: plain, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT }));
+  const result = await withReply(isClaim(session), null, () => takeUpsell({ headers: new Headers(), store: plain, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT }));
   assert.equal(result.kind, "done");
   assert.equal(charges.length, before);
 });

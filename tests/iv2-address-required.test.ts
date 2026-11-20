@@ -135,7 +135,11 @@ async function main(): Promise<void> {
   }
   is("the card update stays a setup with no address", /mode: "setup"/.test(readFileSync(join(ROOT, "lib/card-update.ts"), "utf8")), true);
   const privacy = readFileSync(join(ROOT, "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
-  is("the privacy policy says every paid checkout asks the billing address", privacy.includes("asks for your billing address on every paid checkout"), true);
+  // Claude 3's and Claude 5's LOW on #4938 (VR item 2): the policy says only what the code does today. A package of calls
+  // (lib/call-packages.ts, held by Codex W in #2617) and PayPal do not ask yet, and the policy says so.
+  is("RED: the policy no longer says every paid checkout without its exceptions", privacy.includes("asks for your billing address on every paid checkout,"), false);
+  is("RED: it names the two that do not ask yet", [privacy.includes("except, for now, when you buy a package of calls"), privacy.includes("PayPal asks for what it needs on its own page")], [true, true]);
+  is("RED: both places say the same (the payment paragraph points to #billing-address)", privacy.includes('href="#billing-address"'), true);
   is("and that it is never used for marketing", privacy.includes("never used for marketing"), true);
   // Claude 2's review of #4938: the creator's plan and the store assistant are paid to Marktmorgen, so their address
   // sits on Marktmorgen's own Stripe account, not on a creator's.

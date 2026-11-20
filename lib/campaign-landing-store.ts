@@ -26,7 +26,7 @@ import { MAX_CTA_LABEL, MAX_HEADLINE, MAX_SUBHEADLINE } from "@/lib/sales-page";
 import { type DataStore, DataRoomError, TAKE_DATA, dataKey, monthOf } from "@/lib/store-data";
 import { contentRoomFor, dataBytes, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 import { largerPlanFor } from "@/lib/larger-plan";
-import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, ensureStoreId, erasingField, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
 type LandingStore = DataStore & Partial<Pick<Store, "email" | "extra">>;
 
@@ -180,7 +180,7 @@ end`;
 /**
  * Writes a product's landings (ARGV[6], "" to delete them) only over the record that was read (ARGV[5], "" for none),
  * and sets its slot to their size in the same step: answers {4, 0} when they were dropped with their page (KEYS[3]
- * held), or the store is gone/erasing (KEYS[4]/KEYS[5], ARGV[7]), {3, 0} when the record changed since it was read,
+ * held), or the store is gone or erasing (KEYS[4] its own id key, KEYS[5]/ARGV[7] its erasing mark), {3, 0} when the record changed since it was read,
  * the data room's own answer otherwise ({1, total} written,
  * {0, total} full and nothing written). Modelled by lib/redis-memory.ts.
  */
@@ -251,11 +251,21 @@ async function changeLandings(statsId: string, productId: string, room: LandingS
   if (!LANDING_ID.test(productId)) throw new LandingIdInvalid();
   const key = dataKey(room);
   if (!key || !isRedisConfigured()) throw new LandingsUnreadable();
-  // A bare room is not proof of a live store. Production passes the authenticated store; legacy stores use their
-  // own record, as setWhileStoreLive does. This read-free choice must be checked atomically with TAKE_DATA + SET.
+  // A bare room is not proof of a live store. Production passes the authenticated store, and the write is fenced on
+  // the store's own id key, checked atomically with TAKE_DATA + SET (WRITE_LANDINGS). A store from before ids is given
+  // its id first (ensureStoreId, once and for good), and only while the store kept under its owner's address is this
+  // very store (the same statsId): its owner's record is not its own key, since the owner's next store is kept under
+  // it once this one is erased (Claude 3 on #4967).
   if (typeof room.email !== "string" || !room.email || typeof room.sid !== "string") throw new LandingsUnreadable();
-  const ref = storeRef({ email: room.email, sid: room.sid, extra: room.extra === true });
-  const live = STORE_ID_PATTERN.test(room.sid) ? storeIdCommand(room.sid)[1] : await ownerKey(ref);
+  let sid = room.sid;
+  if (!STORE_ID_PATTERN.test(sid)) {
+    if (room.extra === true) throw new LandingsUnreadable();
+    const named = await ensureStoreId(room.email);
+    if (!named || named.extra || named.statsId !== room.statsId || !STORE_ID_PATTERN.test(named.sid)) throw new LandingsGone();
+    sid = named.sid;
+  }
+  const ref = storeRef({ email: room.email, sid, extra: room.extra === true });
+  const live = storeIdCommand(sid)[1];
   const field = await erasingField(ref);
   for (let tries = 0; tries < WRITE_TRIES; tries += 1) {
     const { raw, landings } = await readRecord(statsId, productId);

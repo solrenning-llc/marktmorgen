@@ -55,7 +55,7 @@ async function seed(owner: string, name: string): Promise<Store> {
   await claimHandle(owner, name, "Harbor Kitchen", "");
   await ensureStoreId(owner);
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_1TestAlertErase01", true);
+  await setStripeAccount(owner, "acct_alertErase01", true);
   await setSubscription(owner, { customerId: `cus_${name}`, subscriptionId: `sub_${name}`, active: true, period: paidPeriod() });
   let store = (await storeForEmail(owner))!;
   await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);

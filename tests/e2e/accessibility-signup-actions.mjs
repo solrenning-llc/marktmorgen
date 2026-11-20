@@ -130,10 +130,22 @@ try{
    await page.addScriptTag({content:axe});
     const result=await page.evaluate(async()=>{
      const searchGate=()=>{const box=document.querySelector('[role="search"][aria-label="Studio"]');return box?(box.hasAttribute("inert")?"closed":"open"):"none";};
-     const searchGateAtStart=searchGate(),root=document.documentElement,result=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});
+     // Diagnostics for an intermittent field-name finding on the studio search (1 audit in 30 on WebKit): what its
+     // label looked like at the start and the end of the scan, whether it is still the same node, and every change the
+     // box went through while axe ran. Logged only with a violation, so a passing audit's line stays as it was.
+     const searchLabel=()=>document.querySelector('[role="search"][aria-label="Studio"] label');
+     const labelState=label=>{if(!label)return null;const chain=[];for(let node=label;node&&node!==document.body&&chain.length<8;node=node.parentElement){const css=getComputedStyle(node);chain.push({tag:node.tagName.toLowerCase(),cls:String(node.className||"").slice(0,80),visibility:css.visibility,display:css.display,opacity:css.opacity,contentVisibility:css.contentVisibility??null,inert:node.inert===true});}
+      const field=document.getElementById(label.htmlFor);return {connected:label.isConnected,text:label.textContent.trim(),fieldFound:!!field,fieldLabels:field?.labels?.length??null,chain};};
+     const labelAtStart=searchLabel(),stateAtStart=labelState(labelAtStart),changes=[],box=document.querySelector('[role="search"][aria-label="Studio"]');
+     const watch=box?new MutationObserver(list=>{for(const m of list){if(changes.length<20)changes.push({type:m.type,target:m.target.nodeName.toLowerCase(),attribute:m.attributeName,added:m.addedNodes.length,removed:m.removedNodes.length,at:Math.round(performance.now())});}}):null;
+     watch?.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});
+     const searchGateAtStart=searchGate(),root=document.documentElement,started=Math.round(performance.now()),result=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});
+     const ended=Math.round(performance.now());watch?.disconnect();
+     const labelAtEnd=searchLabel();
+     const searchDiagnostics=result.violations.length?{started,ended,sameLabelNode:labelAtStart===labelAtEnd,atStart:stateAtStart,atEnd:labelState(labelAtEnd),startNodeAtEnd:labelAtStart&&labelAtStart!==labelAtEnd?labelState(labelAtStart):null,changes}:undefined;
      return {scroll:root.scrollWidth,client:root.clientWidth,searchGateAtStart,searchGateAtEnd:searchGate(),rules:result.passes.map(r=>r.id),
       violations:result.violations.map(r=>({id:r.id,targets:r.nodes.map(n=>n.target)})),
-      incomplete:result.incomplete.map(r=>({id:r.id,targets:r.nodes.map(n=>n.target)}))};
+      incomplete:result.incomplete.map(r=>({id:r.id,targets:r.nodes.map(n=>n.target)})),...(searchDiagnostics?{searchDiagnostics}:{})};
     });
     audits++;console.log("SIGNUP_MATRIX_AUDIT:"+JSON.stringify({engine,width,mode,state,...result}));
     if(result.scroll>result.client||result.violations.length)throw Error("Accessibility/overflow failure at "+state);

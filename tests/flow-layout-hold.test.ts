@@ -14,7 +14,7 @@
  * starts after the change is not held. Synthetic store and email stand-in.
  */
 import { personOf, readRun } from "@/lib/flow-runs";
-import { enroll, readFlows, resolveHeldRun, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
+import { enroll, forgetWorkflowPerson, readFlows, resolveHeldRun, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -98,6 +98,31 @@ async function main(): Promise<void> {
   const heldMoved = await readRun(moved, personOf("reordered@example.com"));
   is("A is never sent again (it is in position 2 now)", subjects("reordered@example.com"), ["Step A"]);
   is("the run is held", heldMoved?.run.status, "held");
+
+  part("An erasure completes after the sender reads a changed layout's lease");
+  const erasedEmail = "layout-erasure@example.test";
+  const erasing = await waitingForB("Erasing", "erasing", erasedEmail);
+  shift += HOUR;
+  await save(erasing, "Erasing", "erasing", [B, A, C]);
+  shift += 25 * HOUR;
+  const pipeline = redis.pipeline.bind(redis);
+  let erasedDuringRead = false;
+  redis.pipeline = async (commands) => {
+    const replies = await pipeline(commands);
+    if (!erasedDuringRead && commands.some(([verb, key, member]) => verb === "ZSCORE" && key === "nl:mail:flowq:lease" && String(member).endsWith(`|${erasedEmail}`))) {
+      erasedDuringRead = true;
+      await forgetWorkflowPerson(store, erasedEmail);
+    }
+    return replies;
+  };
+  try {
+    await run();
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the erasure ran after the lease read", erasedDuringRead, true);
+  is("no second message goes out", subjects(erasedEmail), ["Step A"]);
+  is("the stale sender cannot restore the erased run or history", await readRun(erasing, personOf(erasedEmail)), null);
 
   part("Somebody who starts after the change is not held");
   await upsertContact(list, "later@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);

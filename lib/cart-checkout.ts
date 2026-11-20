@@ -19,6 +19,7 @@
  * was taken off, as on any other checkout here.
  */
 import { itemsHandedOver } from "@/lib/store-data-rules";
+import { askBillingAddress } from "@/lib/billing-address";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
@@ -239,6 +240,8 @@ export async function createCartCheckout(
 
   applyTax(store, body);
   applyTaxDocuments(store, body, false);
+  // A cart is paid: the buyer's full billing address (790 [IV2]).
+  askBillingAddress(body);
   onlyInstantMethods(body);
   inTheCurrencyShown(body);
   // A store with reminders on (lib/checkout-recovery.ts): Stripe asks for

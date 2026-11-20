@@ -38,13 +38,16 @@ test('the unit tax is IRPF 15% plus IOF 0.38% on the profit, with no 27.5% floor
  for(const [price,usage] of [[6900,595],[44900,2754],[99900,5791],[690000,6789]]){
   const u=unitUnder(price,usage),r=receivingOf(price);
   assert.equal(u.pretaxCents,r.revenueCents-r.totalCents-usage);
-  assert.equal(u.taxCents,Math.ceil(u.pretaxCents*1538/10000));
+  // IRPF and IOF each rounded up on its own, as lib/receiving-costs.ts rounds them (Claude 2's LEVE on #4916).
+  assert.equal(u.taxCents,Math.ceil(u.pretaxCents*1500/10000)+Math.ceil(u.pretaxCents*38/10000));
   assert.ok(u.taxCents<Math.ceil(u.pretaxCents*2750/10000),'below the old 27.5% floor');
  }
  assert.equal(unitUnder(6900,100_000).taxCents,0);assert.equal(unitUnder(6900,100_000).meetsFloor,false);
  for(const price of [3600,6900,69000]){
   const room=unitUnder(price,0).usageRoomCents;
   assert.equal(unitUnder(price,room).meetsFloor,true);assert.equal(unitUnder(price,room+1).meetsFloor,false);
+  // The smallest pretax profit that keeps a net cent: 3 (1 IRPF cent and 1 IOF cent), not 2 as one 15.38% rounding gave.
+  assert.equal(unitUnder(price,room).pretaxCents,3);assert.equal(unitUnder(price,room).taxCents,2);assert.equal(unitUnder(price,room).netCents,1);
  }
 });
 test('the unchanged dearest receiving fee and every reserve use the whole amount charged',()=>{

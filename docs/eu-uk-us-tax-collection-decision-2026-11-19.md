@@ -116,3 +116,20 @@ Ainda sem resposta oficial; perguntar à Stripe é decisão do dono, e nenhum ag
 **Pergunta enviada.** O dono mandou as quatro perguntas acima à Stripe Support em 19/11/2026, às 22h03 (Fortaleza), no fio "Re: Connect platform eligibility for international accounts". A tela que ele mostrou ao Claude 4 confirma o envio. A resposta está pendente; quando chegar, é gravada aqui ponto por ponto, com data e prova, e nada vira confirmação antes disso.
 
 **Relação com o que já existe.** [docs/opening-readiness/stripe-platform.md](opening-readiness/stripe-platform.md) já tem a mesma pendência como "Prova extra" da trava 3 (taxa de aplicação em cobranças diretas no Canadá, no Reino Unido e em cada país europeu), com a leitura de 13/11 e de 15/11/2026. Lá também está a frase de [Platform pricing tools](https://docs.stripe.com/connect/platform-pricing-tools): "Your platform is permitted to charge app fees in the connected account's country", sem lista de países. Esta conferência não refaz aquela; só a liga à decisão do dono. A resposta da Stripe, quando chegar, fecha os dois registros juntos.
+
+## Complemento: endereço de cobrança em toda compra paga (20/11/2026, item 790 [IV2])
+
+Solicitação do dono (20/11/2026, por volta da 00h20, horário de Fortaleza), na sessão do Claude 4. O dono respondeu à pergunta do Claude 4 sobre pedir o endereço de cobrança, motivada por dois pontos da conferência do item 789:
+- a oferta de um clique fica escondida quando a Stripe não guarda o endereço;
+- a lei europeia pede duas provas de localização.
+
+Texto do dono (literal):
+
+> Pedir sempre: em toda compra paga, o checkout obriga a Stripe a pedir e guardar o endereço de cobrança completo do comprador (billing_address_collection = required), em todos os países, com o preenchimento automático da própria Stripe para dar menos trabalho. Compras gratuitas continuam sem pedir endereço. Uso do endereço: (1) prova de localização do comprador para o IVA da UE e do Reino Unido, junto com o país do cartão, como as duas provas que não se contradizem (arts. 24b e 24f do Regulamento de Execução 282/2011); se as duas provas se contradisserem, vale a regra que já existe no código, sem cobrar imposto errado; (2) local do comprador para o sales tax dos estados americanos; (3) liberar a oferta de um clique depois do pagamento para todos os compradores. Privacidade: pede só o endereço de cobrança, sem telefone nem dado a mais; nunca é usado para marketing; a política de privacidade diz para que serve e por quanto tempo fica guardado (10 anos nas vendas da UE, pelo art. 63c, e nas demais o prazo que a lei exigir); as regras de apagar dados continuam valendo onde a lei permite. Os registros fiscais ficam com a Solrenning LLC. Isto não muda nenhum preço, limite, comissão, trava ou flag.
+
+**Como fica a aplicação:**
+- **O país do cartão** passa a ser uma das duas provas, por decisão do dono. Isso responde à pergunta deixada ao coordenador no #4921, que é usar ou não o país do cartão como terceira prova.
+- **A recusa antes do pagamento** (`consumerGate`) continua com as provas que existem antes de cobrar: o país da conexão e o país de cobrança escolhido. O endereço e o cartão chegam depois do pagamento.
+- **Depois do pagamento** (oferta de um clique e registros do art. 63c), a prova passa a ser o endereço e o país do cartão. Uma contradição entre eles cai na regra que já existe: recusa, sem imposto errado.
+
+Pedidos repetidos: o Claude 4 conferiu o main (`f9a4ca9c8a`) e os PRs abertos por `billing_address_collection`, pela data e pela etiqueta [IV2] (livre). Não há registro equivalente.

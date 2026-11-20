@@ -59,14 +59,35 @@ export type DraftUsage = {
   planUsageCents: Record<string, number>;
 };
 
+/** Unknown usage must fail before JSON can turn Infinity/NaN into null, and again at the bundle boundary. */
+function requireKnownUsage(usage: DraftUsage): DraftUsage {
+  const known = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  const fail = (part: string): never => { throw new Error(`Unknown commercial margin usage: ${part}`); };
+  if (!usage || !known(usage.perEmailUsd)) fail("email price");
+  if (!Array.isArray(usage.lines) || usage.lines.length !== COST_LINES.length) fail("cost lines");
+  const ids = new Set<string>();
+  for (const line of usage.lines) {
+    if (!line || typeof line.id !== "string" || ids.has(line.id) || !COST_LINES.some((expected) => expected.id === line.id)) fail("cost line identity");
+    ids.add(line.id);
+    for (const tier of TIERS) if (!known(line.usd?.[tier])) fail(`${line.id}/${tier}`);
+  }
+  for (const tier of TIERS) {
+    if (!known(usage.perPaymentUsd?.[tier])) fail(`per payment/${tier}`);
+    for (const cycle of ["month", "year"] as const) {
+      if (!known(usage.planUsageCents?.[`${tier}-${cycle}-list`])) fail(`plan/${tier}/${cycle}`);
+    }
+  }
+  return usage;
+}
+
 export function commercialMarginUsage(): DraftUsage {
   const byTier = (f: (tier: Tier) => number) => Object.fromEntries(TIERS.map((tier) => [tier, f(tier)])) as Record<Tier, number>;
-  return {
+  return requireKnownUsage({
     perEmailUsd: PER_EMAIL,
     lines: COST_LINES.map((line) => ({ id: line.id, usd: byTier((tier) => line.monthlyUsd(tier)) })),
     perPaymentUsd: byTier(perPaymentCost),
     planUsageCents: Object.fromEntries(planUnits(false).map((unit) => [unit.id, unit.usageCents])),
-  };
+  });
 }
 
 const ceilBps = (cents: number, bps: number) => Math.ceil((Math.max(0, cents) * bps) / 10_000);
@@ -173,8 +194,9 @@ export type DraftOptions = { lcUsage?: DraftUsage | null; commit?: string; date?
 
 export function renderCommercialMarginDraft(options: DraftOptions = {}): string {
   const code = commercialMarginUsage();
-  const sesApplied = !!options.lcUsage && options.lcUsage.perEmailUsd === SES_PER_EMAIL_USD;
-  const lc = sesApplied ? options.lcUsage! : code;
+  const supplied = options.lcUsage == null ? null : requireKnownUsage(options.lcUsage);
+  const sesApplied = supplied !== null && supplied.perEmailUsd === SES_PER_EMAIL_USD;
+  const lc = sesApplied ? supplied! : code;
   const { rows, captionNote } = allRows(lc, code);
   const out: string[] = [];
   const push = (...lines: string[]) => out.push(...lines);

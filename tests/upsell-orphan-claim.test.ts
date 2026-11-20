@@ -116,7 +116,7 @@ function paidCheckout(id: string, product: string, fingerprint: string): Record<
     customer: "cus_TestBuyer07",
     currency: "usd",
     metadata: { store: HANDLE, product, upsell_key: fingerprint },
-    customer_details: { email: "orphanbuyer@example.com" },
+    customer_details: { email: "orphanbuyer@example.com", address: { country: "US" } },
     payment_intent: { id: "pi_test_front00007", payment_method: { id: "pm_test_card0007", type: "card", customer: "cus_TestBuyer07" } },
   };
 }

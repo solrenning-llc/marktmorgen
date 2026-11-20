@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AI_REQUEST_LIMITS, ANSWER_MODEL, WRITING_MODEL } from '@/lib/ai-request-rules';
 import { AI_ENTITLEMENT_RULES, AI_SLOT_MICRO_USD, aiEntitlementsFunded, requiredAiRightsMicroUsd } from '@/lib/ai-entitlement-rules';
@@ -80,7 +80,8 @@ test('a run reads at most the PDFs it took the jobs for; an uncounted call reads
 });
 
 test('a document request outside a run that paid for it, or on the writing model, never reaches the provider', async () => {
-  const store = { statsId: 'rights_test', tier: 'creator', trialEnds: 0 } as unknown as Store;
+  const statsId = 'rights_test';
+  const store = { statsId, tier: 'creator', trialEnds: 0 } as unknown as Store;
   const pdf = [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AAAA' } }, { type: 'text', text: 'Read this' }];
   const oldFetch = globalThis.fetch, key = process.env.ANTHROPIC_API_KEY;
   let calls = 0;
@@ -88,10 +89,10 @@ test('a document request outside a run that paid for it, or on the writing model
   globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] })); }) as typeof fetch;
   try {
     assert.equal(await askModel(store, 'facts', pdf, 20, ANSWER_MODEL), null);
-    assert.equal(await withAiCallBudget(store.statsId, 20, () => askModel(store, 'facts', pdf, 20, WRITING_MODEL), undefined, 1), null);
+    assert.equal(await withAiCallBudget(statsId, 20, () => askModel(store, 'facts', pdf, 20, WRITING_MODEL), undefined, 1), null);
     assert.equal(calls, 0);
     // The same PDF inside a run that took its jobs, on the answer model, is read; text needs no PDF allowance.
-    assert.equal(await withAiCallBudget(store.statsId, 20, () => askModel(store, 'facts', pdf, 20, ANSWER_MODEL), undefined, 1), 'ok');
+    assert.equal(await withAiCallBudget(statsId, 20, () => askModel(store, 'facts', pdf, 20, ANSWER_MODEL), undefined, 1), 'ok');
     assert.equal(await askModel(store, 'facts', 'hello', 20, ANSWER_MODEL), 'ok');
     assert.equal(calls, 2);
   } finally {
@@ -106,7 +107,6 @@ function functionsOf(source: string): { name: string; body: string }[] {
   return starts.map((start, i) => ({ name: start.name, body: source.slice(start.at, starts[i + 1]?.at ?? source.length) }));
 }
 function sourcesUnder(dir: string): string[] {
-  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs');
   return readdirSync(join(process.cwd(), dir)).flatMap(name => {
     const path = join(dir, name);
     return statSync(join(process.cwd(), path)).isDirectory() ? sourcesUnder(path) : /\.tsx?$/.test(name) ? [path] : [];
@@ -157,7 +157,8 @@ test('a policy cannot name a price per kind of call below the cost table, and on
   assert.ok(policy && isAiSpendPolicyValid(policy));
   assert.deepEqual(policy.slotMicroUsd, AI_SLOT_MICRO_USD);
   for (const kind of ['writing', 'answer', 'document'] as const) assert.equal(isAiSpendPolicyValid({ ...policy, slotMicroUsd: { ...AI_SLOT_MICRO_USD, [kind]: AI_SLOT_MICRO_USD[kind] - 1 } }), false, kind);
-  const { slotMicroUsd: _named, ...unnamed } = policy;
+  const unnamed = { ...policy };
+  delete unnamed.slotMicroUsd;
   // Every call at the largest request (a whole-context document on Sonnet) is far above these ceilings: unfunded.
   assert.equal(aiEntitlementsFunded(unnamed), false);
 });

@@ -17,20 +17,21 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
  * The optimization: a mixed-integer program (scripts/pricing-optimization-milp.py,
  * scipy.optimize.milp with HiGHS) chooses each plan's monthly price on a $X9
  * grid and the share of each #553 per-use figure, under constant-elasticity
- * demand scenarios. Its input is written by this file
- * (milpInput, docs/pricing-optimization-milp-input-2026-10-18.json), and
- * every solution it returns (docs/pricing-optimization-milp-output-2026-10-18.json)
- * is checked here against the repository's own margin code and against an
- * exhaustive search over the same grid.
+ * demand scenarios. Its input is computed by this file (milpInput), and
+ * every solution it returns (milpOutput, run on demand) is checked here
+ * against the repository's own margin code and against an exhaustive search
+ * over the same grid.
  *
- *   node scripts/pricing-optimization.mjs
+ *   node scripts/pricing-optimization.mjs [--milp-input | --milp-output]
  *
- * writes the input, runs the solver and writes docs/pricing-optimization-2026-10-18.md;
- * tests/pricing-optimization.test.ts fails when any of the three files is
- * stale or a solution stops keeping 60%.
+ * prints the report, the solver's input or its solutions. Since the owner's
+ * decision of 20/11/2026 none of the three is stored: their paths hold only a
+ * fixed text (tests/generated-on-demand.ts), and
+ * tests/pricing-optimization.test.ts fails when a solution stops keeping 60%.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { PLAN_PRICES, PLAN_TITLES, TIERS, monthlyEmails, type Cycle, type Tier } from "@/lib/plan";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
@@ -352,7 +353,17 @@ export function linearityGap(): number {
 
 export type MilpSolution = { scenario: string; alternative: Alternative; status: string; objective: number; plans: Record<Tier, { monthCents: number; shares: Shares }> };
 export type MilpOutput = { solver: string; solutions: MilpSolution[] };
-export const milpOutput = (): MilpOutput => readJson<MilpOutput>(OUTPUT_FILE);
+let solved: MilpOutput | null = null;
+/** The solver's solutions for today's milpInput(), computed on demand (owner, 20/11/2026): OUTPUT_FILE holds only a
+ * fixed text. The interpreter is MILP_PYTHON when set (the test job's own environment with the pinned packages of
+ * scripts/requirements-solver.txt), python3 otherwise; a missing solver fails here, by name, and never reads a copy. */
+export function milpOutput(): MilpOutput {
+  if (solved) return solved;
+  const python = process.env.MILP_PYTHON || "python3";
+  const run = spawnSync(python, [join(root(), "scripts/pricing-optimization-milp.py")], { cwd: root(), input: JSON.stringify(milpInput()), encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (run.status !== 0) throw new Error(`the solver did not run (${python} scripts/pricing-optimization-milp.py needs numpy and scipy: pip install -r scripts/requirements-solver.txt): ${run.error?.message ?? run.stderr}`);
+  return (solved = JSON.parse(run.stdout) as MilpOutput);
+}
 
 let exhaustiveInput: MilpInput | null = null;
 /** Enumerate the same raw-share problem as the solver; printed rounding is

@@ -111,6 +111,9 @@ export function isOneOff(product: Listing): boolean {
 export function canBeBumped(product: Listing): boolean {
   return (
     isOneOff(product) &&
+    // Something shipped needs an address and a shipping line, which a box on another product's checkout adds neither of;
+    // a bundle saved with shipping is not sold at all (lib/product-option.ts handsOver; tests/bundle-physical-owner.test.ts).
+    !product.shipping &&
     product.options.length === 0 &&
     !product.pwyw &&
     product.stock === null &&
@@ -180,6 +183,8 @@ export function bumpTargetPause(target: Listing): BumpPause | null {
   if (target.pwyw) return "targetPwyw";
   if (target.stock !== null) return "targetLimited";
   if (target.bundle && target.pick) return "targetPick";
+  // Shipped (a bundle saved with shipping included): nothing a box can hand over without an address and its shipping.
+  if (target.shipping) return "targetEmpty";
   if (target.file === null && target.link === null && (target.bundle?.length ?? 0) < MIN_BUNDLE_ITEMS) return "targetEmpty";
   return null;
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
+import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT, INVOICES_UNLINKED_TEXT } from "@/components/affiliate-commission-history";
+import { AffiliateUnconfirmed, type WaitingLine } from "@/components/affiliate-unconfirmed";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
 import { useState } from "react";
@@ -65,6 +66,7 @@ const MESSAGES: Record<string, string> = {
   share_term_held:
     "This partner was not removed: their share runs to a set end date, and you agreed it would not end before then without their yes. To end it sooner, open their partner share and press End the partnership; it ends once they accept. Or wait until the end date, then remove them.",
   unsure: "We could not confirm whether this was saved. Reload the page: it shows their share as it stands now.",
+  share_many: SHARE_PROBLEMS.many,
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
   offer_committed: `That store has promised other partners too much of these products since it made this offer: partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. Nothing was saved and the offer is kept. Ask the store to lower a share, then accept again.`,
@@ -82,6 +84,10 @@ const MESSAGES: Record<string, string> = {
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
+  invoices:
+    "Not every membership and plan payment could be read from Stripe just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
+  invoices_ceiling: INVOICES_CEILING_TEXT,
+  invoices_unlinked: INVOICES_UNLINKED_TEXT,
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
@@ -203,6 +209,8 @@ export function AffiliateStudio({
   payouts,
   refundsChecked,
   invoicesChecked = true,
+  invoicesPastCeiling = false,
+  unlinkedInvoices = 0,
   today,
   currency = "usd",
   elsewhere = 0,
@@ -213,6 +221,9 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  unconfirmed = [],
+  unconfirmedTotal = 0,
+  unconfirmedDays = 14,
 }: {
   handle: string;
   setting: AffiliateSetting;
@@ -224,6 +235,10 @@ export function AffiliateStudio({
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked?: boolean;
+  /** Not all read because past what the book can keep between readings (Book.invoicesPastCeiling): reloading will not help. */
+  invoicesPastCeiling?: boolean;
+  /** Paid invoices read whole with no one payment to link them to: no commission on them (Book.unlinkedInvoices). */
+  unlinkedInvoices?: number;
   today: string;
   /** The store's currency: what the totals and new payouts are in. */
   currency?: Currency;
@@ -242,6 +257,10 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** Second-level lines waiting as "buyer not confirmed" (newest first, some), how many in all, and the days the job keeps looking. */
+  unconfirmed?: WaitingLine[];
+  unconfirmedTotal?: number;
+  unconfirmedDays?: number;
 }) {
   const router = useRouter();
   const pending = rows.filter((r) => r.affiliate.status === "pending");
@@ -253,7 +272,11 @@ export function AffiliateStudio({
   // Everyone who can be paid today: what one batch file holds. A sale still
   // inside the wait is owed but not payable, so the two totals differ while
   // anything is clearing.
-  const owedNow = pendingPayoutsChecked ? rows.filter((r) => r.payable > 0 && r.affiliate.status === "approved" && !away.includes(r.affiliate.id)) : [];
+  // Never on a book the batch's confirmation would refuse (app/api/store/affiliates/payout-batch, unsettledBook): a
+  // file paid and then not recorded would come back with the same lines and be paid twice (review of #3378, HIGH).
+  // Nor with a paid invoice left out with its commission not known (Codex X5 and Claude 1 cloud on #3378).
+  const settled = refundsChecked && invoicesChecked && unlinkedInvoices === 0;
+  const owedNow = pendingPayoutsChecked && settled ? rows.filter((r) => r.payable > 0 && r.affiliate.status === "approved" && !away.includes(r.affiliate.id)) : [];
   const batchTotal = owedNow.reduce((sum, r) => sum + r.payable, 0);
   const waitingTotal = rows.reduce((sum, r) => sum + r.waiting, 0);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -362,6 +385,17 @@ export function AffiliateStudio({
             <span className="text-sm text-ink-soft">{`Owed now, in all: ${money(owedTotal, currency)}`}</span>
           </div>
           {pendingPayoutsChecked ? payPanel : <p className="notice notice-warn mt-5" role="alert">Pending payments could not be checked. New payment batches and batch files are unavailable until you reload and this check succeeds. Your saved records and full export remain available.</p>}
+          {pendingPayoutsChecked && !settled ? (
+            <p className="notice notice-warn mt-5" role="status">
+              {!refundsChecked
+                ? "Stripe could not be asked about every refund just now, so what is owed is not settled. Batch files are off until it is: reload in a moment."
+                : invoicesChecked && unlinkedInvoices > 0
+                  ? INVOICES_UNLINKED_TEXT
+                  : invoicesPastCeiling
+                  ? INVOICES_CEILING_TEXT
+                  : "Not every membership and plan payment could be read from Stripe yet, so what is owed is not settled. Batch files are off until they are: reload in a moment."}
+            </p>
+          ) : null}
           {owedNow.length ? (
             <div className="mt-5 rounded-2xl border border-line bg-paper p-4">
               <h3 className="font-semibold text-ink">Pay everyone at once</h3>
@@ -631,7 +665,9 @@ export function AffiliateStudio({
 
         {leadsTotal > 0 ? <LeadReview leads={leads} total={leadsTotal} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} /> : null}
 
-        <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} />
+        <AffiliateUnconfirmed lines={unconfirmed} total={unconfirmedTotal} days={unconfirmedDays} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} />
+
+        <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} invoicesPastCeiling={invoicesPastCeiling} unlinkedInvoices={unlinkedInvoices} />
 
         {payouts.length ? (
           <section aria-labelledby="payouts-title" className="card p-6 sm:p-8">

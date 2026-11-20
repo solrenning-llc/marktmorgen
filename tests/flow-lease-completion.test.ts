@@ -161,7 +161,12 @@ async function main(): Promise<void> {
   redis.pipeline = async (commands) => {
     const answer = await passOn.call(redis, commands);
     // Right after the old run read who it holds: deleted, back, enrolled again, and a later run does the step whole.
-    if (!tookOver && commands[0]?.[0] === "HMGET" && commands.some((c) => c[0] === "ZSCORE" && String(c[2]).endsWith("|hal@example.com"))) {
+    // The read of who the run holds: a ZSCORE of the lease entry before main's run generations (#4234), now the
+    // LEASE_AND_GEN script (lib/flow-runs.ts leaseAndGenCommand: ARGV[1] the lease member).
+    const readsHal = (c: (string | number)[]) =>
+      (c[0] === "ZSCORE" && String(c[2]).endsWith("|hal@example.com")) ||
+      (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-lease-gen:") && String(c[5]).endsWith("|hal@example.com"));
+    if (!tookOver && commands[0]?.[0] === "HMGET" && commands.some(readsHal)) {
       tookOver = true;
       redis.pipeline = passOn;
       await forgetWorkflowPerson(store, "hal@example.com");

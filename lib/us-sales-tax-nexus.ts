@@ -27,8 +27,8 @@
  * state, and its amount is what the state's rule counts (gross, retail or taxable, as `counts` says for that state).
  * `applicableScopeReviewed` is the caller's statement that this was reviewed; without it nothing passes. One ledger
  * covers every window (usSalesTaxLookback): a pending supply (reserved or proposed) counts only in the windows that end
- * today, and one dated before the trailing twelve months refuses, because countTaxSales refuses a pending supply
- * outside a ledger's period.
+ * today and that it falls in, so one from December still pending in January is counted in the trailing twelve months
+ * and does not make the current year unknown; one dated before the trailing twelve months refuses (counted nowhere).
  */
 import { countTaxSales, type TaxSalesLedger } from "@/lib/tax-sales-counter";
 import { usSalesTaxRule } from "@/lib/us-sales-tax-rules";
@@ -134,10 +134,20 @@ export function assessUsSalesTaxNexus(value: unknown, now = Date.now()): UsSales
     if (whole.periodStart !== lookback.start || whole.periodEnd !== lookback.end) return stop("unknown", state, ["ledger-period"]);
     // Read once, as plain data, after countTaxSales has checked every field: each window is counted from this copy.
     const ledger = structuredClone(data.ledger) as TaxSalesLedger;
+    const windows = usSalesTaxWindows(now);
+    // A pending supply (reserved or proposed) is counted in the trailing twelve months, which end today. One dated
+    // before that window would be counted nowhere: unknown, never zero.
+    const trailing = windows.find((window) => window.name === "trailing-twelve-months");
+    if (!trailing || trailing.end !== lookback.end) return stop("unknown", state, ["trailing-window"]);
+    if (ledger.entries.some((entry) => entry.position !== "settled" && entry.supplyOn < trailing.start)) {
+      return stop("unknown", state, ["pending-before-trailing-twelve-months"]);
+    }
     const counted: { name: string; minor: bigint; count: number }[] = [];
-    for (const window of usSalesTaxWindows(now)) {
-      // A pending supply belongs to a window that ends today; a window that ended before has settled supplies only.
-      const entries = window.end === lookback.end ? ledger.entries : ledger.entries.filter((entry) => entry.position === "settled");
+    for (const window of windows) {
+      // A pending supply belongs to the windows that end today and that it falls in (a December supply still pending
+      // on 2 January is in the trailing twelve months, not in the current year); a window that ended before has
+      // settled supplies only (Claude 2's MEDIUM on #4961).
+      const entries = ledger.entries.filter((entry) => entry.position === "settled" || (window.end === lookback.end && entry.supplyOn >= window.start));
       const total = countTaxSales({ ...ledger, periodStart: window.start, periodEnd: window.end, entries });
       if (total.status !== "known") return stop(total.status, state, [`${window.name}-${total.status}`]);
       const minor = BigInt(total.settledApplicableMinor) + BigInt(total.reservedApplicableMinor) + BigInt(total.proposedApplicableMinor);

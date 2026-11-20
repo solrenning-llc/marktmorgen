@@ -105,6 +105,21 @@ test("a pending supply counts in the windows that end today", () => {
   assert.equal(status("TX", [{ on: "2026-11-20", cents: 45_000_000, position: "proposed" }]), "approaching");
 });
 
+test("Claude 2's MEDIUM on #4961: a December supply still pending in January is counted, not unknown", () => {
+  const jan2 = Date.parse("2027-01-02T12:00:00Z");
+  const over = usSalesTaxLookback(jan2);
+  const at = (sales: Sale[]) => assessUsSalesTaxNexus({ state: "TX", ledger: ledger("TX", sales, over), applicableScopeReviewed: true }, jan2);
+  // The probe from the review: one reserved $10 on 31 December was "current-year-unknown"; it is below the limit, as settled.
+  assert.equal(at([{ on: "2026-12-31", cents: 1_000, position: "reserved" }]).status, "below-threshold");
+  assert.equal(at([{ on: "2026-12-31", cents: 1_000 }]).status, "below-threshold");
+  // Still counted where it falls: a pending December supply alone at Texas's $500,000 switches treatment on.
+  assert.equal(at([{ on: "2026-12-31", cents: 50_000_000, position: "reserved" }]).status, "treatment-required");
+  assert.equal(at([{ on: "2026-12-15", cents: 45_000_000, position: "proposed" }]).status, "approaching");
+  // A pending supply dated before the trailing twelve months is counted nowhere: unknown, never zero.
+  const early = at([{ on: "2025-12-01", cents: 100, position: "reserved" }]);
+  assert.deepEqual([early.status, early.reasons], ["unknown", ["pending-before-trailing-twelve-months"]]);
+});
+
 test("dollars or transactions (Arkansas, $100,000 or 200): either one is enough", () => {
   assert.equal(status("AR", [{ on: "2026-05-01", cents: 100, count: 200 }]), "treatment-required");
   assert.equal(status("AR", [{ on: "2026-05-01", cents: 10_000_000 }]), "treatment-required");

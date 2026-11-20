@@ -74,6 +74,9 @@ import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliv
 import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { consumerGate } from "@/lib/eu-vat-gate";
+import { BILLING_COUNTRY_FIELD, checkoutEvidence } from "@/lib/eu-vat-evidence";
+import type { EuSupplyFields } from "@/lib/eu-vat-supply";
 
 export const UPSELL_COOKIE = "nl_upsell";
 export const UPSELL_WINDOW_SECONDS = 60 * 60;
@@ -297,7 +300,7 @@ type SessionView = {
   customer?: unknown;
   currency?: unknown;
   metadata?: Record<string, string> | null;
-  customer_details?: { email?: unknown } | null;
+  customer_details?: { email?: unknown; address?: { country?: unknown } | null } | null;
   payment_intent?: { id?: unknown; payment_method?: unknown } | string | null;
 };
 
@@ -371,6 +374,35 @@ export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, targe
   return `${step.id}.${createHash("sha256").update(`marktmorgen-offer-terms:v1:${terms}`).digest("hex").slice(0, 32)}`;
 }
 
+/**
+ * EU VAT art. 9a (lib/eu-vat-gate.ts; 789 [IV1] unit 1, C): whether this offer may be charged to this buyer. The same
+ * question the card checkout asks (consumerGate), on the product offered, read on its own supply (a bundle by its
+ * members), never on the order it follows: a parent exempt by design (a live call, a package of calls) lets nothing
+ * through. Its evidence is the order's own: the billing country Stripe kept on the paid checkout and the IP country of
+ * this request. An offer that is free or a service a person gives live goes on exactly as consumerGate lets it. Anything
+ * else also needs the two items not to contradict each other (art. 24f): with the IP country present, it must be the
+ * billing country, compared trimmed and upper case as lib/eu-vat-evidence.ts reads both. The aliases consumerGate reads
+ * (UK for GB, EL for GR) are not unfolded here, so "UK" against "GB" disagrees and is refused: fail-closed, and both
+ * name a place REFUSED_PLACES refuses anyway. Pure; nothing is read, written or kept, the country included.
+ */
+export function offerGate(
+  target: Listing,
+  members: ReadonlyMap<string, EuSupplyFields> | undefined,
+  evidence: { headers: Headers; billing: unknown },
+): boolean {
+  // Exempt whatever the evidence: consumerGate answers ok with none only for a free line or a live service.
+  if (consumerGate({ product: target, members, headers: new Headers(), form: new URLSearchParams() }).ok) return true;
+  const billing = typeof evidence.billing === "string" ? evidence.billing : "";
+  const form = new URLSearchParams(billing.trim() ? { [BILLING_COUNTRY_FIELD]: billing } : {});
+  if (!consumerGate({ product: target, members, headers: evidence.headers, form }).ok) return false;
+  const items = checkoutEvidence(evidence.headers, form);
+  return items.ip === null || items.ip === items.billing;
+}
+
+/** What a bundle offered holds, by id, as the checkout reads it for the gate; nothing for a product on its own. */
+const membersOf = async (store: Store, target: Listing): Promise<Map<string, Listing> | undefined> =>
+  target.bundle ? new Map((await readListings(store, target.bundle)).map((listing) => [listing.id, listing])) : undefined;
+
 const toAnswers = (records: Map<string, UpsellRecord>) =>
   new Map<string, StepAnswer>([...records].map(([slot, record]) => [slot, record.state]));
 
@@ -396,6 +428,8 @@ export async function takeUpsell(input: {
    * given for the order before it never counts for this one.
    */
   consent?: DigitalConsent | null;
+  /** The request's headers: its IP country is one of the two items of the EU VAT gate's evidence (offerGate). */
+  headers: Headers;
 }): Promise<TakeResult> {
   const { store, session, secret, origin, answer } = input;
   // A store that cannot sell (lib/store-checkout.ts, canSell: switched off
@@ -449,7 +483,8 @@ export async function takeUpsell(input: {
   const slot = stepSlot(funnel, step);
   // A bundle offered: what it holds now is what this buyer gets, kept with
   // the answer and on the charge.
-  const items = target.bundle ? deliverableItems(target, await readListings(store, target.bundle)).map((p) => p.id) : null;
+  const members = await membersOf(store, target);
+  const items = members ? deliverableItems(target, [...members.values()]).map((p) => p.id) : null;
   const extra = items ? { items } : {};
 
   if (answer === "no") {
@@ -460,6 +495,10 @@ export async function takeUpsell(input: {
     ]);
     return { kind: "declined" };
   }
+
+  // EU VAT art. 9a (offerGate): refused before anything is written, held, reserved or charged, on the offered
+  // product's own supply, with the billing country of the order paid and this request's IP country.
+  if (!offerGate(target, members, { headers: input.headers, billing: view.customer_details?.address?.country })) return { kind: "unavailable" };
 
   // Handed over digitally at once: not without this offer's own yes, asked
   // before anything is written or charged, so the buyer can check it and
@@ -990,6 +1029,11 @@ export async function funnelView(input: {
    * was paid with, to pass over what the buyer already has from the store.
    */
   cart?: { offerFrom: string | null; email: string | null };
+  /**
+   * The EU VAT gate's evidence (offerGate): the request's headers, for its IP country, and the billing country of
+   * the order paid. An offer it refuses is never drawn; the country is neither shown nor kept.
+   */
+  evidence: { headers: Headers; billing: unknown };
 }): Promise<FunnelView> {
   const { store, session, product } = input;
   const records = await readAnswers(session);
@@ -1031,6 +1075,8 @@ export async function funnelView(input: {
   }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
+  // Never drawn where the yes would be refused by the EU VAT gate (takeUpsell, offerGate).
+  if (!offerGate(target, await membersOf(store, target), input.evidence)) return { offer: null, taken, notes, declined };
   // Never a picture moved after a notice to a name no public page gives out (R44); a draft's, as the editor shows it.
   const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && picturedFrom(p)) ?? null : null;
   const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");

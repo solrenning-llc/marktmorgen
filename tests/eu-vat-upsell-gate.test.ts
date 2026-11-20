@@ -188,9 +188,12 @@ async function main(): Promise<void> {
   const offerGate = (upsell as unknown as { offerGate?: OfferGate }).offerGate;
   is("RED: lib/upsell.ts exports offerGate", typeof offerGate, "function");
   if (offerGate) {
-    const callId = await add("Coaching Call", "120");
+    const added = await addProduct(OWNER, "Coaching Call", "", "120", null);
+    if (!added.ok) throw new Error("no call product");
+    const callId = added.product.id;
     is("a weekly call is set", (await setProductCall(OWNER, callId, weekly)).ok, true);
-    const call = (await readListing(store, callId))!;
+    // Read from the store as it is now: the record read above was taken before the call was set.
+    const call = (await readListing((await storeForEmail(OWNER))!, callId))!;
     const download = (await readListing(store, guide))!;
     const de = { headers: ip("DE"), billing: "DE" };
     is("a live call goes on for an EU buyer, as the checkout lets it", offerGate(call, undefined, de), true);

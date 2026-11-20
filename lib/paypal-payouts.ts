@@ -695,8 +695,9 @@ export async function keepPayFileLocked(store: Store, lines: BatchLine[]): Promi
  * nothing at all. A line whose affiliate has no record any more is skipped and counted.
  *
  * A file is refused as "stale", with nothing written, when any of its affiliates has a PayPal payment on its way
- * or a payout written after the file was downloaded, other than this file's own lines (a retry): every file is a
- * snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and LEVE 4).
+ * or a payout written at or after the moment the file was kept, other than this file's own lines (a retry): every
+ * file is a snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and
+ * LEVE 4; the same millisecond, Codex L).
  * Once it is written down, every kept file of the store goes, for the same reason. The lock is renewed every
  * LINES_PER_HOLD lines; lost, the writing stops as "busy" and a retry writes the rest once.
  */
@@ -710,8 +711,10 @@ export async function confirmPayFile(store: Store, file: string, input: { date: 
       const inFile = new Set(kept.lines.map((line) => line.a));
       const away = await onTheirWay(store);
       if ([...inFile].some((id) => away.has(id))) return { ok: false, reason: "stale" };
+      // At or after the file was kept: the download read the book before keeping it, so a payout dated the same
+      // millisecond may overlap the balance the file pays (Codex L on #3906). Only this file's own line is not one.
       const since = (await readPayoutsExact(store)).some(
-        (payout) => inFile.has(payout.aff) && payout.at > kept.at && payout.id !== payoutIdForFileLine(file, payout.aff),
+        (payout) => inFile.has(payout.aff) && payout.at >= kept.at && payout.id !== payoutIdForFileLine(file, payout.aff),
       );
       if (since) return { ok: false, reason: "stale" };
       const reference = payoutReference(input.reference);

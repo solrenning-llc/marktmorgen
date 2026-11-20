@@ -23,7 +23,7 @@ import { cartAskIds, cartAskKey } from "@/lib/checkout-ask-cart";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
-import { CART_NOTE_COMMANDS, COMMAND, PER_EMAIL, TAKE_COMMANDS, UNIT_COST } from "./plan-cost-registry";
+import { CART_NOTE_COMMANDS, COMMAND, PER_EMAIL, RECOVERY_ADMIT_EXTRA_COMMANDS, TAKE_COMMANDS, UNIT_COST } from "./plan-cost-registry";
 
 const OWNER = "owner@example.com";
 const checkouts: URLSearchParams[] = [];
@@ -100,16 +100,18 @@ async function main(): Promise<void> {
   is("not without the yes", await remindAbandoned(await load(), left("cs_test_noyes000000001", { consent: { promotions: "opt_out" } }) as never), "skip");
   // Review of #3929 (MÉDIO, cost): the carts note a cart reminder writes before its mark is priced in the store email
   // it is (tests/plan-cost-registry.ts, UNIT_COST.email), never left unpriced (MR: an unknown cost is never zero).
-  const counting = redis.pipeline.bind(redis);
+  // Changed (rule 23, Codex N1 on #3929): the note is written inside the reminder's admission script (RECOVERY_ADMIT),
+  // so its commands are counted as the in-memory Redis runs them, a script's own included.
+  const counting = redis.run.bind(redis);
   let noteCommands = 0;
-  redis.pipeline = (async (commands: (string | number)[][]) => {
-    noteCommands += commands.filter((c) => String(c[1] ?? "").startsWith("nl:recover:carts:")).length;
-    return counting(commands);
-  }) as typeof redis.pipeline;
+  redis.run = ((c: (string | number)[]) => {
+    if (String(c[1] ?? "").startsWith("nl:recover:carts:") && (c[0] === "SADD" || c[0] === "EXPIRE")) noteCommands += 1;
+    return counting(c);
+  }) as typeof redis.run;
   is("with it: one email", await remindAbandoned(await load(), left("cs_test_cartleft000001") as never), "sent");
-  redis.pipeline = counting;
+  redis.run = counting;
   is("the carts note's commands are the ones priced", noteCommands, CART_NOTE_COMMANDS);
-  is("and the store email's unit pays them", UNIT_COST.email >= PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS) * COMMAND, true);
+  is("and the store email's unit pays them, with the admission's own (RECOVERY_ADMIT_EXTRA_COMMANDS)", UNIT_COST.email >= PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS + RECOVERY_ADMIT_EXTRA_COMMANDS) * COMMAND, true);
   const mail = emails.at(-1)!;
   is("to the buyer, about their cart", [mail.to, mail.subject], ["ana@example.com", "Your cart at Harbor Kitchen"]);
   is("naming everything in it, at today's prices", [mail.text.includes("You put Pantry Guide and Grocery Lists in your cart at Harbor Kitchen"), mail.text.includes("- Pantry Guide: $12"), mail.text.includes("- Grocery Lists: $5")], [true, true, true]);
@@ -145,10 +147,11 @@ async function main(): Promise<void> {
   const noteTtl = Math.min(...(await ttls(await keysOf("nl:recover:carts:*"))));
   is("the carts note outlives every once-a-week mark it may name", noteTtl > Math.max(...(await ttls(await keysOf("nl:recover:once:*")))), true);
   // A note whose write is not answered exactly is unknown: nothing is claimed or sent, so no cart mark is ever taken
-  // without the note that lets deleting the person find it.
+  // without the note that lets deleting the person find it. Changed (rule 23, Codex N1 on #3929): the note and the
+  // claims are one script now (RECOVERY_ADMIT), so its reply is the one lost.
   const pipe = redis.pipeline;
   redis.pipeline = (async (commands: (string | number)[][]) =>
-    commands[0]?.[0] === "SADD" && String(commands[0][1]).startsWith("nl:recover:carts:") ? [] : pipe(commands)) as typeof redis.pipeline;
+    commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:recovery-admit:") ? [] : pipe(commands)) as typeof redis.pipeline;
   const mailsBefore = emails.length, marksBefore = (await keysOf("nl:recover:once:*")).length;
   const lost = await remindAbandoned(await load(), left("cs_test_cartleft000006", { customer_details: { email: "eve@example.com" } }) as never).then(() => "resolved", (error: Error) => error.name);
   redis.pipeline = pipe;

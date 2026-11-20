@@ -468,6 +468,21 @@ export class MemoryRedis {
           this.run(["EXPIRE", log, keep]);
           return 1;
         }
+        // lib/checkout-recovery.ts RECOVERY_ADMIT: a reminder's note and claims, only while the address is not erased.
+        if (key.startsWith("-- marktmorgen:recovery-admit:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, prints, sent, once, carts, print, member, noteSeconds, sentSeconds, onceSeconds, claim] = args;
+          if (print !== "" && this.run(["HEXISTS", prints, print]) === 1) return 2;
+          if (this.run(["EXISTS", sent]) === 1 || this.run(["EXISTS", once]) === 1) return 0;
+          if (member !== "") {
+            const type = this.run(["TYPE", carts]);
+            if (type !== "none" && type !== "set") return -1;
+            this.run(["SADD", carts, member]);
+            this.run(["EXPIRE", carts, noteSeconds]);
+          }
+          this.run(["SET", sent, claim, "EX", sentSeconds]);
+          this.run(["SET", once, "1", "EX", onceSeconds]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         // lib/store-allowance.ts GIVE_ALLOWANCE_BACK: a missing counter left missing, one never below zero, its expiry kept.
         if (key.startsWith("-- marktmorgen:allowance-give-back:v1\n") && args[0] === "1" && args.length === 3) {

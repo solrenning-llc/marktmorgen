@@ -465,6 +465,12 @@ export const TAKE_COMMANDS = 4;
  * (UNIT_COST.email), as if each were a cart reminder (review of #3929; tests/cart-reminder.test.ts counts them).
  */
 export const CART_NOTE_COMMANDS = 2;
+/**
+ * What a reminder's admission (lib/checkout-recovery.ts RECOVERY_ADMIT, Codex N1 on #3929) adds to its note and its
+ * two claims: the script's EVAL and its print HEXISTS, two EXISTS and the note's TYPE, as Upstash bills a script.
+ * Priced on every store email with the note's own (UNIT_COST.email).
+ */
+export const RECOVERY_ADMIT_EXTRA_COMMANDS = 5;
 /** What a function sends on to the browser, by the byte ("Fast Origin Transfer", tests/traffic-cost.ts). */
 export const ORIGIN_PER_BYTE = 0.06 / 1e9;
 /**
@@ -1105,7 +1111,7 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A message written to the inbox, and its index.
   inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
   // An email sent from inside a request or a job already counted, and its count.
-  email: PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS) * COMMAND,
+  email: PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS + RECOVERY_ADMIT_EXTRA_COMMANDS) * COMMAND,
   // An access email; and since 9 November 2026 (13 [D10], review 6748073377 of #3431, M2) the Path lead its link may
   // count when the address uses it (lib/path-lead.ts): a sign-up's and a waitlist's confirmation routes take no
   // public request, so their PATH_LEAD_COMMANDS are priced here, with the email that carried the link.
@@ -1973,7 +1979,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
-      { file: "lib/checkout-recovery.ts", names: ["[\"SADD\", cartsKey(statsId, email), onceFor]", "[\"EXPIRE\", cartsKey(statsId, email), CARTS_NOTE_SECONDS]"] },
+      { file: "lib/checkout-recovery.ts", names: ["RECOVERY_ADMIT", "redis.call('SADD', KEYS[4], ARGV[2])", "redis.call('EXPIRE', KEYS[4], ARGV[3])", "CARTS_NOTE_SECONDS"] },
       // The creator told once about an order whose affiliate link was never confirmed (owner's decision 6, 9 November 2026).
       { file: "lib/affiliates.ts", names: ["tellPending", "pendingNotice"] },
       { file: "lib/refused-tries.ts", names: ["REFUSED_TRIES", "REFUSED_TRY_COMMANDS", "REFUSED_MAX_SECONDS"] },
@@ -1986,7 +1992,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/card-update.ts", names: ['redisPipeline([["DEL", key]])', "CARD_LINK_SECONDS"] },
       { file: "lib/payment-recovery.ts", names: ["const CARD_PAGES = 5", "releaseMark(key, value)"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count, with a cart reminder's two note commands (CART_NOTE_COMMANDS) on every one; the daily and per-person limits only spread them. An email a sender refused for certain may already have been taken (a stop after the figure, a 4xx after the request): a caller that asks again counts the refusal first (lib/refused-tries.ts, REFUSED_TRY_COMMANDS commands, the count kept as tests/store-data-registry.ts says) and stops at REFUSED_TRIES, so one email takes the figure at most that many times; a refusal never sends, so the provider share of the email taken is not spent, and one that took nothing (the figure spent) is the job's or the request's own work. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
+    basis: "The plan's store emails, each at the most an email costs and its count, with a cart reminder's two note commands (CART_NOTE_COMMANDS) and its admission's five more (RECOVERY_ADMIT_EXTRA_COMMANDS: the script that reads the deletion print again before the note and claims, Codex N1 on #3929) on every one; the daily and per-person limits only spread them. An email a sender refused for certain may already have been taken (a stop after the figure, a 4xx after the request): a caller that asks again counts the refusal first (lib/refused-tries.ts, REFUSED_TRY_COMMANDS commands, the count kept as tests/store-data-registry.ts says) and stops at REFUSED_TRIES, so one email takes the figure at most that many times; a refusal never sends, so the provider share of the email taken is not spent, and one that took nothing (the figure spent) is the job's or the request's own work. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
   },
   {
     id: "come-back-unwritten-links",

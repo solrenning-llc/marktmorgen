@@ -45,7 +45,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 **(recommended)** | 82.4% | 60.19% | 60.05% | $77.65 | 0.50 |
 | $149 / $1,490 | 100.0% | 60.48% | 60.35% | $90.12 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.86% | 60.74% | $102.86 | 0.38 |
-| $199 / $1,990 | 100.0% | 61.29% | 61.19% | $121.97 | 0.32 |
+| $199 / $1,990 | 100.0% | 61.29% | 61.18% | $121.97 | 0.32 |
 
 ### Studio
 
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.02% | 60.03% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.06% | 12.14% | 12.17% |
 | Net a customer, a month, at full included use | $77.65 | $271.24 | $604.20 |
-| The same at #553's price | $39.17 | $265.51 | $593.76 |
+| The same at #553's price | $39.17 | $265.51 | $593.75 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

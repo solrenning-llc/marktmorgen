@@ -12,7 +12,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | Store | **$159 / $1,590** | every #553 figure, none cut | 60.69% / 60.56% | 12.25% | 135 | $69 / $690 |
 | Studio | **$819 / $8,190** | every #553 figure, none cut | 61.19% / 60.89% | 12.44% | 17 | $449 / $4,490 |
-| Scale | **$1,769 / $17,690** | every #553 figure, none cut | 61.28% / 60.96% | 12.48% | 8 | $999 / $9,990 |
+| Scale | **$1,769 / $17,690** | every #553 figure, none cut | 61.28% / 60.95% | 12.48% | 8 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).
 
@@ -152,9 +152,9 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
-| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.19%; 62.16% / 61.98%; 62.26% / 62.07%) | yes |
+| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.18%; 62.16% / 61.98%; 62.26% / 62.07%) | yes |
 | ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.88% / 61.85%; 62.96% / 62.87%; 63.04% / 62.95%) | yes |
-| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.19%; 62.16% / 61.98%; 62.26% / 62.07%) | yes |
+| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.29% / 61.18%; 62.16% / 61.98%; 62.26% / 62.07%) | yes |
 | ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.88% / 61.85%; 62.96% / 62.87%; 63.04% / 62.95%) | yes |
 | ε = -1.5 | A | $139 | $629 | $1,319 | yes (60.25% / 60.11%; 60.43% / 60.05%; 60.46% / 60.02%) | yes |
 | ε = -1.5 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $299 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $599 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.39% / 60.34%; 60.43% / 60.05%; 60.48% / 60.02%) | yes |

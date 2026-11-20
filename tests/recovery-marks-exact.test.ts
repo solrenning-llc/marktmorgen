@@ -59,7 +59,9 @@ async function intercept<T>(when: (commands: Commands) => boolean, answer: (comm
 const starts = (op: string, prefix: string) => (commands: Commands) => commands[0]?.[0] === op && String(commands[0][1]).startsWith(prefix);
 const isAssisted = (commands: Commands) => commands.length === 1 && starts("EXISTS", "nl:assist:remind:")(commands);
 const isMarks = (commands: Commands) => commands.length === 5 && starts("EXISTS", "nl:recover:sent:")(commands);
-const isClaims = (commands: Commands) => commands.length === 2 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:recover:sent:") && commands[0].includes("NX");
+// Changed (rule 23, Codex N1 on #3929): the note and both claims are one script now (lib/checkout-recovery.ts
+// RECOVERY_ADMIT: 1 admitted, 0 a claim held, 2 erased), so the claim checks below answer that script.
+const isClaims = (commands: Commands) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:recovery-admit:");
 /** The reply at `slot` replaced with `value` (the real command still runs). */
 const slotAs = (slot: number, value: unknown) => async (commands: Commands, real: Pipe) => {
   const replies = await real(commands);
@@ -139,10 +141,10 @@ test("control: the assistant's own mark, a stop and a taken claim each skip", as
   const b = fresh();
   await redis.pipeline([["SET", `nl:recover:sent:${b.id}`, "sending"]]);
   assert.equal(await remindAbandoned(store, left(b.id, b.email)), "skip");
-  // Another pass took the claim between the read and the SET NX: nothing came back for it.
+  // Another pass took a claim between the read and the admission: the script answers 0.
   const c = fresh();
   const before = sent.length;
-  assert.equal(await intercept(isClaims, async () => ["OK", null], () => remindAbandoned(store, left(c.id, c.email))), "skip");
+  assert.equal(await intercept(isClaims, async () => [0], () => remindAbandoned(store, left(c.id, c.email))), "skip");
   assert.equal(sent.length, before);
 });
 
@@ -221,36 +223,33 @@ test("control: a stop link written whole stays for the reminder it is sent in", 
   assert.notEqual((await redis.pipeline([["GET", key]]))[0], null, "the sent reminder's stop link is kept");
 });
 
-test("a claim reply other than OK or nothing is unknown: nothing is sent", async () => {
-  for (const value of [undefined, "Ok", "ok", "", 1, 0, true, ["OK"], { ok: true }]) {
-    await refuses(isClaims, slotAs(0, value), `sent claim ${String(value)}`);
-    await refuses(isClaims, slotAs(1, value), `once claim ${String(value)}`);
+test("an admission reply other than 1, 0 or 2 is unknown: nothing is sent", async () => {
+  for (const value of [undefined, null, "OK", "1", "", 3, -1, -2, true, [1], { ok: true }]) {
+    await refuses(isClaims, async () => [value], `admission ${String(value)}`);
+    await refuses(isClaims, slotAs(0, value), `admission run, then ${String(value)}`);
   }
-  await refuses(isClaims, async (c, real) => (await real(c)).slice(0, 1), "one claim reply");
-  await refuses(isClaims, async () => [], "no claim replies");
+  await refuses(isClaims, async () => [], "no admission reply");
 });
 
-// Claude 5's LOW on #2929 @ 62904755: when one claim answers "OK" and the other in another shape, the one taken here
-// must not stay behind: the next pass, read whole, sends this checkout's reminder; and another checkout of the same
-// buyer and product is not held back a week by a once mark no email went with.
-test("an unknown once-a-week claim gives back the sent claim taken here; the once mark whose reply was lost stays", async () => {
-  const store = await shop();
-  const { id, email } = fresh();
-  const before = sent.length;
-  await assert.rejects(intercept(isClaims, slotAs(1, "QUEUED"), () => remindAbandoned(store, left(id, email))), UnknownReplyError);
-  assert.deepEqual(sent.slice(before), [], "nothing goes on an unknown claim");
-  assert.equal(await markOf(id), null, "the sent claim taken here is given back, not left 'sending' for two weeks");
-  // The once mark's reply was lost, but its write ran: it may be there, so this week's reminder stays held (safe side).
-  assert.equal(await remindAbandoned(store, left(id, email)), "skip", "the lost once mark is kept: no second email this week");
-  assert.deepEqual(sent.slice(before), [], "none");
-});
-
-test("an unknown sent claim gives back the once-a-week claim it took, so another checkout of the buyer still gets one", async () => {
+// Claude 5's LOW on #2929 @ 62904755: nothing taken here may hold back a week on an email that never went. Changed
+// (rule 23, Codex N1 on #3929): both claims are one script now, so they are taken together or not at all.
+test("an admission that ran but answered in another shape gives both claims back; the next pass sends it once", async () => {
   const store = await shop();
   const { id, email } = fresh();
   const before = sent.length;
   await assert.rejects(intercept(isClaims, slotAs(0, "QUEUED"), () => remindAbandoned(store, left(id, email))), UnknownReplyError);
-  assert.deepEqual(sent.slice(before), [], "nothing goes on an unknown claim");
+  assert.deepEqual(sent.slice(before), [], "nothing goes on an unknown admission");
+  assert.equal(await markOf(id), null, "the sent claim taken here is given back, read back by this pass's own value");
+  assert.equal(await remindAbandoned(store, left(id, email)), "sent", "the next pass sends it");
+  assert.deepEqual(sent.slice(before), [email], "once");
+});
+
+test("an admission that did not run takes nothing back, and another checkout of the buyer still gets one", async () => {
+  const store = await shop();
+  const { id, email } = fresh();
+  const before = sent.length;
+  await assert.rejects(intercept(isClaims, async () => ["QUEUED"], () => remindAbandoned(store, left(id, email))), UnknownReplyError);
+  assert.deepEqual(sent.slice(before), [], "nothing goes on an unknown admission");
   const other = `${id}x`;
   assert.equal(await remindAbandoned(store, left(other, email)), "sent", "the buyer's other checkout of the same product is not held back a week");
   assert.deepEqual(sent.slice(before), [email], "once");

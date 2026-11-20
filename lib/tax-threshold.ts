@@ -30,11 +30,21 @@ export const TAX_THRESHOLD_RULES = Object.freeze({
     source: "https://www.estv.admin.ch/fr/tva-assujettissement-entreprises-etrangeres",
     checkedOn: "2026-10-27",
   }),
+  // Ministry of Finance decree of 07/04/2025, no. 11404515420, items 1-3 (Business Tax Act art. 28-1): a foreign
+  // supplier of electronic services to individuals in Taiwan registers once its annual sales exceed NT$600,000, in the
+  // previous or the current year (FAQ FOUR, Q1, 14/05/2025). Read in Codex V's report V-20261119-1512 (19/11/2026).
+  // "Exceeds" is read the stricter way, reached at exactly 600,000 (coordinator, C5-20261120-2110-9a-other-u4). Who
+  // answers for a sale (supplier or platform, §4.2 versus §4.3 of the Directions) is the scope review's, not this rule's.
+  "tw-cross-border-e-services": Object.freeze({
+    currency: "TWD", thresholdMinor: 60_000_000, comparison: "gte", scope: "country",
+    source: "https://law-out.mof.gov.tw/EngLawContent.aspx?KW=Business+Tax&id=20732&lan=E",
+    checkedOn: "2026-11-19",
+  }),
 } as const);
 export type TaxThresholdRuleId = keyof typeof TAX_THRESHOLD_RULES;
 export type TaxThresholdSnapshot = {
   ruleId: TaxThresholdRuleId;
-  currency: "CAD" | "NOK" | "CHF";
+  currency: "CAD" | "NOK" | "CHF" | "TWD";
   /** Same UTC day as the assessment; stale counters are not current evidence. */
   recordedOn: string;
   /** Includes every applicable supply over the legally reviewed 12-month scope.
@@ -132,7 +142,8 @@ export function assessTaxSalesThreshold(value: unknown, now = Date.now(), expect
     if (totals.status !== "known") return stop(totals.status);
     // A worldwide rule (Switzerland) counts more than any one country's ledger can hold.
     if (TAX_THRESHOLD_RULES[evidence.ruleId as TaxThresholdRuleId].scope !== "country") return stop("unknown");
-    const country = evidence.ruleId === "ca-specified-supplies" ? "CA" : evidence.ruleId === "no-remote-services" ? "NO" : null;
+    const country = evidence.ruleId === "ca-specified-supplies" ? "CA" : evidence.ruleId === "no-remote-services" ? "NO"
+      : evidence.ruleId === "tw-cross-border-e-services" ? "TW" : null;
     if (country === null) return stop("unknown");
     // Neither national threshold may be assessed from a single-state subset.
     if (totals.place.country !== country || totals.place.state !== null) return stop("unknown");

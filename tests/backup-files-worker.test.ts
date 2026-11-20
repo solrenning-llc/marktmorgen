@@ -1,0 +1,816 @@
+/**
+ * 273 [BK1], files part 2: the Cloudflare Worker that copies a store's files
+ * and videos into the backup account (workers/backup-files), against an
+ * in-memory R2 bucket and one fetch that plays the site's listing route, the
+ * origins, the heartbeat monitor and the alarm hook
+ * (tests/backup-files-worker-world.ts). Nothing real is reached.
+ *
+ * The rules come from docs/backup-costs-2026-11-08.md (5.1, 5a, 5b, 7a),
+ * docs/incident-response.md (8.3, 8.7) and the inbox message
+ * C1-20261108-2031-C4-38. What fails here:
+ *   - a trigger other than one hourly cron: a fetch handler, workers.dev, a route;
+ *   - any deletion from an empty, failed, malformed, incomplete or shrunk
+ *     listing (against the previous one, 7 days or 30 days earlier), or from
+ *     an object that is merely missing (an orphan goes only after 90 days of
+ *     complete listings);
+ *   - a deletion record applied before 30 days, applied while the records of
+ *     30 days pass 20% of a source, or held past 90 days; a run that copies
+ *     before it deletes; a record not kept in the backup account;
+ *   - a changed etag that overwrites the good copy, or an earlier version
+ *     pruned before 30 days, while etags of more than 20% of a store changed
+ *     in 30 days, or kept past 90;
+ *   - a copy past 5R (or 4R in 32 days) for a store, or a deletion to make room;
+ *   - a large file that does not resume part by part across runs, or that is
+ *     taken as copied when its origin ignored Range, sent no ETag, or the
+ *     bucket's reply did not read exactly (rule 24);
+ *   - a run past its subrequest budget, or a heartbeat on any run that is not
+ *     a finished, alarm-free day, or no heartbeat on a day whose only missing
+ *     files have their deletion record (expected, never an orphan);
+ *   - an orphan alarm repeated every day: it is raised when the orphan is
+ *     first seen and again when its 90-day end comes;
+ *   - an object's name in what goes to the alarm hook.
+ */
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import worker from "../workers/backup-files/src/index";
+import {
+  BACKUP_FILES_COPY_TIMES,
+  BACKUP_FILES_DELETE_AFTER_DAYS,
+  BACKUP_FILES_GUARD_BPS,
+  BACKUP_FILES_HOLD_MAX_DAYS,
+  BACKUP_FILES_ORPHAN_DAYS,
+  BACKUP_FILES_PART_BYTES,
+  BACKUP_FILES_ROOM_TIMES,
+  BACKUP_FILES_RUN_MS,
+  BACKUP_FILES_RUN_SUBREQUESTS,
+  BACKUP_FILES_VERSION_KEEP_DAYS,
+  copyName,
+  runBackupFiles,
+  type RunReport,
+} from "../workers/backup-files/src/run";
+import { BACKUP_FILES_OBJECTS_PER_MONTH, BACKUP_FILES_ROOM_MOST, BACKUP_FILES_SOURCES, parseStoresPage, BackupFilesContractError, type BackupFilesSource } from "@/lib/backup-files-contract";
+import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
+import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { COMMUNITY_PICTURES, PICTURE_BYTES } from "@/lib/community-picture-rules";
+import { ALARM, BEAT, DAY, DAY0, FakeBucket, ROUTE, SECRET, fakeFetch, listingKey, objects, resetWorld, world, type SourceObject } from "./backup-files-worker-world";
+import { done, is, part } from "./check";
+
+const S = "0123456789abcdef0123456789abcdef";
+const T = "fedcba9876543210fedcba9876543210";
+const root = process.cwd();
+const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+let files = new FakeBucket();
+let videos = new FakeBucket();
+const env = (over: Record<string, unknown> = {}) => ({
+  FILES_BUCKET: files,
+  VIDEOS_BUCKET: videos,
+  BACKUP_FILES_ROUTE_URL: ROUTE,
+  BACKUP_FILES_ROUTE_SECRET: SECRET,
+  BACKUP_FILES_HEARTBEAT_URL: BEAT,
+  BACKUP_FILES_ALARM_URL: ALARM,
+  ...over,
+});
+
+function fresh(stores: { store: string; roomBytes: number }[] = [{ store: S, roomBytes: 10_000_000 }]): void {
+  resetWorld();
+  files = new FakeBucket();
+  videos = new FakeBucket();
+  world.stores = stores;
+}
+
+function setListing(source: BackupFilesSource, store: string, list: SourceObject[]): void {
+  world.listings.set(listingKey(source, store), list);
+}
+
+async function runAt(day: number, hour = 1, options: Record<string, unknown> = {}, over: Record<string, unknown> = {}): Promise<RunReport> {
+  world.now = DAY0 + day * DAY + hour * 3_600_000;
+  return runBackupFiles(env(over) as never, { fetch: fakeFetch, now: () => world.now, sources: ["blob"], ...options });
+}
+
+const codes = (report: RunReport) => [...new Set(report.alarms.map((a) => a.code))].sort();
+const has = (report: RunReport, code: string) => report.alarms.some((a) => a.code === code);
+const beats = () => world.calls.filter((c) => c.url === BEAT).length;
+const deletesIn = (bucket: FakeBucket) => bucket.log.filter((line) => line.startsWith("delete "));
+const copies = (store = S, source: BackupFilesSource = "blob", bucket = files) => bucket.under(`copies/${source}/${store}/`);
+const bytesEqual = (a: Uint8Array | undefined, b: Uint8Array) => !!a && a.byteLength === b.byteLength && a.every((v, i) => v === b[i]);
+
+function big(size: number, seed: number): Uint8Array {
+  const bytes = new Uint8Array(size);
+  for (let i = 0; i < size; i++) bytes[i] = (i * 13 + seed) % 256;
+  return bytes;
+}
+
+async function main(): Promise<void> {
+  let ambientRequests = 0;
+  // Fail closed if a scheduled path escapes the fixtures: no native fetch is available to this test.
+  globalThis.fetch = (async () => {
+    ambientRequests += 1;
+    throw new Error("unmocked network request in backup worker test");
+  }) as typeof fetch;
+  part("it runs on its hourly cron only: no fetch handler, no workers.dev, no route");
+  const tomlPath = join(root, "workers/backup-files/wrangler.toml");
+  const toml = existsSync(tomlPath) ? readFileSync(tomlPath, "utf8") : "";
+  const lines = toml.split("\n").map((line) => line.replace(/#.*$/, "").trim()).filter(Boolean);
+  is("workers_dev = false and preview_urls = false", [lines.includes("workers_dev = false"), lines.includes("preview_urls = false")], [true, true]);
+  is("no route of any kind", lines.filter((line) => /^(route|routes)\s*=|^\[\[routes\]\]/.test(line)), []);
+  const crons = /crons\s*=\s*\[([^\]]*)\]/.exec(toml)?.[1].split(",").map((c) => c.trim().replace(/"/g, "")).filter(Boolean) ?? [];
+  is("exactly one cron, once an hour (a cron of an hour or more has 15 minutes of CPU)", [crons.length, /^\d{1,2} \* \* \* \*$/.test(crons[0] ?? "")], [1, true]);
+  is("Workers Logs off (its price from 1 December 2026 is not read)", /\[observability\][^[]*enabled\s*=\s*false/.test(toml), true);
+  is("the two backup buckets, bound by name", [toml.includes('bucket_name = "marktmorgen-files-backup"'), toml.includes('bucket_name = "marktmorgen-videos-backup"')], [true, true]);
+  is("no production credential is configured in the Worker", /BLOB_READ_WRITE_TOKEN|BUNNY_|R2_ACCESS|CRON_SECRET|UPSTASH/.test(toml), false);
+  is("the Worker exports only a scheduled handler", Object.keys(worker).sort(), ["scheduled"]);
+  const workflows = readdirSync(join(root, ".github/workflows")).map((name) => readFileSync(join(root, ".github/workflows", name), "utf8"));
+  is("nothing deploys it: no workflow runs wrangler or names the Worker (the owner deploys it, once the cost is approved)", workflows.some((text) => /wrangler|workers\/backup-files/.test(text)), false);
+  is("the bounds of 5.1 and 7a", [BACKUP_FILES_DELETE_AFTER_DAYS, BACKUP_FILES_HOLD_MAX_DAYS, BACKUP_FILES_ORPHAN_DAYS, BACKUP_FILES_VERSION_KEEP_DAYS, BACKUP_FILES_GUARD_BPS, BACKUP_FILES_ROOM_TIMES, BACKUP_FILES_COPY_TIMES], [30, 90, 90, 30, 2000, 5, 4]);
+  is("a run stays below the paid plan's 10,000 subrequests and 15 minutes", [BACKUP_FILES_RUN_SUBREQUESTS < 10_000, BACKUP_FILES_RUN_MS < 15 * 60_000, BACKUP_FILES_PART_BYTES >= 5 * 1024 * 1024], [true, true, true]);
+
+  part("the stores page, read exactly: each store with the room R of its plan");
+  const storesPage = { version: 1, kind: "stores", stores: [{ store: S, roomBytes: 5_830_000_000 }], cursor: null, complete: true, reason: "done" };
+  const storesRefused = (raw: unknown) => { try { parseStoresPage(raw); return false; } catch (error) { return error instanceof BackupFilesContractError; } };
+  is("a good page reads as itself", parseStoresPage(JSON.stringify(storesPage)), storesPage);
+  is("a room that is zero, fractional or a string; a store twice; an extra field; complete with a cursor", [
+    storesRefused({ ...storesPage, stores: [{ store: S, roomBytes: 0 }] }),
+    storesRefused({ ...storesPage, stores: [{ store: S, roomBytes: 1.5 }] }),
+    storesRefused({ ...storesPage, stores: [{ store: S, roomBytes: "1" }] }),
+    storesRefused({ ...storesPage, stores: [{ store: S, roomBytes: 1 }, { store: S, roomBytes: 1 }] }),
+    storesRefused({ ...storesPage, note: 1 }),
+    storesRefused({ ...storesPage, cursor: "x" }),
+    storesRefused({ ...storesPage, stores: [{ store: "../x", roomBytes: 1 }] }),
+  ], [true, true, true, true, true, true, true]);
+
+  part("the scheduled handler asks for no retry on every outcome and lists every source, bunny included");
+  fresh();
+  let noRetry = 0;
+  const controller = { scheduledTime: DAY0, cron: "17 * * * *", noRetry: () => { noRetry += 1; } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeFetch as typeof fetch;
+  try {
+    await worker.scheduled(controller as never, env({ BACKUP_FILES_ROUTE_URL: undefined }) as never, { waitUntil: () => undefined } as never);
+    const unconfigured = files.json(`reports/${iso(Date.now())}.json`) as { alarms?: { code: string }[] } | null;
+    is("without its route: noRetry, the route never called, the report and the hook say why", [noRetry > 0, world.calls.filter((c) => c.url !== ALARM).length, unconfigured?.alarms?.some((a) => a.code === "worker_unconfigured")], [true, 0, true]);
+    fresh();
+    noRetry = 0;
+    await worker.scheduled(controller as never, env() as never, { waitUntil: () => undefined } as never);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  is("every source of the contract is listed, so bunny (not built) alarms and no heartbeat is sent", [BACKUP_FILES_SOURCES.every((source) => world.calls.some((c) => c.url.includes(`source=${source}&`))), beats(), noRetry > 0], [true, 0, true]);
+
+  is("the scheduled paths never reach an unmocked network transport", ambientRequests, 0);
+
+  part("a finished day with nothing to alarm: every object copied exactly, one heartbeat");
+  fresh();
+  const three = [...objects("blob", S, 2, 10), { key: `stores/${S}/empty.txt`, etag: '"z"', bytes: new Uint8Array(0) }, ...objects("blob", S, 1, 1000, 1, 2)];
+  setListing("blob", S, three);
+  let report = await runAt(0);
+  is("finished, no alarm, one heartbeat", [report.finished, codes(report), report.heartbeat, beats()], [true, [], true, 1]);
+  const names = await Promise.all(three.map((o) => copyName("blob", S, o.key, o.etag, o.bytes.byteLength)));
+  is("each object under its own name, from its key, etag and size", copies().sort(), [...names].sort());
+  is("the bytes are the origin's, exactly", three.every((o, i) => bytesEqual(files.objects.get(names[i])?.bytes, o.bytes)), true);
+  is("every route call carries the route's own secret and nothing else is reached", world.calls.filter((c) => c.url.startsWith(ROUTE)).every((c) => c.auth === `Bearer ${SECRET}`), true);
+  is("the origins are read only through their signed URLs, without the route's secret", world.calls.filter((c) => c.url.startsWith("https://src.test/")).every((c) => c.auth === null), true);
+  world.calls = [];
+  const puts = files.log.length;
+  report = await runAt(0, 2);
+  is("a second run of the same day copies nothing again and sends no second heartbeat", [files.log.slice(puts).filter((l) => l.startsWith("put copies/")).length, beats(), report.heartbeat], [0, 0, false]);
+
+  part("absence is never a deletion");
+  fresh();
+  setListing("blob", S, objects("blob", S, 10));
+  await runAt(0);
+  setListing("blob", S, []);
+  report = await runAt(1);
+  is("an empty listing: nothing deleted, alarm, no heartbeat", [deletesIn(files).length, has(report, "listing_empty"), report.heartbeat, copies().length], [0, true, false, 10]);
+  setListing("blob", S, objects("blob", S, 10));
+  world.listingFault.set(listingKey("blob", S), { status: 503 });
+  report = await runAt(2);
+  is("a failed listing: nothing deleted, alarm", [deletesIn(files).length, has(report, "listing_failed")], [0, true]);
+  world.listingFault.set(listingKey("blob", S), { body: { version: 1, kind: "files", source: "blob", store: S, entries: [], cursor: null, complete: true, reason: "done", note: "x" } });
+  report = await runAt(3);
+  is("a listing that does not read exactly (rule 24): failed, nothing deleted", [deletesIn(files).length, has(report, "listing_failed")], [0, true]);
+  world.listingFault.set(listingKey("blob", S), { body: { version: 1, kind: "files", source: "blob", store: T, entries: [], cursor: null, complete: true, reason: "done" } });
+  report = await runAt(4);
+  is("a page of another store: failed, nothing deleted", [deletesIn(files).length, has(report, "listing_failed")], [0, true]);
+  world.listingFault.set(listingKey("blob", S), { status: 503, afterPages: 1 });
+  world.pageSize = 4;
+  report = await runAt(5);
+  is("an incomplete listing (the second page failed): nothing deleted, alarm", [deletesIn(files).length, has(report, "listing_failed")], [0, true]);
+  world.listingFault.delete(listingKey("blob", S));
+  world.pageSize = 1000;
+  setListing("blob", S, objects("blob", S, 7));
+  report = await runAt(6);
+  is("a listing after the empty one starts the orphan clock only now, and deletes nothing", [deletesIn(files).length, report.alarms.find((a) => a.code === "orphans")?.count], [0, 3]);
+  report = await runAt(7);
+  is("the orphan alarm is not repeated the next day", [has(report, "orphans"), deletesIn(files).length], [false, 0]);
+  report = await runAt(50);
+  is("nor any day in between", [has(report, "orphans"), deletesIn(files).length], [false, 0]);
+  report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS - 1);
+  is("three objects missing without a record are kept 89 days, with the orphan alarm and the day they go", [deletesIn(files).length, report.alarms.find((a) => a.code === "orphans")?.count, report.alarms.find((a) => a.code === "orphans")?.on], [0, 3, iso(DAY0 + (6 + BACKUP_FILES_ORPHAN_DAYS) * DAY)]);
+  report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS);
+  is("and removed after 90 days missing from every complete listing", [copies().length, deletesIn(files).length], [7, 3]);
+
+  part("a listing that ends unsignable (a key the route could not sign): asked once, never complete, no orphan end");
+  // Claude 5's MEDIUM on #3313: the route leaves such a key out and ends the listing "unsignable", with no cursor.
+  fresh();
+  setListing("blob", S, objects("blob", S, 10));
+  world.unsignableEnd.add(listingKey("blob", S));
+  const listCalls = () => world.calls.filter((c) => c.url.includes("source=blob") && c.url.includes(`store=${S}`)).length;
+  report = await runAt(0);
+  is("the listing is asked for once, never again from its first page", listCalls(), 1);
+  is("its entries are copied; the listing is incomplete, with its alarm and no heartbeat", [copies().length, has(report, "listing_incomplete"), report.heartbeat], [10, true, false]);
+  setListing("blob", S, objects("blob", S, 7));
+  for (const day of [1, 1 + BACKUP_FILES_ORPHAN_DAYS, 2 + BACKUP_FILES_ORPHAN_DAYS]) report = await runAt(day);
+  is("objects missing from listings that are never complete are never ended as orphans", [deletesIn(files).length, copies().length], [0, 10]);
+
+  part("a listing that shrinks 20% exactly passes; more than 20% holds");
+  fresh();
+  setListing("blob", S, objects("blob", S, 10));
+  await runAt(0);
+  setListing("blob", S, objects("blob", S, 8));
+  report = await runAt(1);
+  is("10 → 8 is not more than 20%", has(report, "listing_shrunk"), false);
+  setListing("blob", S, objects("blob", S, 6));
+  report = await runAt(2);
+  is("8 → 6 is", has(report, "listing_shrunk"), true);
+
+  part("cumulative: against the complete listing of 7 days and of 30 days earlier");
+  fresh();
+  for (const [day, count] of [[0, 100], [1, 95], [3, 90], [5, 85]] as const) {
+    setListing("blob", S, objects("blob", S, count));
+    await runAt(day);
+  }
+  setListing("blob", S, objects("blob", S, 79));
+  report = await runAt(7);
+  is("79 against 85 the day before passes, against 100 seven days earlier it holds", [has(report, "listing_shrunk"), has(report, "listing_shrunk_7d"), deletesIn(files).length], [false, true, 0]);
+  fresh();
+  for (const [day, count] of [[0, 100], [7, 85], [14, 85], [21, 85]] as const) {
+    setListing("blob", S, objects("blob", S, count));
+    await runAt(day);
+  }
+  setListing("blob", S, objects("blob", S, 79));
+  report = await runAt(30);
+  is("79 against 85 a week earlier passes, against 100 thirty days earlier it holds", [has(report, "listing_shrunk"), has(report, "listing_shrunk_7d"), has(report, "listing_shrunk_30d"), deletesIn(files).length], [false, false, true, 0]);
+
+  part("deletions come only from explicit records, 30 days after, deletions before copies, records kept");
+  fresh();
+  const ten = objects("blob", S, 10);
+  setListing("blob", S, ten);
+  await runAt(0);
+  const gone = ten[0];
+  const recordedAt = DAY0 + DAY + 1_800_000;
+  world.records = [{ source: "blob", key: gone.key, recordedAt, reason: "creator_deleted" }];
+  setListing("blob", S, ten.slice(1));
+  report = await runAt(1);
+  const kept = files.under(`deletions/${iso(DAY0 + DAY)}/`);
+  is("the record is written into the backup account as received", [kept.length, JSON.stringify((files.json(kept[0] ?? "") as { records?: unknown })?.records)], [1, JSON.stringify([{ source: "blob", key: gone.key, recordedAt, reason: "creator_deleted" }])]);
+  const goneName = await copyName("blob", S, gone.key, gone.etag, gone.bytes.byteLength);
+  report = await runAt(30);
+  is("29 days after: still copied, nothing deleted", [files.objects.has(goneName), deletesIn(files).length], [true, 0]);
+  const added = objects("blob", S, 1, 16, 1, 50);
+  setListing("blob", S, [...ten.slice(1), ...added]);
+  const before = files.log.length;
+  report = await runAt(31);
+  const log = files.log.slice(before);
+  const firstCopy = log.findIndex((line) => line.startsWith("put copies/"));
+  const lastDelete = log.map((line) => line.startsWith("delete ")).lastIndexOf(true);
+  is("30 days after: deleted", [files.objects.has(goneName), deletesIn(files).length], [false, 1]);
+  is("in the run, the deletion comes before the copy", [lastDelete >= 0, firstCopy > lastDelete], [true, true]);
+  is("the alarm hook never receives an object's name", world.calls.filter((c) => c.url === ALARM).every((c) => !(c.body ?? "").includes("stores/") && !(c.body ?? "").includes(".bin")), true);
+
+  part("cumulative records: more than 20% of a source in 30 days holds; the hold ends at 90 days");
+  fresh();
+  const hundred = objects("blob", S, 100);
+  setListing("blob", S, hundred);
+  await runAt(0);
+  const at1 = DAY0 + DAY + 1_800_000;
+  const at2 = DAY0 + 2 * DAY + 1_800_000;
+  world.records = hundred.slice(0, 15).map((o) => ({ source: "blob", key: o.key, recordedAt: at1, reason: "creator_deleted" as const }));
+  setListing("blob", S, hundred.slice(15));
+  report = await runAt(1);
+  is("15% on the first day passes", [has(report, "records_share"), has(report, "records_share_source")], [false, false]);
+  world.records = hundred.slice(15, 30).map((o) => ({ source: "blob", key: o.key, recordedAt: at2, reason: "store_closed" as const }));
+  setListing("blob", S, hundred.slice(30));
+  report = await runAt(2);
+  is("15% more the next day: 30% in 30 days, held and alarmed on the second day", [has(report, "records_share"), has(report, "records_share_source")], [true, true]);
+  world.listingFault.set(listingKey("blob", S), { status: 503 });
+  report = await runAt(31);
+  const held = report.alarms.find((a) => a.code === "deletions_held");
+  is("a due record while the listing fails: held, with the date it will be applied anyway", [deletesIn(files).length, held?.count, held?.on], [0, 15, iso(at1 + BACKUP_FILES_HOLD_MAX_DAYS * DAY)]);
+  report = await runAt(60);
+  is("still held, and alarmed, every day of the hold", [deletesIn(files).length, report.alarms.find((a) => a.code === "deletions_held")?.count], [0, 30]);
+  is("each day of the hold, the alarm gives the date the first held record will be applied anyway", report.alarms.find((a) => a.code === "deletions_held")?.on, iso(at1 + BACKUP_FILES_HOLD_MAX_DAYS * DAY));
+  report = await runAt(91);
+  is("90 days after the record: applied even while the guard holds", [deletesIn(files).length, copies().length], [15, 85]);
+  report = await runAt(92);
+  is("and the next day's, on their own 90th day", [deletesIn(files).length, copies().length], [30, 70]);
+
+  part("a changed etag is a new object; the earlier version stays 30 days");
+  fresh();
+  const base = objects("blob", S, 10);
+  setListing("blob", S, base);
+  await runAt(0);
+  const changed = { ...objects("blob", S, 1, 16, 2)[0] };
+  setListing("blob", S, [changed, ...base.slice(1)]);
+  await runAt(1);
+  const oldName = await copyName("blob", S, base[0].key, base[0].etag, 16);
+  const newName = await copyName("blob", S, changed.key, changed.etag, 16);
+  is("both versions are in the copy, each with its own bytes", [oldName !== newName, bytesEqual(files.objects.get(oldName)?.bytes, base[0].bytes), bytesEqual(files.objects.get(newName)?.bytes, changed.bytes)], [true, true, true]);
+  await runAt(30);
+  is("29 days after it was superseded: kept", files.objects.has(oldName), true);
+  await runAt(31);
+  is("30 days after: the earlier version is pruned, the current one stays", [files.objects.has(oldName), files.objects.has(newName)], [false, true]);
+
+  part("etags of more than 20% of a store changed in 30 days hold the pruning, until 90 days");
+  fresh();
+  const store10 = objects("blob", S, 10);
+  setListing("blob", S, store10);
+  await runAt(0);
+  const gen2 = objects("blob", S, 3, 16, 2);
+  setListing("blob", S, [...gen2, ...store10.slice(3)]);
+  report = await runAt(1);
+  is("3 of 10 changed in a day: alarmed", has(report, "etag_mass_change"), true);
+  const gen3 = objects("blob", S, 3, 16, 3, 3);
+  setListing("blob", S, [...gen2, ...gen3, ...store10.slice(6)]);
+  await runAt(25);
+  report = await runAt(31);
+  const heldVersions = report.alarms.find((a) => a.code === "versions_held");
+  const firstOld = await copyName("blob", S, store10[0].key, store10[0].etag, 16);
+  is("day 31: the first day's earlier versions are held, with the date of their automatic end", [files.objects.has(firstOld), heldVersions?.count, heldVersions?.on], [true, 3, iso(DAY0 + DAY + 3_600_000 + BACKUP_FILES_HOLD_MAX_DAYS * DAY)]);
+  await runAt(91);
+  is("and deleted 90 days after they were superseded", files.objects.has(firstOld), false);
+
+  part("a store's copy never passes 5R, nor 4R copied in 32 days; nothing is deleted for room");
+  fresh([{ store: S, roomBytes: 100 }]);
+  setListing("blob", S, [...objects("blob", S, 1, 300), ...objects("blob", S, 1, 300, 1, 1)]);
+  report = await runAt(0);
+  is("300 + 300 bytes against 5 × 100: the second is refused, files_room, nothing deleted", [copies().length, has(report, "files_room"), deletesIn(files).length, report.heartbeat], [1, true, 0, false]);
+  fresh([{ store: S, roomBytes: 100 }]);
+  setListing("blob", S, [...objects("blob", S, 1, 300), ...objects("blob", S, 1, 150, 1, 1)]);
+  report = await runAt(0);
+  is("300 + 150 bytes copied in 32 days against 4 × 100: the second waits", [copies().length, has(report, "files_copy_ceiling"), has(report, "files_room")], [1, true, false]);
+
+  part("every source read counts against the 4R before it is made, whatever the copy's outcome (Codex H2 M1 on #3340)");
+  const chargedNow = (): number => {
+    const saved = files.json(`state/stores/${S}.json`) as { read?: { bytes: number }[] } | null;
+    return Array.isArray(saved?.read) ? saved.read.reduce((n, d) => n + d.bytes, 0) : -1;
+  };
+  const rangeBytes = (range: string | null) => {
+    const m = range ? /^bytes=(\d+)-(\d+)$/.exec(range) : null;
+    return m ? Number(m[2]) - Number(m[1]) + 1 : 0;
+  };
+  const originBytes = () => world.calls.filter((c) => c.url.startsWith("https://src.test/")).reduce((n, c) => n + rangeBytes(c.range), 0);
+  const chargedAtRead: [number, number][] = [];
+  const watched = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (href.startsWith("https://src.test/")) chargedAtRead.push([chargedNow(), originBytes() + rangeBytes(new Headers(init?.headers).get("range"))]);
+    return fakeFetch(input, init);
+  };
+  const R = 1_000_000;
+  fresh([{ store: S, roomBytes: R }]);
+  setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
+  files.putFault = (key) => (key.startsWith("copies/") ? "null" : undefined);
+  for (let hour = 1; hour <= 5; hour++) report = await runAt(0, hour, { fetch: watched });
+  is("five hourly runs whose copy write is refused read the source at most 4R, and the fifth is refused files_copy_ceiling", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, has(report, "files_copy_ceiling"), copies().length], [true, true, 0]);
+  is("each read was charged and saved in the store's state before it was made", chargedAtRead.length > 0 && chargedAtRead.every(([charged, upTo]) => charged >= upTo), true);
+  is("the refused reads stay counted (unknown is never zero): 4R charged, 0 copied", [chargedNow(), (files.json(`state/stores/${S}.json`) as { copied?: unknown[] } | null)?.copied?.length], [BACKUP_FILES_COPY_TIMES * R, 0]);
+  files.putFault = () => undefined;
+  report = await runAt(1, 1, { fetch: watched });
+  is("the next day, inside the same 32 days, the ceiling still holds: no read, nothing copied", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, copies().length, has(report, "files_copy_ceiling")], [true, 0, true]);
+  // Claude 1's MEDIUM at 58d23815ca (adopted by Claude 3, nuvem E): small objects whose copy write is refused were read,
+  // charged and put again every hour, and the 10,000-objects-in-30-days ceiling counted only confirmed copies. Now every
+  // read (charged before it is made) counts toward it.
+  {
+    fresh([{ store: S, roomBytes: R }]);
+    setListing("blob", S, [0, 1, 2].map((i) => ({ key: `stores/${S}/small${i}.bin`, etag: `"small${i}"`, bytes: big(10, 20 + i) })));
+    files.putFault = (key) => (key.startsWith("copies/") ? "null" : undefined);
+    for (let hour = 1; hour <= 3; hour++) report = await runAt(0, hour, { fetch: watched });
+    files.putFault = () => undefined;
+    // The store has already read the month's object ceiling (attempts, not only copies): no further read.
+    const key = `state/stores/${S}.json`;
+    const state = files.json(key) as { read: { day: number; objects: number; bytes: number }[] };
+    state.read = state.read.map((d) => ({ ...d, objects: BACKUP_FILES_OBJECTS_PER_MONTH }));
+    await files.put(key, JSON.stringify(state));
+    const readsAtCeiling = world.calls.filter((c) => c.url.startsWith("https://src.test/")).length;
+    report = await runAt(1, 1, { fetch: watched });
+    is("attempts count toward the object ceiling: refused files_objects_ceiling, nothing read", [has(report, "files_objects_ceiling"), world.calls.filter((c) => c.url.startsWith("https://src.test/")).length - readsAtCeiling], [true, 0]);
+  }
+  fresh([{ store: S, roomBytes: R }]);
+  setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
+  report = await runAt(0, 1, { fetch: watched });
+  is("healthy control: one read of R, charged R, copied once", [originBytes(), chargedNow(), copies().length, report.heartbeat], [R, R, 1, true]);
+  const two = 2 * BACKUP_FILES_PART_BYTES + 1_000_000;
+  fresh([{ store: S, roomBytes: two / 2 }]);
+  chargedAtRead.length = 0;
+  setListing("blob", S, [{ key: `stores/${S}/twice.mp4`, etag: '"t1"', bytes: big(two, 5) }]);
+  files.partFault = (n) => (n === 2 ? null : undefined);
+  for (let hour = 1; hour <= 10; hour++) report = await runAt(0, hour, { fetch: watched });
+  is("a large file whose second part keeps failing: its parts' reads stay within 4R across runs, then files_copy_ceiling", [originBytes() <= BACKUP_FILES_COPY_TIMES * (two / 2), has(report, "files_copy_ceiling"), copies().length], [true, true, 0]);
+  is("and every part read was charged and saved before it was made", chargedAtRead.length > 0 && chargedAtRead.every(([charged, upTo]) => charged >= upTo), true);
+  files.partFault = () => undefined;
+
+  part("a large file is copied in parts that resume across runs, state saved after each part");
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  const video = { key: `stores/${S}/lesson.mp4`, etag: '"v1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000_000, 7) };
+  setListing("blob", S, [video]);
+  world.tickPerRead = 700_000;
+  report = await runAt(0, 1, { maxMs: 600_000 });
+  const stateAfterOne = files.json(`state/stores/${S}.json`) as { sources?: { blob?: { upload?: { next?: number; parts?: unknown[] } } } } | null;
+  is("the first run stops at a part boundary with one part saved", [report.stoppedBy, stateAfterOne?.sources?.blob?.upload?.next, stateAfterOne?.sources?.blob?.upload?.parts?.length, report.heartbeat], ["time", BACKUP_FILES_PART_BYTES, 1, false]);
+  report = await runAt(0, 2, { maxMs: 600_000 });
+  report = await runAt(0, 3, { maxMs: 600_000 });
+  const videoName = await copyName("blob", S, video.key, video.etag, video.bytes.byteLength);
+  is("the next runs ask the route again for a fresh URL (inside the 10 pages a store-source a day) and go on from the next part", [world.calls.filter((c) => c.url.startsWith(`${ROUTE}?source=blob`)).length, files.log.filter((l) => l.startsWith("mpu-part")).length, files.log.filter((l) => l.startsWith("mpu-create")).length], [3, 3, 1]);
+  is("the whole file, byte for byte, then the heartbeat", [bytesEqual(files.objects.get(videoName)?.bytes, video.bytes), report.finished, report.heartbeat], [true, true, true]);
+  is("each part is read with an exact Range", world.calls.filter((c) => c.url.startsWith("https://src.test/")).map((c) => c.range), [`bytes=0-${BACKUP_FILES_PART_BYTES - 1}`, `bytes=${BACKUP_FILES_PART_BYTES}-${2 * BACKUP_FILES_PART_BYTES - 1}`, `bytes=${2 * BACKUP_FILES_PART_BYTES}-${video.bytes.byteLength - 1}`]);
+
+  part("a multipart upload that cannot be started is charged as an attempt, and tried once a day (Claude 5's HIGH on #3340)");
+  fresh([{ store: S, roomBytes: 1_000_000_000 }]);
+  const larges = [0, 1, 2].map((i) => ({ key: `stores/${S}/large-${i}.bin`, etag: `"l${i}"`, bytes: big(BACKUP_FILES_PART_BYTES + 1, i) }));
+  setListing("blob", S, larges);
+  files.createFault = () => true;
+  for (let hour = 1; hour <= 10; hour++) report = await runAt(0, hour);
+  const creates = files.log.filter((l) => l.startsWith("mpu-create")).length;
+  const readState = files.json(`state/stores/${S}.json`) as { read?: { objects?: number }[] } | null;
+  is("each object's start is tried once in the day, never again on each run", creates, 3);
+  is("each attempt is charged to the store's objects before it is made", (readState?.read ?? []).reduce((n, d) => n + (d.objects ?? 0), 0) >= 3, true);
+  is("and alarmed, never taken as copied", [has(report, "copy_unverified"), copies().length], [true, 0]);
+  files.createFault = () => false;
+
+  part("a part's charge rides on the save after the part before: one state write a part (Claude 5's MEDIUM 2 on #3340)");
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  const threeParts = { key: `stores/${S}/three.mp4`, etag: '"t1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000, 3) };
+  setListing("blob", S, [threeParts]);
+  report = await runAt(0);
+  const stateKey = `put state/stores/${S}.json`;
+  const createAt = files.log.findIndex((l) => l.startsWith("mpu-create"));
+  const completeAt = files.log.findIndex((l) => l.startsWith("mpu-complete"));
+  const between = files.log.slice(createAt, completeAt).filter((l) => l === stateKey).length;
+  const nextOther = files.log.findIndex((l, i) => i > completeAt && l !== stateKey);
+  const after = files.log.slice(completeAt + 1, nextOther < 0 ? undefined : nextOther).filter((l) => l === stateKey).length;
+  is("copied whole", [report.finished, bytesEqual(files.objects.get(await copyName("blob", S, threeParts.key, threeParts.etag, threeParts.bytes.byteLength))?.bytes, threeParts.bytes)], [true, true]);
+  is("from the start of the upload to its end, one state write a part", between, 3);
+  is("and one after it is complete", after, 1);
+  is("no state write before the start: the first part's charge is saved with the upload", files.log.slice(0, createAt).filter((l) => l === stateKey).length <= 1, true);
+
+  part("a part read in a run cut before its save is charged again in the next run, never read uncharged (Claude 3's MEDIUM on #3340)");
+  {
+    fresh([{ store: S, roomBytes: 100_000_000 }]);
+    const cut = { key: `stores/${S}/cut.mp4`, etag: '"c1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000, 5) };
+    setListing("blob", S, [cut]);
+    // The store's state write fails once each time part 2 has just gone in: the run stops before the part is saved.
+    const stateKey = `state/stores/${S}.json`;
+    let armed = false;
+    const partFault = files.partFault;
+    files.partFault = (n) => {
+      if (n === 2) armed = true;
+      return partFault(n);
+    };
+    files.putFault = (key) => {
+      if (key === stateKey && armed) {
+        armed = false;
+        return "throw";
+      }
+      return undefined;
+    };
+    for (let hour = 1; hour <= 6; hour++) report = await runAt(0, hour);
+    files.putFault = () => undefined;
+    files.partFault = partFault;
+    const read = world.calls
+      .filter((c) => c.url.startsWith("https://src.test/") && c.range)
+      .reduce((n, c) => {
+        const m = /bytes=(\d+)-(\d+)/.exec(c.range ?? "");
+        return n + (m ? Number(m[2]) - Number(m[1]) + 1 : 0);
+      }, 0);
+    const state = files.json(stateKey) as { read?: { bytes?: number }[] } | null;
+    const charged = (state?.read ?? []).reduce((n, d) => n + (d.bytes ?? 0), 0);
+    is("every byte read from the source was charged before it was read", charged >= read, true);
+  }
+
+  part("a listing cut short by the run's budget while deleting is not listed again the same day (Claude 5's MEDIUM 3 on #3340)");
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  const many = objects("blob", S, 1000);
+  setListing("blob", S, many);
+  report = await runAt(0, 0);
+  for (let hour = 1; hour < 24 && !report.finished; hour++) report = await runAt(0, hour);
+  world.records = many.slice(0, 200).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 1_800_000, reason: "creator_deleted" as const }));
+  setListing("blob", S, many.slice(200));
+  report = await runAt(1, 0);
+  for (let hour = 1; hour < 24 && !report.finished; hour++) report = await runAt(1, hour);
+  world.calls = [];
+  for (let hour = 1; hour <= 24; hour++) report = await runAt(32, hour, { maxSubrequests: 30 });
+  const pagesAsked = world.calls.filter((c) => c.url.startsWith(`${ROUTE}?source=blob`)).length;
+  is("at most the 10 pages a store-source a day", pagesAsked <= 10, true);
+
+  part("a store's R past the dearest plan's is refused (Claude 5's LOW 4 on #3340)");
+  const roomPage = (roomBytes: number) => JSON.stringify({ version: 1, kind: "stores", stores: [{ store: S, roomBytes }], cursor: null, complete: true, reason: "done" });
+  const refusedRoom = (roomBytes: number) => {
+    try {
+      parseStoresPage(roomPage(roomBytes));
+      return false;
+    } catch (error) {
+      return error instanceof BackupFilesContractError;
+    }
+  };
+  is("Scale's R reads", refusedRoom(BACKUP_FILES_ROOM_MOST), false);
+  is("one byte more is refused", refusedRoom(BACKUP_FILES_ROOM_MOST + 1), true);
+  is("the bound is the dearest plan's R, from the plans' own constants", BACKUP_FILES_ROOM_MOST, Math.max(...(["creator", "pro", "scale"] as const).map((t) => PAID_STORAGE_BYTES[t] + TASK_ROOM_BYTES[t] + COMMUNITY_PICTURES[t] * PICTURE_BYTES)));
+
+  part("an origin that ignores Range, sends no ETag or changes mid-copy is never taken as copied");
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  setListing("blob", S, [video, ...objects("blob", S, 1, 64)]);
+  world.rangeIgnored = true;
+  report = await runAt(0);
+  is("a large file answered whole to a Range: refused, the upload aborted, alarm", [has(report, "range_unsupported"), files.log.some((l) => l.startsWith("mpu-abort")), files.objects.has(videoName), report.heartbeat], [true, true, false, false]);
+  is("a small file answered whole is the whole object: copied", copies().length, 1);
+  fresh();
+  world.noEtag = true;
+  setListing("blob", S, objects("blob", S, 1, 64));
+  report = await runAt(0);
+  is("no ETag on the read: the version is unconfirmed, nothing written", [has(report, "etag_unconfirmed"), copies().length], [true, 0]);
+  fresh();
+  world.etagHeader = '"e9-0"';
+  setListing("blob", S, objects("blob", S, 1, 64));
+  report = await runAt(0);
+  is("bytes read under another ETag than the listing's: a newer version, never written under the old one's name", [copies().length, report.finished, report.heartbeat], [0, false, false]);
+  world.etagHeader = 'W/"e1-0"';
+  report = await runAt(0, 2);
+  is("a weak ETag does not confirm the bytes", [has(report, "etag_unconfirmed"), copies().length], [true, 0]);
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  setListing("blob", S, [video]);
+  world.tickPerRead = 700_000;
+  await runAt(0, 1, { maxMs: 600_000 });
+  setListing("blob", S, [{ ...video, etag: '"v2"', bytes: big(video.bytes.byteLength, 9) }]);
+  await runAt(0, 2, { maxMs: 600_000 });
+  is("a source changed between parts: the upload is aborted, never completed with mixed bytes", [files.log.some((l) => l.startsWith("mpu-abort")), files.log.some((l) => l.startsWith("mpu-complete")), files.objects.has(videoName)], [true, false, false]);
+
+  part("every reply of the bucket is read exactly (rule 24)");
+  fresh();
+  setListing("blob", S, objects("blob", S, 2, 32));
+  files.putFault = (key) => (key.startsWith("copies/") ? "null" : undefined);
+  report = await runAt(0);
+  is("a put answered null: not copied, alarm, no heartbeat", [has(report, "copy_unverified"), report.heartbeat], [true, false]);
+  files.putFault = (key) => (key.startsWith("copies/") ? "short" : undefined);
+  report = await runAt(1);
+  is("a put answered with another size: not copied", [has(report, "copy_unverified"), report.heartbeat], [true, false]);
+  files.putFault = () => undefined;
+  report = await runAt(2);
+  is("then, answered exactly: copied, finished, heartbeat", [copies().length >= 2, report.finished, report.heartbeat], [true, true, true]);
+  fresh([{ store: S, roomBytes: 100_000_000 }]);
+  setListing("blob", S, [video]);
+  files.partFault = () => ({ partNumber: 99, etag: "x" });
+  report = await runAt(0);
+  is("a part answered with another number: aborted, not copied", [has(report, "copy_unverified"), files.log.some((l) => l.startsWith("mpu-abort")), files.objects.has(videoName)], [true, true, false]);
+  fresh();
+  files.objects.set("state/worker.json", { bytes: new TextEncoder().encode('{"version":2}') });
+  report = await runAt(0);
+  is("a state that does not read exactly: nothing called, nothing deleted, alarm, no heartbeat", [world.calls.filter((c) => c.url.startsWith(ROUTE)).length, deletesIn(files).length, has(report, "state_unreadable"), report.heartbeat], [0, 0, true, false]);
+  fresh();
+  files.getFault = (key) => (key === "state/worker.json" ? { size: 3 } : undefined);
+  report = await runAt(0);
+  is("a get that answers neither null nor an object: unreadable, not fresh", [has(report, "state_unreadable"), world.calls.filter((c) => c.url.startsWith(ROUTE)).length], [true, 0]);
+
+  part("deletion failures, the route's refusals and the heartbeat's answer");
+  fresh();
+  const pair = objects("blob", S, 10);
+  setListing("blob", S, pair);
+  await runAt(0);
+  world.records = [{ source: "blob", key: pair[0].key, recordedAt: DAY0 + DAY, reason: "privacy_request" }];
+  setListing("blob", S, pair.slice(1));
+  await runAt(1);
+  files.deleteFault = () => true;
+  report = await runAt(31);
+  const lockedName = await copyName("blob", S, pair[0].key, pair[0].etag, 16);
+  is("a delete that throws (a locked object) is never taken as done", [has(report, "delete_failed"), files.objects.has(lockedName)], [true, true]);
+  files.deleteFault = () => false;
+  report = await runAt(32);
+  is("and is applied the next day", files.objects.has(lockedName), false);
+  fresh();
+  setListing("blob", S, objects("blob", S, 2));
+  report = await runAt(0, 1, {}, { BACKUP_FILES_ROUTE_SECRET: "another-secret-synthetic-0123456789abcd" });
+  is("a route that answers 404 (off, or another secret): no records, no stores, nothing listed or deleted", [has(report, "deletions_unavailable"), has(report, "stores_unavailable"), copies().length, report.heartbeat], [true, true, 0, false]);
+  fresh();
+  world.storesStatus = 503;
+  report = await runAt(0);
+  is("the stores page not built yet (503): alarm, nothing listed", [has(report, "stores_unavailable"), world.calls.some((c) => c.url.includes("source=")), report.heartbeat], [true, false, false]);
+  fresh();
+  setListing("blob", S, objects("blob", S, 2));
+  world.beatStatus = 500;
+  report = await runAt(0);
+  is("a heartbeat not answered 200: alarm, never counted as sent", [has(report, "heartbeat_failed"), report.heartbeat], [true, false]);
+  fresh();
+  world.storesStatus = 503;
+  await runAt(0);
+  await runAt(0, 2);
+  is("an alarm goes to the hook once a day, not every run", world.calls.filter((c) => c.url === ALARM).length, 1);
+
+  part("the route's day ceiling: the source is not asked again until the next UTC day (Codex N1's LOW 1 on #3313)");
+  {
+    const U = "00112233445566778899aabbccddeeff";
+    fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }, { store: U, roomBytes: 100_000_000 }]);
+    for (const store of [S, T, U]) setListing("blob", store, objects("blob", store, 2));
+    world.listingFault.set(listingKey("blob", S), { status: 429, error: "day_ceiling" });
+    const asked = (store: string) => world.calls.filter((c) => c.url.includes("source=blob") && c.url.includes(`store=${store}`)).length;
+    report = await runAt(0);
+    is("one refused call for the source that day, the first store's", [asked(S), asked(T), asked(U)], [1, 0, 0]);
+    is("alarmed as the day's ceiling", has(report, "files_day_ceiling"), true);
+    is("nothing of the source copied that day, nothing claimed done", [copies(S).length, copies(T).length, copies(U).length], [0, 0, 0]);
+    report = await runAt(0, 2);
+    is("a later run the same day asks the source nothing more", [asked(S), asked(T), asked(U)], [1, 0, 0]);
+    world.listingFault.delete(listingKey("blob", S));
+    report = await runAt(1);
+    is("the next UTC day every store of the source is listed and copied", [copies(S).length, copies(T).length, copies(U).length], [2, 2, 2]);
+  }
+
+  part("signed URL refresh shares the source's daily stop with the initial listing");
+  {
+    const twoStores = [{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }];
+    const calls = () => world.calls.filter((c) => c.url.includes("source=blob")).map((c) => new URL(c.url).searchParams.get("store"));
+    const shortSignedUrls = () => {
+      fresh(twoStores);
+      for (const store of [S, T]) setListing("blob", store, objects("blob", store, 2));
+      world.signedForMs = 30_000;
+    };
+
+    shortSignedUrls();
+    world.listingFault.set(listingKey("blob", T), { status: 429, error: "day_ceiling" });
+    report = await runAt(0);
+    is("a later store's day ceiling prevents a refresh for an earlier listed store", calls(), [S, T]);
+    await runAt(0, 2);
+    is("the stop survives another run on the same UTC day", calls(), [S, T]);
+    is("no copy needed a signing request after the refusal", [copies(S).length, copies(T).length], [0, 0]);
+
+    shortSignedUrls();
+    const fetchWithCeiling: typeof fakeFetch = async (input, init) => {
+      const reply = await fakeFetch(input, init);
+      if (reply.status === 200 && String(input).includes(`source=blob&store=${S}`)) {
+        world.listingFault.set(listingKey("blob", S), { status: 429, error: "day_ceiling" });
+      }
+      return reply;
+    };
+    report = await runAt(0, 1, { fetch: fetchWithCeiling });
+    is("only one refresh reaches the route when that refresh first reports the day ceiling", calls(), [S, T, S]);
+    is("the refresh refusal reports the source's day ceiling", has(report, "files_day_ceiling"), true);
+    await runAt(0, 2);
+    is("the refresh refusal is remembered on the next run", calls(), [S, T, S]);
+    world.listingFault.clear();
+    world.signedForMs = 900_000;
+    await runAt(1);
+    is("the next day restores normal copies for both stores", [copies(S).length, copies(T).length], [2, 2]);
+  }
+
+  part("a run keeps inside its subrequest budget and goes on in the next run");
+  fresh([{ store: S, roomBytes: 100_000_000 }, { store: T, roomBytes: 100_000_000 }]);
+  setListing("blob", S, objects("blob", S, 40));
+  setListing("blob", T, objects("blob", T, 40));
+  report = await runAt(0, 1, { maxSubrequests: 60 });
+  const used = world.calls.length + files.log.length + videos.log.length;
+  is("stopped by its budget, and every call and bucket operation counted inside it", [report.stoppedBy, used <= 60, report.subrequests === used], ["subrequests", true, true]);
+  for (let hour = 2; hour < 12 && !report.finished; hour++) report = await runAt(0, hour, { maxSubrequests: 60 });
+  is("the following runs finish the day", [report.finished, copies(S).length, copies(T).length], [true, 40, 40]);
+
+  part("deletion records are read once: each day resumes where the last read ended");
+  fresh();
+  const six = objects("blob", S, 6);
+  setListing("blob", S, six);
+  await runAt(0);
+  world.records = [{ source: "blob", key: six[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" }];
+  setListing("blob", S, six.slice(1));
+  report = await runAt(1);
+  is("a file missing with its deletion record inside its 30 days is expected: no orphan, no alarm, the heartbeat", [codes(report), report.heartbeat], [[], true]);
+  const asks = () => world.calls.filter((c) => c.url.includes("page=deletions")).map((c) => new URL(c.url).searchParams.get("cursor"));
+  world.calls = [];
+  report = await runAt(2);
+  is("the next day asks from the point the last read ended", asks(), ["r1"]);
+  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), report.heartbeat], [0, false, true]);
+
+  part("a resume point the site no longer keeps: alarm, then read again from the oldest kept");
+  world.recordsKeptFrom = 5;
+  report = await runAt(3);
+  is("409: alarmed as deletions_expired, nothing deleted, no heartbeat", [has(report, "deletions_expired"), report.heartbeat, deletesIn(files).length], [true, false, 0]);
+  world.calls = [];
+  await runAt(3, 2);
+  is("the next run asks from the start", asks(), [null]);
+  await runAt(4);
+  is("and the next day resumes from where that read ended", asks(), [null, "r5"]);
+
+  part("a record named twice by the site is counted once");
+  fresh();
+  const namedTwiceObjects = objects("blob", S, 100);
+  setListing("blob", S, namedTwiceObjects);
+  await runAt(0);
+  const twice = namedTwiceObjects.slice(0, 15).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" as const }));
+  world.records = [...twice, ...twice];
+  setListing("blob", S, namedTwiceObjects.slice(15));
+  report = await runAt(1);
+  is("15 objects, 15%: under the 20% guard of the store and of the source", [has(report, "records_share"), has(report, "records_share_source")], [false, false]);
+
+  part("a store named on two pages of the stores list is read once, at its larger room");
+  fresh();
+  world.storePages = [[{ store: S, roomBytes: 10_000_000 }], [{ store: T, roomBytes: 10_000_000 }, { store: S, roomBytes: 20_000_000 }]];
+  setListing("blob", S, objects("blob", S, 2));
+  setListing("blob", T, objects("blob", T, 2));
+  report = await runAt(0);
+  is("the stores are read, both copied", [has(report, "stores_unavailable"), copies(S).length, copies(T).length], [false, 2, 2]);
+  is("at the larger of its two rooms, never the smaller", (files.json(`state/stores/${S}.json`) as { roomBytes?: number } | null)?.roomBytes, 20_000_000);
+
+  part("two sources of one store, and the videos' own bucket");
+  fresh();
+  setListing("blob", S, objects("blob", S, 2));
+  setListing("r2", S, objects("r2", S, 3));
+  report = await runAt(0, 1, { sources: ["blob", "r2"] });
+  is("each source copied under its own folder", [copies(S, "blob").length, copies(S, "r2").length, report.heartbeat], [2, 3, true]);
+  is("a store's file is never put in the videos' bucket", videos.under("copies/").length, 0);
+
+  part("the records written into the backup bucket go after their 92 days (Claude 2, MEDIUM 3 on #3349)");
+  fresh();
+  const keep10 = objects("blob", S, 10);
+  setListing("blob", S, keep10);
+  await runAt(0);
+  world.records = [{ source: "blob", key: keep10[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "privacy_request" }];
+  setListing("blob", S, keep10.slice(1));
+  await runAt(1);
+  const recordFiles = () => files.under(`deletions/${iso(DAY0 + DAY)}/`);
+  is("the day's records are written as received", recordFiles().length, 1);
+  report = await runAt(1 + 91);
+  is("91 days after: the record applied, its file still kept", [recordFiles().length, has(report, "delete_failed")], [1, false]);
+  files.deleteFault = (key) => key.startsWith("deletions/");
+  report = await runAt(1 + 92);
+  is("92 days after, a delete that fails: alarmed, the file kept for the next day, no heartbeat", [recordFiles().length, has(report, "delete_failed"), report.heartbeat], [1, true, false]);
+  files.deleteFault = () => false;
+  report = await runAt(1 + 93);
+  is("the next day it goes, and nothing else of that day is left under deletions/", [recordFiles().length, files.under("deletions/").length, has(report, "delete_failed")], [0, 0, false]);
+  const asked = files.log.length;
+  report = await runAt(1 + 94);
+  is("and that day is not asked again", [files.log.slice(asked).some((l) => l.startsWith(`delete deletions/${iso(DAY0 + DAY)}/`)), has(report, "delete_failed")], [false, false]);
+
+  part("a day of mass deletions is read in linear time (Claude 2, MEDIUM 4 on #3349)");
+  fresh();
+  setListing("blob", S, objects("blob", S, 2));
+  await runAt(0);
+  const massive = objects("blob", S, 60_000, 1, 1, 10).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "store_closed" as const }));
+  world.records = [...massive, ...massive.slice(0, 1000)];
+  const startedAt = performance.now();
+  report = await runAt(1);
+  const tookMs = performance.now() - startedAt;
+  const inbox = (files.json(`state/stores/${S}.json`) as { sources?: { blob?: { pending?: unknown[] } } } | null)?.sources?.blob?.pending?.length;
+  is("61 pages of 1,000 records, 1,000 named twice: 60,000 pending, each once", inbox, 60_000);
+  is(`in well under the Worker's CPU limit (took ${Math.round(tookMs)} ms; a scan of the inbox for each record takes many seconds)`, tookMs < 6_000, true);
+
+  // Claude 3's second review of #3340 (HIGH 1): a live object's copy is never deleted as a version it once was.
+  part("an etag that comes back (A, then B, then A): the live A's copy is never pruned as the old version A");
+  fresh();
+  const twenty = objects("blob", S, 20);
+  setListing("blob", S, twenty);
+  await runAt(0);
+  const genB = objects("blob", S, 1, 16, 2)[0];
+  setListing("blob", S, [genB, ...twenty.slice(1)]);
+  await runAt(1);
+  setListing("blob", S, twenty);
+  await runAt(2);
+  const nameA = await copyName("blob", S, twenty[0].key, twenty[0].etag, 16);
+  is("control: day 2, the copy of A is in the bucket", files.objects.has(nameA), true);
+  for (const day of [31, 32, 33]) await runAt(day);
+  is("day 33: the live A's copy is still in the bucket", bytesEqual(files.objects.get(nameA)?.bytes, twenty[0].bytes), true);
+
+  // Claude 3's second review of #3340 (HIGH 2): the site's clock alone never skips the holds.
+  part("records dated long before they arrive are held and counted from their arrival, never deleted the day they arrive");
+  fresh();
+  const tenOld = objects("blob", S, 10);
+  setListing("blob", S, tenOld);
+  await runAt(0);
+  world.records = tenOld.map((o) => ({ source: "blob", key: o.key, recordedAt: DAY0 - 100 * DAY, reason: "creator_deleted" as const }));
+  setListing("blob", S, []);
+  report = await runAt(1);
+  is("control: the report raises records_share", has(report, "records_share"), true);
+  is("no copy deleted on the day they arrive", [deletesIn(files).length, copies().length], [0, 10]);
+
+  // Claude 3's second review of #3340 (MEDIUM): a record received and archived is never lost with the Worker's state.
+  part("a deletion record archived on a day whose state could not be saved is still applied");
+  fresh();
+  const pairPrivacy = objects("blob", S, 2);
+  setListing("blob", S, pairPrivacy);
+  await runAt(0);
+  const privacyName = await copyName("blob", S, pairPrivacy[0].key, pairPrivacy[0].etag, 16);
+  world.records = [{ source: "blob", key: pairPrivacy[0].key, recordedAt: DAY0 + DAY, reason: "privacy_request" }];
+  world.storesStatus = 503;
+  files.putFault = (key) => (key === "state/worker.json" ? "throw" : undefined);
+  await runAt(1);
+  files.putFault = () => undefined;
+  world.storesStatus = 200;
+  is("control: the record was archived in deletions/", files.under(`deletions/${iso(DAY0 + DAY)}/`).length, 1);
+  setListing("blob", S, pairPrivacy.slice(1));
+  for (const day of [2, 31, 32, 35]) await runAt(day);
+  is("day 35: the erasure was applied, the copy is gone", files.objects.has(privacyName), false);
+  await runAt(1 + 92);
+  is("when its retention ends, the original day's archive replayed from the journal is removed",
+    files.under(`deletions/${iso(DAY0 + DAY)}/`).length, 0);
+
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

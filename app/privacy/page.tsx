@@ -29,7 +29,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 13, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -75,7 +75,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you type for the bottom of your emails goes in those
+          emails only; it is shown on your store&apos;s public policies page too only
+          if you check the box for that where you type it, and comes off the
+          page as soon as you uncheck it and save.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When
@@ -311,10 +315,15 @@ export default function PrivacyPage() {
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
           behalf and under its own privacy policy. A visitor who did not allow
-          ad measurement is never sent. We keep the token sealed; for four days,
-          the request that opened a checkout; for 400 days, the cookies and ad
+          ad measurement is never sent, and neither is a purchase, payment or
+          sign-up of somebody deleted from the store, unless it was already
+          being sent when they were deleted. We keep the token sealed; for
+          four days at the most, the request that opened a checkout, deleted
+          once its purchase is known; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
-          address or browser; for three days (40 for a membership payment) that
+          address or browser, deleted with the buyer when they are deleted
+          from the store;
+          for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.
         </p>
@@ -425,7 +434,11 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}
@@ -940,7 +953,8 @@ export default function PrivacyPage() {
           saying what moved and how to open it. We send it on the
           creator&apos;s instruction and on their word that these people
           bought from them and may be told so, which we cannot check against
-          the other platform. A store may send up to 20,000 of these in 30
+          the other platform. Nobody who left that creator&apos;s list is
+          written to. A store may send up to 20,000 of these in 30
           days, and for that we keep only a count.
         </p>
         <p id="moved-members">
@@ -962,7 +976,12 @@ export default function PrivacyPage() {
           the membership, so somebody who kept it is not written to. We send
           these on the creator&apos;s instruction and on their word that these
           people are their members, which we cannot check against the other
-          platform; they count within the same 20,000 in 30 days. Keeping the
+          platform; they count within the same 20,000 in 30 days. Nobody who
+          left that creator&apos;s list is written to. Each of these emails
+          carries the creator&apos;s postal address and a link that stops
+          them, tied to the address and the store, for 400 days; pressing it
+          keeps a one-way hash of the address for that store for good, so
+          that store never sends them a reminder again. Keeping the
           membership is a checkout on the creator&apos;s own Stripe account,
           like any purchase in their store.
         </p>
@@ -1047,11 +1066,21 @@ export default function PrivacyPage() {
           section&apos;s count. On a store&apos;s own page it sends the furthest
           item they saw &mdash; a product, a link or a part of the page &mdash;
           where it stood, and the item they clicked, if any, and we add one to
-          that day&apos;s count of it. Each page decides at random to send this
-          for one visitor in eight, and for nobody else. On a sales page it can
+          that day&apos;s count of it. Our server picks one page view in eight
+          at random and gives only that page a random code, good for two hours
+          from when the page was shown; the page sends this once, with that
+          code, and we keep the code for those two hours only, so the same reading is
+          never counted twice. Each store counts at most a set number of these
+          readings a month, the same for every store on its plan, and past it a
+          reading is not counted. We keep how many readings came that month,
+          and nothing about who sent them, until a day after the month ends. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
-          when asked what was stopping them from buying. No cookie is set and
+          when asked what was stopping them from buying. On a sales page it also
+          says how long the page was open in front of them, as one of six ranges
+          (from under 10 seconds to 10 minutes or more), measured until they first
+          switch to another tab or app or leave, and we add one to that
+          range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.
         </p>
@@ -1583,8 +1612,10 @@ export default function PrivacyPage() {
           themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
-          every connection that user made, with its tokens, at once. If the
-          creator withdraws our access in their Google account, we stop using
+          every connection that user made, with its tokens, at once. We then
+          keep, for one day, a scrambled form of that Zoom user ID and the time
+          Zoom told us, only so that a connection being finished at that very
+          moment is not kept either. If the creator withdraws our access in their Google account, we stop using
           the connection and tell them, and disconnecting deletes it.
         </p>
         <p id="meta-ads" className="scroll-mt-24">
@@ -2021,7 +2052,11 @@ export default function PrivacyPage() {
           creator&apos;s store may set these, each for that store alone: a pass
           that lets a
           browser into a course or a community, named <code>nl_learn_</code>{" "}
-          followed by a code for the store, for 90 days; the code and time of
+          followed by a code for the store, for 90 days; a student&apos;s
+          &quot;No thanks&quot; to the next step a course&apos;s creator suggests,
+          named <code>nl_ns_</code> followed by a code for the course, holding
+          only that answer, for a year, so it is not suggested again in that
+          browser; the code and time of
           an affiliate link a visitor followed, named <code>nl_via_</code>{" "}
           followed by the store&apos;s address, for up to {MAX_COOKIE_DAYS} days,
           subject to the browser&apos;s own limits; it may expire sooner. The store also keeps an

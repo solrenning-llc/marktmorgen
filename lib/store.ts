@@ -49,7 +49,7 @@ import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held, LockBusyError, applyIfHeld, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -84,6 +84,7 @@ import { ENDED_INDEX } from "@/lib/plan-standing";
 import { closesStore } from "@/lib/plan-closing-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
+import { shortLinksBackOn } from "@/lib/short-link-rest";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
 import { COMMUNITY_ID } from "@/lib/community-text";
 import { type Bump, MAX_BUMPS, type Plan, bumpTargets, canBeBumped, isOneOff, uncoveredOption } from "@/lib/product-extras";
@@ -173,10 +174,12 @@ import { type AssistantPlan, type AssistantSetting, NO_ASSISTANT, parseAssistant
 import { type NextOfferSetting, NO_NEXT_OFFER, parseNextOffer } from "@/lib/next-offer-rules";
 import { type AssistReminderSetting, NO_ASSIST_REMINDER, parseAssistReminder } from "@/lib/assistant-reminder-rules";
 import { DEFAULT_FAIR, type FairPricing, parseFair } from "@/lib/fair-price";
+import { type MemberPrices, NO_MEMBER_PRICES, parseMemberPrices } from "@/lib/member-price-rules";
 import { DEFAULT_LANGUAGE, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { type AdsServerPlatform, parseAdsServer } from "@/lib/ad-consent";
 import { ATTRIBUTION_DAYS, type AttributionDays, DEFAULT_ATTRIBUTION_DAYS, parseAttributionDays } from "@/lib/attribution-rules";
 import { parseEmbedSites, readEmbedSites } from "@/lib/embed-sites";
+import { type OptionalEvent, isAlwaysOn, keptOff, parseOff } from "@/lib/notify-prefs-rules";
 
 // What the rest of the site has always imported from here.
 export { MAX_PRODUCTS, MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, StoreFullError };
@@ -300,6 +303,11 @@ export type MailSettings = {
   fromName: string;
   /** A postal address where the creator can be reached. */
   address: string;
+  /**
+   * The creator chose to show the address on the store's public policies page too (#1824). Typed for the footer
+   * of list emails, it is often where the creator lives, so it is never public by default, only when this is exactly true.
+   */
+  onPolicies?: true;
 };
 
 export const MAX_MAIL_NAME = 60;
@@ -310,7 +318,7 @@ function parseMail(raw: unknown): MailSettings | null {
   const value = raw as Record<string, unknown>;
   const fromName = typeof value.fromName === "string" ? value.fromName.trim().slice(0, MAX_MAIL_NAME) : "";
   const address = typeof value.address === "string" ? value.address.trim().slice(0, MAX_MAIL_ADDRESS) : "";
-  return fromName && address ? { fromName, address } : null;
+  return fromName && address ? { fromName, address, ...(value.onPolicies === true ? { onPolicies: true as const } : {}) } : null;
 }
 
 /** The creator's own domain, on Pro. */
@@ -600,6 +608,14 @@ export type Store = {
   /** Whether each sale, and each alert (lib/store-alerts.ts), is posted to the store's Slack or Discord channel (lib/chat-summary.ts). Off until turned on. */
   chatSales: boolean;
   /**
+   * The optional alert emails its owner switched off (lib/notify-prefs-rules.ts, queue item 601 [KB22] U6): none
+   * until changed, so every alert is emailed as before. Kept here so each alert job follows the last saved choice
+   * with the store it already holds, never a second reading. Account, payment, plan and legal emails never read it.
+   * null: the kept value is present but not a list (keptOff), so optional alert emails are held, and each alert job
+   * says so in the log, until the owner saves again.
+   */
+  alertEmailsOff: OptionalEvent[] | null;
+  /**
    * The creator's own websites that may open the store's checkout card and
    * sign-up form over their pages with the checkout script, and be told what
    * happened (lib/embed-sites.ts): https origins, at most ten. None until added.
@@ -759,6 +775,12 @@ export type Store = {
    * on every store until its creator switches it on.
    */
   fair: FairPricing;
+  /**
+   * Member and past-buyer prices (lib/member-price-rules.ts, 620 [SZ4]): the
+   * creator's rules that a holder of one product pays less for others. Off
+   * on every store until its creator switches it on.
+   */
+  memberPrices: MemberPrices;
   /** Every product in a cart cheaper once it holds a few (lib/cart-rules.ts). Off on every store until switched on. */
   cartDeal: CartDeal;
   /**
@@ -811,6 +833,12 @@ export type Store = {
    * directly. Null when PayPal is not connected.
    */
   paypalSeller: PayPalSeller | null;
+  /**
+   * When PayPal was last disconnected (milliseconds since the epoch; 0 never), written in the same locked write that
+   * clears the seller. A connect started at or before it is never finished by its way back, even when its mark could
+   * not be ended (Codex X5 on #4345; lib/paypal-sales.ts, ONBOARDING_SECONDS).
+   */
+  paypalStoppedAt: number;
   /**
    * The PayPal account the store sold through until the creator disconnected it, and when (`at`, in milliseconds),
    * kept so the sweep can still ask PayPal about the orders it took: a pending payment that completes is handed over,
@@ -901,6 +929,29 @@ async function sha256Hex(value: string): Promise<string> {
 
 export const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
+
+/**
+ * A store whose erasure has begun (Codex N1's HIGH on #3156): the closing walk (lib/closed-store-data.ts, prepareStore)
+ * writes one field here, through the same fence as its first delete and before anything of the live store is deleted,
+ * and closeStoreRecord removes it in the same fenced step as the record. While it is there no plan starts on the store
+ * (setSubscription, withRestartPublicationRecord) and a plan paid for it is returned in full like one paid on its closing
+ * day (lib/closing-plan-guard.ts, closingSince): a store half erased is never opened again. The field is the hash of
+ * the store's ref, as its record key is, so no address is written in it.
+ */
+export const ERASING_KEY = "nl:closed:erasing";
+export const erasingField = async (ref: string) => (await sha256Hex(`nimbus-erasing:${ref.toLowerCase()}`)).slice(0, 40);
+/**
+ * When this store's erasure began (ms), or null when it has not. Read exactly (rule 24): an answer that is neither nil
+ * nor a whole number of ms throws, never read as "not erasing", so a plan is never started on a guess.
+ */
+export async function erasingSince(ref: string): Promise<number | null> {
+  const read = repliesFor(await redisPipeline([["HGET", ERASING_KEY, await erasingField(ref)]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("whether a store's erasure has begun");
+  if (raw === null) return null;
+  if (!/^\d{1,16}$/.test(raw)) throw new UnknownReplyError("whether a store's erasure has begun");
+  return Number(raw);
+}
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 /**
@@ -1086,6 +1137,7 @@ function parseStore(raw: unknown): Store | null {
       adsServer: parseAdsServer(value.adsServer),
       attributionDays: parseAttributionDays(value.attributionDays),
       chatSales: value.chatSales === true,
+      alertEmailsOff: keptOff(value.alertEmailsOff),
       embedSites: parseEmbedSites(value.embedSites),
       winback: parseWinBack(value.winback),
       welcomeOffer: parseWelcomeOffer(value.welcomeOffer),
@@ -1134,6 +1186,8 @@ function parseStore(raw: unknown): Store | null {
       nextOffer: parseNextOffer(value.nextOffer),
       assistReminder: parseAssistReminder(value.assistReminder),
       fair: { ...parseFair(value.fair), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
+      // Stores written before member prices existed have none.
+      memberPrices: parseMemberPrices(value.memberPrices),
       cartDeal: parseCartDeal(value.cartDeal),
       // Stores written before a store could pick its language speak English.
       language: parseLanguage(value.language),
@@ -1146,6 +1200,8 @@ function parseStore(raw: unknown): Store | null {
       pastBuyers: value.pastBuyers === true,
       // Stores written before PayPal selling existed sell through Stripe only.
       paypalSeller: parsePayPalSeller(value.paypalSeller),
+      // Stores written before this existed were never disconnected after it.
+      paypalStoppedAt: Number.isSafeInteger(value.paypalStoppedAt) && (value.paypalStoppedAt as number) > 0 ? (value.paypalStoppedAt as number) : 0,
       paypalPast: parsePayPalSeller(value.paypalPast),
     };
   } catch {
@@ -1217,6 +1273,23 @@ export async function storeForRefExact(ref: string): Promise<Store | null> {
     throw new UnknownReplyError("a store's record (unreadable, or another owner's)");
   }
   return store;
+}
+
+/**
+ * What is kept under one ref's record key, read exactly (rule 24): "gone" only when Redis answers nil; "there" with the
+ * ids of the store whose record it is (this store's, or another's at the same key) only for text that reads as a store
+ * record (parseStore); anything else, text included ("QUEUED", "OK", a cut record), throws UnknownReplyError (Claude 7's
+ * ALTO 2 on #3643). The closing walk reads it before it walks a store, so it never erases one whose record is still
+ * there, and knows whether that record is the closing store's own (Codex L, Codex P and Claude 2 cloud L on #3643).
+ */
+export async function storeRecordAt(ref: string): Promise<{ state: "gone" } | { state: "there"; sid: string; statsId: string | null }> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return { state: "gone" };
+  const store = typeof reply[0] === "string" ? parseStore(reply[0]) : null;
+  if (!store || typeof store.sid !== "string") throw new UnknownReplyError("a store's record (GET, not a record)");
+  return { state: "there", sid: store.sid, statsId: typeof store.statsId === "string" && store.statsId ? store.statsId : null };
 }
 
 /** One bounded read for the funded restart's final source check.
@@ -1305,6 +1378,8 @@ export async function withRestartPublicationRecord<T>(
   const entry=Object.getOwnPropertyDescriptor(reply,"0");
   if(!entry||!Object.hasOwn(entry,"value"))return null;
   const record=restartPublicationRecord(entry.value,ref,goal);if(!record)return null;
+  // A store whose erasure has begun never starts again (Codex N1's HIGH on #3156).
+  if((await erasingSince(ref))!==null)return null;
   return await work({...record,owner,held});
  }catch{return null;}
  finally{await releaseLockStrict(held);}
@@ -1320,6 +1395,32 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
   if (email.startsWith(RELEASED_PREFIX)) return null;
   const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
   return parseStore(raw);
+}
+
+/**
+ * storeForHandle on Redis's exact answer only (rule 24): null only where the
+ * handle is free or was let go, or the record it leads to is truly not there;
+ * a reply missing or in any other shape, and a record that is there but
+ * cannot be read, throw UnknownReplyError, so a page says the store could
+ * not be read rather than that there is no such store.
+ */
+export async function storeForHandleExact(handle: string): Promise<Store | null> {
+  if (handleProblem(handle)) return null;
+  // Redis not there is not knowing the store, never "no such store" (Codex X5 on #2970): the deletion page would
+  // otherwise fall silently to every store.
+  if (!isRedisConfigured()) unknownHandleReply();
+  const [email] = repliesFor(await redisPipeline([["GET", handleKey(handle)]]), 1) ?? unknownHandleReply();
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) unknownHandleReply();
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return null;
+  const [raw] = repliesFor(await redisPipeline([["GET", await ownerKey(email)]]), 1) ?? unknownHandleReply();
+  if (raw === null) return null;
+  return (typeof raw === "string" ? parseStore(raw) : null) ?? unknownHandleReply();
+}
+
+function unknownHandleReply(): never {
+  throw new UnknownReplyError("the store behind an address");
 }
 
 /**
@@ -1358,9 +1459,33 @@ export async function storeIdExists(sid: string): Promise<boolean> {
 export async function storeForId(sid: string): Promise<Store | null> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
   const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
-  if (typeof ref !== "string" || !ref) return null;
+  return storeForIdRef(sid, ref);
+}
+
+/** The command storeForId sends to find a store by its id, for a caller that sends it in a pipeline of its own (lib/short-link-open.ts). */
+export const storeIdCommand = (sid: string): [string, string] => ["GET", storeIdKey(sid)];
+
+/** The store that storeIdCommand's reply names, checked to carry that very id, as storeForId reads it; null for anything else. */
+export async function storeForIdRef(sid: string, ref: unknown): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || typeof ref !== "string" || !ref) return null;
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
+}
+
+/**
+ * storeForIdRef, telling a store that is not there (null: its id or its record answered nothing, or the record is
+ * another store's) from a reply that could not be read ("unknown": not one answer, or a record that does not parse),
+ * which is never taken for a store gone (lib/short-link-open.ts). The same one read.
+ */
+export async function storeForIdRefRead(sid: string, ref: unknown): Promise<Store | null | "unknown"> {
+  if (!STORE_ID_PATTERN.test(sid) || ref === null) return null;
+  if (typeof ref !== "string" || !ref) return "unknown";
+  let reply: unknown;
+  const store = await storeForEmailSeen(ref, (_commands, seen) => { reply = seen; });
+  if (store) return store.sid === sid ? store : null;
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  if (reply[0] === null) return null;
+  return parseStore(reply[0]) ? null : "unknown";
 }
 
 /**
@@ -1393,21 +1518,44 @@ function unknownIdReply(): never {
 export async function accountStores(email: string): Promise<Store[]> {
   if (!isRedisConfigured()) return [];
   const address = email.toLowerCase();
-  const [first, members] = await redisPipeline([
+  // Read exactly (rule 24): a reply cut short or of another shape throws, never a shorter list. Callers read "no
+  // other store" as leave to delete what the owner's other stores share (lib/closed-store-data.ts), to make a second
+  // Stripe customer (billing checkout), or to move only the first store and drop the account's list (moveAccount).
+  const listed = repliesFor(await redisPipeline([
     ["GET", await ownerKey(address)],
     ["SMEMBERS", await accountKey(address)],
-  ]);
-  const ids = Array.isArray(members)
-    ? members.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id))
+  ]), 2);
+  const ids = listed ? storeIdList(listed[1]) : null;
+  if (!listed || !ids) throw new UnknownReplyError("an account's stores");
+  const records = ids.length
+    ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length)
     : [];
-  const others = ids.length
-    ? (await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))))
-        .map(parseStore)
-        .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    : [];
-  const main = parseStore(first);
+  if (!records) throw new UnknownReplyError("an account's other stores");
+  const others = records
+    // A null is an id whose store is gone; anything else must be a store record.
+    .map((raw) => (raw === null ? null : exactStore(raw, "an account's other store")))
+    .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const main = listed[0] === null ? null : exactStore(listed[0], "an account's first store");
   return main ? [main, ...others] : others;
+}
+
+/**
+ * An account's SMEMBERS of other store ids read exactly: a list of text in which every member is a store id this
+ * version reads, or null. A member in another form (written by a later version, or damaged) is unknown, never left
+ * out: a shorter list reads as "no other store", which lets a closing erase a shared Stripe account's records and a
+ * move drop the account's list with that store still in it (Codex review on #3889).
+ */
+function storeIdList(reply: unknown): string[] | null {
+  const members = stringList(reply);
+  return members && members.every((id) => STORE_ID_PATTERN.test(id)) ? members : null;
+}
+
+/** A store record that must read: text that parses as a store, or UnknownReplyError. */
+function exactStore(raw: unknown, what: string): Store {
+  const store = parseStore(raw);
+  if (!store) throw new UnknownReplyError(what);
+  return store;
 }
 
 /**
@@ -1495,6 +1643,7 @@ async function freshStore(fields: {
     adsServer: [],
     attributionDays: DEFAULT_ATTRIBUTION_DAYS,
     chatSales: false,
+    alertEmailsOff: [],
     embedSites: [],
     winback: { ...NO_WINBACK },
     welcomeOffer: { ...NO_WELCOME_OFFER },
@@ -1532,6 +1681,7 @@ async function freshStore(fields: {
     nextOffer: { ...NO_NEXT_OFFER },
     assistReminder: { ...NO_ASSIST_REMINDER },
     fair: { ...DEFAULT_FAIR },
+    memberPrices: { ...NO_MEMBER_PRICES, rules: [] },
     cartDeal: { ...NO_DEAL },
     language: DEFAULT_LANGUAGE,
     emailSync: null,
@@ -1540,6 +1690,7 @@ async function freshStore(fields: {
     recentSales: false,
     pastBuyers: false,
     paypalSeller: null,
+    paypalStoppedAt: 0,
   };
 }
 
@@ -2011,7 +2162,7 @@ export async function settleDeletedStore(gone: { ref: string; sid: string; email
 export type DeleteResult =
   /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
   | { ok: true; store: Store; unsure?: true }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" | "closing" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" | "closing" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -2020,7 +2171,12 @@ export type DeleteResult =
  * Only a store with no products, no subscription in good standing and no
  * domain of its own can go: a store that has sold something has buyers who
  * will come back to it, and a store that is paying would be deleted with
- * money still running. Its addresses are let go the way a released address
+ * money still running. A Store assistant add-on that still renews holds the
+ * store too: once its address is let go nothing finds that subscription again
+ * (lib/assistant-billing.ts, applyListedAssistant reads the store by
+ * `assistant_for`), so it would charge every month for a store that is gone
+ * (#4080). Set to stop at the end of its month, or ended, it charges nothing
+ * more and does not hold it. Its addresses are let go the way a released address
  * is — dark for a month before anyone else may take them — so a link
  * already shared leads nowhere rather than to a stranger. An account's first
  * store is its home, and is never deleted here.
@@ -2047,6 +2203,13 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
     if (!store.extra) return { ok: false, reason: "first" };
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
+    if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
+    // Not active is not "stopped": a past_due or unpaid add-on (lib/assistant-billing.ts assistantPlanOf) is written
+    // down as not active while Stripe may still charge it, and once the store is gone nothing finds it again. It holds
+    // the store until it is known to stop: set to stop at the end of its month, or ended at Stripe (`terminal`). A
+    // period unread or run out is not proof of an end, as Stripe renews a past_due one (Codex X6 and T on #4202).
+    const plan = store.assistantPlan;
+    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.terminal !== true) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
     // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
     // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused
@@ -2088,17 +2251,77 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
  * its place among its account's stores and in the company's lists go. Its
  * owner's account and sign-in stay, and may make a store again. Run after
  * everything that needed the record has read it.
+ *
+ * The record is read again under the store's lock right before it goes, and
+ * `beforeDelete` is handed what it holds then (null when it is already gone):
+ * a write that landed since the caller's own read (a photo put on, an id
+ * made) is seen there, so the caller can name its keys while the record
+ * still does (Codex G on #3614). A write after this waits for the lock and
+ * then finds no store. A read again that does not read is never "unchanged"
+ * (rule 24): it throws, with the record still there. The record goes last,
+ * and only while the lock is still this call's (deleteIfHeldOnly). Answers
+ * false, with nothing done, when another store (another sid) is kept at its
+ * key by then: its ref and its owner's folder are that store's now, so the
+ * caller must not walk them (Revisor 2 on #3643); true otherwise.
  */
-export async function closeStoreRecord(store: Store, extraKeys: string[] = []): Promise<void> {
+export async function closeStoreRecord(
+  store: Store,
+  extraKeys: string[] = [],
+  beforeDelete?: (fresh: Store | null, held: Held) => Promise<void>,
+): Promise<boolean> {
   const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
-  await redisPipeline([
-    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
-    ["DEL", owner, beforeMoveKeyOf(owner), ...extraKeys],
-    ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
-    ["ZREM", ENDED_INDEX, storeRef(store)],
-    ["SREM", SHARING_INDEX, storeRef(store)],
-  ]);
+  let held: Held;
+  try {
+    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, LOCK_WAIT_MS);
+  } catch (error) {
+    if (error instanceof LockBusyError) throw new StoreBusyError();
+    throw error;
+  }
+  try {
+    const read = repliesFor(await redisPipeline([["GET", owner]]), 1);
+    const raw = read?.[0];
+    // Only nil is "gone", and only a record that parses is what it holds now.
+    if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    const fresh = raw === null ? null : parseStore(raw);
+    if (raw !== null && !fresh) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    // Only this store's own record (the same sid) is this closing's to read and delete: another store at the same key
+    // (Codex G on #3643) means this one's record is already gone. Nothing of the other is read, released or deleted,
+    // and this returns as for a record that is gone, so the walk takes this ref out of line and never prepares the
+    // other store under it a walk later (Claude 6 on #3643); this store's entry still walks only its own marks.
+    // A store from before ids (sid "") given one since the walk's read (ensureStoreId) is still this store: its stats id,
+    // made once and never changed, says so (Claude 7's LEVE on #3643). Only then is a different sid read as the same store.
+    const sameLegacy = store.sid === "" && Boolean(store.statsId) && fresh?.statsId === store.statsId;
+    if (fresh && fresh.sid !== store.sid && !sameLegacy) return false;
+    // The lock held is passed on, so what the caller deletes here is made only while it is still held (lib/closed-store-data.ts, fencedBy).
+    await beforeDelete?.(fresh, held);
+    // Its addresses are held back (those it has now too: one moved to since is its own), its id and places go, and the
+    // record last, all in the steps that read the store's lock as still ours (applyIfHeld, CLOSING_FENCED): a lock that
+    // ran out before them (a paused function, a slow network) lets none of them land on a store whose plan started
+    // again in that moment, which kept its address and its id (Codex M's focal M1 on #3156, on #3643's design). Its id
+    // leaves its account's list at both addresses read, as one moved since is the account's now (Claude 6 on #3643). An
+    // answer that is not "done" or "not ours" throws before anything is said closed (rule 24): the closing walk reads the
+    // record before it walks the store, and prepares it again while it is there.
+    const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
+    const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
+    // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
+    const sid = sameLegacy && fresh ? fresh.sid : store.sid;
+    const changes: FencedChange[] = [
+      ...[...handles].map((handle) => ({ op: "SETEX", key: handleKey(handle), words: [released, String(RELEASE_QUARANTINE_DAYS * 24 * 60 * 60)] })),
+      ...(STORE_ID_PATTERN.test(sid) ? [{ op: "DEL", key: storeIdKey(sid), words: [] }, ...[...accounts].map((account) => ({ op: "SREM", key: account, words: [sid] }))] : []),
+      { op: "ZREM", key: ENDED_INDEX, words: [storeRef(store)] },
+      { op: "SREM", key: SHARING_INDEX, words: [storeRef(store)] },
+      // The record is the very last change, so it goes in the last step even when the changes take more than one
+      // (applyIfHeld splits them past FENCED_KEYS or FENCED_WORDS; Claude 5's LOW on #3156).
+      // The erasing mark goes in the same step as the record (Codex N1's HIGH on #3156), never before it.
+      { op: "HDEL", key: ERASING_KEY, words: [await erasingField(storeRef(store))] },
+      ...[beforeMoveKeyOf(owner), ...extraKeys, owner].map((key) => ({ op: "DEL", key, words: [] })),
+    ];
+    if (!(await applyIfHeld(held, changes))) throw new StoreBusyError();
+    return true;
+  } finally {
+    await releaseLock(held);
+  }
 }
 
 export type RenameResult =
@@ -2265,6 +2488,9 @@ export async function setSubscription(
     stripeCustomerId: expected.stripeCustomerId, subscriptionId: expected.subscriptionId,
     subscriptionActive: expected.subscriptionActive, tier: expected.tier, cycle: expected.cycle } : null;
   const result = await withStore<Store | null>(email, async (store, save) => {
+    // No plan runs on a store whose erasure has begun (Codex N1's HIGH on #3156): read under the store's lock, exactly,
+    // so a start racing the walk's first delete is refused; a payment for it is returned (closingSince).
+    if (fields.active && (await erasingSince(storeRef(store))) !== null) return null;
     if (source && (store.sid !== source.sid || store.statsId !== source.statsId ||
         store.stripeCustomerId !== source.stripeCustomerId || store.subscriptionId !== source.subscriptionId ||
         store.subscriptionActive !== source.subscriptionActive || store.tier !== source.tier || store.cycle !== source.cycle)) return null;
@@ -2344,6 +2570,11 @@ export async function setSubscription(
     await redisPipeline([[paysNow(saved) ? "SADD" : "SREM", PAYING_INDEX, storeRef(saved)]]).catch((error) =>
       console.error("could not keep the list of stores that pay", error),
     );
+    // A store that starts paying, or whose plan changes: its short links open again at once, and the studio is told
+    // when they had been turned off (lib/short-link-rest.ts, the owner's decision 14 on #3330). Only when it changes.
+    if (paysNow(saved) && (!paysNow(store) || saved.tier !== store.tier || saved.subscriptionId !== store.subscriptionId || saved.period?.start !== store.period?.start)) {
+      await shortLinksBackOn(saved.sid).catch((error) => console.error("could not turn the store's short links back on", error));
+    }
     // The stores whose sales pay a share, for the daily job that keeps what
     // was taken to what is owed (lib/share-settle.ts). Only when it changes.
     const sharing = saved.shared && saved.subscriptionActive;
@@ -2470,8 +2701,10 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string): Pr
       const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
       const home = typeof points === "string" ? points.toLowerCase() : "";
       if (home !== from && home !== to) return null;
-      const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
-      const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
+      const read = repliesFor(await redisPipeline([["SMEMBERS", await accountKey(from)]]), 1);
+      // Rule 30: the same exact read as accountStores; an unknown member stops the repair before any write.
+      const extras = read ? storeIdList(read[0]) : null;
+      if (!extras) throw new UnknownReplyError("an account's stores");
       for (const sid of extras) {
         const back = await withStore(extraRef(sid), async (extra, _save, held) => {
           if (extra.email.toLowerCase() === home) return true;
@@ -2500,11 +2733,15 @@ export async function moveAccount(
     // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
-    const [existing, theirs] = await redisPipeline([
+    const read = repliesFor(await redisPipeline([
       ["GET", await ownerKey(to)],
       ["SCARD", await accountKey(to)],
-    ]);
-    if ((typeof existing === "string" && existing) || Number(theirs) > 0) {
+    ]), 2);
+    // A count that does not read is unknown (rule 24), never NaN passed as "it owns no store".
+    const theirs = read ? countOf(read[1]) : null;
+    if (!read || theirs === null) throw new UnknownReplyError("the stores of the address moved to");
+    const existing = read[0];
+    if ((typeof existing === "string" && existing) || theirs > 0) {
       return { ok: false, reason: "taken" };
     }
 
@@ -2991,6 +3228,19 @@ export async function setLeaving(email: string, raw: unknown): Promise<{ ok: tru
 /** Whether each sale and each alert is posted to the store's chat (lib/chat-summary.ts). */
 export async function setChatSales(email: string, on: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ chatSales: on === true }));
+}
+
+/**
+ * The optional alert emails switched off (lib/notify-prefs-rules.ts): the whole list, replacing the one before; `[]`
+ * turns every one back on. An always-on notice is refused as such, and anything that is not a list of distinct
+ * optional events as invalid; nothing is written either way.
+ */
+export async function setAlertEmailsOff(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "invalid" | "always_on" | "none" }> {
+  if (Array.isArray(raw) && raw.some(isAlwaysOn)) return { ok: false, reason: "always_on" };
+  const off = parseOff(raw);
+  if (!off) return { ok: false, reason: "invalid" };
+  const next = await patchStore(email, () => ({ alertEmailsOff: off }));
+  return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 
 /** The sites that may open the store's checkout with the checkout script (lib/embed-sites.ts): the whole list, as typed. */
@@ -3576,8 +3826,9 @@ export async function editProduct(
       // A bundle is one sale of several things at one price: never free, never
       // charged again and again, never priced by its buyer (lib/bundle-rules.ts).
       if (isBundle(product) && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "bundle" };
-      // A physical product is sold once, at a price (lib/shipping.ts): shipped by the creator.
-      if (product.shipping && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "shipped" };
+      // A physical product is sold once, for a price (lib/shipping.ts): shipped by the creator. The price may be
+      // one the buyer chooses, at or above this one (514 [PF2]), checked by pwywProblem below as on any product.
+      if (product.shipping && (fields.priceCents === 0 || recurring)) return { ok: false, reason: "shipped" };
       const next: Product = {
         ...product,
         title: fields.title,
@@ -3604,6 +3855,30 @@ export async function editProduct(
     return result;
   }
   return { ok: true, store: result.store, product: result.product };
+}
+
+/**
+ * A product's title alone, for a change the creator confirmed from the AI
+ * agent's proposals (631 [AA1] (c), lib/agent-kinds.ts): its price, terms and
+ * everything else stay exactly as they are. Empty is refused, as on the
+ * studio's own form. The words checks are the caller's (descriptionRefusal).
+ */
+export async function setProductTitle(email: string, id: string, rawTitle: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
+  const title = rawTitle.trim().slice(0, MAX_TITLE_LENGTH);
+  // `only.expected`: written only while the title is still that, checked under the store's lock (an agent's
+  // proposal confirmed or undone, lib/agent-kinds.ts); "changed" when it is not, and nothing is written.
+  const result = await onProduct<"title" | "changed">(email, id, (product) =>
+    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title } : { ok: false, reason: "title" },
+  );
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
+}
+
+/** A product's short summary alone, as setProductTitle: everything else stays. Empty is allowed, as on the studio's form. */
+export async function setProductSummary(email: string, id: string, rawSummary: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
+  const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
+  // `only.expected`, as setProductTitle: written only while the summary is still that.
+  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary }));
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
 /** Takes something off the store. Returns the product as it was, for its files. */
@@ -4742,7 +5017,32 @@ export async function setPastBuyers(email: string): Promise<Store | null> {
 export async function setPayPalSeller(email: string, merchant: string | null): Promise<Store | null> {
   const seller = merchant ? parsePayPalSeller({ merchant, at: Date.now() }) : null;
   if (merchant && !seller) return null;
-  return patchStore(email, () => ({ paypalSeller: seller }));
+  // A disconnect is written with its moment, in the same locked write: an older connect never finishes after it.
+  return patchStore(email, () => (seller ? { paypalSeller: seller } : { paypalSeller: null, paypalStoppedAt: Date.now() }));
+}
+
+/**
+ * Connects a PayPal seller on the way back from PayPal's onboarding only while `still()` says that connect is still
+ * the store's current one, asked under the store's write lock: a disconnect (which ends the connect before clearing the
+ * seller) or a newer connect made while PayPal was being asked is never undone. "stale" when it no longer is; null when
+ * the store is missing, the merchant id is not one, or `still()` cannot tell (rule 24).
+ */
+export async function connectPayPalSellerIf(
+  email: string,
+  merchant: string,
+  still: () => Promise<boolean | "unknown">,
+  startedAt: number,
+): Promise<Store | "stale" | null> {
+  const seller = parsePayPalSeller({ merchant, at: Date.now() });
+  if (!seller || !Number.isSafeInteger(startedAt) || startedAt <= 0) return null;
+  return withStore<Store | "stale" | null>(email, async (store, save) => {
+    // A disconnect at or after this connect began wins, whatever its end of the connect's mark came back as.
+    if (store.paypalStoppedAt >= startedAt) return "stale";
+    const current = await still();
+    if (current === "unknown") return null;
+    if (!current) return "stale";
+    return save({ ...store, paypalSeller: seller });
+  });
 }
 
 /**
@@ -4751,8 +5051,11 @@ export async function setPayPalSeller(email: string, merchant: string | null): P
  * back when refunded, cancelled with a notice when never confirmed (lib/paypal-sales.ts, watchPayPal).
  */
 export async function disconnectPayPalSeller(email: string): Promise<Store | null> {
+  // Written with its moment, in the same locked write (as setPayPalSeller's disconnect): a connect started at or before
+  // it is never finished by its way back (connectPayPalSellerIf, paypalStoppedAt).
   return patchStore(email, (store) => ({
     paypalSeller: null,
+    paypalStoppedAt: Date.now(),
     paypalPast: store.paypalSeller && store.paypalSeller.merchant ? { merchant: store.paypalSeller.merchant, at: Date.now() } : (store.paypalPast ?? null),
   }));
 }
@@ -4928,6 +5231,11 @@ export async function setCartDeal(email: string, raw: unknown): Promise<Store | 
 
 export async function setFair(email: string, raw: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ fair: parseFair(raw) }));
+}
+
+/** Sets member and past-buyer prices (lib/member-price-rules.ts, 620 [SZ4]): read from anything as the rules allow. */
+export async function setMemberPrices(email: string, raw: unknown): Promise<Store | null> {
+  return patchStore(email, () => ({ memberPrices: parseMemberPrices(raw) }));
 }
 
 /** Sets the language the store speaks to its buyers in (lib/store-language.ts). */

@@ -44,6 +44,7 @@
  * not the buyer ever comes back to the thanks page.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
+import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { countOrder } from "@/lib/orders";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -185,7 +186,8 @@ async function creditAgain(store: Store, session: string, slot: string): Promise
   if (!record) throw new Error("a paid offer's record did not read");
   // Never paid, or paid before a payment id was known: nothing to credit from.
   if (record.state !== "paid" || !record.pi || !store.stripeAccountId) return;
-  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
+  // With its settled charge, so a partner's dated end is compared with when it was paid (noteCharge, Codex G on #1924).
+  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}?expand[]=latest_charge.balance_transaction`);
   const meta = pi.metadata as Record<string, string> | null;
   if (meta?.parent !== session || (meta?.step ?? "") !== slot) return;
   await noteCharge(store, pi);
@@ -280,6 +282,8 @@ export type TakeResult =
   | { kind: "failed" }
   /** Stripe's answer did not arrive; the thanks page finds out what happened. */
   | { kind: "checking" }
+  /** Stripe answered 429 (too many requests) to the yes: the offer was let go of and can be answered again, under the same idempotency key. */
+  | { kind: "busy" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
   | { kind: "consent" }
@@ -334,7 +338,15 @@ export function offerOpen(createdSeconds: number, secret: string | undefined, ke
  * product that is a draft again or has nothing to hand over is passed over
  * as if it were gone, on the thanks page and when the answer is taken alike.
  */
-const sellableTargets = (store: Store, listings: Listing[]) => listings.filter((p) => canSellProduct(store, p));
+// At the price each costs on its own right now: a store-wide sale (lib/store-sale.ts) lowers it, so an offer dearer
+// than the product bought alone is paused as "dearer" (lib/funnel.ts, stepPause), never charged (DISC-B-3).
+const sellableTargets = (store: Store, listings: Listing[]) =>
+  listings
+    .filter((p) => canSellProduct(store, p))
+    .map((p) => {
+      const off = saleOff(store.sale, p, saleClock());
+      return off > 0 ? { ...p, priceCents: salePrice(p.priceCents, off) } : p;
+    });
 
 /**
  * How the thanks page's form names the offer it drew: the step's id, a dot, and a fingerprint of every term drawn
@@ -553,6 +565,18 @@ export async function takeUpsell(input: {
       slot ? `nimbus-upsell:${session}:${slot}` : `nimbus-upsell:${session}`,
     );
     const id = typeof pi.id === "string" ? pi.id : "";
+    // Only Stripe's answer for this charge (rule 30, DISC-C-4): a payment intent, with its id, for the amount and
+    // currency asked. Any other answer proves nothing: the offer stays pending, with no id taken from it, and is
+    // found among the buyer's payments and settled from what Stripe says (settleOne), never written down as paid.
+    // An answer with no amount at all (audit R48) is still this payment intent by its id, object and currency: it
+    // goes on as Stripe says, and its email leaves the amount line out (afterPaid). An amount that is there and is
+    // not the one asked is another charge's.
+    const amountAsked = pi.amount === undefined || pi.amount === null || pi.amount === step.priceCents;
+    const own = pi.object === "payment_intent" && /^pi_\w+$/.test(id) && amountAsked && typeof pi.currency === "string" && pi.currency.toLowerCase() === store.currency.toLowerCase();
+    if (!own) {
+      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+      return { kind: "checking" };
+    }
     if (pi.status === "succeeded") {
       await writeUpsell(session, slot, { state: "paid", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
@@ -579,11 +603,29 @@ export async function takeUpsell(input: {
     return { kind: "failed" };
   } catch (error) {
     // Stripe answered and said no — a declined card, a refused request — so
-    // nothing was charged.
-    if (error instanceof StripeError && error.status < 500) {
+    // nothing was charged. Never a 429 (too many requests: nothing done, and
+    // nothing said of the card), a 409 or an idempotency error (a request
+    // under this key is still being worked on, or was made before): those
+    // say nothing of a charge, and go the way of no answer below.
+    if (
+      error instanceof StripeError &&
+      error.status < 500 &&
+      error.status !== 409 &&
+      error.status !== 429 &&
+      error.code !== "idempotency_error" &&
+      error.code !== "idempotency_key_in_use"
+    ) {
       await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
       return { kind: "failed" };
+    }
+    // Too many requests: not a word about the card, and the yes is not lost to it (outage drill, 13 November 2026).
+    // The offer is let go of so the buyer can answer it again; that yes goes under this same idempotency key, so
+    // whatever Stripe did with this one, it is charged once at most.
+    if (error instanceof StripeError && error.status === 429) {
+      await redisPipeline([["DEL", recordKey(session, slot)], ...(slot ? [["SREM", slotsKey(session), slot]] : [])]);
+      await unwatchPending(store, session, slot);
+      return { kind: "busy" };
     }
     // No answer, or Stripe's own failure: the charge may have gone through.
     // It stays pending and is settled from what Stripe says (settleUpsells),

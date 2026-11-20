@@ -171,7 +171,7 @@ async function main() {
     const salesPage = readFileSync(join(root, "app/[handle]/p/[product]/page.tsx"), "utf8");
     const facts = readFileSync(join(root, "components/store-product.tsx"), "utf8");
     is("the course page reads the facts", /readCourseFacts\(course\)/.test(coursePage) && /videoTotalLine\(/.test(coursePage), true);
-    is("the sales page reads them only for a course", /product\.course \? readCourse\(product\.course\.id\)/.test(salesPage) && /videoTotalLine\(/.test(salesPage), true);
+    is("the sales page reads them only for a course", /product\.course \? readCourse(?:ForSale)?\(product\.course\.id\)/.test(salesPage) && /videoTotalLine\(/.test(salesPage), true);
     is("the facts line takes the video total from the page", /videoLine/.test(facts), true);
     is("nothing typed: no duration field in the course record", /duration|minutes/i.test(readFileSync(join(root, "lib/course.ts"), "utf8").match(/export type Course = \{[\s\S]*?\n\};/)?.[0] ?? ""), false);
   }

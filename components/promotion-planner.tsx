@@ -73,7 +73,7 @@ export function PromotionPlanner({ data, range, products, spendUnread = false }:
     {!link ? <p className="mt-1 text-xs text-ink-soft">Enter a campaign name with letters or numbers to create the link.</p> : null}
     <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" className="btn btn-primary" disabled={!link} onClick={() => void copy()}>Copy campaign link</button>
-      <button type="button" className="btn btn-secondary" aria-describedby={id + "-results-status"} onClick={() => setNoResults(!showCampaignResults(target => document.getElementById(target), matchMedia("(prefers-reduced-motion: reduce)").matches))}>See campaign results</button>
+      <button type="button" className="btn btn-secondary" aria-describedby={id + "-results-status"} onClick={() => setNoResults(!showCampaignResults(target => document.getElementById(target), typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches))}>See campaign results</button>
     </div>
     <p id={id + "-results-status"} className="mt-2 text-xs text-ink-soft" role="status">{noResults ? campaignResultsMissing(spendUnread) : ""}</p>
     <p id={id + "-copy-status"} className="mt-2 text-xs text-ink-soft" role="status">{copied === link && link ? "Campaign link copied." : copied === "selected:" + link ? "The campaign link is selected. Copy it using your keyboard or device menu." : copied === "failed:" + link ? "Select the campaign link above and copy it." : "Share this link, then review its recorded visits and payments in Campaigns. Results are not guaranteed; gross revenue excludes refunds, fees and other costs."}</p>

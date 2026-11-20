@@ -1,4 +1,5 @@
 import { VisitUsBlock } from "@/components/visit-us-block";
+import { StoreTrustCard } from "@/components/store-trust-card";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
 import { StorePagesNav } from "@/components/store-pages-nav";
@@ -59,6 +60,7 @@ import { sellsInTestMode } from "@/lib/stripe-connect";
 import { DemoNote } from "@/components/demo-notes";
 import { lookStyle } from "@/lib/store-look";
 import { canUse } from "@/lib/plan";
+import { badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { photoUrl } from "@/lib/photo-limits";
 import { canManage } from "@/lib/membership-manage";
 import { canRecover, sellsDeliverables } from "@/lib/buyer-orders";
@@ -192,7 +194,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   const selling = canSell(store);
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
   const cartOn = selling && offersCart(store);
-  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
+  const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" || query.cart === "abroad" || query.cart === "country" ? query.cart : null;
   // Sold through the creator's own PayPal as well, or instead (lib/paypal-sales.ts).
   const byPayPal = sellsThroughPayPal(store);
   // A buyer standing in front of a checkout deserves to know it is a rehearsal
@@ -309,8 +311,14 @@ export default async function StorePage({ params, searchParams }: Params) {
     community: store.community?.on === true,
   };
 
+  // The badge at the foot of the page, and where it leads: the creator's invite code only while the invite programme and
+  // sales are both open (lib/badge-link.ts, 14 [D11]); read, never made, and only when the badge is shown. Its read
+  // starts here, beside recentSales, so it adds no serial round trip (badgeInviteCode never rejects).
+  const showBadge = store.look.badge || !canUse(store, "branding");
+  const badgeRead = showBadge ? badgeInviteCode(store.sid) : null;
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
   const recent = await recentSales(store);
+  const badgeLink = badgeHref(badgeRead ? await badgeRead : null);
 
   return (
     <div
@@ -453,6 +461,8 @@ export default async function StorePage({ params, searchParams }: Params) {
                           </a>
                         </p>
                       ) : null}
+                      {/* How the results are ordered (EU 2011/83/EU Art. 6a(1)(a)): searchStore keeps the creator's own product order, nothing is paid for. */}
+                      {results && results.total ? <p className="mt-1 text-sm">{bw.searchOrder(store.name)}</p> : null}
                     </form>
                   ) : null}
                   {/* The creator's collections, each a page of its own (lib/store-collections.ts). */}
@@ -703,6 +713,8 @@ export default async function StorePage({ params, searchParams }: Params) {
 
           {/* "Visit us" (lib/visit-us.ts): the creator's address, hours and phone, as typed; no map, nothing looked up or tracked. */}
           {store.visitUs ? <VisitUsBlock visitUs={store.visitUs} language={store.language} /> : null}
+          {/* "About this store": facts worked out from the record, each shown only when the creator turns it on (lib/store-trust.ts). */}
+          <StoreTrustCard store={store} />
 
           <div className="mt-12 text-center">
             {/* The store's blog, once it has a post (lib/store-blog.ts): known from the record, with no read. */}
@@ -758,8 +770,8 @@ export default async function StorePage({ params, searchParams }: Params) {
                 {bw.deleteMyData}
               </Link>
             </p>
-            {store.look.badge || !canUse(store, "branding") ? (
-              <Link href="/" prefetch={false} className="st-footer-link text-sm font-semibold">
+            {showBadge ? (
+              <Link href={badgeLink} prefetch={false} className="st-footer-link text-sm font-semibold">
                 {w.madeWith}
               </Link>
             ) : null}

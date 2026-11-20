@@ -118,7 +118,7 @@ export function ReportForm({ url: given }: { url: string }) {
       </div>
       <fieldset className="space-y-3">
         <legend className="field-label">Your statements</legend>
-        <label className="flex items-start gap-3 text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
           <input type="checkbox" checked={goodFaith} onChange={(e) => setGoodFaith(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-violet-brand" />
           <span>
             {copyright
@@ -126,7 +126,7 @@ export function ReportForm({ url: given }: { url: string }) {
               : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
           </span>
         </label>
-        <label className="flex items-start gap-3 text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
           <input type="checkbox" checked={accurate} onChange={(e) => setAccurate(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-violet-brand" />
           <span>
             {copyright

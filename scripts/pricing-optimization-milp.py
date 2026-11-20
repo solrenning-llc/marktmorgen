@@ -27,7 +27,6 @@ OUTPUT = ROOT / "docs/pricing-optimization-milp-output-2026-10-18.json"
 
 def solve(data, scenario, alternative):
     tiers, printed = data["tiers"], data["printed"]
-    lower = data["alternatives"][alternative]
     kept = data["taxKeptBps"] / 10_000
     # Variable layout: for each tier and option, x (binary), then one share per printed figure.
     index, n = {}, 0
@@ -70,7 +69,8 @@ def solve(data, scenario, alternative):
                 s = index[(t, j, r)]
                 if not fixed:
                     c[s] += q * kept * plan["coefMonth"][r] / 100
-                share_floor = lower if plan["figures"][r] > 0 else 1
+                # Never below what a page prints for the figure (tests/pricing-optimization-table.ts lowestShare).
+                share_floor = plan["lowest"][alternative][r]
                 # share_floor * x <= s <= x
                 add({s: 1, x: -share_floor}, 0, np.inf)
                 add({s: 1, x: -1}, -np.inf, 0)

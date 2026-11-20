@@ -103,9 +103,10 @@ function One({
   const fromCreator = comment.by === CREATOR_AUTHOR;
   const name = fromCreator ? storeName : comment.name || w.aStudent;
   const mine = comment.by === reader;
+  // A hidden comment says so with its badge, in words; only the decorative initial is faded, never the text (WCAG 1.4.6).
   return (
-    <div id={`c-${comment.id}`} className={`flex gap-3 ${comment.hidden ? "opacity-60" : ""}`}>
-      <span aria-hidden="true" className={`cm-face ${fromCreator ? "cm-face-creator" : ""} ${reply ? "h-8 w-8 text-sm" : "h-10 w-10"}`}>
+    <div id={`c-${comment.id}`} className="flex gap-3">
+      <span aria-hidden="true" className={`cm-face ${fromCreator ? "cm-face-creator" : ""} ${reply ? "h-8 w-8 text-sm" : "h-10 w-10"}${comment.hidden ? " opacity-60" : ""}`}>
         {initialOf(name)}
       </span>
       <div className="min-w-0 flex-1">

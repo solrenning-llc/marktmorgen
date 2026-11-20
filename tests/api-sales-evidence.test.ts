@@ -10,6 +10,7 @@ import {makeKey} from '@/lib/api-keys';
 import {addDraftProducts,claimHandle,ensureStatsId,setStripeAccount,setSubscription,storeForEmail} from '@/lib/store';
 import {productIds} from '@/lib/catalog';
 import {paidPeriod} from './billing-period-fixture';
+import {listingKeysRead,listingValues} from './listing-reads';
 import {store as redis} from './redis-stub';
 const owner='g2-api-sales@example.test',handle='g2-api-sales',account='acct_G2ApiSales';
 // A paid checkout carries its expanded payment, as Stripe sends it: one without it is unknown (Codex G2's second proof on #1899).
@@ -50,9 +51,11 @@ test('fifty own product lookups must fit the allowance paid before their reads',
  const f=await fixture(true),ids=productIds(f.shop),base=redis.pipeline.bind(redis);assert.equal(ids.length,50);
  let bytes=0,reads=0,paidBeforeFirst:number|null=null;const debits:number[]=[];
  redis.pipeline=async batch=>{
-  if(batch.some(c=>c[0]==='GET'&&/^nl:catalog:.*:l:/.test(String(c[1])))&&paidBeforeFirst===null)paidBeforeFirst=debits.reduce((a,b)=>a+b,0);
+  if(batch.some(c=>listingKeysRead(c).length>0)&&paidBeforeFirst===null)paidBeforeFirst=debits.reduce((a,b)=>a+b,0);
   const answers=await base(batch);
-  batch.forEach((c,i)=>{if(c[0]==='INCRBY'&&String(c[1]).includes(':api:'))debits.push(Number(c[2]));if(c[0]==='GET'&&/^nl:catalog:.*:l:/.test(String(c[1]))){reads++;bytes+=Buffer.byteLength(String(answers[i]));}});return answers;
+  batch.forEach(c=>{if(c[0]==='INCRBY'&&String(c[1]).includes(':api:'))debits.push(Number(c[2]));});
+  // Each listing record read, alone or in an MGET (lib/catalog.ts getMany), and the bytes it answered.
+  for(const r of listingValues(batch,answers)){reads++;bytes+=Buffer.byteLength(String(r.value));}return answers;
  };
  try {
   const r=await f.call(page(ids.map((id,i)=>session({id:'cs_test_Cost'+i,metadata:{store:handle,product:id}}))));

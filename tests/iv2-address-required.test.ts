@@ -112,8 +112,12 @@ const onlyTheAddress = (body: URLSearchParams) => [body.get(FIELD), body.has("ph
 async function main(): Promise<void> {
   part("Every place that names the Checkout Sessions endpoint is classified");
   const found: Record<string, number> = {};
-  for (const file of [...sources("lib"), ...sources("app")]) {
-    const count = (readFileSync(join(ROOT, file), "utf8").match(/["'`]\/checkout\/sessions["'`]/g) ?? []).length;
+  // Every source folder, and every way to write the endpoint: "/checkout/sessions", "/v1/checkout/sessions", a full
+  // URL or a template ending in it (the independent review of this unit). Reads of one session ("/checkout/sessions/"
+  // followed by an id, or "?") are not creations and are not counted.
+  const folders = ["lib", "app", "components", "workers", "cli", "scripts"].filter((dir) => existsSync(join(ROOT, dir)));
+  for (const file of folders.flatMap((dir) => sources(dir))) {
+    const count = (readFileSync(join(ROOT, file), "utf8").match(/["'`](?:[^"'`\s]*\/v1)?\/checkout\/sessions["'`]|\/checkout\/sessions`/g) ?? []).length;
     if (count) found[file] = count;
   }
   is("the same files, each with one entry per occurrence (a new one fails until classified here)", found, Object.fromEntries(Object.entries(SITES).map(([file, kinds]) => [file, kinds.length])));
@@ -128,6 +132,10 @@ async function main(): Promise<void> {
     }
   }
   is("the card update stays a setup with no address", /mode: "setup"/.test(readFileSync(join(ROOT, "lib/card-update.ts"), "utf8")), true);
+  const privacy = readFileSync(join(ROOT, "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
+  is("the privacy policy says every paid checkout asks the billing address", privacy.includes("asks for your billing address on every paid checkout"), true);
+  is("and that it is never used for marketing", privacy.includes("never used for marketing"), true);
+  is("and no longer says it is asked only with sales tax on", privacy.includes("When a creator switches on sales tax, Stripe asks the buyer for the address it needs to work the tax out"), false);
 
   redis.clear();
   const owner = "iv2address@example.com";

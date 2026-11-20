@@ -171,6 +171,11 @@ export function parseAssistant(raw: unknown): AssistantSetting {
 export type AssistantPlan = {
   subscriptionId: string;
   active: boolean;
+  /**
+   * Stripe confirmed it ended (canceled, incomplete_expired, a dispute, or the subscription gone): only then does it
+   * stop holding its store. Absent on an older or unknown snapshot, which is never taken as ended (Codex T on #4202).
+   */
+  terminal?: boolean;
   /** The month paid for, in seconds; null when Stripe did not say. */
   period: { start: number; end: number; renews: boolean } | null;
   /** Set to stop at the period's end. */
@@ -193,6 +198,7 @@ export function parseAssistantPlan(raw: unknown): AssistantPlan | null {
   return {
     subscriptionId: value.subscriptionId,
     active: value.active === true,
+    ...(value.terminal === true ? { terminal: true } : {}),
     period,
     cancelsAtEnd: value.cancelsAtEnd === true,
     disputedAt: typeof value.disputedAt === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.disputedAt) ? value.disputedAt.slice(0, 40) : "",

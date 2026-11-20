@@ -1,7 +1,8 @@
 /**
  * Rule 24 on the workflow sender (lib/flows.ts, sendDueSteps): before a due
  * step is done, one read gives each person's row on the creator's list
- * (HMGET) and whether they still hold the step's lease entry (ZSCORE). Only
+ * (HMGET) and whether they still hold the step's lease entry, read with their run's
+ * generation (LEASE_AND_GEN, one command each; a ZSCORE until Codex L's MEDIUM on #4234). Only
  * a reply in its exact shape decides: a row that is exactly nil is "no longer
  * on your list", a score that is exactly nil is "taken out by another
  * workflow". A reply out of shape (no answer, a word where a list belongs, a
@@ -28,7 +29,8 @@ const real = redis.pipeline.bind(redis);
 let inject: ((values: unknown[]) => unknown[]) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
-  if (inject && batch[0]?.[0] === "HMGET" && batch.slice(1).length > 0 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+  // The rows, then each lease entry read with its run's generation (lib/flow-runs.ts LEASE_AND_GEN, since Codex L's MEDIUM on #4234).
+  if (inject && batch[0]?.[0] === "HMGET" && batch.slice(1).length > 0 && batch.slice(1).every((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-lease-gen:"))) {
     const change = inject;
     inject = null;
     return change(values);
@@ -87,7 +89,9 @@ async function main(): Promise<void> {
     ["a number where the person's row belongs", ([rows, ...scores]) => [(rows as unknown[]).map(() => 7), ...scores]],
     ["a shorter list of rows", ([, ...scores]) => [[], ...scores]],
     ["no answer for the lease entry's score", ([rows]) => [rows]],
-    ["a list where the lease entry's score belongs", ([rows, ...scores]) => [rows, ...scores.map(() => ["1"])]],
+    ["a list where the lease entry's score belongs", ([rows, ...pairs]) => [rows, ...pairs.map((pair) => [["1"], (pair as unknown[])[1]])]],
+    ["a word where the run's generation belongs", ([rows, ...pairs]) => [rows, ...pairs.map((pair) => [(pair as unknown[])[0], "not-a-generation"])]],
+    ["a pair with one slot", ([rows, ...pairs]) => [rows, ...pairs.map((pair) => [(pair as unknown[])[0]])]],
   ];
   let n = 0;
   for (const [label, reply] of cases) {

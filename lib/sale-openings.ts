@@ -76,6 +76,7 @@ export const NOT_A_STORE_OPENING: readonly { file: string; why: string }[] = Obj
   Object.freeze({ file: "lib/stripe-account.ts", why: "the onAccount helper itself, which the openings call" }),
   Object.freeze({ file: "lib/billing.ts", why: "Marktmorgen's own plans, on the platform account (onPlatform)" }),
   Object.freeze({ file: "lib/assistant-billing.ts", why: "the Store assistant add-on, Marktmorgen's own, on the platform account (onPlatform), and a read of open sessions" }),
+  Object.freeze({ file: "lib/community-access.ts", why: "reads (GET) a member's paid checkout sessions and payment intents to open a community (holdingsOf), never opens one" }),
   Object.freeze({ file: "lib/verify-stripe.ts", why: "the operator's check on the demo account (onDemoAccount), never a creator's" }),
 ]);
 

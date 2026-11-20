@@ -64,6 +64,8 @@ const SITES: Record<string, Kind[]> = {
   "lib/calls.ts": ["paid-unless-package"],
   "lib/card-update.ts": ["setup"],
   "lib/cart-checkout.ts": ["paid"],
+  // Merge with #3395: holdingsOf lists a member's paid checkout sessions (GET), to open a community; it creates none.
+  "lib/community-access.ts": ["read"],
   "lib/order-confirmation-outbox.ts": ["replay"],
   "lib/payment-requests.ts": ["paid"],
   "lib/sale-openings.ts": Array<Kind>(10).fill("list"),

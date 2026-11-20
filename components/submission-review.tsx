@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/toast";
 import { MAX_SUBMISSION_REPLY, type SubmissionReply, type SubmissionState, type SubmittedFile } from "@/lib/submission-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { NO_BUYER_ADDRESSES } from "@/lib/buyer-addresses";
 
 /** One kept file as the studio route answers it. */
 export type ReviewItem =
@@ -103,7 +104,7 @@ export function ReviewEntry({ productId, item }: { productId: string; item: Extr
         <h3 className="min-w-0 break-words text-base font-semibold text-ink">{item.lessonTitle}</h3>
         <span className={`tag ${state === "submitted" ? "tag-next" : "tag-live"}`}>{state === "submitted" ? "Waiting for your reply" : state === "reviewed" ? "Answered" : "Withdrawn"}</span>
       </div>
-      <p className="mt-1 break-all text-sm text-ink-soft">{`${item.buyer} · sent ${day(item.at)} · kept until ${day(item.keepUntil)}`}</p>
+      <p className="mt-1 break-all text-sm text-ink-soft">{`${item.buyer ? `${item.buyer} · ` : ""}sent ${day(item.at)} · kept until ${day(item.keepUntil)}`}</p>
       <p className="mt-2 break-all text-sm text-ink">{`${item.file.name} (${item.file.type}, ${size(item.file.bytes)})`}</p>
       {item.note ? (
         <div className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-[var(--r-sm)] bg-sand p-3 text-sm text-ink" tabIndex={0} aria-label="The buyer's note">
@@ -190,7 +191,7 @@ export function ReviewEntry({ productId, item }: { productId: string; item: Extr
  * read when the creator asks for it, not on every visit to the page, because
  * each page is counted in the plan's studio requests.
  */
-export function SubmissionReview({ productId }: { productId: string }) {
+export function SubmissionReview({ productId, showBuyerAddresses }: { productId: string; showBuyerAddresses: boolean }) {
   const [items, setItems] = useState<ReviewItem[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -223,6 +224,7 @@ export function SubmissionReview({ productId }: { productId: string }) {
         Files from buyers
       </h2>
       <p className="mt-1 text-sm text-ink-soft">Files buyers sent you for review on this course&rsquo;s lessons, newest first.</p>
+      {showBuyerAddresses ? null : <p className="mt-1 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>}
       {items === null ? (
         <button type="button" className="btn btn-secondary btn-sm mt-3" aria-disabled={busy} aria-busy={busy} onClick={() => load()}>
           {busy ? "Opening…" : "Show files to review"}

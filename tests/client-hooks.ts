@@ -39,9 +39,10 @@ function refsOf(node: unknown, out: [{ current: unknown }, RefNode][] = []): [{ 
  * Renders `component(props)`, runs its effects, and re-renders on every state change.
  * `contexts` gives a context the value a provider above would; any other reads its default.
  * `beforeEffects`, when given, is called with each render's tree before its effects run, as React attaches refs before
- * it runs effects. With `attach`, each ref object a host element is given is set, as React does, before the effects
- * run: to what `attach` answers for that element (a stand-in with focus(), for example), and back to null once the
- * element is no longer rendered.
+ * it runs effects.
+ * With `attach`, each ref object a host element is given is set, as React does, before
+ * the effects run: to what `attach` answers for that element (a stand-in with focus(),
+ * for example), and back to null once the element is no longer rendered.
  */
 export async function mount<P>(
   component: (props: P) => unknown,
@@ -117,7 +118,6 @@ export async function mount<P>(
     } finally {
       internals.H = before;
     }
-    options.beforeEffects?.(last);
     if (options.attach) {
       const now = new Set<{ current: unknown }>();
       for (const [ref, node] of refsOf(last)) {
@@ -127,6 +127,7 @@ export async function mount<P>(
       for (const ref of attached) if (!now.has(ref)) ref.current = null;
       attached = now;
     }
+    options.beforeEffects?.(last);
     while (pending.length) pending.shift()!();
   };
   const settle = async () => {

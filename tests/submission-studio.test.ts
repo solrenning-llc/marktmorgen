@@ -184,6 +184,37 @@ async function main(): Promise<void> {
   is("a file whose buyer was deleted is gone", (await post({ action: "reply", id: "prod1", submission: ids[7], text: "Hi" })).status, 404);
   const after = [...((await get("id=prod1&list=1")).body.rows as { id: string }[]), ...((await get(`id=prod1&list=1&before=${(await get("id=prod1&list=1")).body.next}`)).body.rows as { id: string }[])];
   is("and off the list", after.some((row) => row.id === ids[7]), false);
+
+  part("A delayed reply cannot overwrite the reply confirmed after its lock expired");
+  resetWorld();
+  const delayedId = await sent("d".repeat(32), LESSONS[0], NOW);
+  const original = redis.pipeline.bind(redis);
+  let waiting!: () => void;
+  let resume!: () => void;
+  const reachedWrite = new Promise<void>((resolve) => { waiting = resolve; });
+  const mayWrite = new Promise<void>((resolve) => { resume = resolve; });
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command.some((value) =>
+      typeof value === "string" && value.includes('"text":"First delayed reply."')))) {
+      waiting();
+      await mayWrite;
+    }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  const delayedReply = post({ action: "reply", id: "prod1", submission: delayedId, text: "First delayed reply." });
+  try {
+    await Promise.race([reachedWrite, delayedReply.then(() => { throw new Error("did not reach the reply write"); })]);
+    redis.advance(31_000);
+    const second = await post({ action: "reply", id: "prod1", submission: delayedId, text: "Second confirmed reply." });
+    is("the current holder confirms its reply", [second.status, (second.body.reply as { text?: string } | undefined)?.text], [200, "Second confirmed reply."]);
+    resume();
+    is("the expired holder does not also confirm a reply", (await delayedReply).status, 503);
+    const rows = (await get("id=prod1&list=1")).body.rows as { id: string; reply?: { text: string } }[];
+    is("the already confirmed words remain stored", rows.find((row) => row.id === delayedId)?.reply?.text, "Second confirmed reply.");
+  } finally {
+    resume();
+    redis.pipeline = original;
+  }
   done();
 }
 

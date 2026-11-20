@@ -45,7 +45,7 @@ import type { MoveRequest } from "@/lib/purchase-move-rules";
 import { claimPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
 import { type Told, tellCreatorOfMove } from "@/lib/purchase-move-notice";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { giveData, takeData } from "@/lib/store-data";
 import type { Store } from "@/lib/store";
@@ -298,7 +298,8 @@ export async function forgetMovedPerson(store: Store, raw: string): Promise<numb
   for (const commands of [others, own]) {
     if (!commands.length) continue;
     const done = repliesFor(await redisPipeline(commands), commands.length);
-    if (!done || done.some((reply) => typeof reply !== "number")) throw new UnknownReplyError(what);
+    // Each DEL or HDEL here names one key or one field, so only 0 or 1 confirms it; any other count is unknown.
+    if (!done || done.some((reply, at) => countWithin(reply, commands[at]) === null)) throw new UnknownReplyError(what);
   }
   await giveData(store, [...olds].map((old) => ({ slot: movedRoomSlot(sid, old), bytes: 0, set: true })));
   return (mark ? 2 : 0) + (lines.size ? 1 + lines.size : 0);

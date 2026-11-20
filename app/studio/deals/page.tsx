@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { DealsBoard } from "@/components/deals-board";
 import { DealChannelsLoader, DealChannelsWaiting } from "@/components/deal-channels-table";
@@ -53,6 +54,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
   const fields = loadedFields ?? [];
   const available = inventory.available && loadedFields !== null && team !== null && shown.pipelines.length > 0;
   const assignees = [store.email, ...(team?.members ?? []).filter(m => can(m.role, "orders")).map(m => m.email)];
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -66,7 +68,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Deals and fields</p>
+          <StudioTrail store={store} here="Deals and fields" />
           <h1 className="t-h2 mt-3">Your deals, pipelines and what you keep about people</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Only your team sees any of this. Nothing here sends anything by itself; a workflow you set to start from a stage, under Email, can. Each person&apos;s answers to your fields are on their page under{" "}

@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function RefundsPage() {
   return (
-    <LegalPage title="Refund Policy" lastUpdated="October 31, 2026">
+    <LegalPage title="Refund Policy" lastUpdated="November 9, 2026">
       <p>
         This Refund Policy applies to what you pay Marktmorgen, a product of
         Solrenning, an independent software studio, for the creator store at
@@ -198,6 +198,12 @@ export default function RefundsPage() {
           terms, and the law, still apply to anything that was not as
           described or did not work.
         </p>
+        <p id="course-access-end">
+          <strong className="text-black">A course with an end date.</strong>{" "}
+          Access to a course you bought ends only on a date its page showed
+          you before you paid. If no date was shown when you bought it, or you
+          paid with PayPal, your access has no end.
+        </p>
         <p id="store-closes">
           <strong className="text-black">If the store closes.</strong>{" "}
           From the day the store&rsquo;s plan ends, we pause the payments of
@@ -218,6 +224,19 @@ export default function RefundsPage() {
           creator keeps the store open, nothing is refunded and your
           membership goes on as it was, with nothing charged for the days in
           between.
+        </p>
+        <p id="plan-past-end">
+          <strong className="text-black">A payment plan that charges you after its last payment.</strong>{" "}
+          A payment plan ends after the payments you agreed to. If Stripe still
+          takes a payment after that date, we end the plan and refund that
+          payment in full, automatically, from the creator&rsquo;s own Stripe
+          account, and email you once to say so. If the creator&rsquo;s balance
+          does not cover it, or Stripe refuses the refund, we try again every
+          day and tell the creator. We can do this only while the
+          creator&rsquo;s Stripe account still lets us act on it. If it does
+          not, we cannot end the plan or refund the payment from here: ask the
+          creator, or your bank or card company. Marktmorgen does not hold that
+          money and never pays it.
         </p>
         <p>
           If you cannot reach them, write to us at{" "}

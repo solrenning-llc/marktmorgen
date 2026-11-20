@@ -32,6 +32,11 @@
  *   report     a member reported a post or a comment (told once for each
  *              post or comment, however many members report it).
  *   affiliate  somebody confirmed an application to the affiliate programme.
+ *   message    a buyer wrote in the store's inbox (lib/inbox.ts): once while a
+ *              conversation is unread, at most QUIET_PER_HOUR an hour; "New
+ *              message from a buyer", never their words, name or address; it
+ *              opens the conversation. A device kept before this event existed
+ *              hears of these only once its person switches them on.
  *   alert      the store's numbers went off course: visits or sales from them
  *              fell, refunds piled up, the month's goal is off pace or reached
  *              (lib/store-alerts.ts). A device kept before this event existed
@@ -57,12 +62,13 @@
  *   nl:phone:st:<statsId>           device -> how the last send went
  *   nl:phone:seen:<hash>            an event already sent, forty days
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { maySendPathReminder } from "@/lib/path-reminder-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
-import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
 import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
@@ -70,7 +76,7 @@ import { memberStores, readTeam } from "@/lib/team";
 import { type PushFetchHooks, type Subscription, readSubscription, sendPush, vapidKeys, vapidKeysFor } from "@/lib/web-push";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 
-export const PHONE_EVENTS = ["sale", "booking", "report", "affiliate", "live", "comment", "alert", "path"] as const;
+export const PHONE_EVENTS = ["sale", "booking", "report", "affiliate", "live", "comment", "message", "alert", "path"] as const;
 export type PhoneEvent = (typeof PHONE_EVENTS)[number];
 
 export { MAX_DEVICES };
@@ -92,6 +98,8 @@ const EVENT_NEEDS: Record<PhoneEvent, Permission[]> = {
   affiliate: ["settings"],
   live: ["community"],
   comment: ["products"],
+  // A buyer's new message in the inbox: whoever may answer buyers, as the inbox itself is shown (app/studio/inbox, "orders").
+  message: ["orders"],
   alert: ["stats"],
   path: [],
 };
@@ -100,7 +108,7 @@ const EVENT_NEEDS: Record<PhoneEvent, Permission[]> = {
 export function eventsFor(role: Role): PhoneEvent[] {
   return PHONE_EVENTS.filter((event) => event === "path" ? role === "owner" : EVENT_NEEDS[event].some((need) => can(role, need)));
 }
-/** Reports, and applications, a store's devices are told about in an hour, at most, of each. */
+/** Reports, applications, lesson comments and buyers' messages a store's devices are told about in an hour, at most, of each. */
 export const QUIET_PER_HOUR = 20;
 /** Tests one store may send in a minute. */
 const TESTS_PER_MINUTE = 6;
@@ -143,6 +151,14 @@ const cfgKey = (statsId: string) => `nl:phone:cfg:${statsId}`;
 const stateKey = (statsId: string) => `nl:phone:st:${statsId}`;
 const seenKey = (statsId: string, event: string, seed: string) =>
   `nl:phone:seen:${createHash("sha256").update(`${statsId}|${event}|${seed}`).digest("hex").slice(0, 40)}`;
+/**
+ * The seed of a conversation's unread episode in the inbox (event "message"): alertCreator's SET NX on it is the
+ * one atomic claim of "told once until read" across workers, and lib/inbox.ts deletes it in the same write that
+ * marks the conversation read, so the next message tells again (Codex C2 on #3619).
+ */
+export const messageEpisodeSeed = (conversationId: string) => `inbox:${conversationId}`;
+/** The key alertCreator claims for a conversation's unread episode; deleted when it is read. */
+export const messageEpisodeKey = (statsId: string, conversationId: string) => seenKey(statsId, "message", messageEpisodeSeed(conversationId));
 const testsKey = (statsId: string) => `nl:rl:phone:test:${statsId}`;
 const quietKey = (statsId: string, event: string) => `nl:rl:phone:quiet:${statsId}:${event}`;
 
@@ -396,7 +412,7 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
     // saving power; the rest waits for it.
     urgency: event === "sale" || event === "booking" || event === "live" || event === "test" ? "high" : "normal",
     // A newer report or application replaces one still waiting at the push service.
-    topic: event === "report" || event === "affiliate" || event === "comment" ? `nimbus-${event}` : undefined,
+    topic: event === "report" || event === "affiliate" || event === "comment" || event === "message" ? `nimbus-${event}` : undefined,
     // A live event's notice is no use once the event has started.
     ttlSeconds: event === "path" ? 0 : event === "test" ? 600 : event === "live" ? 900 : 86400,
     hooks: hooksForTests,
@@ -449,13 +465,9 @@ export async function alertCreator(
   // SET NX answers OK when this event is new here and null when it was sent already; anything else is unknown, and nothing is sent on it.
   const fresh = repliesFor(await redisPipeline([["SET", seenKey(statsId, event, options.seed), "1", "NX", "EX", SEEN_SECONDS]]), 1)?.[0];
   if (fresh !== "OK") return 0;
-  if (event === "report" || event === "affiliate" || event === "comment") {
-    const replies = repliesFor(await redisPipeline([
-      ["SET", quietKey(statsId, event), "0", "EX", 3600, "NX"],
-      ["INCR", quietKey(statsId, event)],
-    ]), 2);
+  if (event === "report" || event === "affiliate" || event === "comment" || event === "message") {
     // A count in any other shape is unknown (CX-123 rule 24): nothing is sent on it.
-    const count = countOf(replies?.[1]);
+    const count = windowCountOf(await redisPipeline(windowCount(quietKey(statsId, event), 3600)));
     if (count === null || count > QUIET_PER_HOUR) return 0;
   }
   await soon(() => Promise.all(listening.map((device) => event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now()) ? Promise.resolve(null) : deliver(store, device, event, alert))));
@@ -672,12 +684,8 @@ export async function sendTest(
   const device = config?.devices.find((d) => d.id === id && isMine(store, d, who));
   if (!device || !keys) return { ok: false, reason: "missing" };
   if (!vapidKeysFor(device.kid)) return { ok: false, reason: "stale" };
-  const replies = repliesFor(await redisPipeline([
-    ["SET", testsKey(store.statsId), "0", "EX", 60, "NX"],
-    ["INCR", testsKey(store.statsId)],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): no test is sent on it.
-  const count = countOf(replies?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(testsKey(store.statsId), 60)));
   if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   const state = await deliver(store, device, "test", {
     title: "Marktmorgen Studio",

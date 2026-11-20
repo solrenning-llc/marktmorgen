@@ -37,15 +37,17 @@ async function main(): Promise<void> {
   shop = (await storeForEmail(owner))!;
   const paidIds = shop.catalog.items.filter((p) => (p.kind & KIND.paid) !== 0).map((p) => p.id);
 
-  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more. That charge
-  // is worked out as the builder works it out (each product's data-room weight, raised to its record's size): the
-  // names kept for the sales file weigh with the product (lib/catalog.ts productBytes, #3129), on purpose, so a fixed
-  // 10 no longer fits (Claude 1's MEDIUM (b) on #3129, the over-charge kept and said in the PR).
+  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more. That
+  // charge is worked out from what each listing weighs now (its data room slot, raised to its record's length), as
+  // the builder weighs it, so a record that grows beside every product (lib/page-depth-rules.ts) moves it with them.
+  // The names kept for the sales file weigh with the product (lib/catalog.ts productBytes, #3129), on purpose, so a
+  // fixed 10 no longer fits (Claude 1's MEDIUM (b) on #3129, the over-charge kept and said in the PR).
+  const [weights] = (await redis.pipeline([["HMGET", dataKey(shop)!, ...paidIds.map((id) => `p:${id}`)]])) as unknown[][];
+  const sizes = await listingSizes(shop, paidIds);
+  if (!Array.isArray(weights) || weights.length !== paidIds.length || !sizes) throw new Error("fixture weights unknown");
+  const before = cartLinkUnits(2 * paidIds.length, paidIds.reduce((sum, _id, i) => sum + Math.min(MAX_PRODUCT_BYTES, Math.max(Number(weights[i]), sizes[i])), 0));
   const figure = allowanceFor(shop, "studio");
   const used = await allowanceUsed(shop, "studio");
-  const weights = (await redis.pipeline([["HMGET", dataKey(shop)!, ...paidIds.map((id) => `p:${id}`)]]))[0] as (string | null)[];
-  const sizes = (await listingSizes(shop, paidIds))!;
-  const before = cartLinkUnits(2 * paidIds.length, paidIds.reduce((sum, _id, i) => sum + Math.min(MAX_PRODUCT_BYTES, Math.max(Number(weights[i]), sizes[i])), 0));
   is("the fixture: every paid product weighed and measured", [paidIds.length, weights.every((w) => Number(w) > 0), sizes.length], [24, true, 24]);
   const spare = figure - used - before;
   if (spare > 0) await takeAllowance(shop, "studio", spare);
@@ -86,6 +88,7 @@ async function main(): Promise<void> {
   }
   const total = debits.reduce((a, b) => a + b, 0);
   console.log("CART_LINK_SETTLE", JSON.stringify({ debits, paidBeforeRead, bytes, listed: listed.length }));
+  is("what was taken before the read is the charge left for it, and nothing more", paidBeforeRead, before);
   is("the records grew between their measure and their read, beyond what was taken before it", [grown, bytes > paidBeforeRead * CART_LINK_UNIT_BYTES], [true, true]);
   is("the builder still lists the 24 products", listed.length, 24);
   is("what was really read is taken in all, the difference after the read", total >= cartLinkUnits(2 * 24, bytes), true);

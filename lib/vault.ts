@@ -43,6 +43,7 @@ import { type AwsKey, EMPTY_HASH, hashOf, presignV4, signV4 } from "@/lib/aws-si
 import { VAULT_TIMEOUT_MS, VAULT_WRITE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
 import {
   PIECE_BYTES,
   PIECE_SECONDS,
@@ -221,6 +222,12 @@ export async function openVaultUpload(input: {
   /** Opt in for clients that can complete a one-part multipart session. */
   multipart?: boolean;
   reservation?: string;
+  /**
+   * The store's fence (lib/live-fence.ts): the record is written only while the store is live, read in the same step
+   * as the write. The provider's POST can answer after the store's erasure began; its record (pathname, size, session
+   * id) is then never written back, and the session made is retired (Codex L-20261120-0141).
+   */
+  fence?: StoreLiveFence;
 }): Promise<{ ok: true; upload: OpenedUpload; sessionId: string } | { ok: false; reason: "off" | "invalid" | "unavailable" }> {
   const config = vaultConfig();
   if (!config || !isRedisConfigured()) return { ok: false, reason: "off" };
@@ -236,6 +243,16 @@ export async function openVaultUpload(input: {
     if (!uploadId || !UPLOAD_ID.test(uploadId)) return { ok: false, reason: "unavailable" };
   }
   const record: Upload = { reservation: input.reservation, pathname, uploadId, bytes: input.bytes, type: input.type, at: Date.now() };
+  if (input.fence) {
+    const kept = await setIfStoreLive(input.fence, uploadKey(pathname), JSON.stringify(record), UPLOAD_SECONDS);
+    if (kept !== "kept") {
+      // Not handed out: the session is cancelled now. "gone": the store's erasure began, nothing was written.
+      if (uploadId) await retireVaultSession(pathname, uploadId).catch(() => false);
+      if (kept === "gone") return { ok: false, reason: "unavailable" };
+      throw new UnknownReplyError("a vault upload record's write");
+    }
+    return { ok: true, sessionId: uploadId, upload: { pathname, pieces, pieceBytes: PIECE_BYTES, ...(input.multipart ? { multipart: true as const } : {}) } };
+  }
   const written = repliesFor(await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]), 1);
   if (written?.[0] !== "OK") {
     // Not handed out: nothing can be signed for it, so its session is cancelled now.
@@ -243,6 +260,14 @@ export async function openVaultUpload(input: {
     throw new UnknownReplyError("a vault upload record's write");
   }
   return { ok: true, sessionId: uploadId, upload: { pathname, pieces, pieceBytes: PIECE_BYTES, ...(input.multipart ? { multipart: true as const } : {}) } };
+}
+
+/**
+ * Forgets an upload's record once its session was retired at the provider and nothing was handed out (lib/vault-storage.ts,
+ * openReservedVault): only a DEL, so it can never write a record back.
+ */
+export async function forgetVaultUploadRecord(pathname: string): Promise<void> {
+  if (isVaultPath(pathname) && isRedisConfigured()) await redisPipeline([["DEL", uploadKey(pathname)]]);
 }
 
 /**

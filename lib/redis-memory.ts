@@ -1167,6 +1167,14 @@ export class MemoryRedis {
           this.run(["HSET", diary, field, value]);
           return 1;
         }
+        // The same fenced write, also fenced on the store (lib/storage-reservations.ts WRITE_LIVE): -1 when it is erased.
+        if (key.startsWith("-- marktmorgen:fenced-set-live:v1\n") && args[0] === "4" && args.length === 8) {
+          const [, lock, target, live, erasing, token, value, field] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return -1;
+          this.run(["SET", target, value]);
+          return 1;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

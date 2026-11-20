@@ -109,6 +109,15 @@ export const UPLOAD_OPEN_CLASS_A_OPS = 20;
 export const UPLOAD_OPEN_CLASS_B_OPS = 4;
 /** Requests an upload start brings besides itself: completing and canceling it. */
 export const UPLOAD_REQUESTS_PER_OPEN = 3;
+/**
+ * Database commands an upload start adds since every write of its open is fenced on the store (Codex
+ * L-20261120-0141, lib/vault-storage.ts openReservedVault), at its worst path: the cleanup's, the reservation's, the
+ * bind's and a release's storage writes each read the store's key and its erasing mark (EXISTS, HGET:
+ * STORAGE_FENCE_EXTRA_COMMANDS, 4 x 2), the upload record's write is an EVAL that reads both before its SET (3), and a
+ * record forgotten after its session was retired is one DEL (1). Counted on top of the twenty a request is held at,
+ * since what the open sends besides them was never counted (#4019), never zero.
+ */
+export const UPLOAD_OPEN_FENCE_EXTRA_COMMANDS = 12;
 
 /** The most a month of upload starts and signed pieces can cost, in whole micro-USD. */
 export function uploadOperationsMicroUsd(opens: number, controlRequests: number, piecesPerControl: number): number | null {
@@ -117,8 +126,9 @@ export function uploadOperationsMicroUsd(opens: number, controlRequests: number,
   const classA = BigInt(opens) * BigInt(UPLOAD_OPEN_CLASS_A_OPS) + BigInt(controlRequests) * BigInt(piecesPerControl);
   const classB = BigInt(opens) * BigInt(UPLOAD_OPEN_CLASS_B_OPS);
   const requests = BigInt(opens) * BigInt(UPLOAD_REQUESTS_PER_OPEN) + BigInt(controlRequests);
+  const fenced = BigInt(opens) * BigInt(UPLOAD_OPEN_FENCE_EXTRA_COMMANDS);
   const total = ceilDiv(classA * BigInt(R2_CLASS_A_MICRO_USD_PER_MILLION), million) + ceilDiv(classB * BigInt(R2_CLASS_B_MICRO_USD_PER_MILLION), million)
-    + requests * BigInt(UPLOAD_REQUEST_INFRA_MICRO_USD);
+    + requests * BigInt(UPLOAD_REQUEST_INFRA_MICRO_USD) + ceilDiv(fenced * BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS), million);
   return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
 }
 

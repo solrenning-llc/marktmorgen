@@ -61,7 +61,7 @@ const keys = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "M
 
 async function openDuringErasure(n: number) {
   const field = await erasingField(REF);
-  const fence = { live: LIVE, field };
+  const fence = { live: LIVE, erasing: ERASING_KEY, field };
   await redis.pipeline([["SET", LIVE, REF]]);
   let release: () => void = () => undefined;
   hold = new Promise<void>((done) => { release = done; });
@@ -97,14 +97,78 @@ test("when the provider refuses that retirement, still nothing of the erased sto
   assert.deepEqual([await keys("nl:vault:up:*"), await keys("nl:storage:pending:*")], [[], []]);
 });
 
+test("an erasure between the record's write and the bind: the session is retired and its record forgotten", async () => {
+  redis.clear();
+  sessions.clear();
+  asked.length = 0;
+  await redis.pipeline([["SET", LIVE, REF]]);
+  const field = await erasingField(REF);
+  const fence = { live: LIVE, erasing: ERASING_KEY, field };
+  const pipeline = redis.pipeline.bind(redis);
+  let erased = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await pipeline(commands);
+    if (!erased && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-cache-live:"))) {
+      erased = true;
+      await pipeline([["HSET", ERASING_KEY, field, String(Date.now())], ["DEL", LIVE]]);
+      for (const key of await keys("nl:storage:pending:*")) await pipeline([["DEL", key]]);
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const outcome = await openReservedVault({ folder: folder(4), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure)
+    .then((r) => r, (e: unknown) => e)
+    .finally(() => { redis.pipeline = pipeline; });
+  assert.equal(erased, true, "the erasure ran after the record was written");
+  assert.match(String(outcome), /storage_(store_gone|reservation_missing)/, "the bind is refused for the erased store");
+  assert.ok(asked.includes("DELETE session") && sessions.size === 0, "the session is retired at the provider");
+  assert.deepEqual([await keys("nl:vault:up:*"), await keys("nl:storage:pending:*")], [[], []], "its record is forgotten and no row is written back");
+});
+
 test("control: a live store's upload opens, with its record and its storage row", async () => {
   redis.clear();
   sessions.clear();
   await redis.pipeline([["SET", LIVE, REF]]);
-  const fence = { live: LIVE, field: await erasingField(REF) };
+  const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF) };
   const opened = await openReservedVault({ folder: folder(3), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, fence } as never, 10, measure);
   assert.equal(opened.ok, true);
   assert.equal((await keys("nl:vault:up:*")).length, 1);
   assert.equal((await keys("nl:storage:pending:*")).length, 1);
   assert.equal(sessions.size, 1);
+});
+
+test("the fence's commands on an open stay within what each upload start is priced with", async () => {
+  const { UPLOAD_OPEN_FENCE_EXTRA_COMMANDS } = await import("@/lib/spend-cost-table");
+  const count = async (n: number, fenced: boolean) => {
+    redis.clear();
+    await redis.pipeline([["SET", LIVE, REF]]);
+    const fence = { live: LIVE, erasing: ERASING_KEY, field: await erasingField(REF) };
+    const run = redis.run.bind(redis);
+    let commands = 0;
+    redis.run = ((command: (string | number)[]) => { commands += 1; return run(command); }) as typeof redis.run;
+    try {
+      const opened = await openReservedVault({ folder: folder(n), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf", multipart: true, ...(fenced ? { fence } : {}) } as never, 10, measure);
+      assert.equal(opened.ok, true);
+    } finally {
+      redis.run = run;
+    }
+    return commands;
+  };
+  const { SET_IF_STORE_LIVE } = await import("@/lib/live-fence");
+  // Measured: the storage writes of the cleanup, the reservation and the bind, each read the store's key and its mark.
+  // The record's EVAL stands in for its SET one for one here (the stand-in runs that script's own commands apart), so
+  // its own extra is read from the script: its EVAL and its calls, in place of one SET.
+  const storage = (await count(6, true)) - (await count(7, false));
+  assert.equal(storage, 3 * 2, `the three storage writes add ${storage} commands`);
+  const record = 1 + (SET_IF_STORE_LIVE.match(/redis\.call\(/g)?.length ?? 0) - 1;
+  assert.equal(record, 3);
+  // The worst path adds a release's write (2) and the record's DEL (1).
+  const worst = storage + record + 2 + 1;
+  assert.equal(worst, UPLOAD_OPEN_FENCE_EXTRA_COMMANDS, `${worst} at the worst against the ${UPLOAD_OPEN_FENCE_EXTRA_COMMANDS} priced`);
+});
+
+test("the vault route opens every upload with its store's fence", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const route = readFileSync(join(process.cwd(), "app/api/store/vault/route.ts"), "utf8");
+  assert.match(route, /const fence = await storeLiveFence\(store\);\s*\n\s*const opened = await openReservedVault\(\{[^}]*\bfence \}/);
 });

@@ -2015,8 +2015,13 @@ export const COST_LINES: CostLine[] = [
     id: "uploads",
     feature: "Upload operations",
     monthlyUsd: (tier) => micro(uploadWorstCostMicroUsd(tier)),
-    sources: [{ file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] }],
-    basis: "Every upload operation the automatic upload allowance can start.",
+    sources: [
+      { file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] },
+      { file: "lib/spend-cost-table.ts", names: ["UPLOAD_OPEN_FENCE_EXTRA_COMMANDS"] },
+      { file: "lib/storage-reservations.ts", names: ["WRITE_LIVE", "STORAGE_FENCE_EXTRA_COMMANDS"] },
+      { file: "lib/live-fence.ts", names: ["SET_IF_STORE_LIVE"] },
+    ],
+    basis: "Every upload operation the automatic upload allowance can start. Since 20 November 2026 (Codex L-20261120-0141) every write of an upload's open is fenced on the store, so a provider answering after the store's erasure writes nothing back: each start is priced with UPLOAD_OPEN_FENCE_EXTRA_COMMANDS (12) more database commands at its worst path, held by tests/vault-erasure-fence.test.ts.",
   },
   {
     id: "workflows",

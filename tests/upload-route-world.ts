@@ -9,6 +9,13 @@ export async function studioAccess(){return state.auth?{ok:true,access:{store:st
 export const storeForEmail=async()=>state.store;
 export const storeFolder=async()=>FOLDER;
 export const storeRef=()=>'owner@example.test';
+// What lib/store-live-cache.ts reads to build the route's store fence (Codex L-20261120-0141); the world's own
+// openReservedVault stands in for the open, so the fence is only carried.
+export const ERASING_KEY='nl:closed:erasing';
+export const STORE_ID_PATTERN=/^[0-9a-f]{32}$/;
+export const erasingField=async()=>'e'.repeat(40);
+export const ownerKey=async()=>'nl:store:owner:'+'o'.repeat(40);
+export const storeIdCommand=(sid:string):[string,string]=>['GET','nl:store:id:'+sid];
 export const ownsDeliveryId=()=>state.owns;
 export const readKind=async()=>[{course:{id:'course-1'}}];
 /** No product here has a file yet (lib/catalog.ts readDelivery, deliveredFile), so the door's lock check (#3936) lets every open through. */

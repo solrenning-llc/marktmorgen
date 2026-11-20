@@ -19,9 +19,10 @@ const IMPLEMENTED_IN = [
   "app/api/store/pay-request/route.ts",
   "app/api/store/tip/route.ts",
   "components/billing-country-field.tsx",
+  "lib/upsell.ts (offerGate)",
 ].join("; ");
 
-const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts", "tests/eu-vat-open-paths.test.ts"].join("; ");
+const EVIDENCE = ["tests/eu-vat-consumer-gate.test.ts", "tests/eu-vat-checkout-routes.test.ts", "tests/eu-vat-pay-request-gate.test.ts", "tests/eu-vat-tip-gate.test.ts", "tests/eu-vat-open-paths.test.ts", "tests/eu-vat-upsell-gate.test.ts"].join("; ");
 
 export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
   { jurisdiction: "EU", treatment: "refuse-consumers", implementedIn: IMPLEMENTED_IN, recordedOn: "2026-11-13", registration: "", evidence: EVIDENCE },
@@ -30,5 +31,5 @@ export const REFUSE_CONSUMERS_DRAFTS: readonly DeemedSupplierRecord[] = [
 
 /** The paid paths a buyer can still reach without consumerGate: each must be gated, or shown not to need it. */
 export const REFUSE_CONSUMERS_OPEN: readonly string[] = [
-  "the one-click offer after paying (app/api/store/upsell, lib/upsell.ts): charged to the card just used, with no billing country of its own; to be gated with the first checkout's evidence, or refused for an electronic offer (Claude 7 on #4572)",
+  "physical goods shipped to an EU or UK address by a buyer whose billing country is outside them (lib/store-checkout.ts and lib/cart-shipping.ts, shipping_address_collection; PayPal's shipping): consumerGate reads the billing country only, and lib/eu-vat-goods.ts (shipCountriesUnderEuVat) is not wired yet (789 [IV1] unit 1)",
 ];

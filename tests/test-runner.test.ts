@@ -372,6 +372,15 @@ type Options = {files: string[], compile: (file: string) => Promise<unknown>, ru
 const runFiles = runTestFiles as unknown as (options: Options) => Promise<number>;
 const say = (runner as unknown as {say: (text: string) => void}).say;
 const text = (chunks: Array<[string, string | Uint8Array]>) => chunks.map(([stream, data]) => `${stream}:${typeof data === 'string' ? data : Buffer.from(data).toString('utf8')}`).join('');
+// The same, labeled by line rather than by chunk: a pipe may hand two writes of a busy worker over as one chunk, or one
+// line in two, so a test of real processes reads each stream's whole lines (RED stand-in: still by chunk).
+const lines = text;
+
+test('a real worker\'s output is labeled by line: two writes in one chunk, or one line in two chunks, read the same', () => {
+  assert.equal(lines([['err', 'one err 0\none err 1\n'], ['out', 'one out 1\n']]), 'err:one err 0\nerr:one err 1\nout:one out 1\n');
+  assert.equal(lines([['err', 'one e'], ['out', 'one out 0\n'], ['err', 'rr 2\n']]), 'out:one out 0\nerr:one err 2\n');
+  assert.equal(lines([['out', Buffer.from('a\nb')]]), 'out:a\nout:b');
+});
 
 test('TEST_CONCURRENCY: unset or empty is 1, a whole number from 1 to 32 is taken, anything else stops the run', () => {
   const parse = (runner as unknown as {testConcurrency: (value: string | undefined) => number}).testConcurrency;
@@ -452,7 +461,7 @@ test('side by side, real processes: stdout and stderr kept per file, nonzero exi
     try { owned.push(Number(readFileSync(grandPid, 'utf8'))); } catch { /* never started */ }
     assert.equal(failed, 1, 'two exited with 5');
     assert.ok(Date.now() - started < 15_000, 'the descendant left behind did not hold the run to its limit');
-    const all = text(out);
+    const all = lines(out);
     const one = all.indexOf('out:=== one.test.ts'), two = all.indexOf('out:=== two.test.ts'), three = all.indexOf('out:=== three.test.ts');
     assert.ok(one === 0 && one < two && two < three, all);
     const oneText = all.slice(one, two);

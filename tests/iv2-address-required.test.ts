@@ -137,6 +137,12 @@ async function main(): Promise<void> {
   const privacy = readFileSync(join(ROOT, "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
   is("the privacy policy says every paid checkout asks the billing address", privacy.includes("asks for your billing address on every paid checkout"), true);
   is("and that it is never used for marketing", privacy.includes("never used for marketing"), true);
+  // Claude 2's review of #4938: the creator's plan and the store assistant are paid to Marktmorgen, so their address
+  // sits on Marktmorgen's own Stripe account, not on a creator's.
+  is("and names the account of whoever is paid: the creator's for a sale, ours for a plan or add-on", [
+    privacy.includes("on the Stripe account of whoever is paid: the creator&apos;s for a store&apos;s sale, ours for a Marktmorgen plan or add-on"),
+    privacy.includes("keeps it with the payment on the creator&apos;s Stripe account"),
+  ], [true, false]);
   is("and no longer says it is asked only with sales tax on", privacy.includes("When a creator switches on sales tax, Stripe asks the buyer for the address it needs to work the tax out"), false);
 
   redis.clear();

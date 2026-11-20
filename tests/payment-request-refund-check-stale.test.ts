@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   const draft = (readDraft({ email: "client@example.com", name: "Dana", lines: [{ text: "Coaching", quantity: 1, amount: "480" }], note: "", dueDate: "", autoReminders: 0, consent: true }, "usd", now) as { ok: true; draft: Parameters<typeof createRequest>[1] }).draft;
   const made = await createRequest(store, draft, now);
   if (!made.ok) throw new Error("the request was not made");
-  await markPaid(store, made.request.id, { id: "cs_test_refundcheckstale000000001", amount_total: PAID, payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+  await markPaid(store, made.request.id, { id: "cs_test_refundcheckstale000000001", amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
   store = (await storeForEmail(OWNER))!;
   const base = (await readRequest(made.request.id))!;
   /** The list's row as the server gives it: paid, its refunds past the list's cap, so the check is offered. */

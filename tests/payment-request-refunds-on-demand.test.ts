@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   const made = await createRequest(store, draft, now);
   if (!made.ok) throw new Error("the request was not made");
   const id = made.request.id;
-  await markPaid(store, id, { id: "cs_test_refundsondemand0000000001", amount_total: PAID, payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+  await markPaid(store, id, { id: "cs_test_refundsondemand0000000001", amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
   store = (await storeForEmail(OWNER))!;
   const kept = async () => (await readRequest(id))!;
 
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
   store = await paidStore();
   const made2 = await createRequest(store, draft, now);
   if (!made2.ok) throw new Error("the second request was not made");
-  await markPaid(store, made2.request.id, { id: "cs_test_refundsondemand0000000002", amount_total: PAID, payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+  await markPaid(store, made2.request.id, { id: "cs_test_refundsondemand0000000002", amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
   store = (await storeForEmail(OWNER))!;
   const id2 = made2.request.id;
   const check2 = async (given: Page[]) => {
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
   store = await paidStore();
   const made3 = await createRequest(store, draft, now);
   if (!made3.ok) throw new Error("the third request was not made");
-  await markPaid(store, made3.request.id, { id: "cs_test_refundsondemand0000000003", amount_total: PAID, payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
+  await markPaid(store, made3.request.id, { id: "cs_test_refundsondemand0000000003", amount_total: PAID, currency: "usd", payment_intent: INTENT, created: Math.floor(now / 1000) }, now);
   store = (await storeForEmail(OWNER))!;
   const cap = api.REFUND_CHECKS_PER_MINUTE ?? 0;
   is("a finite cap a minute, below Stripe's read limit", cap > 0 && cap <= 30, true);

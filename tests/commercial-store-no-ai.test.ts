@@ -49,10 +49,10 @@ test('a plan with AI rights still needs a ceiling of at least one largest reques
 });
 
 test('Studio and Scale are still held to every right funded in full, and Store needs nothing', () => {
-  assert.equal(requiredAiStoreMicroUsd('creator', policy.requestMicroUsd), 0n);
+  assert.equal(requiredAiStoreMicroUsd('creator', policy.requestMicroUsd), BigInt(0));
   for (const tier of ['pro', 'scale'] as const) {
     const required = requiredAiStoreMicroUsd(tier, policy.requestMicroUsd)!;
-    assert.ok(required > 0n);
+    assert.ok(required > BigInt(0));
     const saved = policy.storeMicroUsd[tier];
     try {
       policy.storeMicroUsd[tier] = Number(required) - 1;

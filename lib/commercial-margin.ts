@@ -260,7 +260,7 @@ export function commercialMarginDataReady(review:CommercialMarginReview):boolean
  // jobs, no answers) needs no ceiling: the cost model gives it 0, and every
  // reservation against it refuses before the provider is asked (owner,
  // 20/11/2026, decision 3 (a)). An unreadable requirement (null) is held.
- const publishesAi=(tier:"creator"|"pro"|"scale")=>requiredAiStoreMicroUsd(tier,aiPolicy.requestMicroUsd)!==0n;
+ const publishesAi=(tier:"creator"|"pro"|"scale")=>requiredAiStoreMicroUsd(tier,aiPolicy.requestMicroUsd)!==BigInt(0);
  if((["creator","pro","scale"] as const).some(tier=>uploadPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || aiPolicy.fundedStores[tier]<review.companyBase!.reviewedPayingCustomers! || (publishesAi(tier)&&aiPolicy.storeMicroUsd[tier]<Math.max(...SUPPORTED_AI_MODELS.map(model=>aiPolicy.requestMicroUsd[model])))))return false;
  return REQUIRED_MARGIN_SCENARIOS.every(key=>{
   const scenario=review.scenarios[key]??null;

@@ -26,7 +26,7 @@ export function answerOf(publication: boolean | undefined): PublicationAnswer {
 const VALUE: Record<PublicationAnswer, boolean | null> = { yes: true, no: false, unset: null };
 
 const CHOICES: readonly { answer: PublicationAnswer; title: string; detail: string }[] = [
-  { answer: "yes", title: "Yes, it is", detail: "An e-book, an e-magazine or an e-newspaper that buyers read on a screen." },
+  { answer: "yes", title: "Yes, it is", detail: "An e-book, an e-magazine or an e-newspaper. Buyers in the EU and the UK cannot buy it yet." },
   { answer: "no", title: "No, it is not", detail: "For example a course, a template, software, music or a video." },
   { answer: "unset", title: "Not answered yet", detail: "Buyers in the EU and the UK cannot buy it until you answer." },
 ];
@@ -73,19 +73,19 @@ function PublicationChoiceLive({ product }: { product: Product }) {
     }
   }
 
-  return <PublicationChoiceView id={product.id} answer={answerOf(product.publication)} busy={busy} error={error} onChange={change} />;
+  return <PublicationChoiceView id={product.id} answer={answerOf(product.publication)} bundle={Array.isArray(product.bundle) && product.bundle.length > 0} busy={busy} error={error} onChange={change} />;
 }
 
 /** The choice itself, without the network: three radios in a fieldset, the help said once, the error read out. */
-export function PublicationChoiceView({ id, answer, busy, error, onChange }: { id: string; answer: PublicationAnswer; busy: boolean; error: string | null; onChange: (next: PublicationAnswer) => void }) {
+export function PublicationChoiceView({ id, answer, bundle = false, busy, error, onChange }: { id: string; answer: PublicationAnswer; bundle?: boolean; busy: boolean; error: string | null; onChange: (next: PublicationAnswer) => void }) {
   const name = `publication-${id}`;
   return (
     <div aria-busy={busy} className="mt-3 rounded-[var(--r-sm)] border border-line bg-white p-4">
       <fieldset aria-describedby={`${name}-hint`}>
         <legend className="field-label">Is this product an e-book, an e-magazine or an e-newspaper?</legend>
         <p id={`${name}-hint`} className="mt-1 text-sm text-ink-soft">
-          We use your answer to add the right VAT for buyers in the EU and the UK. Some countries tax these at a lower rate,
-          so we never guess.
+          We use your answer to work out the VAT for buyers in the EU and the UK. Some countries tax these at a lower rate,
+          so we never guess.{bundle ? " This is a bundle: each product in it needs its own answer too." : null}
         </p>
         <div className="mt-2 grid gap-2">
           {CHOICES.map((choice) => (

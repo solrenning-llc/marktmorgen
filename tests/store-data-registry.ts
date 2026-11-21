@@ -262,6 +262,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:inbound:support:held:@lib/inbound-mail.ts": company("That the support inbox was told today that messages are held", "One key a day, kept two days: the company's."),
   "nl:sns:seen:@app/api/mail/ses/route.ts": company("Amazon's notices already handled", "The email provider's notices, kept a few days: the company's."),
   "nl:course:@app/api/store/course/route.ts": short("A course's lock while the studio changes it", "studio", 1),
+  "nl:crefund:told:@lib/creator-refund.ts": short("A refund given from a buyer's record, marked once it is written into the team's log, so a repeat of the same form never writes it twice (649 [WG9])", "studio", 2, MARK),
   "nl:rl:export:@app/api/store/export/route.ts": { what: "Downloads of a store's files: counted ten minutes at a time, and its whole exports since its plan ended", parts: [per("studio", 1, KEY, "Downloads counted ten minutes at a time."), capped(() => KEY, "One count of whole exports since the plan ended, sixty days.")] },
   "nl:rl:export:@lib/list-download.ts": { what: "A store's list downloads since its plan ended", parts: [capped(() => KEY, "One count of list downloads since the plan ended, sixty days.")] },
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
@@ -1175,6 +1176,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sub:slots:@lib/submission-store.ts": room("A store's list of the buyer slots an upload was opened on, each turn at its latest door's end or kept file's keeping time, for the daily sweep to set the slot back once every place on it has lapsed (review of #3568, Claude 6): each turn counted with every place in the buyer's one room slot (sbl:); no expiry of its own, so a backlog is never lost, and each turn goes with the sweep, the store's closing or the buyer's erasure", "lib/submission-store.ts"),
   "nl:sub:rec:@lib/submission-store.ts": room("A buyer's file sent for review, its record kept to the creator's keeping time and a week, counted in the room until it expires", "lib/submission-store.ts"),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
+  // The owner's "Medir só 1x por dia" (16 November 2026): a store's Blob folder listed once a UTC day, the total kept and
+  // the writes since tallied by the hour, every key kept BLOB_TALLY_KEEP_SECONDS (three days) from its last write.
+  "nl:storage:blob:@lib/blob-tally.ts": { what: "The store's Blob folder: the day's listed total, the day's one listing and the bytes written since, by the hour", parts: [capped((1 + 3 + 3 * 24) * KEY, "One total, a mark a day for three days and a count an hour for three days.", src("lib/blob-tally.ts", "BLOB_TALLY_KEEP_SECONDS = 3 * 86_400", "BLOB_MEASURES_PER_DAY"))] },
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
   "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 3 + 13) * KEY, "Eight figures, the window and the two before (a billing counter is kept BILLING_COUNTER_KEEP_DAYS from its window's start, lib/allowance-window.ts, so the last month of a period that does not renew keeps its counter to its stretched end; Claude 6 on #4561); and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },
@@ -1294,6 +1298,7 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [
     per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other."),
+    capped(0, "A message not kept's place in its day's count (lib/webhooks.ts SKIP_COUNT, `nl:hooks:evt:<id>:skip:<reason>`, Codex X6 on #3446): one an event, deleted once its lines are in the log, or with the day's count given back, and gone at the end of the next UTC day at the latest. Counted with the event's own mark above, which it stands beside or in place of (a mark let go on a failure).", src("lib/webhooks.ts", "SKIP_COUNT")),
     capped(30 * (288 / 3) * MARK, "The mark of a passed-over Stripe event, kept thirty days. Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS")),
   ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },

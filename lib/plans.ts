@@ -47,6 +47,7 @@ import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
 import { refundLatePayments } from "@/lib/plan-late-refunds";
 import { tellLateRefunds } from "@/lib/plan-late-notice";
 import { ACCOUNT_ID, PENDING, SESSION_ID, entryOf, memberOf } from "@/lib/plan-remember";
+import { ERASING_KEY, erasingField, storeIdCommand } from "@/lib/store";
 
 // Written down when a plan's checkout opens; kept in its own module so lib/store-checkout.ts reads it with no static
 // import cycle through this one (tests/plans-import-cycle.test.ts).
@@ -394,12 +395,46 @@ export async function settlePlans(
 }
 
 /**
+ * The plan's ZADD, only while the store it names is still the one read just before and not erasing (Codex
+ * L-20261120-2008): the store's id key must still hold that store's ref (ARGV[3]) and its erasing field (ARGV[4],
+ * computed from that ref) must be absent. closeStoreRecord deletes the id key in the same fenced step as the erasing
+ * mark, so a pass that read the member before the store's erasure never puts it back after the walk pruned it.
+ * -1: the store is gone or erasing, nothing written; otherwise ZADD's own answer.
+ */
+const MOVE_IF_LIVE = `-- marktmorgen:plan-move-if-live:v1
+if redis.call("GET", KEYS[2]) ~= ARGV[3] then return -1 end
+if redis.call("HGET", KEYS[3], ARGV[4]) then return -1 end
+return redis.call("ZADD", KEYS[1], ARGV[1], ARGV[2])`;
+
+/**
+ * The ZADD that puts `next` in the line, fenced on its store when the member names one. A member written before
+ * members named their store (no store id) has no store to fence on and keeps the plain ZADD; the closing walk cannot
+ * find such a member by its store either. Null when the store is gone or erasing, or its ref could not be read: then
+ * nothing is written and the plan is not moved.
+ */
+async function retryWrite(at: number, next: string): Promise<(string | number)[] | null> {
+  const { sid } = entryOf(next);
+  if (!sid) return ["ZADD", RETRY, at, next];
+  const [, idKey] = storeIdCommand(sid);
+  try {
+    const ref = repliesFor(await redisPipeline([["GET", idKey]]), 1)?.[0];
+    if (typeof ref !== "string" || !ref) return null;
+    return ["EVAL", MOVE_IF_LIVE, 3, RETRY, idKey, ERASING_KEY, at, next, ref, await erasingField(ref)];
+  } catch (error) {
+    console.error("reading a payment plan's store failed", error);
+    return null;
+  }
+}
+
+/**
  * Puts a plan in the line of plans tried, due at `at`, as `next` (the same member, or one with another time or
  * mark), and only once that ZADD answered takes out what it was, so a refused or cut-off write never loses it.
- * True when it moved.
+ * True when it moved. A plan whose store is gone or erasing is not put back (Codex L-20261120-2008): false, so the
+ * stuck and owed notices after it are not sent either.
  */
 async function moveTo(member: string, at: number, next: string): Promise<boolean> {
-  if (!(await wrote([["ZADD", RETRY, at, next]]))) return false;
+  const write = await retryWrite(at, next);
+  if (!write || !(await wrote([write]))) return false;
   await redisPipeline(next === member ? [["SREM", PENDING, member]] : [["SREM", PENDING, member], ["ZREM", RETRY, member]]).catch(
     (error: unknown) => console.error("moving a payment plan in its line failed", error),
   );

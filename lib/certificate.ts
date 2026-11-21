@@ -67,6 +67,12 @@ export type Certificate = {
   /** When the creator withdrew it; 0 while it stands. */
   withdrawnAt: number;
   /**
+   * Present only on one withdrawn because the payment that gave its course was
+   * given back in full, a refund that succeeded or a dispute lost
+   * (lib/certificate-refunds.ts): its page no longer shows the name.
+   */
+  withdrawnFor?: "refund";
+  /**
    * The last moment it is valid, in seconds (639 [GL7](32)), fixed when it is
    * issued from the course's validity then; absent is for good.
    */
@@ -145,7 +151,7 @@ export function hasFinished(course: Course, done: Set<string>, passed: Set<strin
 
 type CertificateRecord = Record<string, unknown> & Pick<Certificate, "id" | "name" | "title" | "store">;
 /** Privacy export keeps status as stored, without claiming that it is valid. */
-type CertificateCopy = Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> & Partial<Record<"issuedAt" | "withdrawnAt" | "validUntil", unknown>>;
+type CertificateCopy = Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil" | "withdrawnFor"> & Partial<Record<"issuedAt" | "withdrawnAt" | "validUntil" | "withdrawnFor", unknown>>;
 
 function certificateRecord(raw: unknown): CertificateRecord | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -160,7 +166,7 @@ function certificateRecord(raw: unknown): CertificateRecord | null {
   }
 }
 
-function certificateFields(value: CertificateRecord): Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> {
+function certificateFields(value: CertificateRecord): Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil" | "withdrawnFor"> {
   return {
     id: value.id,
     store: value.store,
@@ -179,6 +185,7 @@ function copyCertificate(value: CertificateRecord): CertificateCopy {
     ...(Object.hasOwn(value, "issuedAt") ? { issuedAt: value.issuedAt } : {}),
     ...(Object.hasOwn(value, "withdrawnAt") ? { withdrawnAt: value.withdrawnAt } : {}),
     ...(Object.hasOwn(value, "validUntil") ? { validUntil: value.validUntil } : {}),
+    ...(Object.hasOwn(value, "withdrawnFor") ? { withdrawnFor: value.withdrawnFor } : {}),
   };
 }
 
@@ -193,12 +200,28 @@ function parseCertificate(raw: unknown): Certificate | null {
   if (!Object.hasOwn(value, "withdrawnAt") || !seconds(value.withdrawnAt)) return null;
   const hasExpiration = Object.hasOwn(value, "validUntil");
   if (hasExpiration && (!seconds(value.validUntil) || value.validUntil === 0)) return null;
+  // Withdrawn for a refund only as the refund pass writes it: on a withdrawn
+  // one, exactly "refund". Anything else is no certificate, never one that
+  // shows the name again.
+  const forRefund = Object.hasOwn(value, "withdrawnFor");
+  if (forRefund && (value.withdrawnFor !== "refund" || value.withdrawnAt === 0)) return null;
   return {
     ...certificateFields(value),
     issuedAt: value.issuedAt,
     withdrawnAt: value.withdrawnAt,
     ...(hasExpiration ? { validUntil: value.validUntil as number } : {}),
+    ...(forRefund ? { withdrawnFor: "refund" as const } : {}),
   };
+}
+
+/**
+ * The name a certificate's public page, its title and its description show:
+ * none once it was withdrawn because its course's payment was given back
+ * (DONO-18; Claude 2 on #3374). A certificate the creator withdrew shows it,
+ * marked withdrawn, as before.
+ */
+export function publicName(certificate: Pick<Certificate, "name" | "withdrawnAt" | "withdrawnFor">): string | null {
+  return certificate.withdrawnAt > 0 && certificate.withdrawnFor === "refund" ? null : certificate.name;
 }
 
 export const certKey = (id: string) => `nl:cert:${id}`;
@@ -463,13 +486,16 @@ export async function certificatesFor(courseId: string): Promise<{ list: Certifi
 /**
  * Withdraws a certificate. The page stays and says it was withdrawn, and the
  * student may issue it again. Only a certificate of this course is touched.
+ * `why` "refund": withdrawn because its course's payment was given back
+ * (withdrawForRefund), so its page no longer shows the name.
  */
-export async function withdrawCertificate(courseId: string, id: string): Promise<boolean> {
+export async function withdrawCertificate(courseId: string, id: string, why?: "refund"): Promise<boolean> {
   const found = await readCertificate(id);
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
+    const marked: Certificate = { ...found, withdrawnAt: Math.floor(Date.now() / 1000), ...(why ? { withdrawnFor: why } : {}) };
     // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
-    const [written] = exactReplies(await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]), 1, "a certificate's withdrawal");
+    const [written] = exactReplies(await redisPipeline([["SET", certKey(id), JSON.stringify(marked), "XX"]]), 1, "a certificate's withdrawal");
     if (written === null) return false;
     // Unknown whether it was marked withdrawn: the slot is not freed for a second one (CX-123 rule 24).
     if (written !== "OK") throw new UnknownReply("a certificate's withdrawal");
@@ -480,6 +506,118 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   const [freed] = exactReplies(await redisPipeline([["EVAL", CERT_SLOT_FREE, 1, indexKey(courseId), emailKey(found.email), id]]), 1, "a certificate's withdrawal");
   if (freed !== 1 && freed !== 0) throw new UnknownReply("a certificate's withdrawal");
   return true;
+}
+
+/** How many of a student's earlier certificates one withdrawal for a refund marks at the most (Codex N1, U and X6 on #3409). */
+export const REFUND_WALK_IDS = 1;
+/** SSCAN's COUNT while a withdrawal for a refund walks the student's list: a hint, so a page may hold a few more. */
+export const REFUND_WALK_SCAN = 10;
+/** The refunded payment a walk is for, as its "done" mark names it: a Stripe id, never empty. */
+export const REFUND_WALK_PAYMENT = /^[A-Za-z0-9_]{1,255}$/;
+/** How long a walk's place is kept between calls: longer than the refund pass takes to come back to the row. */
+export const REFUND_WALK_SECONDS = 60 * 86_400;
+/** The ids of the student's list a walk has read and not yet looked at (a list), and where its SSCAN stands (a string). */
+const walkKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:rw:${who}`;
+const walkCursorKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:rwc:${who}`;
+
+/** What one withdrawal for a refund did: whether it changed a certificate, and whether the student's list has more to look at. */
+export type RefundWithdrawal = { changed: boolean; more: boolean };
+
+/**
+ * Withdraws the certificates a student was issued for a course because the payment that gave them the course was
+ * given back in full and the course no longer opens for them (lib/certificate-refunds.ts; owner decision DONO-18):
+ * the one standing is marked withdrawn for a refund, and so is every other one of the course the student was issued,
+ * withdrawn already by the creator or replaced since (review of #3409, Claude 5, MÉDIO 1), keeping when it was
+ * withdrawn; so no page of theirs shows the name. Found by the student's slot and their own list (byKey); one issued
+ * before that list was kept (17 October 2026) and no longer in the slot is not reached here, and stays for the
+ * creator to withdraw.
+ *
+ * The student's list is walked a few at a time, never read whole (Codex N1, U and X6 on #3409: the list has no
+ * ceiling of its own): each call reads one SSCAN page when the ids it kept are used up, and looks at REFUND_WALK_IDS
+ * of them; `more` says the list holds more, and the caller comes back to the row on a later pass, inside the
+ * month's checks. So one call's commands and bytes are bounded whatever the list holds
+ * (CERTIFICATE_PASS_CHECK_COMMANDS, tests/plan-cost-registry.ts). The walk's place is kept beside the list and goes
+ * with the person and the store. Looking at a certificate again is harmless: one marked for the refund is skipped.
+ * `changed` is true when one was changed now; running it again after `more` is false changes nothing. Every reply is
+ * read exactly: one that is not what was asked for throws UnknownReply (CX-123 rule 24), and the caller tries again on
+ * its next run, from the place kept.
+ */
+export async function withdrawForRefund(courseId: string, email: string, refund: string): Promise<RefundWithdrawal> {
+  if (!isRedisConfigured()) return { changed: false, more: false };
+  const what = "a certificate's withdrawal for a refund";
+  // The payment the walk is for: its "done" mark names it, so a later refund of another payment walks the list again.
+  if (!REFUND_WALK_PAYMENT.test(refund)) throw new Error(`${what}: the refunded payment is not named`);
+  const doneMark = `done:${refund}`;
+  const who = emailKey(email);
+  let changed = false;
+  const holder = await slotHolder(courseId, who, what);
+  if (holder?.standing) {
+    if (await withdrawCertificate(courseId, holder.id, "refund")) changed = true;
+    // Nothing withdrawn while the slot still names one that stands: its record read in a shape that says nothing, never "none".
+    else if ((await slotHolder(courseId, who, what))?.standing) throw new UnknownReply(what);
+  }
+  const list = walkKey(courseId, who);
+  const place = walkCursorKey(courseId, who);
+  const [cursorRaw, keptRaw] = exactReplies(await redisPipeline([["GET", place], ["LRANGE", list, 0, REFUND_WALK_IDS - 1]]), 2, what);
+  if (cursorRaw !== null && (typeof cursorRaw !== "string" || !/^(?:\d{1,20}|done(?::[A-Za-z0-9_]{1,255})?)$/.test(cursorRaw))) throw new UnknownReply(what);
+  // Walked to its end already for this payment: nothing of the list is looked at again (the pass coming back to the
+  // row), until the mark ends or goes with the person. A walk done for another payment, or a mark from before it named
+  // one, is walked again from the start: a later refund (the course bought again, a certificate issued and replaced
+  // since) must reach the certificates the earlier walk did not see (Claude 4 AA's LEVE on #3409). Looking again is
+  // harmless: one marked for the refund is skipped.
+  if (cursorRaw === doneMark) return { changed, more: false };
+  const kept = plainList(keptRaw);
+  if (!kept || !kept.every((id) => typeof id === "string")) throw new UnknownReply(what);
+  let ids = kept as string[];
+  // Where the SSCAN stands: "0" before the first page and after the last, so a list read to its end says "no more".
+  let cursor = cursorRaw === null || cursorRaw.startsWith("done") ? "0" : cursorRaw;
+  if (ids.length === 0) {
+    const [page] = exactReplies(await redisPipeline([["SSCAN", byKey(courseId, who), cursor, "COUNT", REFUND_WALK_SCAN]]), 1, what);
+    const parts = plainList(page);
+    const next = parts?.[0];
+    const found = plainList(parts?.[1]);
+    if (!parts || parts.length !== 2 || typeof next !== "string" || !/^\d{1,20}$/.test(next) || !found || !found.every((id) => typeof id === "string")) throw new UnknownReply(what);
+    // The page's ids are kept before any is looked at, with where the scan goes next: a call stopped part way comes
+    // back to the same ids, never to the next page with these skipped.
+    const queue = (found as string[]).filter((id) => CERT_ID_PATTERN.test(id));
+    const writes: (string | number)[][] = [["SET", place, next, "EX", REFUND_WALK_SECONDS]];
+    if (queue.length) writes.push(["RPUSH", list, ...queue], ["EXPIRE", list, REFUND_WALK_SECONDS]);
+    const wrote = exactReplies(await redisPipeline(writes), writes.length, what);
+    if (wrote[0] !== "OK" || (queue.length && (replyCount(wrote[1], what) < queue.length || replyCount(wrote[2], what) !== 1))) throw new UnknownReply(what);
+    cursor = next;
+    ids = queue.slice(0, REFUND_WALK_IDS);
+  }
+  if (ids.length) {
+    const [rows] = exactReplies(await redisPipeline([["MGET", ...ids.map(certKey)]]), 1, what);
+    const values = plainList(rows);
+    if (!values || values.length !== ids.length || !values.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReply(what);
+    for (let j = 0; j < ids.length; j += 1) {
+      const found = parseCertificate(values[j]);
+      if (!found || found.courseId !== courseId || found.withdrawnFor === "refund") continue;
+      if (!found.withdrawnAt) {
+        // One still standing that the slot does not name: withdrawn for the refund as the standing one is.
+        if (await withdrawCertificate(courseId, ids[j], "refund")) changed = true;
+        continue;
+      }
+      const marked: Certificate = { ...found, withdrawnFor: "refund" };
+      // XX: only while it is still there, so this never writes back a certificate the person's deletion took.
+      const [written] = exactReplies(await redisPipeline([["SET", certKey(ids[j]), JSON.stringify(marked), "XX"]]), 1, what);
+      if (written === null) continue;
+      if (written !== "OK") throw new UnknownReply(what);
+      changed = true;
+    }
+    // Looked at: taken off the walk's list only now, so a call stopped above looks at them again.
+    const [left] = exactReplies(await redisPipeline([["LTRIM", list, ids.length, -1]]), 1, what);
+    if (left !== "OK") throw new UnknownReply(what);
+  }
+  // More while the walk's list holds ids not looked at, or its SSCAN has pages left; the walk's place goes once done.
+  const [remaining] = exactReplies(await redisPipeline([["LLEN", list]]), 1, what);
+  const queued = replyCount(remaining, what);
+  if (queued > 0 || cursor !== "0") return { changed, more: true };
+  // Done: the ids it kept go, and its place says so, so the list is not walked again for this refund.
+  const [ended, cleared] = exactReplies(await redisPipeline([["SET", place, doneMark, "EX", REFUND_WALK_SECONDS], ["DEL", list]]), 2, what);
+  if (ended !== "OK" || replyCount(cleared, what) > 1) throw new UnknownReply(what);
+  return { changed, more: false };
 }
 
 /**
@@ -543,7 +681,8 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
         }
         try {
           const value = JSON.parse(raw) as Record<string, unknown>;
-          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+          // Back to its issue-time shape: not withdrawn, and without the refund's mark (withdrawnFor), which issue never wrote.
+          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0, withdrawnFor: undefined })], 3);
         } catch {
           // Unreadable: nothing is known of what it took, so nothing is given back for it.
         }
@@ -555,7 +694,8 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
     if (unknown) throw new UnknownReply(what);
     exactReplies(
       await redisPipeline([
-        ["DEL", byKey(courseId, who)],
+        // With the student's list, a refund's walk of it (withdrawForRefund): its ids and its place.
+        ["DEL", byKey(courseId, who), walkKey(courseId, who), walkCursorKey(courseId, who)],
         ["HDEL", indexKey(courseId), who],
         ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
       ]),

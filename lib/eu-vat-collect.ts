@@ -78,7 +78,7 @@ function collectingUk(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | un
 /**
  * The checkout route's EU and UK gate. `records`, `vatSwitch`, `now`, `rates` and `publication` are for tests only: the
  * route passes none of them, so it reads DEEMED_SUPPLIER_RECORDS, the reviewed switches, the clock and the official
- * rate table, and no product is classified as an e-publication or not (so no UK sale collects).
+ * rate table, and no product is classified as an e-publication or not (so no EU or UK sale collects).
  */
 export function euSaleGate(input: {
   product: EuSupplyFields;
@@ -89,7 +89,10 @@ export function euSaleGate(input: {
   vatSwitch?: Omit<SwitchInput, "now">;
   now?: Date;
   rates?: readonly EuVatRate[];
-  /** Whether the product is an e-publication (zero-rated in the UK): only an explicit `false` lets UK VAT be collected. */
+  /**
+   * Whether the product is an e-publication (zero-rated in the UK, possibly reduced-rated in a Member State): only an
+   * explicit `false` lets EU or UK VAT be collected. No product carries the classification yet, so nothing collects.
+   */
   publication?: boolean;
 }): EuSaleGate {
   const base = consumerGate({ product: input.product, members: input.members, headers: input.headers, form: input.form });
@@ -107,7 +110,10 @@ export function euSaleGate(input: {
   // consumerGate's refusal, as today.
   const supply = euSupplyOf(input.product, input.members);
   const items = checkoutEvidence(input.headers, input.form);
-  if (eu) {
+  // Unit 4: the EU collects only for a product explicitly classified as not an e-publication (Directive 2006/112/EC
+  // annex III, point 6, lets a Member State tax those at a reduced rate, and EU_VAT_RATES holds only the standard rate):
+  // an e-publication or an unclassified product keeps the refusal, never the standard rate on a guess (TX policy).
+  if (eu && input.publication === false) {
     const answer = euCheckout({ supply, priceCents: input.product.priceCents, items, rates: input.rates, records: input.records, vatSwitch: input.vatSwitch, now });
     if (answer.kind === "collect" && answer.vat.country === answer.place.country) return { ok: true, collect: { country: answer.place.country } };
   }

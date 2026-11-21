@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 1192,
+  "sha256": "02874f69c139fbf916eb8bfcd88742f5def0571f0b2ddbb51efa5f841ca36dfd",
+  "content": "P_STN_METRICS {\"fetch\":0,\"run\":0,\"pipeline\":0,\"network\":0,\"sourceBytes\":4606799,\"capped\":false}\nnode:internal/modules/package_json_reader:331\n  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n        ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find package '@vercel/blob' imported from /workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/lib/blob.ts\n    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:331:9)\n    at packageResolve (node:internal/modules/esm/resolve:784:25)\n    at moduleResolve (node:internal/modules/esm/resolve:873:18)\n    at defaultResolve (node:internal/modules/esm/resolve:1006:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:705:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:725:38)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at resolve (file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/proofs/p/stn11-email-usage/native-linked.mjs:29:10)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at resolveWithHooks (node:internal/modules/customization_hooks:417:10) {\n  code: 'ERR_MODULE_NOT_FOUND'\n}\n\nNode.js v24.22.1\n"
+}

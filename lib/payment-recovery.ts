@@ -245,21 +245,27 @@ async function remindFailed(store: Store, deadline: number): Promise<Swept> {
   // Stopped by the run's time, not by the end of the list or the page cap: there is more to read (rule 24, R24 crons
   // item 6). The page cap is not "more to do" now: the next run reads on from where this one stopped.
   let complete = ended || pages >= FAILED_PAGES;
-  // Every member not handled, in list order, by where a reading starts to list it again.
+  // Every member not handled, in list order, by where a reading starts to list it again, and whether it was tried
+  // (false: the run's time or PER_STORE ran out before it).
   const notHandledFrom: string[] = [];
-  const notHandled = (sub: Sub) => {
+  const tried: boolean[] = [];
+  const notHandled = (sub: Sub, wasTried = true) => {
     complete = false;
     notHandledFrom.push(fromOf.get(sub) ?? start);
+    tried.push(wasTried);
   };
   // Written once the members read are handled, never before (rule 24): a run that throws on the way leaves the cursor
   // where it was. The list ended: the top, so a member not handled is read again there, with every newer one.
   // Otherwise from before the first member not handled, but not when that is where this run started (nothing moved,
   // so a member that fails every time would hold the cursor for good): then from the next one not handled, or from
-  // where this run stopped, and that member is read again when the list comes round.
+  // where this run stopped, and that member is read again when the list comes round. A member at the start that was
+  // not tried at all (the run's time ran out first) failed nothing: the next run starts at it again, never a whole lap
+  // of the list later (Claude 3 N, 6806672663 item 1 on #3215).
   const moveCursor = async () => {
     const stopAt = notHandledFrom[0] ?? null;
-    if (!ended && stopAt !== null && stopAt === start) console.error("failed renewals: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
-    const to = ended ? "" : stopAt === null ? after : stopAt === start ? (notHandledFrom[1] ?? after) : stopAt;
+    const stuck = stopAt !== null && stopAt === start && tried[0] === true;
+    if (!ended && stuck) console.error("failed renewals: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
+    const to = ended ? "" : stopAt === null ? after : stuck ? (notHandledFrom[1] ?? after) : stopAt;
     await redisPipeline([to ? ["SET", dueCursorKey(account), to, "EX", 30 * 86_400] : ["DEL", dueCursorKey(account)]]);
   };
   const mine = subs.filter((s) => handles.has(s.metadata?.store ?? ""));
@@ -276,7 +282,7 @@ async function remindFailed(store: Store, deadline: number): Promise<Swept> {
   for (const sub of mine) {
     // Members left for the next run, which starts at this store (recoverFailedPayments).
     if (Date.now() >= deadline || written >= PER_STORE) {
-      for (const left of mine.slice(mine.indexOf(sub))) notHandled(left);
+      for (const left of mine.slice(mine.indexOf(sub))) notHandled(left, false);
       break;
     }
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";

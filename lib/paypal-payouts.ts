@@ -37,6 +37,7 @@ import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, payAddress
 import { type BookSizes, bookWork } from "@/lib/api-read-rules";
 import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
+import { takeAllowance } from "@/lib/store-allowance";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -78,6 +79,31 @@ const SETTLE_PACE_SECONDS = 300;
  */
 export const PRESS_PACE_SECONDS = 60;
 const pressKey = (statsId: string) => `nl:pp:press:${statsId}`;
+/**
+ * The most one reading asked for by a view or a press of "Check with PayPal" spends asking PayPal (settlePayPal): no
+ * call is started that could not end before it, so the reading always ends inside its function's 60 s (the studio's
+ * affiliates page and the route both set maxDuration = 60). A batch not reached stays on its way, read next time.
+ */
+export const PAYPAL_READING_MS = 40_000;
+/**
+ * A reading asked for by a view or a press is a call held for up to its function's 60 s at 2 GB, a new token and up to
+ * ten pages of each open batch, and the writes back (C5-20261121-1459-PAYPAL-READING): far more than the one studio
+ * request a press took, or the four a page takes. So, once its pace mark is its own and before PayPal is asked, it
+ * takes PAYPAL_READING_BASE_UNITS of the store's studio requests, and one more for each PAYPAL_READING_UNIT_COMMANDS of
+ * the work its open batches can make (PAYPAL_READING_BATCH_COMMANDS each, PAYPAL_READING_LINE_COMMANDS a line).
+ * Refused, it reads nothing. tests/paypal-reading-cost.test.ts holds the units above the reading's cost at the
+ * registry's own figures (tests/plan-cost-registry.ts, paypalReadingCost) and the commands under the count. The daily
+ * job takes none: it is the company's one run a day, not a store's request.
+ */
+export const PAYPAL_READING_BASE_UNITS = 7;
+export const PAYPAL_READING_UNIT_COMMANDS = 30;
+export const PAYPAL_READING_BATCH_COMMANDS = 6;
+export const PAYPAL_READING_LINE_COMMANDS = 3;
+export function paypalReadingUnits(batches: number, lines: number): number {
+  return PAYPAL_READING_BASE_UNITS + Math.ceil((batches * PAYPAL_READING_BATCH_COMMANDS + lines * PAYPAL_READING_LINE_COMMANDS) / PAYPAL_READING_UNIT_COMMANDS);
+}
+/** A reading out of its time: the batch it was reading stays on its way, with nothing said in the logs. */
+class ReadingOutOfTime extends Error {}
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
 
 /**
@@ -743,9 +769,11 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
  * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212). `retryNow`: with `unavailable`,
  * true only when no mark of this reading is left (none was taken, or its release was confirmed), so a new try asks at
  * once; false when the mark could not be confirmed taken or let go, so the next try may find it until it runs out
- * (Codex L on #4212).
+ * (Codex L on #4212). `limit`: true, and only then present, when the reading was not made because the store's studio
+ * requests left this month cannot pay for it (paypalReadingUnits): trying again does not help (`retryNow` false), and
+ * the daily job still reads PayPal on its own.
  */
-export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean; retryNow?: boolean };
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean; retryNow?: boolean; limit?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -798,6 +826,20 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
   const claimed = pace ? await claimMark(pace.key, pace.seconds, mark) : "ours";
   if (claimed === "taken") return onTheirWayNow();
   if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true, retryNow: false };
+  // A view's or a press's reading is counted first, at its worst (PAYPAL_READING_BASE_UNITS): refused or not known,
+  // nothing is asked of PayPal and the mark is let go, as with no token below.
+  if (pace) {
+    const lines = [...open.values()].reduce((n, b) => n + b.lines.length, 0);
+    const taken = await takeAllowance(store, "studio", paypalReadingUnits(open.size, lines)).catch(() => null);
+    if (!taken?.ok) {
+      const released = await releaseMark(pace.key, mark);
+      // Only a count not known may go through at once; no room this month (or no place in the month's pool) does not.
+      const limit = taken?.reason === "used";
+      return { ...onTheirWayNow(), unavailable: true, retryNow: released && (taken === null || taken.reason === "unknown"), ...(limit ? { limit: true } : {}) };
+    }
+  }
+  const deadline = pace ? Date.now() + PAYPAL_READING_MS : Number.POSITIVE_INFINITY;
+  const inTime = () => Date.now() + TIMEOUT_MS <= deadline;
   const token = await bearer(store).catch(() => null);
   if (!token) {
     // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
@@ -810,8 +852,9 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
     // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
+    // Only the daily job sends it again: a view or a press reads PayPal and nothing more, inside its own time and units.
     if (batch.startsWith(UNKNOWN_BATCH_PREFIX)) {
-      await settleUnknown(store, batch, sent, auth, sender).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
+      if (!pace) await settleUnknown(store, batch, sent, auth, sender).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
       out.waiting += sent.lines.length;
       continue;
     }
@@ -826,6 +869,8 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
     let batchStatus = "";
     try {
       for (let page = 1; page <= 10; page += 1) {
+        // A page that could not end inside the reading's time is not asked: the batch is read again next time.
+        if (!inTime()) throw new ReadingOutOfTime();
         const data = await call("GET", `/v1/payments/payouts/${encodeURIComponent(batch)}?page=${page}&page_size=1000&total_required=true`, auth);
         batchStatus = String((data.batch_header as { batch_status?: unknown } | undefined)?.batch_status ?? "");
         const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
@@ -842,7 +887,7 @@ export async function settlePayPal(store: Store, options: { paced?: boolean; pre
         if (page >= pages) break;
       }
     } catch (error) {
-      console.error("reading a PayPal batch failed", error);
+      if (!(error instanceof ReadingOutOfTime)) console.error("reading a PayPal batch failed", error);
       out.waiting += sent.lines.length;
       continue;
     }

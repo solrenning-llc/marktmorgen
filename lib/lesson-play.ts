@@ -126,13 +126,22 @@ export async function claimPlaying(who: string, folder: string, now = Date.now()
   return null;
 }
 
+/**
+ * KEYS[1] a person's place in a store, ARGV[1] the claim a press holds it with, ARGV[2] its token ("" to let it go),
+ * ARGV[3] the token's seconds: let go or replaced only while it still holds that claim, in one step, so a press whose
+ * claim ran out never deletes or writes over another press's claim (Codex N1's LOW on #3402). 1 when done, else 0.
+ */
+const PLAYING_IF = `-- marktmorgen:lesson-playing-if:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[2] == "" then return redis.call("DEL", KEYS[1]) end
+redis.call("SET", KEYS[1], ARGV[2], "EX", tonumber(ARGV[3]))
+return 1`;
+
 /** Lets a claim go when its press signed no token, only while it is still that claim. Best effort: it ends in PLAY_CLAIM_SECONDS. */
 export async function dropPlayingClaim(who: string, folder: string, claim: string): Promise<void> {
   if (!isRedisConfigured() || !who || !folder || !claim.startsWith("claim:")) return;
   try {
-    const key = playingKey(who, folder);
-    const [raw] = await redisPipeline([["GET", key]]);
-    if (raw === claim) await redisPipeline([["DEL", key]]);
+    await redisPipeline([["EVAL", PLAYING_IF, 1, playingKey(who, folder), claim, "", 0]]);
   } catch (error) {
     console.error("could not let a viewer's claim to hold go; it ends on its own", error);
   }
@@ -140,16 +149,17 @@ export async function dropPlayingClaim(who: string, folder: string, claim: strin
 
 /**
  * Keeps a signed-in person's live token in a store, for the lesson video it is for, until it has
- * PLAY_REUSE_MIN_SECONDS left, in place of their claim or their token before. Answers whether it was kept.
+ * PLAY_REUSE_MIN_SECONDS left, in place of the claim its press holds the place with, and only while it still holds
+ * that claim; a token too short to keep lets that claim go instead, in the same one script. Answers whether it was kept.
  */
-export async function keepPlaying(who: string, folder: string, pathname: string, player: KeptPlayer, now = Date.now()): Promise<boolean> {
-  if (!isRedisConfigured() || !who || !folder) return false;
+export async function keepPlaying(who: string, folder: string, claim: string, pathname: string, player: KeptPlayer, now = Date.now()): Promise<boolean> {
+  if (!isRedisConfigured() || !who || !folder || !claim.startsWith("claim:")) return false;
   const expires = expiresOf(player.src);
   const seconds = expires === null ? 0 : expires - Math.floor(now / 1000) - PLAY_REUSE_MIN_SECONDS;
-  if (seconds < 1) return false;
+  const next = seconds < 1 ? "" : JSON.stringify({ p: pathname, ...player });
   try {
-    const [reply] = await redisPipeline([["SET", playingKey(who, folder), JSON.stringify({ p: pathname, ...player }), "EX", seconds]]);
-    return reply === "OK";
+    const [reply] = await redisPipeline([["EVAL", PLAYING_IF, 1, playingKey(who, folder), claim, next, Math.max(seconds, 0)]]);
+    return next !== "" && reply === 1;
   } catch (error) {
     console.error("could not keep a lesson video's token for its viewer", error);
     return false;

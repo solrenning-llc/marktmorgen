@@ -41,10 +41,12 @@ import {
  *      else, the store's anonymous previews (PREVIEW_PLAYS_PER_STORE_WINDOW);
  *   4. takes PLAY_REQUEST_UNITS of the store's public requests;
  *   5. one live hold a person a store (review of #3402, M1): gives a signed-in
- *      person's live token again for the same video, or for another lesson a
- *      token ending with it, holding nothing; or else, with their place claimed
- *      so that presses at once cannot each hold, holds the playback and signs a
- *      token (lib/learn.ts, lessonVideo: an anonymous press never takes the
+ *      person's live token again for the same video, and refuses another lesson
+ *      while it is live, signing and holding nothing (the owner's decision B of
+ *      11 November 2026); or else, with their place claimed so that presses at
+ *      once cannot each hold, holds the playback and signs a token, kept or let
+ *      go only while the claim is still this press's (lib/lesson-play.ts,
+ *      PLAYING_IF), (lib/learn.ts, lessonVideo: an anonymous press never takes the
  *      window below PREVIEW_KEEP_BPS, nor previews past their window's half);
  *   6. sends the browser back to the lesson with a ticket for the player, taken
  *      once, or with what kept it from playing, in words the page says.
@@ -133,8 +135,8 @@ export async function POST(request: NextRequest) {
   switch (got?.kind) {
     case "stream": {
       const player = { src: got.src, width: got.width, height: got.height };
-      // Their live token is now this one (a moved token ends with the one before); a claim not replaced is let go.
-      if (who && folder && !same && !(await keepPlaying(who, folder, video.pathname, player)) && claim) await dropPlayingClaim(who, folder, claim);
+      // Their live token is now this one, in place of their claim; a token too short to keep lets the claim go.
+      if (who && folder && claim) await keepPlaying(who, folder, claim, video.pathname, player);
       const ticket = await keepPlayTicket(video.pathname, player);
       return back(ticket ?? "error");
     }

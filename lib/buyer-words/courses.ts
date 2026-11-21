@@ -2249,7 +2249,7 @@ const pt: CoursesWords = {
     `Outras pessoas estão a usar agora o tempo de vídeo desta loja. O tempo que não usarem volta dentro de ${plural(hours, "cerca de uma hora", `cerca de ${hours} horas`)}; depois prima Reproduzir aula de novo.`,
   playKeptRest: "O tempo de vídeo que resta a esta loja este mês está reservado para os seus alunos.",
   playManyRest: "Os vídeos das aulas foram iniciados muitas vezes na última hora. Tente novamente dentro de uma hora.",
-  playPlayingRest: "O vídeo de uma das suas aulas está tocando. Você pode iniciar outro quando ele terminar, em no máximo 30 minutos.",
+  playPlayingRest: "O vídeo de uma das suas aulas está a ser reproduzido. Pode iniciar outro quando ele terminar, dentro de 30 minutos no máximo.",
   playPreviewsRest: "Muitas pessoas estão a ver agora as pré-visualizações gratuitas desta loja. Tente novamente dentro de uma hora.",
   playAgainRest: "Prima Reproduzir aula de novo daqui a pouco.",
   playBlockRest: (minutes) =>

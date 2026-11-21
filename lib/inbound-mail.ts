@@ -400,12 +400,17 @@ async function files(listed: FileList, charge?: Charge): Promise<{ sent: { filen
 const COUNT_ADMITTED = "admitted";
 const COUNT_REFUSED = "refused";
 
-/** Writes the count's decision on the mark this run took, for the rest of its hour. Never throws: a retry that cannot read it waits. */
-async function decide(mark: string, decision: string): Promise<void> {
+/**
+ * Writes the count's decision on the mark this run took, for the rest of its hour: true only when Redis answered "OK".
+ * Never throws. A write not confirmed leaves retries reading an undecided mark, so the caller does not forward on it
+ * (Codex N1's and X6's LOW on #3926): the message waits for a later try instead.
+ */
+async function decide(mark: string, decision: string): Promise<boolean> {
   try {
-    await redisPipeline([["SET", mark, decision, "XX", "EX", 3_600]]);
+    return repliesFor(await redisPipeline([["SET", mark, decision, "XX", "EX", 3_600]]), 1)?.[0] === "OK";
   } catch (error) {
     console.error("an inbound message's count could not be written down", error);
+    return false;
   }
 }
 
@@ -692,9 +697,11 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     if (counted === "unknown") return "retry";
     if (counted === "ours") {
       const admitted = await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600);
-      // Written for a retry; this run knows its own decision, so a write that did not land changes nothing here.
-      await decide(mark, admitted ? COUNT_ADMITTED : COUNT_REFUSED);
+      // Written for a retry. A refusal stays a refusal whether or not the write landed; an admission is forwarded only
+      // once it is written down, or a retry would read the mark as undecided while this run had already sent it.
+      const written = await decide(mark, admitted ? COUNT_ADMITTED : COUNT_REFUSED);
       if (!admitted) return "skipped";
+      if (!written) return "retry";
     } else {
       const decided = await decisionOf(mark);
       if (decided === COUNT_REFUSED) return "skipped";

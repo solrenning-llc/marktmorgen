@@ -63,13 +63,13 @@ async function meterCohortReady(meter: EmailMeter): Promise<boolean> {
 }
 
 /** Takes a store's figure for `n` emails before they go; true for the meters already counted elsewhere. */
-async function metered(meter: EmailMeter, n: number): Promise<boolean> {
+async function metered(meter: EmailMeter, n: number, now = Date.now()): Promise<boolean> {
   if (!(await meterCohortReady(meter))) return false;
-  return takeMeteredAllowance(meter, n);
+  return takeMeteredAllowance(meter, n, now);
 }
-async function takeMeteredAllowance(meter: EmailMeter, n: number): Promise<boolean> {
+async function takeMeteredAllowance(meter: EmailMeter, n: number, now = Date.now()): Promise<boolean> {
   if (meter.by !== "store") return true;
-  const taken = await takeAllowance(meter.store, meter.kind, n, Date.now(), meter.asked === true);
+  const taken = await takeAllowance(meter.store, meter.kind, n, now, meter.asked === true);
   if (!taken.ok) console.error(`an email was not sent: the store's ${meter.kind} figure (${taken.reason})`);
   return taken.ok;
 }
@@ -709,8 +709,11 @@ async function dispatchBatch(
   // answers "retry" or "waiting" with nothing handed to Amazon: a list sender tries such a batch again each run, and an
   // outage must never spend the store's emails on mail that never went (outage drill, 14 November 2026).
   let debited = 0;
+  // The moment it was taken: given back into that same window, never the one running when the answer came (a call
+  // that crossed the window's end debited the old month and would have credited the new one; Codex N1's LOW 2 on #3926).
+  let debitedAt = 0;
   const nothingSent = async <T>(answer: T): Promise<T> => {
-    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited);
+    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited, debitedAt);
     debited = 0;
     return answer;
   };
@@ -724,8 +727,14 @@ async function dispatchBatch(
       }));
       authorization = lazyMeter(meter, going.length);
       if (!(await authorization.preflight())) return "refused";
-    } else if (!(await metered(meter, going.length))) return "refused";
-    else if (meter.by === "store") debited = going.length;
+    } else {
+      const at = Date.now();
+      if (!(await metered(meter, going.length, at))) return "refused";
+      if (meter.by === "store") {
+        debited = going.length;
+        debitedAt = at;
+      }
+    }
   }
   let idempotencyKey = batchKey;
   // Whether Amazon took anyone in this call. Until it has, a "retry" further down (Amazon only, the Resend handoff

@@ -34,14 +34,35 @@ const codes = [
   { id: "promo_active0001", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } },
   { id: "promo_stopped001", code: "OLD", active: false, promotion: { type: "coupon", coupon: { id: "co_2", percent_off: 10, duration: "once" } } },
 ];
+/** A customer row that is not one: an empty object, an array, an id that is not a customer's. */
+const OFF_CUSTOMERS: Record<string, unknown> = { "rowobject@example.com": {}, "rowarray@example.com": [], "rowbadid@example.com": { id: 42 } };
+/** A subscription row that is not one: an empty object, an array, no status, metadata that is not an object, an id that is not a subscription's. */
+const OFF_SUBS: Record<string, unknown> = {
+  "subobject@example.com": {},
+  "subarray@example.com": [],
+  "subnostatus@example.com": { id: "sub_nostatus01", metadata: { store: "memberstore" } },
+  "submeta@example.com": { id: "sub_badmeta001", status: "active", metadata: "memberstore" },
+  "subbadid@example.com": { id: 7, status: "active", metadata: { store: "memberstore" } },
+};
 const posted: { path: string; body: string; key: string | null }[] = [];
 let refuse = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [], has_more: false });
-  if (path === "/subscriptions") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [], has_more: false });
+  // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
+  // Rows Stripe could not have sent, one per address (Codex S second review of #2912, residual of M2):
+  // a customer or a subscription row that is not a readable one is unknown, never "no membership".
+  if (path === "/customers") {
+    const email = url.searchParams.get("email") ?? "";
+    const data = email === "member@example.com" ? [{ id: "cus_member0001" }] : email in OFF_CUSTOMERS ? [OFF_CUSTOMERS[email]] : email in OFF_SUBS ? [{ id: `cus_${email.split("@")[0]}01` }] : [];
+    return answer({ object: "list", data, has_more: false });
+  }
+  if (path === "/subscriptions") {
+    const customer = url.searchParams.get("customer") ?? "";
+    const off = Object.keys(OFF_SUBS).find((email) => customer === `cus_${email.split("@")[0]}01`);
+    return answer({ object: "list", data: customer === "cus_member0001" ? subs : off ? [OFF_SUBS[off]] : [], has_more: false });
+  }
   if (path === "/promotion_codes") return answer({ object: "list", data: codes, has_more: false });
   const one = codes.find((c) => path === `/promotion_codes/${c.id}`);
   if (path.startsWith("/promotion_codes/")) return one ? answer(one) : answer({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such promotion code" } }, 404);
@@ -71,6 +92,14 @@ async function main(): Promise<void> {
   is("how many intervals a renewal covers, read exactly", [every(undefined), every(1), every(3), every(0), every("3"), every(2.5)], [1, 1, 3, null, null, null]);
   is("and said that way in the studio", [everyWords({ interval: "month", every: 3 }), everyWords({ interval: "month", every: 1 }), everyWords({ interval: "month", every: null }), everyWords({ interval: "", every: 1 })], [" every 3 months", " a month", "", ""]);
   is("nobody under that address: none", (await memberSubs(store, "nobody@example.com"))?.length, 0);
+
+  part("A row Stripe could not have sent is unknown, never no membership (Codex S second review of #2912)");
+  for (const email of [...Object.keys(OFF_CUSTOMERS), ...Object.keys(OFF_SUBS)]) {
+    is(`${email}: the lookup says Stripe could not be read`, await memberSubs(store, email), null);
+    is(`${email}: putting a code on says Stripe, never not a member`, await applyMemberDiscount(store, email, "sub_live000001", "promo_active0001"), { ok: false, reason: "stripe" });
+  }
+  is("a readable but ended membership still is not one", (await memberSubs(store, "member@example.com"))?.some((s) => s.id === "sub_gone000001"), false);
+  is("nothing was sent to Stripe for an unreadable row", posted.length, 0);
 
   part("Putting a code on");
   is("not this member's membership: refused", await applyMemberDiscount(store, "member@example.com", "sub_else000001", "promo_active0001"), { ok: false, reason: "not_member" });

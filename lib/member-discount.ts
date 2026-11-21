@@ -24,6 +24,14 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PROMO_PATTERN = /^promo_[A-Za-z0-9]{6,64}$/;
 /** The statuses of a membership still running, as lib/membership-manage.ts counts them. */
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+/**
+ * Every status Stripe gives a subscription at API_VERSION ("Subscription
+ * object", status enum), the same list lib/billing.ts reads plans with. Any
+ * other value is not one Stripe sends, so the row is unknown (Codex S
+ * corrective focal of #2912, M2 residual): only a recognized status that is
+ * not running (canceled, incomplete, incomplete_expired) leaves it out.
+ */
+const STRIPE_SUB_STATUSES = new Set([...LIVE, "canceled", "incomplete", "incomplete_expired"]);
 const STATES = new Set([...LIVE, "incomplete", "incomplete_expired", "canceled"]);
 const MAX_CUSTOMERS = 20;
 /**
@@ -60,7 +68,7 @@ export type MemberSub = {
   discounted: boolean;
 };
 
-type Raw = Record<string, unknown>;
+export type Raw = Record<string, unknown>;
 const list = (value: unknown): Raw[] => (value && typeof value === "object" && Array.isArray((value as Raw).data) ? ((value as Raw).data as Raw[]) : []);
 
 /**
@@ -84,6 +92,18 @@ function page(value: unknown, what: string, most: number, pattern: RegExp, seen:
   }
   return { rows: rows as Raw[], more: listed.has_more };
 }
+
+/**
+ * Whether a row is one Stripe could have sent for a customer or a
+ * subscription: its id, and for a subscription a status Stripe has and its
+ * metadata object, readable (Codex S second review of #2912, residual of M2;
+ * its corrective focal: a non-empty status is not enough). A row
+ * that is not is unknown, never left out as "not a membership": only a
+ * readable row is filtered by status, store or kind.
+ */
+const readableCustomer = (row: Raw): boolean => typeof row.id === "string" && CUSTOMER_PATTERN.test(row.id);
+const readableSub = (row: Raw): boolean =>
+  typeof row.id === "string" && SUB_PATTERN.test(row.id) && typeof row.status === "string" && STRIPE_SUB_STATUSES.has(row.status) && !!row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata);
 
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
 export function hasDiscount(sub: Raw): boolean {
@@ -140,28 +160,39 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
  * for "not a member", and no discount is put on or refused on a guess.
  */
 export async function memberSubs(store: Store, email: string): Promise<MemberSub[] | null> {
+  const rows = await memberSubRows(store, email);
+  return rows === null ? null : rows.map((r) => r.row);
+}
+
+/**
+ * The same memberships with what Stripe answered for each, for a reader that
+ * needs more of a subscription than the studio row (lib/member-free-days.ts:
+ * its next charge). Same reads, same filter; null when Stripe could not be read.
+ */
+export async function memberSubRows(store: Store, email: string): Promise<{ row: MemberSub; raw: Raw }[] | null> {
   const account = store.stripeAccountId;
   if (!account) return null;
   const handles = saleHandles(store);
   try {
     const customers = page(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers", MAX_CUSTOMERS, CUSTOMER_PATTERN, new Set());
     if (customers.more) throw new UnreadListError(`more than ${MAX_CUSTOMERS} customers under one address`);
-    const out: MemberSub[] = [];
+    const out: { row: MemberSub; raw: Raw }[] = [];
     // One budget for the whole find, the customers' page already spent.
     let pages = 1;
     for (const customer of customers.rows) {
       // A membership id repeated on a later page of the same customer's list is a list that cannot be read.
       const seenSubs = new Set<string>();
-      if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) throw new UnreadListError("Stripe answered a customer with no id that can be read");
+      if (!readableCustomer(customer)) throw new UnreadListError("Stripe answered a customer with no id that can be read");
       let after = "";
       for (;;) {
         if (pages === STRIPE_PAGES) throw new UnreadListError(`more than ${STRIPE_PAGES} Stripe pages for one address's memberships`);
         pages += 1;
-        const query = `customer=${encodeURIComponent(customer.id)}&status=all&limit=${MEMBERSHIPS_PER_PAGE}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
+        const query = `customer=${encodeURIComponent(customer.id as string)}&status=all&limit=${MEMBERSHIPS_PER_PAGE}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
         const subs = page(await onAccount("GET", account, `/subscriptions?${query}`, undefined, API_VERSION), "memberships", MEMBERSHIPS_PER_PAGE, SUB_PATTERN, seenSubs);
         for (const sub of subs.rows) {
+          if (!readableSub(sub)) throw new UnreadListError("Stripe answered a subscription row in an unknown shape");
           const row = readMemberSub(sub, handles);
-          if (row) out.push(row);
+          if (row) out.push({ row, raw: sub });
         }
         if (!subs.more) break;
         const last = subs.rows[subs.rows.length - 1].id;

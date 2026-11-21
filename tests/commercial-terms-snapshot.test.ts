@@ -1,3 +1,4 @@
+import { mock } from "node:test";
 import {planPaymentDisputeFixture, zeroExposureFixture } from './margin-test-fixtures';
 import {fundedCustomerWithAi} from './margin-test-fixtures';
 import { BASE_PLAN_REVENUE_CEILINGS, CURRENT_COMMERCIAL_TERMS, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, commercialMarginReady, REQUIRED_MARGIN_SCENARIOS, type CommercialMarginReview } from "@/lib/commercial-margin";
@@ -9,6 +10,10 @@ import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { PAID_VIDEO_HOURS, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
 import { done, is } from "./check";
+// The synthetic review names this month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again on every call: a run crossing 00:00 UTC on a month's last day failed the review. Only Date
+// is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 const review = (): CommercialMarginReview => ({
  companyBase:{monthlyFixedCostsCeilingCents:0,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: zero fixed costs",fixedTaxEvidence:"TEST ONLY: zero fixed taxes",reviewedPayingCustomers:1},planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,
  taxEvidence: "TEST ONLY: hypothetical taxes",

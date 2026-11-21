@@ -4,6 +4,12 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { unitUnder as currentUnitUnder, SIZING_READING, FLOOR_BPS as currentFloor } from "./historical-receiving-model";
 import { unitUnder as archivedUnitUnder, FLOOR_BPS as archivedFloor, HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
+import { PLANS_ON_SALE } from "@/lib/opening";
+import { renderLimitsProposal } from "./limits-proposal-table";
+import { renderPackCostDecomposition } from "./pack-cost-decomposition-table";
+import { renderPerUseResale } from "./per-use-resale-table";
+import { renderPricingOptimization } from "./pricing-optimization-table";
+import { renderPricingUsageProposal } from "./pricing-usage-proposal-table";
 
 test("the superseded target reproduces history without changing the single receiving or tax model", () => {
   const current = currentUnitUnder(10000, 4000, SIZING_READING, true);
@@ -31,9 +37,14 @@ test("production code cannot import the archived target or its price proposals",
   assert.deepEqual(failures, []);
 });
 test("each dated analysis is labeled historical and never becomes a new price proposal", () => {
-  for (const name of ["limits-proposal", "pricing-usage-proposal", "pack-cost-decomposition", "per-use-resale", "pricing-optimization"]) {
-    const doc = readFileSync(join(process.cwd(), "docs", name + "-2026-10-18.md"), "utf8");
-    assert.ok(doc.startsWith(HISTORICAL_MARGIN_NOTICE), name);
-  }
+  // Generated on demand (owner, 20/11/2026): each analysis is checked as its script prints it today.
+  const analyses: Record<string, () => string> = {
+    "limits-proposal": () => renderLimitsProposal(PLANS_ON_SALE, PLANS_ON_SALE),
+    "pack-cost-decomposition": renderPackCostDecomposition,
+    "per-use-resale": renderPerUseResale,
+    "pricing-optimization": renderPricingOptimization,
+    "pricing-usage-proposal": renderPricingUsageProposal,
+  };
+  for (const [name, render] of Object.entries(analyses)) assert.ok(render().startsWith(HISTORICAL_MARGIN_NOTICE), name);
   assert.match(HISTORICAL_MARGIN_NOTICE, /not a new price or limit proposal/i);
 });

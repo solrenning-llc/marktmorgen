@@ -17,6 +17,7 @@
  *     as gone: nobody is skipped for good, nothing is written to anyone, and
  *     the next run sends it with working links.
  */
+import { mock } from "node:test";
 import { advanceBroadcast } from "@/lib/broadcasts";
 import { windowId } from "@/lib/allowance-window";
 import { usedThisMonth } from "@/lib/mail";
@@ -27,6 +28,10 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+// A broadcast takes its emails from the store's month (lib/allowance-window.ts), read again at each batch: a run crossing
+// 00:00 UTC on a month's last day around the cut batch failed "the next run reaches everyone once" and "the broadcast
+// completes". Only Date is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 type Commands = (string | number)[][];
 const real = redis.pipeline.bind(redis);

@@ -121,7 +121,7 @@ export function TaxEditor({
             </Link>
           </p>
 
-          <label className="flex items-start gap-3 text-sm font-semibold text-ink">
+          <label className="flex min-h-11 items-start gap-3 text-sm font-semibold text-ink">
             <input
               type="checkbox"
               checked={enabled}
@@ -134,11 +134,11 @@ export function TaxEditor({
 
           <fieldset className="space-y-2" disabled={!ready || !enabled || busy}>
             <legend className="field-label">Your prices</legend>
-            <label className="flex items-start gap-3 text-sm text-ink">
+            <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
               <input type="radio" name="tax-included" checked={!included} onChange={() => setIncluded(false)} className="mt-0.5 h-4 w-4" />
               <span>Tax is added on top at checkout (usual in the United States)</span>
             </label>
-            <label className="flex items-start gap-3 text-sm text-ink">
+            <label className="flex min-h-11 items-start gap-3 text-sm text-ink">
               <input type="radio" name="tax-included" checked={included} onChange={() => setIncluded(true)} className="mt-0.5 h-4 w-4" />
               <span>My prices already include it (usual in Europe, the UK and Australia)</span>
             </label>
@@ -146,7 +146,7 @@ export function TaxEditor({
 
           <fieldset className="space-y-3 border-t border-line pt-4" disabled={!ready || busy}>
             <legend className="field-label">Business buyers</legend>
-            <label className="flex items-start gap-3 text-sm font-semibold text-ink">
+            <label className="flex min-h-11 items-start gap-3 text-sm font-semibold text-ink">
               <input
                 type="checkbox"
                 checked={ids}
@@ -163,7 +163,7 @@ export function TaxEditor({
               else changes. Stripe checks the number&apos;s format. Entering a number does not by itself establish a buyer&apos;s
               tax treatment. A buyer without a number is never stopped.
             </p>
-            <label className="flex items-start gap-3 text-sm font-semibold text-ink">
+            <label className="flex min-h-11 items-start gap-3 text-sm font-semibold text-ink">
               <input
                 type="checkbox"
                 checked={invoices}

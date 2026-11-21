@@ -23,6 +23,13 @@ import { readFileSync } from "node:fs";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The checks name the day once (the calendar's makings, the readings' and the list's tries of the day) while the code
+// reads the day again at each call; a real midnight mid-file moved the code to the next day's counters and the checks
+// read the first day's (RED when started 2 s before 00:00 UTC). The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 process.env.STRIPE_SECRET_KEY = "sk_test_readings_erasure_only";
 /** The checkouts the stand-in for Stripe lists (the races below); none otherwise. */

@@ -7,9 +7,13 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { claimHandle, createStore, deleteStore, setSubscription, storeForId, storeRef } from "@/lib/store";
+import { queueDeleted } from "@/lib/closed-store-data";
+import { claimHandle, createStore, deleteStore as deleteWith, setSubscription, storeForId, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// Merged with main of 15 November 2026 (Claude 1 cloud O): this PR's deleteStore takes the walk's queue, as tests/store-deletion.test.ts passes it.
+const deleteStore = (ref: string) => deleteWith(ref, queueDeleted);
 
 async function main(): Promise<void> {
   redis.clear();

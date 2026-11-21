@@ -24,7 +24,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
-import { packageState, readBought } from "@/lib/call-packages";
+import { packageReadCommands, packageState, readBought } from "@/lib/call-packages";
 import { giftFrom } from "@/lib/gifts";
 import { readPreorder, soonOne } from "@/lib/preorders";
 import { readPreorderJob } from "@/lib/preorder-rules";
@@ -40,7 +40,7 @@ import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
-import { isLiveSub, soldAMembership } from "@/lib/membership-access";
+import { liveExpanded, soldAMembership } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
@@ -700,7 +700,8 @@ async function purchaseFromSession(
     const product = bought ? await find(meta.product) : null;
     if (!bought || !product) return null;
     if ((await refundedFor(account, session, meter)) !== false) return null;
-    await meter?.take(bought.holds.length);
+    // One EXISTS a hold, the record of paid sessions and a seen session written down (packageReadCommands).
+    await meter?.take(packageReadCommands(bought));
     const state = await packageState(bought);
     return { customer: null, purchase: {
       reference: id,
@@ -729,8 +730,8 @@ async function purchaseFromSession(
   // A membership hands its thing over while it is being paid for.
   const member = soldAMembership(product, { mode: session.mode, metadata: meta });
   if (member) {
-    const sub = session.subscription as { status?: unknown } | null;
-    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+    // One that cannot be read throws (rule 24): never shown as ended, with the way to renew, to somebody who pays.
+    if (!liveExpanded(session.subscription)) {
       return { customer: null, purchase: {
         reference: id,
         kind: "sale",
@@ -1251,6 +1252,22 @@ export async function ordersGrant(store: Store, token: string): Promise<string |
   const raw = replies?.[0];
   if (typeof raw !== "string" || !raw) return null;
   return grantFrom(raw, grantAccount(store));
+}
+
+/**
+ * ordersGrant, with an unreadable link told apart (rule 24): null only when the
+ * link is exactly not there (nil) or its record grants nothing; "unknown" when
+ * the GET's reply was lost or is not text, so a caller says "try again" rather
+ * than "no purchase". A failed request still throws.
+ */
+export async function ordersGrantExactly(store: Store, token: string): Promise<string | null | "unknown"> {
+  if (!ORDERS_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
+  if (!replies) return "unknown";
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
+  return raw ? grantFrom(raw, grantAccount(store)) : null;
 }
 
 /** The address in a grant record written exactly as `Grant` for this account, or null. */

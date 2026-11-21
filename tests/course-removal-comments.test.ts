@@ -25,6 +25,7 @@ import {
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "course-removal-comments@example.com";
 
@@ -41,6 +42,7 @@ function commentKeys(courseId: string, lessonIds: string[]): string[] {
 }
 
 async function main(): Promise<void> {
+  answerNoRunningSubscriptions();
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   await claimHandle(OWNER, "coursecommentcleanup", "Course Comment Cleanup", "");

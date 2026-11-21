@@ -72,8 +72,13 @@ async function main(): Promise<void> {
   const general = config.spaces[0].id;
   const ownerCookie = `${SESSION_COOKIE}=${await openSession(CLUB)}`;
 
+  // Both readings of whether they hold the pass: the community's own answer, and the shared reading of what they hold
+  // (lib/community-access.ts holdingsOf) that its doors read first.
   const holds = async (email: string, ok: boolean) =>
-    redis.pipeline([["SET", `nl:cm:${cid}:ok:${emailKey(email)}`, JSON.stringify({ v: config.v, ok })]]);
+    redis.pipeline([
+      ["SET", `nl:cm:${cid}:ok:${emailKey(email)}`, JSON.stringify({ v: config.v, ok })],
+      ["SET", `nl:cm:${cid}:h:${emailKey(email)}`, JSON.stringify({ v: config.v, ids: [ticket.product.id], held: ok ? [ticket.product.id] : [] })],
+    ]);
   async function member(name: string, handle: string): Promise<{ key: string; email: string }> {
     const email = `${handle}@lapsednotice.example`;
     const key = memberKey(email);
@@ -109,7 +114,7 @@ async function main(): Promise<void> {
     const { notices } = await noticesFor(cid, leo.key);
     is("Leo, whose ticket lapsed, is not told", notices.length, 0);
     is("and the post's words never reach his list", notices.some((n) => n.words.includes("Office hours")), false);
-    is("his phone is not looked up to be pushed", seen.some((c) => c[0] === "HGETALL" && c[1] === `nl:cm:${cid}:ps:${leo.key}`), false);
+    is("his phone is not looked up to be pushed", seen.some((c) => c.includes(`nl:cm:${cid}:ps:${leo.key}`)), false);
   }
 
   part("A reply to a post he wrote while in does not reach him after his ticket lapsed");
@@ -118,7 +123,7 @@ async function main(): Promise<void> {
     const where = await act(ownerCookie, { action: "comment", post: leoPost, text: "Welcome Leo, glad you are here" });
     is("the reply was written", where.includes("n=commented"), true);
     is("no reply notice is filed for Leo", (await noticesFor(cid, leo.key)).notices.length, 0);
-    is("his phone is not looked up to be pushed", seen.some((c) => c[0] === "HGETALL" && c[1] === `nl:cm:${cid}:ps:${leo.key}`), false);
+    is("his phone is not looked up to be pushed", seen.some((c) => c.includes(`nl:cm:${cid}:ps:${leo.key}`)), false);
   }
   done();
 }

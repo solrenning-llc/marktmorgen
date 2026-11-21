@@ -73,7 +73,12 @@ async function main(): Promise<void> {
     return `${passCookieName(club)}=${await mintPass(club, email, "all")}`;
   }
   async function holdsWorkshop(email: string, ok: boolean): Promise<void> {
-    await redis.pipeline([["SET", `nl:cm:${cid}:ev:${event.id}:ok:${emailKey(email)}`, JSON.stringify({ v: `${config.v}.${event.v}`, ok })]]);
+    const ids = [pass.product.id, workshop.product.id];
+    await redis.pipeline([
+      ["SET", `nl:cm:${cid}:ev:${event.id}:ok:${emailKey(email)}`, JSON.stringify({ v: `${config.v}.${event.v}`, ok })],
+      // The shared reading of what they hold (lib/community-access.ts holdingsOf), which the doors read first.
+      ["SET", `nl:cm:${cid}:h:${emailKey(email)}`, JSON.stringify({ v: config.v, ids, held: ok ? ids : [pass.product.id] })],
+    ]);
   }
   const act = async (cookie: string, action: string): Promise<string> => {
     const form = new FormData();
@@ -104,10 +109,11 @@ async function main(): Promise<void> {
   part("The event's page offers the way to give the place back to a member it locks out");
   {
     const source = readFileSync("app/[handle]/community/events/[event]/page.tsx", "utf8");
-    const locked = source.slice(source.indexOf("{!allowed ? ("), source.indexOf(") : event.cancelled ? ("));
+    const start = source.indexOf(") : !allowed ? (");
+    const locked = start < 0 ? "" : source.slice(start, source.indexOf(") : event.cancelled ? (", start));
     is("the locked note is found", locked.length > 0, true);
-    is("the \"You're going\" badge is drawn only for a member the event lets in", /\{mine && allowed && !over && !event\.cancelled \? <span className="cm-badge cm-badge-accent">\{w\.youAreGoing\}/.test(source) && !/\{mine && !over && !event\.cancelled \? <span className="cm-badge/.test(source), true);
-    is("it carries a \"not going\" form for a member holding a place", /mine && !over && !event\.cancelled[\s\S]*action="notgoing"[\s\S]*w\.cancelRsvp/.test(locked), true);
+    is("the \"You're going\" badge is drawn only for a member the event lets in", /\{mine === true && allowed === true && !over && !event\.cancelled \? <span className="cm-badge cm-badge-accent">\{w\.youAreGoing\}/.test(source) && !/\{mine(?: === true)? && !over && !event\.cancelled \? <span className="cm-badge/.test(source), true);
+    is("it carries a \"not going\" form for a member holding a place", /mine === true && !over && !event\.cancelled[\s\S]*action="notgoing"[\s\S]*w\.cancelRsvp/.test(locked), true);
   }
   done();
 }

@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     const where = await creatorPost(general, "Welcome everyone, @rita-removed included");
     is("the post was written", where.includes("n=posted"), true);
     is("no notice is filed for a removed member", (await noticesFor(cid, key)).notices.length, 0);
-    const pushedHer = seen.some((c) => c[0] === "HGETALL" && c[1] === `nl:cm:${cid}:ps:${key}`);
+    const pushedHer = seen.some((c) => c.includes(`nl:cm:${cid}:ps:${key}`));
     is("her phone is not looked up to be pushed", pushedHer, false);
   }
 

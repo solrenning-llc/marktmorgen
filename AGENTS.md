@@ -8,7 +8,7 @@ Vale para todo agente deste repositório (Claude 1, Claude 2 e Codex), em toda s
 
 ## CP — Texto para o dono copiar vai num bloco com botão de copiar (dono, 19/11/2026, por volta das 22h Fortaleza)
 
-Pedido do dono, nas palavras dele: "sempre que colocar um texto para eu copiar e colar, coloque facil de copiar e coloca um botao para eu clicar para copiar". Vale para todo agente deste repositório, em toda sessão. Todo texto que o dono vai copiar e colar em outro lugar, como um e-mail, uma mensagem, uma resposta a fornecedor ou um comando, vai sozinho dentro de um bloco de código cercado por três crases, com o tipo `text` para texto comum ou `bash` para comando. Assim a tela mostra o botão de copiar. Cada texto fica no próprio bloco, sem comentário, sem marcador de citação (">") e sem nada que não deva ser colado; a explicação fica fora do bloco. Complemento do dono (20/11/2026, por volta das 00h19 Fortaleza), nas palavras dele: "sempre que fizer um texto para eu colar, faça um cabeçalho e coloque: título da mensagem, remerente, destinatário, assunto da mensagem, identificador único, data, horário". Todo texto que o dono vai colar começa, dentro do mesmo bloco, por um cabeçalho com estas linhas, nesta ordem: Título; Remetente; Destinatário; Assunto; Identificador (único, no padrão do canal: agente, data, hora e assunto curto, por exemplo C3-20261120-0019-tx2-fila); Data (DD/MM/AAAA); Horário (de Fortaleza e UTC). A data e o horário são lidos no relógio da máquina na hora de escrever o texto, nunca estimados. Um comando que o dono vai colar no terminal não leva cabeçalho, porque o cabeçalho quebraria o comando. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+Pedido do dono, nas palavras dele: "sempre que colocar um texto para eu copiar e colar, coloque facil de copiar e coloca um botao para eu clicar para copiar". Vale para todo agente deste repositório, em toda sessão. Todo texto que o dono vai copiar e colar em outro lugar, como um e-mail, uma mensagem, uma resposta a fornecedor ou um comando, vai sozinho dentro de um bloco de código cercado por três crases, com o tipo `text` para texto comum ou `bash` para comando. Assim a tela mostra o botão de copiar. Cada texto fica no próprio bloco, sem comentário, sem marcador de citação (">") e sem nada que não deva ser colado; a explicação fica fora do bloco. Complemento do dono (20/11/2026, por volta das 00h19 Fortaleza), nas palavras dele: "sempre que fizer um texto para eu colar, faça um cabeçalho e coloque: título da mensagem, remerente, destinatário, assunto da mensagem, identificador único, data, horário". Todo texto que o dono vai colar começa, dentro do mesmo bloco, por um cabeçalho com estas linhas, nesta ordem: Título; Remetente; Destinatário; Assunto; Identificador (único, no padrão do canal: agente, data, hora e assunto curto, por exemplo C3-20261120-0019-tx2-fila); Data (DD/MM/AAAA); Horário (de Fortaleza e UTC). A data e o horário são lidos no relógio da máquina na hora de escrever o texto, nunca estimados. Um comando que o dono vai colar no terminal não leva cabeçalho, porque o cabeçalho quebraria o comando. Complemento do dono (21/11/2026, entre 00h05 e 00h16 Fortaleza, repassado pelo Claude 4, sessão 01S9eVA6MR, na mensagem C4-20261121-0016-c3-sem-uso-fuso): (a) a ordem do cabeçalho passa a ser Título; Remetente; Destinatário; Assunto; Data; Hora; Identificador único, e prevalece sobre a ordem anterior deste parágrafo (Pedidos repetidos, passo 3 (b)); (b) o remetente é sempre o agente que escreve o texto, nomeado expressamente, com a sessão (e, quando o destinatário precisa encontrá-la, o nome da conversa), e, quando o texto transmite orientações do dono, isso é dito; (c) os horários informados ao dono são sempre no horário de Fortaleza; (d) toda transcrição de texto do dono é redigida em tom educado, gentil e cortês, com gramática correta, na norma culta, e tecnicamente correta. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## AV11 — Caixa de mensagens do Claude 1 (dono, 02/11/2026 19h28 Fortaleza)
 
@@ -93,6 +93,42 @@ Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais 
 (h) **PR empilhado.** Quando a base entrar no main, o autor muda a base do PR para `main` na mesma rodada, sem push novo se não houver conflito.
 
 (i) **Próximo responsável.** Todo aviso de "aguardando" diz quem age em seguida e por quê: autor, revisor nomeado, coordenador ou dono.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## SU — Agente sem uso e prazo de quem recebe a vez (dono, 21/11/2026, 00h16 Fortaleza)
+
+Pedido do dono, repassado pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C4-20261121-0016-c3-sem-uso-fuso e gravado pelo coordenador (Claude 5 ibqho) no próximo PR de documentação, como o dono pediu. Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 20 e 21/11/2026, o Claude 3 ficou sem uso a partir de 20/11, por volta das 21h17 Fortaleza, sem que a coordenação percebesse. A vez de custo do #4963 e do #4974 foi dada a ele às 00h00 de 21/11, e a ordem de custo ficou parada até o dono avisar.
+
+(a) **Conferir a última atividade antes de dar a vez.** Antes de dar a vez de custo ou de indicar o "próximo a agir", o coordenador e os demais agentes conferem a última atividade da sessão indicada: o último comentário dela no canal de coordenação e o último envio ou comentário nos PRs dela. Sem atividade há mais de 2 horas, a sessão é tratada como sem uso, e o PR é adotado na mesma rodada (AC (a)), com "Adopted by ... until the author returns" no PR e o CLAIMED no canal (AC (p)).
+
+(b) **Prazo de quem recebe a vez.** O autor que recebe a vez na ordem de custo responde no canal em até 30 minutos. Sem resposta, a vez passa a uma sessão adotante, sem nova decisão do coordenador.
+
+(c) **Linha fixa no painel.** O painel do coordenador tem sempre a linha "Sem uso: sessão, desde quando, volta quando", atualizada a cada rodada.
+
+(d) **Aviso de uso acabando.** Cada agente avisa no canal quando o próprio uso semanal chegar a 10% ou menos, com a data e a hora da renovação, em horário de Fortaleza (complementa a AV10, item 5). Esse aviso não depende de o uso já ter acabado: é dado antes, para a coordenação redistribuir o trabalho a tempo.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## FZ — Horários no fuso do cliente (dono, 21/11/2026, por volta das 00h11 Fortaleza)
+
+Orientação do dono, repassada pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C4-20261121-0016-c3-sem-uso-fuso, nas palavras transcritas: "No site, sempre que um horário estiver visível ao cliente, ele deverá ser exibido automaticamente no fuso horário do próprio cliente, que poderá alterá-lo." Vale para todo agente deste repositório, em todo trabalho novo ou alterado que mostre um horário a um criador, comprador ou visitante: páginas, estúdio, e-mails, notificações e exportações.
+
+(a) Os instantes continuam guardados em UTC (milissegundos desde a época ou ISO 8601) e só são convertidos na exibição.
+
+(b) O fuso do cliente é um identificador IANA (por exemplo, America/Fortaleza), detectado automaticamente no navegador (`Intl.DateTimeFormat().resolvedOptions().timeZone`) e validado no servidor. O horário de verão e as mudanças de regra de cada fuso ficam a cargo do próprio `Intl`, sem tabela feita à mão.
+
+(c) O cliente pode trocar o fuso numa opção visível. A escolha fica num cookie próprio, para o servidor já renderizar no fuso certo, sem divergência na hidratação do React. Para quem tem conta, ela pode ficar também no perfil.
+
+(d) Regras que são de fato em UTC, como a virada dos contadores diários à 00h00 UTC, continuam em UTC, mas o horário exibido é convertido para o fuso do cliente, como já faz `utcAndLocal` em `lib/local-clock.ts`.
+
+(e) Nos e-mails, renderizados no servidor, usa-se o fuso salvo na conta; na falta dele, o fuso é escrito ao lado do horário. Nas exportações (CSV e afins), ISO 8601 com o deslocamento do fuso. Nas datas de cobrança e nos prazos legais, a data e o fuso aparecem sempre de forma explícita, para nunca parecerem de outro dia.
+
+(f) A opção de troca de fuso cumpre a AX274: rótulo visível, operação por teclado e alvo de pelo menos 44 × 44 px.
+
+(g) O cookie não gera custo de fornecedor. Se a escolha também for guardada no servidor, essa leitura e essa gravação entram no pior caso de cada plano, com teto, antes de serem ligadas (regra MR); custo desconhecido reprova.
+
+**Estado (regra VR):** nada disso está construído. O item 790 [FZ1] de docs/codex-queue.md guarda o trabalho, em PRs pequenos: primeiro o fuso único (detecção, troca pelo cliente e cookie), depois a migração tela por tela. Conferido pelo Claude 4 no main em 21/11/2026, às 00h12 Fortaleza: algumas telas já usam o fuso do navegador, cada uma por conta própria; há 101 ocorrências de `timeZone: "UTC"` em app/ e components/, a classificar uma a uma; não existe opção de troca. O item 367 [EZ4] cobre só a entrega de e-mails às 9h no fuso do leitor.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

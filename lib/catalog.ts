@@ -254,6 +254,13 @@ export type Product = {
    */
   note?: boolean;
   /**
+   * The creator's own answer to whether this product is an electronically supplied publication (an e-book, an
+   * e-magazine, an e-newspaper), for VAT: a Member State may tax one at a reduced rate, and the UK zero-rates it
+   * (789 [IV1] step 3, unit 5a; lib/eu-vat-collect.ts). Absent is not answered, and VAT is never collected on a guess:
+   * only an explicit `false` lets EU or UK VAT be collected.
+   */
+  publication?: boolean;
+  /**
    * A physical product the creator ships (lib/shipping.ts): where to, what
    * shipping costs and when it ships. Absent or null is not shipped.
    */
@@ -445,6 +452,7 @@ export function parseProduct(entry: unknown): Product | null {
     intro: parseIntro(value.intro),
     yearly: parseYearly(value.yearly),
     note: value.note === true,
+    ...(value.publication === true || value.publication === false ? { publication: value.publication } : {}),
     shipping,
     ...(legal ? { legal } : {}),
     hidden: value.hidden === true,
@@ -493,6 +501,7 @@ export function listingOf(product: Listing): Listing {
     intro: product.intro ?? null,
     yearly: product.yearly ?? null,
     note: product.note ?? false,
+    ...(product.publication === true || product.publication === false ? { publication: product.publication } : {}),
     shipping: product.shipping ?? null,
     // From a full product, computed from its own legal record; from a listing, its mark as stored.
     ...((Object.hasOwn(product, "fields") ? safetyComplete(product as Product) : product.safetyFilled === true) ? { safetyFilled: true } : {}),
@@ -1594,11 +1603,29 @@ export async function movedCount(catalog: string): Promise<number | null> {
   return Number(found);
 }
 
-/** Sends writes in pipelines of a few hundred. */
+/**
+ * Sends writes in pipelines of a few hundred. Each pipeline has to answer once for every command it sent; one that
+ * answers otherwise (none, fewer, more, or not a list) may not have landed, so it throws (CX-123 rule 24, Codex Z on
+ * #2690) and whoever was saving stops before writing the store record: an unknown write is never said done.
+ */
 export async function runWrites(commands: Command[]): Promise<void> {
   for (let i = 0; i < commands.length; i += 400) {
-    await redisPipeline(commands.slice(i, i + 400));
+    const slice = commands.slice(i, i + 400);
+    const replies = repliesFor(await redisPipeline(slice), slice.length);
+    if (!replies || !slice.every((command, at) => writeAnswered(command, replies[at]))) throw new UnknownReplyError("a product write");
   }
+}
+
+/**
+ * Whether Redis answered one write as that write is answered when it was done (Codex T on #2690): an unconditional
+ * SET only with OK; DEL, HSET and HDEL only with a count (a safe integer, 0 or more); any other command with
+ * something that is not nil. A nil, a count as text or an error text is not a done write.
+ */
+function writeAnswered(command: Command, reply: unknown): boolean {
+  const name = String(command[0] ?? "").toUpperCase();
+  if (name === "SET") return command.length === 3 ? reply === "OK" : reply !== null && reply !== undefined;
+  if (name === "DEL" || name === "HSET" || name === "HDEL") return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0;
+  return reply !== null && reply !== undefined;
 }
 
 /**

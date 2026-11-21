@@ -4,7 +4,7 @@ import { CLOSING_DAYS } from '@/lib/plan-closing-rules';
 import { LONGEST_PAUSE_MONTHS, PAUSE_EVERY_DAYS, PLAN_BREAKS_ENABLED } from '@/lib/plan-pause-rules';
 import { CUSTOMER_COST_CATEGORIES, assessCustomerWorstCase } from '@/lib/net-margin-rules';
 import { customerTaxCollectionState, customerTaxContractContextState, customerTaxContractContextSupported } from './customer-tax-review';
-import { termsMatchDigest } from '@/lib/commercial-terms-digest';
+import { assertContractAdmissionAllowed, termsMatchDigest } from '@/lib/commercial-terms-digest';
 import { assessMinimumCustomerBase } from '@/lib/customer-base-rules';
 import { fundedExposureDetails } from '@/lib/funded-exposure-rules';
 import type { CommercialMarginReview, MarginScenario } from '@/lib/commercial-margin';
@@ -34,6 +34,8 @@ export const CONTRACT_FUNDING_RULES={schema:4,planPaymentDisputes:PLAN_PAYMENT_D
 export type ContractFundingPolicy={reviewId:string;financialSnapshot:string;admissionsUntil:string;liabilitiesThrough:string;reviewedLiabilityTailDays:number|null;allTermCostsAndLiabilitiesBounded:boolean;coverageEvidence:string;reserveEvidence:string;reservedFundsCents:number;carryForwardReservedCents:number;fundedGrants:Record<ContractKey,number>};
 export type ContractFundingContext={termsSnapshot:string;review:CommercialMarginReview|null};
 export const CURRENT_CONTRACT_FUNDING_POLICY:ContractFundingPolicy|null=null;
+// No contract is admitted while the terms it cites cannot be stored by digest (OWNER-20261121-0000, step 2).
+assertContractAdmissionAllowed(CURRENT_CONTRACT_FUNDING_POLICY);
 const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
 const bounded=(n:unknown):n is number=>integer(n)&&n<=CONTRACT_FUNDING_RULES.maxInteger;
 const inertProxyDetector:((value:unknown)=>boolean)|null=(()=>{

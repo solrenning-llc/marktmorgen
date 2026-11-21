@@ -94,3 +94,17 @@ export function expandCommercialReview(review: CommercialMarginReview, text: unk
   }
   return { ok: true, review: copy };
 }
+
+/**
+ * Step 2 of OWNER-20261121-0000-COMMERCIAL-TERMS-STORAGE: each version of the terms stored once in Redis, by its
+ * SHA-256, with no expiry, the first time a contract that cites it is admitted. It does not exist yet, so no contract
+ * may be admitted: assertContractAdmissionAllowed refuses a contract funding policy in force until this is true, and
+ * the PR that builds the store is the only one that may set it.
+ */
+export const COMMERCIAL_TERMS_STORED = false;
+
+/** Throws when a contract funding policy is in force while the terms it would cite cannot be stored. Called where the
+ * policy in force is defined (lib/contract-funding-rules.ts), so the code refuses to load with one. */
+export function assertContractAdmissionAllowed(policyInForce: unknown, termsStored: boolean = COMMERCIAL_TERMS_STORED): void {
+  if (policyInForce !== null && !termsStored) throw new Error('No contract may be admitted until each version of the commercial terms is stored by its digest (OWNER-20261121-0000-COMMERCIAL-TERMS-STORAGE, step 2)');
+}

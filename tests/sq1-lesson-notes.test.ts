@@ -84,7 +84,7 @@ async function owner(): Promise<void> {
   is("what is kept takes room in the store's data room", (await used()) > before, true);
 
   const route = read("app/api/store/course/note/route.ts");
-  is("the route finds the student from the session, through courseAccess", /courseAccess\(store, product, await cookies\(\)\)/.test(route), true);
+  is("the route finds the student from the session, through courseAccess", /courseAccess\(store, product, await cookies\(\), course\)/.test(route), true);
   // Rule 23 (merge of #3031's two fix branches): the route asks noteReaderOf, which makes the key from the session's address.
   is("the student's key is made from the session's address, never from the request", /noteReaderOf\(access, course\.id\)/.test(route) && /return emailKey\(learner\.email\)/.test(read("lib/lesson-notes.ts")) && !/body\.(who|email|learner)/.test(route), true);
   is("the creator keeps no notes and reads none", /access\.learner\.owner/.test(route), true);

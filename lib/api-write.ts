@@ -31,7 +31,7 @@ import { enroll } from "@/lib/flows";
 import { grantUnlessErased, importedFor, takeGiven } from "@/lib/imported-purchases";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { releaseDay, reserveDay } from "@/lib/mail";
+import { mailDay, releaseDay, reserveDay } from "@/lib/mail";
 import { pausedFor } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { reserveMoved } from "@/lib/imports";
@@ -239,8 +239,9 @@ export async function giveAccess(
 
   let emailed = false;
   // And just before the email, as an import's emails are: deleted since, or unknown, nothing is sent.
-  if (notify && !(await pausedFor(store.sid)) && (await notDeleted()) === true && (await reserveDay(1))) {
-    if ((await reserveMoved(store, 1)) < 1) await releaseDay(1);
+  const day = mailDay();
+  if (notify && !(await pausedFor(store.sid)) && (await notDeleted()) === true && (await reserveDay(1, day))) {
+    if ((await reserveMoved(store, 1)) < 1) await releaseDay(1, day);
     else {
       const a = accessWords(store.language);
       const base = storeBase(store);
@@ -276,7 +277,7 @@ export async function takeAccess(store: Store, body: Record<string, unknown>): P
   const found = await productFor(store, body.product);
   if ("error" in found) return fail(found.error ?? "unknown_product");
   if (!store.statsId) return fail("not_given_here");
-  const taken = await takeGiven(store.statsId, email, found.product.id, "api:");
+  const taken = await takeGiven(store.statsId, email, found.product.id, "api:", store);
   return taken ? { ok: true, value: { email, product: found.product.id } } : fail("not_given_here");
 }
 

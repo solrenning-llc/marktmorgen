@@ -48,7 +48,11 @@ export default async function MovePage({ params, searchParams }: Params) {
   const say = speech(store);
   const m = moveWords(store.language);
   const listing = (await readListing(store, productId)) ?? null;
-  const invite = listing ? await readMove(store, listing.id, token).catch(() => null) : null;
+  // A read in an unknown shape (lib/move-members.ts, readMove throws) is not "this link no longer works": the member is
+  // asked to try again, and no button is shown on it.
+  const read = listing ? await readMove(store, listing.id, token).catch(() => undefined) : null;
+  const unknown = read === undefined;
+  const invite = read ?? null;
   // The price their invitation names, even one since taken off sale, while not yet kept (642 [WG2], lib/move-members.ts openMove).
   const product = listing && invite && !invite.kept ? withInvitedOption(listing, invite.o) : listing;
   const selling = product?.recurring ? canSellProduct(store, product) : false;
@@ -58,9 +62,10 @@ export default async function MovePage({ params, searchParams }: Params) {
   const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o));
   // What stops the member here, and what happened on the last press: a refused page or too many tries leave the button.
   // Kept already: said so, with no button (main's "kept", review of #4121; Revisor 1 on #2685). Its state cannot be
-  // read: said to be unknown, never kept, with no button either (Claude 4's MÉDIO on #2685).
+  // read: said to be unknown, never kept, with no button either (Claude 4's MÉDIO on #2685). A link read in an unknown
+  // shape: the member is asked to try again (main, readMove throws).
   const unknownState = Boolean(invite?.keptUnknown);
-  const blocking = !invite ? m.notices.expired : unknownState ? m.notices.unknown : invite.kept !== 0 ? m.notices.kept : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
+  const blocking = unknown ? m.notices.refused : !invite ? m.notices.expired : unknownState ? m.notices.unknown : invite.kept !== 0 ? m.notices.kept : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];

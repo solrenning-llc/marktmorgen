@@ -50,6 +50,11 @@ const en = {
     `Your membership of ${title} with ${store} has not moved yet. Keep it with the link below. Nothing is charged before ${date}, and the first payment here is ${amount}.`,
   reminderLast: "This is the only reminder. If you do nothing, nothing is charged here.",
   sentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
+  stopLine: (store: string, link: string) => `Stop emails from ${store} about moving your membership: ${link}`,
+  stopAsk: (who: string) => `Stop emails from ${who || "this store"} about moving your membership?`,
+  stopButton: "Stop these emails",
+  stopDoneTitle: "No more emails about it",
+  stopDone: (email: string, who: string) => `${email} will not get more emails from ${who || "this store"} about moving a membership, nor any other reminder from it. Nothing else is needed.`,
 };
 
 export type MoveWords = {
@@ -92,6 +97,11 @@ const es: MoveWords = {
     `Tu membresía de ${title} con ${store} aún no se ha trasladado. Consérvala con el enlace de abajo. No se cobra nada antes del ${date}, y el primer pago aquí es de ${amount}.`,
   reminderLast: "Este es el único recordatorio. Si no haces nada, aquí no se cobra nada.",
   sentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
+  stopLine: (store, link) => `Dejar de recibir correos de ${store} sobre el traslado de tu membresía: ${link}`,
+  stopAsk: (who) => `¿Dejar de recibir correos de ${who || "esta tienda"} sobre el traslado de tu membresía?`,
+  stopButton: "Dejar de recibir estos correos",
+  stopDoneTitle: "No más correos sobre esto",
+  stopDone: (email, who) => `${email} no recibirá más correos de ${who || "esta tienda"} sobre el traslado de una membresía, ni ningún otro recordatorio suyo. No hace falta nada más.`,
 };
 
 const fr: MoveWords = {
@@ -130,6 +140,11 @@ const fr: MoveWords = {
     `Votre abonnement à ${title} chez ${store} n'a pas encore été transféré. Gardez-le avec le lien ci-dessous. Rien n'est débité avant le ${date}, et le premier paiement ici est de ${amount}.`,
   reminderLast: "C'est le seul rappel. Si vous ne faites rien, rien n'est débité ici.",
   sentBy: (store) => `Envoyé par Marktmorgen pour le compte de ${store}.`,
+  stopLine: (store, link) => `Ne plus recevoir d'e-mails de ${store} sur le transfert de votre abonnement${S}: ${link}`,
+  stopAsk: (who) => `Ne plus recevoir d'e-mails de ${who || "cette boutique"} sur le transfert de votre abonnement${S}?`,
+  stopButton: "Ne plus recevoir ces e-mails",
+  stopDoneTitle: "Plus d'e-mails à ce sujet",
+  stopDone: (email, who) => `${email} ne recevra plus d'e-mails de ${who || "cette boutique"} sur le transfert d'un abonnement, ni aucun autre de ses rappels. Vous n'avez rien d'autre à faire.`,
 };
 
 const de: MoveWords = {
@@ -168,6 +183,11 @@ const de: MoveWords = {
     `Ihre Mitgliedschaft bei ${title} von ${store} ist noch nicht umgezogen. Behalten Sie sie über den Link unten. Vor dem ${date} wird nichts berechnet, und die erste Zahlung hier beträgt ${amount}.`,
   reminderLast: "Dies ist die einzige Erinnerung. Wenn Sie nichts tun, wird hier nichts berechnet.",
   sentBy: (store) => `Gesendet von Marktmorgen im Auftrag von ${store}.`,
+  stopLine: (store, link) => `Keine E-Mails mehr von ${store} zum Umzug Ihrer Mitgliedschaft: ${link}`,
+  stopAsk: (who) => `Keine E-Mails mehr von ${who || "diesem Shop"} zum Umzug Ihrer Mitgliedschaft?`,
+  stopButton: "Diese E-Mails stoppen",
+  stopDoneTitle: "Keine E-Mails mehr dazu",
+  stopDone: (email, who) => `${email} erhält keine E-Mails mehr von ${who || "diesem Shop"} zum Umzug einer Mitgliedschaft und auch keine anderen Erinnerungen von dort. Sonst ist nichts nötig.`,
 };
 
 const it: MoveWords = {
@@ -206,6 +226,11 @@ const it: MoveWords = {
     `Il tuo abbonamento a ${title} con ${store} non è ancora stato trasferito. Mantienilo con il link qui sotto. Non viene addebitato nulla prima del ${date}, e il primo pagamento qui è di ${amount}.`,
   reminderLast: "Questo è l'unico promemoria. Se non fai nulla, qui non viene addebitato nulla.",
   sentBy: (store) => `Inviato da Marktmorgen per conto di ${store}.`,
+  stopLine: (store, link) => `Non ricevere più email da ${store} sul trasferimento del tuo abbonamento: ${link}`,
+  stopAsk: (who) => `Non ricevere più email da ${who || "questo negozio"} sul trasferimento del tuo abbonamento?`,
+  stopButton: "Interrompi queste email",
+  stopDoneTitle: "Niente più email su questo",
+  stopDone: (email, who) => `${email} non riceverà più email da ${who || "questo negozio"} sul trasferimento di un abbonamento, né altri suoi promemoria. Non serve altro.`,
 };
 
 const nl: MoveWords = {
@@ -244,6 +269,11 @@ const nl: MoveWords = {
     `Je lidmaatschap van ${title} bij ${store} is nog niet verhuisd. Houd het via de link hieronder. Er wordt niets afgeschreven vóór ${date}, en de eerste betaling hier is ${amount}.`,
   reminderLast: "Dit is de enige herinnering. Als je niets doet, wordt hier niets afgeschreven.",
   sentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
+  stopLine: (store, link) => `Geen e-mails meer van ${store} over het verhuizen van je lidmaatschap: ${link}`,
+  stopAsk: (who) => `Geen e-mails meer van ${who || "deze winkel"} over het verhuizen van je lidmaatschap?`,
+  stopButton: "Stop deze e-mails",
+  stopDoneTitle: "Geen e-mails meer hierover",
+  stopDone: (email, who) => `${email} krijgt geen e-mails meer van ${who || "deze winkel"} over het verhuizen van een lidmaatschap, en ook geen andere herinneringen van daar. Verder hoef je niets te doen.`,
 };
 
 const pt: MoveWords = {
@@ -282,6 +312,11 @@ const pt: MoveWords = {
     `A sua subscrição de ${title} com ${store} ainda não foi transferida. Mantenha-a com a ligação abaixo. Não é cobrado nada antes de ${date}, e o primeiro pagamento aqui é de ${amount}.`,
   reminderLast: "Este é o único lembrete. Se não fizer nada, não é cobrado nada aqui.",
   sentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,
+  stopLine: (store, link) => `Deixar de receber emails de ${store} sobre a transferência da sua subscrição: ${link}`,
+  stopAsk: (who) => `Deixar de receber emails ${who ? `de ${who}` : "desta loja"} sobre a transferência da sua subscrição?`,
+  stopButton: "Deixar de receber estes emails",
+  stopDoneTitle: "Sem mais emails sobre isto",
+  stopDone: (email, who) => `${email} não voltará a receber emails ${who ? `de ${who}` : "desta loja"} sobre a transferência de uma subscrição, nem nenhum outro lembrete seu. Não é preciso mais nada.`,
 };
 
 export const MOVE_WORDS: Record<LanguageCode, MoveWords> = { en, es, fr, de, it, nl, pt };

@@ -260,7 +260,10 @@ export function handsOver(product: Listing): boolean {
   if (product.options.length > 0 && product.options.every((option) => option.offSale)) return false;
   // A bundle hands over its products: it is ready once it holds two. Whether
   // each can still be handed over is read when the checkout opens.
-  if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
+  // A bundle saved with shipping before a shipped product was kept from becoming one hands over nothing it can
+  // charge for: its checkout would ask for no address and add no shipping, so it is not sold until the shipping
+  // is taken off (tests/bundle-physical-owner.test.ts).
+  if (product.bundle) return !product.shipping && product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
   // A call delivers a time, not a file: it is ready once it has hours set.
   if (product.call) return product.options.length === 0 && product.recurring === null;
   // A course delivers its lessons: it is ready once it has one, at one price

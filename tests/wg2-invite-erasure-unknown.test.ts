@@ -13,7 +13,9 @@ async function attempt(reply: (fields: number) => unknown): Promise<{ result: nu
   let deletes = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands[0]?.[0] === "HMGET") return [reply(commands[0].length - 2)];
-    deletes += commands.length;
+    // Only commands that write count: main's read of the memberships whose invitations wait to be deleted (#3473,
+    // withPendingInvites: one SMEMBERS) runs first and deletes nothing.
+    deletes += commands.filter((c) => !["SMEMBERS", "SCARD", "GET", "HGET", "HMGET", "EXISTS"].includes(String(c[0]))).length;
     return real(commands);
   }) as typeof redis.pipeline;
   try {

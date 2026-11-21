@@ -52,7 +52,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:claims:", "nl:closed:due", "nl:closed:erasing", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:ap:stores", "nl:cm:ap:turns", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
-  "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock",
+  "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock", "nl:crefund:told:",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:erased:", "nl:crm:fields:", "nl:crm:gen:", "nl:crm:pacc:lock:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:", "nl:dsched:tell",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dripstart:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:files:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
@@ -108,7 +108,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:soldbefore:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop", "nl:stamp:noroom:",
-  "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
+  "nl:stock:back:", "nl:stock:lock:", "nl:storage:blob:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
@@ -265,6 +265,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:coursegone:": E,
   "nl:course:": E, "nl:courses:drip": I, "nl:courses:lock": C,
   "nl:creators:responses": C,
+  "nl:crefund:told:": X(2),
   "nl:crm:co:": E, "nl:crm:co:lock:": X(1), "nl:crm:deals:": E, "nl:crm:erased:": X(31), "nl:crm:fields:": E, "nl:crm:gen:": X(31), "nl:crm:pacc:": E, "nl:crm:pacc:lock:": X(1), "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
   // ---------------------------------------------------------------- d-f
   "nl:data:": E,
@@ -477,6 +478,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stamp:noroom:": E,
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:back:": E, "nl:stock:lock:": E,
+  "nl:storage:blob:": X(3),
   "nl:storage:pending:": X(1),
   // A buyer's files for review (750 [CD1]): the setup is named by the course, the record and the places by the store's files' folder.
   "nl:sub:door:": X(1), "nl:sub:due": I, "nl:sub:list:": E, "nl:sub:live:": E, "nl:sub:rec:": E, "nl:sub:setup:": E, "nl:sub:who:": E,

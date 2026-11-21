@@ -78,18 +78,23 @@ function withoutAttempt(request: PaymentRequest): PaymentRequest {
  * emails for the month before it goes. Writes down when it went, or why it
  * did not, and when the next reminder is due.
  */
-export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; request: PaymentRequest }> {
+export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; request: PaymentRequest; closed?: true }> {
+  const startedAt = Date.now();
   const ordinal = request.sent.length;
   // The attempt is written onto the request before the email goes (Codex L, MEDIUM, review of #4501): an outcome
   // whose write then fails leaves it there, and the next try records that email as sent at its attempt, handing
   // nothing over again, since the senders forget the idempotency key after a day. Only a certain refusal, written
   // down, lets the same email go again. A write that fails here throws before anything is handed over.
   const begun = await changeRequest(store, request.id, (current) => {
+    // Payment/cancellation may win while the caller waits for this lock. Carry the caller's clock forward by
+    // the real wait too: expiry during admission is closed even when `now` was sampled before the wait.
+    if (statusOf(current, now + Math.max(0, Date.now() - startedAt)) !== "open") return { next: null, answer: "closed" as const };
     if (current.sent.length !== ordinal) return { next: null, answer: "moved" as const };
     if (current.sendingAt) return { next: { ...withoutAttempt(current), sent: [...current.sent, current.sendingAt], failed: "" }, answer: "recorded" as const };
     return { next: { ...current, sendingAt: now, failed: "" }, answer: "go" as const };
   }, now);
   if (!begun) return { sent: false, request };
+  if (begun.answer === "closed") return { sent: false, request: begun.request, closed: true };
   if (begun.answer === "recorded") {
     console.error("a payment request email may have gone before its outcome was written; recorded as sent, not sent again", request.id, ordinal);
     return { sent: true, request: begun.request };
@@ -234,8 +239,11 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
       const done = await sendRequestEmail(store, request, now);
       if (done.sent) counts.sent += 1;
       else {
-        // Not sent (the store's emails for the month are used, or email failed): tried again tomorrow, never sooner.
-        await delayReminder(sid, id, now + RETRY_MS);
+        // A confirmed closed request is terminal (its id/expiry are never reused or extended): remove only its
+        // own due member. Never recreate tomorrow's reminder after payment, cancellation or expiry won admission.
+        if (done.closed) await dropReminder(sid, id);
+        // Still open but not sent (allowance used or sender refused): tried again tomorrow, never sooner.
+        else await delayReminder(sid, id, now + RETRY_MS);
         counts.skipped += 1;
       }
     }

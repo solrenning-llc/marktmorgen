@@ -113,6 +113,8 @@ async function main(): Promise<void> {
   noBox.set("product", shippedId);
   noBox.set("bump", pastProduct);
   noBox.set("rtoken", token);
+  // A sale outside the EU and the UK, said by its billing country, as main's EU VAT gate asks first (lib/eu-vat-gate.ts).
+  noBox.set("billing_country", "US");
   const before = opened.length;
   const boxed = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: noBox, headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.53" } }));
   await runAfter();
@@ -125,6 +127,7 @@ async function main(): Promise<void> {
   withBox.set("product", shippedId);
   withBox.set("bump", pastProduct);
   withBox.set("rtoken", token);
+  withBox.set("billing_country", "US");
   const retried = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(withBox), headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.54" } }));
   await runAfter();
   const session = opened.at(-1)!;

@@ -126,7 +126,10 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const unknown = await disconnectMeta(a.statsId!);
   redis.pipeline = pipeline as typeof redis.pipeline;
-  is("forgotten here, but Meta's grant is kept rather than risk the other store", [unknown && unknown.metaAccess, granted.get(USER_2), revokedFor], ["kept", true, []]);
+  // Claude 3's LOW on #4159 @722914265e (copy honesty, VR item 2): an index that cannot be read is not "another store
+  // still uses it". The grant is kept all the same, and the creator is told it could not be confirmed.
+  is("forgotten here, but Meta's grant is kept rather than risk the other store", [granted.get(USER_2), revokedFor], [true, []]);
+  is("and it says the use could not be confirmed, never that another store uses it", unknown && unknown.metaAccess, "unconfirmed");
   is("the other store still reads Meta", await readMetaSpend(b.statsId!, b.currency) !== "broken", true);
 
   part("A flow that goes stale while Meta is read keeps the grant another store uses (main's late expiry, merged)");
@@ -166,6 +169,13 @@ async function main(): Promise<void> {
   const at = studio.indexOf('"disconnected-kept": {');
   const notice = at < 0 ? "" : studio.slice(at, at + 400);
   is("and that notice says the permission was kept, not given back", [notice.includes("we kept its permission at Meta"), /given back/i.test(notice)], [true, false]);
+
+  const unsureLine = accountChangeWords({ kind: "metaads-disconnected", kept: true, unconfirmed: true }).line;
+  is("an unconfirmed keep is said as unconfirmed: no claim that another store uses the login, never given back", [/Another store still uses/.test(unsureLine), /could not confirm/i.test(unsureLine), /given back/i.test(unsureLine), /Facebook settings/.test(unsureLine)], [false, true, false, true]);
+  is("the route sends an unconfirmed keep to its own studio notice", routes.includes('unconfirmed ? "disconnected-unconfirmed" :'), true);
+  const atUnsure = studio.indexOf('"disconnected-unconfirmed": {');
+  const unsureNotice = atUnsure < 0 ? "" : studio.slice(atUnsure, atUnsure + 400);
+  is("and that notice says it could not be confirmed and the permission was kept", [/could not confirm/i.test(unsureNotice), unsureNotice.includes("we kept its permission at Meta"), /Another store still uses/.test(unsureNotice), /given back/i.test(unsureNotice)], [true, true, false, false]);
 
   part("What the creator is promised before pressing Disconnect, and what the privacy policy says");
   // Review of #4159 (Claude 1 cloud, MEDIUM): both promised an unconditional give-back, which disconnectMeta now

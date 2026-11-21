@@ -377,6 +377,19 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
         }
+
+        // lib/community-events.ts KEEP_RSVP_IF_NOT_ERASED: an RSVP is admitted only while its person is not erased.
+        if (key.startsWith("-- marktmorgen:event-rsvp-add:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, list, erased, member, print, mark] = args;
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HEXISTS", erased, print]) === 1) return [-1, 0];
+          const added = call(["HSETNX", list, member, mark]);
+          return [added, call(["HLEN", list])];
+        }
+
         // lib/flow-runs.ts HOLD_LAYOUT_IF_LEASED: the same lease and run versions must still be live.
         if (key.startsWith("-- marktmorgen:flow-hold-layout-if-leased:v1\n") && args[0] === "5" && args.length === 17) {
           const [, lease, run, log, held, index, member, score, stamp, open, email, step, note, now, entry, heldMember, person] = args;
@@ -557,6 +570,30 @@ export class MemoryRedis {
           this.run(["SET", seen, "pending", "EX", seenSeconds]);
           return 1;
         }
+        // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: devices' last sends, each kept only while it is still on its store's list.
+        if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length >= 5 && (args.length - 3) % 2 === 0) {
+          const [, list, states, ...pairs] = args;
+          this.scriptCalls += 1;
+          const raw = this.run(["GET", list]);
+          if (raw === null || raw === undefined) return 0;
+          let config: unknown;
+          try {
+            config = JSON.parse(String(raw));
+          } catch {
+            return -2;
+          }
+          const devices = config && typeof config === "object" && !Array.isArray(config) ? (config as { devices?: unknown }).devices : undefined;
+          if (!Array.isArray(devices)) return -2;
+          const listed = new Set(devices.flatMap((device) => (!!device && typeof device === "object" && typeof (device as { id?: unknown }).id === "string" ? [(device as { id: string }).id] : [])));
+          let written = 0;
+          for (let i = 0; i + 1 < pairs.length; i += 2) {
+            if (!listed.has(pairs[i])) continue;
+            this.scriptCalls += 1;
+            this.run(["HSET", states, pairs[i], pairs[i + 1]]);
+            written += 1;
+          }
+          return written;
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;
@@ -624,6 +661,14 @@ export class MemoryRedis {
           if (Number(this.run(["ZCARD", line])) >= Number(ceiling)) return -1;
           this.run(["SET", record, value, "NX", "EX", seconds]);
           this.run(["ZADD", line, due, id]);
+          return 1;
+        }
+        // lib/host-calendar.ts: compare the exact config and keep the reading in the same operation.
+        if (key.startsWith("-- marktmorgen:host-reading-current:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, config, target, failure, expected, value, seconds, kind] = args;
+          if (this.run(["GET", config]) !== expected) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (kind === "good") this.run(["DEL", failure]);
           return 1;
         }
         // lib/store-join.ts SAVE_GRANT_IF_LIVE: a join grant and its erasure note, only while the store is live.
@@ -1330,6 +1375,15 @@ export class MemoryRedis {
           this.run(["SET", args[1], args[3], "EX", args[4]]);
           const length = this.run(["STRLEN", args[2]]);
           return [this.run(["DEL", args[2]]), length];
+        }
+        // lib/mail-clicks.ts NOTE_CLICK_IF_ALLOWED: consent and its link marker
+        // are checked in the same Redis step that keeps the click.
+        if (key.startsWith("-- marktmorgen:mail-click-if-allowed:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, marker, contacts, used, token, email, raw, campaign, seconds] = args;
+          if (this.run(["GET", marker]) !== token || this.run(["HGET", contacts, email]) !== raw) return 0;
+          this.run(["SADD", used, campaign]);
+          this.run(["EXPIRE", used, seconds]);
+          return 1;
         }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
@@ -2041,12 +2095,20 @@ export class MemoryRedis {
           const kept = this.run(["GET", receipt]);
           return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
         }
-        // lib/paypal-payouts.ts, KEEP_LINK_IF_LIVE: the PayPal link written only while its store's key exists and it is
-        // not being erased; 1 written, 0 not.
-        if (key.startsWith("-- marktmorgen:paypal-link-live:v1\n") && args[0] === "3" && args.length === 6) {
-          const [, live, erasing, link, field, value] = args;
+        // The link's two identity reads and write mirror paypal-link-live:v2, including the legacy byte cap.
+        if (key.startsWith("-- marktmorgen:paypal-link-live:v2\n") && args[0] === "3" && args.length === 9) {
+          const [, live, erasing, link, field, value, statsId, ref, byteCap] = args;
           this.scriptCalls += 2;
-          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return 0;
+          if (this.run(["HGET", erasing, field]) !== null) return 0;
+          if (statsId === "") {
+            if (this.run(["GET", live]) !== ref) return 0;
+          } else {
+            const raw = this.run(["GETRANGE", live, 0, byteCap]);
+            if (typeof raw !== "string" || raw === "" || new TextEncoder().encode(raw).byteLength > Number(byteCap)) return 0;
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return 0; }
+            if (!record || typeof record !== "object" || Array.isArray(record) || (record as { statsId?: unknown }).statsId !== statsId) return 0;
+          }
           this.scriptCalls += 1;
           this.run(["SET", link, value]);
           return 1;
@@ -2054,12 +2116,12 @@ export class MemoryRedis {
         // lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE: an open PayPal batch written (and its store watched) only while the
         // store is live; -1, nothing written, when it is gone, being erased or (from before ids) its owner's record is
         // another store's.
-        if (key.startsWith("-- marktmorgen:paypal-open-live:v2\n") && args[0] === "4" && args.length === 10) {
-          const [, live, erasing, open, stores, field, batch, value, sid, statsId] = args;
+        if (key.startsWith("-- marktmorgen:paypal-open-live:v3\n") && args[0] === "4" && args.length === 11) {
+          const [, live, erasing, open, stores, field, batch, value, sid, statsId, ref] = args;
           this.scriptCalls += 2;
           if (this.run(["HGET", erasing, field]) !== null) return -1;
           if (statsId === "") {
-            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+            if (this.run(["GET", live]) !== ref) return -1;
           } else {
             const raw = this.run(["GET", live]);
             if (raw === null) return -1;

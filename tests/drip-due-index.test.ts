@@ -18,7 +18,8 @@
 import { readFileSync } from "node:fs";
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import * as learn from "@/lib/learn";
-import { emailKey, forgetLearnerPerson, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
+import { type DripSource, emailKey, forgetLearnerPerson, recordEnrollment, registerDrip, sendDripEmails, touchStudent as touchStudentRow } from "@/lib/learn";
+import { KIND } from "@/lib/catalog";
 import { type Course, isOpen } from "@/lib/course";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
@@ -60,7 +61,21 @@ async function setup(tier: "creator" | "pro" = "creator", products: unknown[] = 
   await claimHandle(OWNER, "drip-index-shop", "Drip Index Shop", "");
   await setSubscription(OWNER, { customerId: "cus_DripIndex0001", subscriptionId: "sub_DripIndex0001", active: true, tier, cycle: "month", trialEnds: 0, period: paidPeriod() });
   const real = (await storeForEmail(OWNER))!;
-  return { ...real, catalog: { ...real.catalog, items: (products as { id: string }[]).map((p) => ({ id: p.id })), inline: products } } as unknown as Store;
+  // Paid course items, as the catalog lists them: the course page and the job read them by kind (#3369).
+  return { ...real, catalog: { ...real.catalog, items: (products as { id: string }[]).map((p) => ({ id: p.id, kind: KIND.paid | KIND.course, options: [] })), inline: products } } as unknown as Store;
+}
+/**
+ * The course page's write (lib/learn.ts touchStudent), for a student who bought the course that day and had it written
+ * down on the thanks page: since #3369 the job announces only what the course page opens, from the same start
+ * (courseLedger), so each student here has a purchase on record from before their first visit. The row and its pairs
+ * are touchStudent's own.
+ */
+async function touchStudent(courseId: string, email: string, start: number, room: Parameters<typeof touchStudentRow>[3], stamp?: number | null, drip?: DripSource): Promise<void> {
+  const productId = !drip ? null : "card" in drip ? drip.card.p : drip.productId;
+  // Written down once, before the first visit, as the thanks page does: a student with a row already bought before.
+  const known = (await original([["HEXISTS", `nl:course:${courseId}:students`, emailKey(email)]]))[0] === 1;
+  if (productId && !known && "handle" in room) await recordEnrollment(room as unknown as Store, email, productId, start);
+  return touchStudentRow(courseId, email, start, room, stamp, drip);
 }
 const dueKey = (store: Store) => `nl:drip:due:${store.statsId}`;
 const pendingKey = (store: Store) => `nl:drip:pending:${store.statsId}`;
@@ -287,6 +302,7 @@ async function main(): Promise<void> {
     const store = await setup();
     const email = "legacy@example.com";
     const old = `${COURSE.id}|${store.handle}|${PRODUCT.id}`;
+    await recordEnrollment(store, email, PRODUCT.id, NOW - 36 * 3600);
     await original([["SADD", "nl:courses:drip", old], ["HSET", `nl:course:${COURSE.id}:students`, emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW })]]);
     const counts = await quietly(() => run(store));
     is("out of the old set, walked, its student emailed once", [(await original([["SISMEMBER", "nl:courses:drip", old]]))[0], counts.courses, to(email)], [0, 1, 1]);
@@ -341,7 +357,8 @@ async function main(): Promise<void> {
     is("the Store plan reads a seventh of its email figure a run", entriesPerRun, Math.ceil(STORE_ALLOWANCES.creator.email / 7));
     is("the window's seven runs still hold the whole email figure, so none is left for want of a run", entriesPerRun * learn.DRIP_WINDOW_RUNS >= STORE_ALLOWANCES.creator.email, true);
     is("nothing sent; the marks stop at the store's ceiling", [counts.sent, claims() <= learn.DRIP_REFUSALS_PER_STORE], [0, true]);
-    const most = typeof R.dripRunCommandsPerStore === "function" ? (R.dripRunCommandsPerStore as (e: number) => number)(entriesPerRun) + (R.DRIP_RUN_FIXED_COMMANDS as number) : -1;
+    // A run reads today's pairs too, up to what the store may still send (merge with #3369): the registry's own entries.
+    const most = typeof R.dripRunCommandsPerStore === "function" ? (R.dripRunCommandsPerStore as (e: number) => number)((R.dripEntriesPerRun as (t: "creator") => number)("creator")) + (R.DRIP_RUN_FIXED_COMMANDS as number) : -1;
     is(`the run's commands (${seen.length}) within the formula (${most})`, seen.length <= most, true);
   }
 
@@ -425,8 +442,11 @@ async function main(): Promise<void> {
     // student); the walk's page went from 200 rows to 100 so its last page costs less: 0.0124, 0.0237 and 0.0472.
     // Merge of main of 16 November 2026 (#3445, 24 [E7]): a row carries its stamp and a card its access ends, priced at
     // their largest: 0.0125, 0.0238 and 0.0476.
-    is("Store, Studio and Scale a month, in dollars", line, [0.0125, 0.0238, 0.0476]);
-    is("the Store line still below the three-day window's", line[0] < 0.0145, true);
+    // Merge with #3369 (21 November 2026, the reviewers' shape): a run reads the pairs due today up to what the store may
+    // still send in its window (its whole email figure at the worst), each pair's again check, and a moved start's pairs
+    // written again: 0.0347, 0.1128 and 0.2845, above the three-day window's, and a refunded Store first year with
+    // drip-start-read summed in still under US$66 (email-logo-region, drip-index-start-read).
+    is("Store, Studio and Scale a month, in dollars", line, [0.0347, 0.1128, 0.2845]);
     is("the registry's ceilings are the code's", [R.DRIP_REFUSALS_PER_STORE_RUN, R.DRIP_INDEX_PAGES_RUN], [learn.DRIP_REFUSALS_PER_STORE, L.DRIP_INDEX_PAGES_PER_RUN]);
     // The access end (24 [E7], merge of main of 16 November 2026): a row's stamp and a card's ends are priced as written.
     is("the registry's stamp and card ends are the code's", [R.DRIP_STAMP_BYTES, R.DRIP_CARD_ENDS_BYTES], [L.STAMP_BYTES, L.DRIP_CARD_END_BYTES]);

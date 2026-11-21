@@ -18,7 +18,8 @@
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts).
  */
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE, emailKey, sendDripEmails } from "@/lib/learn";
+import { DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE, emailKey, recordEnrollment, sendDripEmails } from "@/lib/learn";
+import { KIND } from "@/lib/catalog";
 import { type Course, readCoursesEach } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -53,11 +54,13 @@ async function setup(courses: number): Promise<Store> {
   await claimHandle(OWNER, "drip-ceiling-shop", "Drip Ceiling Shop", "");
   await setSubscription(OWNER, { customerId: "cus_DripCeiling01", subscriptionId: "sub_DripCeiling01", active: true, tier: "pro", cycle: "month", trialEnds: 0, period: paidPeriod() });
   const real = (await storeForEmail(OWNER))!;
-  const store = { ...real, catalog: { ...real.catalog, items: products.slice(0, courses).map((p) => ({ id: p.id })), inline: products.slice(0, courses) } } as unknown as Store;
+  const store = { ...real, catalog: { ...real.catalog, items: products.slice(0, courses).map((p) => ({ id: p.id, kind: KIND.paid | KIND.course, options: [] })), inline: products.slice(0, courses) } } as unknown as Store;
   for (let n = 0; n < courses; n += 1) {
     await original([["SADD", DRIP, `${COURSES[n].id}|${store.handle}|${products[n].id}`]]);
     for (let s = 0; s < 30; s += 1) {
       const email = `student-${n}-${s}@example.com`;
+      // Bought on that day, written down on the thanks page: the job announces only what the course page opens (#3369).
+      await recordEnrollment(store, email, products[n].id, NOW - 36 * 3600);
       await original([["HSET", `nl:course:${COURSES[n].id}:students`, emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW })]]);
     }
   }
@@ -89,7 +92,8 @@ async function main(): Promise<void> {
   // Store, Studio and Scale at full use: with the index (docs/drip-due-index.md) a few cents, where the marks without
   // the ceiling cost more than each plan's whole net profit and the walk of every course 31 to 87 cents.
   // Scale 0.05 since the walk asks which pairs are already indexed and first starts' bytes are priced (Claude 5 on #3344).
-  is("Store, Studio and Scale a month, in dollars", month, [0.01, 0.02, 0.05]);
+  // Merge with #3369 (21 November 2026): today's pairs up to what the store may still send, each with its again check.
+  is("Store, Studio and Scale a month, in dollars", month, [0.03, 0.11, 0.28]);
 
   part("Every send refused (the store's email figure spent): the marks stop at the ceilings, not at the students");
   {
@@ -116,7 +120,8 @@ async function main(): Promise<void> {
     seen.length = 0;
     const run = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, Date.now() + 60_000));
     // A run reads a seventh of the Studio email figure (43 pairs); the rest wait in the index for the next run.
-    is("the first run: as many as a run reads", run.sent, dripEntriesPerRun("pro"));
+    // Since the merge with #3369 a run reads every pair due today the store may still send: as many as are indexed.
+    is("the first run: as many as a run reads", run.sent, Math.min(run.indexed, dripEntriesPerRun("pro")));
     const second = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW + 86_400, Date.now() + 60_000));
     is("the next day's run: the rest; sixty students, sixty emails, sixty marks, none lost", [run.sent + second.sent, claims()], [60, 60]);
     const again = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, Date.now() + 60_000));
@@ -143,7 +148,7 @@ async function main(): Promise<void> {
     const run = await quietly(() => sendDripEmails(async () => store, each, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
     // A run reads at most a seventh of the store's email figure of pairs due (dripIndexEntriesPerRun): the rest wait in
     // the index for the next runs, inside the same seven-day window (three days and a third until 15 November 2026).
-    is("the first run emails as many as a run reads", run.sent, dripEntriesPerRun("pro"));
+    is("the first run emails as many as a run reads", run.sent, Math.min(run.indexed, dripEntriesPerRun("pro")));
     is("eight courses' outlines, one MGET, no GET of a course", [seen.filter((c) => c[0] === "MGET" && String(c[1]).startsWith("nl:course:")).length, seen.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:course:")).length], [1, 0]);
     let sent = run.sent;
     // One run a day over the window: 240 due, 43 a run, all sent by the sixth day, inside the seven; none lost, none twice.

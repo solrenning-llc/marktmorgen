@@ -23,7 +23,8 @@
  */
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, setMailSettings, setProductCourse, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { emailKey, registerDrip, sendDripEmails } from "@/lib/learn";
+import { emailKey, recordEnrollment, registerDrip, sendDripEmails } from "@/lib/learn";
+import { KIND } from "@/lib/catalog";
 import { type Course, editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import * as coursesRoute from "@/app/api/cron/courses/route";
 import { paidPeriod } from "./billing-period-fixture";
@@ -72,11 +73,23 @@ async function setup(): Promise<Store> {
   await claimHandle(OWNER, "drip-bounded-shop", "Drip Bounded Shop", "");
   await setSubscription(OWNER, { customerId: "cus_DripBounded01", subscriptionId: "sub_DripBounded01", active: true, tier: "pro", cycle: "month", trialEnds: 0, period: paidPeriod() });
   const real = (await storeForEmail(OWNER))!;
-  return { ...real, catalog: { ...real.catalog, items: [{ id: PA.id }, { id: PB.id }], inline: [PA, PB] } } as unknown as Store;
+  const store = { ...real, catalog: { ...real.catalog, items: [{ id: PA.id, kind: PAID_COURSE, options: [] }, { id: PB.id, kind: PAID_COURSE, options: [] }], inline: [PA, PB] } } as unknown as Store;
+  buyersIn = [store];
+  return store;
 }
+/** A paid course item, as the catalog lists one: the course page and the job read it by kind (#3369). */
+const PAID_COURSE = KIND.paid | KIND.course;
+/**
+ * The stores whose students bought their course, written down on the thanks page the day they began: the job announces
+ * only what the course page opens, from the same start (courseLedger, #3369). Each course's product, by course.
+ */
+let buyersIn: Store[] = [];
+const productOf = new Map<string, string>();
 const memberOf = (store: Store, course: Course, product: { id: string }) => `${course.id}|${store.handle}|${product.id}`;
 /** A student a day and a half in, whose second week opened half a day ago; `seen` is their last visit. */
 async function student(course: Course, email: string, seen = NOW): Promise<string> {
+  const product = course.id === A.id ? PA.id : course.id === B.id ? PB.id : productOf.get(course.id) ?? "";
+  for (const store of buyersIn) await recordEnrollment(store, email, product, NOW - 36 * 3600);
   await original([["HSET", `nl:course:${course.id}:students`, emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: seen })]]);
   return email;
 }
@@ -125,7 +138,8 @@ async function main(): Promise<void> {
     await claimHandle(otherOwner, "drip-bounded-two", "Drip Bounded Two", "");
     await setSubscription(otherOwner, { customerId: "cus_DripBounded02", subscriptionId: "sub_DripBounded02", active: true, tier: "pro", cycle: "month", trialEnds: 0, period: paidPeriod() });
     const realOther = (await storeForEmail(otherOwner))!;
-    const other = { ...realOther, catalog: { ...realOther.catalog, items: [{ id: PB.id }], inline: [PB] } } as unknown as Store;
+    const other = { ...realOther, catalog: { ...realOther.catalog, items: [{ id: PB.id, kind: PAID_COURSE, options: [] }], inline: [PB] } } as unknown as Store;
+    buyersIn.push(other);
     await original([["SADD", DRIP, memberOf(store, A, PA), memberOf(other, B, PB)]]);
     const first = await student(A, "first-a@example.com");
     const second = await student(B, "second-b@example.com");
@@ -322,6 +336,8 @@ async function main(): Promise<void> {
     const linked = await setProductCourse(owner, made.product.id, { id: course.id, lessons: 1 });
     if (!linked.ok) throw Error("Synthetic course was not linked");
     const routeStore = (await storeForEmail(owner))!;
+    buyersIn = [routeStore];
+    productOf.set(course.id, made.product.id);
     const handle = routeStore.handle;
     const member = `${course.id}|${handle}|${made.product.id}`;
     await original([["SADD", DRIP, member]]);

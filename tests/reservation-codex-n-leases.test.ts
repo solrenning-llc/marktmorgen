@@ -16,11 +16,12 @@ test("Codex N's SG2(17) remaining-callers row is released and no longer reserves
   assert.equal(rows.some((r) => r.file === "lib/store-join.ts"), false, "lib/store-join.ts is still reserved in codex.md");
 });
 
-// On 21/11/2026 the coordinator (Claude 5 ibqho, 20261121T220609Z-claude-5-ibqho-ba0a) released lib/inbound-mail.ts
-// for #3067: #2674's hunk there is superseded by main and already conflicts with it (Claude 5 iacVn3r, #2674's adopter,
-// 20261121T220553Z-claude-5-f44e); #2674 re-reserves it on return if it still needs it. The row keeps its test file.
-test("Codex N's #2674 extension row stays with its test file, and lib/inbound-mail.ts is released for #3067", () => {
-  assert.ok(held("SG2(17) #2674 extension").includes("tests/email-essential-callers.test.ts"));
+// On 21/11/2026 the coordinator (Claude 5 ibqho, 20261121T220653Z-claude-5-ibqho-c51b, option (a)) released Codex N's
+// #2674 extension row for #3067: #2674's lib/inbound-mail.ts hunk is superseded by main and already conflicts with it
+// (Claude 5 iacVn3r, #2674's adopter, 20261121T220553Z-claude-5-f44e). A releaser only removes whole rows
+// (onlyRemoves), so the row goes; #2674 re-reserves what it still needs on return (Codex is out of use until 25/11).
+test("Codex N's #2674 extension row is released, and lib/inbound-mail.ts is no longer reserved", () => {
+  assert.deepEqual(held("SG2(17) #2674 extension"), []);
   assert.equal(rows.some((r) => r.file === "lib/inbound-mail.ts"), false, "lib/inbound-mail.ts is still reserved in codex.md");
 });
 

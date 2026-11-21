@@ -9,7 +9,7 @@ A = "a" * 40
 B = "b" * 40
 # The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after the nine below
 # complete on main and has no documentation scope (tests/main-red-alarm.test.ts).
-NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
+NOT_CI = {"coordination-rollover.yml", "main-red-alarm.yml", "stale-pr-report.yml"}
 
 # The cheap workflows that keep running every job on each pull request.
 EVERY_EVENT = {"product-checks", "codeql", "dependency-security"}

@@ -362,13 +362,25 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, course: result.course });
       }
 
+      // The start and the end are on the drip card the mail run reads: a card that could not be written puts the course
+      // back as it was read, so the saved course is never ahead of its card, and the creator is told it was not saved
+      // (Claude 5 and Codex X6 on #3344, LOW 2). The error goes on to the route's own failure answer.
+      const dripOrPutBack = async (next: Course) => {
+        try {
+          await registerDrip(store, product, next);
+        } catch (error) {
+          await save(course);
+          throw error;
+        }
+      };
+
       if (action === "start") {
         const at = body.at === null ? null : Number(body.at);
         const result = editCourse(course, { op: "start", at });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         // The cohort's start is part of the drip schedule (the card's `s` and `g`): kept, and its students walked again.
-        await registerDrip(store, product, result.course);
+        await dripOrPutBack(result.course);
         return Response.json({ ok: true, course: result.course });
       }
 
@@ -385,7 +397,7 @@ export async function POST(request: NextRequest) {
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         // The drip card carries the ends (`e`, `k`), so the run stops a stamped student's emails with their access.
-        await registerDrip(store, product, result.course);
+        await dripOrPutBack(result.course);
         return Response.json({ ok: true, course: result.course });
       }
 

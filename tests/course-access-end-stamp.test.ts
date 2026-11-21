@@ -243,6 +243,27 @@ async function main(): Promise<void> {
   is("earlier than the date set: refused", await send({ action: "access-end", id: s.product.id, at: ahead - DAY }), [400, "access_end_earlier"]);
   is("taken off: done", await send({ action: "access-end", id: s.product.id, at: null }), [200, "ok"]);
 
+  part("LOW 2 (Claude 5 and Codex X6 on #3344): a drip registration that fails leaves the course as it was");
+  // The start and the end are part of the drip card; a save that went through while the card could not be written left
+  // the course ahead of the card the mail run reads. Now the course is put back and the creator is told it failed.
+  const keptBefore = await readCourseExact(s.courseId);
+  const plainPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => String(command[1] ?? "").startsWith("nl:drip:"))) throw new Error("synthetic: the drip card could not be written");
+    return plainPipe(commands);
+  }) as typeof redis.pipeline;
+  const failedSends: unknown[] = [];
+  try {
+    for (const body of [{ action: "access-end", id: s.product.id, at: ahead + DAY }, { action: "start", id: s.product.id, at: ahead }]) {
+      failedSends.push(await send(body).catch(() => "threw"));
+    }
+  } finally {
+    redis.pipeline = plainPipe;
+  }
+  const keptAfter = await readCourseExact(s.courseId);
+  is("neither said as saved", failedSends.some((answer) => JSON.stringify(answer) === JSON.stringify([200, "ok"])), false);
+  is("the course's end and start are kept as they were", [keptAfter?.accessEndsAt ?? null, keptAfter?.startsAt ?? null], [keptBefore?.accessEndsAt ?? null, keptBefore?.startsAt ?? null]);
+
   part("M2: the checkout refuses an end that is not the one shown, and stamps the one that is");
   const c = await shop("stampcheckout");
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -298,6 +319,35 @@ async function main(): Promise<void> {
   }
   is("the student whose end passed before the module opens: not emailed", claimed.some((key) => key.includes(emailKey("drip-ended@example.test"))), false);
   is("the student with no end: emailed as before", claimed.some((key) => key.includes(emailKey("drip-open@example.test"))), true);
+
+  part("LOW 1 (Claude 5 and Codex X6 on #3344): a room too full for the pairs or the card still keeps a new access end");
+  // A row kept before stamps, then the course page with the outline and the stamp: the joint take (the stamp, the pairs
+  // and the card) is refused, as a room with no space for the pairs would; the stamp's own few bytes still fit.
+  const lowNow = Math.floor(Date.now() / 1000);
+  const lowEnd = lowNow + 30 * DAY;
+  await touchStudent(d.courseId, "low1-stamp@example.test", lowNow, d.store);
+  let jointRefused = 0;
+  const realPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const shaped = commands.map((command) => {
+      const take = command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:store-data:v1\n");
+      // More than one change (three arguments each, after the key, the limit, the mode and the month): no room.
+      if (!take || command.length <= 10) return command;
+      jointRefused += 1;
+      return [...command.slice(0, 4), 0, ...command.slice(5)];
+    });
+    return realPipeline(shaped);
+  }) as typeof redis.pipeline;
+  try {
+    await touchStudent(d.courseId, "low1-stamp@example.test", lowNow, d.store, lowEnd, { course: dripEnded, productId: d.product.id });
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  const lowRow = await redis.pipeline([["HGET", `nl:course:${d.courseId}:students`, emailKey("low1-stamp@example.test")]]);
+  const lowKept = typeof lowRow[0] === "string" ? (JSON.parse(lowRow[0] as string) as { x?: number; i?: number }) : null;
+  is("the stamp, the pairs and the card together were refused", jointRefused > 0, true);
+  is("the new access end is kept on the row, from its own room", lowKept?.x, lowEnd);
+  is("and the row is left unmarked, so a later visit writes its pairs", lowKept?.i, undefined);
 
   part("M-A (C2 focal): a checkout opened before the end and paid after it has no end");
   // Stripe keeps a checkout open for up to 24 hours: a stamp counts only on a session made at least that long before it.

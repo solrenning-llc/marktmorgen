@@ -755,10 +755,12 @@ export async function touchStudent(
   ];
   if (changes.length > 0 && !(await takeData(room, changes)).ok) {
     // A new row and its pairs together or neither; a row already kept is written without its pairs and its mark, so a
-    // later visit tries them again, and without a stamp new to it, so its drip emails go on as before (24 [E7]).
+    // later visit tries them again. A stamp new to it is tried alone, from its own few bytes, so a room too full only
+    // for the pairs or the card never loses the end just read (Claude 5 and Codex X6 on #3344, LOW 1); without room
+    // even for that, the row goes on without it, and its drip emails as before (24 [E7]).
     if (typeof raw !== "string") return;
     delete row.i;
-    if (stampNew) delete row.x;
+    if (stampNew && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: STAMP_BYTES }])).ok) delete row.x;
     await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
     return;
   }

@@ -43,7 +43,7 @@ const INVITED = LONG_PAST + 15;
 const NOW = Date.UTC(2026, 9, 16, 12);
 const nowS = Math.floor(NOW / 1000);
 
-type Txn = { id: string; amount: number; currency: string; metadata: Record<string, string> };
+type Txn = { object?: string; customer?: string; id: string; amount: number; currency: string; metadata: Record<string, string> };
 const invoices = new Map<string, Record<string, unknown>[]>();
 const refunds = new Map<string, { amount: number; status: string }[]>();
 const balance = new Map<string, Txn[]>();
@@ -82,6 +82,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const form = new URLSearchParams(String(init?.body ?? ""));
     const txn: Txn = {
       id: `cbtxn_${posts}abcdef`,
+      object: "customer_balance_transaction",
+      customer: txns[1],
       amount: Number(form.get("amount")),
       currency: form.get("currency") ?? "",
       metadata: { nimbus_invite_credit: form.get("metadata[nimbus_invite_credit]") ?? "" },

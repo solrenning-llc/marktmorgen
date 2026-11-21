@@ -287,35 +287,67 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
 }
 
 /**
- * One person's attempt claimed only while their run is there (KEYS: the run's record, its history; ARGV: the open
- * attempt, the "attempted" event, the run's generation or ANY_GEN). -1 when the run is gone (erased,
- * forgetPersonCommands, or aged out) or is another run than the step was taken for (another generation), 0 when an
- * attempt is already open, 1 when claimed, with its event written in the same step: a step taken from the queue just
- * before an erasure makes no record or history again (Defect 4083). Modelled by lib/redis-memory.ts.
+ * One person's attempt, claimed in one step only while all of these hold, so nothing of someone erased, taken over or
+ * started again meanwhile is written back and no later cleanup is needed:
+ * - the take that read them still holds their lease entry at its own score (Codex L and G2 on #2287): another take that
+ *   took the same entry over is that take's;
+ * - their run still holds its address (the erasure deletes the run before it takes the lease out, lib/flows.ts
+ *   forgetWorkflowPerson: one pipeline, not one step, so this closes the moment between the two);
+ * - their run is the one the step was taken for: its generation, read with the lease entry (LEASE_AND_GEN), or ANY_GEN
+ *   for a run with none (Codex L's MEDIUM on #4234: one erased and started again is another run).
+ * -1 when any fails, nothing written; 0 when an attempt is already open; 1 when claimed, with its own attempt value
+ * ("index:stepId:token", which its outcome must match: settleAttempts), its "attempted" event, and the run and its
+ * history kept RUN_KEEP_SECONDS again and its place in the list of runs renewed, past-retention entries dropped (Claude
+ * 5 on #2287: a sequence can outlast that, and a run that keeps stepping never expires in the middle of it).
+ * KEYS: the run, its history, the list of runs, the lease. ARGV: the lease member ("" for no lease check), its score, the
+ * open attempt, the event, the run's generation or ANY_GEN, RUN_KEEP_SECONDS, the person, now. Modelled by
+ * lib/redis-memory.ts.
  */
-export const CLAIM_IF_RUN = `-- marktmorgen:flow-claim:v2
-if redis.call("EXISTS", KEYS[1]) == 0 then return -1 end
-if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return -1 end
-if redis.call("HSETNX", KEYS[1], "open", ARGV[1]) == 0 then return 0 end
-redis.call("RPUSH", KEYS[2], ARGV[2])
+export const CLAIM_IF_RUN = `-- marktmorgen:flow-claim:v3
+if ARGV[1] ~= "" then
+  local held = redis.call("ZSCORE", KEYS[4], ARGV[1])
+  if held == false or tonumber(held) ~= tonumber(ARGV[2]) then return -1 end
+end
+if redis.call("HEXISTS", KEYS[1], "email") == 0 then return -1 end
+if ARGV[5] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[5] then return -1 end
+if redis.call("HSETNX", KEYS[1], "open", ARGV[3]) == 0 then return 0 end
+redis.call("RPUSH", KEYS[2], ARGV[4])
+redis.call("EXPIRE", KEYS[1], ARGV[6])
+redis.call("EXPIRE", KEYS[2], ARGV[6])
+redis.call("ZADD", KEYS[3], ARGV[8], ARGV[7])
+redis.call("ZREMRANGEBYSCORE", KEYS[3], 0, tonumber(ARGV[8]) - tonumber(ARGV[6]))
+redis.call("EXPIRE", KEYS[3], ARGV[6])
 return 1`;
 
 /**
- * Claims an attempt of step `index` for each person, before anything is done
- * for them. `claimed` may go ahead; `open` already had an attempt with no
- * known outcome and must not be tried again; `gone` has no run any more (erased
- * meanwhile, or started again as another run) and is not tried. Throws when the claim cannot be confirmed, so
- * nothing is attempted on an unknown claim. `gens`: each person's run generation read with the step's lease entry
- * (ANY_GEN when absent). `opens`: each claimed attempt's own value, "index:stepId:token", which its outcome must
- * match (settleAttempts), so a late repeat of one attempt never clears the next.
+ * Claims an attempt of step `index` for each person, before anything is done for them (CLAIM_IF_RUN). `claimed` may go
+ * ahead; `open` already had an attempt with no known outcome and must not be tried again; `gone` are no longer this
+ * take's run (erased, taken out, taken over or started again meanwhile), and nothing was written for them. Throws when
+ * the claim cannot be confirmed, so nothing is attempted on an unknown claim. `gens`: each person's run generation read
+ * with the lease entry (ANY_GEN when absent). `lease`: this take's lease and its score, which the step that sends
+ * always passes (lib/flows.ts sendDueSteps); without it only the run and its generation are checked. `opens`: each
+ * claimed attempt's own value, which its outcome must match (settleAttempts), so a late repeat never clears the next.
  */
-export async function claimAttempts(flowId: string, emails: string[], index: number, stepId: string, kind: string, nowSeconds = Math.floor(Date.now() / 1000), gens?: Map<string, string>): Promise<{ claimed: string[]; open: string[]; gone: string[]; opens: Map<string, string> }> {
+export async function claimAttempts(
+  flowId: string,
+  emails: string[],
+  index: number,
+  stepId: string,
+  kind: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  gens?: Map<string, string>,
+  lease?: { key: string; member: (email: string) => string; score: number },
+): Promise<{ claimed: string[]; open: string[]; gone: string[]; opens: Map<string, string> }> {
   if (!emails.length) return { claimed: [], open: [], gone: [], opens: new Map() };
   const attempted = event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" });
   const values = emails.map(() => `${index}:${stepId}:${newToken()}`);
   let reply: unknown;
   try {
-    reply = await redisPipeline(emails.map((email, i) => ["EVAL", CLAIM_IF_RUN, 2, runKey(flowId, personOf(email)), logKey(flowId, personOf(email)), values[i], attempted, gens?.get(email) ?? ANY_GEN]));
+    reply = await redisPipeline(emails.map((email, i) => {
+      const person = personOf(email);
+      // Without a lease, KEYS[4] is never read (ARGV[1] is ""): the run's own key stands in for it.
+      return ["EVAL", CLAIM_IF_RUN, 4, runKey(flowId, person), logKey(flowId, person), indexKey(flowId), lease ? lease.key : runKey(flowId, person), lease ? lease.member(email) : "", lease ? lease.score : 0, values[i], attempted, gens?.get(email) ?? ANY_GEN, RUN_KEEP_SECONDS, person, nowSeconds];
+    }));
   } catch {
     throw new FlowRunUnavailable("A workflow step's attempt could not be recorded");
   }

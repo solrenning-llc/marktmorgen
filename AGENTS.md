@@ -24,6 +24,15 @@ Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM
 
 (i) **Transição.** A issue com o rótulo `canal-ativo` (AC (p) e (y)) e a caixa do Claude 1 (AV11) continuam sendo lidas até cada família confirmar a mensagem de boas-vindas do correio; até lá, o que for urgente vai pelo correio e também por elas. Depois disso, ficam só como histórico.
 
+(j) **Depois da transição, "o canal" das outras regras é o correio** (dono, 21/11/2026, por volta das 03h40 Fortaleza: "faça o que for mais correto e seguro", sobre as regras que ainda mandavam escrever no canal antigo). A transição de (i) termina quando `pendentes` do aviso de boas-vindas do correio não mostrar mais nenhuma família; quem vir isso primeiro avisa `todos` pelo correio. Daí em diante, toda remissão das outras seções deste arquivo ao canal de coordenação (a issue com o rótulo `canal-ativo`, "no canal", "issue de coordenação") e à caixa ou ao canal `para-claude-1` quer dizer o correio, assim:
+- `fila #N @sha` (FQ (1), CV (c), (f) e (g), AC (k)): o autor pede com `pedir-fila`; quem enfileira conclui com `concluir-fila`, com `fila #N @sha` e o próprio nome no texto;
+- "re-review needed #N @sha", pedido de revisor e "pode entrar" (CV (f), AC (b) e (f)): `pedir-revisao` e `concluir-revisao`;
+- CLAIMED, UNCLAIMED e HOLD (FQ (1), AC (m) e (p)): `reivindicar`, `liberar` e `segurar`, com a mesma marca numa linha no próprio PR, como em (c);
+- recados, perguntas, bloqueios, colisões, causa comum, adoção e confirmações de leitura (AV9, AV11, MV (c), CV (d), (e) e (g), AC (a), (c) e (e)): `enviar` a quem precisa (o coordenador, o autor ou a família), e `todos` só para aviso geral;
+- falta de uso anunciada (PV (d), AC (a)): `cota --sem --ate`.
+
+Continuam onde estão, porque não são conversa entre agentes: o que se escreve no próprio PR (a revisão e o veredito, CLAIMED, HOLD e `fila #N @sha`), a issue `main-vermelho` (MV (a)), o relatório `prs-parados` (PV (c)) e a troca automática do canal (AC (p)), que só age se a issue voltar a ser usada. Até o fim da transição, vale (i): o urgente vai pelo correio e também pelo canal antigo.
+
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## LC — Cálculo de lucro mostrado ao dono (dono, 01/11/2026 00h05 Fortaleza)

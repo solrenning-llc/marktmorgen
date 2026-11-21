@@ -40,6 +40,12 @@ is("a mark set in the mailbox is also written on the PR, where FQ (1), AC (m) an
 is("the enqueuer checks `estado-pr` and the PR's comments, and a held first request waits", [/inclusive o `estado-pr` do PR e os comentários do próprio PR/.test(co), /HOLD, ou CLAIMED de outra família, no correio, `pegar-fila` não o entrega/.test(co)], [true, true]);
 is("the sender learns that the recipient has no quota", /Quem envia para um agente sem cota é avisado na hora/.test(co), true);
 is("asking the owner to relay only when there is a problem", /\(h\) \*\*Pedir ao dono para passar um recado\*\* só em caso de problema/.test(co), true);
+part("after the transition, the other sections' channel means the mailbox (j)");
+is("(j) says when the transition ends, checkably", /termina quando `pendentes` do aviso de boas-vindas do correio não mostrar mais nenhuma família/.test(co), true);
+for (const [what, command] of [["fila #N @sha", "pedir-fila"], ["re-review needed", "pedir-revisao"], ["CLAIMED, UNCLAIMED e HOLD", "reivindicar"], ["falta de uso", "cota --sem --ate"]] as const)
+  is(`(j) maps "${what}" to \`${command}\``, new RegExp(`${what.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\n]*\`${command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(co), true);
+is("what is written on the PR stays on the PR", /Continuam onde estão, porque não são conversa entre agentes: o que se escreve no próprio PR/.test(co), true);
+is("main-vermelho and prs-parados stay", [/a issue `main-vermelho` \(MV \(a\)\)/.test(co), /o relatório `prs-parados` \(PV \(c\)\)/.test(co)], [true, true]);
 is("it ends with the standard sentence", co.trim().endsWith("Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo."), true);
 
 done();

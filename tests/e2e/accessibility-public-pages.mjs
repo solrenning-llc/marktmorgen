@@ -41,6 +41,9 @@ try{
    const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});
    const expected=path==="/no-such-page-here"?404:200;
    if(response.status()!==expected)throw Error("HTTP "+response.status());
+   // Measure the page as it settles, not mid-fade: an entrance animation (nb-fade-up, up to 700 ms after a 320 ms delay)
+   // passes through partial opacity, and axe read /platform's sign-in button at that moment on a slow runner (7.75:1 settled).
+   await page.evaluate(async()=>{await Promise.all(document.getAnimations().filter(a=>a.playState==="running"&&Number.isFinite(a.effect?.getComputedTiming().iterations)).map(a=>a.finished.catch(()=>{})));});
    await page.addScriptTag({content:axe});
    const report=await page.evaluate(async()=>{
     const tags=["wcag2a","wcag2aa","wcag2aaa","wcag21a","wcag21aa","wcag21aaa","wcag22a","wcag22aa","wcag22aaa"];

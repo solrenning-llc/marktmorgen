@@ -106,7 +106,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:soldbefore:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop", "nl:stamp:noroom:",
-  "nl:stock:back:", "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
+  "nl:stock:back:", "nl:stock:lock:", "nl:storage:blob:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
@@ -467,6 +467,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stamp:noroom:": E,
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:back:": E, "nl:stock:lock:": E,
+  "nl:storage:blob:": X(3),
   "nl:storage:pending:": X(1),
   // A buyer's files for review (750 [CD1]): the setup is named by the course, the record and the places by the store's files' folder.
   "nl:sub:door:": X(1), "nl:sub:due": I, "nl:sub:list:": E, "nl:sub:live:": E, "nl:sub:rec:": E, "nl:sub:setup:": E, "nl:sub:who:": E,

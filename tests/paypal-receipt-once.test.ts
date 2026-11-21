@@ -691,7 +691,11 @@ async function main(): Promise<void> {
   // The paid record's last write names the sales list among its keys: a ZADD, or (since #3385) the one EVAL that
   // settles the sale, whose keys follow the script and its key count.
   const paidWrite = sentK4.findLastIndex((c, i) => i < markRead && c.slice(1).some((arg) => String(arg).startsWith("nl:ppsell:sales:")));
-  const listWrite = markRead > paidWrite && paidWrite >= 0 ? markRead - paidWrite - 1 : -1;
+  // The sale's own short line for the sales file follows the paid record's write (lib/paypal-sales.ts, lineWrite): one
+  // SET of nl:ppsell:sum:, the sale's, priced inside the order's ORDER_COMPUTE (tests/plan-cost-registry.ts), never the
+  // list's. Only that exact SET right after it moves the window; the list's own commands are still all counted.
+  const saleLine = paidWrite >= 0 && sentK4[paidWrite + 1]?.[0] === "SET" && String(sentK4[paidWrite + 1]?.[1]).startsWith("nl:ppsell:sum:") ? 1 : 0;
+  const listWrite = markRead > paidWrite + saleLine && paidWrite >= 0 ? markRead - paidWrite - saleLine - 1 : -1;
   console.log(`        the list's write added ${listWrite} commands to that try`);
   is("the list's write, once in a store's life, adds at most the 7 commands the registry adds for it (commandsPerReceiptTry)", listWrite > 0 && listWrite <= 7, true);
   is("its receipt is sent once", copies(buyerK4).length, 1);

@@ -582,6 +582,7 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  member = 0,
   accessEnd = null,
   chosenOption = null,
   countryProblem = false,
@@ -629,6 +630,12 @@ export function BuyBox({
    * C4-20261106-0520-TODOS-19), not repeated on every card.
    */
   stepped?: boolean;
+  /**
+   * A member price the server proved for this visitor (components/member-price.tsx, 620 [SZ4]), as a percentage; 0
+   * for none. Given by the product page only where the checkout takes it (one price, paid in full, nothing to check):
+   * the form sends it for the checkout to prove again, and the button says its amount.
+   */
+  member?: number;
   /**
    * For a course on its own sales page (24 [E7]): the end that page says ("none" or the end in seconds), sent with the
    * form so the checkout refuses a sale whose end changed and stamps the one shown. Null everywhere else: a card that
@@ -682,8 +689,9 @@ export function BuyBox({
   const intro = activeIntro(product, store.tiers);
   // Or a yearly price beside the monthly one (lib/yearly-price.ts): picked here, before paying.
   const yearly = activeYearly(product, store.tiers);
-  // A store-wide sale on this product right now (lib/store-sale.ts): its price everywhere below.
-  const off = offNow(store, product);
+  // A store-wide sale on this product right now (lib/store-sale.ts): its price everywhere below. A member price
+  // replaces it only where it takes off more (memberShown), as the checkout does.
+  const off = member || offNow(store, product);
 
   if (isFree(product)) {
     return canGiveProduct(store, product) ? (
@@ -798,6 +806,8 @@ export function BuyBox({
       {accessEnd !== null ? <input type="hidden" name={ACCESS_END_FIELD} value={accessEnd} /> : null}
       {embed?.site ? <input type="hidden" name="site" value={embed.site} /> : null}
       {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
+      {/* The member price this page showed: proved again at checkout before Stripe (lib/member-price.ts, memberClaim). */}
+      {member ? <input type="hidden" name="member" value={String(member)} /> : null}
       {/*
         target="_top", here and on every form that opens a payment page:
         Stripe and PayPal refuse to be drawn inside a frame, and the home
@@ -1038,7 +1048,8 @@ export function BuyBox({
       {product.recurring && store.tiers.includes(product.id) ? (
         <p className="st-muted mt-2 text-center text-xs">{w.switchPlansNote}</p>
       ) : null}
-      <SaleNote store={store} product={product} />
+      {/* A member price says its own note beside the buy box (components/member-price.tsx), not a sale's. */}
+      {member ? null : <SaleNote store={store} product={product} />}
     </form>
     {withPayPal ? <PayPalButton store={store} product={product} alone={false} formId={formId} /> : null}
     </>

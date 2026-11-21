@@ -165,9 +165,11 @@ async function main(): Promise<void> {
   const mug = await addProduct(OWNER, "Clay mug", "", "30", null);
   const pack = await addProduct(OWNER, "Recipe pack", "", "27", null);
   if (!mug.ok || !pack.ok) throw new Error("no products");
-  const shippedSet = await setProductShipping(OWNER, mug.product.id, { cents: 600, region: "eu", countries: [], note: "" });
+  // Shipped to Norway and Iceland, in the EEA but outside the EU: the EU and the UK stay closed until the opening
+  // (789 [IV1] unit 1, lib/eu-vat-goods.ts), whatever is filled, so an EU-only mug would ship nowhere.
+  const shippedSet = await setProductShipping(OWNER, mug.product.id, { cents: 600, region: "custom", countries: ["NO", "IS"], note: "" });
   // 618 [SZ2] (#3029): a product shipped to the EU/EEA is sold there only once its EU/EEA safety items and its picture
-  // are filled, so the EU-only mug carries them; otherwise it ships nowhere and has no checkout form to hold the line.
+  // are filled, so the EEA-only mug carries them; otherwise it ships nowhere and has no checkout form to hold the line.
   const legalSet = await setProductLegal(OWNER, mug.product.id, {
     safety: {
       manufacturer: { name: "Clay Works Co.", postal: "1 Kiln Rd, Austin, TX 78701", electronic: "safety@claywork.example", country: "US" },

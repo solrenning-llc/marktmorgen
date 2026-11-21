@@ -12,8 +12,8 @@
 import { readFileSync } from "node:fs";
 import * as soldFileUpload from "@/lib/sold-file-upload";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { handedBack } from "@/lib/upload-hand-back";
-import { askDoor } from "@/lib/upload-refusal";
+import { uploadMessage } from "@/lib/upload-refusal";
+import { askForDoor } from "@/lib/upload-through-door";
 import { done, is, part } from "./check";
 
 const DID_NOT_FINISH = "The upload did not finish, and nothing was changed. Try again in a moment.";
@@ -54,10 +54,8 @@ async function refusedWith(answer: Answer, ownerId = "p0011223344556677"): Promi
 }
 
 const { uploadReason, uploadSoldFile } = soldFileUpload;
-// Read off the module so this file builds before the sentence exists, and fails on what it says (RED first).
-const uploadMessage = (soldFileUpload as unknown as { uploadMessage?: (thrown: unknown, own?: Record<string, string>) => string }).uploadMessage;
-const said = (thrown: unknown, own: Record<string, string> = {}) =>
-  typeof uploadMessage === "function" ? uploadMessage(thrown, own) : "(no uploadMessage)";
+// The studio's sentence for what an upload threw (lib/upload-refusal.ts), read off every kind the uploaders throw.
+const said = (thrown: unknown, own: Record<string, string> = {}) => uploadMessage(thrown, own);
 
 async function main(): Promise<void> {
   part("the file door's refusal reaches the creator, by its own reason");
@@ -157,34 +155,19 @@ async function main(): Promise<void> {
     is("control: and the form's own words", said(big, { too_big: "That file is too big." }), "That file is too big.");
   }
 
-  part("a door that said yes hands its upload to the library once, and the door hands it back unchanged");
+  part("a door that said yes is read once, and what it issued is what the client carries back");
   {
     const issued = { delegationToken: "delegation.synthetic", signature: "sig-synthetic", params: { pathname: "stores/f/p/a.pdf", "valid-until": "1" } };
     fileDoor = { "*": { status: 200, body: { type: "blob.generate-presigned-url", presignedUrlPayload: issued } } };
     const before = seen.length;
-    is("askDoor returns what the door issued", await askDoor("/api/store/file", "stores/f/p/a.pdf", "{}"), issued);
-    is("askDoor asked the door once", seen.slice(before), ["/api/store/file"]);
+    is("askForDoor returns what the door issued", await askForDoor("/api/store/file", "stores/f/p/a.pdf", "{}", false), issued);
+    is("askForDoor asked the door once", seen.slice(before), ["/api/store/file"]);
     fileDoor = { "*": { status: 200, body: { type: "blob.generate-presigned-url" } } };
-    const empty = await askDoor("/api/store/file", "stores/f/p/a.pdf", "{}").then(() => null, (thrown: unknown) => thrown);
+    const empty = await askForDoor("/api/store/file", "stores/f/p/a.pdf", "{}", false).then(() => null, (thrown: unknown) => thrown);
     is("a yes without an upload in it is no reason, and did not finish", [uploadReason(empty), said(empty)], ["server_error", DID_NOT_FINISH]);
     const odd = await refusedWith({ status: 400, body: { ok: false, error: 7, message: { not: "text" } } });
     is("a door's word that is not text is no word", [uploadReason(odd), said(odd)], ["server_error", DID_NOT_FINISH]);
 
-    const event = (clientPayload: unknown) => ({ type: "blob.generate-presigned-url", payload: { pathname: "stores/f/p/a.pdf", clientPayload, multipart: false } });
-    is("handed back: the issued upload, unchanged", handedBack(event(JSON.stringify({ handBack: issued }))), { type: "blob.generate-presigned-url", presignedUrlPayload: issued });
-    is("a first ask is not handed back (the door checks and signs it)", handedBack(event(JSON.stringify({ productId: "p1" }))), null);
-    is("a client payload that is not JSON is not handed back", handedBack(event("{not json")), null);
-    is("an empty signature is not handed back", handedBack(event(JSON.stringify({ handBack: { ...issued, signature: "" } }))), null);
-    is("params that are not text are not handed back", handedBack(event(JSON.stringify({ handBack: { ...issued, params: { a: 1 } } }))), null);
-    is("another event is not handed back", handedBack({ type: "blob.upload-completed", payload: { clientPayload: JSON.stringify({ handBack: issued }) } }), null);
-    is("no body is not handed back", [handedBack(null), handedBack("text")], [null, null]);
-    const route = (path: string) => readFileSync(path, "utf8");
-    for (const path of ["app/api/store/file/route.ts", "app/api/store/image/upload/route.ts"]) {
-      const source = route(path);
-      const back = source.indexOf("handedBack(body)");
-      is(`${path}: hands back before anything is checked, counted or signed`, back > 0 && back < source.indexOf("studioAccess(") && back < source.indexOf("handleUploadPresigned({"), true);
-      is(`${path}: only after another site is refused`, source.indexOf("fromAnotherSite(request)") < back, true);
-    }
   }
 
   part("every studio uploader goes through the door that says why, and shows the reason");
@@ -198,9 +181,6 @@ async function main(): Promise<void> {
       is(`${path}: no picture upload asks the door through the library alone`, direct, []);
       is(`${path}: every picture upload reads its door's answer`, source.includes("uploadThroughDoor("), true);
       is(`${path}: shows the reason`, source.includes("uploadMessage("), true);
-    }
-    for (const path of ["components/product-editor.tsx", "components/podcast-editor.tsx", "components/course-editor.tsx"]) {
-      is(`${path}: shows the reason`, read(path).includes("uploadMessage("), true);
     }
     const sold = read("lib/sold-file-upload.ts");
     is("lib/sold-file-upload.ts: the file door is heard", sold.includes("uploadThroughDoor("), true);

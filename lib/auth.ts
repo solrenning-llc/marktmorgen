@@ -63,8 +63,7 @@ import { withPrefill } from "@/lib/handle-prefill";
 
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MAX_EMAIL_LENGTH = 254;
-import { SESSION_COOKIE, sessionIdShaped } from "@/lib/session-id";
-export { SESSION_COOKIE, sessionIdShaped };
+export const SESSION_COOKIE = "nl_session";
 
 const LINK_TTL_SECONDS = 15 * 60;
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -945,7 +944,7 @@ export async function spendSignInLink(token: string): Promise<string | null> {
  */
 export async function sessionEmail(id: string | undefined): Promise<string | null> {
   if (!id || !isRedisConfigured()) return null;
-  if (!sessionIdShaped(id)) return null;
+  if (!/^[0-9a-f]{64}$/.test(id)) return null;
   const reply = repliesFor(await redisPipeline([["GET", await sessionKey(id)]]), 1);
   if (!reply) throw new UnknownReplyError("a session");
   if (reply[0] === null) return null;

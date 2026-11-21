@@ -85,11 +85,9 @@ export class LedgerNotCounted extends Error {
  * Studio requests one reading of the buyers from Stripe costs at the most,
  * when its one-hour copy ran out (tests/plan-cost-registry.ts,
  * BUYER_LEDGER), besides what it reads and writes by size (below): for a
- * caller that counts them (`count`, below). Seven since a studio request is
- * priced with an upload's hand-back call (review of #3171): seven cover it,
- * and no fewer would (tests/plan-cost-registry.test.ts).
+ * caller that counts them (`count`, below).
  */
-export const BUYER_LEDGER_UNITS = 7;
+export const BUYER_LEDGER_UNITS = 8;
 /** Bytes of the ledger's copy, or of the imported buyers, that one studio request covers when read (tests/plan-cost-registry.ts, LEDGER_MB). */
 export const LEDGER_BYTES_PER_UNIT = 1_000_000;
 /** The most one imported buyer weighs: its address and when it came, read, then written in the copy as a row. */

@@ -64,6 +64,7 @@ import { RECEIPT_BATCH_SHAPE } from "@/lib/receipt-batch";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { BESIDE_SAVE_COMMANDS } from "@/lib/store-data";
 import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
+import { MAX_DOOR_BYTES } from "@/lib/upload-door";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -557,6 +558,16 @@ export const COMMUNITY_DOOR_COST =
   request("wait", 40 + TAKE_COMMANDS, 20_000) + BLOB_SIMPLE_OPERATION + 2 * BLOB_ADVANCED_OPERATION + COMMUNITY_SWEEP_COMMANDS * COMMAND;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
+/**
+ * The picture door's second call (app/api/store/image/upload, #3171): every studio picture upload asks the door itself
+ * (lib/upload-through-door.ts askForDoor, the studio request the window counts), then the file store's client asks the
+ * route again with that door in x-upload-door, and the route hands it back before anything is read, counted or signed.
+ * That call runs no command and asks the file store nothing, but it is a call: priced at the lightest request's shape,
+ * receiving the door's header at its most (MAX_DOOR_BYTES) and a first ask's body at its most (16_000, the limit the
+ * route reads a first ask with), and sending the door back with its envelope, every byte through Fast Origin Transfer.
+ * Taken once for every studio request, as if each were a picture upload (line picture-door-echo).
+ */
+export const PICTURE_DOOR_ECHO = request("light", 0, 0) + (MAX_DOOR_BYTES + 16_000 + MAX_DOOR_BYTES + 64) * ORIGIN_PER_BYTE;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
 /**
@@ -1104,20 +1115,6 @@ export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
 /**
- * The body a studio upload's door reads at the most (app/api/store/image/upload, app/api/store/file: limited(request,
- * 16_000)), and so what a hand-back can receive and send back.
- */
-export const UPLOAD_DOOR_BODY_BYTES = 16_000;
-/**
- * A studio upload asks its door twice (lib/upload-refusal.ts): askDoor, the studio request the window counts, and the
- * file store library's own request, which the door answers by handing back what it issued (lib/upload-hand-back.ts,
- * handedBack) before anything is read or counted. That second invocation runs no database command, but it is a call:
- * priced at the lightest request's shape with its body received and sent back, and carried by every studio request
- * as if each were an upload, since a window may be spent on nothing else (review of #3171 by Claude 6;
- * tests/upload-hand-back-cost.test.ts counts the invocations).
- */
-export const UPLOAD_HAND_BACK_EXTRA = request("light", 0, 0) + 2 * UPLOAD_DOOR_BODY_BYTES * ORIGIN_PER_BYTE;
-/**
  * lib/webhooks.ts erasedSincePaid (R38): before an event read from a payment provider names its buyer (Stripe's
  * refund.issued, sale.completed, membership.started, an offer's sale.completed and membership.canceled; PayPal's
  * refund.issued), one HGET of that address's print in the store's deletion hash (lib/suppression.ts), so a person
@@ -1222,9 +1219,8 @@ export function teamLogFenceUsd(tier: Tier): number {
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
-  // three commands more in the "*" state, taken as if every load paid them (review of #2556 at 0e308316), and an
-  // upload's hand-back call, taken as if every request were an upload (review of #3171).
-  studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) + UPLOAD_HAND_BACK_EXTRA,
+  // three commands more in the "*" state, taken as if every load paid them (review of #2556 at 0e308316).
+  studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000),
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
   // A message written to the inbox, and its index.
@@ -2305,6 +2301,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/stream-rules.ts", names: ["STREAM_HELD_REQUESTS"] },
     ],
     basis: "Every upload operation the automatic upload allowance can start, each start priced at the most operations its own path makes: on R2, every page of the vault listing admission reads, the multipart create and complete, and three file measurements; on Vercel Blob, every page of the host file store's listing admission reads, as Advanced Operations at the top regional rate; on Bunny Stream, the read of the store's collection admission makes, at a stated allowance, since no rate for it is cited (tests/vault-open-class-a.test.ts). Two finish or cancel requests per upload: a finish and a confirmed cancel are written down and a repeat answered from that record, an unconfirmed cancel may be asked again inside the two, a finish refused for its piece list asks R2 nothing, and a request past them is refused before R2 is asked (tests/vault-control-once.test.ts). Since 20 November 2026 (Codex L-20261120-0141) every write of an upload's open is fenced on the store, so a provider answering after the store's erasure writes nothing back: each start is priced with UPLOAD_OPEN_FENCE_EXTRA_COMMANDS (12) more database commands at its worst path, held by tests/vault-erasure-fence.test.ts.",
+  },
+  {
+    id: "picture-door-echo",
+    feature: "The picture door's second call: the file store's client asking the picture route again with the door it was given, handed back with nothing read, counted or signed (#3171)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * PICTURE_DOOR_ECHO,
+    sources: [
+      { file: "app/api/store/image/upload/route.ts", names: ["DOOR_ECHO_HEADER", "doorFromHeader(echoed)", "limited(request, 16_000)"] },
+      { file: "lib/upload-through-door.ts", names: ["askForDoor", "uploadThroughDoor"] },
+      { file: "lib/upload-door.ts", names: ["MAX_DOOR_BYTES"] },
+    ],
+    basis: "Every studio picture upload asks the picture door itself (askForDoor), the studio request the window counts and the line picture-uploads prices; the file store's client then asks the route again with that door in x-upload-door, and the route hands it back before anything is read, counted or signed. That second call is one more per picture upload request, at most the plan's studio figure a month: a call at the lightest request's shape, with no command and no file store operation, receiving the door's header at its most (MAX_DOOR_BYTES) and a first ask's body at its most (16_000, the limit the route reads a first ask with), and sending the door back with its envelope, every byte at Fast Origin Transfer (PICTURE_DOOR_ECHO). The file route's echo is already bounded by UPLOAD_REQUESTS_PER_OPEN in the line uploads (docs/file-upload-admission-refusals.md).",
   },
   {
     id: "workflows",

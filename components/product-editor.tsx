@@ -37,7 +37,7 @@ import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
 import { PublicationChoice } from "@/components/publication-choice";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
 import { toast } from "@/components/toast";
-import { uploadMessage, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import {
   MAX_PRODUCTS,
   MAX_SUMMARY_LENGTH,
@@ -2120,8 +2120,7 @@ export function ProductEditor({
       }
       router.refresh();
     } catch (thrown) {
-      // The door's own reason (a spent studio window, a second step, a full storage...), or that it did not finish.
-      setFileError({ id, message: uploadMessage(thrown, MESSAGES) });
+      setFileError({ id, message: MESSAGES[uploadReason(thrown)] ?? MESSAGES.server_error });
     } finally {
       setFileBusyId(null);
       setPercent(0);

@@ -19,7 +19,7 @@
  * (tests/vault-upload.test.ts).
  */
 import { PIECES_PER_ASK } from "@/lib/vault-rules";
-import { UploadRefused } from "@/lib/upload-refusal";
+import { UploadRefused } from "@/lib/upload-through-door";
 
 /** The pauses before a piece is tried again, in ms. After the last one the upload gives up. */
 export const PIECE_PAUSES_MS = [1_000, 3_000, 5_000, 10_000, 20_000, 60_000];
@@ -29,7 +29,7 @@ const AT_ONCE = 3;
 export type VaultFile = { pathname: string; bytes: number; contentType: string };
 
 /**
- * Why an upload stopped: our door said no (`reason` is its word, `said` its own sentence when it sent one, such as a
+ * Why an upload stopped: our door said no (`reason` is its word, `words` its own sentence when it sent one, such as a
  * spent studio window's), or the store could not be reached for too long.
  */
 export class VaultUploadError extends UploadRefused {}
@@ -94,7 +94,7 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
 
   const opened = await door({ action: "open", ownerId, name, bytes: file.size, type: file.type, multipart: true });
   if (opened.error === "off") return null;
-  if (!opened.ok || !opened.upload) throw new VaultUploadError(opened.error ?? "server_error", opened.message ?? "");
+  if (!opened.ok || !opened.upload) throw new VaultUploadError(opened.error ?? "server_error", opened.message || undefined);
   const { pathname, pieces, pieceBytes } = opened.upload;
   // Older servers ignore the negotiation and keep their single-PUT protocol.
   const needsEtags = opened.upload.multipart === true || pieces > 1;
@@ -115,7 +115,7 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
     const numbers: number[] = [];
     for (let n = number; n <= pieces && numbers.length < PIECES_PER_ASK; n += 1) if (!etags[n - 1]) numbers.push(n);
     const answer = await door({ action: "sign", pathname, numbers });
-    if (!answer.ok || !answer.pieces) throw new VaultUploadError(answer.error ?? "server_error", answer.message ?? "");
+    if (!answer.ok || !answer.pieces) throw new VaultUploadError(answer.error ?? "server_error", answer.message || undefined);
     for (const piece of answer.pieces) addresses.set(piece.number, { url: piece.url, type: piece.type });
     const mine = addresses.get(number);
     if (!mine) throw new VaultUploadError("server_error");
@@ -183,7 +183,7 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
     // (app/api/store/vault), and its abort ends only that session: a join that worked and whose answer was lost has
     // already let the upload go, and abort then finds nothing to end (lib/vault.ts abortVaultUpload).
     await door({ action: "abort", pathname }).catch(() => {});
-    throw new VaultUploadError(closed.error ?? "server_error", closed.message ?? "");
+    throw new VaultUploadError(closed.error ?? "server_error", closed.message || undefined);
   }
   options.onProgress?.(100);
   return closed.file;

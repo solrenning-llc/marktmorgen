@@ -11,8 +11,7 @@ import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, ownsImagePath } from "@/lib/produ
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { costPauseCode } from "@/lib/plan-standing";
 import { notePictureDoor } from "@/lib/picture-door";
-import { handedBack } from "@/lib/upload-hand-back";
-import { SESSION_COOKIE, sessionIdShaped } from "@/lib/session-id";
+import { DOOR_ECHO_HEADER, doorFromHeader } from "@/lib/upload-door";
 
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 5 * 60 * 1000;
@@ -33,6 +32,16 @@ export async function POST(request: NextRequest) {
   // Sec-Fetch-Site (lib/request-guard.ts).
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
 
+  // The client's second ask, carrying the door the studio already asked for and was given (lib/upload-door.ts, the one
+  // protocol of lib/upload-through-door.ts): that very door goes back, and nothing else happens here. A header that is
+  // there but is not a door is refused, never treated as a first ask.
+  const echoed = request.headers.get(DOOR_ECHO_HEADER);
+  if (echoed !== null) {
+    const door = doorFromHeader(echoed);
+    if (!door) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+    return Response.json({ type: "blob.generate-presigned-url", presignedUrlPayload: door });
+  }
+
   let body: HandleUploadPresignedBody;
   try {
     body = (await (await limited(request, 16_000)).json()) as HandleUploadPresignedBody;
@@ -41,14 +50,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // The browser asked this door already and read its answer (lib/upload-refusal.ts askDoor), so a refusal says why;
-    // the file store's library now asks for what was issued then, and is given it back unchanged: nothing is checked,
-    // counted or signed twice, and it grants nothing the browser does not already hold.
-    const issued = handedBack(body);
-    // Only to a browser holding a session id's shape: a caller with none has no counted upload to hand back, so it is
-    // refused as the signed path refuses it, with nothing read (lib/session-id.ts, as lib/auth.ts emailForSession).
-    if (issued && !sessionIdShaped(request.cookies.get(SESSION_COOKIE)?.value)) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
-    if (issued) return Response.json(issued);
     const answer = await handleUploadPresigned({
       body,
       request,

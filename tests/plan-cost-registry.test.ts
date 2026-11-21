@@ -21,7 +21,7 @@ import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/pers
 import { IncludedBytes, PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, sentUnits } from "@/lib/sent-bytes";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
-import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, UPLOAD_HAND_BACK_EXTRA, apiReadCost } from "./plan-cost-registry";
+import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
@@ -524,16 +524,10 @@ test("Path page and its actual usage count fit its reserved studio page", () => 
  assert.ok(PATH_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS);
 });
 
-// The "no fewer would do" checks below price a studio request without an upload's hand-back call (UPLOAD_HAND_BACK_EXTRA,
-// #3171): every studio request carries it in UNIT_COST.studio as if each were an upload, which keeps the window's cost a
-// ceiling, but a page that only reads (companies, benefits, buyers) makes no hand-back, so its count stays the one these
-// pages need without it and does not drop because uploads cost more.
-const STUDIO_WITHOUT_HAND_BACK = UNIT_COST.studio - UPLOAD_HAND_BACK_EXTRA;
-
 test("a companies request fits its studio requests, and each page that reads every company fits what it counts", () => {
  assert.ok(COMPANIES_REQUEST <= UNIT_COST.studio * COMPANIES_REQUEST_UNITS, `${COMPANIES_REQUEST} > ${COMPANIES_REQUEST_UNITS} x ${UNIT_COST.studio}`);
  assert.ok(COMPANIES_PAGE_READ <= UNIT_COST.studio * COMPANIES_READ_UNITS, `${COMPANIES_PAGE_READ} > ${COMPANIES_READ_UNITS} x ${UNIT_COST.studio}`);
- assert.ok(COMPANIES_PAGE_READ > STUDIO_WITHOUT_HAND_BACK * (COMPANIES_READ_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_READ_UNITS");
+ assert.ok(COMPANIES_PAGE_READ > UNIT_COST.studio * (COMPANIES_READ_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_READ_UNITS");
  // What a page sends on is counted by its size: one studio request for each STUDIO_UNIT_SENT_BYTES.
  assert.ok(STUDIO_UNIT_SENT <= UNIT_COST.studio, `${STUDIO_UNIT_SENT} > ${UNIT_COST.studio}`);
  // The companies page at its most (every company, every person at them with an address of 254 characters): the
@@ -551,12 +545,12 @@ test("a reading of who is owed a membership benefit fits the studio requests cou
  for (let pages = 1; pages <= BENEFIT_STRIPE_PAGES; pages += 1) {
   assert.ok(benefitsRead(pages) <= UNIT_COST.studio * BENEFIT_PAGE_UNITS * pages, `${pages} pages: ${benefitsRead(pages)} > ${pages} x ${BENEFIT_PAGE_UNITS} x ${UNIT_COST.studio}`);
  }
- assert.ok(benefitsRead(1) > STUDIO_WITHOUT_HAND_BACK * (BENEFIT_PAGE_UNITS - 1), `${benefitsRead(1)} <= ${BENEFIT_PAGE_UNITS - 1} x ${STUDIO_WITHOUT_HAND_BACK}: lower BENEFIT_PAGE_UNITS`);
+ assert.ok(benefitsRead(1) > UNIT_COST.studio * (BENEFIT_PAGE_UNITS - 1), `${benefitsRead(1)} <= ${BENEFIT_PAGE_UNITS - 1} x ${UNIT_COST.studio}: lower BENEFIT_PAGE_UNITS`);
 });
 
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {
  assert.ok(BUYER_LEDGER <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${BUYER_LEDGER} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
- assert.ok(BUYER_LEDGER > STUDIO_WITHOUT_HAND_BACK * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${STUDIO_WITHOUT_HAND_BACK}: lower BUYER_LEDGER_UNITS`);
+ assert.ok(BUYER_LEDGER > UNIT_COST.studio * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${UNIT_COST.studio}: lower BUYER_LEDGER_UNITS`);
 });
 
 test("what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out", () => {
@@ -606,8 +600,8 @@ test("the tasks agenda at its most fits the studio requests it counts", () => {
 });
 
 test("the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2))", () => {
- // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more, and an upload's hand-back call (review of #3171).
- assert.equal(request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, PAGE_INCLUDED_BYTES) + UPLOAD_HAND_BACK_EXTRA, UNIT_COST.studio);
+ // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more.
+ assert.equal(request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, PAGE_INCLUDED_BYTES), UNIT_COST.studio);
  assert.ok(LEDGER_BYTES_PER_UNIT === STUDIO_UNIT_SENT_BYTES && request("light", 2, STUDIO_UNIT_SENT_BYTES) <= UNIT_COST.studio, "a studio request counted past the included bytes covers its megabyte");
  // The page at its worst: a task's person looked up (?who=) and not there, so the agenda is drawn below; every part
  // that reads or sends by size at the most it moved without a request of its own before: the lookup's copy of the

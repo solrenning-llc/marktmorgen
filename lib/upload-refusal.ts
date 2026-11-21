@@ -1,38 +1,18 @@
 /**
  * Why an upload from the studio's browser was refused, in words the creator can act on.
  *
- * Every upload asks a door on our server first (app/api/store/image/upload for a picture,
- * app/api/store/file and app/api/store/vault for a file that is sold), and a door that says no says
- * why: a spent studio window (with the window's own sentence), requests that could not be counted, a
- * team that requires a second step, a session held until its second step, a role without the
- * permission, a full storage, a paused plan. The file store's browser library (`uploadPresigned`)
- * reads only whether its door said yes and throws one fixed error otherwise, so the reason was lost
- * and every refusal read as "Something went wrong on our side".
+ * Every studio upload asks its door first, through the one protocol (lib/upload-through-door.ts: main's, from
+ * ff29bd12cf), so a door that says no says why: a spent studio window (with the window's own sentence), requests that
+ * could not be counted, a team that requires a second step, a session held until its second step, a role without the
+ * permission, a full storage, a paused plan. Before, every refusal read as "Something went wrong on our side".
  *
- * So the door is asked here, by a request that reads its answer (`askDoor`), and only a door that
- * said yes hands the library what it issued: the library's own request to the same door carries it
- * back in its client payload, and the door returns it unchanged without checking or signing anything
- * again (`handedBack`), so a studio request is counted once and nothing is issued twice. What it hands
- * back grants nothing the browser does not already hold.
- *
- * Runs in the browser; the door's half is lib/upload-hand-back.ts.
+ * Here are only the words; the upload itself goes through lib/upload-through-door.ts (#3171, decision of the author
+ * family, option (a): one protocol, no hand-back of this file's own).
  */
-import { uploadPresigned } from "@vercel/blob/client";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { HAND_BACK, type Issued, isIssued } from "@/lib/upload-hand-back";
+import { UploadRefused, uploadThroughDoor as throughDoor } from "@/lib/upload-through-door";
 
-/** A door, or the file store behind it, said no: `reason` is the door's word, `said` its own sentence when it sent one. */
-export class UploadRefused extends Error {
-  readonly reason: string;
-  readonly said: string;
-  /** Both read from a door's JSON, so anything but text (or a word past 60 characters) counts as none given. */
-  constructor(reason: unknown, said: unknown = "") {
-    const word = typeof reason === "string" && reason.length <= 60 ? reason : "";
-    super(`upload ${word || "failed"}`);
-    this.reason = word;
-    this.said = typeof said === "string" ? said.slice(0, 600) : "";
-  }
-}
+export { UploadRefused };
 
 /** What an upload that failed for a reason nobody gave says: true of every studio uploader, which changes nothing until its upload is in. */
 export const UPLOAD_DID_NOT_FINISH = "The upload did not finish, and nothing was changed. Try again in a moment.";
@@ -67,7 +47,7 @@ const GENERIC: Record<string, string> = {
 
 /** The door's word and sentence behind anything an upload threw; an empty reason when nobody gave one. */
 export function refusalOf(thrown: unknown): { reason: string; said: string } {
-  if (thrown instanceof UploadRefused) return { reason: thrown.reason, said: thrown.said };
+  if (thrown instanceof UploadRefused) return { reason: thrown.reason, said: thrown.words ?? "" };
   // The file store itself turning a file's type away (its own error names the content type).
   if (thrown instanceof Error && /content type|not allowed/i.test(thrown.message)) return { reason: "wrong_type", said: "" };
   return { reason: "", said: "" };
@@ -86,40 +66,15 @@ export function uploadMessage(thrown: unknown, own: Record<string, string> = {})
 }
 
 /**
- * Asks `door` for one upload, by the library's own event, and reads its answer: what it issued when it said yes, or an
- * UploadRefused with its word (and sentence) when it said no. A door that cannot be reached or answers no word throws
- * an UploadRefused with an empty reason.
+ * Uploads `body` to `pathname` through `door`, by the one protocol (lib/upload-through-door.ts): asked first, so a
+ * refusal throws the door's own reason, then sent with the door carried back. Throws an UploadRefused for a refusal,
+ * or what the file store's client throws once the upload itself is under way.
  */
-export async function askDoor(door: string, pathname: string, clientPayload: string, multipart = false): Promise<Issued> {
-  let response: Response;
-  try {
-    response = await fetch(door, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "blob.generate-presigned-url", payload: { pathname, clientPayload, multipart } }),
-    });
-  } catch {
-    throw new UploadRefused("");
-  }
-  const answer = (await response.json().catch(() => null)) as { presignedUrlPayload?: unknown; error?: unknown; message?: unknown } | null;
-  if (response.ok && isIssued(answer?.presignedUrlPayload)) return answer.presignedUrlPayload;
-  // A door that said yes without anything usable gave no reason.
-  throw response.ok ? new UploadRefused("") : new UploadRefused(answer?.error, answer?.message);
-}
-
-type LibraryOptions = Parameters<typeof uploadPresigned>[2];
-
-/**
- * Uploads `body` to `pathname` through `door`: asked first (askDoor), so a refusal throws the door's own reason, then
- * sent by the file store's library with what the door issued. Throws an UploadRefused for a refusal, or what the
- * library throws once the upload itself is under way.
- */
-export async function uploadThroughDoor(
+export function uploadThroughDoor(
   pathname: string,
   body: Blob,
-  options: Omit<LibraryOptions, "handleUploadUrl" | "clientPayload"> & { door: string; clientPayload: string },
-): ReturnType<typeof uploadPresigned> {
-  const { door, clientPayload, ...rest } = options;
-  const issued = await askDoor(door, pathname, clientPayload, rest.multipart === true);
-  return uploadPresigned(pathname, body, { ...rest, handleUploadUrl: door, clientPayload: JSON.stringify({ [HAND_BACK]: issued }) });
+  options: Parameters<typeof throughDoor>[3] & { door: string },
+): ReturnType<typeof throughDoor> {
+  const { door, ...rest } = options;
+  return throughDoor(door, pathname, body, rest);
 }

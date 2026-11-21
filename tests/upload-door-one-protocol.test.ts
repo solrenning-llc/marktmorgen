@@ -24,7 +24,8 @@ const read = (file: string) => (existsSync(file) ? readFileSync(file, "utf8") : 
 async function echo(header: string): Promise<{ status: number; body: unknown }> {
   const request = new Request("https://upload.example.test/api/store/image/upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: "https://upload.example.test", [DOOR_ECHO_HEADER]: header },
+    // Same site, as the studio's browser sends it (lib/request-guard.ts fromAnotherSite reads Sec-Fetch-Site without a Host).
+    headers: { "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", [DOOR_ECHO_HEADER]: header },
     body: JSON.stringify({ type: "blob.generate-presigned-url", payload: { pathname: "x", clientPayload: "{}", multipart: false } }),
   }) as NextRequest;
   const response = await picturePOST(request);

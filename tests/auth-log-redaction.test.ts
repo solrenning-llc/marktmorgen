@@ -2,6 +2,11 @@
  * Rule 30 on the sign-in routes (#3712, Claude 4 cloud D): a provider or
  * storage error can carry the address, a code or a token, so no route under
  * app/api/auth hands the error object to the server log, only a fixed label.
+ *
+ * Scope (Claude 6's LEVE 1 on #3712, 7057898833): this guards the ROUTES only. The sign-in libraries they call
+ * (lib/auth.ts, lib/signin-finish.ts, lib/two-step*.ts, lib/passkeys.ts, lib/recovery-address.ts) and the pages under
+ * app/signin/** still log a fixed label with the raw error at about 25 sites; that is the named follow-up
+ * (Codex adoption lane), which widens `root` below to them. Today's real Redis and provider messages carry no address.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -32,24 +37,35 @@ function consoleLeaks(source: string): number[] {
   const file = ts.createSourceFile("route.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const lines = new Set<number>();
   const fixedString = (node: ts.Node) => ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
-  // console.error / console["error"], used as the callee of a call with one fixed string.
-  const allowedUse = (id: ts.Identifier) => {
-    const member = id.parent;
+  // The global objects the console hangs on: `globalThis.console` and `globalThis["console"]` are the console itself
+  // (Claude 6's LEVE 2 on #3712).
+  const GLOBALS = new Set(["globalThis", "window", "self", "global"]);
+  const globalConsole = (node: ts.Node): boolean =>
+    (ts.isPropertyAccessExpression(node) && node.name.text === "console" && ts.isIdentifier(node.expression) && GLOBALS.has(node.expression.text)) ||
+    (ts.isElementAccessExpression(node) && ts.isIdentifier(node.expression) && GLOBALS.has(node.expression.text) &&
+      fixedString(node.argumentExpression) && (node.argumentExpression as ts.StringLiteral).text === "console");
+  // console.error / console["error"], used as the callee of a call with one fixed string; `ref` is the console itself.
+  const allowedUse = (ref: ts.Expression) => {
+    const member = ref.parent;
     const isMember =
-      (ts.isPropertyAccessExpression(member) && member.expression === id) ||
-      (ts.isElementAccessExpression(member) && member.expression === id && fixedString(member.argumentExpression));
+      (ts.isPropertyAccessExpression(member) && member.expression === ref) ||
+      (ts.isElementAccessExpression(member) && member.expression === ref && fixedString(member.argumentExpression));
     if (!isMember) return false;
     const call = member.parent;
     return ts.isCallExpression(call) && call.expression === member && call.arguments.length === 1 && fixedString(call.arguments[0]);
   };
+  const flag = (node: ts.Node) => lines.add(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
   const visit = (node: ts.Node) => {
-    if (ts.isIdentifier(node) && node.text === "console") {
+    if (globalConsole(node)) {
+      if (!allowedUse(node as ts.Expression)) flag(node);
+    } else if (ts.isIdentifier(node) && node.text === "console") {
       const parent = node.parent;
-      // `obj.console` or `{ console: … }` names a property, not the global console.
+      // `obj.console` or `{ console: … }` names a property, not the global console; `globalThis.console` is read
+      // above as the console itself.
       const isPropertyName =
         (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
         (ts.isPropertyAssignment(parent) && parent.name === node);
-      if (!isPropertyName && !allowedUse(node)) lines.add(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+      if (!isPropertyName && !allowedUse(node)) flag(node);
     }
     ts.forEachChild(node, visit);
   };

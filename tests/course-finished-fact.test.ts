@@ -17,6 +17,7 @@ import { earnedCount, issueCertificate, withdrawCertificate } from "@/lib/certif
 import { FINISHED_SHOWN_FROM, pageFacts } from "@/lib/page-facts";
 import { readPageFacts } from "@/lib/page-facts-read";
 import { FACT_KEYS, FACTS_ON_BY_DEFAULT, emptyBlock, parsePage } from "@/lib/sales-page";
+import * as salesPage from "@/lib/sales-page";
 import { FINISHED_WORDS } from "@/lib/buyer-words/finished";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { UnknownReply } from "@/lib/redis-exact";
@@ -121,8 +122,8 @@ async function main(): Promise<void> {
   const uncertainStore = { statsId: "st_uncertain_finished", language: "en", look: { sold: false } } as unknown as Store;
   const uncertainProduct = { id: "p", course: { id: uncertainCourse.id, lessons: 8 }, bundle: null } as unknown as Listing;
   const missing = await readPageFacts(uncertainStore, uncertainProduct);
-  is("nine certificates and a failed tenth issue never advertise ten",
-    [missing.facts.finished, missing.factsUnread.includes("finished")], [undefined, true]);
+  is("nine certificates and a failed tenth issue never advertise ten, nor say a number is unread (Claude 6 MÉDIO 1)",
+    [missing.facts.finished, missing.factsUnread.includes("finished")], [undefined, false]);
 
   part("What the block says");
   const course = { course: { lessons: 8 } };
@@ -135,7 +136,10 @@ async function main(): Promise<void> {
   is("French says participants, as for adults", pageFacts({ language: "fr", locale: "fr-FR", product: course, bundleItems: null, sold: null, reviews: null, finished: 12 }).finished?.label, "participants ont obtenu le certificat");
 
   part("The creator's choice");
-  is("it is one of the numbers a block may show", FACT_KEYS.some((f) => f.key === "finished"), true);
+  // Claude 6 review of #3988, MÉDIO 2: with no exact, bounded reader the count can never reach 10, so the studio does
+  // not offer it, nor promise it in a hint, until FINISHED_FACT_READY (lib/sales-page.ts) is true.
+  is("it is not offered while there is no exact reader", FACT_KEYS.some((f) => f.key === "finished"), false);
+  is("and the switch that would offer it is off", (salesPage as { FINISHED_FACT_READY?: boolean }).FINISHED_FACT_READY, false);
   is("a new block does not start with it checked", FACTS_ON_BY_DEFAULT.includes("finished"), false);
   is("but starts with every other number, as before", FACTS_ON_BY_DEFAULT, FACT_KEYS.map((f) => f.key).filter((k) => k !== "finished"));
   const fresh = emptyBlock("facts", "facts0");
@@ -148,17 +152,17 @@ async function main(): Promise<void> {
   const store = { statsId: "st_finished", language: "en", look: { sold: false } } as unknown as Store;
   const product = { id: "p1", course: { id: COURSE, lessons: 8 }, bundle: null } as unknown as Listing;
   const read = await readPageFacts(store, product);
-  is("an unverified index is omitted and named as unread", [read.facts.finished?.value, read.factsUnread.includes("finished")], [undefined, true]);
+  is("off: omitted, and never named as unread (a permanent state is not a passing failure)", [read.facts.finished?.value, read.factsUnread.includes("finished")], [undefined, false]);
   broken = true;
   const failed = await readPageFacts(store, product);
   broken = false;
-  is("a failed read is named as unread, not as none", [failed.facts.finished, failed.factsUnread.includes("finished")], [undefined, true]);
+  is("off: a broken count is never read, so nothing is unread", [failed.facts.finished, failed.factsUnread.includes("finished")], [undefined, false]);
   commands = 0;
   await readPageFacts(store, { ...product, course: null } as unknown as Listing);
   const withoutCourse = commands;
   commands = 0;
   await readPageFacts(store, product);
-  is("not a course: no read for it (the course and the count fewer)", commands - withoutCourse >= 2, true);
+  is("off: a course costs no read for it (the same commands as a product with no course)", commands - withoutCourse, 0);
   await saveCourse({ ...certCourse, certificate: false }, ROOM);
   const off = await readPageFacts(store, product);
   is(
@@ -171,8 +175,8 @@ async function main(): Promise<void> {
   part("The product page");
   const page = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
   is(
-    "it reads the count only when a block of the page asks for it and the course gives a certificate now",
-    page.includes('product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))') &&
+    "it reads the count only once it is ready, a block of the page asks for it and the course gives a certificate now",
+    page.includes('FINISHED_FACT_READY && product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))') &&
       page.includes("certificateOn: course?.certificate === true,") &&
       page.includes("const certificateOn = courseFacts?.certificateOn === true;") &&
       page.includes("await earnedCount(product.course.id).catch(() => null)"),

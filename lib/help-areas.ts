@@ -70,6 +70,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
 export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
   declines: "The Declined payments report, opened from the disputes review: the help center has no answer about card declines yet. Its screen help lists \"Who handles refunds and disputes?\" as the closest answer, the one for the screen it opens from, not as an answer about declines.",
   students: "Filtering a course's students and changing many at once (the Students screen): the course answer says who opened it and how to take a student off, not this screen.",
+  "learning-paths": "Putting several courses in an order (the Learning paths screen): what a path is, how to make one and what students will see once paths are shown to them (249 [ST2] unit 4).",
 };
 
 /** Studio screens that are not an area of their own. */

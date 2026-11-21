@@ -16,6 +16,7 @@ import { NextRequest } from "next/server";
 import { POST as hitRoute } from "@/app/api/store/hit/route";
 import { HIT_FIELDS_MAX_BYTES, HIT_FIELD_MAX_BYTES, HIT_TEXT_FIELDS, STORE_FOR_HIT, type Store, claimHandle, ownerKey, storeFolder, storeForHandle, storeForHit } from "@/lib/store";
 import { countAffiliateClick, countHit, countVisit, isStorePeople } from "@/lib/visit";
+import { productIdFor } from "@/lib/catalog";
 import { visitsIn } from "@/lib/traffic";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";
@@ -155,6 +156,40 @@ async function checks(): Promise<void> {
   is("so the store cannot be read, and nothing is counted", await storeForHit("fields"), null);
   redis.run(["SET", recordKey, JSON.stringify(rich)]);
   is("the script names every text field it answers", HIT_TEXT_FIELDS.every((field) => STORE_FOR_HIT.includes(`'${field}'`)), true);
+
+  part("A record the whole reader takes, the count takes too (Claude 2's independent review)");
+  const recordWith = async (change: Record<string, unknown>) => {
+    redis.run(["SET", recordKey, JSON.stringify({ ...rich, ...change })]);
+    return { whole: (await storeForHandle("fields"))!, counted: await storeForHit("fields", { product: "legacyP" }) };
+  };
+  // A name kept to 60 characters can end in half an emoji; JSON.stringify writes that lone surrogate as an escape,
+  // which Redis's cjson refuses. The script reads it as U+FFFD first, so the store is still counted.
+  const cut = await recordWith({ name: `${"a".repeat(59)}😀`.slice(0, 60), bio: `${"b".repeat(159)}😀`.slice(0, 160) });
+  is("a name cut in an emoji: the store is still read", cut.counted !== null, true);
+  is("and its name keeps the 59 characters before it", cut.counted?.store.name.slice(0, 59), cut.whole.name.slice(0, 59));
+  const escapedSlash = await recordWith({ name: "a\\ud83d" });
+  is("a name holding the text \\ud83d (an escaped backslash, not a surrogate) reads as written", escapedSlash.counted?.store.name, escapedSlash.whole.name);
+  const unfunded = await recordWith({ period: { ...(rich.period as Record<string, unknown>), funded: false } });
+  is("a period funded other than true is no period, as the whole reader says", unfunded.counted?.store.period ?? null, unfunded.whole.period);
+  const oddRenews = await recordWith({ period: { ...(rich.period as Record<string, unknown>), renews: "yes" } });
+  is("a period whose renews is not a flag is no period either", oddRenews.counted?.store.period ?? null, oddRenews.whole.period);
+  const oddAnchor = await recordWith({ allowanceAnchor: "x" });
+  is("an anchor that is not an object reads as the whole reader reads it", oddAnchor.counted?.store.allowanceAnchor, oddAnchor.whole.allowanceAnchor);
+  const legacy = await recordWith({ catalog: undefined, products: [{ id: "legacyP", title: "An old product", priceCents: 500 }] });
+  is("a record from before catalogs: its product is known, as productIdFor names it", legacy.counted?.productKnown, productIdFor(legacy.whole, "legacyP") === "legacyP");
+  is("and productIdFor does name it", productIdFor(legacy.whole, "legacyP"), "legacyP");
+  const untitled = await recordWith({ catalog: undefined, products: [{ id: "legacyP", title: "", priceCents: 500 }] });
+  is("an old product the whole reader drops (no title) is not known either", untitled.counted?.productKnown, productIdFor(untitled.whole, "legacyP") === "legacyP");
+  redis.run(["SET", recordKey, JSON.stringify(rich)]);
+
+  part("The bound holds at the longest escapes");
+  const control = "\u0001".repeat(HIT_FIELD_MAX_BYTES);
+  const worst = { ...rich, ...Object.fromEntries(HIT_TEXT_FIELDS.map((field) => [field, control])), allowanceAnchor: { subscriptionId: control, start: 1, end: 2 } };
+  redis.run(["SET", recordKey, JSON.stringify(worst)]);
+  const longest = String(redis.run(["EVAL", STORE_FOR_HIT, "1", recordKey, "", "", String(HIT_FIELD_MAX_BYTES)]));
+  is("every text field at its longest, every byte escaped: under HIT_FIELDS_MAX_BYTES", Buffer.byteLength(longest) <= HIT_FIELDS_MAX_BYTES, true);
+  is("and it is near the bound, so the bound is not loose", Buffer.byteLength(longest) > HIT_FIELDS_MAX_BYTES - 1_024, true);
+  redis.run(["SET", recordKey, JSON.stringify(rich)]);
 
   part("What a count does with the store reads only the fields the script answers");
   const allowed = new Set<string>([...fields, "affiliates"]);

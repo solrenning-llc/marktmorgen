@@ -4461,13 +4461,18 @@ export class MemoryRedis {
    */
   private storeForHit(args: string[]): unknown {
     const [recordKey, link, product, capText] = args;
-    const raw = this.run(["GET", recordKey]);
-    if (typeof raw !== "string") return null;
+    const stored = this.run(["GET", recordKey]);
+    if (typeof stored !== "string") return null;
+    // A lone surrogate's escape is read as U+FFFD first, as the script does; one left would be refused, as Redis's
+    // cjson refuses it (JSON.parse alone would take it, and a test would pass where Redis does not).
+    const raw = stored.replace(/(\\+)u([dD][89a-fA-F][0-9a-fA-F]{2})/g, (whole, slashes: string) => (slashes.length % 2 === 1 ? `${slashes.slice(0, -1)}\\ufffd` : whole));
+    if (/(^|[^\\])(\\\\)*\\u[dD][89a-fA-F][0-9a-fA-F]{2}/.test(raw)) return "";
     let r: Record<string, unknown>;
     try {
       const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
-      r = parsed as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object") return "";
+      // A list decodes to a Lua table too, with none of the record's fields: answered as an empty record, as there.
+      r = Array.isArray(parsed) ? {} : (parsed as Record<string, unknown>);
     } catch {
       return "";
     }
@@ -4482,9 +4487,16 @@ export class MemoryRedis {
     out.subscriptionActive = r.subscriptionActive === true;
     out.trialEnds = num(r.trialEnds);
     const p = table(r.period);
-    if (p) out.period = { start: num(p.start), end: num(p.end), ...(typeof p.renews === "boolean" ? { renews: p.renews } : {}), ...(p.funded === true ? { funded: true } : {}) };
-    const a = table(r.allowanceAnchor);
-    if (a) out.allowanceAnchor = { subscriptionId: str(a.subscriptionId), start: num(a.start), end: num(a.end) };
+    if (p) {
+      const period: Record<string, unknown> = { start: num(p.start), end: num(p.end) };
+      if (p.renews !== undefined) period.renews = typeof p.renews === "boolean" ? p.renews : 0;
+      if (p.funded !== undefined) period.funded = p.funded === true;
+      out.period = period;
+    }
+    if (r.allowanceAnchor !== undefined && r.allowanceAnchor !== null) {
+      const a = table(r.allowanceAnchor);
+      out.allowanceAnchor = a ? { subscriptionId: str(a.subscriptionId), start: num(a.start), end: num(a.end) } : { subscriptionId: "", start: 0, end: 0 };
+    }
     out.affiliatesEnabled = table(r.affiliates)?.enabled === true;
     out.linkKnown = false;
     if (link !== "" && Array.isArray(r.links)) {
@@ -4498,17 +4510,30 @@ export class MemoryRedis {
       }
     }
     out.productKnown = false;
-    const c = table(r.catalog);
-    if (product !== "" && c && typeof c.id === "string" && /^[0-9a-f]{32}$/.test(c.id) && Array.isArray(c.items)) {
+    if (product !== "") {
+      const c = table(r.catalog);
       const seen = new Set<string>();
       let count = 0;
-      for (const item of c.items) {
-        if (!Array.isArray(item) || !safe(item[0]) || seen.has(item[0])) continue;
-        seen.add(item[0]);
-        if (item[0] === product) { out.productKnown = true; break; }
-        if (item.slice(2).some((option) => safe(option) && option === product)) break;
-        count += 1;
-        if (count >= 2_000) break;
+      if (c && typeof c.id === "string" && /^[0-9a-f]{32}$/.test(c.id)) {
+        for (const item of Array.isArray(c.items) ? c.items : []) {
+          if (!Array.isArray(item) || !safe(item[0]) || seen.has(item[0])) continue;
+          seen.add(item[0]);
+          if (item[0] === product) { out.productKnown = true; break; }
+          if (item.slice(2).some((option) => safe(option) && option === product)) break;
+          count += 1;
+          if (count >= 2_000) break;
+        }
+      } else if (Array.isArray(r.products)) {
+        for (const entry of r.products) {
+          const one = table(entry);
+          if (!one || !safe(one.id) || seen.has(one.id) || typeof one.title !== "string" || one.title === "" || typeof one.priceCents !== "number" || !Number.isInteger(one.priceCents) || one.priceCents < 0) continue;
+          seen.add(one.id);
+          if (one.id === product) { out.productKnown = true; break; }
+          const options = Array.isArray(one.options) ? one.options : [];
+          if (options.some((option) => safe(table(option)?.id) && table(option)?.id === product)) break;
+          count += 1;
+          if (count >= 2_000) break;
+        }
       }
     }
     return JSON.stringify(out);

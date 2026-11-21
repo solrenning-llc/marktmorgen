@@ -1440,24 +1440,36 @@ export const HIT_FIELD_MAX_BYTES = 320;
 export const HIT_TEXT_FIELDS = ["handle", "name", "email", "sid", "statsId", "tier", "cycle", "subscriptionId", "planEndedAt"] as const;
 
 /**
- * The most bytes storeForHit's script answers: every text field at HIT_FIELD_MAX_BYTES and the rest (flags, numbers,
- * the period and the anchor with its id, the names of the fields) inside 1,024. Held in tests/hit-store-fields.test.ts.
+ * The most bytes storeForHit's script answers: every text field (and the anchor's subscription) at HIT_FIELD_MAX_BYTES,
+ * each byte escaped at its longest (a control character is written \u00XX, six bytes), and the rest (flags, numbers,
+ * the names of the fields) inside 1,024. Measured in bytes, as the wire carries it (Claude 2's independent review).
  */
-export const HIT_FIELDS_MAX_BYTES = (HIT_TEXT_FIELDS.length + 1) * HIT_FIELD_MAX_BYTES + 1_024;
+export const HIT_FIELDS_MAX_BYTES = (HIT_TEXT_FIELDS.length + 1) * HIT_FIELD_MAX_BYTES * 6 + 1_024;
 
 /**
  * The fields of a store's record a count needs (app/api/store/hit), read inside Redis: one script reads the record,
  * decodes it there and answers only them, so the rest of the record (its products, pages and words, up to
  * MAX_STORE_BYTES) never crosses the wire (#1496, option A; coordinator, 21 November 2026). Nothing is written and no
  * second copy is kept: the record stays the one source. KEYS[1] the record; ARGV the link id and the product id to
- * look for ("" for none) and HIT_FIELD_MAX_BYTES. A link is known as parseStoreLinks keeps it (lib/store-link.ts, the
- * first MAX_STORE_LINKS kept); a product as productIdFor names it (lib/catalog.ts, parseItems: the first of each id,
- * MAX_PRODUCTS at most), and only on a catalog with its own id: on a record from before catalogs a product is not
- * known. Modelled by lib/redis-memory.ts.
+ * look for ("" for none) and HIT_FIELD_MAX_BYTES. As the whole record is read (parseStore):
+ *   - a lone surrogate, which JSON.stringify writes as an escape (a text cut in an emoji's middle, as a name kept to
+ *     60 characters can be) and Redis's cjson refuses, is read as U+FFFD first, so the record still decodes (Claude
+ *     2's independent review: without it the store would not be counted at all);
+ *   - a link is known as parseStoreLinks keeps it (lib/store-link.ts, the first MAX_STORE_LINKS kept);
+ *   - a product as productIdFor names it (lib/catalog.ts, parseCatalog: the items of a catalog with its own id, or the
+ *     old products list of a record from before catalogs; the first of each id, MAX_PRODUCTS at most);
+ *   - a period or an anchor that parseStore would not take (a funded or renews of another kind, an anchor that is not
+ *     an object) is answered so that parseStore does not take it either.
+ * Modelled by lib/redis-memory.ts.
  */
 export const STORE_FOR_HIT = `-- marktmorgen:store-for-hit:v1
 local raw = redis.call('GET', KEYS[1])
 if not raw then return false end
+local bs = string.char(92)
+raw = (string.gsub(raw, '(' .. bs .. '+)u([dD][89a-fA-F]%x%x)', function(slashes, hex)
+  if #slashes % 2 == 1 then return string.sub(slashes, 1, -2) .. bs .. 'ufffd' end
+  return nil
+end))
 local ok, r = pcall(cjson.decode, raw)
 if not ok or type(r) ~= 'table' then return '' end
 local cap = tonumber(ARGV[3])
@@ -1472,12 +1484,16 @@ out.trialEnds = num(r.trialEnds)
 if type(r.period) == 'table' then
   local p = r.period
   out.period = {start = num(p.start), ['end'] = num(p['end'])}
-  if type(p.renews) == 'boolean' then out.period.renews = p.renews end
-  if p.funded == true then out.period.funded = true end
+  if p.renews ~= nil then if type(p.renews) == 'boolean' then out.period.renews = p.renews else out.period.renews = 0 end end
+  if p.funded ~= nil then out.period.funded = (p.funded == true) end
 end
-if type(r.allowanceAnchor) == 'table' then
+if r.allowanceAnchor ~= nil and r.allowanceAnchor ~= cjson.null then
   local a = r.allowanceAnchor
-  out.allowanceAnchor = {subscriptionId = str(a.subscriptionId), start = num(a.start), ['end'] = num(a['end'])}
+  if type(a) == 'table' then
+    out.allowanceAnchor = {subscriptionId = str(a.subscriptionId), start = num(a.start), ['end'] = num(a['end'])}
+  else
+    out.allowanceAnchor = {subscriptionId = '', start = 0, ['end'] = 0}
+  end
 end
 out.affiliatesEnabled = type(r.affiliates) == 'table' and r.affiliates.enabled == true
 out.linkKnown = false
@@ -1494,14 +1510,30 @@ end
 out.productKnown = false
 if ARGV[2] ~= '' then
   local c = r.catalog
-  if type(c) == 'table' and type(c.id) == 'string' and #c.id == 32 and c.id:match('^[0-9a-f]+$') and type(c.items) == 'table' then
-    local seen, count = {}, 0
-    for _, item in ipairs(c.items) do
-      if type(item) == 'table' and safe(item[1]) and not seen[item[1]] then
-        seen[item[1]] = true
-        if item[1] == ARGV[2] then out.productKnown = true break end
+  local seen, count = {}, 0
+  if type(c) == 'table' and type(c.id) == 'string' and #c.id == 32 and c.id:match('^[0-9a-f]+$') then
+    if type(c.items) == 'table' then
+      for _, item in ipairs(c.items) do
+        if type(item) == 'table' and safe(item[1]) and not seen[item[1]] then
+          seen[item[1]] = true
+          if item[1] == ARGV[2] then out.productKnown = true break end
+          local named = false
+          for i = 3, #item do if safe(item[i]) and item[i] == ARGV[2] then named = true break end end
+          if named then break end
+          count = count + 1
+          if count >= ${MAX_PRODUCTS} then break end
+        end
+      end
+    end
+  elseif type(r.products) == 'table' then
+    for _, product in ipairs(r.products) do
+      if type(product) == 'table' and safe(product.id) and not seen[product.id] and type(product.title) == 'string' and product.title ~= '' and type(product.priceCents) == 'number' and product.priceCents >= 0 and product.priceCents == math.floor(product.priceCents) then
+        seen[product.id] = true
+        if product.id == ARGV[2] then out.productKnown = true break end
         local named = false
-        for i = 3, #item do if safe(item[i]) and item[i] == ARGV[2] then named = true break end end
+        if type(product.options) == 'table' then
+          for _, option in ipairs(product.options) do if type(option) == 'table' and safe(option.id) and option.id == ARGV[2] then named = true break end end
+        end
         if named then break end
         count = count + 1
         if count >= ${MAX_PRODUCTS} then break end
@@ -1530,7 +1562,7 @@ export async function storeForHit(handle: string, ask: { link?: string; product?
   const link = typeof ask.link === "string" ? ask.link.slice(0, 64) : "";
   const product = typeof ask.product === "string" ? ask.product.slice(0, 64) : "";
   const [reply] = await redisPipeline([["EVAL", STORE_FOR_HIT, 1, await ownerKey(email), link, product, HIT_FIELD_MAX_BYTES]]);
-  if (typeof reply !== "string" || !reply || reply.length > HIT_FIELDS_MAX_BYTES) return null;
+  if (typeof reply !== "string" || !reply || new TextEncoder().encode(reply).length > HIT_FIELDS_MAX_BYTES) return null;
   let fields: Record<string, unknown>;
   try {
     const parsed = JSON.parse(reply) as unknown;

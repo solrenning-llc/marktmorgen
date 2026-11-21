@@ -11,6 +11,7 @@
  */
 import { claimMark, claimValue } from "@/lib/claim-mark";
 import { RELEASE } from "@/lib/redis-lock";
+import { cursorRefused } from "@/lib/stripe-cursor";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
@@ -57,13 +58,27 @@ async function walkList(
   // Unreadable or absent: from the top, as every run read before this cursor existed. Never a send twice: each
   // reminder is held by its own mark.
   let after = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : "";
-  const start = after;
+  let start = after;
   // Every subscription not handled, in list order, by where a reading starts to list it again.
   const notHandledFrom: string[] = [];
   let seen = 0;
   let more = true;
+  let restarted = false;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, hasMore } = await listSubscriptions(status, after || undefined);
+    let listed: Awaited<ReturnType<typeof listSubscriptions>>;
+    try {
+      listed = await listSubscriptions(status, after || undefined);
+    } catch (error) {
+      // A kept cursor Stripe refuses (the object is gone) is never read again: the list is read from the top at once,
+      // once a run, and the cursor written at the end replaces it (Claude 3 N, 6806672663 item 2 on #3215).
+      if (restarted || page !== 0 || !after || !cursorRefused(error)) throw error;
+      restarted = true;
+      after = "";
+      start = "";
+      page -= 1;
+      continue;
+    }
+    const { data, hasMore } = listed;
     let previous = after;
     for (const subscription of data) {
       const from = previous;

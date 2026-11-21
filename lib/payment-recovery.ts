@@ -44,6 +44,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { cursorRefused } from "@/lib/stripe-cursor";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { formatMoney } from "@/lib/money";
@@ -219,15 +220,29 @@ async function remindFailed(store: Store, deadline: number): Promise<Swept> {
   // never its first pages again and again. A cursor not read as one is the top: read again, never skipped.
   const [saved] = await redisPipeline([["GET", dueCursorKey(account)]]);
   let after = typeof saved === "string" && SUB_PATTERN.test(saved) ? saved : "";
-  const start = after;
+  let start = after;
   const subs: Sub[] = [];
   // Where a reading starts to list each membership again: the one listed just before it.
   const fromOf = new Map<Sub, string>();
   let pages = 0;
   let ended = false;
+  let restarted = false;
   for (; pages < FAILED_PAGES && Date.now() < deadline; pages += 1) {
     if (after) query.set("starting_after", after);
-    const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
+    else query.delete("starting_after");
+    let listed: { data?: unknown; has_more?: unknown };
+    try {
+      listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
+    } catch (error) {
+      // A kept cursor Stripe refuses (the object is gone) is never read again: the list is read from the top at once,
+      // once a run, and the cursor written at the end replaces it (Claude 3 N, 6806672663 item 2 on #3215).
+      if (restarted || pages !== 0 || !after || !cursorRefused(error)) throw error;
+      restarted = true;
+      after = "";
+      start = "";
+      pages -= 1;
+      continue;
+    }
     if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of past-due memberships");
     let previous = after;
     for (const sub of listed.data as Sub[]) {
@@ -459,7 +474,7 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   const now = Date.now();
   const [saved] = await redisPipeline([["GET", cardCursorKey(account)]]);
   let after = typeof saved === "string" && SUB_PATTERN.test(saved) ? saved : "";
-  const start = after;
+  let start = after;
   // The list was read to its end this run: the next run reads it from the top (below).
   let ended = false;
   // `from`: where a reading starts to list that member again, the membership listed just before it (rule 24, R24
@@ -467,13 +482,26 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   const due: { sub: RunningSub; card: Card; customer: string; email: string; payAt: number; from: string }[] = [];
   let lookups = 0;
   let page = 0;
+  let restarted = false;
 
   for (; page < CARD_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ status: "active", limit: "100" });
     query.append("expand[]", "data.default_payment_method");
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
-    const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
+    let listed: { data?: unknown; has_more?: unknown };
+    try {
+      listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
+    } catch (error) {
+      // A kept cursor Stripe refuses (the object is gone) is never read again: the list is read from the top at once,
+      // once a run, and the cursor written at the end replaces it (Claude 3 N, 6806672663 item 2 on #3215).
+      if (restarted || page !== 0 || !after || !cursorRefused(error)) throw error;
+      restarted = true;
+      after = "";
+      start = "";
+      page -= 1;
+      continue;
+    }
     // A page that is not a list is not "no running memberships" (CX-123 rule 24, L6): the cursor is not moved.
     if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of running memberships");
     const rows = listed.data as RunningSub[];

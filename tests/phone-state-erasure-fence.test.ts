@@ -101,6 +101,28 @@ async function main(): Promise<void> {
   is("at most ten devices + 2 commands", stateCommands <= ten.length + 2, true);
   is("every device listed has its state", fields().sort(), [...ten].sort());
 
+  // Claude 6's LEVE 1 on #5001: the states were kept only once every device's deliver had settled (Promise.all), so
+  // one device whose removal as gone threw (its list change unreadable) left every other device without its state.
+  // Main wrote each device's own state before its removal; so does this.
+  part("One device's removal as gone fails: every device still gets its state");
+  redis.run(["DEL", state, `nl:phone:cfg:${statsId}`]);
+  const gone = await add(30);
+  const kept = await add(31);
+  const cfg = `nl:phone:cfg:${statsId}`;
+  const listed = JSON.parse(String(redis.run(["GET", cfg]))) as { devices: { id: string; endpoint: string }[] };
+  for (const device of listed.devices) if (device.id === gone) device.endpoint = "https://example.com/not-a-push-service";
+  redis.run(["SET", cfg, JSON.stringify(listed)]);
+  const plain = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The list change that would take the gone device off answers something unreadable, every time.
+    if (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === cfg && commands[0].length === 6) return ["?"];
+    return plain(commands);
+  }) as typeof redis.pipeline;
+  await alertCreator(store, "report", { title: "A report", body: "Synthetic", url: "/studio" } as never, { seed: "fence-gone" }).catch(() => 0);
+  redis.pipeline = plain;
+  is("the other device's state is kept", fields().includes(kept), true);
+  is("the gone device's own state is kept too, as on main", fields().includes(gone), true);
+
   done();
 }
 

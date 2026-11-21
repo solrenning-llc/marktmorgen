@@ -42,7 +42,7 @@ import { isPathBoardSharedKey } from "@/lib/path-board";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countedInRoom } from "@/lib/data-families";
 import { ORDER_BOARD_ENTRY_BYTES, ORDER_ENTRY_BYTES, ORDER_KEY_BYTES } from "@/lib/order-data";
-import { dataKey, noteData } from "@/lib/store-data";
+import { dataKey, noteDataConfirmed } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 import { readAllListings } from "@/lib/catalog";
 import { readFlows } from "@/lib/flows";
@@ -292,7 +292,11 @@ async function applySums(deadline: number): Promise<{ applied: number; done: boo
         const [total, legacy] = room.map((v) => v === null ? 0 : count(v));
         // What the room counts without this slot, its own field included.
         const counted = Math.max(0, total - legacy - (legacy > 0 ? 64 : 0));
-        await noteData(store, [{ slot: LEGACY_SLOT, bytes: Math.max(0, measured - counted), set: true }]);
+        // The sum goes only once the room confirms it counted it: an unconfirmed receipt keeps the sum and this run's
+        // checkpoint, so the next run applies it again (Codex Y's HOLD on #2501; "set" makes a repeat exact).
+        if (!(await noteDataConfirmed(store, [{ slot: LEGACY_SLOT, bytes: Math.max(0, measured - counted), set: true }]))) {
+          throw new Error("Recount accounting is unconfirmed");
+        }
         applied += 1;
       }
       await write([["HDEL", SUM_KEY, ref]]);

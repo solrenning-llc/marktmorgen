@@ -133,6 +133,8 @@ async function withLockTakenOver<T>(lock: string, run: () => Promise<T>): Promis
   }
 }
 
+// A mark taken through claimWhileStoreLive is a script whose 1 means taken: its wrong shape for "a count" is SET's "OK".
+const scriptShapes = (shapes: [string, unknown][]) => shapes.map(([label, reply]): [string, unknown] => (label === "a count" ? ["SET's OK, not the script's 1", ["OK"]] : [label, reply]));
 const SHAPES: [string, unknown][] = [
   ["queued", ["QUEUED"]],
   ["no reply", []],
@@ -164,8 +166,7 @@ async function quietSales(): Promise<void> {
     is(`the day's check answered ${label}, not written: nothing read, nothing sent`, [outcome, stripeCalls, emails.length], ["skipped", 0, 0]);
     is("and nothing let go", redis.run(["EXISTS", `nl:quiet:seen:2026-10-20:lquiet`]), 0);
   }
-  // The stretch's mark is a script now, whose 1 means taken: its wrong shape for "a count" is SET's own "OK".
-  const SCRIPT_SHAPES = SHAPES.map(([label, reply]): [string, unknown] => (label === "a count" ? ["SET's OK, not the script's 1", ["OK"]] : [label, reply]));
+  const SCRIPT_SHAPES = scriptShapes(SHAPES);
   for (const [label, reply] of SCRIPT_SHAPES) {
     await seed();
     emails.length = 0;
@@ -223,7 +224,7 @@ async function storeAlerts(): Promise<void> {
     const outcome = await withReplyOnly("SET", "nl:alert:seen:", reply, () => checkAlerts(store));
     is(`the day's look answered ${label}, not written: nothing read, nothing said`, [outcome, stripeCalls, emails.length, posted.length], [{ said: 0, skipped: true }, 0, 0, 0]);
   }
-  for (const [label, reply] of SHAPES) {
+  for (const [label, reply] of scriptShapes(SHAPES)) {
     const store = await fresh();
     const outcome = await withReplyOnly("SET", `nl:alert:${store.statsId}:`, reply, () => checkAlerts(store));
     is(`an alert's mark answered ${label}, not written: not said`, [outcome.said, emails.length, posted.length], [0, 0, 0]);

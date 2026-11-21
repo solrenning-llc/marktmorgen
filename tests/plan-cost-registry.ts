@@ -1384,9 +1384,11 @@ export const PAYPAL_PRESSES_UNTAKEN = 1;
  * A vault open refused for storage spends no monthly upload budget since #4019 (lib/vault-storage.ts, admit), so its
  * listings, the expired session it retired and its ledger commands are paid by the integration unit it took
  * ("vault-open"): every unit of the figure is priced as if it were one, on top of its call (lib/spend-cost-table.ts,
- * vaultRefusedPassMicroUsd; tests/vault-refused-pass-cost.test.ts).
+ * vaultRefusedPassMicroUsd; tests/vault-refused-pass-cost.test.ts). Its measure also sends the daily total's store
+ * commands (BLOB_TALLY_OPEN_COMMANDS, lib/blob-tally.ts, since #2848), which the blob-list line prices per paid open
+ * only, so the pass carries them too.
  */
-export const VAULT_REFUSED_PASS = micro(vaultRefusedPassMicroUsd());
+export const VAULT_REFUSED_PASS = micro(vaultRefusedPassMicroUsd()) + BLOB_TALLY_OPEN_COMMANDS * COMMAND;
 
 /** Checkout-refusal panel, inside the existing studio unit (not added again):
  * one HMGET for seven UTC days plus last, with the writer's 60/300-character

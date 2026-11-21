@@ -37,3 +37,13 @@ test("each open is priced for the ledger commands it sends", () => {
   assert.ok(one - none >= UPLOAD_BUDGET_COMMANDS_PER_OPEN * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS / 1_000_000);
   assert.ok(UPLOAD_BUDGET_COMMANDS_PER_OPEN >= 74, "the most measured on real Redis");
 });
+
+test("a refused pass also pays the daily total's store commands its measure sends (#2848)", async () => {
+  // Since #2848 a vault open measures through storageUsedToday (lib/blob-tally.ts, blobHeldToday), which sends
+  // BLOB_TALLY_OPEN_COMMANDS store commands before storage is granted. The blob-list line prices them per paid open
+  // (PAID_UPLOAD_OPENS), and a pass refused for storage spends no paid open (#4019): its pass must carry them.
+  const { BLOB_TALLY_OPEN_COMMANDS, COMMAND } = await import("./plan-cost-registry");
+  const listingsAndLedger = vaultRefusedPassMicroUsd() / 1_000_000;
+  assert.ok(VAULT_REFUSED_PASS >= listingsAndLedger + BLOB_TALLY_OPEN_COMMANDS * COMMAND - 1e-15,
+    `${VAULT_REFUSED_PASS} < ${listingsAndLedger} + ${BLOB_TALLY_OPEN_COMMANDS} commands`);
+});

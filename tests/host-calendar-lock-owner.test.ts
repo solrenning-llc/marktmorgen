@@ -17,7 +17,7 @@ process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const email = "lock-owner@example.com";
 const host = hostId(email);
 const [cfg, , , lock] = hostCalendarKeys(host);
-const store = { statsId: "lock-owner-stats" };
+const store = { statsId: "lock-owner-stats", sid: "", email: "" };
 
 async function seed(): Promise<void> {
   redis.clear();

@@ -131,7 +131,7 @@ import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS } from "@/lib/crm";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
-import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST } from "@/lib/stats-report";
+import { EMAIL_KEY_HOLDS_MS, SUMMARY_TRIES, SUMMARY_TRY_COMMANDS_MOST, SUMMARY_TRY_EXTRA_BYTES } from "@/lib/stats-report";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
   PROVIDER_CHARGES_BPS, R2_CLASS_A_MICRO_USD_PER_MILLION, R2_CLASS_B_MICRO_USD_PER_MILLION, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
@@ -1465,7 +1465,8 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - routeCommandsPerTry: the route's own Redis commands on its longest try, measured with a post and the owner's
  *   email both refused (every part's mark taken, its first try's time kept with SET NX EX and GET, the mark let go,
  *   the tries counted with INCR and EXPIRE, the claim let go with DEL, and on the week the GET of firstTryOf), on both
- *   routes (tests/numbers-summary-retry-cost.test.ts: weekly 20, monthly 16): SUMMARY_TRY_COMMANDS_MOST;
+ *   routes (tests/numbers-summary-retry-cost.test.ts), counting the store-fenced EVALs and their inner calls: SUMMARY_TRY_COMMANDS_MOST;
+ * - extraWireBytesPerTry: SUMMARY_TRY_EXTRA_BYTES covers the five bounded store-fenced admissions and uncertain-claim reads. A legacy store is read only within Redis, with GETRANGE capped before JSON decode; its JSON is not returned on the wire. The period claim, each part with its first timestamp, AI first-try read and retry increment/release check identity and erasing atomically (lib/summary-live.ts). A gone store is decided without new tries or notices;
  * - emailsPerTry: at most one owner's email, through sendEmailPinned under `numbers-summary:<claim key>` (lib/email.ts),
  *   a company email (EMAIL_SITES, meter company), let go for another try only while its first try is younger than
  *   EMAIL_KEY_HOLDS_MS (23 h); the pinned sender's own commands (keepSender, moveToResend) and its one request a sender
@@ -1476,7 +1477,7 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * A scheduled job, bounded by its schedule and SUMMARY_TRIES, a company cost like the other per-store cron work, not a
  * plan's allowance; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
  */
-export const NUMBERS_SUMMARY_RETRY = { triesPerPeriod: SUMMARY_TRIES, routeCommandsPerTry: SUMMARY_TRY_COMMANDS_MOST, emailsPerTry: 1, aiJobsPerPeriod: 1, emailKeyHoldsMs: EMAIL_KEY_HOLDS_MS } as const;
+export const NUMBERS_SUMMARY_RETRY = { triesPerPeriod: SUMMARY_TRIES, routeCommandsPerTry: SUMMARY_TRY_COMMANDS_MOST, extraWireBytesPerTry: SUMMARY_TRY_EXTRA_BYTES, emailsPerTry: 1, aiJobsPerPeriod: 1, emailKeyHoldsMs: EMAIL_KEY_HOLDS_MS } as const;
 export const NUMBERS_SUMMARY_RETRY_COMMANDS = NUMBERS_SUMMARY_RETRY.triesPerPeriod * NUMBERS_SUMMARY_RETRY.routeCommandsPerTry;
 /**
  * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in

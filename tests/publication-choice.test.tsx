@@ -3,7 +3,7 @@
  * product is an e-book, an e-magazine or an e-newspaper, for EU and UK VAT. It holds that:
  *   - it is not shown while EU and UK VAT cannot be collected (both reviewed switches off): before that the answer
  *     changes nothing a buyer sees, and the studio never shows a control that does nothing (rule VR, item 2);
- *   - shown, it is one fieldset with a legend, the help said once and tied to the group, and three labelled radios
+ *   - shown, it is one fieldset with a legend, the help said once and tied to the group, and three labeled radios
  *     (yes, no, not answered), the stored answer checked, each target at least 44px tall;
  *   - while saving, the radios are disabled and the box says it is busy; an error is read out at once;
  *   - it sends only true, false or null, and the editor mounts it beside the other product settings, never on a
@@ -32,7 +32,7 @@ test("the stored answer maps to one of the three choices", () => {
   assert.deepEqual([answerOf(true), answerOf(false), answerOf(undefined)], ["yes", "no", "unset"]);
 });
 
-test("one fieldset with a legend, the help tied to it, and three labelled radios", () => {
+test("one fieldset with a legend, the help tied to it, and three labeled radios", () => {
   const html = view("unset");
   assert.equal((html.match(/<fieldset/g) ?? []).length, 1);
   assert.match(html, /<fieldset aria-describedby="publication-p1-hint"><legend class="field-label">Is this product an e-book, an e-magazine or an e-newspaper\?<\/legend>/);

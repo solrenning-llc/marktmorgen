@@ -4,9 +4,10 @@
  * before ids (its sid is "") is fenced on its owner's record. After that store is erased, its owner may make a new store
  * under the same owner key: that record's being there must not let a late copy of the erased store's readings back in.
  * The record's statsId tells the two apart; a legacy store with no statsId cannot be told apart, so nothing is kept.
+ * A store with an id is live only while its id key still holds its own ref (v3, the rule of store-claim-live:v1).
  * Every identifier here is a local synthetic stand-in.
  */
-import { claimHandle, ownerKey, storeRef, type Store } from "@/lib/store";
+import { ERASING_KEY, claimHandle, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { keepUnlessErasedWhileLive } from "@/lib/store-live-cache";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -59,6 +60,22 @@ async function main(): Promise<void> {
   const withId = await shop("reading-copy-d@example.com", "reading-copy-d");
   is("nobody refused", [...(await keepUnlessErasedWhileLive(withId, "nl:test:copy:d", "list-d", "two", 60, names))], []);
   is("and written", await read("nl:test:copy:d"), "two");
+
+  // The rule of store-claim-live:v1 (lib/live-fence.ts, Claude 2's MEDIUM on #4937): moveAccount repoints the id key to
+  // the new ref, and an erasure begun after the move marks the new ref's field. A copy kept under the old ref must not
+  // land on EXISTS alone.
+  part("a store with an id whose account moved, then began erasing under the new ref: a late copy is refused");
+  const idKey = storeIdCommand(withId.sid)[1];
+  const moved = "reading-copy-moved@example.com";
+  await redis.pipeline([["SET", idKey, moved], ["HSET", ERASING_KEY, await erasingField(moved), String(Date.now())]]);
+  const afterMove = await keepUnlessErasedWhileLive(withId, "nl:test:copy:moved", "list-d", "erased buyer", 60, names);
+  is("everyone refused", [...afterMove], names);
+  is("and nothing written", await read("nl:test:copy:moved"), null);
+
+  part("control: the id key holds this store's own ref again, nothing erasing under it: the copy is kept");
+  await redis.pipeline([["SET", idKey, storeRef(withId)], ["DEL", ERASING_KEY]]);
+  is("nobody refused", [...(await keepUnlessErasedWhileLive(withId, "nl:test:copy:back", "list-d", "three", 60, names))], []);
+  is("and written", await read("nl:test:copy:back"), "three");
 
   done();
 }

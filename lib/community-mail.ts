@@ -29,7 +29,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
-import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
+import { type BatchMessage, sendListBatchOutcome } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import { leadsKey } from "@/lib/contact-rules";
@@ -493,15 +493,23 @@ export async function advanceAnnouncement(
           });
           messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatchOutcome(messages, batchKey, { by: "monthly" });
+        const outcome = await sendListBatchOutcome(messages, batchKey, { by: "monthly" });
         if (outcome === "sent") await batchCountSettled(batchKey, to);
+        if (outcome === "waiting") {
+          // Known not handed to any provider: it waits for the sender in the queue, never counted as a failure. A count
+          // kept by an earlier unknown answer for this same batch stays kept (below).
+          if (!kept) await release(store, recipients.length, day);
+          job = { ...job, status: "waiting", note: SENDER_WAIT_NOTE };
+          break;
+        }
         if (outcome !== "sent") {
-          // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+          // An answer not known (lib/email.ts, sendListBatchOutcome) may have sent them: their count is kept, never given
           // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
           // unknown answer stays whatever this one says.
-          // Amazon's unknown answer ("unconfirmed") is kept and marked too: the same batch tried again never writes to
-          // whoever Amazon may have taken (lib/email.ts, notMaybeTaken), and the mark ends before that evidence does
-          // (lib/batch-count.ts), so the retry is not counted again (Codex X6 on #4073, replacing #4073 MEDIUM 1).
+          // Amazon's unknown answer ("unconfirmed") is kept and marked too (Codex X6 on #4073, replacing #4073 MEDIUM 1).
+          // A list batch carries no maybe-taken marks (lib/email.ts, dispatchBatch, listOnly), so the retry may write
+          // again to whoever Amazon took when its answer was lost; that retry is counted under this kept count, as the
+          // release-and-reserve before it was, never twice.
           if (outcome === "uncertain" || outcome === "unconfirmed") {
             if (!kept) await keepBatchCount(batchKey, to);
           } else if (!kept) await release(store, recipients.length, day);

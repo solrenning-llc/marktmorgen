@@ -72,11 +72,20 @@ export const eventTimeIn = () => "November 6, 2026";
 export const lengthIn = () => "30 minutes";
 export const isSenderConfigured = () => true;
 /** What the email service answers a batch, as lib/email.ts tells it apart: "uncertain" is a batch it may have taken. */
-export let batchAnswer: "sent" | "retry" | "uncertain" | "unconfirmed" | "refused" = "sent";
+export let batchAnswer: "sent" | "retry" | "uncertain" | "unconfirmed" | "refused" | "waiting" = "sent";
 export const setBatchAnswer = (answer: typeof batchAnswer) => { batchAnswer = answer; };
-/** sendBatch as lib/email.ts answers it: an answer not known comes back as "retry", like one nothing of which went. */
-export const sendBatch = async (messages: unknown[]) => { sent.push(messages); return batchAnswer === "uncertain" || batchAnswer === "unconfirmed" ? "retry" : batchAnswer; };
-export const sendBatchOutcome = async (messages: unknown[]) => { sent.push(messages); return batchAnswer; };
+/** sendBatch as lib/email.ts answers it: an answer not known, or a sender not there, comes back as "retry". */
+export const sendBatch = async (messages: unknown[]) => {
+  sent.push(messages);
+  return batchAnswer === "uncertain" || batchAnswer === "unconfirmed" || batchAnswer === "waiting" ? "retry" : batchAnswer;
+};
+export const sendBatchOutcome = async (messages: unknown[]) => { sent.push(messages); return batchAnswer === "waiting" ? "retry" : batchAnswer; };
+/** sendListBatch as lib/email.ts answers it: an answer not known comes back as "retry". */
+export const sendListBatch = async (messages: unknown[]) => {
+  sent.push(messages);
+  return batchAnswer === "uncertain" || batchAnswer === "unconfirmed" ? "retry" : batchAnswer;
+};
+export const sendListBatchOutcome = async (messages: unknown[]) => { sent.push(messages); return batchAnswer; };
 export const BATCH_SIZE = 100;
 export const CHECKED_BATCH_SIZE = 25;
 export const SENDER_WAIT_NOTE = "Waiting for the sender.";

@@ -1956,6 +1956,28 @@ export async function sendDueSteps(
       let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
       const onQueue: (string | number)[][] = [];
       const tallies: (string | number)[][] = [];
+      // Whoever sendTo skipped (in none of done, rest, uncertain and refused) was never handed to the sender: tokensFor
+      // no longer found them mailable, or their link's write lost its compare-and-set three times. Their attempt must
+      // not stay open. Their row is read again exactly: exactly gone, or exactly not mailable, ends the run as "left"
+      // (below, settleLeftIfRun, main's #4307: written only where the run still exists, and a refused address is
+      // accounted, never "left"); anyone else (still mailable after lost writes, or an unknown answer) waits to be tried
+      // again, which cannot send twice because nothing went out to them.
+      const answered = new Set([...result.done, ...result.rest, ...(result.refused ?? []).map((r) => r.email)]);
+      const skipped = going.filter((email) => !answered.has(email) && !uncertain.has(email));
+      const left: string[] = [];
+      const again: string[] = [];
+      if (skipped.length) {
+        const rows = await redisPipeline([["HMGET", leadsKey(listId), ...skipped]])
+          .then((reply) => repliesFor(repliesFor(reply, 1)?.[0], skipped.length))
+          .catch(() => null);
+        skipped.forEach((email, i) => {
+          const row = rows?.[i];
+          const contact = typeof row === "string" ? parseContact(row) : null;
+          if (rows && (row === null || (contact && !mailable(contact)))) left.push(email);
+          else again.push(email);
+        });
+      }
+      const waits: { email: string; reason: WaitReason; note: string }[] = again.map((email) => ({ email, reason: "retry", note: "Waiting to be tried again later; it was not sent." }));
       if (rest.length) {
         if (result.stopped === "refused") {
           counts.dropped += rest.length;
@@ -1967,10 +1989,15 @@ export async function sendDueSteps(
           const reason: WaitReason = result.stopped === "allowance" || result.stopped === "day" || result.stopped === "sender" || result.stopped === "paused" || result.stopped === "portion" ? result.stopped : "retry";
           const why =
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";
-          const window = allowanceWindow(store, now * 1000);
-          waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null }, gens);
-          onQueue.push(...waiting.queue);
+          waits.unshift(...rest.map((email) => ({ email, reason, note: why })));
         }
+      }
+      if (waits.length) {
+        const window = allowanceWindow(store, now * 1000);
+        // With each run's generation, as every late write of this step (main's #4234): a wait never lands on a run started
+        // again after an erasure.
+        waiting = await waitOrStop(flow.id, group, index, waits, now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null }, gens);
+        onQueue.push(...waiting.queue);
       }
       if (result.done.length) {
         counts.sent += result.done.length;
@@ -1995,8 +2022,8 @@ export async function sendDueSteps(
       // Each is written only where their run still exists: one erased meanwhile leaves nothing behind (Claude 7 on #4307).
       // Refused address by address (sendTo's fourth list, #3489) is accounted for: settled failed above, never also
       // "left" (Claude 1 on #4307).
-      const accounted = new Set([...result.done, ...result.rest, ...uncertain, ...(result.refused ?? []).map((r) => r.email)]);
-      const gone = going.filter((email) => !accounted.has(email));
+      // Of them, only those whose row was read again as gone or not mailable (above); the rest wait to be tried again.
+      const gone = left;
       if (gone.length) counts.dropped += gone.length;
       if (waiting) {
         const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;

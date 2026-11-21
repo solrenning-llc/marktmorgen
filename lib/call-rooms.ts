@@ -40,8 +40,9 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnreadableMget, getsWhole, mgetCommands, mgetLotFor, mgetWhole } from "@/lib/redis-mget";
-import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
+import { getsWhole, mgetCommands, mgetLotFor, mgetWhole } from "@/lib/redis-mget";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { type CallSetup, cleanRoom, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
 
@@ -99,6 +100,39 @@ export function roomReads(bookings: number): number {
   return bookings > 0 ? mgetCommands(ROOM_KEYS_PER_BOOKING * bookings, ROOM_KEYS_PER_MGET) + ROOM_RECORDS_PER_BOOKING * bookings : 0;
 }
 
+/** A room reply off its shape (rule 24): an UnknownReplyError, as every unknown Redis answer, in words a page can show. */
+const unreadableRooms = (): UnknownReplyError => Object.assign(new UnknownReplyError("the bookings' rooms"), { message: "The booking rooms could not be read." });
+
+/** Only explicit nulls prove that no room or meeting was stored. */
+function roomReplies(reply: unknown, count: number): (string | null)[] {
+  if (!Array.isArray(reply) || reply.length !== count) throw unreadableRooms();
+  const values: (string | null)[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+    if (!slot || !("value" in slot) || (slot.value !== null && typeof slot.value !== "string")) throw unreadableRooms();
+    values.push(slot.value);
+  }
+  return values;
+}
+
+function storedMeetingLink(raw: string | null, scope: string): string | null {
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const record = parseRecord(raw);
+    if (!record || record.scope !== scope || typeof value.gone !== "boolean" ||
+      typeof value.link !== "string" || value.link !== record.link) throw unreadableRooms();
+    const link = givenLink(record);
+    if (link) {
+      const room = cleanRoom(link);
+      if (room === null || room === "bad" || new URL(link).toString() !== link) throw unreadableRooms();
+    }
+    return link;
+  } catch {
+    throw unreadableRooms();
+  }
+}
+
 /** One booked seat, as much of it as picks its room. */
 export type RoomAsk = {
   product: string;
@@ -128,29 +162,28 @@ export function fallbackSetup(setup: CallSetup, start: number): CallSetup {
  * make in one trip more.
  */
 export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
-  return roomsRead(callsId, asks, false);
+  return roomsRead(callsId, asks);
 }
 
 /**
  * roomsFor, for a reader that may ask about every booking of a store at once
  * (the booking calendar's making, lib/calendar-sync.ts, slotRoomsBatched): the
- * same reads, and a value that is there but is not what its key holds (a room
- * key without a room made here, a meeting record that does not parse or is
- * another call's, review of #3079) throws UnreadableMget: the reading fails,
- * never a room taken for absent (and so never a new one made in its place).
+ * same reads. A value that is there but is not what its key holds (a room key
+ * without a room made here, a meeting record that does not parse, is another
+ * call's or has a link that is not its exact, canonical own; review of #3079
+ * and main's fix(calls) of 5 and 8 November 2026) throws on every reading now:
+ * the reading fails, never a room taken for absent (and so never a new one
+ * made in its place).
  */
 export async function roomsForMany(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
-  return roomsRead(callsId, asks, true);
+  return roomsRead(callsId, asks);
 }
 
-/** The prefix of a meeting record's key: the rest is its scope (lib/meet-records.ts, recordKey). */
-const RECORD_PREFIX = recordKey("");
-
-async function roomsRead(callsId: string | null, asks: RoomAsk[], strict: boolean): Promise<(string | null)[]> {
+async function roomsRead(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
   // In person (lib/call-place.ts): no room, not even one kept from when it was online; the others are asked as before.
   if (asks.some((a) => whereOf(a.setup).kind === "place")) {
     const online = asks.map((a, i) => ({ a, i })).filter(({ a }) => whereOf(a.setup).kind !== "place");
-    const found = await roomsRead(callsId, online.map(({ a }) => a), strict);
+    const found = await roomsRead(callsId, online.map(({ a }) => a));
     const out: (string | null)[] = asks.map(() => null);
     online.forEach(({ i }, k) => {
       out[i] = found[k];
@@ -169,22 +202,20 @@ async function roomsRead(callsId: string | null, asks: RoomAsk[], strict: boolea
   // The room keys ROOM_KEYS_PER_MGET at one MGET, the meeting records a GET each (no lot could bound their reply).
   // Read only whole (rule 24, lib/redis-mget.ts): one value per key, each text or nothing; anything else is unknown
   // and throws, never a booking taken to have no room (and one made in its place).
-  const [rooms, records] = await Promise.all([mgetWhole(roomKeys, ROOM_KEYS_PER_MGET), getsWhole(recordKeys)]);
-  if (strict) {
-    // Each value there only when it is what its key holds: a room made here under a room key, a meeting record of
-    // the key's own scope under a record's key (roomsForMany).
-    if (rooms.some((value) => value !== null && !isVideoRoom(value))) throw new UnreadableMget("a room key held something other than a room made here");
-    recordKeys.forEach((key, k) => {
-      const value = records[k];
-      if (value !== null && parseRecord(value)?.scope !== key.slice(RECORD_PREFIX.length)) {
-        throw new UnreadableMget("a meeting record's key held something other than its own record");
-      }
-    });
-  }
-  const found: (string | null)[] = asks.map((_, i) => {
+  // A reply not whole is the same unknown as on main: in words a page can show (unreadableRooms, rule 24).
+  const [rooms, records] = await Promise.all([mgetWhole(roomKeys, ROOM_KEYS_PER_MGET), getsWhole(recordKeys)]).catch((error: unknown) => {
+    throw error instanceof UnknownReplyError ? unreadableRooms() : error;
+  });
+  // Every value checked, on every reading (main, fix(calls) of 5 and 8 November 2026): a room key holds a room made
+  // here, a meeting record is of its own key's scope with an exact, canonical link (storedMeetingLink); anything
+  // else is unknown and throws.
+  const found: (string | null)[] = asks.map((ask, i) => {
     const own = rooms[i * ROOM_KEYS_PER_BOOKING];
     const shared = rooms[i * ROOM_KEYS_PER_BOOKING + 1];
-    const meeting = givenLink(parseRecord(records[i * ROOM_RECORDS_PER_BOOKING])) ?? givenLink(parseRecord(records[i * ROOM_RECORDS_PER_BOOKING + 1]));
+    if ((own !== null && !isVideoRoom(own)) || (shared !== null && !isVideoRoom(shared))) throw unreadableRooms();
+    const ownMeeting = storedMeetingLink(records[i * ROOM_RECORDS_PER_BOOKING], callScope(callsId, { ...ask, group: false }));
+    const groupMeeting = storedMeetingLink(records[i * ROOM_RECORDS_PER_BOOKING + 1], callScope(callsId, { ...ask, group: true }));
+    const meeting = ownMeeting ?? groupMeeting;
     if (meeting) return meeting;
     if (isVideoRoom(own)) return own;
     if (isVideoRoom(shared)) return shared;
@@ -204,16 +235,18 @@ async function roomsRead(callsId: string | null, asks: RoomAsk[], strict: boolea
   });
   if (making.size) {
     const keys = [...making.keys()];
-    const made = await redisPipeline(
+    const made = roomReplies(await redisPipeline(
       keys.flatMap((key) => [
         ["SET", key, newVideoRoom(), "NX", "EX", making.get(key)!.ttl],
         // Whoever won the race, this is the room.
         ["GET", key],
       ]),
-    );
+    ), keys.length * 2);
     keys.forEach((key, k) => {
+      const acknowledgement = made[k * 2];
       const room = made[k * 2 + 1];
-      for (const i of making.get(key)!.at) found[i] = isVideoRoom(room as string) ? (room as string) : null;
+      if ((acknowledgement !== null && acknowledgement !== "OK") || !isVideoRoom(room)) throw unreadableRooms();
+      for (const i of making.get(key)!.at) found[i] = room;
     });
   }
   return asks.map((a, i) => found[i] ?? roomFor(a.setup, a.start));

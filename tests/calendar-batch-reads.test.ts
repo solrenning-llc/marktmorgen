@@ -239,7 +239,7 @@ async function main(): Promise<void> {
       batch.map((command, i) => {
         if (placed || command[0] !== "GET" || !/^nl:meet:r:c:/.test(String(command[1])) || batch.some((c) => c[0] === "SET")) return replies[i];
         placed = true;
-        return JSON.stringify({ provider: "google", scope: String(command[1]).slice("nl:meet:r:".length), link: "https://meet.google.com/abc-defg-hij" });
+        return JSON.stringify({ provider: "google", scope: String(command[1]).slice("nl:meet:r:".length), link: "https://meet.google.com/abc-defg-hij", gone: false });
       }),
     );
     const text = await own.value.text();

@@ -63,7 +63,7 @@ async function main() {
     part("The rules: the notice is bounded, and paid for when the code is scheduled");
     is("a failed send is tried a bounded number of times", NOTICE_TRIES >= 1 && NOTICE_TRIES <= 5, true);
     is("a send is tried again an hour or more later, not every five minutes", NOTICE_RETRY_SECONDS >= 3600, true);
-    is("scheduling takes a studio request for each switch-on try and each notice try, ahead", SCHEDULE_UNITS, ACTIVATION_TRIES + NOTICE_TRIES);
+    is("scheduling takes a studio request for each switch-on try, each stop try (#4522) and each notice try, ahead", SCHEDULE_UNITS, ACTIVATION_TRIES + rules.STOP_TRIES + NOTICE_TRIES);
 
     const start = NOW + 2 * HOUR;
     const end = start + 48 * HOUR;

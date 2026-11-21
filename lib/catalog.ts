@@ -12,6 +12,11 @@
  *                                page, a checkout and a download need to know
  *   nl:catalog:<id>:x:<product>  the heavy rest, the checkout questions and
  *                                the funnel, only when there is any
+ *   nl:catalog:<id>:g:<product>  the page's copy of the legal information of
+ *                                a product the creator ships (618 [SZ2]),
+ *                                written with the heavy rest, which keeps it
+ *                                too, only when there is any: the product's
+ *                                page reads this alone, never the questions
  *
  * The <id> is the catalog's own, written in the store record, so a new
  * address or a new sign-in email moves nothing here.
@@ -39,6 +44,7 @@ import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalo
 export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
 import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
+import { safetyComplete } from "@/lib/physical-legal-ship";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
@@ -276,6 +282,15 @@ export type Product = {
    */
   legal?: PhysicalLegal | null;
   /**
+   * On the listing only: true when the product's own legal record had every
+   * EU/EEA safety item, its picture included, when it was last saved
+   * (lib/physical-legal-ship.ts), so the store page and the cart know where
+   * it ships now without reading that record. Computed by listingOf from a
+   * full product, never typed and never read from a full record; absent is
+   * not filled. Every checkout judges the record itself.
+   */
+  safetyFilled?: boolean;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -307,6 +322,11 @@ export type Catalog = {
   head: Listing[];
   /** A record from before this layout: its products, read in full. Null otherwise. */
   inline: Product[] | null;
+  /**
+   * The products of the head or inline whose stored schedule (`recurring`) is there but could not be read: read as
+   * no schedule everywhere else (parseRecurring), unknown to readListingsAll (Codex's review of #1824). Only when any.
+   */
+  unreadSchedules?: string[];
 };
 
 /** What a product is, in bits a store record can carry for thousands of them. */
@@ -379,6 +399,8 @@ function parseCard(id: string, raw: string): Card | null {
   }
 }
 const extrasKey = (catalog: string, product: string) => `nl:catalog:${catalog}:x:${product}`;
+/** The page's copy of a product's legal record (618 [SZ2]): at most LEGAL_RECORD_MAX_BYTES, read on its page alone. */
+const legalKey = (catalog: string, product: string) => `nl:catalog:${catalog}:g:${product}`;
 
 type Command = (string | number)[];
 
@@ -488,13 +510,24 @@ export function listingOf(product: Listing): Listing {
     yearly: product.yearly ?? null,
     note: product.note ?? false,
     shipping: product.shipping ?? null,
+    // From a full product, computed from its own legal record; from a listing, its mark as stored.
+    ...((Object.hasOwn(product, "fields") ? safetyComplete(product as Product) : product.safetyFilled === true) ? { safetyFilled: true } : {}),
     hidden: product.hidden,
   };
 }
 
 function parseListing(entry: unknown): Listing | null {
   const product = parseProduct(entry);
-  return product ? listingOf(product) : null;
+  if (!product) return null;
+  // A stored listing keeps its mark only when it is exactly true (lib/physical-legal-ship.ts).
+  const mark = (entry as { safetyFilled?: unknown }).safetyFilled === true;
+  return listingOf({ ...listingOf(product), ...(mark ? { safetyFilled: true } : {}) });
+}
+
+/** Whether a stored entry's schedule is there (not absent, not null) and was read as none. */
+function scheduleUnread(entry: unknown, read: Pick<Product, "recurring">): boolean {
+  const recurring = entry && typeof entry === "object" ? (entry as { recurring?: unknown }).recurring : undefined;
+  return recurring !== undefined && recurring !== null && !read.recurring;
 }
 
 /** The kind bits of a product. */
@@ -546,22 +579,29 @@ export function parseCatalog(raw: unknown, legacy: unknown): Catalog {
   if (value && typeof value.id === "string" && CATALOG_ID_PATTERN.test(value.id)) {
     const items = parseItems(value.items);
     const known = new Set(items.map((item) => item.id));
-    const head = Array.isArray(value.head)
-      ? value.head.map(parseListing).filter((listing): listing is Listing => listing !== null && known.has(listing.id))
-      : [];
-    return { id: value.id, items, head, inline: null };
+    const head: Listing[] = [];
+    const unread: string[] = [];
+    for (const entry of Array.isArray(value.head) ? value.head : []) {
+      const listing = parseListing(entry);
+      if (listing === null || !known.has(listing.id)) continue;
+      head.push(listing);
+      if (scheduleUnread(entry, listing)) unread.push(listing.id);
+    }
+    return { id: value.id, items, head, inline: null, ...(unread.length ? { unreadSchedules: unread } : {}) };
   }
   const inline: Product[] = [];
+  const unread: string[] = [];
   const seen = new Set<string>();
   for (const entry of Array.isArray(legacy) ? legacy : []) {
     const product = parseProduct(entry);
     if (!product || seen.has(product.id)) continue;
     seen.add(product.id);
     inline.push(product);
+    if (scheduleUnread(entry, product)) unread.push(product.id);
     if (inline.length >= MAX_PRODUCTS) break;
   }
   const items = inline.map(itemOf);
-  return { id: null, items, head: headFrom(items, new Map(inline.map((p) => [p.id, listingOf(p)]))), inline };
+  return { id: null, items, head: headFrom(items, new Map(inline.map((p) => [p.id, listingOf(p)]))), inline, ...(unread.length ? { unreadSchedules: unread } : {}) };
 }
 
 /** How a catalog is written into the store record. */
@@ -754,6 +794,64 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
 }
 
 /**
+ * Every listing asked for, in the order asked, or UnknownReplyError: for a
+ * reader whose answer would be wrong with one left out (a store's policy
+ * page, lib/store-policy-input.ts). An id the store does not have, a record
+ * missing from Redis, a reply that is not one exact answer per GET
+ * (repliesFor), a record that is not that product's listing, or one whose
+ * `recurring` is there but not a schedule makes the whole read unknown, never
+ * a shorter list or a membership read as none (Codex G's review of #1824), wherever it is read from: Redis, the
+ * head or a record from before product records (unreadSchedules), and a head listing with no schedule whose item
+ * says it is a membership (Codex's review of #1824 @ 48fc8e11e6). Stricter than readListingsExact below,
+ * which leaves out a record Redis confirms is not there.
+ */
+export async function readListingsAll(store: Store, ids: readonly string[]): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  if (asked.length !== ids.length) throw new UnknownReplyError("a listing read for products the store does not have");
+  const catalog = store.catalog;
+  const unread = new Set(catalog.unreadSchedules ?? []);
+  if (asked.some((id) => unread.has(id))) throw new UnknownReplyError("a listing read with a membership schedule unreadable in the store record");
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => {
+      const product = byId.get(id);
+      if (!product) throw new UnknownReplyError("a listing read with a product missing from the store record");
+      return listingOf(product);
+    });
+  }
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  // The head and its item are written together: a head listing with no schedule whose item says a membership is
+  // a contradiction, never "not a membership".
+  const kinds = new Map(catalog.items.map((item) => [item.id, item.kind]));
+  for (const id of asked) {
+    const listing = found.get(id);
+    if (listing && !listing.recurring && ((kinds.get(id) ?? 0) & KIND.recurring) !== 0) throw new UnknownReplyError("a listing read whose head says no schedule while its item says a membership");
+  }
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a listing read with no catalog storage");
+    const chunks: string[][] = [];
+    for (let i = 0; i < missing.length; i += 400) chunks.push(missing.slice(i, i + 400));
+    const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((id) => ["GET", listingKey(catalog.id!, id)]))));
+    chunks.forEach((chunk, c) => {
+      const replies = repliesFor(answers[c], chunk.length);
+      if (!replies) throw new UnknownReplyError("a listing read");
+      chunk.forEach((id, i) => {
+        const raw = parseJson(replies[i]);
+        const listing = parseListing(raw);
+        if (!listing || listing.id !== id) throw new UnknownReplyError("a listing read with a record missing or unreadable");
+        // parseProduct reads a schedule it cannot read as none; here that would say "not a membership".
+        // Only an absent or null `recurring` is none (Codex G's review of #1824).
+        const recurring = (raw as { recurring?: unknown }).recurring;
+        if (recurring !== undefined && recurring !== null && !listing.recurring) throw new UnknownReplyError("a listing read with a membership schedule unreadable");
+        found.set(id, listing);
+      });
+    });
+  }
+  return asked.map((id) => found.get(id)!);
+}
+
+/**
  * What these products' listing records weigh now, in bytes (STRLEN), on
  * Redis's exact answer only (one whole number per product), so a read can be
  * paid for at what it will read; null when it cannot be known. Products the
@@ -820,6 +918,22 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
     if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * The legal information of one product (618 [SZ2]; lib/physical-legal-record.ts),
+ * from the page's copy of it, written with the product: null when it has none
+ * or the copy cannot be read. One GET of that copy alone (at most
+ * LEGAL_RECORD_MAX_BYTES), never the checkout questions or the funnel kept in
+ * the heavy rest, for the page of a shipped product; every checkout reads the
+ * heavy rest itself.
+ */
+export async function readProductLegal(store: Store, id: string): Promise<PhysicalLegal | null> {
+  const catalog = store.catalog;
+  if (catalog.inline) return catalog.inline.find((product) => product.id === id)?.legal ?? null;
+  if (!SAFE_ID.test(id) || !catalog.id || !isRedisConfigured() || !catalog.items.some((item) => item.id === id)) return null;
+  const [raw] = await getMany([legalKey(catalog.id, id)]);
+  return readPhysicalLegal(parseJson(raw));
 }
 
 /**
@@ -1410,30 +1524,42 @@ export function productWrites(catalog: string, product: Product): Command[] {
   const listing = JSON.stringify(listingOf(product));
   const extras = extrasOf(product);
   const heavy = extras !== "";
-  if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
+  const legal = legalCopyOf(product);
+  if (byteLength(listing) + byteLength(extras) + byteLength(legal) > MAX_PRODUCT_BYTES) throw new StoreFullError();
+  // What is not written is deleted, in one command: a product with neither sends what it always did.
+  const gone = [...(heavy ? [] : [extrasKey(catalog, product.id)]), ...(legal ? [] : [legalKey(catalog, product.id)])];
   return [
     ["SET", listingKey(catalog, product.id), listing],
-    heavy ? ["SET", extrasKey(catalog, product.id), extras] : ["DEL", extrasKey(catalog, product.id)],
+    ...(heavy ? [["SET", extrasKey(catalog, product.id), extras]] : []),
+    ...(legal ? [["SET", legalKey(catalog, product.id), legal]] : []),
+    ...(gone.length ? [["DEL", ...gone]] : []),
     ["HSET", titlesKey(catalog), product.id, cardValue(product)],
   ];
 }
 
+/** The page's copy of a product's legal record, "" when it has none (618 [SZ2]). */
+function legalCopyOf(product: Product): string {
+  return product.legal ? JSON.stringify(product.legal) : "";
+}
+
 /**
  * What one product's records count for in the store's data room
- * (lib/store-data.ts): its listing, its heavy rest and its card, each under
+ * (lib/store-data.ts): its listing, its heavy rest, the page's copy of its
+ * legal record and its card, each under
  * its own key or field.
  */
 export function productBytes(product: Product): number {
   const listing = JSON.stringify(listingOf(product));
   const extras = extrasOf(product);
   const heavy = extras !== "";
-  return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
+  const legal = legalCopyOf(product);
+  return dataBytes([listing, extras, legal, product.id, cardValue(product)], 2 + (heavy ? 1 : 0) + (legal ? 1 : 0));
 }
 
 /** The writes that forget one product's records. */
 export function productDrops(catalog: string, id: string): Command[] {
   if (!SAFE_ID.test(id)) return [];
-  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
+  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id), legalKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
 }
 
 /**

@@ -8,7 +8,7 @@ import { CREATOR, type Comment, type Member, commentNumbers, postNumbers, readCo
 import { levelOf, pointsOf } from "@/lib/community-points";
 import { requestCount } from "@/lib/community-dm";
 import { unreadCount } from "@/lib/community-notify";
-import { maySeeSpace } from "@/lib/community-access";
+import { spaceAnswer, unknownForGood } from "@/lib/community-access";
 import { communityVisitor } from "@/lib/community-page";
 import { pollViews } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
@@ -42,7 +42,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: `${communityWords(store?.language).postPageTitle} — Marktmorgen`, robots: { index: false, follow: false } };
 }
 
-type Who = { key: string; owner: boolean; canWrite: boolean };
+/** `canReport`: a member, muted or not (a muted member writes nothing, but may still report). */
+type Who = { key: string; owner: boolean; canWrite: boolean; canReport: boolean };
 
 function CommentItem({
   store,
@@ -129,7 +130,7 @@ function CommentItem({
             {who.canWrite && mine && !editing ? (
               <Link href={`${here}?edit=${comment.id}#comment-${comment.id}`} className="cm-quiet-link cm-mini">{w.edit}</Link>
             ) : null}
-            {who.canWrite && !who.owner && !mine ? (
+            {who.canReport && !who.owner && !mine ? (
               <ActButton store={store} action="report" post={post} from="post" extra={extra} className="cm-quiet-link cm-mini">{w.report}</ActButton>
             ) : null}
             {who.owner ? (
@@ -183,9 +184,9 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   // A post in a space kept for the buyers of some products is not reachable
   // by its address either.
   const itsSpace = config.spaces.find((s) => s.id === post.sp);
-  if (itsSpace && !(await maySeeSpace(store, config, itsSpace, { owner, email: viewer.email }))) {
-    redirect(`${home}?n=spacelocked`);
-  }
+  // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
+  const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email, holdings: viewer.holdings }) : true;
+  if (may !== true) redirect(`${home}?n=${may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked"}`);
   const query = await searchParams;
   const w = communityWords(store.language);
   const notices = communityNotices(store.language);
@@ -199,7 +200,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
     pointsOf(id, [post.a, ...all.map((c) => c.a)]),
   ]);
   const levels = new Map([...points].map(([k, n]) => [k, levelOf(n)]));
-  const who: Who = { key, owner, canWrite };
+  const who: Who = { key, owner, canWrite, canReport: Boolean(viewer.member) };
   // The badge on the Messages link: nothing to read, nothing shown.
   const waiting = config.dm.on ? await requestCount(id, key) : 0;
   const news = await unreadCount(id, key);

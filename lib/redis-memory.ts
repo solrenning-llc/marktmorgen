@@ -557,6 +557,30 @@ export class MemoryRedis {
           this.run(["SET", seen, "pending", "EX", seenSeconds]);
           return 1;
         }
+        // lib/phone-alerts.ts PHONE_STATE_IF_LISTED: devices' last sends, each kept only while it is still on its store's list.
+        if (key.startsWith("-- marktmorgen:phone-state-if-listed:v1\n") && args[0] === "2" && args.length >= 5 && (args.length - 3) % 2 === 0) {
+          const [, list, states, ...pairs] = args;
+          this.scriptCalls += 1;
+          const raw = this.run(["GET", list]);
+          if (raw === null || raw === undefined) return 0;
+          let config: unknown;
+          try {
+            config = JSON.parse(String(raw));
+          } catch {
+            return -2;
+          }
+          const devices = config && typeof config === "object" && !Array.isArray(config) ? (config as { devices?: unknown }).devices : undefined;
+          if (!Array.isArray(devices)) return -2;
+          const listed = new Set(devices.flatMap((device) => (!!device && typeof device === "object" && typeof (device as { id?: unknown }).id === "string" ? [(device as { id: string }).id] : [])));
+          let written = 0;
+          for (let i = 0; i + 1 < pairs.length; i += 2) {
+            if (!listed.has(pairs[i])) continue;
+            this.scriptCalls += 1;
+            this.run(["HSET", states, pairs[i], pairs[i + 1]]);
+            written += 1;
+          }
+          return written;
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;

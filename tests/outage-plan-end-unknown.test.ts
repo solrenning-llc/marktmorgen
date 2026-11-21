@@ -38,8 +38,9 @@ async function main(): Promise<void> {
   subscriptionBody = {};
   const first = await settlePlans();
   console.log("  first run:", JSON.stringify(first));
-  const [left] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"]]);
-  is("the plan is kept pending (its end is unknown, not 'nothing to do')", (left as string[]).length, 1);
+  // Kept for a later run: still pending, or (since #3367) moved to the line of plans tried again, due at once.
+  const [left, line] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"], ["ZRANGE", "nl:plans:retry", 0, -1]]);
+  is("the plan is kept pending (its end is unknown, not 'nothing to do')", (left as string[]).length + (line as string[]).length, 1);
 
   part("Stripe answers properly on the next run");
   subscriptionBody = { id: "sub_ProbePlan0001", object: "subscription", status: "active", billing_cycle_anchor: 1_790_000_000 };

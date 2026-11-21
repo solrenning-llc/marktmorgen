@@ -70,8 +70,11 @@ import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, SES_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { UPSTASH_MICRO_USD_PER_GB_TRANSFER } from "@/lib/spend-cost-table";
+import { TIERS } from "@/lib/plan";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
-import { SHARE_COMMANDS_PER_REQUEST } from "@/lib/traffic-rules";
+import { ADMIT_READING } from "@/lib/page-read";
+import { INVITE_BADGE_LINK_ON } from "@/lib/badge-link";
+import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SETUP_EXTRA_REQUESTS, SETUP_VISITS, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit, visitsIncluded } from "@/lib/traffic-rules";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
@@ -95,8 +98,12 @@ const PICTURES_ON_A_LATER_PAGE = 4;
  * allows for, which tests/traffic.test.ts holds the code under.
  */
 export const COMMANDS = {
-  /** Drawing the front page of a store that pays. */
-  frontPage: 4,
+  /**
+   * Drawing the front page of a store that pays, and one GET more while the
+   * badge's link may carry the creator's invite code (lib/badge-link.ts,
+   * INVITE_BADGE_LINK_ON, off while the invite programme or sales are closed).
+   */
+  frontPage: 4 + (INVITE_BADGE_LINK_ON ? 1 : 0),
   /**
    * Counting it: the store's stats and the visit. Since October 11, 2026 the
    * view also counts its country and kind of device on the day's record
@@ -126,7 +133,10 @@ export const COMMANDS = {
    * What a visitor new to the day adds, once: the visit, how long the day
    * is kept, and the store's all-time visitors. Since October 11, 2026 also
    * the expiry of the day's visitors, written with the visitor new to the
-   * day rather than with every view. What the month is marked with is
+   * day rather than with every view. Since November 11, 2026 the count that
+   * creates the day's record also gives it its expiry inside the script
+   * (lib/capped-count.ts, version 3): one command, once a store a day, not
+   * once a visit, inside the room here. What the month is marked with is
    * counted apart, monthMark.
    */
   firstOfDay: 4,
@@ -155,16 +165,34 @@ export const COMMANDS = {
   laterCount: 11,
   /**
    * How a page was read (lib/page-read.ts), sent as a visitor leaves it by
-   * one visitor in READ_SAMPLE: one command, and an expiry the first time a
-   * block of a sales page is counted at all, which is once per block and not
-   * per visit. Until October 11, 2026 this went through the store's general
-   * count at seven commands and was in none of these sums.
-   *
-   * Billed (October 31, 2026, as frontCount): its count is the count script
-   * with one name, its length read and its count, and the expiry the first
-   * time: 4 at the most, 3 and 4 measured. It was held at 1, the script alone.
+   * one visitor in READ_SAMPLE, every command billed as Upstash bills it, a
+   * script's inner calls too (tests/page-read-worst-commands.test.ts): the
+   * admission, one script since Codex G's review of #2571 (lib/page-read.ts
+   * ADMIT_READING: EVAL, INCR, and the token's mark SET or, past the
+   * ceiling, the DECR that puts the count back: 3, as the token's mark and
+   * the window's count with its expiry were before; the count's EXPIRE runs
+   * only when INCR makes it, once a window, priced so in readingsCost), the
+   * capped count of the blocks' record at its most (EVAL, HLEN, HMGET,
+   * HINCRBY: 4) with the time's range counted beside it (HINCRBY 1: its
+   * record only ever holds the TIME_RANGES names, so it is not capped) and,
+   * that answer lost, both records' expiry again (2): 10 since 11 November
+   * 2026 (#2571, the review at 5d245b24, MEDIUM 1). The reading that reaches
+   * the window's ceiling also marks it (SET, 1); that is once a window for
+   * each ceiling its tokens can carry, priced so (readCeilingMarksCost), not
+   * on every reading. It was 13 from 9 November 2026 (the time's range in the
+   * capped count, the mark on every reading) and 12 from 4 November 2026
+   * (639 [GL7](25), the cost lane's CX-35), with a script counted as one
+   * command; until October 11, 2026 it went through the store's general
+   * count at seven commands and was in none of these sums. Readings are no
+   * longer one of the window's public requests and have a ceiling of their
+   * own, so every one the ceiling allows is priced on its own line
+   * (tests/plan-cost-registry.ts, page-readings), and not inside visitCost.
+   * #1496 had held it at 4 billed (October 31, 2026: the capped count alone)
+   * inside visitCost; main's measured 10 and its own line stand since the
+   * merge of 21 November 2026, with the scripts' bytes priced in
+   * readBeaconCost (EVALS.readBeacon, READ_ADMIT_BYTES).
    */
-  readBeacon: 4,
+  readBeacon: 10,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
    * route that knows who is asking: the store, the community's settings,
@@ -245,6 +273,13 @@ export const EVALS = {
   signal: 1,
 };
 const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
+/**
+ * A reading's admission (lib/page-read.ts, ADMIT_READING, one script since
+ * Codex G's review of #2571) is sent whole with its EVAL too, once a reading:
+ * its bytes priced in readBeaconCost, beside the capped count's (merge of main
+ * into #1496, 21 November 2026). tests/traffic.test.ts counts it as billed.
+ */
+export const READ_ADMIT_BYTES = Buffer.byteLength(ADMIT_READING);
 
 /**
  * The store's record is read whole from the database (lib/store.ts,
@@ -324,7 +359,25 @@ const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND
  * an empty answer.
  */
 export function readBeaconCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + evalCost(EVALS.readBeacon) + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + evalCost(EVALS.readBeacon) + READ_ADMIT_BYTES * DB_BYTE + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+}
+
+/**
+ * Every ceiling a store's reading tokens can carry (lib/page-read.ts,
+ * readCeiling, from lib/traffic-rules.ts requestLimitFor): its setup, its
+ * trial and each tier's. The window's mark (`:over`) is written only by the
+ * reading whose count, given once for each value by INCR, is its token's
+ * ceiling, so at most once a window for each of these.
+ */
+export const READ_CEILINGS = new Set([
+  [SETUP_VISITS, SETUP_EXTRA_REQUESTS],
+  [TRIAL_VISITS, TRIAL_EXTRA_REQUESTS],
+  ...TIERS.map((tier) => [visitsIncluded(tier), EXTRA_REQUESTS[tier]]),
+].map(([visits, extra]) => Math.ceil(publicVisitLimit(REQUESTS_PER_VISIT * visits + extra) / READ_SAMPLE))).size;
+
+/** A window's ceiling marks at the most: one SET for each ceiling its tokens can carry. */
+export function readCeilingMarksCost(): number {
+  return READ_CEILINGS * COMMAND;
 }
 
 /** What one visit costs at the most this is worked out for, in dollars. */
@@ -332,12 +385,12 @@ export function visitCost(): number {
   const later = PAGES_PER_VISIT - 1;
   const requests = 1 + STATIC_FILES + 1 + 1 + STORE_PAGE_SIZE + later * (1 + 1 + PICTURES_ON_A_LATER_PAGE);
   const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + MONTH_MARKS_PER_VISIT * COMMANDS.monthMark + later * (COMMANDS.laterPage + COMMANDS.laterCount);
-  // Every page of the visit is taken to be measured for how it is read, at the
-  // share of visitors the pages send it for: the store's page and two sales pages.
-  const reading = (PAGES_PER_VISIT / READ_SAMPLE) * readBeaconCost();
+  // How the visit's pages were read is not here since 4 November 2026 (639 [GL7](25)): readings have their own
+  // count and ceiling in the store's window (lib/page-read.ts, readCeiling), and every reading that ceiling allows
+  // is priced at readBeaconCost on its own line (tests/plan-cost-registry.ts, page-readings), whatever the visits.
   const evals = evalCost(EVALS.frontCount + later * EVALS.laterCount);
   const records = storeReadCost(PAGES_PER_VISIT * (STORE_READS.page + STORE_READS.count));
-  return requests * CDN_PER_REQUEST + commands * COMMAND + evals + records + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
+  return requests * CDN_PER_REQUEST + commands * COMMAND + evals + records + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE);
 }
 
 /**

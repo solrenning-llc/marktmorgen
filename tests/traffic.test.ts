@@ -24,15 +24,19 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { offeredItems } from "@/lib/bundles";
-import { readListings, readPage } from "@/lib/catalog";
+import { readListings, readPage, readProductLegal } from "@/lib/catalog";
 import { monthKey } from "@/lib/delivery";
 import { outOfKeys } from "@/lib/licence-keys";
+import { badgeInviteCode } from "@/lib/badge-link";
 import { PLAN_PRICES } from "@/lib/plan";
 import { readAbout } from "@/lib/product-about";
 import { withinLimit } from "@/lib/request-guard";
 import { summaries, summaryOf } from "@/lib/reviews";
 import { stockLeft } from "@/lib/stock";
-import { addProduct, addStoreLink, claimHandle, setAffiliateSetting, setProductFile, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, setAffiliateSetting, setProductFields, setProductFile, setProductLegal, setProductShipping, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
+import { activeShipping, parseShipping } from "@/lib/shipping";
+import { MAX_PROP65 } from "@/lib/physical-legal";
+import { LEGAL_RECORD_MAX_BYTES } from "@/lib/physical-legal-record";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, MAX_FUNNEL_SLUG } from "@/lib/page-funnel";
 import { countFunnelStep, readPageFunnel } from "@/lib/page-funnel-store";
@@ -76,11 +80,11 @@ import { COMMANDS, EVALS, EVAL_BYTES, FUNDED_SIGNAL_PATH_MEASURED, PAGES_PER_VIS
 import { POST as readRoute } from "@/app/api/store/read/route";
 import { POST as hitRoute } from "@/app/api/store/hit/route";
 import { NextRequest } from "next/server";
-import { STORE_SCOPE, readToken } from "@/lib/page-read";
+import { ADMIT_READING, STORE_SCOPE, noteReadStore, readSampled, readSlot, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { addMonthsMs, allowanceWindow } from "@/lib/allowance-window";
-import { REQUEST_COMMANDS } from "./plan-cost-registry";
+import { COMMAND, DB_BYTE, REQUEST_COMMANDS, perMegabyte } from "./plan-cost-registry";
 
 /** A store's window at a moment (lib/allowance-window.ts): its billing month when it pays, the calendar month or its trial otherwise. */
 const windowOf = (store: Parameters<typeof allowanceWindow>[0], at = Date.now()) => allowanceWindow(store, at)!.id;
@@ -164,10 +168,14 @@ let measuring = false;
  * (EVALS). The last measurement's, read after counted().
  */
 let evals = 0;
+/** A reading's admission scripts sent while something ran (lib/page-read.ts, ADMIT_READING), priced in readBeaconCost. */
+let admits = 0;
 /** Reads of a store's whole record (lib/store.ts, nl:store:owner:), priced by the byte in tests/traffic-cost.ts (STORE_READS). */
 let records = 0;
 /** Bytes the database answered with, other than the store's record (priced apart) and the count scripts' answers: the last measurement's. */
 let replyBytes = 0;
+/** And the bytes of the texts in everything it answered, records and scripts too (measured()). */
+let answerBytes = 0;
 /** Every write sent while something was measured, as sent: which commands went together. */
 const sentPipelines: (string | number)[][][] = [];
 /** Run before a DECR is sent: what another request does meanwhile (fourth round, L3). */
@@ -184,7 +192,12 @@ const real = redis.pipeline.bind(redis);
     if (command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) records += 1;
     if (command[0] !== "EVAL") continue;
     if (String(command[1]).startsWith("-- marktmorgen:capped-count:")) evals += 1;
-    else if (measuring) uncounted.push(String(command[1]).split("\n")[0]);
+    else if (command[1] === ADMIT_READING) {
+      // A reading's admission (lib/page-read.ts), billed as tests/page-read-worst-commands.test.ts bills it: INCR, its
+      // EXPIRE when the count is new, then DECR past the ceiling or the mark's SET. Its bytes: READ_ADMIT_BYTES.
+      admits += 1;
+      commands += 1 + (Number(redis.run(["GET", String(command[4])]) ?? 0) + 1 === 1 ? 1 : 0) + 1;
+    } else if (measuring) uncounted.push(String(command[1]).split("\n")[0]);
   }
   if (measuring) sentPipelines.push(list.map((command) => [...command]));
   if (decrHook) for (const command of list) if (command[0] === "DECR") decrHook(String(command[1]));
@@ -195,11 +208,19 @@ const real = redis.pipeline.bind(redis);
   list.forEach((command, i) => {
     if (!(command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) && command[0] !== "EVAL") replyBytes += sizeOf((replies as unknown[])[i]);
   });
+  // Main's measure, apart (measured()): the bytes of the texts in every answer.
+  for (const answer of replies as unknown[]) answerBytes += textBytes(answer);
   return replies;
 }) as typeof redis.pipeline;
+/** The bytes of the texts in a reply, inside a list too: an MGET answers with one (lib/catalog.ts, getMany). */
+function textBytes(answer: unknown): number {
+  if (typeof answer === "string") return Buffer.byteLength(answer);
+  return Array.isArray(answer) ? answer.reduce((sum: number, part) => sum + textBytes(part), 0) : 0;
+}
 async function counted(work: () => Promise<unknown>): Promise<number> {
   commands = 0;
   evals = 0;
+  admits = 0;
   records = 0;
   replyBytes = 0;
   const inside = redis.scriptCalls;
@@ -210,6 +231,14 @@ async function counted(work: () => Promise<unknown>): Promise<number> {
     measuring = false;
   }
   return commands + redis.scriptCalls - inside;
+}
+
+/** The commands sent and the bytes of the replies while something ran. */
+async function measured(work: () => Promise<unknown>): Promise<{ commands: number; bytes: number }> {
+  commands = 0;
+  answerBytes = 0;
+  await work();
+  return { commands, bytes: answerBytes };
 }
 
 /** The request a page's count arrives as. */
@@ -378,6 +407,7 @@ async function main(): Promise<void> {
     await ratings;
     await bundles;
     await soonProducts(store).catch(() => new Set());
+    await badgeInviteCode(store.sid);
     return listings;
   };
   const listings = await drawFront();
@@ -418,6 +448,36 @@ async function main(): Promise<void> {
   is("a product's page is drawn inside it", (await counted(drawLater)) <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
   evalsSent.page.push(evals);
   recordsRead.page.push(records);
+  // A product the creator ships also reads its legal information on its page (618 [SZ2],
+  // lib/catalog.ts readProductLegal): one command more, of the page's copy alone, however large the
+  // checkout questions kept beside it. Its bytes, at the record's ceiling, are priced with the
+  // commands and stay inside what a later page is costed at (rule MR: a public view's reads are counted).
+  const shipped = await addProduct(joy.email, "Printed book", "", "35", null);
+  if (!shipped.ok) throw new Error("no shipped product");
+  await setProductShipping(joy.email, shipped.product.id, parseShipping({ cents: 600, region: "custom", countries: ["US", "FR"], note: "" })!);
+  await setProductFields(joy.email, shipped.product.id, [0, 1, 2].map((n) => ({ label: `Question ${n}`, type: "dropdown" as const, optional: true, options: Array.from({ length: 200 }, (_, i) => `${n}-${i}-${"q".repeat(90)}`) })));
+  await setProductLegal(joy.email, shipped.product.id, { safety: null, prop65: "WARNING: ".padEnd(MAX_PROP65, "x"), quantities: [] });
+  const shippedListing = (await readListings((await storeForPage("joy"))!, [shipped.product.id]))[0];
+  const drawShipped = async (legal = true) => {
+    const store = (await storeForPage("joy"))!;
+    await isResting(store);
+    await readListings(store, [shippedListing.id]);
+    await Promise.all([
+      shippedListing.about ? readAbout(store.statsId, shippedListing.id) : Promise.resolve(""),
+      stockLeft(store, shippedListing).catch(() => null),
+      outOfKeys(store, shippedListing).catch(() => false),
+      summaryOf(store.statsId, shippedListing.id).catch(() => null),
+      isSoon(store, shippedListing.id).catch(() => false),
+      legal && activeShipping(shippedListing) ? readProductLegal(store, shippedListing.id).catch(() => null) : Promise.resolve(null),
+    ]);
+  };
+  const plain = await counted(() => drawShipped(false));
+  const joyPageNow = (await storeForPage("joy"))!;
+  const legalRead = await measured(() => readProductLegal(joyPageNow, shippedListing.id));
+  const withLegal = await counted(() => drawShipped());
+  is("a shipped product's page: one command more, of the legal copy alone", [withLegal - plain, legalRead.commands, legalRead.bytes > 0, legalRead.bytes <= LEGAL_RECORD_MAX_BYTES, withLegal <= COMMANDS.laterPage + REQUEST_COMMANDS], [1, 1, true, true, true]);
+  is("its commands, and its legal read at the record's ceiling, inside what a later page is costed at",
+    withLegal * COMMAND + LEGAL_RECORD_MAX_BYTES * DB_BYTE + perMegabyte(LEGAL_RECORD_MAX_BYTES) <= (COMMANDS.laterPage + REQUEST_COMMANDS) * COMMAND, true);
   const countLater = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
@@ -508,16 +568,43 @@ async function main(): Promise<void> {
   console.log(`a later page's count, billed: ${laterCount}; with the day's record at its most: ${laterFull}`);
   // How a page was read, sent by one visitor in eight as they leave (lib/page-read.ts):
   // the route, with a block of a sales page counted before and one of the store's page.
+  // Since 639 [GL7](25) each reading is counted once a visit, drawn by the server, in the window's own count of
+  // readings and never as one of its public requests (lib/page-read.ts): the mark, the count of readings with its
+  // expiry, and the reading's count, at most COMMANDS.readBeacon.
   const readStore = (await storeForHandle("joy"))!;
+  let visit = 0;
+  let place = 0;
+  // Each token for a page whose own request is its block's reading slot (lib/page-read.ts, readSlot), as its check leaves it.
+  const drawnToken = (scope: string) => {
+    const window = allowanceWindow(readStore, Date.now())!.id;
+    do place += 1;
+    while (!readSlot(window, place));
+    noteReadStore(readStore.statsId, readStore, Date.now(), place);
+    for (;;) {
+      const nonce = `trafficvisit${String((visit += 1)).padStart(4, "0")}`;
+      if (readSampled(nonce)) return readToken(readStore.statsId, scope, Date.now(), nonce);
+    }
+  };
   const readRequest = (body: Record<string, unknown>) =>
     readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)" }, body: JSON.stringify(body) }) as never);
-  await readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" });
-  const depthCount = await counted(() => readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" }));
+  await readRequest({ t: drawnToken(product.id), k: "d", p: product.id, b: "blok0001" });
+  const depthCount = await counted(() => readRequest({ t: drawnToken(product.id), k: "d", p: product.id, b: "blok0001" }));
   evalsSent.read.push(evals);
   recordsRead.read.push(records);
-  const reachCount = await counted(() => readRequest({ t: readToken(readStore.statsId, STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
+  const admitsSent = [admits];
+  const reachCount = await counted(() => readRequest({ t: drawnToken(STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
   evalsSent.read.push(evals);
   recordsRead.read.push(records);
+  admitsSent.push(admits);
+  const repeat = drawnToken(STORE_SCOPE);
+  await readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" });
+  const repeatCount = await counted(() => readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" }));
+  // More than the mark and the count of readings (one script since Codex G's review of #2571, lib/page-read.ts
+  // ADMIT_READING): none past it would mean nothing was counted, which would pass the model for the wrong reason.
+  is("and how a page was read is inside what a reading is priced at, with no public request", [depthCount > 1, depthCount <= COMMANDS.readBeacon, reachCount > 1, reachCount <= COMMANDS.readBeacon], [true, true, true, true]);
+  is("and the same token again costs no command on the server that spent it (Claude 5 on #2571)", repeatCount, 0);
+  // Its admission script is sent whole once a reading, its bytes priced in readBeaconCost (READ_ADMIT_BYTES, merge of main into #1496).
+  is("and each reading sends its admission script once, whose bytes are in what a reading is priced at", admitsSent, [1, 1]);
   is("and every count script a visit sends is in what its bytes are priced at", [Math.max(...evalsSent.page), Math.max(...evalsSent.front) <= EVALS.frontCount, Math.max(...evalsSent.later) <= EVALS.laterCount, Math.max(...evalsSent.read) <= EVALS.readBeacon, Math.min(...evalsSent.front, ...evalsSent.later, ...evalsSent.read) >= 1], [0, true, true, true, true]);
   // The store's record, read whole (4 November 2026, independent review of #1496): once by each page drawn and
   // once by each count it sends, never by a reading. Each read is priced at MAX_STORE_BYTES (tests/traffic-cost.ts).
@@ -591,16 +678,18 @@ async function main(): Promise<void> {
     is(`a ${name} by a signed-in stranger is counted, takes one of the store's signals and none of its requests, inside what a signal is priced at`, [m.counted, m.requests, m.signals, within(m)], [true, 0, 1, true]);
   }
   // A count and its expiry go in one write (third round, L2): a request that
-  // died between two writes left a count kept for ever. The window's requests
-  // and its signals alike. The expiry is the same point at every count
-  // (keepSecondsFor), set again with each, and never by an EXPIRE with an
-  // option, which a Redis or REST service may refuse (tests/letter-members.test.ts).
+  // died between two writes left a count kept for ever. The expiry is the same
+  // point at every count (keepSecondsFor), set again with each, and never by
+  // an EXPIRE with an option, which a Redis or REST service may refuse
+  // (tests/letter-members.test.ts). The window's signals only since the merge
+  // of 21 November 2026: the window's requests keep main's count, its expiry
+  // once a window (lib/traffic.ts, countRequestsAt; REQUEST_COMMANDS).
   sentPipelines.length = 0;
   await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`));
   await counted(async () => { await isResting((await storeForHandle("joy"))!); });
   const together = (prefix: string, add: string) => sentPipelines.some((list) => list.some((c) => c[0] === add && String(c[1]).startsWith(prefix)) && list.some((c) => c[0] === "EXPIRE" && String(c[1]).startsWith(prefix) && c.length === 3 && Number(c[2]) > 0));
   const optioned = sentPipelines.some((list) => list.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && String(c[1]).startsWith("nl:traffic:") && c.length > 3));
-  is("a count of the window's signals and of its requests is written with its expiry, in one write, and no EXPIRE takes an option", [together("nl:traffic:s:", "INCR"), together("nl:traffic:r:", "INCRBY"), optioned], [true, true, false]);
+  is("a count of the window's signals is written with its expiry, in one write, and no EXPIRE takes an option", [together("nl:traffic:s:", "INCR"), optioned], [true, false]);
   // The help center says it, its figures from the rule (third round, M3).
   const helpText = JSON.stringify(HELP_SECTIONS);
   is("the help center says how many clicks, affiliates' visits and funnel steps are counted, and what happens past them", [helpText.includes(JSON.stringify(signalsWords()).slice(1, -1)), signalsWords().includes(countWords(SIGNALS_PER_VISIT * VISITS_INCLUDED.creator)), (helpText.match(/Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to/g) ?? []).length >= 2], [true, true, true]);
@@ -877,7 +966,11 @@ async function main(): Promise<void> {
   // Between $0.0002 and $0.0003 until October 31, 2026, when the count
   // scripts were costed as Upstash bills them (313 [CV1]): $0.000304. From
   // 4 November 2026 also the six reads of the store's whole record a visit
-  // makes, a megabyte each at the most (STORE_READS): $0.000484.
+  // makes, a megabyte each at the most (STORE_READS): $0.000484, with a
+  // visit's readings inside it. Main moved readings to their own line
+  // (639 [GL7](25)); merged on 21 November 2026, the visit is computed
+  // without them, at $0.000480 by the model, so still above $0.0004: main's
+  // bound of $0.0002 to $0.0003 does not hold #1496's billed commands and reads.
   is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0004, visitCost() < 0.0005], [3, 13, true, true]);
   console.log(`a visit at the most: ${visitCost().toFixed(7)} dollars`);
 
@@ -894,9 +987,14 @@ async function main(): Promise<void> {
   for (const page of ["app/[handle]/p/[product]/page.tsx", "app/[handle]/book/[product]/page.tsx", "app/[handle]/free/page.tsx", "app/[handle]/waitlist/page.tsx"]) {
     is(`${page.split("/")[2]}: somebody who arrives straight at it is counted`, /<StoreTracking[^>]*\bpresence\b/.test(read(page).replace(/\s+/g, " ")), true);
   }
-  for (const page of ["app/[handle]/page.tsx", "app/[handle]/p/[product]/page.tsx"]) {
-    is(`${page.includes("/p/") ? "a product's page" : "the store's page"} rests with the store, before anything else is read for it`, /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/.test(read(page)), true);
-  }
+  is("the store's page rests with the store, before anything else is read for it", /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/.test(read("app/[handle]/page.tsx")), true);
+  // Rule 23 (traffic audit, 9 November 2026): the product page counts itself inside the load its title shares, before
+  // the product is read, and draws the resting page from it (tests/public-admission-before-read.test.ts runs it).
+  const productPage = read("app/[handle]/p/[product]/page.tsx");
+  is("a product's page rests with the store, before anything else is read for it", [
+    /if \(await isResting\(store\)\) return \{ store, asked, resting: true \};\s*\/\/ The id alone[^\n]*\n\s*const product = await readListing\(/.test(productPage),
+    /if \(found\.resting\) return <StoreResting store=\{found\.store\} \/>;/.test(productPage),
+  ], [true, true]);
   const resting = read("components/store-resting.tsx");
   is("a resting page keeps the way back to what a buyer has, and counts nothing", [/\/orders/.test(resting), /\/community/.test(resting), /StoreTracking|StoreBeacon/.test(resting.replace(/\/\*[\s\S]*?\*\//, ""))], [true, true, false]);
   for (const page of ["app/[handle]/orders", "app/[handle]/manage", "app/api/store/download"]) {

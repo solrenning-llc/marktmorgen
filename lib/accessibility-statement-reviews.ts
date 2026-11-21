@@ -95,6 +95,7 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/grow-sales": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/help": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/help/buyers": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/help/trust-and-safety": { date: "November 20, 2026", digest: "eba44788522343cb" },
   "page:/help/zoom": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/invite/[code]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/l/ended": { date: "November 18, 2026", digest: "eba44788522343cb" },

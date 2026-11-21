@@ -130,6 +130,7 @@ function plan(payments: number, ago: number, charged: number, buyer: string): { 
       status: "paid",
       created: addPeriods(anchor, "month", i),
       amount_paid: 5_000,
+      currency: "usd",
       paid_out_of_band: false,
       customer_email: buyer,
       charge: { id: `ch_${tag}x${i}`, object: "charge" as const, payment_intent: intent, amount: 5_000, amount_refunded: 0, disputed: false, currency: "usd", balance_transaction: { amount: 5_000, currency: "usd" }, invoice: id },

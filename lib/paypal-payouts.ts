@@ -6,6 +6,7 @@
  *   nl:pp:open:<statsId>     batches sent and not yet settled: what each affiliate was sent
  *   nl:pp:item:<item>        a PayPal payout item already written into the book (once)
  *   nl:pp:stores             the stores with a batch still open, for the daily job
+ *   nl:pp:pace:<statsId>     a reading asked for by a view, so the next views for a few minutes do not ask PayPal again
  *
  * How it works, and why this way. PayPal's Payouts API only ever sends money
  * from the balance of the account whose app makes the call. So the creator
@@ -38,8 +39,9 @@ import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/af
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { type Store, storeForId, storeIdGone } from "@/lib/store";
+import { ERASING_KEY, type Store, erasingField, ownerKey, storeForId, storeIdCommand, storeIdGone, storeRef } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
 const PAYPAL_API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? "")
@@ -59,8 +61,38 @@ const TIMEOUT_MS = 20_000;
 const linkKey = (statsId: string) => `nl:pp:${statsId}`;
 const openKey = (statsId: string) => `nl:pp:open:${statsId}`;
 const itemKey = (item: string) => `nl:pp:item:${item}`;
+/**
+ * How long an item's mark was kept when a batch wrote it (SET NX EX, before payouts took their item's id on 8 November
+ * 2026): the marks read now (lib/affiliates.ts, an older PayPal payout's Undo, #4606) lapse by then, and the family's
+ * bound in lib/data-families.ts is this one (tests/closing-families.test.ts, TIMED_IN_CODE; Claude 4 cloud Z on #4614).
+ */
+export const ITEM_MARK_SECONDS = 400 * 86_400;
 const STORES = "nl:pp:stores";
+const paceKey = (statsId: string) => `nl:pp:pace:${statsId}`;
+/** How long a reading asked for by a view stands for the next views (settlePayPal, `paced`). */
+const SETTLE_PACE_SECONDS = 300;
+/**
+ * The studio's "Check with PayPal" press: never held back by a view's pace (it would answer a check that was not made,
+ * reviews of #4212), but by its own mark, so a creator who presses again within this time is told PayPal was asked
+ * already, and repeated presses stay bounded.
+ */
+export const PRESS_PACE_SECONDS = 60;
+const pressKey = (statsId: string) => `nl:pp:press:${statsId}`;
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
+
+/**
+ * The link written only while its store is live, in one step (Codex L-20261119-2344): connectPayPal waits on PayPal
+ * to check the app, and the store's erasure can begin or end meanwhile; a plain SET after it would write the sealed
+ * Secret back into nl:pp:<statsId>, an erased family, with no expiry. KEYS[1] the store's own key (its id key, or
+ * for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the link;
+ * ARGV[1] the store's erasing field, ARGV[2] the link. 1 written, 0 not (gone or erasing). Billed 1 + 3, in place of
+ * the SET's 1: a connection stays inside the integration unit's 10 commands (tests/paypal-link-store-erasure.test.ts).
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const KEEP_LINK_IF_LIVE = `-- marktmorgen:paypal-link-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
 
 type Link = { client: string; secret: string; at: number; auto: boolean };
 export type PayPalView = { client: string; at: number; auto: boolean; broken: boolean };
@@ -246,7 +278,18 @@ export async function connectPayPal(store: Store, client: string, secret: string
     return null;
   });
   const link: Link = { client, secret: seal(secret, context(store.statsId)), at: Date.now(), auto: before?.auto === true };
-  await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify(link)]]);
+  // The store's id key; for a store from before ids (sid ""), its record under its owner. A sid of any other shape
+  // has no id key to find, so it reads as gone and nothing is kept (fail closed).
+  const ref = storeRef(store);
+  const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const written = repliesFor(await redisPipeline([
+    ["EVAL", KEEP_LINK_IF_LIVE, 3, live, ERASING_KEY, linkKey(store.statsId), await erasingField(ref), JSON.stringify(link)],
+  ]), 1);
+  // Kept only on its exact 1: 0 is a store gone or being erased, and any other answer is not known to be kept.
+  if (written?.[0] !== 1) {
+    console.error(written?.[0] === 0 ? "the PayPal link was not kept: the store is gone or being erased" : "the PayPal link's write got no exact answer");
+    return { ok: false, reason: "error" };
+  }
   return { ok: true };
 }
 
@@ -288,6 +331,24 @@ export async function onTheirWay(store: Store): Promise<Set<string>> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("Pending payout records are unavailable");
   const open = await readOpen(store.statsId);
   return new Set([...open.values()].flatMap((b) => b.lines.map((l) => l.a)));
+}
+
+/**
+ * Why what the book says is owed cannot be paid from it, or null when it can: "refunds" while refunds and disputes
+ * were not all read from Stripe, "invoices" while the membership and plan payments were not, and "invoices_ceiling"
+ * while those are past what the book can keep between readings (Book.invoicesPastCeiling), which reloading does not
+ * change. The one test every way of paying a batch makes first: the file (GET payout-batch), its confirmation (POST),
+ * the PayPal press and payday (review of #3378 by Claude 2, HIGH: a file handed out that its confirmation would refuse
+ * could be paid twice).
+ */
+export function unsettledBook(book: Pick<Book, "refundsChecked" | "invoicesChecked" | "invoicesPastCeiling" | "unlinkedInvoices">): "refunds" | "invoices" | "invoices_ceiling" | "invoices_unlinked" | null {
+  if (!book.refundsChecked) return "refunds";
+  if (!book.invoicesChecked) return book.invoicesPastCeiling ? "invoices_ceiling" : "invoices";
+  // A paid invoice left out with no one payment to link it to (Book.unlinkedInvoices): its commission is not known,
+  // so no payout is made from a book that leaves it out (Codex X5's and Claude 1 cloud's MEDIUM on #3378). Reloading
+  // gives the same: the creator pays by hand, as past the ceiling.
+  if ((book.unlinkedInvoices ?? 0) > 0) return "invoices_unlinked";
+  return null;
 }
 
 /** Who can be paid now: owed, cleared, and not already on their way through PayPal. */
@@ -383,8 +444,12 @@ export type PayResult =
    * "pending": nothing was paid now (not sent, or refused by PayPal), but the batch's "?" entry could not be confirmed
    * removed, so the settling may still send it (settleUnknown); its people stay on their way. "error" and PayPal's own
    * refusals ("funds", "refused") are said only once nothing will be sent.
+   * "refunds": refunds and disputes not all read from Stripe; "invoices": the membership and plan payments not all
+   * read (audit A1): either way what is owed is not known, so nothing is sent. "invoices_ceiling": those are past
+   * what the book can keep (unsettledBook), which reloading does not change. "invoices_unlinked": a paid invoice is left
+   * out with its commission not known (Book.unlinkedInvoices), which reloading does not change either.
    */
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" | "pending" };
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "invoices_ceiling" | "invoices_unlinked" | "funds" | "refused" | "busy" | "error" | "unknown" | "pending" };
 
 /**
  * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
@@ -544,8 +609,11 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       // A batch names no product (batchBody, payoutNote), so nothing is read for the names, as the payout file does: up
       // to BOOK_INVOICES listings fewer read on every press (PAYPAL_PRESS_BOOK_COMMANDS, Claude 7 on #4488).
       const book = await readBook(store, undefined, { titles: false });
-      // What is owed is not known while refunds could not be read from Stripe.
-      if (!book.refundsChecked) return { ok: false, reason: "refunds" };
+      // What is owed is not known while refunds could not be read from Stripe, nor while the membership and plan
+      // payments could not all be read (audit A1): one left out is a commission the affiliate earned and is not paid.
+      const unsettled = unsettledBook(book);
+      if (unsettled) return { ok: false, reason: unsettled };
+      // Only the lines a PayPal batch can pay (main, #4318): an address PayPal cannot take is left to the payout file.
       if (!paypalPayableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
       const token = await bearer(store);
       if (!token) return { ok: false, reason: "reconnect" };
@@ -624,7 +692,16 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   }
 }
 
-export type Settled = { paid: number; released: number; waiting: number };
+/**
+ * `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within
+ * PRESS_PACE_SECONDS, an unknown mark, or no token). `unavailable`: true, and only then present, when it was not asked
+ * because nothing could be checked (no token, or a pace mark that could not be confirmed), not because it was asked
+ * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212). `retryNow`: with `unavailable`,
+ * true only when no mark of this reading is left (none was taken, or its release was confirmed), so a new try asks at
+ * once; false when the mark could not be confirmed taken or let go, so the next try may find it until it runs out
+ * (Codex L on #4212).
+ */
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean; retryNow?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -642,8 +719,13 @@ async function earlierItemMark(item: string): Promise<boolean> {
  * Reads every open batch from PayPal and writes into the book what PayPal
  * says was paid — once per item, whoever asks first. Items PayPal could not
  * pay go back to owed; the rest stay on their way.
+ *
+ * `paced`: asked for by a view (the studio's affiliates page, the route's "settle"), not by the daily job. Each reading
+ * is a new token from the creator's PayPal app and up to 10 pages of every open batch, so one reading is made per store
+ * every SETTLE_PACE_SECONDS and the views between them ask PayPal nothing: everyone is still on their way, as they were,
+ * until the next reading or the daily job (which is never paced). A pace mark that cannot be confirmed asks nothing.
  */
-export async function settlePayPal(store: Store): Promise<Settled> {
+export async function settlePayPal(store: Store, options: { paced?: boolean; press?: boolean } = {}): Promise<Settled> {
   const out: Settled = { paid: 0, released: 0, waiting: 0 };
   if (!store.statsId || !isRedisConfigured()) return out;
   const statsId = store.statsId;
@@ -665,8 +747,20 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       undropped.add(field);
     }
   }
+  const onTheirWayNow = () => ({ ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0), asked: false });
+  // A press is held back only by its own mark; a view by the view's. An unknown mark asks nothing.
+  const pace = options.press ? { key: pressKey(statsId), seconds: PRESS_PACE_SECONDS } : options.paced ? { key: paceKey(statsId), seconds: SETTLE_PACE_SECONDS } : null;
+  const mark = pace ? claimValue() : "";
+  const claimed = pace ? await claimMark(pace.key, pace.seconds, mark) : "ours";
+  if (claimed === "taken") return onTheirWayNow();
+  if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true, retryNow: false };
   const token = await bearer(store).catch(() => null);
-  if (!token) return { ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  if (!token) {
+    // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
+    // press asks again (review of #4212, LEVE).
+    const released = pace ? await releaseMark(pace.key, mark) : true;
+    return { ...onTheirWayNow(), unavailable: true, retryNow: released };
+  }
   const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
@@ -801,12 +895,12 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     // money that may have left: never sent again, left for the creator's own check (rule 30).
     if (!sent.p || !sender || sender !== sent.p) return needsManualCheck(statsId, field, sent);
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
-    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,
-    // wait (no try counted). A line no longer owed in full (refunded since, or the affiliate gone or no longer
+    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds, or membership and plan payments,
+    // that cannot all be read: not known, wait (no try counted), never a line "no longer owed" (audit A1). A line no longer owed in full (refunded since, or the affiliate gone or no longer
     // approved), or a store whose currency changed: it cannot be told whether the first request paid it, so it is
     // left for the creator's own check and never sent.
     const book = await readBook(store);
-    if (!book.refundsChecked) return "waiting";
+    if (unsettledBook(book)) return "waiting";
     const rows = new Map(book.rows.map((row) => [row.affiliate.id, row]));
     const lines: BatchLine[] = [];
     for (const line of sent.lines) {

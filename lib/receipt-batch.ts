@@ -119,6 +119,7 @@ function saleIn(row: Record<string, unknown>, handles: Set<string>, range: { fro
 /** The store's one-time paid sales in the days asked, counted from at most RECEIPT_LIST_PAGES pages. */
 async function listSales(account: string, handles: Set<string>, range: { from: number; to: number }, clock: BatchClock): Promise<Listed> {
   const candidates: Candidate[] = [];
+  const seen = new Set<string>();
   const base =
     `/checkout/sessions?limit=${RECEIPT_LIST_PAGE_SIZE}&status=complete&created[gte]=${range.from - RECEIPT_LIST_LOOKBACK_SECONDS}` +
     `&created[lt]=${range.to}&expand[]=data.payment_intent.latest_charge`;
@@ -138,8 +139,11 @@ async function listSales(account: string, handles: Set<string>, range: { from: n
     } catch {
       return { ok: false, why: "unreadable" };
     }
-    if (read.unreadable > 0) return { ok: false, why: "unreadable" };
+    if (read.unreadable > 0 || read.rows.length > RECEIPT_LIST_PAGE_SIZE) return { ok: false, why: "unreadable" };
     for (const row of read.rows) {
+      // A repeated reference leaves the count and the list's continuation unproved.
+      if (seen.has(row.id)) return { ok: false, why: "unreadable" };
+      seen.add(row.id);
       const inside = saleIn(row, handles, range);
       if (inside === "unreadable") return { ok: false, why: "unreadable" };
       if (inside) candidates.push({ reference: row.id, row });
@@ -204,15 +208,16 @@ export async function receiptBatch(store: Store, account: string, range: Extract
     clock.afterRound?.();
   }
 
+  const tooLong: ReceiptBatch = { ok: false, status: 503, message: "This download took too long, so no file was made. Choose fewer days, or try again." };
   // Asked with the longest number, so a sale whose receipt cannot be drawn is never given one.
   const drawable: Receipt[] = [];
   for (const receipt of read) {
+    if (clock.now() >= clock.stopAt) return tooLong;
     if (await receiptDrawable({ ...receipt, number: receiptNumberText(RECEIPT_NUMBER_MAX) })) drawable.push(receipt);
     else skipped.push({ reference: receipt.reference, why: "undrawable" });
   }
   // New numbers follow the order the sales were paid in; a sale numbered before keeps its own.
   drawable.sort((a, b) => a.paidAt - b.paidAt || (a.reference < b.reference ? -1 : 1));
-  const tooLong: ReceiptBatch = { ok: false, status: 503, message: "This download took too long, so no file was made. Choose fewer days, or try again." };
   const files: { number: string; bytes: Uint8Array }[] = [];
   for (const receipt of drawable) {
     if (clock.now() >= clock.stopAt) return tooLong;
@@ -233,10 +238,12 @@ export async function receiptBatch(store: Store, account: string, range: Extract
     }
     files.push({ number: numbered.number, bytes });
   }
+  if (clock.now() >= clock.stopAt) return tooLong;
   files.sort((a, b) => numberOf(a.number) - numberOf(b.number));
   const entries = files.map((f) => ({ name: `receipt-${f.number}.pdf`, bytes: f.bytes }));
   if (skipped.length > 0) entries.push({ name: LEFT_OUT_FILE, bytes: new TextEncoder().encode(notIncludedText(range.label, skipped, files.length)) });
   const zip = zipStored(entries, new Date());
+  if (clock.now() >= clock.stopAt) return tooLong;
   if (zip.byteLength > RECEIPT_BATCH_MAX_BYTES) {
     console.error("a receipts download came out heavier than its ceiling", zip.byteLength);
     return { ok: false, status: 500, message: "This download could not be made. Choose fewer days, or download receipts one by one." };

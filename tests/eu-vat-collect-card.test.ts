@@ -54,10 +54,10 @@ const SWITCH = {
   eu: { memberState: "IE", vatNumber: "EU372000019", effectiveFrom: "2027-01-01" },
   reviews: [{ jurisdiction: "EU", registration: "EU372000019", reviewedOn: "2027-01-15", reviewer: "owner" }],
 };
-// The product is classified as not an e-publication (unit 4): without it, nothing in the EU collects.
-const ON = { records: RECORDS, vatSwitch: SWITCH, now: NOW, rates: RATES, publication: false };
+const ON = { records: RECORDS, vatSwitch: SWITCH, now: NOW, rates: RATES };
 
-const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null };
+// The creator answered that it is not an e-publication (unit 5a): without that answer, nothing collects.
+const ESS: EuSupplyFields = { priceCents: 2900, file: null, link: "https://example.com/pack", keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null, publication: false };
 const GOODS: EuSupplyFields = { ...ESS, link: null, shipping: { countries: ["DE"] } };
 const evidence = (ip: string | null, billing: string | null) => {
   const headers = new Headers();
@@ -147,9 +147,9 @@ async function main(): Promise<void> {
   // Unit 4 (Claude 2's note 1 on #4999): the table holds only the standard rate, and a Member State may tax an
   // e-publication at a reduced one, so only a product explicitly classified as not one is collected; never on a guess.
   const refusedDE = consumerGate({ product: ESS, ...evidence("DE", "DE") });
-  is("the product not classified either way: refused as today", euSaleGate({ product: ESS, ...evidence("DE", "DE"), ...ON, publication: undefined }), refusedDE);
-  is("an e-publication: refused as today, never the standard rate", euSaleGate({ product: ESS, ...evidence("DE", "DE"), ...ON, publication: true }), refusedDE);
-  is("a cart whose products are not classified: refused as today", euCartGate({ products: [ESS, ESS], ...evidence("DE", "DE"), ...ON, publication: undefined }), refusedDE);
+  is("the product not classified either way: refused as today", euSaleGate({ product: { ...ESS, publication: undefined }, ...evidence("DE", "DE"), ...ON }), refusedDE);
+  is("an e-publication: refused as today, never the standard rate", euSaleGate({ product: { ...ESS, publication: true }, ...evidence("DE", "DE"), ...ON }), refusedDE);
+  is("a cart whose products are not classified: refused as today", euCartGate({ products: [{ ...ESS, publication: undefined }, { ...ESS, publication: undefined }], ...evidence("DE", "DE"), ...ON }), refusedDE);
   is("a US buyer: goes on, nothing to collect", euSaleGate({ product: ESS, ...evidence("US", "US"), ...ON }), { ok: true, collect: null });
   for (const [label, ip, billing] of [["a UK buyer", "GB", "GB"], ["IP outside, billing in the EU", "US", "DE"], ["IP and billing in two EU countries", "DE", "FR"], ["no rate for that country", "FR", "FR"]] as const) {
     const sentNow = evidence(ip, billing);

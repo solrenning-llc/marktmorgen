@@ -2524,6 +2524,55 @@ export class MemoryRedis {
           this.until.delete(target);
           return 1;
         }
+        // lib/webhooks.ts SAVE_WEBHOOK_CONFIG: the store still live (its id key, or its record holding the same statsId for a
+        // store from before ids) and not erasing, then the settings' compare-and-set and the watch index in the same step.
+        if (key.startsWith("-- marktmorgen:webhook-config-save:v1\n") && args[0] === "7" && args.length === 16) {
+          const [, target, live, erasing, stores, anchor, back, wait, was, next, field, statsId, mode, action, reset, maxBytes] = args;
+          if (mode === "id") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["EXISTS", live])) !== 1) return -2;
+          } else if (mode === "legacy") {
+            if (!statsId) return -3;
+            this.scriptCalls += 1;
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -2;
+            if (typeof raw !== "string" || new TextEncoder().encode(raw).length > Number(maxBytes)) return -3;
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return -3;
+            }
+            const held = record && typeof record === "object" && !Array.isArray(record) ? (record as { statsId?: unknown }).statsId : undefined;
+            if (typeof held !== "string" || !held) return -3;
+            if (held !== statsId) return -2;
+          } else return -3;
+          this.scriptCalls += 1;
+          if (Number(this.run(["HEXISTS", erasing, field])) === 1) return -2;
+          this.live(target);
+          const current = this.data.get(target);
+          if (current !== undefined && typeof current !== "string") throw new Error("WRONGTYPE");
+          this.scriptCalls += 1;
+          if ((current ?? "") !== was) return [-1];
+          if (action === "add" || action === "remove") {
+            this.scriptCalls += 1;
+            const kind = this.run(["TYPE", stores]);
+            if (kind !== "none" && kind !== "set") return -3;
+          }
+          this.scriptCalls += 1;
+          this.data.set(target, next);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
+          this.until.delete(target);
+          if (action === "add" || action === "remove") {
+            this.scriptCalls += 1;
+            this.run([action === "add" ? "SADD" : "SREM", stores, statsId]);
+          }
+          if (reset === "1") {
+            this.scriptCalls += 1;
+            this.run(["DEL", anchor, back, wait]);
+          }
+          return 1;
+        }
         // lib/webhooks.ts RESEND_MARK: the same compare and replies, but the write keeps the key's expiry (SET KEEPTTL),
         // and a key left with none is given ARGV[3] seconds, in the same step.
         if (key.startsWith("-- marktmorgen:webhook-resend-mark:v1\n") && args[0] === "1" && args.length === 5) {

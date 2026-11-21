@@ -28,7 +28,8 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { readDraft, type PaymentRequest } from "@/lib/payment-request-rules";
 import { createRequest, markPaid, readRequest } from "@/lib/payment-request-store";
 import * as requests from "@/lib/payment-requests";
-import { forgetRefundCheck } from "@/lib/payment-request-refund-cache";
+import * as refundCache from "@/lib/payment-request-refund-cache";
+import { forgetRefundCheck } from "./refund-check-cache";
 import { addEndpoint, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { PaymentRequestsStudio } from "@/components/payment-requests-studio";
 import { advance, store as redis } from "./redis-stub";
@@ -150,6 +151,7 @@ async function main(): Promise<void> {
 
   part("A refund the five-minute Stripe events job reads costs it no command: what was kept goes by itself within REFUND_CHECK_SECONDS");
   is("there is a way to forget one payment's kept check (the tests below use it)", typeof forgetRefundCheck, "function");
+  is("no production module exports a forget of the kept check: it is the tests' own (Codex X6's LOW, 7046132508)", "forgetRefundCheck" in refundCache, false);
   // Claude 5's LEVE on #3291: only these tests forget a kept check, so lib/payment-requests.ts does not hand it out.
   is("lib/payment-requests.ts does not export forgetRefundCheck", "forgetRefundCheck" in requests, false);
   is("the events reader never forgets it: no Redis command per refunded charge it reads", readFileSync("lib/webhooks.ts", "utf8").includes("forgetRefundCheck"), false);

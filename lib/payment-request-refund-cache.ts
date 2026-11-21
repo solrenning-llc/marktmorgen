@@ -18,7 +18,8 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 /** How long one payment's whole reading is kept: a minute, so a refund made since shows on the next opening after it. */
 export const REFUND_CHECK_SECONDS = 60;
 
-const refundCheckKey = (sid: string, payment: string) => `nl:payreq:rf:${sid}:${payment}`;
+/** The key of one payment's kept reading (exported for the tests' own forget, tests/refund-check-cache.ts, only). */
+export const refundCheckKey = (sid: string, payment: string) => `nl:payreq:rf:${sid}:${payment}`;
 
 /**
  * The cents last read as refunded for this payment, or null when none is
@@ -38,11 +39,4 @@ export async function keptRefundCheck(sid: string, payment: string): Promise<num
 export async function keepRefundCheck(sid: string, payment: string, refunded: number): Promise<void> {
   const replies = repliesFor(await redisPipeline([["SET", refundCheckKey(sid, payment), String(refunded), "EX", REFUND_CHECK_SECONDS]]), 1);
   if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a payment's refund check kept");
-}
-
-/** Forgets this payment's kept reading, so its next opening asks Stripe. Throws UnknownReplyError when the delete was not confirmed. */
-export async function forgetRefundCheck(sid: string, payment: string): Promise<void> {
-  if (!sid || !payment) return;
-  const replies = repliesFor(await redisPipeline([["DEL", refundCheckKey(sid, payment)]]), 1);
-  if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("a payment's refund check forgotten");
 }

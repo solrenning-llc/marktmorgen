@@ -1,17 +1,19 @@
 /**
  * The cart-link builder settles at what it really read (Claude 4,
  * C4-20261106-1740-C3-104, #1928): when listing records grow between their
- * STRLEN and their GET, the bytes beyond what was taken before the read are
+ * STRLEN and their read (GET or MGET), the bytes beyond what was taken before the read are
  * debited from the same studio count afterwards, with no new read, past the
  * figure if it must (C4-20261106-1810-C3-107): it was already spent. The next
  * opening is then refused as usual.
  */
 import { cartLinkProducts, cartLinkUnits, CART_LINK_UNIT_BYTES } from "@/lib/cart-link-products";
-import { KIND, productIds } from "@/lib/catalog";
+import { KIND, MAX_PRODUCT_BYTES, listingSizes, productIds } from "@/lib/catalog";
+import { dataKey } from "@/lib/store-data";
 import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProductHidden, setSubscription, storeForEmail } from "@/lib/store";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { store as redis } from "./redis-stub";
+import { listingKeysRead, listingValues } from "./listing-reads";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is } from "./check";
 
@@ -36,10 +38,16 @@ async function main(): Promise<void> {
   shop = (await storeForEmail(owner))!;
   const paidIds = shop.catalog.items.filter((p) => (p.kind & KIND.paid) !== 0).map((p) => p.id);
 
-  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more.
+  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more. That
+  // charge is worked out from what each listing weighs now (its data room slot, raised to its record's length), as
+  // the builder weighs it, so a record that grows beside every product (lib/page-depth-rules.ts) moves it with them.
+  const [weights] = (await redis.pipeline([["HMGET", dataKey(shop)!, ...paidIds.map((id) => `p:${id}`)]])) as unknown[][];
+  const sizes = await listingSizes(shop, paidIds);
+  if (!Array.isArray(weights) || weights.length !== paidIds.length || !sizes) throw new Error("fixture weights unknown");
+  const before = cartLinkUnits(2 * paidIds.length, paidIds.reduce((sum, _id, i) => sum + Math.min(MAX_PRODUCT_BYTES, Math.max(Number(weights[i]), sizes[i])), 0));
   const figure = allowanceFor(shop, "studio");
   const used = await allowanceUsed(shop, "studio");
-  const spare = figure - used - 10;
+  const spare = figure - used - before;
   if (spare > 0) await takeAllowance(shop, "studio", spare);
   const base = redis.pipeline.bind(redis);
   const debits: number[] = [];
@@ -47,14 +55,15 @@ async function main(): Promise<void> {
   let paidBeforeRead = -1;
   let grown = false;
   const spy = (async (commands: (string | number)[][]) => {
-    const isGet = commands.some((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1])));
-    if (isGet && paidBeforeRead < 0) paidBeforeRead = debits.reduce((a, b) => a + b, 0);
+    // A product record read alone (GET) or LISTINGS_PER_MGET at one MGET (lib/catalog.ts getMany).
+    const reads = commands.some((c) => listingKeysRead(c).length > 0);
+    if (reads && paidBeforeRead < 0) paidBeforeRead = debits.reduce((a, b) => a + b, 0);
     const answer = await base(commands);
-    commands.forEach((c, i) => {
+    commands.forEach((c) => {
       if (c[0] === "INCRBY" && String(c[1]).includes(":studio:")) debits.push(Number(c[2]));
-      if (c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))) bytes += Buffer.byteLength(String(answer[i] ?? ""));
     });
-    // Between the STRLENs and the GETs, every record grows (real writers, synthetic file metadata).
+    for (const { value } of listingValues(commands, answer)) bytes += Buffer.byteLength(String(value ?? ""));
+    // Between the STRLENs and the read (GETs or MGETs), every record grows (real writers, synthetic file metadata).
     if (!grown && commands.some((c) => c[0] === "STRLEN" && /^nl:catalog:.*:l:/.test(String(c[1])))) {
       grown = true;
       redis.pipeline = base;
@@ -78,6 +87,7 @@ async function main(): Promise<void> {
   }
   const total = debits.reduce((a, b) => a + b, 0);
   console.log("CART_LINK_SETTLE", JSON.stringify({ debits, paidBeforeRead, bytes, listed: listed.length }));
+  is("what was taken before the read is the charge left for it, and nothing more", paidBeforeRead, before);
   is("the records grew between their measure and their read, beyond what was taken before it", [grown, bytes > paidBeforeRead * CART_LINK_UNIT_BYTES], [true, true]);
   is("the builder still lists the 24 products", listed.length, 24);
   is("what was really read is taken in all, the difference after the read", total >= cartLinkUnits(2 * 24, bytes), true);

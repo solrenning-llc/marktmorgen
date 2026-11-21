@@ -28,7 +28,7 @@ import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliv
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
-import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
+import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, ownedSub } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
 import { chargedOf, keepWhileUnconfirmed, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
@@ -41,6 +41,7 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
+import { setWhileStoreLive } from "@/lib/store-live-cache";
 
 /** What the switch page and the form ask for, in place of another plan's id. */
 export const YEARLY_TARGET = "yearly";
@@ -124,7 +125,8 @@ export async function yearlyPrice(store: Store, product: Listing, cents: number)
   const made = await onAccount("POST", account, "/prices", yearlyPriceBody(store, product, cents));
   const id = typeof made.id === "string" ? made.id : "";
   if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
-  await redisPipeline([["SET", key, id, "EX", 400 * 86_400]]);
+  // Kept only while the store is live: a Stripe answer that comes after its erasure began writes nothing back (L-1446).
+  await setWhileStoreLive(store, key, id, 400 * 86_400);
   return id;
 }
 
@@ -154,8 +156,11 @@ async function find(store: Store, token: string, subscription: string): Promise<
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone", emailed: false };
   const granted = await grantFor(store, token, subscription);
   if (!granted) return { reason: "expired", emailed: false };
-  const { grant, emailed } = granted;
-  const sub = (await subsOf(store, grant)).find((s) => s.id === subscription) as (YearlySub & { id?: unknown; items?: { data?: { id?: unknown }[] } }) | undefined;
+  const { emailed } = granted;
+  // Among every customer the link manages; `grant` is then the one who holds it (R43 F1 on #2985).
+  const owned = await ownedSub(store, granted.grant, subscription);
+  const grant = owned?.grant ?? granted.grant;
+  const sub = owned?.sub as (YearlySub & { id?: unknown; items?: { data?: { id?: unknown }[] } }) | undefined;
   if (!sub) return { reason: "gone", emailed };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId) return { reason: "gone", emailed };

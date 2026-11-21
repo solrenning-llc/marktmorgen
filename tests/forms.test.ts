@@ -24,6 +24,8 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as saveForms } from "@/app/api/store/forms/route";
 import { POST as sendForm } from "@/app/api/store/form/route";
 import { store as redis } from "./redis-stub";
+import { personKey } from "@/lib/person-key";
+import { redisPipeline } from "@/lib/redis";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
 
@@ -103,6 +105,14 @@ async function main(): Promise<void> {
   is("and the answers are kept, with the result", [kept.total, kept.responses[0]?.outcome, kept.responses[0]?.answers.aaaaaa], [1, "res002", "b@example.com"]);
   const trap = await post([...base, ["q_aaaaaa", "c@example.com"], ["q_bbbbbb", "opt001"], ["website", "spam"]]);
   is("a robot filling the hidden field is told it worked, and nothing is kept", [trap.status, (await readResponses(store.statsId, formId)).total], [303, 1]);
+
+  // Revisor 2 (#2287): anybody can type an address into a form, so a form sent with a deleted person's address is not
+  // their return, and the mark of their deletion stays.
+  const deletedMark = `nl:crm:erased:${store.statsId}:${personKey(store.statsId!, "d@example.com")}`;
+  await redisPipeline([["SET", deletedMark, String(Date.now() - 60_000), "EX", 3600]]);
+  const typed = await post([...base, ["q_aaaaaa", "d@example.com"], ["q_bbbbbb", "opt002"]]);
+  is("a form sent with a deleted person's address is kept, and their deletion mark stays", [typed.status, (await redisPipeline([["EXISTS", deletedMark]]))[0]], [303, 1]);
+  await redisPipeline([["DEL", deletedMark]]);
 
   part("A step of a funnel");
   await writePageFunnel(store.statsId!, { id: "funnel0001", name: "Survey", slug: "survey", steps: [{ kind: "page", id: "pagepage01" }, { kind: "product", id: course.product.id }], on: true, since: 1 }, [], ROOM);

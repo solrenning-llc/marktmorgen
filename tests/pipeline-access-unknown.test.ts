@@ -106,8 +106,8 @@ async function main(): Promise<void> {
     lose = "none";
     is(`(${shape}) and the new address was not given "no restriction" silently`, await readPipelineAccess(statsId, to), {});
   }
-  is("control: a copy over the exact reply carries the restriction", [await copyPipelineAccess(store, "sam@example.com", "sam-ok@example.com"), await readPipelineAccess(statsId, "sam-ok@example.com")], [undefined, { [FIRST_PIPELINE_ID]: "none" }]);
-  is("control: copying a teammate never restricted (exactly null) writes nothing", [await copyPipelineAccess(store, "kim@example.com", "kim2@example.com"), await readAllPipelineAccess(statsId).then((all) => Object.hasOwn(all, "kim2@example.com"))], [undefined, false]);
+  is("control: a copy over the exact reply carries the restriction", [await copyPipelineAccess(store, "sam@example.com", "sam-ok@example.com"), await readPipelineAccess(statsId, "sam-ok@example.com")], [{ prior: null, now: JSON.stringify({ [FIRST_PIPELINE_ID]: "none" }) }, { [FIRST_PIPELINE_ID]: "none" }]);
+  is("control: copying a teammate never restricted (exactly null) writes nothing", [await copyPipelineAccess(store, "kim@example.com", "kim2@example.com"), await readAllPipelineAccess(statsId).then((all) => Object.hasOwn(all, "kim2@example.com"))], [{ prior: null, now: null }, false]);
 
   part("Rule 30: writing a restriction reads what was there exactly");
   for (const shape of SHAPES) {

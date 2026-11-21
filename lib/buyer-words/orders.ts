@@ -14,8 +14,13 @@
  * (lib/buyer-words/index.ts, speech): a sentence here only places them.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+import { membershipWords } from "@/lib/buyer-words/membership";
 
 type Interval = "day" | "week" | "month" | "year";
+
+/** Charged every few weeks or months (609 [WP8]): the membership words' own "every 3 months"; once an interval keeps `once`. */
+const often = (code: LanguageCode, interval: Interval, count: number, once: string): string =>
+  count > 1 ? membershipWords(code).every(interval, count) : once;
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** French takes the singular for 0 and 1. */
@@ -101,8 +106,14 @@ const en = {
   boughtOn: (date: string) => `Bought on ${date}`,
   endedNote:
     "This membership is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.",
+  /** The same, for a store that is not taking payments after a report: the first sentence alone. */
+  endedClosedNote: "This membership is no longer running, so what it gave you access to is closed now.",
   renew: "Renew your membership",
   openCourse: "Open the course",
+  /** How far the buyer is in a course on the list (560 [AS1]): lessons done of the lessons it has now. */
+  lessonsDone: (done: number, total: number) => `${done} of ${total} ${plural(total, "lesson", "lessons")} done`,
+  /** Said when that could not be read just now: never as 0 done. */
+  progressUnread: "We could not check your progress in this course just now. Open the course to see where you are.",
   bookSession: (left: number) => `Book a session (${left} left)`,
   packageExpired: "The time to book this package's sessions has passed.",
   packageAllBooked: "Every session of this package is booked.",
@@ -234,9 +245,12 @@ const en = {
     `Nothing was charged today. Your first payment here of ${price}${hasTax ? " plus any sales tax" : ""} is taken on ${date}, from the card you gave. Cancel before then and you are not charged at all.`,
   trialCharge: (price: string, hasTax: boolean, days: number, date: string) =>
     `Nothing was charged today. Your first payment of ${price}${hasTax ? " plus any sales tax" : ""} is taken when the ${days}-day trial ends, on ${date}, from the card you gave. Cancel before then and you are not charged at all.`,
-  /** How a membership renews: for a set number of payments, or until cancelled (payments 0). */
-  renews: (interval: Interval, payments: number) => {
-    const every = { day: "a day", week: "a week", month: "a month", year: "a year" }[interval];
+  /**
+   * How a membership renews: for a set number of payments, or until cancelled (payments 0); `count` of the interval
+   * between charges, "every 3 months" for more than one (609 [WP8]).
+   */
+  renews: (interval: Interval, payments: number, count: number) => {
+    const every = often("en", interval, count, { day: "a day", week: "a week", month: "a month", year: "a year" }[interval]);
     return payments > 0
       ? `This renews once ${every} for ${payments} payments in all and then ends by itself.`
       : `This renews once ${every} until you cancel it.`;
@@ -301,6 +315,8 @@ const en = {
     addedToOrderNoPart: "The product added to this order has no such part.",
     noSuchProduct: "This order has no such product in it.",
     tooOften: "This link has been opened very many times in the last hour. Please try again in a little while.",
+    /** A copy marked with the buyer's email could not be made just now (lib/pdf-stamp.ts, "retry"): never the file unmarked instead. */
+    stampNotReady: "Your copy, marked with your email, could not be made just now. Please try again in a few minutes.",
   },
 };
 
@@ -379,8 +395,11 @@ const es: OrdersWords = {
   givenByStore: (store, date) => `Te lo dio ${store}${date ? ` el ${date}` : ""}`,
   boughtOn: (date) => `Comprado el ${date}`,
   endedNote: "Esta membresía ya no está activa, así que lo que te daba acceso está cerrado ahora. Renuévala y todo se abre de nuevo al instante.",
+  endedClosedNote: "Esta membresía ya no está activa, así que lo que te daba acceso está cerrado ahora.",
   renew: "Renueva tu membresía",
   openCourse: "Abrir el curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "lección completada", "lecciones completadas")}`,
+  progressUnread: "No pudimos comprobar tu progreso en este curso en este momento. Abre el curso para ver por dónde vas.",
   bookSession: (left) => `Reservar una sesión (${left === 1 ? "queda 1" : `quedan ${left}`})`,
   packageExpired: "Ya pasó el plazo para reservar las sesiones de este paquete.",
   packageAllBooked: "Todas las sesiones de este paquete están reservadas.",
@@ -497,10 +516,10 @@ const es: OrdersWords = {
     `Hoy no se cobró nada. Tu primer pago aquí de ${price}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""} se cobra el ${date}, a la tarjeta que indicaste. Cancela antes y no se te cobrará nada.`,
   trialCharge: (price, hasTax, days, date) =>
     `Hoy no se cobró nada. Tu primer pago de ${price}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""} se cobra cuando termine la prueba de ${days} ${plural(days, "día", "días")}, el ${date}, a la tarjeta que indicaste. Cancela antes y no se te cobrará nada.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Esta membresía se renueva ${esOnce(interval)} durante ${payments} ${plural(payments, "pago", "pagos")} en total y luego termina sola.`
-      : `Esta membresía se renueva ${esOnce(interval)} hasta que la canceles.`,
+      ? `Esta membresía se renueva ${often("es", interval, count, esOnce(interval))} durante ${payments} ${plural(payments, "pago", "pagos")} en total y luego termina sola.`
+      : `Esta membresía se renueva ${often("es", interval, count, esOnce(interval))} hasta que la canceles.`,
   manageAt: (hasEnd, url, email) =>
     `Para gestionarla o cancelarla por tu cuenta${hasEnd ? " antes de que termine" : ""}, en cualquier momento y sin escribir a nadie, abre ${url} y escribe ${email}.`,
   cancelByReply: (hasEnd, store) => `Para cancelarla${hasEnd ? " antes de que termine" : ""}, responde a este email y le llegará a ${store}.`,
@@ -550,6 +569,7 @@ const es: OrdersWords = {
     addedToOrderNoPart: "El producto añadido a este pedido no tiene esa parte.",
     noSuchProduct: "Este pedido no contiene ese producto.",
     tooOften: "Este enlace se ha abierto muchísimas veces en la última hora. Vuelve a intentarlo dentro de un rato.",
+    stampNotReady: "Ahora mismo no pudimos preparar tu copia, marcada con tu correo electrónico. Vuelve a intentarlo dentro de unos minutos.",
   },
 };
 
@@ -626,8 +646,11 @@ const fr: OrdersWords = {
   givenByStore: (store, date) => `Offert par ${store}${date ? ` le ${date}` : ""}`,
   boughtOn: (date) => `Acheté le ${date}`,
   endedNote: "Cet abonnement n'est plus actif, l'accès qu'il vous donnait est donc fermé. Renouvelez-le et tout s'ouvre de nouveau immédiatement.",
+  endedClosedNote: "Cet abonnement n'est plus actif, l'accès qu'il vous donnait est donc fermé.",
   renew: "Renouveler votre abonnement",
   openCourse: "Ouvrir la formation",
+  lessonsDone: (done, total) => `${done} ${pluralFr(done, "leçon terminée", "leçons terminées")} sur ${total}`,
+  progressUnread: "Nous n'avons pas pu vérifier votre progression dans cette formation pour le moment. Ouvrez la formation pour voir où vous en êtes.",
   bookSession: (left) => `Réserver une séance (${left}${S}${pluralFr(left, "restante", "restantes")})`,
   packageExpired: "Le délai pour réserver les séances de ce forfait est dépassé.",
   packageAllBooked: "Toutes les séances de ce forfait sont réservées.",
@@ -742,10 +765,10 @@ const fr: OrdersWords = {
     `Rien n'a été débité aujourd'hui. Votre premier paiement ici, de ${price}${hasTax ? ", plus les éventuelles taxes de vente," : ""} est prélevé le ${date}, sur la carte que vous avez indiquée. Annulez avant cette date et rien ne vous sera débité.`,
   trialCharge: (price, hasTax, days, date) =>
     `Rien n'a été débité aujourd'hui. Votre premier paiement de ${price}${hasTax ? ", plus les éventuelles taxes de vente," : ""} est prélevé à la fin de l'essai de ${days}${S}${pluralFr(days, "jour", "jours")}, le ${date}, sur la carte que vous avez indiquée. Annulez avant cette date et rien ne vous sera débité.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Cet abonnement se renouvelle ${frOnce(interval)} pendant ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total, puis prend fin de lui-même.`
-      : `Cet abonnement se renouvelle ${frOnce(interval)} jusqu'à ce que vous l'annuliez.`,
+      ? `Cet abonnement se renouvelle ${often("fr", interval, count, frOnce(interval))} pendant ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total, puis prend fin de lui-même.`
+      : `Cet abonnement se renouvelle ${often("fr", interval, count, frOnce(interval))} jusqu'à ce que vous l'annuliez.`,
   manageAt: (hasEnd, url, email) =>
     `Pour le gérer ou l'annuler vous-même${hasEnd ? " d'ici là" : ""}, à tout moment et sans écrire à personne, ouvrez ${url} et saisissez ${email}.`,
   cancelByReply: (hasEnd, store) => `Pour l'annuler${hasEnd ? " d'ici là" : ""}, répondez à cet e-mail et votre message parviendra à ${store}.`,
@@ -795,6 +818,7 @@ const fr: OrdersWords = {
     addedToOrderNoPart: "Le produit ajouté à cette commande ne contient pas cet élément.",
     noSuchProduct: "Cette commande ne contient pas ce produit.",
     tooOften: "Ce lien a été ouvert un très grand nombre de fois dans la dernière heure. Réessayez dans un moment.",
+    stampNotReady: "Votre copie, marquée avec votre adresse e-mail, n'a pas pu être préparée pour le moment. Réessayez dans quelques minutes.",
   },
 };
 
@@ -871,8 +895,11 @@ const de: OrdersWords = {
   givenByStore: (store, date) => `Von ${store} erhalten${date ? ` am ${date}` : ""}`,
   boughtOn: (date) => `Gekauft am ${date}`,
   endedNote: "Diese Mitgliedschaft läuft nicht mehr, daher ist der Zugang, den sie Ihnen gab, jetzt geschlossen. Verlängern Sie sie, und alles ist sofort wieder offen.",
+  endedClosedNote: "Diese Mitgliedschaft läuft nicht mehr, daher ist der Zugang, den sie Ihnen gab, jetzt geschlossen.",
   renew: "Mitgliedschaft verlängern",
   openCourse: "Kurs öffnen",
+  lessonsDone: (done, total) => `${done} von ${total} ${plural(total, "Lektion", "Lektionen")} erledigt`,
+  progressUnread: "Wir konnten Ihren Fortschritt in diesem Kurs gerade nicht prüfen. Öffnen Sie den Kurs, um zu sehen, wo Sie stehen.",
   bookSession: (left) => `Termin buchen (noch ${left} übrig)`,
   packageExpired: "Die Frist, um die Termine dieses Pakets zu buchen, ist abgelaufen.",
   packageAllBooked: "Alle Termine dieses Pakets sind gebucht.",
@@ -988,10 +1015,10 @@ const de: OrdersWords = {
     `Heute wurde nichts berechnet. Ihre erste Zahlung hier von ${price}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""} wird am ${date} von der angegebenen Karte abgebucht. Kündigen Sie vorher, wird Ihnen gar nichts berechnet.`,
   trialCharge: (price, hasTax, days, date) =>
     `Heute wurde nichts berechnet. Ihre erste Zahlung von ${price}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""} wird am Ende des ${days}-tägigen Testzeitraums, am ${date}, von der angegebenen Karte abgebucht. Kündigen Sie vorher, wird Ihnen gar nichts berechnet.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Die Mitgliedschaft verlängert sich ${deOnce(interval)} für insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")} und endet dann von selbst.`
-      : `Die Mitgliedschaft verlängert sich ${deOnce(interval)}, bis Sie sie kündigen.`,
+      ? `Die Mitgliedschaft verlängert sich ${often("de", interval, count, deOnce(interval))} für insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")} und endet dann von selbst.`
+      : `Die Mitgliedschaft verlängert sich ${often("de", interval, count, deOnce(interval))}, bis Sie sie kündigen.`,
   manageAt: (hasEnd, url, email) =>
     `Um sie${hasEnd ? " vorher" : ""} selbst zu verwalten oder zu kündigen, jederzeit und ohne jemandem zu schreiben, öffnen Sie ${url} und geben Sie ${email} ein.`,
   cancelByReply: (hasEnd, store) => `Um sie${hasEnd ? " vorher" : ""} zu kündigen, antworten Sie auf diese E-Mail, dann erreicht Ihre Nachricht ${store}.`,
@@ -1041,6 +1068,7 @@ const de: OrdersWords = {
     addedToOrderNoPart: "Das zu dieser Bestellung hinzugefügte Produkt hat keinen solchen Teil.",
     noSuchProduct: "Diese Bestellung enthält kein solches Produkt.",
     tooOften: "Dieser Link wurde in der letzten Stunde sehr oft geöffnet. Bitte versuchen Sie es in Kürze noch einmal.",
+    stampNotReady: "Ihre mit Ihrer E-Mail-Adresse gekennzeichnete Kopie konnte gerade nicht erstellt werden. Bitte versuchen Sie es in ein paar Minuten noch einmal.",
   },
 };
 
@@ -1121,8 +1149,11 @@ const it: OrdersWords = {
   givenByStore: (store, date) => `Ricevuto da ${store}${date ? ` ${itOn(date)}` : ""}`,
   boughtOn: (date) => `Acquistato ${itOn(date)}`,
   endedNote: "Questo abbonamento non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.",
+  endedClosedNote: "Questo abbonamento non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso.",
   renew: "Rinnova il tuo abbonamento",
   openCourse: "Apri il corso",
+  lessonsDone: (done, total) => `${done} di ${total} ${plural(total, "lezione completata", "lezioni completate")}`,
+  progressUnread: "Non siamo riusciti a controllare i tuoi progressi in questo corso in questo momento. Apri il corso per vedere a che punto sei.",
   bookSession: (left) => `Prenota una sessione (${left === 1 ? "ne resta 1" : `ne restano ${left}`})`,
   packageExpired: "Il tempo per prenotare le sessioni di questo pacchetto è scaduto.",
   packageAllBooked: "Tutte le sessioni di questo pacchetto sono prenotate.",
@@ -1238,10 +1269,10 @@ const it: OrdersWords = {
     `Oggi non ti è stato addebitato nulla. Il tuo primo pagamento qui di ${price}${hasTax ? " più le eventuali imposte sulle vendite" : ""} viene addebitato ${itOn(date)}, sulla carta che hai indicato. Se annulli prima, non ti viene addebitato nulla.`,
   trialCharge: (price, hasTax, days, date) =>
     `Oggi non ti è stato addebitato nulla. Il tuo primo pagamento di ${price}${hasTax ? " più le eventuali imposte sulle vendite" : ""} viene addebitato alla fine della prova di ${days} ${plural(days, "giorno", "giorni")}, ${itOn(date)}, sulla carta che hai indicato. Se annulli prima, non ti viene addebitato nulla.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `L'abbonamento si rinnova ${itOnce(interval)} per ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto e poi termina da solo.`
-      : `L'abbonamento si rinnova ${itOnce(interval)} finché non lo annulli.`,
+      ? `L'abbonamento si rinnova ${often("it", interval, count, itOnce(interval))} per ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto e poi termina da solo.`
+      : `L'abbonamento si rinnova ${often("it", interval, count, itOnce(interval))} finché non lo annulli.`,
   manageAt: (hasEnd, url, email) =>
     `Per gestirlo o annullarlo in autonomia${hasEnd ? " prima che termini" : ""}, in qualsiasi momento e senza scrivere a nessuno, apri ${url} e inserisci ${email}.`,
   cancelByReply: (hasEnd, store) => `Per annullarlo${hasEnd ? " prima che termini" : ""}, rispondi a questa email e il messaggio arriverà a ${store}.`,
@@ -1291,6 +1322,7 @@ const it: OrdersWords = {
     addedToOrderNoPart: "Il prodotto aggiunto a questo ordine non contiene quella parte.",
     noSuchProduct: "Questo ordine non contiene quel prodotto.",
     tooOften: "Questo link è stato aperto moltissime volte nell'ultima ora. Riprova tra poco.",
+    stampNotReady: "Al momento non è stato possibile preparare la tua copia, contrassegnata con la tua email. Riprova tra qualche minuto.",
   },
 };
 
@@ -1367,8 +1399,11 @@ const nl: OrdersWords = {
   givenByStore: (store, date) => `Gekregen van ${store}${date ? ` op ${date}` : ""}`,
   boughtOn: (date) => `Gekocht op ${date}`,
   endedNote: "Dit lidmaatschap loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.",
+  endedClosedNote: "Dit lidmaatschap loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten.",
   renew: "Verleng je lidmaatschap",
   openCourse: "Open de cursus",
+  lessonsDone: (done, total) => `${done} van ${total} ${plural(total, "les", "lessen")} afgerond`,
+  progressUnread: "We konden je voortgang in deze cursus op dit moment niet controleren. Open de cursus om te zien waar je bent.",
   bookSession: (left) => `Boek een sessie (nog ${left} over)`,
   packageExpired: "De tijd om de sessies van dit pakket te boeken is verstreken.",
   packageAllBooked: "Alle sessies van dit pakket zijn geboekt.",
@@ -1483,10 +1518,10 @@ const nl: OrdersWords = {
     `Vandaag is er niets afgeschreven. Je eerste betaling hier van ${price}${hasTax ? " plus eventuele omzetbelasting" : ""} wordt op ${date} afgeschreven van de kaart die je hebt opgegeven. Zeg je daarvoor op, dan betaal je helemaal niets.`,
   trialCharge: (price, hasTax, days, date) =>
     `Vandaag is er niets afgeschreven. Je eerste betaling van ${price}${hasTax ? " plus eventuele omzetbelasting" : ""} wordt afgeschreven als de proefperiode van ${days} ${plural(days, "dag", "dagen")} afloopt, op ${date}, van de kaart die je hebt opgegeven. Zeg je daarvoor op, dan betaal je helemaal niets.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Het lidmaatschap wordt ${nlOnce(interval)} verlengd, voor in totaal ${payments} ${plural(payments, "betaling", "betalingen")}, en stopt daarna vanzelf.`
-      : `Het lidmaatschap wordt ${nlOnce(interval)} verlengd tot je het opzegt.`,
+      ? `Het lidmaatschap wordt ${often("nl", interval, count, nlOnce(interval))} verlengd, voor in totaal ${payments} ${plural(payments, "betaling", "betalingen")}, en stopt daarna vanzelf.`
+      : `Het lidmaatschap wordt ${often("nl", interval, count, nlOnce(interval))} verlengd tot je het opzegt.`,
   manageAt: (hasEnd, url, email) =>
     `Om het zelf te beheren of op te zeggen${hasEnd ? " voor die tijd" : ""}, op elk moment en zonder iemand te schrijven, open je ${url} en vul je ${email} in.`,
   cancelByReply: (hasEnd, store) => `Om het op te zeggen${hasEnd ? " voor die tijd" : ""}, beantwoord je deze e-mail; dan komt je bericht bij ${store} aan.`,
@@ -1536,6 +1571,7 @@ const nl: OrdersWords = {
     addedToOrderNoPart: "Het product dat aan deze bestelling is toegevoegd, heeft zo'n onderdeel niet.",
     noSuchProduct: "Deze bestelling bevat zo'n product niet.",
     tooOften: "Deze link is het afgelopen uur heel vaak geopend. Probeer het over een poosje opnieuw.",
+    stampNotReady: "Je exemplaar, gemarkeerd met je e-mailadres, kon nu niet worden gemaakt. Probeer het over een paar minuten opnieuw.",
   },
 };
 
@@ -1612,8 +1648,11 @@ const pt: OrdersWords = {
   givenByStore: (store, date) => `Oferecido por ${store}${date ? ` a ${date}` : ""}`,
   boughtOn: (date) => `Comprado a ${date}`,
   endedNote: "Esta subscrição já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.",
+  endedClosedNote: "Esta subscrição já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado.",
   renew: "Renovar a sua subscrição",
   openCourse: "Abrir o curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "aula concluída", "aulas concluídas")}`,
+  progressUnread: "Não foi possível verificar o seu progresso neste curso agora. Abra o curso para ver onde está.",
   bookSession: (left) => `Marcar uma sessão (${left === 1 ? "resta 1" : `restam ${left}`})`,
   packageExpired: "O prazo para marcar as sessões deste pacote já terminou.",
   packageAllBooked: "Todas as sessões deste pacote estão marcadas.",
@@ -1729,10 +1768,10 @@ const pt: OrdersWords = {
     `Hoje não foi cobrado nada. O seu primeiro pagamento aqui, de ${price}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""}, é cobrado a ${date}, no cartão que indicou. Se cancelar antes disso, não paga nada.`,
   trialCharge: (price, hasTax, days, date) =>
     `Hoje não foi cobrado nada. O seu primeiro pagamento de ${price}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""} é cobrado quando terminar o período de teste de ${days} ${plural(days, "dia", "dias")}, a ${date}, no cartão que indicou. Se cancelar antes disso, não paga nada.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Esta subscrição renova-se ${ptOnce(interval)} durante ${payments} ${plural(payments, "pagamento", "pagamentos")} no total e depois termina automaticamente.`
-      : `Esta subscrição renova-se ${ptOnce(interval)} até a cancelar.`,
+      ? `Esta subscrição renova-se ${often("pt", interval, count, ptOnce(interval))} durante ${payments} ${plural(payments, "pagamento", "pagamentos")} no total e depois termina automaticamente.`
+      : `Esta subscrição renova-se ${often("pt", interval, count, ptOnce(interval))} até a cancelar.`,
   manageAt: (hasEnd, url, email) =>
     `Para a gerir ou cancelar por si${hasEnd ? " antes disso" : ""}, a qualquer momento e sem escrever a ninguém, abra ${url} e introduza ${email}.`,
   cancelByReply: (hasEnd, store) => `Para a cancelar${hasEnd ? " antes disso" : ""}, responda a este email e a mensagem chega a ${store}.`,
@@ -1782,6 +1821,7 @@ const pt: OrdersWords = {
     addedToOrderNoPart: "O produto adicionado a esta encomenda não tem essa parte.",
     noSuchProduct: "Esta encomenda não contém esse produto.",
     tooOften: "Esta ligação foi aberta muitíssimas vezes na última hora. Tente novamente daqui a pouco.",
+    stampNotReady: "Não foi possível preparar agora a sua cópia, marcada com o seu e-mail. Tente novamente dentro de alguns minutos.",
   },
 };
 

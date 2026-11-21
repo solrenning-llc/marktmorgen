@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { FAMILIES, UNITS, afterEndByteMonths, itemBytes, keptParts, partAverage, partPeak, reserveBytes, reservePeakBytes, type Unit } from "./store-data-registry";
+import { FAMILIES, PAYPAL_NEVER_REACHES, UNITS, afterEndByteMonths, itemBytes, keptParts, paypalItemBytes, partAverage, partPeak, reserveBytes, reservePeakBytes, type Unit } from "./store-data-registry";
 import { ADD_ON_LINES, COST_LINES, PER_PAYMENT_LINES } from "./plan-cost-registry";
 import { DATA_ROOM_BYTES, ITEM_DATA_BYTES, MAX_ORDER_ITEMS, NON_PAYING_DATA_ROOM_BYTES, ORDER_DATA_BYTES, contentRoomFor, orderDataBytes, orderReserveFor } from "@/lib/store-data-rules";
 import { TIERS } from "@/lib/plan";
@@ -92,12 +92,13 @@ test("what an order keeps for good is written where it is measured, and charged 
   // room what each write adds (tests/order-data.test.ts,
   // scripts/test_order_data_redis.py). So every file a kept or item part
   // names must write through it.
+  // Rule 23 (review of #3448, 9 November 2026): orderWriteIfSame, the same write behind a check of the row it was decided from, counts as writing through lib/order-data.ts; lib/contacts.ts now calls only that one.
   const files = new Set<string>();
   for (const [name, family] of Object.entries(FAMILIES)) {
     if ((family.parts ?? []).some((part) => "kept" in part || "item" in part)) files.add(name.slice(name.indexOf("@") + 1));
   }
   assert.ok(files.size >= 20, `only ${files.size} files keep what an order leaves`);
-  for (const file of files) assert.match(read(file), /\borderWrite(Charged)?\(/, `${file} keeps what an order leaves and does not write it through lib/order-data.ts`);
+  for (const file of files) assert.match(read(file), /\borderWrite(Charged|IfSame)?\(/, `${file} keeps what an order leaves and does not write it through lib/order-data.ts`);
   assert.doesNotMatch(read("lib/orders.ts"), /chargeOrderData|ORDER_DATA_BYTES/, "an order is charged a fixed ceiling again");
 });
 
@@ -105,6 +106,12 @@ test("what an order can keep for good fits what every checkout holds before it o
   const kept = keptParts().reduce((sum, part) => sum + part.bytes, 0);
   assert.ok(kept <= ORDER_DATA_BYTES, `an order keeps ${kept} bytes, ORDER_DATA_BYTES is ${ORDER_DATA_BYTES}`);
   assert.ok(itemBytes() <= ITEM_DATA_BYTES, `a product keeps ${itemBytes()} bytes, ITEM_DATA_BYTES is ${ITEM_DATA_BYTES}`);
+  // A product sold through PayPal can open a community or a private podcast (membership parts) and keeps its PayPal
+  // parts too: the sum, not only the dearest kind, fits (pre-review of claude5/affiliate-refund-lifetime, LEVE 2).
+  assert.ok(paypalItemBytes() <= ITEM_DATA_BYTES, `a PayPal product keeps ${paypalItemBytes()} bytes, ITEM_DATA_BYTES is ${ITEM_DATA_BYTES}`);
+  const sells = read("lib/paypal-sales.ts");
+  assert.match(sells, /product\.recurring \|\| product\.call \|\| product\.pwyw \|\| product\.keys/, "PayPal no longer refuses a recurring product or license keys: PAYPAL_NEVER_REACHES is no longer true");
+  for (const name of PAYPAL_NEVER_REACHES) assert.ok(Object.hasOwn(FAMILIES, name), `${name} is not a family`);
   assert.equal(orderDataBytes(1), ORDER_DATA_BYTES + ITEM_DATA_BYTES);
   assert.equal(orderDataBytes(MAX_ORDER_ITEMS + 50), ORDER_DATA_BYTES + MAX_ORDER_ITEMS * ITEM_DATA_BYTES);
   assert.equal(orderDataBytes(0), orderDataBytes(1));

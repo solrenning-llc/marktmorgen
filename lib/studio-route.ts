@@ -35,6 +35,7 @@ import { fromAnotherSite as crossSite } from "@/lib/request-guard";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { LOCKED_MESSAGE } from "@/lib/locked-words";
 import { lockedOut, lockedUntil } from "@/lib/two-step";
+import { LOCK_UNREAD, lockOrUnread, lockUnreadJson, lockUnreadPage } from "@/lib/two-step-unknown";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
@@ -85,8 +86,9 @@ export type Creator = Access & {
 /**
  * `locked`: a session let in without its second step, for what waits until two-step login turns off (lib/two-step.ts).
  * `used`: the store's studio requests for its window are used (lib/store-allowance-rules.ts).
+ * `unread`: that lock could not be read just now: neither locked nor free, nothing done (lib/two-step-unknown.ts).
  */
-export type Refusal = "signed_out" | "no_store" | "forbidden" | "gone" | "locked" | "used" | "two_step";
+export type Refusal = "signed_out" | "no_store" | "forbidden" | "gone" | "locked" | "used" | "two_step" | "unread";
 
 /**
  * What a check asks of a role: one permission, or "member" — any role at all
@@ -180,12 +182,19 @@ export async function studioAccess(
   request: NextRequest,
   need: Need,
   action = "",
+  /** How many of the studio's requests this one is counted as (guardStoreWrite's `units`). */
+  units = 1,
 ): Promise<{ ok: true; access: Access } | { ok: false; reason: Refusal; store?: Store; message?: string; why?: "used" | "unknown" | "pool" | "daily" }> {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out" };
   // Let in without the second step: what moves money or data out waits (lib/two-step.ts).
-  if (lockedOut(need, action) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
+  if (lockedOut(need, action)) {
+    // A lock that could not be read is never read as free (rule 24): nothing is done, and it is said as such.
+    const until = await lockOrUnread(lockedUntil(session));
+    if (until === LOCK_UNREAD) return { ok: false, reason: "unread" };
+    if (until > 0) return { ok: false, reason: "locked" };
+  }
   const result = await resolveAccess(
     email,
     { pinned: pinnedStore(request), remembered: request.cookies.get(STORE_COOKIE)?.value ?? null, session },
@@ -197,7 +206,7 @@ export async function studioAccess(
   // (lib/store-allowance-rules.ts). Moving to a larger plan, cancelling,
   // deleting the store, downloading its data and leaving a team are never
   // refused for it: they have a small daily bound of their own instead.
-  const counted = await countStudio(access.store, need);
+  const counted = await countStudio(access.store, need, units);
   // Its message already says which: the figure used, no place this month, or no count just now.
   if (!counted.ok) return { ok: false, reason: "used", store: access.store, message: counted.message, why: counted.reason };
   if (counted.store) result.access = { ...result.access, store: counted.store };
@@ -271,11 +280,12 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
 export async function holdStudio(
   store: Store,
   units: number,
-): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string }> {
+): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string; reason: "used" | "unknown" | "pool"; limit: number; left?: number; reset?: string }> {
   const now = Date.now();
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units, now);
-  if (!taken.ok) return { ok: false, message: taken.message };
+  // Why it was refused, and how many were left when that was read, for a caller that words it for itself (lib/list-download.ts).
+  if (!taken.ok) return { ok: false, message: taken.message, reason: taken.reason, limit: taken.limit, left: taken.left, reset: taken.reset };
   return {
     ok: true,
     give: async (n) => {
@@ -305,6 +315,8 @@ export function refusedJson(reason: Refusal, message = ""): Response {
       return Response.json({ ok: false, error: "locked", message: LOCKED_MESSAGE }, { status: 403 });
     case "two_step":
       return Response.json({ ok: false, error: "two_step_required" }, { status: 403 });
+    case "unread":
+      return lockUnreadJson();
   }
 }
 
@@ -330,6 +342,7 @@ export async function creatorFrom(
     if (result.reason === "no_store") return away(origin, "/studio?stripe=nostore");
     if (result.reason === "gone") return away(origin, "/studio?team=gone");
     if (result.reason === "locked") return away(origin, "/studio?two-step=locked");
+    if (result.reason === "unread") return lockUnreadPage(`${origin}/studio`, "your studio");
     if (result.reason === "two_step") return away(origin, "/studio?two-step=required#two-step");
     if (result.reason === "used") return away(origin, studioPath(result.store ?? { sid: "" }, `why=${result.why ?? "used"}`, "paused"));
     return away(origin, studioPath(result.store ?? { sid: "" }, "team=forbidden"));

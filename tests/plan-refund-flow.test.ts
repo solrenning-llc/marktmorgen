@@ -37,30 +37,30 @@ async function main() {
   globalThis.fetch=(async (_input,init)=>{if((init?.method??"GET")==="GET")reads++;else writes++;return new Response(JSON.stringify(reply),{status:200,headers:{"content-type":"application/json"}});}) as typeof fetch;
   try{
     for(const amount of [null,"", "123",true,-1,0,1.5,9007199254740992]){
-      reply={data:[{...valid,amount}],has_more:false};
+      reply={object:"list",data:[{...valid,amount}],has_more:false};
       is("parts amount unknown: "+String(amount),(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"unknown");
       is("earlier amount unknown: "+String(amount),(await findPlanRefund(sid,NOW-60,NOW)).kind,"unknown");
     }
-    for(const bad of [{has_more:false},{data:null,has_more:false},{data:[null],has_more:false},{data:[valid],has_more:null},{data:[{...valid,currency:null}],has_more:false}]){
+    for(const bad of [{has_more:false},{object:"list",data:null,has_more:false},{object:"list",data:[null],has_more:false},{object:"list",data:[valid],has_more:null},{object:"list",data:[{...valid,currency:null}],has_more:false}]){
       reply=bad;
       is("parts incomplete evidence is unknown",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"unknown");
       is("earlier incomplete evidence is unknown",(await findPlanRefund(sid,NOW-60,NOW)).kind,"unknown");
     }
-    reply={data:[valid,{...valid,id:"re_Evidence0002",amount:null}],has_more:false};
+    reply={object:"list",data:[valid,{...valid,id:"re_Evidence0002",amount:null}],has_more:false};
     is("a valid row cannot hide an unreadable refund",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"unknown");
-    reply={data:[valid],has_more:false};
+    reply={object:"list",data:[valid],has_more:false};
     is("confirmed part still settles",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"found");
     is("confirmed earlier refund still found",(await findPlanRefund(sid,NOW-60,NOW)).kind,"found");
-    reply={data:[],has_more:false};
+    reply={object:"list",data:[],has_more:false};
     is("confirmed empty parts",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"none");
     is("confirmed empty history",(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
     for(const charge of [null,"py_OtherEvidence0001"]){
-      reply={data:[{...valid,charge,metadata:{}}],has_more:false};
+      reply={object:"list",data:[{...valid,charge,metadata:{}}],has_more:false};
       is("an unrelated valid refund does not block history: "+String(charge),(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
     }
-    reply={data:[{...valid,charge:null,metadata:null,status:null}],has_more:false};
+    reply={object:"list",data:[{...valid,charge:null,metadata:null,status:null}],has_more:false};
     is("nullable foreign metadata and status are not our refund",(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
-    reply={data:[{...valid,charge:"py_OtherEvidence0001"}],has_more:false};
+    reply={object:"list",data:[{...valid,charge:"py_OtherEvidence0001"}],has_more:false};
     is("the recorded charge identity need not have a card prefix",(await partsOutcome(sid,[{c:"py_OtherEvidence0001",a:123}])).kind,"found");
     is("own known non-card refund still found",(await findPlanRefund(sid,NOW-60,NOW)).kind,"found");
     is("bounded reads without any provider write",[reads,writes],[36,0]);
@@ -71,7 +71,7 @@ async function main() {
   const unreadableStore = await unreadable.store();
   globalThis.fetch=(async (input,init)=>{
     const url=String(input instanceof Request?input.url:input);
-    if((init?.method??"GET")==="GET"&&url.includes("/v1/refunds?"))return new Response(JSON.stringify({data:[{...valid,amount:null,metadata:{plan_refund:unreadableStore.sid}}],has_more:false}),{status:200,headers:{"content-type":"application/json"}});
+    if((init?.method??"GET")==="GET"&&url.includes("/v1/refunds?"))return new Response(JSON.stringify({object:"list",data:[{...valid,amount:null,metadata:{plan_refund:unreadableStore.sid}}],has_more:false}),{status:200,headers:{"content-type":"application/json"}});
     return fetchBefore(input,init);
   }) as typeof fetch;
   try{
@@ -253,8 +253,13 @@ async function main() {
   await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 1);
   world.listDown = false;
   world.chargeListDown = false;
-  is(`undecidable for ${GIVE_UP_DAYS} days: dropped, the stop taken back`, [await h.note(), h.sub().cancel_at_period_end], [null, false]);
-  is("and the creator is told the refund could not be confirmed, the plan renews as usual, how to ask again", world.emails.map((e) => [e.text.includes("We could not confirm the refund"), e.text.includes("It renews as usual unless you cancel it"), e.text.includes("Refund my payment")]), [[true, true, true]]);
+  is(`undecidable for ${GIVE_UP_DAYS} days: still held, the note and the stop kept (rule 24: unknown is never none)`, [(await h.note()) !== null, h.sub().cancel_at_period_end, h.sub().status], [true, true, "active"]);
+  is("and no letter says nothing was refunded", world.emails.length, 0);
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_600);
+  // This refund was made (only ending the plan failed): the old letter would have said "Nothing was refunded" for money given back.
+  is("readable again after it: the refund made is found, the plan ended, the note dropped", [await h.note(), h.sub().status], [null, "canceled"]);
+  is("and the creator is told what was refunded, never that nothing was", world.emails.map((e) => [e.text.includes("We refunded $69"), /Nothing was refunded|was not made|could not confirm/.test(e.text)]), [[true, false]]);
   delete process.env.RESEND_API_KEY;
   await redisPipeline([["HSET", ENDING_KEY, "gone-store-id", JSON.stringify({ s: "sub_gonestore01", at: NOW, m: 1 })]]);
   await finishPlanRefunds(Date.now() + 10_000, NOW + 60);
@@ -280,7 +285,7 @@ async function retainedRefundIdentityEvidence() {
     reads++;
     const index = charges.indexOf(url.searchParams.get("charge") ?? "");
     const row = { ...refund, charge: charges[index], id: unique && index === 1 ? "re_D2Evidence002" : refund.id };
-    return new Response(JSON.stringify({ data: [row], has_more: false }), { status: 200 });
+    return new Response(JSON.stringify({ object: "list", data: [row], has_more: false }), { status: 200 });
   };
   try {
     part("Distinct refunds can cover distinct noted charges");
@@ -308,7 +313,7 @@ async function retainedRefundIdentityEvidence() {
     const url = new URL(String(input instanceof Request ? input.url : input));
     if ((init?.method ?? "GET") === "GET" && url.pathname === "/v1/refunds" && url.searchParams.has("charge")) {
       replayedReads++;
-      return new Response(JSON.stringify({ data: [{ ...only, charge: url.searchParams.get("charge") }], has_more: false }), { status: 200 });
+      return new Response(JSON.stringify({ object: "list", data: [{ ...only, charge: url.searchParams.get("charge") }], has_more: false }), { status: 200 });
     }
     return fetchBefore(input, init);
   };

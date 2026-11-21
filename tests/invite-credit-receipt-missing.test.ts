@@ -19,7 +19,7 @@ const PAST = INVITE_HOLD_DAYS + 4;
 const INVITED = PAST + 20;
 const invoices = new Map<string, Record<string, unknown>[]>();
 // What the POST answers next: a reply with no receipt, one with an odd id, then a real one.
-let reply: (amount: number) => unknown = () => ({});
+let reply: (amount: number, currency: string, customer: string, credit: string) => unknown = () => ({});
 const posts: { credit: string; key: string | null }[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -36,7 +36,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const form = new URLSearchParams(String(init?.body ?? ""));
     const headers = new Headers(init?.headers);
     posts.push({ credit: form.get("metadata[nimbus_invite_credit]") ?? "", key: headers.get("idempotency-key") });
-    return answer(reply(Number(form.get("amount"))));
+    return answer(reply(Number(form.get("amount")), form.get("currency") ?? "", txns[1], form.get("metadata[nimbus_invite_credit]") ?? ""));
   }
   const customer = path.match(/^\/customers\/(cus_[A-Za-z0-9]+)$/);
   if (customer && method === "GET") return answer({ id: customer[1], object: "customer", balance: 0, currency: "usd" });
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     is("still nothing added, still owed and listed", [second.added, record("in_BeaFirst01").state, redis.run(["SISMEMBER", OWED_KEY, "in_BeaFirst01"])], [0, "owed", 1]);
 
     part("The next run gets a real receipt");
-    reply = (amount) => ({ id: "cbtxn_Bea000000001", object: "customer_balance_transaction", amount });
+    reply = (amount, currency, customer, credit) => ({ id: "cbtxn_Bea000000001", object: "customer_balance_transaction", amount, currency, customer, metadata: { nimbus_invite_credit: credit } });
     const third = await settleInvites(Date.now() + 60_000, NOW);
     is("the credit is now done with its receipt", [record("in_BeaFirst01").state, record("in_BeaFirst01").txn], ["done", "cbtxn_Bea000000001"]);
     is("and leaves the owed list", redis.run(["SISMEMBER", OWED_KEY, "in_BeaFirst01"]), 0);

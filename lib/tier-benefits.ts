@@ -31,7 +31,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Store, ensureListId, saleHandles } from "@/lib/store";
+import { type Store, ensureListId, ownerKey, saleHandles, STORE_ID_PATTERN, storeIdCommand, storeRef, erasingField, ERASING_KEY } from "@/lib/store";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { readListings } from "@/lib/catalog";
 import { productOfSub } from "@/lib/tier-rules";
@@ -52,6 +52,7 @@ import {
   type Benefit,
   type MemberLike,
   benefitJson,
+  benefitMarkUnits,
   benefitText,
   isCadence,
   owedNow,
@@ -394,24 +395,39 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   const listId = store.listId ?? (await ensureListId(store.email).catch(() => null))?.listId ?? null;
   if (!listId) return { ok: false, reason: "unknown" };
   const people = [...new Set(writes.map((w) => w.row.person))];
+  const markWork = await charge(benefitMarkUnits(writes.length));
+  if (!markWork.ok) return { ok: false, reason: "used", message: markWork.message };
   // Each person's place in the list is counted before it is known whether it is already there; given back below when it was.
   const bytes = writes.reduce((sum, w) => sum + w.bytes, 0) + people.reduce((sum, p) => sum + whoBytes(p), 0);
   // Its room first; nothing is written when it does not fit or cannot be counted.
   const taken = await takeData(store, [{ slot: SLOT, bytes }], now);
   if (!taken.ok) return taken.reason === "full" ? { ok: false, reason: "full", message: taken.message } : { ok: false, reason: "room" };
   const byPerson = people.map((person) => ({ person, writes: writes.filter((w) => w.row.person === person) }));
+  // The store's own key: its id key, or for a store from before ids its owner's record, told apart by its statsId (v3).
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  const storeIdKey = withId ? storeIdCommand(store.sid)[1] : await ownerKey(storeRef(store));
+  const erasing = await erasingField(storeRef(store));
   const commands: (string | number)[][] = byPerson.map(({ person, writes: own }) => [
     "EVAL",
     BENEFIT_MARK,
-    3,
+    5,
     marksKey(statsId, person),
     whoKey(statsId),
     suppressedKey(listId),
+    storeIdKey,
+    ERASING_KEY,
     suppressionPrint(listId, own[0].row.email),
     person,
+    erasing,
+    withId ? "" : statsId,
     ...own.flatMap((w) => [w.field, givenJson(mark)]),
   ]);
   const replies = repliesFor(await redisPipeline(commands).catch(() => null), commands.length);
+  // The closing walk owns the room now; do not recreate even its counter by giving a late reservation back.
+  if (replies?.some((reply) => reply === -2)) return { ok: false, reason: "erased" };
+  // The owner's record could not be read: not known whether this store is still its own. Nothing was written; the room
+  // is kept (errs fuller, never short).
+  if (replies?.some((reply) => reply === -3)) return { ok: false, reason: "unknown" };
   let giveBack = 0;
   byPerson.forEach(({ person, writes: own }, i) => {
     const reply: unknown = replies ? replies[i] : null;
@@ -442,14 +458,29 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
  * One person's marks written only while they are not on the store's list of the deleted (Codex G on #3014): a person's
  * erasure writes their print (lib/suppression.ts) before it deletes their marks, so a mark written in the same step as
  * this look is either deleted by that erasure or refused here, never left behind it. KEYS[1] their marks, KEYS[2] the
- * list of people with marks, KEYS[3] the store's prints; ARGV[1] their print, ARGV[2] the person, ARGV[3..] field and
- * mark pairs. -1 when they were deleted (nothing written); otherwise each HSETNX's reply, then the SADD's.
- * lib/redis-memory.ts runs it the same way.
+ * list of people with marks, KEYS[3] the store's prints; ARGV[1] their print, ARGV[2] the person. -1 when they were
+ * deleted (nothing written); otherwise each HSETNX's reply, then the SADD's.
+ * KEYS[4] is the store's own key, KEYS[5] its erasing index, ARGV[3] its erasing field and ARGV[4] "" for a store with
+ * an id (its id key fenced on with EXISTS) or, for a store from before ids, its statsId, compared with its owner's
+ * record's own (v3, the rule of lib/store-live-cache.ts setWhileStoreLive v2; Claude 2 and Codex X4 on #4880: v2 fenced
+ * a legacy store on an id key it never has). A gone, erasing or no-longer-its-owner's store returns -2 without any
+ * mark/index write; an owner record that does not parse returns -3 (unknown), never erased. Mark pairs start at
+ * ARGV[5]. lib/redis-memory.ts runs it the same way.
  */
-export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v1
+export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v3
+if ARGV[4] == "" then
+  if redis.call("EXISTS", KEYS[4]) == 0 then return -2 end
+else
+  local raw = redis.call("GET", KEYS[4])
+  if not raw then return -2 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -3 end
+  if record["statsId"] ~= ARGV[4] then return -2 end
+end
+if redis.call("HEXISTS", KEYS[5], ARGV[3]) == 1 then return -2 end
 if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return -1 end
 local out = {}
-for i = 3, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
+for i = 5, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
 out[#out + 1] = redis.call("SADD", KEYS[2], ARGV[2])
 return out`;
 
@@ -511,19 +542,26 @@ export async function benefitMarksOf(store: Store, person: string): Promise<{ be
 
 // ------------------------------------------------------------------ erasure
 
+/** Removes the marks and returns only the bytes this erasure actually removed. */
+const FORGET_BENEFIT_PERSON = `-- marktmorgen:forget-benefit-person:v1
+local flat = redis.call("HGETALL", KEYS[1])
+local listed = redis.call("SREM", KEYS[2], ARGV[1])
+return {redis.call("DEL", KEYS[1]), listed, flat}`;
+
 /** A deleted person's marks (lib/person-erasure.ts): how many keys went. Throws when the answer cannot be read. */
 export async function forgetBenefitPerson(store: Store, person: string): Promise<number> {
   if (!store.statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
-  const key = marksKey(store.statsId, person);
-  const [held] = repliesFor(await redisPipeline([["HGETALL", key]]), 1) ?? [];
-  const flat = stringList(held);
-  const replies = repliesFor(await redisPipeline([["DEL", key], ["SREM", whoKey(store.statsId), person]]), 2);
+  const reply = repliesFor(await redisPipeline([["EVAL", FORGET_BENEFIT_PERSON, 2, marksKey(store.statsId, person), whoKey(store.statsId), person]]), 1);
+  const replies = repliesFor(reply?.[0], 3);
   const gone = replies ? countOf(replies[0]) : null;
-  if (gone === null || !replies || countOf(replies[1]) === null) throw new UnknownReplyError("deleting a person's benefit marks");
+  const unlisted = replies ? countOf(replies[1]) : null;
+  const flat = stringList(replies?.[2]);
+  // One key and one member: keep #4880's exact counts, and read the atomic snapshot whole.
+  if ((gone !== 0 && gone !== 1) || (unlisted !== 0 && unlisted !== 1) || !flat || flat.length % 2 !== 0 ||
+      (gone === 0 && flat.length !== 0)) throw new UnknownReplyError("deleting a person's benefit marks");
   let bytes = 0;
-  if (flat) for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
-  // Their place in the list goes with them, and its room.
-  if (countOf(replies[1]) === 1) bytes += whoBytes(person);
+  for (let i = 0; i < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
+  if (unlisted === 1) bytes += whoBytes(person);
   if (bytes) await giveData(store, [{ slot: SLOT, bytes }]);
   return gone;
 }

@@ -25,12 +25,16 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const path = new URL(String(input)).pathname.replace(/^\/v1/, "");
   const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
   if (path === "/subscriptions") {
-    return answer({ object: "list", has_more: false, data: [{
+    const member = {
       id: "sub_active00001", status: "active", start_date: ANCHOR, billing_cycle_anchor: ANCHOR, trial_end: null,
       metadata: { store: "driftstore", product: basicId },
       customer: { id: "cus_active00001", email: "member@example.com" },
       items: { data: [{ price: { unit_amount: 1000, currency: "usd", metadata: {}, recurring: { interval: "month", interval_count: 1 } }, current_period_end: NOW + 10 * DAY }] },
-    }] });
+    };
+    return answer({ object: "list", has_more: false, data: [
+      member,
+      { ...member, id: "sub_other000001", customer: { id: "cus_other000001", email: "other@example.com" } },
+    ] });
   }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -91,6 +95,50 @@ async function main(): Promise<void> {
   await forgetBenefitPerson(store, person);
   is("nothing kept", await kept(), 0);
   is("after erasure the room's tb slot is back where it started", await tb(), before);
+
+  part("An undo already in progress cannot be credited again by erasure");
+  await giveBenefit(store, "team@example.com", print.benefit.id, [{ sub: "sub_other000001", period: "once" }], NOW * 1000);
+  const otherBytes = await tb();
+  is("the unaffected member has a counted mark", otherBytes > 0, true);
+  await give();
+  const tote = await addBenefit(store, { product: basicId, text: "A canvas tote", cadence: "once" }, (ANCHOR - DAY) * 1000);
+  if (!tote.ok) throw new Error("no second benefit");
+  const second = await giveBenefit(store, "team@example.com", tote.benefit.id, [{ sub: "sub_active00001", period: "once" }], NOW * 1000);
+  if (!second.ok || second.given !== 1) throw new Error("no second mark");
+  const marks = `nl:tben:given:${store.statsId}:${person}`;
+  const index = `nl:tben:who:${store.statsId}`;
+  const real = redis.pipeline.bind(redis);
+  let allowUndo!: () => void;
+  let undoRead!: () => void;
+  const allow = new Promise<void>((resolve) => { allowUndo = resolve; });
+  const reached = new Promise<void>((resolve) => { undoRead = resolve; });
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "HDEL" && c[1] === marks)) {
+      undoRead();
+      await allow;
+    }
+    if (commands.some((c) => c[0] === "HGETALL" && c[1] === marks)) {
+      const snapshot = await real(commands);
+      allowUndo();
+      await undo;
+      return snapshot;
+    }
+    if (commands.some((c) => c[0] === "EVAL" && c.includes(marks) && c.includes(index))) {
+      allowUndo();
+      await undo;
+    }
+    return real(commands);
+  };
+  const undo = undoGiven(store, print.benefit.id, "sub_active00001", "once", NOW * 1000);
+  await Promise.race([reached, undo]);
+  try {
+    await forgetBenefitPerson(store, person);
+    is("the concurrent undo removed the original mark", await undo, { ok: true, undone: true });
+  } finally {
+    allowUndo();
+    redis.pipeline = real;
+  }
+  is("only the unaffected member's bytes remain counted", await tb(), otherBytes);
   done();
 }
 

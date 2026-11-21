@@ -123,9 +123,11 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [301, 70_000];
  * SCARD, two SMEMBERS), whose members are then counted with the rest (ERASE_PER.waitlists), four more: 571.
  */
 // 567 before #4290 and #4462; four more cover the own ask count and the atomic ask eraser's fixed work (ZCARD, EVAL,
-// ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575; and (750 [CD1]) a person's files sent for review,
-// ERASE_SUBMISSIONS: 575 before them.
-export const ERASE_FIXED_COMMANDS = 575 + ERASE_SUBMISSIONS[0];
+// ZRANGEBYSCORE, DEL), and #4462's four for the waitlist marks: 575; and (Codex X4 on #4880) a person's benefit marks
+// erased by one EVAL whose three calls replace three commands, one more: 576; and (750 [CD1]) a person's files sent for
+// review, ERASE_SUBMISSIONS: 576 before them (575 plus the benefit marks' one, written apart so the cost registry's
+// source line for the waitlist marks still holds). No public allowance changes.
+export const ERASE_FIXED_COMMANDS = 575 + 1 + ERASE_SUBMISSIONS[0];
 /**
  * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
  * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted

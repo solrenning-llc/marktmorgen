@@ -70,6 +70,7 @@ import { POST as ranswers } from "@/app/api/store/answers/route";
 import { POST as rassistant_settings } from "@/app/api/store/assistant-settings/route";
 import { POST as rblog } from "@/app/api/store/blog/route";
 import { POST as rbundle } from "@/app/api/store/bundle/route";
+import { POST as rbusiness_tasks } from "@/app/api/store/business-tasks/route";
 import { POST as rcampaign_landing } from "@/app/api/store/campaign-landing/route";
 import { POST as rcommunity } from "@/app/api/store/community/route";
 import { POST as rcommunity_chat } from "@/app/api/store/community/chat/route";
@@ -131,6 +132,7 @@ const ROUTES: Record<string, Handler> = {
   "assistant-settings": rassistant_settings as Handler,
   "blog": rblog as Handler,
   "bundle": rbundle as Handler,
+  "business-tasks": rbusiness_tasks as Handler,
   "campaign-landing": rcampaign_landing as Handler,
   "community": rcommunity as Handler,
   "community/chat": rcommunity_chat as Handler,
@@ -331,6 +333,7 @@ async function main(): Promise<void> {
     ["product", { action: "remove", id: xid }],
     ["keys", { action: "clear", id: xid }],
     ["bundle", { action: "clear", id: xid }],
+    ["business-tasks", { action: "remove", id: "abcdefghij" }],
     ["option", { action: "remove", id: "x" }],
     ["podcast", { action: "remove", id: xid, episode: "x" }],
     ["page-funnels", { action: "remove", id: "x" }],
@@ -448,6 +451,7 @@ async function main(): Promise<void> {
     "call": ["act:products:remove"],
     "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
+    "business-tasks": ["act:settings:remove"],
     "calendar": ["need:settings"],
     "campaign-landing": ["act:products:remove"],
     "community": ["lockedFor"],
@@ -560,6 +564,7 @@ async function main(): Promise<void> {
     "assistant": "not:a buyer's own conversation with the store's assistant",
     "blog": { delete: "act:page" },
     "bundle": { clear: "act:products", create: "open:adds", save: "open:edits" },
+    "business-tasks": { add: "open:adds", done: "open:reversible", edit: "open:edits", remove: "act:settings" },
     "assistant-memory": "need:settings",
     "calendar": "need:settings",
     "campaign-landing": { remove: "act:products", save: "open:edits" },

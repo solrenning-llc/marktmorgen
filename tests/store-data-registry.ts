@@ -613,6 +613,9 @@ export const FAMILIES: Record<string, Family> = {
     parts: [capped(TASK_COUNT_WEIGHT, "The count's field noted once past a full room, when a paid recount saves it.", src("lib/crm.ts", "TASK_COUNT_WEIGHT", "noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }])"))],
   },
   "nl:crm:tasks:@lib/person-agenda-read.ts": { what: "Tasks about a person, only counted here (one HLEN, tasksKept) before the agenda reads them; kept and counted by lib/crm.ts", room: ["lib/crm.ts"] },
+  // IA2 unit 2 (10 November 2026): the store's own task list, one record taken in the room before it is written.
+  "nl:biztasks:@lib/business-tasks.ts": room("The store's own task list, at what it weighs, at most MAX_BUSINESS_TASKS tasks", "lib/business-tasks.ts"),
+  "nl:biztasklock:@lib/business-tasks.ts": short("One change of the store's task list at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:tasklock:@lib/crm.ts": short("One change of a store's tasks at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:erased:@lib/crm.ts": short("A person deleted from the store and not come back (the server's time, no personal data): no value is set about them (SET_CRM_VALUE) until a paid order, a confirmed sign-up or place, or a free product claimed through its emailed link takes it away (a form never does); one key an erasure, ERASED_MARK_SECONDS (31 days: the longest a studio page's session, 30 days, lets a save prepared before arrive), counted at every studio request", "studio", ERASED_MARK_SECONDS / 86_400, KEY),
   "nl:crm:gen:@lib/crm.ts": short("A person's generation, the time of their last deletion (a number of milliseconds, never one it had): a page read before a deletion is refused (SET_CRM_VALUE); one key an erasure, ERASED_MARK_SECONDS from the last, counted at every studio request", "studio", ERASED_MARK_SECONDS / 86_400, KEY),

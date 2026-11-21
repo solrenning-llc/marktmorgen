@@ -1,4 +1,4 @@
-import { consumerGate } from "@/lib/eu-vat-gate";
+import { EuVatCollectRefused, euCartGate } from "@/lib/eu-vat-collect";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm } from "@/lib/digital-consent";
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
@@ -25,7 +25,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { countHit } from "@/lib/visit";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
@@ -40,6 +40,7 @@ import { CartShippingRefused } from "@/lib/cart-checkout";
 import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
+import { everywhereBut } from "@/lib/physical-legal-ship";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { giveBackHold, holdAdmission, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
 import { limitedStock } from "@/lib/product-extras";
@@ -132,9 +133,10 @@ export async function GET(request: NextRequest) {
           label: sending.cents > 0 ? sw.rate : sw.freeRate,
           where: sw.shipsTo(
             shipsToWords(
-              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries },
+              // Everywhere but the closed countries (lib/physical-legal-ship.ts): said in a few words, not listed.
+              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries, except: everywhereBut(sending.countries) ?? undefined },
               locale,
-              { and: sw.and, more: sw.more, everywhere: sw.everywhere },
+              { and: sw.and, more: sw.more, everywhere: sw.everywhere, everywhereElse: sw.everywhereElse, everywhereElseEu: sw.everywhereElseEu },
             ),
           ),
           notTo: country && !sending.countries.includes(country) ? words.notTo(countryName(country)) : null,
@@ -340,10 +342,10 @@ export async function POST(request: NextRequest) {
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
   // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as for one product: before anything is held or charged, a cart
   // with a paid product for the EU or the UK is refused, and one without the billing country asks for it.
-  for (const product of products) {
-    const gate = consumerGate({ product, headers: request.headers, form: sent });
-    if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
-  }
+  // Since 789 [IV1] step 3, unit 3 (lib/eu-vat-collect.ts euCartGate): exactly this loop over consumerGate while no
+  // record says "collect" with its switch on, as today; with one on, a cart whose products all agree has the VAT on top.
+  const gate = euCartGate({ products, headers: request.headers, form: sent });
+  if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);
@@ -354,10 +356,12 @@ export async function POST(request: NextRequest) {
   // Whether this press took a hold count (holdAdmission), given back when no unit stays held.
   let charged = false;
   try {
-    const via = await attributionFor(store, products[0].id, {
+    // A lookup that does not answer never stops the sale: the click rides on the order as pending (owner's decision 6).
+    const credit = await attributionOrPending(store, products[0].id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    }).catch(() => null);
+    }, products.map((p) => p.id));
+    const via = credit.known ? credit.via : null;
     const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && products.every((p) => assistReminderOffered(store, p));
     // Offers after paying, from the first product in the cart whose funnel is
     // on (lib/cart-offers.ts): a secret for this browser, its fingerprint on
@@ -386,11 +390,13 @@ export async function POST(request: NextRequest) {
       cameFrom: cameFrom(request.headers.get("referer"), new URL(origin).hostname),
         // The channel this sale is credited to: the page's own tags, else the
         // one remembered for this visitor (lib/visit-channel.ts), else direct.
-        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
+        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)), ...pendingChannel(credit) },
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
-    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused);
+      // Only when the cart's EU gate said to collect (never while nothing collects): the VAT on top, or a refusal before Stripe.
+      ...(gate.collect ? { euVat: { country: gate.collect.country } } : {}),
+    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused || error instanceof EuVatCollectRefused);
     // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
     if (!holding.ok) {
       if (charged) await giveBackHold(store, clientAddress(request));
@@ -408,12 +414,14 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers });
   } catch (error) {
     // Refused before Stripe was asked: no unit stays held, so the hold count is given back.
-    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused)) await giveBackHold(store, clientAddress(request));
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused || error instanceof EuVatCollectRefused)) await giveBackHold(store, clientAddress(request));
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked (or the page was from before its words changed): back to the cart, nothing charged.
     if (error instanceof DigitalConsentMissing) return away(`/@${store.handle}?cart=consent#cart`);
     // Its physical products cannot all be shipped to one address any more (lib/cart-shipping.ts): back to the cart, which says which.
     if (error instanceof CartShippingRefused) return away(`/@${store.handle}?cart=changed#cart`);
+    // The VAT this cart needs could not be put on it (lib/eu-vat-collect.ts): refused as an EU or UK cart is today.
+    if (error instanceof EuVatCollectRefused) return away(`/@${store.handle}?cart=abroad#cart`);
     console.error("a cart's checkout failed", error);
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
     // Stripe says the account cannot take card payments: written down, and said on the store page (lib/stripe-charges.ts).

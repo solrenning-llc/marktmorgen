@@ -45,3 +45,4 @@ zapier/node_modules/
 
 # Compiled Python, from running the scripts/*.py checks locally (Claude 6 on #3426, L1).
 __pycache__/
+*.pyc

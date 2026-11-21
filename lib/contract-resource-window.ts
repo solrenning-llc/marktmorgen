@@ -117,6 +117,10 @@ export async function reservePaidResourceWindow(
  let selected:Record<string,unknown>;
  try{
   if(!store||typeof store!=='object')return false;
+  // The store's allowanceAnchor (lib/allowance-window.ts, a switch of interval) is left out on purpose: a cohort is
+  // bound to the funded proof's own period, so it is counted in that period's months, one cohort per month of it. The
+  // anchored windows the store's counters use run at the same pace, one whole month each from the anchor's day, so a
+  // switch neither adds a cohort nor takes one away (tests/contract-resource-window.test.ts).
   selected=Object.fromEntries(['statsId','tier','cycle','subscriptionId','subscriptionActive','trialEnds','planEndedAt','period'].map(name=>{
    const field=Object.getOwnPropertyDescriptor(store,name);
    return[name,field&&Object.hasOwn(field,'value')?field.value:null];

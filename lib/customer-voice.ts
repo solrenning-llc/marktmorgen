@@ -8,14 +8,20 @@
  * an AI summary of open answers with their sentiment; Baremetrics'
  * Cancellation Insights groups the reasons members give; Amplitude's
  * feedback agent groups feedback into themes and sends them on a schedule.
- * Here four lists the studio already keeps, each shown on its own, are read
+ * Here six lists the studio already keeps, each shown on its own, are read
  * together:
  *
  *   - what members wrote when canceling (lib/membership-numbers.ts);
  *   - questions a product page or the store's guide could not answer
  *     (lib/answers.ts);
  *   - the words of reviews (lib/reviews.ts);
- *   - what was searched for on the store and found nothing (lib/stats.ts).
+ *   - what was searched for on the store and found nothing (lib/stats.ts);
+ *   - questions the Store assistant could not answer (lib/store-assistant.ts);
+ *   - how many are on the waitlist of each product coming soon so far,
+ *     confirmed or not, never who (lib/waitlist.ts).
+ *
+ * What the last two read is paid for first, in VOICE_EXTRA_STUDIO_UNITS more
+ * of the store's studio requests (app/api/store/voice; review of #3731).
  *
  * A list whose read failed is never taken for an empty one (rule 24): the
  * summary stands for the whole month, so it is made only from every list
@@ -51,18 +57,22 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
+import { assistantMissedExact } from "@/lib/store-assistant";
+import { waitlistSizes, WAITLIST_VOICE_PRODUCTS } from "@/lib/waitlist";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
-import { readTitles } from "@/lib/catalog";
+import { productIds, readTitles } from "@/lib/catalog";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
+import { cleanReviewText } from "@/lib/review-ai-summary-rules";
 import type { Store } from "@/lib/store";
 
-export type VoiceSource = "cancel" | "question" | "review" | "search";
-export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search"];
+export type VoiceSource = "cancel" | "question" | "review" | "search" | "assistant" | "waitlist";
+export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant", "waitlist"];
 
 /** One text from a customer, as the model is handed it, by its number. */
 export type VoiceItem = {
@@ -105,6 +115,12 @@ export type VoiceSummary = {
 };
 
 export const DAYS = 90;
+/**
+ * The studio requests one summary click takes beyond its own, before it reads: one SMEMBERS of the products coming
+ * soon, a HLEN for each of up to WAITLIST_VOICE_PRODUCTS of them and one LRANGE of the assistant's unanswered
+ * questions, against a studio request's twenty commands (UNIT_COST.studio, tests/plan-cost-registry.ts).
+ */
+export const VOICE_EXTRA_STUDIO_UNITS = Math.ceil((1 + WAITLIST_VOICE_PRODUCTS + 1) / 20);
 /** Fewer texts than this, and there is nothing worth sorting. */
 export const MIN_TEXTS = 8;
 /**
@@ -167,17 +183,37 @@ redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
 
-/** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
-export function cleanVoice(value: string, max = MAX_TEXT): string {
-  return value
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[email]")
-    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, max);
+const VOICE_FAILURE_MESSAGES: Record<VoiceSource | "save", string> = {
+  cancel: "reading cancellation feedback for the customer summary failed",
+  question: "reading customer questions for the customer summary failed",
+  review: "reading customer reviews for the customer summary failed",
+  search: "reading customer searches for the customer summary failed",
+  assistant: "reading the store assistant's unanswered questions for the customer summary failed",
+  waitlist: "reading coming-soon waitlists for the customer summary failed",
+  save: "keeping the customer summary failed",
+};
+
+/** Logs only a fixed operation label: provider errors may contain customer text or request data. */
+export function logVoiceFailure(kind: VoiceSource | "save", _error: unknown): void {
+  console.error(VOICE_FAILURE_MESSAGES[kind]);
 }
+
+/**
+ * A text as it may be sent: one line, short, with addresses, handles, phone
+ * numbers and links taken out. Pure. The same rule as the reviews' summary
+ * (cleanReviewText), so a web address without "http" or "www"
+ * ("janesmith.dev") is a link too, as the privacy policy says (663 [HF1]);
+ * cut at whole characters, never inside an emoji.
+ */
+export function cleanVoice(value: string, max = MAX_TEXT): string {
+  return Array.from(cleanReviewText(value)).slice(0, max).join("");
+}
+
+/**
+ * The text a waitlist of a product no longer in the store stands under (Claude 7 on #3731): the store's own product
+ * index no longer lists it, so its name is gone for good, not unread. Its people are still counted, never named.
+ */
+export const REMOVED_WAITLIST_TEXT = "A product no longer in your store";
 
 /**
  * The texts of the last 90 days, newest first in each list, numbered from 1,
@@ -190,11 +226,15 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   const items: Omit<VoiceItem, "id">[] = [];
   const unread: VoiceSource[] = [];
   const failed = (source: VoiceSource) => (error: unknown) => {
-    console.error(`reading the ${source} texts for what customers are saying failed`, error);
+    logVoiceFailure(source, error);
     unread.push(source);
     return null;
   };
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
+  let titlesRead = true;
+  const titles = await readTitles(store).catch(() => {
+    titlesRead = false;
+    return new Map<string, string>();
+  });
   const titleOf = (id: string) => (id === STORE_PAGE ? "the store page" : titles.get(id));
 
   if (store.stripeAccountId && sellsMemberships(store)) {
@@ -205,6 +245,10 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   }
   for (const q of (await missedQuestions(store, 50).catch(failed("question"))) ?? []) {
     if (q.at >= since) items.push({ source: "question", text: q.question, n: 1, product: titleOf(q.productId) });
+  }
+  // The Store assistant's own unanswered questions (95 [D2-DEMAND-RADAR]), read exactly: never who asked.
+  for (const q of (await assistantMissedExact(store).catch(failed("assistant"))) ?? []) {
+    if (q.at >= since) items.push({ source: "assistant", text: q.question, n: 1 });
   }
   const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(failed("review"));
   for (const r of reviews?.rows ?? []) {
@@ -217,10 +261,30 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
     }
   }
 
+  // Products coming soon that people joined the waitlist for (95 [D2-DEMAND-RADAR]): the name and how many, never who.
+  // The product's name is the text. A product the store's own index still lists but whose name could not be read
+  // leaves the waitlists unread, never left out (Codex T on #3731). A product the index no longer lists was removed
+  // while its waitlist stayed: its name is gone for good, not unread, so its people are counted under
+  // REMOVED_WAITLIST_TEXT and the summary can still be made (Claude 7 on #3731; before, one such product kept the
+  // waitlists unread for good, and every press paid its units for an answer that could not change).
+  const sizes = await waitlistSizes(store).catch(failed("waitlist"));
+  const listed = new Set(productIds(store));
+  const nameless = (w: { productId: string }) => listed.has(w.productId) && (!titlesRead || !titles.get(w.productId));
+  if (sizes && sizes.some((w) => w.people > 0 && nameless(w))) unread.push("waitlist");
+  else {
+    let gone = 0;
+    for (const w of sizes ?? []) {
+      if (w.people <= 0) continue;
+      if (!listed.has(w.productId)) gone += w.people;
+      else items.push({ source: "waitlist", text: titles.get(w.productId) as string, n: w.people });
+    }
+    if (gone > 0) items.push({ source: "waitlist", text: REMOVED_WAITLIST_TEXT, n: gone });
+  }
+
   const out: VoiceItem[] = [];
   for (const item of items) {
     const text = cleanVoice(item.text);
-    if (text.replace(/\[(email|link|number)\]/g, "").trim().length < 2) continue;
+    if (text.replace(/\[(email|handle|link|number)\]/g, "").trim().length < 2) continue;
     out.push({ ...item, text, id: out.length + 1 });
     if (out.length >= MAX_TEXTS) break;
   }
@@ -234,9 +298,11 @@ export function voicePrompt(items: VoiceItem[]): string {
     question: "a visitor's question the page could not answer",
     review: "a buyer's review",
     search: "words searched for on the store that found nothing",
+    assistant: "a buyer's question the Store assistant could not answer",
+    waitlist: "a product coming soon people joined the waitlist for",
   };
   return items
-    .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, searched ${i.n} times` : ""}) ${i.text}`)
+    .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, ${i.source === "waitlist" ? "joined" : "searched"} ${i.n} times` : ""}) ${i.text}`)
     .join("\n");
 }
 
@@ -311,11 +377,49 @@ function parseSummary(raw: unknown): VoiceSummary | null {
  */
 export async function forgetVoicePerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [, gone] = await redisPipeline([
-    ["DEL", lockKey(statsId)],
-    ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
-  ]);
-  return Number(gone) || 0;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["DEL", lockKey(statsId)],
+      ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
+    ]),
+    2,
+  );
+  // Both DELs' own counts only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const locked = countOf(replies?.[0]);
+  const gone = countOf(replies?.[1]);
+  if (locked === null || gone === null) throw new UnknownReplyError("the customer voice summaries deleted");
+  return gone;
+}
+
+/**
+ * A review its buyer deleted (app/api/store/review/route.ts; Claude 7's reviews hunt, 14 November 2026): every summary
+ * kept for the store that quotes its words goes, with the lock of a reading under way, so that reading is not kept
+ * (VOICE_KEEP). A summary that does not read (another reply than text or nothing) goes too, never kept on a guess. One
+ * GET of each kept month, then at most one DEL. Returns how many summaries went.
+ */
+export async function forgetReviewWords(statsId: string | null, text: string, now = Date.now()): Promise<number> {
+  const words = text.trim();
+  if (!statsId || !words || !isRedisConfigured()) return 0;
+  const quoted = new Set([words, cleanVoice(words)]);
+  const keys = keptMonths(now).map((month) => voiceKey(statsId, month));
+  const replies = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  const gone = keys.filter((key, i) => {
+    const raw = replies ? replies[i] : undefined;
+    if (raw === null) return false;
+    const summary = parseSummary(raw);
+    if (!summary) return true;
+    return [...summary.themes, ...(summary.reviewThemes ?? [])].some((theme) => theme.examples.some((example) => example.source === "review" && quoted.has(example.text)));
+  });
+  if (!gone.length) return 0;
+  // Each DEL read exactly (CX-123 rule 24; Codex U and T): one lock and these summaries can answer at most 1 and
+  // gone.length. Anything else is unknown and throws, so the review route schedules the retry, never "forgotten".
+  const deleted = repliesFor(await redisPipeline([["DEL", lockKey(statsId)], ["DEL", ...gone]]), 2);
+  const unlocked = countOf(deleted?.[0]);
+  const summaries = countOf(deleted?.[1]);
+  if (unlocked === null || unlocked > 1 || summaries === null || summaries > gone.length) {
+    throw new UnknownReplyError("deleting the summaries that quote the deleted review words");
+  }
+  return summaries;
 }
 
 /** This month's summary, or last month's while this month has none yet. */
@@ -332,13 +436,18 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] };
+  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] }
+  // The studio requests the lists' reads are paid with could not be taken: their own refusal and words (review of #3731).
+  | { ok: false; reason: "studio"; refused: string; message: string };
+
+/** Takes what the lists' reads cost (the route's countStudio), just before they are read. */
+export type VoicePay = () => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
 
 /**
  * This month's summary: the one already made, or, when there is none and
  * enough to sort, made now as one of the month's AI jobs.
  */
-export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceResult> {
+export async function makeVoice(store: Store, now = Date.now(), pay?: VoicePay): Promise<VoiceResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   const month = monthOf(now);
   const [kept] = await redisPipeline([["GET", voiceKey(store.statsId, month)]]);
@@ -350,6 +459,12 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   });
   if (!held) return { ok: false, reason: "busy" };
   try {
+    // The lists' reads are paid for just before they are read: never for a summary already kept this month, nor
+    // while another reading holds the lock (MR; Claude 1's LOW on #3731). Refused: nothing is read.
+    if (pay) {
+      const paid = await pay();
+      if (!paid.ok) return { ok: false, reason: "studio", refused: paid.reason, message: paid.message };
+    }
     const { items, unread } = await gatherVoice(store, now);
     // A list unread: no summary from part of what customers said, since it would stand for the whole month, and
     // too few is then not known to be few. Nothing is asked or counted, so the creator can try again.
@@ -364,7 +479,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     const done = await counted(store, now, async () => {
       const system = [
         "You sort what an online store's customers wrote into the few themes they repeat.",
-        "You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched for on the store that found nothing.",
+        "You are given numbered texts: words members wrote when canceling, questions a product page or the store's assistant could not answer, reviews, words searched for on the store that found nothing, and products coming soon with how many are on their waitlists.",
         `Group texts that say the same thing into at most ${MAX_THEMES} themes. A theme needs at least two texts. Leave out texts that fit no theme. Each text goes in one theme at most.`,
         "Name each theme in plain American English, at most 8 words, saying what customers said or wanted (for example: \"Wants a printable version\", \"Price feels high for what is inside\"). No numbers in a name, no judgment of the customers, nothing that is not in the texts.",
         "Return only a JSON object: {\"themes\": [{\"title\": string, \"ids\": [numbers of its texts]}]}, the most repeated theme first.",
@@ -380,7 +495,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
     // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
     const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
-      console.error("keeping the summary of what customers say failed", error);
+      logVoiceFailure("save", error);
       return null;
     });
     if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };

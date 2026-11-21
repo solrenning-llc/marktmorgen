@@ -78,8 +78,8 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${statsId}:sales`, "cs_part", sale("cs_part", ANA, 10_000)],
   ]);
   refunds = [
-    { status: "succeeded", payment_intent: "pi_cs_full", amount: 10_000 },
-    { status: "succeeded", payment_intent: "pi_cs_part", amount: 4_000 },
+    { id: "re_full", object: "refund", status: "succeeded", payment_intent: "pi_cs_full", amount: 10_000, currency: "usd" },
+    { id: "re_part", object: "refund", status: "succeeded", payment_intent: "pi_cs_part", amount: 4_000, currency: "usd" },
   ];
   is("refunded in full: nothing earned", [(await line("cs_full"))?.status, (await line("cs_full"))?.commission], ["refunded", 0]);
   is("refunded in part: 30% of what was kept", [(await line("cs_part"))?.status, (await line("cs_part"))?.commission], ["partly refunded", 1_800]);
@@ -93,10 +93,10 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${statsId}:sales`, "cs_ask", sale("cs_ask", BEN, 10_000)],
   ]);
   disputes = [
-    { id: "dp_1", status: "lost", payment_intent: "pi_cs_lost", amount: 10_000, created: NOW },
-    { id: "dp_2", status: "needs_response", payment_intent: "pi_cs_open", amount: 10_000, created: NOW },
-    { id: "dp_3", status: "won", payment_intent: "pi_cs_won", amount: 10_000, created: NOW },
-    { id: "dp_4", status: "warning_needs_response", payment_intent: "pi_cs_ask", amount: 10_000, created: NOW },
+    { id: "dp_1", object: "dispute", status: "lost", payment_intent: "pi_cs_lost", amount: 10_000, currency: "usd", created: NOW },
+    { id: "dp_2", object: "dispute", status: "needs_response", payment_intent: "pi_cs_open", amount: 10_000, currency: "usd", created: NOW },
+    { id: "dp_3", object: "dispute", status: "won", payment_intent: "pi_cs_won", amount: 10_000, currency: "usd", created: NOW },
+    { id: "dp_4", object: "dispute", status: "warning_needs_response", payment_intent: "pi_cs_ask", amount: 10_000, currency: "usd", created: NOW },
   ];
   let book = await readBook(store);
   const commission = (ref: string) => book.lines.find((l) => l.ref === ref)?.commission;
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   is("her own code on her own purchase: nothing earned", [(await line("cs_code4"))?.status, (await line("cs_code4"))?.commission], ["own purchase", 0]);
   await noteSession(store, order("cs_code1", "cy@example.com", {}, code("promo_1TestAnaCode001")));
   is("the same order noticed twice is written once", (await readBook(store)).lines.filter((l) => l.ref === "cs_code1").length, 1);
-  refunds = [{ status: "succeeded", payment_intent: "pi_cs_code1", amount: 5_000 }];
+  refunds = [{ id: "re_code1", object: "refund", status: "succeeded", payment_intent: "pi_cs_code1", amount: 5_000, currency: "usd" }];
   is("and its refund takes the code's commission back too", (await line("cs_code1"))?.commission, 0);
 
   done();

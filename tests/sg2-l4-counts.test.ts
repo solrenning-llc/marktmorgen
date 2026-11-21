@@ -79,22 +79,23 @@ async function outcome<T>(run: () => Promise<T>): Promise<T | string> {
   }
 }
 
-/** The pipeline that counts a limit: [SET key 0 EX n NX, INCR key] on a key starting with `prefix`. */
+/** The pipeline that counts a limit (lib/window-count.ts): [INCR key, EXPIRE key n NX] on a key starting with `prefix`. */
 const counter = (prefix: string) => (commands: (string | number)[][]) =>
-  commands.length === 2 && commands[1]?.[0] === "INCR" && String(commands[1]?.[1]).startsWith(prefix);
+  commands.length === 2 && commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).startsWith(prefix) && commands[1]?.[0] === "EXPIRE";
 const only = (name: string, prefix: string) => (commands: (string | number)[][]) =>
   commands.length === 1 && commands[0]?.[0] === name && String(commands[0]?.[1]).startsWith(prefix);
 
-/** Replies a limit's [SET NX, INCR] must never be read from. */
+/** Replies a window count (lib/window-count.ts: INCR, then EXPIRE NX) must never be read from. */
 const BAD_COUNTERS: [string, unknown][] = [
-  ["a count that is null", ["OK", null]],
-  ["a count written as text", ["OK", "1"]],
-  ["a fractional count", ["OK", 0.5]],
-  ["a negative count", ["OK", -1]],
-  ["a count that is an object", ["OK", { result: 1 }]],
-  ["a count that is true", ["OK", true]],
-  ["a reply missing the count", ["OK"]],
-  ["a third, unasked-for reply", ["OK", 1, 1]],
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a fractional count", [0.5, 1]],
+  ["a negative count", [-1, 1]],
+  ["a count that is an object", [{ result: 1 }, 1]],
+  ["a count that is true", [true, 1]],
+  ["a reply missing the EXPIRE's answer", [1]],
+  ["a third, unasked-for reply", [1, 1, 1]],
   ["a reply that is not a list", { result: 1 }],
   ["a Redis that cannot be asked", "throw"],
 ];
@@ -143,9 +144,9 @@ async function main(): Promise<void> {
       const got = await outcome(() => inviteMember(store, `helper${n}@sg2-l4.example`, "editor", "https://marktmorgen.com"));
       is(`inviteMember, ${label}: refused, never sent`, [typeof got === "string" ? "rejected" : got.ok ? "sent" : got.reason, mails.length - before], [reply === "throw" ? "rejected" : "limited", 0]);
     }
-    rule = { when: counter("nl:rl:team-invite:"), reply: ["OK", 21] };
+    rule = { when: counter("nl:rl:team-invite:"), reply: [21, 1] };
     is("inviteMember: one past the day's limit is limited, as before", await outcome(() => inviteMember(store, "past@sg2-l4.example", "editor", "https://marktmorgen.com")), { ok: false, reason: "limited" });
-    rule = { when: counter("nl:rl:team-invite:"), reply: ["OK", 20] };
+    rule = { when: counter("nl:rl:team-invite:"), reply: [20, 1] };
     const last = await inviteMember(store, "last@sg2-l4.example", "editor", "https://marktmorgen.com");
     is("inviteMember: the day's last one (20) is sent", [last.ok, mails.at(-1)], [true, "last@sg2-l4.example"]);
     rule = null;
@@ -164,9 +165,9 @@ async function main(): Promise<void> {
     const got = await outcome(() => sendTest(phoneStore, owner, "owner", added.id));
     is(`phone sendTest, ${label}: refused, nothing pushed`, [typeof got === "string" ? "rejected" : got.ok ? "sent" : got.reason, pushes.length - before], [reply === "throw" ? "rejected" : "limited", 0]);
   }
-  rule = { when: counter("nl:rl:phone:test:"), reply: ["OK", 7] };
+  rule = { when: counter("nl:rl:phone:test:"), reply: [7, 1] };
   is("phone sendTest: one past the minute's limit is limited, as before", await outcome(() => sendTest(phoneStore, owner, "owner", added.id)), { ok: false, reason: "limited" });
-  rule = { when: counter("nl:rl:phone:test:"), reply: ["OK", 6] };
+  rule = { when: counter("nl:rl:phone:test:"), reply: [6, 1] };
   {
     const before = pushes.length;
     const got = await sendTest(phoneStore, owner, "owner", added.id);
@@ -198,12 +199,12 @@ async function main(): Promise<void> {
   }
   rule = { when: only("SET", "nl:phone:seen:"), reply: [null] };
   is("alertCreator: an event already seen (null) is not pushed again, as before", await alertCreator(phoneStore, "report", alert, { seed: "seen-again" }), 0);
-  rule = { when: counter("nl:rl:phone:quiet:"), reply: ["OK", 21] };
+  rule = { when: counter("nl:rl:phone:quiet:"), reply: [21, 1] };
   {
     const before = pushes.length;
     is("alertCreator: one past the hour's limit is not pushed, as before", [await alertCreator(phoneStore, "report", alert, { seed: "past" }), pushes.length - before], [0, 0]);
   }
-  rule = { when: counter("nl:rl:phone:quiet:"), reply: ["OK", 20] };
+  rule = { when: counter("nl:rl:phone:quiet:"), reply: [20, 1] };
   {
     const before = pushes.length;
     is("alertCreator: the hour's last one (20) is pushed", [await alertCreator(phoneStore, "report", alert, { seed: "last" }), pushes.length - before], [1, 1]);

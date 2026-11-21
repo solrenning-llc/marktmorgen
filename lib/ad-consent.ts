@@ -102,3 +102,66 @@ export const LEAD_ID = /^ld_[0-9a-f]{16}$/;
 export function leadIdOf(raw: unknown): string | undefined {
   return typeof raw === "string" && LEAD_ID.test(raw) ? raw : undefined;
 }
+
+/**
+ * The cookies the ad platforms' own scripts set on a store's site once they
+ * were allowed to run: Meta, Google, TikTok, Pinterest, Reddit and X. They
+ * were set under the yes, so they go with it (tracking-consent hunt, November
+ * 2026): a no, or Global Privacy Control, expires them on this site too.
+ */
+/*
+ * TikTok's ttcsid and ttcsid_<pixel code> are its own first-party session cookies (TikTok Ads help, "About using
+ * cookies with TikTok Pixel", read through a search on 14 November 2026; LOW on #4241).
+ */
+export const PLATFORM_COOKIE = /^(_fbp|_fbc|_ga|_ga_[A-Za-z0-9]{1,40}|_gid|_gat(_[A-Za-z0-9]{1,40})?|_gcl_[a-z]{1,10}|_ttp|_tt_enable_cookie|ttclid|ttcsid|ttcsid_[A-Za-z0-9]{1,40}|_pin_unauth|_epik|_derived_epik|_pinterest_ct_ua|_rdt_uuid|_rdt_cid|_twclid|muc_ads)$/;
+
+/**
+ * The cookie strings that expire every platform cookie in a `document.cookie`
+ * value, on this host and on every parent domain a script may have set it on
+ * (Meta's and Google's set theirs on the site's registrable domain). A domain
+ * the browser will not take, like a public suffix, is simply ignored by it.
+ */
+export function platformCookieExpiries(cookieHeader: string, hostname: string, secure: boolean): string[] {
+  const names = new Set<string>();
+  for (const part of cookieHeader.split(";")) {
+    const name = part.split("=")[0]?.trim() ?? "";
+    if (PLATFORM_COOKIE.test(name)) names.add(name);
+  }
+  if (!names.size) return [];
+  const labels = hostname.toLowerCase().replace(/\.$/, "").split(".").filter(Boolean);
+  const domains = [""];
+  if (labels.length >= 2 && !/^[0-9.]+$/.test(hostname)) {
+    for (let i = 0; i <= labels.length - 2; i++) domains.push(`; Domain=.${labels.slice(i).join(".")}`);
+  }
+  const tail = `; Path=/; Max-Age=0; SameSite=Lax${secure ? "; Secure" : ""}`;
+  return [...names].flatMap((name) => domains.map((domain) => `${name}=${domain}${tail}`));
+}
+
+/**
+ * What the platforms' scripts keep in the browser's storage rather than in a
+ * cookie: Google's conversion linker keeps ad clicks in Local Storage under
+ * _gcl_ls (Google Tag Manager help, "Conversion linker"). ePrivacy art. 5(3)
+ * covers any storage, so they go with the cookies (LOW on #4241). Only names
+ * a platform documents: an unknown key is the site's own, never removed.
+ */
+export const PLATFORM_STORAGE = /^_gcl_ls$/;
+
+/** The keys of a storage that are the platforms', as PLATFORM_STORAGE names them. */
+export function platformStorageKeys(keys: readonly string[]): string[] {
+  return keys.filter((k) => PLATFORM_STORAGE.test(k));
+}
+
+/**
+ * Whether a no on one store may expire the platforms' cookies: not while
+ * another store on the same site (marktmorgen.com/@another) has a stored yes
+ * in this browser. Only a stored yes counts: a store whose pixels run with no
+ * stored choice (outside the countries that ask first) does not keep them,
+ * so a no here may expire cookies its pixels set too, and on a custom
+ * subdomain the parent-domain expiry reaches the parent site's own. Both err
+ * toward less tracking. `choices` are the stored choices of every store in
+ * this browser, by handle.
+ */
+export function mayClearPlatformCookies(handle: string, choices: Record<string, string>, gpc: boolean): boolean {
+  if (gpc) return true;
+  return !Object.entries(choices).some(([other, value]) => other !== handle && value === "yes");
+}

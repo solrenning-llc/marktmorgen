@@ -680,6 +680,14 @@ async function confirmationMutation(op: string, found: FoundOrigin, p: ShipmentM
 }
 async function preparePaid(found: FoundOrigin, p: ShipmentMailPolicy, runtime: ConfirmationOriginRuntime, owner: string): Promise<FoundOrigin | null> {
   const session = await readProviderSession(found, found.row.session, runtime, true);
+  if (session && session.id === found.row.session && session.status === "expired" && session.payment_status !== "paid") {
+    // Stripe's terminal answer from the original account for this exact
+    // verified session: it can never be paid. Release the reserved origin
+    // (shared pool slot and row envelope) instead of holding it forever.
+    // A missing or unverified reply never reaches this and releases nothing.
+    await confirmationMutation("cancel", found, null, runtime);
+    return null;
+  }
   if (!session || session.id !== found.row.session || !knownPhysicalPayment(session)) return null;
   const store = data(found.payload.snapshot.store), product = data(found.payload.snapshot.product);
   if (!store || !product || store.statsId !== found.row.statsId || store.stripeAccountId !== found.row.accountId) return null;
@@ -827,10 +835,13 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       } catch { /* Dispatch barrier and accounting evidence are still retained. */ }
       counts.unknown++; continue;
     }
-    if (outcome === "unknown" || outcome === "waiting") { counts.unknown++; continue; }
-    const changed = await confirmationMutation(outcome === "accepted" ? "accepted" : outcome === "not_accepted" ? "not-accepted" : "refused", found, p, runtime, owner);
+    // Only a known refusal is terminal. An explicit no-POST outcome restores
+    // custody like a non-acceptance; any other value keeps the barrier.
+    const op = outcome === "accepted" ? "accepted" : outcome === "not_accepted" ? "not-accepted" : outcome === "not_posted" ? "not-posted" : outcome === "refused" ? "refused" : null;
+    if (!op) { counts.unknown++; continue; }
+    const changed = await confirmationMutation(op, found, p, runtime, owner);
     if (outcome === "accepted" && changed?.[0] === "accepted") counts.accepted++;
-    else if (outcome === "not_accepted" && changed?.[0] === "queued") counts.waiting++;
+    else if ((outcome === "not_accepted" || outcome === "not_posted") && changed?.[0] === "queued") counts.waiting++;
     else counts.unknown++;
   }
   return counts;

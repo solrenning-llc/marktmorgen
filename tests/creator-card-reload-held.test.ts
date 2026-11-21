@@ -9,7 +9,6 @@ import { answering } from "./security/next-headers";
 import { POST } from "@/app/api/store/creator-card/route";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { NO_CARD, type CreatorCard } from "@/lib/creator-card";
-import { CONTACT_WORDS } from "@/lib/buyer-words/contact";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -33,7 +32,7 @@ function editorProps(node: unknown): { initial: unknown; held?: unknown } | unde
 }
 
 function deleteShown(initial: CreatorCard, held: boolean | undefined): boolean {
-  const html = renderToStaticMarkup(createElement(CreatorCardEditor, { initial, held, handle: "synthetic", storeName: "Synthetic", words: CONTACT_WORDS.en.card, address: "example.com/@synthetic/contact", look: { className: "st-page", style: {}, lang: "en" } }));
+  const html = renderToStaticMarkup(createElement(CreatorCardEditor, { initial, held, handle: "synthetic", storeName: "Synthetic", language: "en", address: "example.com/@synthetic/contact", look: { className: "st-page", style: {}, lang: "en" } }));
   return html.includes(">Delete the card<");
 }
 

@@ -21,7 +21,7 @@ import { setChatAddress } from "@/lib/chat-summary";
 import { setSalesGoal } from "@/lib/sales-goal";
 import { StripeError } from "@/lib/stripe-account";
 import type { Listing } from "@/lib/catalog";
-import { type Store, claimHandle, ensureStatsId, setChatSales, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { type Store, claimHandle, ensureStatsId, ensureStoreId, setChatSales, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as coursesCron } from "@/app/api/cron/courses/route";
 import { GET as remindersCron } from "@/app/api/cron/reminders/route";
 import { GET as discordCron } from "@/app/api/cron/discord/route";
@@ -70,8 +70,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 type Commands = (string | number)[][];
+// A mark taken through claimWhileStoreLive (lib/store-live-cache.ts) is one EVAL whose key is its fifth argument.
 const startsWith = (commands: Commands, name: string, prefix: string) =>
-  commands[0]?.[0] === name && String(commands[0]?.[1] ?? "").startsWith(prefix);
+  (commands[0]?.[0] === name && String(commands[0]?.[1] ?? "").startsWith(prefix)) ||
+  (name === "SET" && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1] ?? "").startsWith("-- marktmorgen:store-claim-live:v1\n") && String(commands[0]?.[5] ?? "").startsWith(prefix));
 
 /** The first pipeline whose first command is `name` on a key starting `prefix` never reaches Redis; `reply` is all there is. */
 async function withReplyOnly<T>(name: string, prefix: string, reply: unknown, run: () => Promise<T>): Promise<T> {
@@ -142,10 +144,19 @@ const SHAPES: [string, unknown][] = [
 async function quietSales(): Promise<void> {
   part("quiet-sales.ts: the day's check and the email are ours only on an exact claim");
   const now = Date.UTC(2026, 9, 20, 12);
-  const store = { handle: "lquiet", previousHandles: [], name: "Quiet", email: OWNER, stripeAccountId: "acct_test", subscriptionActive: true } as unknown as Store;
+  const bare = { handle: "lquiet", previousHandles: [], name: "Quiet", email: OWNER, stripeAccountId: "acct_test", subscriptionActive: true } as unknown as Store;
+  // The stretch's mark is taken only while the store is live (claimWhileStoreLive, Codex L-20261120-1852): every case
+  // below starts from a store with its identity kept, its other fields as before.
+  let store = bare;
+  const seed = async () => {
+    redis.clear();
+    await claimHandle(OWNER, "lquiet", "Quiet", "");
+    await ensureStoreId(OWNER);
+    store = { ...bare, sid: (await storeForEmail(OWNER))!.sid } as Store;
+  };
   const quiet = Array.from({ length: 30 }, (_, i) => ({ id: `cs_q${i}`, created: (now - (20 + i) * DAY) / 1000, status: "complete", payment_status: "paid", metadata: { store: "lquiet" } }));
   for (const [label, reply] of SHAPES) {
-    redis.clear();
+    await seed();
     sessions = quiet;
     stripeCalls = 0;
     emails.length = 0;
@@ -153,19 +164,21 @@ async function quietSales(): Promise<void> {
     is(`the day's check answered ${label}, not written: nothing read, nothing sent`, [outcome, stripeCalls, emails.length], ["skipped", 0, 0]);
     is("and nothing let go", redis.run(["EXISTS", `nl:quiet:seen:2026-10-20:lquiet`]), 0);
   }
-  for (const [label, reply] of SHAPES) {
-    redis.clear();
+  // The stretch's mark is a script now, whose 1 means taken: its wrong shape for "a count" is SET's own "OK".
+  const SCRIPT_SHAPES = SHAPES.map(([label, reply]): [string, unknown] => (label === "a count" ? ["SET's OK, not the script's 1", ["OK"]] : [label, reply]));
+  for (const [label, reply] of SCRIPT_SHAPES) {
+    await seed();
     emails.length = 0;
     const outcome = await withReplyOnly("SET", "nl:quiet:sent:", reply, () => checkQuiet(store, now));
     is(`the email's mark answered ${label}, not written: no email`, [outcome, emails.length], ["skipped", 0]);
   }
-  redis.clear();
+  await seed();
   emails.length = 0;
   stripeCalls = 0;
   is("the day's check answered in another shape but written: read back as ours, the email goes once", await withReplyAfter("SET", "nl:quiet:seen:", ["QUEUED"], () => checkQuiet(store, now)), "sent");
   is("one email", emails.length, 1);
   is("and the same day again is seen", await checkQuiet(store, now), "seen");
-  redis.clear();
+  await seed();
   emails.length = 0;
   is("the email's mark answered in another shape but written: ours, sent", await withReplyAfter("SET", "nl:quiet:sent:", [undefined], () => checkQuiet(store, now)), "sent");
   is("one email", emails.length, 1);
@@ -178,7 +191,7 @@ async function storeAlertsAndSales(): Promise<Store> {
   await setStripeAccount(OWNER, "acct_1TestLtenA0001", true);
   await setSubscription(OWNER, { customerId: "cus_LtenA00001", subscriptionId: "sub_LtenA00001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;
   return store;
@@ -198,7 +211,7 @@ async function storeAlerts(): Promise<void> {
   });
   const fresh = async () => {
     const store = await storeAlertsAndSales();
-    await setSalesGoal(store.statsId!, 50_000, "usd");
+    await setSalesGoal(store, 50_000, "usd");
     sessions = [paid("cs_test_ltenalert00001")];
     emails.length = 0;
     posted.length = 0;
@@ -262,7 +275,7 @@ async function checkoutTrouble(): Promise<void> {
     resendFails = false;
     duringSend = null;
   }
-  is("a failed send lets go of its own mark only: the other run's mark stays", redis.run(["GET", mark]), "another-run");
+  is("a failed send never lets go of another run's mark", redis.run(["GET", mark]), "another-run");
   redis.run(["DEL", mark]);
   resendFails = true;
   try {
@@ -270,7 +283,8 @@ async function checkoutTrouble(): Promise<void> {
   } finally {
     resendFails = false;
   }
-  is("and a failed send with its own mark still held lets it go, so the next refusal can tell", redis.run(["EXISTS", mark]), 0);
+  // A provider error may follow acceptance: false is refused or unknown alike, so the day's mark stays (r24 6.2).
+  is("and a send that did not come back true keeps its own mark, so no second email goes that day", redis.run(["EXISTS", mark]), 1);
 }
 
 async function crons(): Promise<void> {

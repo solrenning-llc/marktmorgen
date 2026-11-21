@@ -134,8 +134,8 @@ test("nothing is written into the programme until the person answers", () => {
   const at = aff.indexOf("if (input.alreadyHere)");
   assert.ok(at > 0, "the recognising branch should exist");
   const branch = aff.slice(at, at + 1_600);
-  // Rule 23: the record writers are now writeNewAffiliate and changeAffiliate; none of them may be here either.
-  assert.doesNotMatch(branch, /writeAffiliate|writeNewAffiliate|changeAffiliate|acceptPartnership/, "recognising somebody is not agreeing for them");
+  // Rule 23: the record writers are now makeAffiliate and changeAffiliate; none of them may be here either.
+  assert.doesNotMatch(branch, /writeAffiliate|writeNewAffiliate|makeAffiliate|changeAffiliate|acceptPartnership/, "recognising somebody is not agreeing for them");
   assert.match(branch, /offerPartnership\(/, "it leaves an offer");
   // The reason belongs in the comment over the branch, which is above `at`.
   assert.match(

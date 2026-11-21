@@ -181,9 +181,31 @@ def main():
         assert db.command("EXISTS", fullkeys[0], fullkeys[1]) == 0
         print("PASS: closed-store fence wins before creation/binding, and full storage budget creates neither origin nor source")
         assert profiles == {"enqueue": 27, "create": 17, "bound_replay": 15, "cursor": 17, "bind": 18}, profiles
-        def shared_change(op, k, expected=None, owner="f" * 48):
+        def shared_change(op, k, expected=None, owner="f" * 48, at=now):
             return db.command("EVAL", shared, 10, *k, op,
-                db.command("GET", k[0]) if expected is None else expected, "", now, 131072, json.dumps(policy), owner)
+                db.command("GET", k[0]) if expected is None else expected, "", at, 131072, json.dumps(policy), owner)
+        # An open checkout waits for the buyer without spending delivery checks
+        # (a deferred unpaid pass gives its check back), but only until the
+        # latest possible Stripe expiry (created + 47h).
+        late, latekeys = fixture("late-payment")
+        late = candidate(late, "cs_test_latePayment000001", "late")
+        late.update(checks=policy["maximumChecks"], next=now)
+        db.command("SET", latekeys[0], json.dumps(late)); db.command("SET", latekeys[1], late["sourceValue"])
+        waited = shared_change("claim", latekeys, owner="1" * 48)
+        assert waited[0] == "preparing" and json.loads(waited[1])["checks"] == policy["maximumChecks"] + 1
+        deferred = shared_change("defer", latekeys, owner="1" * 48)
+        assert deferred[0] == "queued" and json.loads(deferred[1])["next"] == now + policy["retryMilliseconds"]
+        assert json.loads(deferred[1])["checks"] == policy["maximumChecks"]
+        assert int(db.command("ZSCORE", latekeys[2], late["id"])) == now + policy["retryMilliseconds"]
+        stale = dict(late, created=now - 47 * 3_600_000, next=now)
+        db.command("SET", latekeys[0], json.dumps(stale))
+        parked = shared_change("claim", latekeys, owner="1" * 48)
+        assert parked[0] == "queued" and json.loads(parked[1])["next"] == 0 and json.loads(parked[1])["checks"] == policy["maximumChecks"]
+        fresh = dict(late, checks=0, created=now - 47 * 3_600_000, next=now)
+        db.command("SET", latekeys[0], json.dumps(fresh))
+        assert json.loads(shared_change("claim", latekeys, owner="1" * 48)[1])["checks"] == 1
+        db.command("DEL", latekeys[0], latekeys[1]); db.command("ZREM", latekeys[2], late["id"])
+        print("PASS: an unpaid open checkout spends no delivery check until its latest possible Stripe expiry, then the bounded budget applies")
         newperson = prefix + "person:verified-buyer"
         newfence = prefix + "erased:verified-buyer"
         made.update([newperson, newfence])
@@ -251,16 +273,77 @@ def main():
         assert db.command("TTL", keys[0]) == -1
         print("PASS:acceptance on the last funded check parks evidence without leaving a hot polling member")
         before_items = int(db.command("HGET", keys[5], "items"))
+        before_bytes = int(db.command("HGET", keys[5], "bytes"))
+        before_store_items = int(db.command("HGET", keys[6], "items"))
+        before_store_bytes = int(db.command("HGET", keys[6], "bytes"))
+        # Cancellation must still erase both outcome fields. Removing these
+        # commands to satisfy the unchanged budget would lose privacy evidence.
+        global_summary = "refused:" + held["id"]
+        person_summary = "refused:" + held["person"] + ":" + held["id"]
+        db.command("HSET", keys[5], global_summary, "synthetic-outcome")
+        db.command("HSET", keys[6], person_summary, "synthetic-outcome")
         cancel_raw = db.command("GET", keys[0])
         canceled, profiles["cancel_paid"] = measured(lambda: shared_change("cancel", paidkeys, expected=cancel_raw))
         assert canceled == ["canceled"]
         assert db.command("EXISTS", keys[0]) == 0 and db.command("TTL", keys[1]) > 399 * 86_400
         assert db.command("SISMEMBER", newperson, held["id"]) == 0
         assert int(db.command("HGET", keys[5], "items")) == before_items - 1
+        assert int(db.command("HGET", keys[5], "bytes")) == before_bytes - held["bytes"]
+        if before_store_items == 1 and before_store_bytes == held["bytes"]:
+            assert db.command("HMGET", keys[6], "items", "bytes") == [None, None]
+        else:
+            assert db.command("HMGET", keys[6], "items", "bytes") == [str(before_store_items - 1), str(before_store_bytes - held["bytes"])]
+        assert db.command("HGET", keys[5], global_summary) is None
+        assert db.command("HGET", keys[6], person_summary) is None
         assert db.command("SISMEMBER", keys[7], held["id"]) == 0
         print("PASS:origin cancellation erases its actual paid-person index and protected row, releases one shared reservation and retains only the400day matching source")
         assert {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]} == {"paid": 20, "dispatch": 16, "accepted_unsettled": 19, "settlement_retry": 19, "cancel_paid": 25}
         print(json.dumps({"paid_worker_commands_including_eval_and_redis_call": {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]}, "supplier_invoice": False}))
+
+        # Exact safe-integer pool writes must not round or use exponent syntax.
+        # Each case uses an isolated pair of pools and retains the original
+        # 25-command cancellation assertion above, unchanged.
+        for offset, count in enumerate([2, 9007199254740991]):
+            exact, exactkeys = fixture("cancel-decimals-" + str(offset))
+            for key_index in [2, 3, 5, 6, 7]:
+                exactkeys[key_index] += ":exact-" + str(offset)
+            made.update(exactkeys)
+            assert enqueue(exact, exactkeys)[0] == "queued"
+            raw_exact = db.command("GET", exactkeys[0])
+            for pool_key in [exactkeys[5], exactkeys[6]]:
+                db.command("HSET", pool_key, "items", str(count), "bytes", "9007199254740991")
+            canceled_exact, commands_exact = measured(lambda: shared_change("cancel", exactkeys, expected=raw_exact))
+            assert canceled_exact == ["canceled"] and commands_exact == 25
+            for pool_key in [exactkeys[5], exactkeys[6]]:
+                assert db.command("HMGET", pool_key, "items", "bytes") == [str(count - 1), str(9007199254740991 - exact["bytes"])]
+            assert db.command("EXISTS", exactkeys[0]) == 0
+        print("PASS: cancellation retains both erasure fields, exact canonical pool decrements and the unchanged25-command bound")
+
+        # A paid confirmation shares the shipment Lua and pool HASHes. Its
+        # provider refusal keeps the confirmation family's own refused row and
+        # never writes a shipment-family refusal summary that shipment erasure
+        # and person copy cannot own.
+        refused_row, refused_keys = fixture("refused-paid-confirmation")
+        for key_index in [2, 3, 5, 6, 7]:
+            refused_keys[key_index] += ":refused"
+        made.update(refused_keys)
+        assert enqueue(refused_row, refused_keys)[0] == "queued"
+        sent = json.loads(db.command("GET", refused_keys[0]))
+        sent.update(state="dispatching", phase="queued", owner="f" * 48, next=0, leaseUntil=now + 60_000)
+        db.command("SET", refused_keys[0], json.dumps(sent)); db.command("ZREM", refused_keys[2], sent["id"])
+        pools_before = [db.command("HGETALL", refused_keys[5]), db.command("HGETALL", refused_keys[6])]
+        answer = shared_change("refused", refused_keys)
+        assert answer[0] == "refused", answer
+        kept = json.loads(db.command("GET", refused_keys[0]))
+        assert kept["state"] == "refused" and kept["next"] == 0 and kept["sealed"] == sent["sealed"]
+        assert db.command("ZSCORE", refused_keys[2], sent["id"]) is None
+        for pool_key in [refused_keys[5], refused_keys[6]]:
+            assert [f for f in db.command("HKEYS", pool_key) if f.startswith("refused:")] == []
+        assert [db.command("HGETALL", refused_keys[5]), db.command("HGETALL", refused_keys[6])] == pools_before
+        assert db.command("TTL", refused_keys[0]) == -1 and db.command("TTL", refused_keys[1]) == -1
+        assert shared_change("cancel", refused_keys) == ["canceled"]
+        assert db.command("EXISTS", refused_keys[0]) == 0
+        print("PASS: a refused paid confirmation keeps its own refused row and hold, writes no shipment refusal summary, and its own erasure removes it")
 
         # The actual production erasure Lua snapshots older origins and stores
         # bounded markers in the already-funded envelope, never a new key/slot.

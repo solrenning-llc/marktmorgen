@@ -162,6 +162,15 @@ export function usedWords(kind: AllowanceKind, limit: number, reset: string, sta
 export const VISITOR_REFUSAL = "This store can't take this right now. Please try again later.";
 
 /**
+ * A figure's line on the studio page: "120 of 5,000 store emails used", or, when the count could not be read, the
+ * figure and that it was not read. An unread count is never "0 of 5,000 used" (rule 24).
+ */
+export function figureUsedLine(used: number | null, limit: number, many: string): string {
+  const all = `${limit.toLocaleString("en-US")} ${many}`;
+  return used === null ? `${all} in all. How many are used could not be read just now; reload the page to check.` : `${used.toLocaleString("en-US")} of ${all} used`;
+}
+
+/**
  * How many of the store's emails this month are used, as the studio's sending tools say it after "…emails for this
  * month:" (agreements, payment requests). An unread count (null, lib/store-allowance.ts allowanceUsedExact) is said
  * to be unknown, never "0 of N used".

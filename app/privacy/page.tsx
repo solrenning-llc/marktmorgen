@@ -1336,7 +1336,18 @@ export default function PrivacyPage() {
           store that issued them is open, so the page goes on proving what it
           says; a withdrawn one says it was withdrawn. When the store closes
           (section 6), its certificates go with it.
-          A student who wants theirs withdrawn asks the creator.
+          A student who wants theirs withdrawn asks the creator. A certificate
+          whose course was refunded in full or lost in a dispute is withdrawn
+          on its own once the course no longer opens for the student, usually
+          within three hours (longer when the payment service cannot be read,
+          and until the next month when a store has many refunds in one
+          month), and its page then no longer shows the name, the course or
+          the date. The same goes for one the creator already withdrew and
+          for the student&apos;s earlier certificates of that course. A
+          refund still pending, failed or canceled withdraws
+          nothing. A certificate of a course paid through PayPal, given as a
+          gift, pre-ordered, bought for a group, added in one click after
+          checkout or paid in installments is withdrawn by the creator.
         </p>
         <p id="assignments">
           <strong className="text-black">Course assignments.</strong> When a
@@ -1982,7 +1993,10 @@ export default function PrivacyPage() {
             product&apos;s description, a course outline or an email), and
             which receives only what that creator typed into the box for it,
             the product&apos;s name, price and kind, and the store&apos;s
-            name; never anything about their buyers, members or list. For an
+            name; never anything about their buyers, members or list. When the
+            creator asks it to read a product&apos;s own PDF, it also receives
+            the first pages of that file and the product&apos;s description,
+            never the rest of the file. For an
             Outreach email it receives what the creator typed, the
             creator&apos;s name, the names of their products, and the name and
             description a business gives itself on its own website; never

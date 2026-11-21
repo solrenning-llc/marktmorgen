@@ -536,11 +536,14 @@ async function courseLedger(store: Store, email: string, read: "lenient" | "stri
   // bundle that was. Nothing was paid through Stripe, so nothing there can
   // take it back; the creator can still take a student off (setBlocked).
   const given = new Map<string, number>();
-  // Read exactly for the drip job (strict): an unreadable reply is unknown, never "nothing was brought over" (Claude 7's
-  // MEDIUM on #3369), so the module's email waits for the next run instead of being lost under a "shut".
-  for (const purchase of strict && imported ? importedFromExact(broughtOver) : importedFrom(broughtOver)) {
-    for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
-      if (!given.has(id)) given.set(id, purchase.at);
+  if (imported) {
+    // Read exactly for the drip job (strict): an unreadable reply is unknown, never "nothing was brought over" (Claude 7's
+    // MEDIUM on #3369), so the module's email waits for the next run instead of being lost under a "shut". The exact
+    // readers (paidCoursesExact) never take an illegible row for "not had" either (Claude 6's LEVE 1 on #2794).
+    for (const purchase of strict ? importedFromExact(broughtOver) : importedFrom(broughtOver, { complete: exact })) {
+      for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
+        if (!given.has(id)) given.set(id, purchase.at);
+      }
     }
   }
 

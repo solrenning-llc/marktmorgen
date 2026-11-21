@@ -43,7 +43,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
+import { type Store, ERASING_KEY, STORE_ID_PATTERN, erasingField, storeForId, storeForIdExact, storeIdCommand } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
@@ -528,16 +528,42 @@ export function logLineRecord(entry: LogLine): string {
   return JSON.stringify(line);
 }
 
-/** Writes one line into a store's activity log. Never throws. */
-export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<boolean> {
+/**
+ * The line pushed and the log trimmed only while the store is live (Codex X6 on #3678, MEDIUM): its id key still holds
+ * the store's very ref (KEYS[1], ARGV[1]) and its erasing mark (KEYS[2], field ARGV[2]) is absent, the rule of
+ * lib/store-join.ts SAVE_GRANT_IF_LIVE. The erasing mark is written before anything of the store is deleted (ERASING_KEY),
+ * so a line racing the store's erasure never makes its log again, with a teammate's address in it, after dropTeam's DEL.
+ * The LPUSH's count when written, 0 when the store is being erased or gone.
+ */
+const LOG_IF_LIVE = `-- marktmorgen:team-log-if-live:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call("HEXISTS", KEYS[2], ARGV[2]) == 1 then return 0 end
+local pushed = redis.call("LPUSH", KEYS[3], ARGV[3])
+redis.call("LTRIM", KEYS[3], 0, tonumber(ARGV[4]))
+return pushed`;
+
+/** What one log line costs at the most: the GET of the store's ref, and the EVAL with the four calls inside it (GET, HEXISTS, LPUSH, LTRIM). */
+export const LOG_WRITE_COMMANDS = 6;
+/** What the fence adds to a log line over the LPUSH and LTRIM it replaced, charged on every studio request (tests/plan-cost-registry.ts). */
+export const LOG_FENCE_EXTRA_COMMANDS = LOG_WRITE_COMMANDS - 2;
+
+/**
+ * Writes one line into a store's activity log, only while the store is live (LOG_IF_LIVE). Never throws. `ref`: the
+ * store's ref when the caller holds the store (lib/studio-route.ts), so the line takes one round trip, not two; the
+ * script still checks that the id key holds it, so a ref that is no longer the store's writes nothing.
+ */
+export async function logTeam(sid: string, line: Omit<LogLine, "at">, ref?: string): Promise<boolean> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
   const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200), ...(line.access ? { access: line.access } : {}) };
   // Whether the line is known written (its LPUSH answered a count of at least one): a caller that marks a line as told
   // can let the mark go when it was not (lib/creator-refund.ts). Never throws, as before.
   try {
+    const idKey = storeIdCommand(sid)[1];
+    const live = ref || (await redisPipeline([["GET", idKey]]))[0];
+    // No store under this id (gone, or never): nothing is written, so no log is made for it.
+    if (typeof live !== "string" || !live) return false;
     const [pushed] = await redisPipeline([
-      ["LPUSH", logKey(sid), logLineRecord(entry)],
-      ["LTRIM", logKey(sid), 0, LOG_LINES - 1],
+      ["EVAL", LOG_IF_LIVE, 3, idKey, ERASING_KEY, logKey(sid), live, await erasingField(live), logLineRecord(entry), LOG_LINES - 1],
     ]);
     return typeof pushed === "number" && Number.isSafeInteger(pushed) && pushed >= 1;
   } catch (error) {

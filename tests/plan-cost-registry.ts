@@ -98,6 +98,7 @@ import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { LOG_FENCE_EXTRA_COMMANDS } from "@/lib/team";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { BESIDE_POOL_BYTES, DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { ORDER_KEY_BYTES } from "@/lib/order-data";
@@ -2291,6 +2292,16 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/saved-blocks.ts", names: ["MAX_SECTION_BYTES"] },
     ],
     basis: "Links and sections kept, every link read by others at its monthly figure in both calendar months a billing month touches, and every import, preview, update from a section, link made and file exported of the store's window, each page read and written with its earlier version.",
+  },
+  {
+    id: "team-log-fence",
+    feature: "A team log line written only while its store is live (lib/team.ts LOG_IF_LIVE; Codex X6's MEDIUM on #3678): only the commands the fence adds",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * LOG_FENCE_EXTRA_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/team.ts", names: ["LOG_IF_LIVE", "LOG_WRITE_COMMANDS", "LOG_FENCE_EXTRA_COMMANDS"] },
+      { file: "lib/studio-route.ts", names: ["await logTeam(access.store.sid"] },
+    ],
+    basis: "A teammate's studio write logs one line (lib/studio-route.ts), and a few studio actions log one of their own; taken as if every studio request of the plan's figure wrote one. The line's LPUSH and LTRIM, priced inside the studio request's twenty commands before, become the store's ref read (GET) and one EVAL running GET, HEXISTS, LPUSH and LTRIM: LOG_WRITE_COMMANDS in all, LOG_FENCE_EXTRA_COMMANDS more a line, at Upstash's command price. Nothing more is kept: the log stays LOG_LINES lines.",
   },
   {
     id: "team-scheduling",

@@ -3413,6 +3413,14 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
+        // lib/team.ts LOG_IF_LIVE: a team log line pushed and the log trimmed only while the store is live and not being erased.
+        if (key.startsWith("-- marktmorgen:team-log-if-live:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, idKey, erasing, log, ref, field, line, last] = args;
+          if (this.run(["GET", idKey]) !== ref || Number(this.run(["HEXISTS", erasing, field])) === 1) return 0;
+          const pushed = this.run(["LPUSH", log, line]);
+          this.run(["LTRIM", log, "0", last]);
+          return pushed;
+        }
         // lib/team.ts TEAM_INDEX_OFF_TEAM: an id leaves a person's team index only when its team, read in the same step,
         // is gone or lists everyone but them; a team record that does not read keeps the id (Codex U on #3660).
         if (key.startsWith("-- marktmorgen:team-index-off-team:v1\n")) {

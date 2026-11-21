@@ -31,6 +31,9 @@ const OWNER = "rowan@example.com";
 const HANDLE = "rowanshop";
 const ACCOUNT = "acct_1rowanrefund42";
 const CHARGE = "ch_wg9action1";
+/** The team log's write: its fenced script since Codex X6's MEDIUM on #3678 (lib/team.ts LOG_IF_LIVE), its LPUSH before. */
+const isLogWrite = (command: (string | number)[]) =>
+  (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:team-log-if-live:v1\n")) || (command[0] === "LPUSH" && String(command[1]).startsWith("nl:team:log:"));
 const T1 = "1".repeat(32);
 const T2 = "2".repeat(32);
 const T3 = "3".repeat(32);
@@ -145,8 +148,9 @@ async function main(): Promise<void> {
   is("the team member's address never goes to Stripe", (sent[0]?.body ?? "").includes("rowan"), false);
   is("the payment now has 12.50 given back", stripe.charge.refunded, 1_250);
   const afterFirst = await logLines(store);
-  is("one line in the team's log: who, and how much on which payment", afterFirst, [`${OWNER}|owner|Refunded $12.50 on payment ${CHARGE}`]);
+  is("one line in the team's log: who, and how much on which payment", afterFirst, [`${OWNER}|owner|Refunded $12.50 on the payment ending ${CHARGE.slice(-4)}`]);
   is("the buyer's address is not in the log", afterFirst.join(" ").includes("buyer@example.com"), false);
+  is("the payment's whole id is never kept in the log, only its last four characters (Codex X6 on #3678)", afterFirst.join(" ").includes(CHARGE), false);
 
   part("The same form sent again later: Stripe answers the first refund, nothing is given back twice");
   const again = await post({ charge: CHARGE, token: T1, amount: "12.50", reason: "requested_by_customer" });
@@ -260,12 +264,13 @@ async function main(): Promise<void> {
   is("no answer at all: unknown, never done", [lost.status, lost.body.error], [502, "unknown"]);
   const lines = await logLines(store);
   is("the log says what Stripe answered, and never 'Refunded' for an unknown answer", lines.slice(0, 5), [
-    `${OWNER}|owner|Sent a refund of $50 on payment ${CHARGE}; Stripe's answer could not be read`,
-    `${OWNER}|owner|Sent a refund of $50 on payment ${CHARGE}; Stripe's answer could not be read`,
-    `${OWNER}|owner|Sent a refund of $50 on payment ${CHARGE}; Stripe's answer could not be read`,
-    `${OWNER}|owner|Refund of $50 on payment ${CHARGE} refused by Stripe`,
-    `${OWNER}|owner|Refund of $50 on payment ${CHARGE} waiting at Stripe`,
+    `${OWNER}|owner|Sent a refund of $50 on the payment ending ${CHARGE.slice(-4)}; Stripe's answer could not be read`,
+    `${OWNER}|owner|Sent a refund of $50 on the payment ending ${CHARGE.slice(-4)}; Stripe's answer could not be read`,
+    `${OWNER}|owner|Sent a refund of $50 on the payment ending ${CHARGE.slice(-4)}; Stripe's answer could not be read`,
+    `${OWNER}|owner|Refund of $50 on the payment ending ${CHARGE.slice(-4)} refused by Stripe`,
+    `${OWNER}|owner|Refund of $50 on the payment ending ${CHARGE.slice(-4)} waiting at Stripe`,
   ]);
+  is("no line of the log holds the payment's whole id", (await logLines(store)).some((line) => line.includes(CHARGE)), false);
 
   part("Who may: only the payments role, and nothing is asked of Stripe otherwise");
   reset();
@@ -284,7 +289,7 @@ async function main(): Promise<void> {
   const realPipeline = redis.pipeline.bind(redis);
   let dropped = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!dropped && commands[0]?.[0] === "LPUSH" && String(commands[0][1]).startsWith("nl:team:log:")) {
+    if (!dropped && commands[0] && isLogWrite(commands[0])) {
       dropped += 1;
       throw new Error("synthetic: the team log's write was lost");
     }
@@ -331,7 +336,7 @@ async function main(): Promise<void> {
       return ["??"];
     }
     if (name === "GET" && key.startsWith("nl:crefund:told:")) throw new Error("synthetic: the read back failed");
-    if (!lostOnce && name === "LPUSH" && key.startsWith("nl:team:log:")) {
+    if (!lostOnce && commands[0] && isLogWrite(commands[0])) {
       lostOnce += 1;
       throw new Error("synthetic: the team log's write was lost");
     }

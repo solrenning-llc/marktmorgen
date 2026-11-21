@@ -255,6 +255,12 @@ export async function giveRefund(
   return settle(store, who, chargeId, key, reply, amount.cents, left.currency);
 }
 
+/** How the team's log names a payment: "the payment ending" and the id's last four characters, never the whole id. */
+export function paymentInLog(chargeId: string): string {
+  const tail = [...chargeId].slice(-4).join("");
+  return /^[A-Za-z0-9]{4}$/.test(tail) ? `the payment ending ${tail}` : "a payment";
+}
+
 /**
  * The refund's answer measured against what was asked, written once in the team's log (by the refund's id, or the
  * action's key when unknown), and said back.
@@ -262,14 +268,17 @@ export async function giveRefund(
 async function settle(store: Store, who: { email: string; role: Role }, chargeId: string, key: string, reply: unknown, cents: number, currency: string): Promise<RefundAnswer> {
   const state = Number.isSafeInteger(cents) && cents > 0 ? refundOutcome(reply, { chargeId, cents, currency }) : "unknown";
   const money = Number.isSafeInteger(cents) && /^[a-z]{3}$/.test(currency) ? formatMoney(cents, currency) : "an amount not read";
+  // The team's log keeps only the payment id's last four characters, enough to find it in Stripe beside the amount and
+  // the day, never the whole id (Codex X6 on #3678, LOW: the log is kept and read by every teammate).
+  const payment = paymentInLog(chargeId);
   const what =
     state === "done"
-      ? `Refunded ${money} on payment ${chargeId}`
+      ? `Refunded ${money} on ${payment}`
       : state === "pending"
-        ? `Refund of ${money} on payment ${chargeId} waiting at Stripe`
+        ? `Refund of ${money} on ${payment} waiting at Stripe`
         : state === "failed"
-          ? `Refund of ${money} on payment ${chargeId} refused by Stripe`
-          : `Sent a refund of ${money} on payment ${chargeId}; Stripe's answer could not be read`;
+          ? `Refund of ${money} on ${payment} refused by Stripe`
+          : `Sent a refund of ${money} on ${payment}; Stripe's answer could not be read`;
   const toldFor = state === "unknown" ? key : String((record(reply) ?? {}).id);
   // Marked as told first, so two answers at once write one line; a line not known written lets its own mark go, so the
   // same form sent again (Stripe answers the first refund) writes it then (Codex G and Claude 1 on #3678).

@@ -1423,11 +1423,27 @@ export class MemoryRedis {
           this.run(["HSET", diary, field, value]);
           return 1;
         }
-        // The same fenced write, also fenced on the store (lib/storage-reservations.ts WRITE_LIVE): -1 when it is erased.
-        if (key.startsWith("-- marktmorgen:fenced-set-live:v1\n") && args[0] === "4" && args.length === 8) {
-          const [, lock, target, live, erasing, token, value, field] = args;
+        // The same fenced write, also fenced on the store (lib/storage-reservations.ts WRITE_LIVE): -1 when it is erased
+        // or (a store from before ids, statsId given) its owner's record is another store's; -2 for a record that does
+        // not parse.
+        if (key.startsWith("-- marktmorgen:fenced-set-live:v2\n") && args[0] === "4" && args.length === 9) {
+          const [, lock, target, live, erasing, token, value, field, statsId] = args;
           if (this.run(["GET", lock]) !== token) return 0;
-          if (Number(this.run(["EXISTS", live])) !== 1 || this.run(["HGET", erasing, field]) !== null) return -1;
+          if (this.run(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (Number(this.run(["EXISTS", live])) !== 1) return -1;
+          } else {
+            const raw = this.run(["GET", live]);
+            if (raw === null) return -1;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -2;
+            }
+            if (!record || typeof record !== "object") return -2;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
           this.run(["SET", target, value]);
           return 1;
         }

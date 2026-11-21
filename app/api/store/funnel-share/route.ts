@@ -6,7 +6,7 @@ import { fileHeaders, fromAnotherSite } from "@/lib/request-guard";
 import { FUNNEL_ID } from "@/lib/page-funnel";
 import { type BundleOutline, type FunnelBundle, type PlanLine, leftOutWords, outlineOf, planImport, readBundle } from "@/lib/funnel-bundle";
 import { collectBundle, importBundle, receiverOf } from "@/lib/funnel-bundle-store";
-import { MONTH_USE_SECONDS, countUse, createShare, listShares, openShare, revokeShare, shareMonthKey, storeMonthKey, storeUseKey } from "@/lib/funnel-share-store";
+import { MONTH_USE_SECONDS, ShareStoreGoneError, countUse, createStoreShare, listShares, openShare, revokeShare, shareMonthKey, storeMonthKey, storeUseKey } from "@/lib/funnel-share-store";
 import { funnelStarter, starterBeforeLines, starterOutline } from "@/lib/funnel-starters";
 import {
   DEFAULT_SHARE_DAYS,
@@ -174,7 +174,8 @@ export async function POST(request: NextRequest) {
       // What is written is what any receiver would read: a snapshot that does not pass its own rules is never shared.
       const check = readBundle(collected.bundle, { maxBytes: limits.bundleBytes });
       if (!check.ok) return refuse(`bundle_${check.error}`);
-      const made = await createShare(statsId, { name: collected.funnel.name, funnelId, days, from: store.name || `@${store.handle}`, bundle: collected.bundle, outline, limit: limits.shares });
+      // Fenced by the store's erasure (lib/funnel-share-store.ts createStoreShare): a store erased meanwhile gets "gone", no link.
+      const made = await createStoreShare(store, { name: collected.funnel.name, funnelId, days, from: store.name || `@${store.handle}`, bundle: collected.bundle, outline, limit: limits.shares });
       if (!made.ok) return refuse("shares_full", 400, { limit: limits.shares });
       return Response.json(
         { ok: true, code: made.code, link: shareLink(SITE_URL, made.code), share: shown(made.entry), left: leftOutWords(collected.left) },
@@ -290,6 +291,8 @@ export async function POST(request: NextRequest) {
     return refuse("invalid");
   } catch (error) {
     if (isUnread(error)) return unread(tried.counted);
+    // The store was erased, or began to be, while this share was being made: nothing was written, no code is given.
+    if (error instanceof ShareStoreGoneError) return refuse("gone", 410);
     console.error("sharing or bringing in a funnel failed", error);
     return refuse("server_error", 500);
   }

@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, countWithin, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -482,7 +482,10 @@ export async function handIn(input: {
   };
   const member = `${lessonId}|${who}`;
   // Its room first: what it weighs over what it replaces, its two places in the lists the first time, its file's entry.
-  const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (input.file ? ENTRY_BYTES : 0);
+  // The entry only for a file that is not the one already kept (#4486, Codex C2): keeping it writes the same field of
+  // the files' hash again, one entry in Redis, and a drop gives back one entry per field.
+  const newEntry = Boolean(input.file) && input.file?.path !== before?.file?.path;
+  const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (newEntry ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
   input.writing?.();
   // Written only over the work read above (HAND_IN_WRITE_IF): a hand-in whose lease ran out while another replaced the
@@ -943,7 +946,8 @@ export async function forgetTasksPerson(
   // batch: nothing is sent again on a guess and no room is given back, the files read go to the daily job that
   // deletes uploads nobody kept, and the erasure is told it could not finish, never "done".
   const receipt = repliesFor(await redisPipeline(batch), batch.length);
-  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) {
+  // Each count only within what its command could remove (#4794, Codex V): a DEL of one record answering 2 is unknown.
+  if (!receipt || !receipt.every((reply, i) => countWithin(reply, batch[i]) !== null)) {
     if (files.length) await redisPipeline([["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]]);
     throw new UnknownReplyError("the deletion of a student's work on a course's assignments");
   }

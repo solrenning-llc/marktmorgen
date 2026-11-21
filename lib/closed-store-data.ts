@@ -65,7 +65,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
-import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock } from "@/lib/redis-lock";
+import { type FencedChange, type Held as LockHeld, LockBusyError, applyIfHeld, holdLock, withLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { CLAIM_PAGES, CLAIMS_LEFT_DAYS, DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
 import { standingOf } from "@/lib/plan-standing";
@@ -112,6 +112,8 @@ import { forgetPath } from "@/lib/path";
 export const DUE_KEY = "nl:closed:due";
 export const BATCH_KEY = "nl:closed:batch";
 export const WALK_KEY = "nl:closed:walk";
+/** The phases a walk writes in WALK_KEY (eraseClosed); "" is a field never written, a walk that never ran. */
+const WALK_PHASES: ReadonlySet<string> = new Set(["", "idle", "walk", "finish"]);
 /** Keys one SCAN of the walk asks for. */
 export const WALK_COUNT = 1000;
 /** The most pages of the database one run of the walk reads. */
@@ -218,9 +220,23 @@ async function sharedAccount(store: Store): Promise<boolean> {
   return others.some((other) => other.sid !== store.sid && other.stripeAccountId === store.stripeAccountId);
 }
 
-/** Puts a store in line for the next walk. */
+/**
+ * Puts a store in line for the next walk. Only Redis's exact answer confirms it (#4221, Codex U): ZADD NX's integer,
+ * 1 put in line, 0 already in line (its first time kept). Any other reply is resolved by an exact read-back of the
+ * store's score; when that does not show it in line either, it throws UnknownReplyError, so a caller never saves
+ * `due` (lib/plan-closing.ts) for a store the walk would never reach, and the next run asks again.
+ */
 export async function markDue(ref: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]);
+  const added = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]), 1);
+  if (added && (added[0] === 0 || added[0] === 1)) return;
+  const back = repliesFor(await redisPipeline([["ZSCORE", DUE_KEY, ref]]), 1);
+  const score = back?.[0];
+  // A score is a finite number or decimal text, never JavaScript's hex/binary/octal coercion.
+  const scoreRead = typeof score === "number"
+    ? Number.isFinite(score)
+    : typeof score === "string" && /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(score) && Number.isFinite(Number(score));
+  if (scoreRead) return;
+  throw new UnknownReplyError("a closed store's place in line for the walk");
 }
 
 /**
@@ -465,8 +481,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     // The erasing mark first (Codex N1's HIGH on #3156): written through the same fence as the deletes, before any of
     // them, so from the first delete on no plan starts on this store (lib/store.ts, setSubscription) and a payment for it
     // is returned (closingSince). Its write not proved throws here, with nothing deleted. It goes with the record.
-    await keep();
-    await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
+    // Written under the PayPal press's own lock too (Codex L-20261120-0448): a press holding it (lib/paypal-payouts.ts,
+    // payWithPayPal) finishes, its money asked for and its batch written down, before the erasure begins, and one that
+    // comes after finds the mark and asks for nothing (KEEP_OPEN_IF_LIVE). A lock held past its wait throws
+    // LockBusyError here, with nothing marked or deleted, and the walk tries the store again later.
+    const markErasing = async () => {
+      await keep();
+      await apply([["HSET", ERASING_KEY, await erasingField(ref), String(now)]]);
+    };
+    if (store.statsId) await withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, markErasing);
+    else await markErasing();
     // Its calendar hosts' claims, which are kept by the host, across the stores they serve: each page read exactly, each
     // HDEL made through the lock (fencedBy), the lock made to last before a host's first, and where a walk stopped kept
     // for the next (clearClaims, Claude 4 on #3660). The key of that place goes with the store's other keys below.
@@ -1730,8 +1754,14 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   let unsure = false;
   // An entry naming another store's key not confirmed out of the batch (EntryNotWithdrawnError): no walk starts in this run.
   let entryLeft = false;
-  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
-  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
+  // The walk's own state, read exactly (rule 24/30; #4220, Codex U): one reply of four slots, each a string or nil (a
+  // field never written), with a phase a walk writes and a cursor of digits. Anything else is unknown: it throws before
+  // anything is scanned, deleted or written, so a walk in progress is never restarted from 0 over its saved place.
+  const stateReplies = repliesFor(await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]), 1);
+  const slots = stateReplies ? repliesFor(stateReplies[0], 4) : null;
+  if (!slots || slots.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("the closed-store walk's state");
+  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = slots.map((v) => (typeof v === "string" ? v : ""));
+  if (!WALK_PHASES.has(phaseRaw) || (cursorRaw !== "" && !/^[0-9]+$/.test(cursorRaw))) throw new UnknownReplyError("the closed-store walk's state");
   let phase = phaseRaw || "idle";
   let cursor = cursorRaw || "0";
 

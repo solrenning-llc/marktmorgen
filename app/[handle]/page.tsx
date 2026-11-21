@@ -18,7 +18,8 @@ import { linkIcon } from "@/lib/store-socials";
 import { imageUrl } from "@/lib/product-image";
 import { type PagePart, drawnOrder } from "@/lib/store-order";
 import { tipsOpen } from "@/lib/store-tip-checkout";
-import { StoreTipBox } from "@/components/store-tip-box";
+import { StoreTipBox, TIP_PROBLEMS } from "@/components/store-tip-box";
+import { tipKept } from "@/lib/store-tips";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
@@ -83,9 +84,6 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
-
-/** What a try at "Support my work" may come back with (app/api/store/tip). */
-const TIP_PROBLEMS = new Set(["amount", "limited", "closed", "error"]);
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -672,7 +670,12 @@ export default async function StorePage({ params, searchParams }: Params) {
               ) : null}
               {/* "Support my work": an amount given with nothing bought, paid on Stripe's page (lib/store-tips.ts). */}
               {part === "tips" ? (
-                <StoreTipBox store={store} problem={typeof query.tip === "string" && TIP_PROBLEMS.has(query.tip) ? query.tip : ""} rehearsal={rehearsal} />
+                <StoreTipBox
+                  store={store}
+                  problem={typeof query.tip === "string" && TIP_PROBLEMS.has(query.tip) ? query.tip : ""}
+                  rehearsal={rehearsal}
+                  kept={typeof query.tip === "string" && TIP_PROBLEMS.has(query.tip) ? tipKept(store, query) : undefined}
+                />
               ) : null}
               {/* The sign-up box: an address joins only once its owner confirms by email (lib/store-join.ts). */}
               {part === "signup" ? <StoreJoinBox store={store} /> : null}

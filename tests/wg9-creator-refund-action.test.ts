@@ -31,9 +31,9 @@ const OWNER = "rowan@example.com";
 const HANDLE = "rowanshop";
 const ACCOUNT = "acct_1rowanrefund42";
 const CHARGE = "ch_wg9action1";
-/** The team log's write: its fenced script since Codex X6's MEDIUM on #3678 (lib/team.ts LOG_IF_LIVE), its LPUSH before. */
+/** The team log's write: its fenced script since #4988 (lib/team.ts KEEP_LOG_IF_LIVE), its LPUSH before. */
 const isLogWrite = (command: (string | number)[]) =>
-  (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:team-log-if-live:v1\n")) || (command[0] === "LPUSH" && String(command[1]).startsWith("nl:team:log:"));
+  (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:team-log-live:v1\n")) || (command[0] === "LPUSH" && String(command[1]).startsWith("nl:team:log:"));
 const T1 = "1".repeat(32);
 const T2 = "2".repeat(32);
 const T3 = "3".repeat(32);

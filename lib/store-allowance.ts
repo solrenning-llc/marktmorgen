@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { types } from "node:util";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
+import { BILLING_COUNTER_KEEP_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { standingOf } from "@/lib/plan-standing";
@@ -26,7 +26,11 @@ import type { Store } from "@/lib/store";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 import { windowCountBy } from "@/lib/window-count";
 
-export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
+export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string;
+  /** Read only to tag the store's email with its list (lib/mail-health-rules.ts stopTags), never to count. */
+  listId?: string | null;
+  /** Read only so a notice to the store's own address carries no list tag (lib/email.ts messageTags), never to count. */
+  email?: string | null };
 
 /**
  * What taking from a figure answered. A refusal for being used says, when
@@ -238,8 +242,10 @@ return after`;
  */
 export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind, n: number, window: string, now = Date.now()): Promise<void> {
   if (!Number.isSafeInteger(n) || n < 1 || !WINDOW_ID.test(window)) return;
-  // A window long over has no counter left to give back to: one would be made, below zero and kept for ever.
-  if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (LONGEST_WINDOW_DAYS + 1) * 86_400_000) return;
+  // A window long over has no counter left to give back to: one would be made, below zero and kept for ever. A billing
+  // counter is kept BILLING_COUNTER_KEEP_DAYS from its start (keepSecondsFor), so a give-back in a stretched last window
+  // still finds it (Claude 6 on #4561, LOW).
+  if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (BILLING_COUNTER_KEEP_DAYS + 1) * 86_400_000) return;
   const id = idOf(store);
   if (!id || !isRedisConfigured()) return;
   try {

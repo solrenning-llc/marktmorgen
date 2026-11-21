@@ -100,7 +100,9 @@ test("states whose pages could not be read stay unknown in every field", () => {
   }
 });
 
-test("data only: nothing reads the table yet", () => {
+// Since 9 [C-US] unit 2 the only reader is lib/us-sales-tax-nexus.ts, which nothing in production reads yet
+// (tests/us-sales-tax-nexus.test.ts holds that); no checkout, store or page reads the table itself.
+test("data only: nothing reads the table but the unwired nexus counter", () => {
   const readers: string[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
@@ -110,5 +112,5 @@ test("data only: nothing reads the table yet", () => {
     }
   };
   for (const dir of ["app", "lib", "components"]) walk(dir);
-  assert.deepEqual(readers.filter((path) => path !== join("lib", "us-sales-tax-rules.ts")), []);
+  assert.deepEqual(readers.filter((path) => path !== join("lib", "us-sales-tax-rules.ts")).sort(), [join("lib", "us-sales-tax-nexus.ts")]);
 });

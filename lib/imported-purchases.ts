@@ -195,6 +195,20 @@ function parse(productId: string, raw: unknown): ImportedPurchase | null {
   }
 }
 
+/**
+ * The same, read exactly (CX-123 rule 24), for a caller that waits on unknown (the drip job, lib/learn.ts): nothing
+ * there (nil, an empty list) is none; a reply of another shape, a list that does not pair up or a purchase that does
+ * not read throws UnknownReplyError, never "nothing was brought over" (Claude 7's MEDIUM on #3369).
+ */
+export function importedFromExact(raw: unknown): ImportedPurchase[] {
+  if (raw === null || raw === undefined) return [];
+  // importedRows (main, #2794) marks a list that does not pair up, a key that is not a string and a purchase that
+  // does not read: any of them is unknown here.
+  const { found, unknown } = importedRows(raw);
+  if (unknown) throw new UnknownReplyError("an address's imported purchases");
+  return found;
+}
+
 /** Reads a hash as Redis returns it, a flat list or an object. */
 function pairs(raw: unknown): { rows: [string, unknown][]; complete: boolean } {
   if (Array.isArray(raw)) {

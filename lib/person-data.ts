@@ -83,6 +83,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/member-health.ts", how: "erased", what: "The ten-minute copy of your members' scores" },
   { file: "lib/tier-benefits.ts", how: "erased", what: "Your marks of the membership benefits you handed them, with when and who on your team marked each" },
   { file: "lib/inbox.ts", how: "erased", what: "Their conversations in your inbox: what they wrote and what you answered" },
+  { file: "lib/buyer-block.ts", how: "erased", what: "Whether you blocked them from writing to your store, with your reason" },
   { file: "lib/imports.ts", how: "expires", days: 14, what: "A file you imported is kept for 14 days after the import began, then deleted with everything in it" },
 
   // ---------------------------------------------------------------- what the store keeps about them

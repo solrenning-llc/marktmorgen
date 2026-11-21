@@ -21,6 +21,7 @@ import { essentialLimitState } from "@/lib/request-guard";
 import { isHouseStore } from "@/lib/house-store";
 import type { Store } from "@/lib/store";
 import { contactStoreLive, fileContact } from "@/lib/inbox";
+import { mayWrite } from "@/lib/buyer-block";
 
 import { MAX_MESSAGE, MAX_NAME, MIN_MESSAGE } from "@/lib/store-contact-rules";
 /** Messages one store receives in a day, at most. */
@@ -53,6 +54,9 @@ export async function sendContact(input: { store: Store; name: string; email: st
   const who = store.statsId ?? store.handle;
   const byIp = await essentialLimitState("contact-ip", `${who}|${input.ip}`, 3, 3_600);
   if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
+  // Someone the creator blocked (lib/buyer-block.ts), or whose standing cannot be read, reaches nobody; checked before
+  // the store's day is counted (Claude 7 on #3839), so a blocked person never uses up the store's slots for real buyers.
+  if (!(await mayWrite(store, email))) return "closed";
   const byStore = await essentialLimitState("contact-store", who, MAX_PER_DAY, 86_400);
   if (byStore !== "within") return byStore === "exceeded" ? "limited" : "error";
   const live = await contactStoreLive(store);

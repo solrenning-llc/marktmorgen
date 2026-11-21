@@ -230,7 +230,7 @@ export async function withdraw(store: Store, purchase: Purchase, statement: With
     const tells = counted ? countOf(counted[0]) : null;
     if (tells === null || tells < 1) return "error";
     if (tells <= WITHDRAWAL_ACK_SENDS) {
-      told = await fileContact({ store, email: statement.email, name: statement.name, text: w.creatorNote(purchase.title, reference, when, purchase.paidWith === "paypal" ? "PayPal" : "Stripe"), now: nowMs }).catch((error) => {
+      told = await fileContact({ store, email: statement.email, name: statement.name, text: w.creatorNote(purchase.title, reference, when, purchase.paidWith === "paypal" ? "PayPal" : "Stripe"), now: nowMs, source: "withdrawal" }).catch((error) => {
         console.error("telling the creator about a withdrawal failed", error);
         return false;
       });

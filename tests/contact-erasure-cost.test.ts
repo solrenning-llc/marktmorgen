@@ -7,6 +7,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { CONTACT_LIVE_MONTH, DAY_WINDOWS, UNIT_COST, request, nonPayingWorst, COST_LINES, figureCost } from "./plan-cost-registry";
 import { MAX_PER_DAY } from "@/lib/store-contact";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { BLOCK_CHECK_COMMANDS, BLOCK_ENTRY_BYTES } from "@/lib/buyer-block";
 
 test("actual fence scripts' inner calls and wire bytes are charged, including failed sends without inbox allowance", async () => {
   redis.clear(); const owner = "contact-cost@example.test";
@@ -39,7 +40,8 @@ test("actual fence scripts' inner calls and wire bytes are charged, including fa
   const worst = ["EVAL", INBOX_STORE_LIVE, 2, "x".repeat(80), "nl:closed:erasing", "x".repeat(40), "\u0001".repeat(320), "a".repeat(32)];
   assert.ok(Buffer.byteLength(JSON.stringify(worst)) <= INBOX_LIVE_BYTES);
   assert.equal(CONTACT_LIVE_MONTH, 2 * MAX_PER_DAY * DAY_WINDOWS * request("light", CONTACT_LIVE_COMMANDS, INBOX_LIVE_BYTES));
-  assert.equal(UNIT_COST.inbox, request("light", 12 + 4 + INBOX_OPEN_FENCE_COMMANDS, 4000 + INBOX_LIVE_BYTES));
+  // With #3839, every buyer message also makes the block check (lib/buyer-block.ts), priced on the same unit.
+  assert.equal(UNIT_COST.inbox, request("light", 12 + 4 + INBOX_OPEN_FENCE_COMMANDS + BLOCK_CHECK_COMMANDS, 4000 + INBOX_LIVE_BYTES + BLOCK_ENTRY_BYTES));
   assert.equal(COST_LINES.find(x => x.id === "inbox")!.monthlyUsd("pro"), figureCost(STORE_ALLOWANCES.pro, "inbox") + CONTACT_LIVE_MONTH);
   assert.ok(Number.isFinite(nonPayingWorst()));
   console.log(JSON.stringify({ preflightCommands: pre.inner + 1, writerCommands: write.inner + 1, preflightBytes: pre.bytes, writerExtraBytes: write.delta, escapedBoundBytes: Buffer.byteLength(JSON.stringify(worst)), contactLiveMonthUsd: CONTACT_LIVE_MONTH }));

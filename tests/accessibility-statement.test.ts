@@ -16,7 +16,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import AccessibilityPage from "@/app/accessibility/page";
-import { ACCESSIBILITY_CHECKS, REVIEWED_STATUS, STATEMENT_REVIEW, accessibilityGaps, reviewCounts, statementDigest } from "@/lib/accessibility-statement";
+import * as statement from "@/lib/accessibility-statement";
+import { ACCESSIBILITY_CHECKS, REVIEWED_STATUS, STATEMENT_REVIEW, accessibilityGaps, reviewCounts } from "@/lib/accessibility-statement";
 import inventory from "@/docs/accessibility-inventory.json";
 import { done, is, part } from "./check";
 
@@ -57,8 +58,20 @@ function main(): void {
   const templates = (inventory as { pageTemplates: { status: string }[] }).pageTemplates;
   is("a reviewed page needs the exact finished status, which no template has today", [counts.total, counts.reviewed, templates.some((t) => t.status === REVIEWED_STATUS)], [templates.length, 0, false]);
 
-  part("The date of the last review follows the records");
-  is("the records the page shows were reviewed on the date it gives", STATEMENT_REVIEW.digest, statementDigest());
+  part("The date of the last review follows the records, one line a record (Proposal 2, BROADCAST-282)");
+  // Each page template, each open item and each check the page shows has its own review line, so two changes to
+  // different records never edit the same line (13 of the 80 conflicts measured on 18 November 2026 were on the one
+  // line this replaces). The page's date is the latest line's.
+  const s = statement as unknown as { statementParts?: () => Record<string, string>; STATEMENT_REVIEWS?: Readonly<Record<string, { date: string; digest: string }>> };
+  const parts = s.statementParts?.() ?? {};
+  const reviews = s.STATEMENT_REVIEWS ?? {};
+  is("one part for each page template, each open item and each check", Object.keys(parts).length, templates.length + openWork.length + ACCESSIBILITY_CHECKS.length);
+  is("one review line for each part, and none for a record that is gone", Object.keys(reviews).sort(), Object.keys(parts).sort());
+  is("each line was reviewed against its record as it is now", Object.entries(parts).filter(([key, digest]) => reviews[key]?.digest !== digest).map(([key]) => key), []);
+  is("each line's date is a real date", Object.entries(reviews).filter(([, line]) => Number.isNaN(Date.parse(line.date))).map(([key]) => key), []);
+  is("the lines are kept in alphabetical order, so a new one goes in its own place (AC (d))", Object.keys(reviews), Object.keys(reviews).slice().sort());
+  const latest = Object.values(reviews).map((line) => line.date).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1);
+  is("the page's date is the latest line's", STATEMENT_REVIEW.date, latest);
   is("the date is a real date", Number.isNaN(Date.parse(STATEMENT_REVIEW.date)), false);
 
   part("What the page says, and what it never says");

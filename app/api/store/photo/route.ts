@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { dropPhotoUpload, notePhotoUpload, setPhotoId, settlePhotos, storeForEmail, storeForEmailSeen } from "@/lib/store";
 import { MAX_PHOTO_BYTES, decodePhoto, deletePhoto, newPhotoId, writePhoto } from "@/lib/store-photo";
+import { newCostCode } from "@/lib/plan-standing";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -68,6 +69,12 @@ export async function POST(request: NextRequest) {
       if (result.store.photoLeft?.length) await settlePhotos(guarded.ref);
       return Response.json({ ok: true, photoId: null });
     }
+
+    // A new photo is new storage nobody pays for while the plan's renewal is
+    // unpaid, a payment for it is disputed or the plan has ended (232 [CA1],
+    // lib/plan-standing.ts newCostCode). Taking the photo off stays open.
+    const paused = newCostCode(guarded.store);
+    if (paused) return Response.json({ ok: false, error: paused }, { status: 409 });
 
     const decoded = decodePhoto(guarded.body.photo);
     if (typeof decoded === "string") {

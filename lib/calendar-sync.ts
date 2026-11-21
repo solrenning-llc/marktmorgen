@@ -1028,7 +1028,10 @@ export async function forgetStoreCalendar(statsId: string | null | undefined): P
   } catch {
     parsed = null;
   }
-  await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
+  const keys = [cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)];
+  // Confirmed only on a count from 0 up to the keys named (as forgetRecentSales, #4752).
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a store's calendar feeds");
 }
 
 export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null; token?: string }, make: () => Promise<MadeFeed>, now = Date.now()): Promise<FeedAnswer> {

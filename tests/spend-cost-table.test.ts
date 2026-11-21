@@ -13,7 +13,7 @@ import {
   PDF_READ_MICRO_USD, PROVIDER_CHARGES_BPS, R2_STORAGE_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR, WRITING_JOB_MICRO_USD, aiRequestHoldMicroUsd,
 } from '@/lib/spend-cost-table';
-import { SUPPORTED_AI_MODELS, boundedAiRequest } from '@/lib/ai-request-rules';
+import { ANSWER_MODEL, SUPPORTED_AI_MODELS, WRITING_MODEL, boundedAiRequest } from '@/lib/ai-request-rules';
 import { READ_PDF_JOBS } from '@/lib/ai-rules';
 
 const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
@@ -23,11 +23,14 @@ test('every supported model is priced, and nothing else is', () => {
   assert.deepEqual([...SUPPORTED_AI_MODELS].sort(), Object.keys(ANTHROPIC_RATES).sort());
 });
 
-test('the default models named in lib/ai.ts are priced', () => {
+test('the models fixed in code are priced, and lib/ai.ts asks only them', () => {
+  // 433 [PV3] (b): the models are constants (lib/ai-request-rules.ts), no longer defaults a deployment setting could replace.
+  for (const name of [WRITING_MODEL, ANSWER_MODEL]) assert.ok(Object.hasOwn(ANTHROPIC_RATES, name), name);
+  assert.deepEqual([WRITING_MODEL, ANSWER_MODEL], ['claude-sonnet-5-5', 'claude-haiku-5-5']);
   const ai = read('lib/ai.ts');
-  for (const name of [...ai.matchAll(/: "(claude-[a-z0-9-]+)";\n}/g)].map(m => m[1])) assert.ok(Object.hasOwn(ANTHROPIC_RATES, name), name);
-  assert.match(ai, /: "claude-sonnet-5-5";\n}/);
-  assert.match(ai, /: "claude-haiku-5-5";\n}/);
+  assert.match(ai, /function model\(\): string \{\n  return WRITING_MODEL;\n\}/);
+  assert.match(ai, /export function answerModel\(\): string \{\n  return ANSWER_MODEL;\n\}/);
+  assert.doesNotMatch(ai, /process\.env\.AI_(ANSWER_)?MODEL/);
 });
 
 test('the model wait priced per call is the model timeout in lib/ai.ts', () => {

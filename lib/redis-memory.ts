@@ -552,11 +552,11 @@ export class MemoryRedis {
           return 1;
         }
         // lib/store-join.ts SAVE_GRANT_IF_LIVE: a join grant and its erasure note, only while the store is live.
-        if (key.startsWith("-- marktmorgen:join-grant-if-live:v1\n") && args[0] === "4" && args.length === 12) {
-          const [, live, erasing, grantKey, notes, field, grant, seconds, at, cutoff, keep, statsId] = args;
+        if (key.startsWith("-- marktmorgen:join-grant-if-live:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, live, erasing, grantKey, notes, field, grant, seconds, at, cutoff, keep, statsId, ref] = args;
           if (this.run(["HGET", erasing, field]) !== null) return 0;
           if (statsId === "") {
-            if (Number(this.run(["EXISTS", live])) !== 1) return 0;
+            if (this.run(["GET", live]) !== ref) return 0;
           } else {
             const raw = this.run(["GET", live]);
             if (typeof raw !== "string") return 0;

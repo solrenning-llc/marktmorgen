@@ -77,6 +77,7 @@ import { INVITE_GONE_READ_COMMANDS } from "@/lib/move-members";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
+import { SHARE_FENCE_EXTRA_COMMANDS } from "@/lib/funnel-share-store";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
@@ -2142,10 +2143,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/answers-rules.ts", names: ["ANSWERS_MONTHLY", "ASKS_PER_DAY"] },
       { file: "lib/ai-request-rules.ts", names: ["AI_REQUEST_LIMITS"] },
       { file: "lib/funnel-ai.ts", names: ["askModel"] },
+      { file: "lib/product-ideas.ts", names: ["askModel", "IDEAS_OUTPUT_TOKENS"] },
       // An AI explanation of one funnel check (26 [E9]): one writing job (FUNNEL_EXPLAIN_JOBS), taken before its one bounded request (tests/funnel-explain.test.ts).
       { file: "lib/funnel-explain.ts", names: ["askModel", "counted", "FUNNEL_EXPLAIN_JOBS", "FUNNEL_EXPLAIN_CALL"] },
     ],
-    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out.",
+    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out. Product ideas (758 [STN5] unit 2, lib/product-ideas.ts) take one writing job each, one request on the cheapest model at IDEAS_SYSTEM_BYTES + IDEAS_PROMPT_BYTES in and IDEAS_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-ideas.test.ts), so the line does not move.",
   },
   {
     id: "uploads",
@@ -2242,13 +2244,14 @@ export const COST_LINES: CostLine[] = [
       const own = l.importsPerMonth * request("write", 300, l.bundleBytes + 30 * MAX_PAGE_BYTES)
         + l.previewsPerMonth * request("light", 30, 50_000)
         + l.appliesPerMonth * request("write", MAX_APPLY_PAGES * 10, MAX_APPLY_PAGES * 4 * MAX_PAGE_BYTES)
-        + l.sharesPerMonth * request("write", 60, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
+        // Each link's creation fenced by the store's erasure (CREATE_STORE_SHARE: its HGET and EXISTS more, Codex L-20261120-1836).
+        + l.sharesPerMonth * request("write", 60 + SHARE_FENCE_EXTRA_COMMANDS, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
         + l.exportsPerMonth * request("write", 40, 10 * MAX_PAGE_BYTES + l.bundleBytes);
       return kept + linkReads + own;
     },
     sources: [
       { file: "lib/funnel-share-rules.ts", names: ["SHARE_LIMITS", "IMPORTS_PER_SHARE_MONTH", "PREVIEWS_PER_SHARE_MONTH", "PREVIEWS_PER_STORE_HOUR", "MAX_APPLY_PAGES"] },
-      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey"] },
+      { file: "lib/funnel-share-store.ts", names: ["storeMonthKey", "shareMonthKey", "SHARE_FENCE_EXTRA_COMMANDS", "CREATE_STORE_SHARE"] },
       { file: "lib/saved-blocks.ts", names: ["MAX_SECTION_BYTES"] },
     ],
     basis: "Links and sections kept, every link read by others at its monthly figure in both calendar months a billing month touches, and every import, preview, update from a section, link made and file exported of the store's window, each page read and written with its earlier version.",

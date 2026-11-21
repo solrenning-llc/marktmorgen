@@ -34,7 +34,7 @@
  * classification yet, so ukCheckout refuses every UK sale), and the sterling rate of a sale in another currency (HMRC's
  * rate at the time of the supply, VAT Notice 700, 7.6, is not read here), so only a sale in pounds can collect.
  */
-import { consumerGate } from "@/lib/eu-vat-gate";
+import { EU_UK_REFUSED, consumerGate } from "@/lib/eu-vat-gate";
 import { type EuSupplyFields, euSupplyOf } from "@/lib/eu-vat-supply";
 import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { euCheckout } from "@/lib/eu-vat-checkout";
@@ -121,6 +121,34 @@ export function euSaleGate(input: {
 }
 
 /**
+ * The cart route's gate (app/api/store/cart/route.ts), one product at a time as euSaleGate decides each: the first
+ * refusal is the cart's, exactly as the route's loop over consumerGate returns it today. A cart collects only when every
+ * product that needs VAT names the same country; products that disagree refuse the cart. Test inputs as euSaleGate's.
+ */
+export function euCartGate(input: {
+  products: readonly EuSupplyFields[];
+  headers: Headers;
+  form: URLSearchParams | FormData;
+  records?: unknown;
+  vatSwitch?: Omit<SwitchInput, "now">;
+  now?: Date;
+  rates?: readonly EuVatRate[];
+  publication?: boolean;
+}): EuSaleGate {
+  let collect: { country: string } | null = null;
+  for (const product of input.products) {
+    const gate = euSaleGate({ ...input, product });
+    if (!gate.ok) return gate;
+    if (gate.collect === null) continue;
+    if (collect !== null && collect.country !== gate.collect.country) {
+      return { ok: false, reason: "refused", message: EU_UK_REFUSED };
+    }
+    collect = gate.collect;
+  }
+  return collect === null ? { ok: true, collect: null } : { ok: true, collect };
+}
+
+/**
  * Puts the EU VAT on a built one-off checkout body, after the share is set and before Stripe is asked; throws
  * EuVatCollectRefused, with the body untouched, when it cannot. `costsCents`, `now` and `rates` are for tests only.
  */
@@ -137,6 +165,43 @@ export function applyEuCollect(
     rates?: readonly EuVatRate[];
   },
 ): void {
+  collectOn(body, input, false);
+}
+
+/**
+ * Unit 3 (the owner's order to Claude 4 5BC, 21/11/2026 about 00h55 UTC, "faça vc o correto"; CLAIMED 7054618378):
+ * the same VAT on a built cart checkout body (lib/cart-checkout.ts), after the share, the tax settings and the currency
+ * are set and before Stripe is asked. Every line is one product at quantity one, in one currency, at an amount of
+ * ours; the VAT is worked out once on their sum, at the one country's rate, and added as one line through one fee.
+ * Anything else (a code or a code box, shipping, a currency conversion) refuses with the body untouched.
+ */
+export function applyEuCollectCart(
+  body: URLSearchParams,
+  input: {
+    country: string;
+    /** Set by createCartCheckout: lib/buyer-currency.ts BUYER_CURRENCY_LIVE, which would convert the amounts after this. */
+    buyerCurrencyLive: boolean;
+    costsCents?: (vatCents: number, currency: string) => number | null;
+    now?: Date;
+    rates?: readonly EuVatRate[];
+  },
+): void {
+  collectOn(body, { ...input, chooseYourPrice: false }, true);
+}
+
+/** Both bodies: every check before anything is written, then applyEuVatLines writes the VAT line and the fee. */
+function collectOn(
+  body: URLSearchParams,
+  input: {
+    country: string;
+    chooseYourPrice: boolean;
+    buyerCurrencyLive: boolean;
+    costsCents?: (vatCents: number, currency: string) => number | null;
+    now?: Date;
+    rates?: readonly EuVatRate[];
+  },
+  cart: boolean,
+): void {
   const refuse = (why: string): never => {
     throw new EuVatCollectRefused(why);
   };
@@ -145,18 +210,35 @@ export function applyEuCollect(
   if (input.buyerCurrencyLive) refuse("a conversion to the buyer's currency");
   if (body.get("mode") !== "payment") refuse("not a one-off payment");
   const keys = [...body.keys()];
-  if (keys.some((key) => /^line_items\[[1-9]\d*\]/.test(key))) refuse("more than one line");
-  if (body.get("line_items[0][quantity]") !== "1") refuse("a quantity other than one");
-  if (body.has("line_items[0][price]")) refuse("a Stripe Price instead of an amount");
+  // The lines, numbered from 0 with no gap: one on a one-off checkout, one to four in a cart.
+  const indexes = new Set<number>();
+  for (const key of keys) {
+    const line = /^line_items\[(\d+)\]/.exec(key);
+    if (line) indexes.add(Number(line[1]));
+  }
+  const count = indexes.size;
+  if (count === 0 || [...indexes].some((index) => index >= count)) refuse("the lines");
+  if (!cart && count !== 1) refuse("more than one line");
+  if (cart && count > 4) refuse("more lines than a cart holds");
   if (keys.some((key) => key.startsWith("discounts[") || key === "allow_promotion_codes")) refuse("a discount or a promotion box");
   if (keys.some((key) => key.startsWith("shipping_") || key.startsWith("subscription_data["))) refuse("shipping or a subscription");
   // Stripe's conversion stays off as inTheCurrencyShown sets it (lib/instant-pay.ts); anything else changes the amount.
   if (body.get("adaptive_pricing[enabled]") !== "false") refuse("a conversion to the buyer's currency");
-  const amount = body.get("line_items[0][price_data][unit_amount]") ?? "";
-  const currency = body.get("line_items[0][price_data][currency]") ?? "";
-  if (!/^(0|[1-9]\d{0,14})$/.test(amount) || !/^[a-z]{3}$/i.test(currency)) refuse("the line's amount or currency");
+  let total = 0;
+  let currency = "";
+  for (let i = 0; i < count; i += 1) {
+    if (body.get(`line_items[${i}][quantity]`) !== "1") refuse("a quantity other than one");
+    if (body.has(`line_items[${i}][price]`)) refuse("a Stripe Price instead of an amount");
+    const amount = body.get(`line_items[${i}][price_data][unit_amount]`) ?? "";
+    const lineCurrency = body.get(`line_items[${i}][price_data][currency]`) ?? "";
+    if (!/^(0|[1-9]\d{0,14})$/.test(amount) || !/^[a-z]{3}$/i.test(lineCurrency)) refuse("the line's amount or currency");
+    if (i > 0 && lineCurrency.toLowerCase() !== currency.toLowerCase()) refuse("lines in different currencies");
+    currency = lineCurrency;
+    total += Number(amount);
+  }
+  if (!Number.isSafeInteger(total)) refuse("the lines' total");
   const now = input.now ?? new Date();
-  const vat = input.country === "GB" ? ukVat(Number(amount), currency, now) : vatOnTop(Number(amount), input.country, input.rates ?? EU_VAT_RATES, now);
+  const vat = input.country === "GB" ? ukVat(total, currency, now) : vatOnTop(total, input.country, input.rates ?? EU_VAT_RATES, now);
   if (!vat || vat.country !== input.country) refuse("no sourced rate, or no sterling rate");
   const cost = (input.costsCents ?? euVatCollectionCostCents)(vat!.vatCents, currency);
   if (cost === null || !Number.isSafeInteger(cost) || cost < 0) refuse("the cost of receiving the VAT is unknown");

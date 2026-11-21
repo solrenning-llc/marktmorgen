@@ -68,12 +68,17 @@ test("the scanner lists every console call that is not one fixed string", () => 
     "console[method](\"x\");",
     "promise.catch(console.error);",
     "const { error: logError } = console;",
+    // Claude 6's LEVE 2 on #3712 (7057898833): the global console reached through globalThis is the same console.
+    "globalThis.console.error(\"x\", error);",
+    'globalThis["console"].warn(error);',
+    "window.console.log(detail);",
   ];
   const missed = leaking.filter((call) => consoleLeaks(`const email = "a";\n${call}\n`).join() !== "2");
   assert.deepEqual(missed, [], "every leaking call is listed on its own line");
   assert.deepEqual(consoleLeaks('console.error("Sign-in failed");\n'), [], "a fixed label alone is allowed");
   assert.deepEqual(consoleLeaks('console["warn"](`Sign-in failed`);\nconst o = { console: 1 };\no.console;\n'), [], "a fixed template, and a property merely named console, are allowed");
   assert.deepEqual(consoleLeaks('console.error(\n  "Sign-in failed",\n  error,\n);\n'), [1], "a call split over lines is still read");
+  assert.deepEqual(consoleLeaks('globalThis.console.error("Sign-in failed");\n'), [], "a fixed label through globalThis is allowed");
 });
 
 test("no sign-in route logs an error object", () => {

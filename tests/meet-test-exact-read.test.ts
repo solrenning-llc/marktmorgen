@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   redis.clear();
   is("confirmed none (null): read as none", await outcome(() => readTests(SID, ["google"])), "{}");
   is("confirmed none (null): moving says there is none", await outcome(() => moveTest(store, "google")), "null");
-  is("confirmed none (null): removing says there was none", await outcome(() => removeTest(SID, "google")), "false");
+  is("confirmed none (null): removing says there was none", await outcome(() => removeTest(store, "google")), "false");
 
   const odd: [string, unknown][] = [
     ["a missing slot (undefined)", undefined],
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
     const read = await outcome(() => readTests(SID, ["google"]));
     const made = await outcome(() => makeTest(store, "google"));
     const moved = await outcome(() => moveTest(store, "google"));
-    const removed = await outcome(() => removeTest(SID, "google"));
+    const removed = await outcome(() => removeTest(store, "google"));
     restore();
     is("read: unknown, never none", read, "unavailable");
     is("make: no second meeting is made over the one there", [made, outbound - before], ["unavailable", 0]);

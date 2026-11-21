@@ -1,12 +1,13 @@
 /**
- * Writes docs/margin-alignment-2026-10-18.md from tests/margin-alignment-table.ts,
+ * Prints the report at docs/margin-alignment-2026-10-18.md from tests/margin-alignment-table.ts,
  * with the same wiring the test runner uses (tests/test-config.mjs), so the
- * document's figures are never typed. tests/margin-alignment.test.ts fails
- * when the file on disk is not what this writes.
+ * document's figures are never typed. Generated on demand (owner, 20/11/2026): the path holds
+ * only a fixed text, and nothing is written. tests/margin-alignment.test.ts checks the
+ * output computed on demand.
  *
  *   node scripts/margin-alignment.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,9 +38,7 @@ try {
     process.stderr.write(run.stderr);
     process.exit(1);
   }
-  const target = join(root, "docs/margin-alignment-2026-10-18.md");
-  if (process.argv.includes("--stdout")) process.stdout.write(run.stdout);
-  else { writeFileSync(target, run.stdout); console.log(`Wrote ${target}`); }
+  process.stdout.write(run.stdout);
 } finally {
   rmSync(out, { recursive: true, force: true });
 }

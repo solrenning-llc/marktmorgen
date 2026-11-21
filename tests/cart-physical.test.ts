@@ -86,10 +86,11 @@ async function main(): Promise<void> {
   is("a line about when it ships only when there is one to say", [sharedShipNote(["Ships in 3 days"]), sharedShipNote(["Ships in 3 days", "Ships in 3 days "]), sharedShipNote(["Ships in 3 days", ""]), sharedShipNote(["A", "B"])], ["Ships in 3 days", "Ships in 3 days", "", ""]);
 
   part("The checkout");
-  await createCartCheckout(shop(), [physical("box", ["US", "CA", "GB"], 700, "Ships in 3 days"), physical("poster", ["GB", "US"], 300, "Ships in 3 days")], "https://marktmorgen.com", { country: "US" });
+  // Australia, not Great Britain: the EU and the UK stay off every checkout until the opening (789 [IV1] unit 1).
+  await createCartCheckout(shop(), [physical("box", ["US", "CA", "AU"], 700, "Ships in 3 days"), physical("poster", ["AU", "US"], 300, "Ships in 3 days")], "https://marktmorgen.com", { country: "US" });
   let body = sent.at(-1)!;
   is("the order's own product and the one added, in the cart's order", [body.get("metadata[product]"), body.get("metadata[bump]")], ["box", "poster"]);
-  is("an address only where both ship, once each", body.getAll("shipping_address_collection[allowed_countries][0]").concat(body.getAll("shipping_address_collection[allowed_countries][1]"), body.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "GB"]);
+  is("an address only where both ship, once each", body.getAll("shipping_address_collection[allowed_countries][0]").concat(body.getAll("shipping_address_collection[allowed_countries][1]"), body.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "AU"]);
   is("each one's shipping added on one line, with the line they share", [body.get("shipping_options[0][shipping_rate_data][type]"), body.get("shipping_options[0][shipping_rate_data][fixed_amount][amount]"), body.get("shipping_options[0][shipping_rate_data][fixed_amount][currency]"), body.get("shipping_options[0][shipping_rate_data][display_name]")], ["fixed_amount", "1000", "usd", "Shipping · Ships in 3 days"]);
   is("the order marked as shipped, on the checkout and the payment", [body.get("metadata[ship]"), body.get("payment_intent_data[metadata][ship]")], ["yes", "yes"]);
   is("no tax codes while Stripe Tax is off", [...body.keys()].filter((key) => key.includes("tax_code")), []);
@@ -111,7 +112,8 @@ async function main(): Promise<void> {
   is("the deal for buying more takes off the lines, never the shipping", [body.get("line_items[0][price_data][unit_amount]"), body.get("line_items[1][price_data][unit_amount]"), body.get("shipping_options[0][shipping_rate_data][fixed_amount][amount]")], ["1800", "1800", "1000"]);
   const before = sent.length;
   let refused: unknown = null;
-  await createCartCheckout(shop(), [physical("box", ["US"], 500), physical("poster", ["DE"], 500)], "https://marktmorgen.com", { digitalConsent: TEST_CONSENT }).catch((error) => {
+  // Mexico, not an EU/EEA country: those stay off a product until its safety fields are filled (618 [SZ2], tests/sz2-u3-display.test.ts).
+  await createCartCheckout(shop(), [physical("box", ["US"], 500), physical("poster", ["MX"], 500)], "https://marktmorgen.com", { digitalConsent: TEST_CONSENT }).catch((error) => {
     refused = error;
   });
   is("sharing no country: refused, nothing opened", [refused instanceof CartShippingRefused && (refused as CartShippingRefused).why, sent.length], ["apart", before]);
@@ -145,7 +147,7 @@ async function main(): Promise<void> {
   };
   await shipped("Planner", ["US", "CA"], 700, "Ships in 3 days");
   await shipped("Poster", ["US", "GB"], 0, "");
-  await shipped("Mug", ["DE"], 500, "");
+  await shipped("Mug", ["MX"], 500, "");
   const open = async (ids: string[], country = "") => {
     const answer = await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=paper&ids=${ids.join(",")}`, { headers: country ? { "x-vercel-ip-country": country } : {} }));
     return (await answer.json()) as {

@@ -37,13 +37,15 @@ import { freshChecks } from "@/lib/ai-draft-review";
  * unavailable while a run is on.
  */
 
-export type StepView = "waiting" | "running" | "done" | "skipped";
+export type StepView = "waiting" | "running" | "done" | "skipped" | "unfinished";
 
 const STATE_WORDS: Record<StepView, string> = {
   waiting: "Not started",
   running: "Running",
   done: "Done",
   skipped: "Not run, not charged",
+  // A part of a file that started and did not come back (758 [STN5] unit 3): whether it counts is said with the result.
+  unfinished: "Started, did not come back",
 };
 
 const MESSAGES: Record<string, string> = {

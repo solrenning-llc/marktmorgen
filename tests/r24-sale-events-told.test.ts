@@ -115,7 +115,7 @@ async function freshStore(): Promise<Store> {
   await setStripeAccount(OWNER, "acct_1TestR24Sale", true);
   await setSubscription(OWNER, { customerId: "cus_R24Sale0001", subscriptionId: "sub_R24Sale0001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
-  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);
+  await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK, store);
   await setChatSales(OWNER, true);
   await setRecentSales(OWNER, true);
   store = (await storeForEmail(OWNER))!;

@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
       if (!(await takeBuyerAction(store))) return no("resting", 503);
       const opened = await openSubmissionDoor({ ...where, data: store, email: learner!.email, setup: asked, file, nowSeconds: now });
       if (!opened.ok) {
-        const status = { busy: 409, full: 409, budget: 503, room: 409, pending: 409, off: 404, invalid: 400, unavailable: 503 }[opened.reason];
+        const status = { busy: 409, full: 409, budget: 503, buyer_limit: 429, room: 409, pending: 409, off: 404, invalid: 400, unavailable: 503 }[opened.reason];
         return no(opened.reason === "budget" ? "upload_budget_unavailable" : opened.reason === "unavailable" ? "files_unavailable" : opened.reason, status);
       }
       return yes({ upload: opened.upload });

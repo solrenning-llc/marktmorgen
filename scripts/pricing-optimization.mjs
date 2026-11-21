@@ -1,20 +1,24 @@
 /**
- * Writes the three files of the pricing optimization (an ANALYSIS: no price,
- * limit, gate or tax assumption in code changes):
+ * Prints the pricing optimization (an ANALYSIS: no price, limit, gate or tax
+ * assumption in code changes), generated on demand (owner, 20/11/2026): the
+ * three paths below hold only a fixed text (tests/generated-on-demand.ts),
+ * and nothing is written.
  *
- *   1. docs/pricing-optimization-milp-input-2026-10-18.json, from
- *      tests/pricing-optimization-table.ts milpInput() (the repository's own
- *      margin code), with the same wiring the test runner uses;
- *   2. docs/pricing-optimization-milp-output-2026-10-18.json, by running
- *      scripts/pricing-optimization-milp.py (scipy.optimize.milp, HiGHS);
- *   3. docs/pricing-optimization-2026-10-18.md, from
- *      renderPricingOptimization(), which checks every solution again.
+ *   node scripts/pricing-optimization.mjs                the report
+ *     (docs/pricing-optimization-2026-10-18.md), from renderPricingOptimization(),
+ *     which runs the solver and checks every solution again;
+ *   node scripts/pricing-optimization.mjs --milp-input   the solver's input
+ *     (docs/pricing-optimization-milp-input-2026-10-18.json), from
+ *     tests/pricing-optimization-table.ts milpInput(), the repository's own margin code;
+ *   node scripts/pricing-optimization.mjs --milp-output  the solver's solutions
+ *     (docs/pricing-optimization-milp-output-2026-10-18.json), from
+ *     scripts/pricing-optimization-milp.py (scipy.optimize.milp, HiGHS; the packages
+ *     are pinned in scripts/requirements-solver.txt, and MILP_PYTHON picks the interpreter).
  *
- * tests/pricing-optimization.test.ts fails when any of them is stale.
- *
- *   node scripts/pricing-optimization.mjs
+ * The wiring is the one the test runner uses; tests/pricing-optimization.test.ts
+ * checks the same output.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,13 +43,13 @@ async function run(contents) {
 }
 
 try {
-  const input = await run(`import { milpInput } from "./pricing-optimization-table"; process.stdout.write(JSON.stringify(milpInput(), null, 1) + "\\n");`);
-  writeFileSync(join(root, "docs/pricing-optimization-milp-input-2026-10-18.json"), input);
-  const py = spawnSync("python3", [join(root, "scripts/pricing-optimization-milp.py")], { cwd: root, stdio: "inherit" });
-  if (py.status !== 0) process.exit(1);
-  const doc = await run(`import { renderPricingOptimization } from "./pricing-optimization-table"; process.stdout.write(renderPricingOptimization());`);
-  writeFileSync(join(root, "docs/pricing-optimization-2026-10-18.md"), doc);
-  console.log("Wrote docs/pricing-optimization-2026-10-18.md");
+  if (process.argv.includes("--milp-input")) {
+    process.stdout.write(await run(`import { milpInput } from "./pricing-optimization-table"; process.stdout.write(JSON.stringify(milpInput(), null, 1) + "\\n");`));
+  } else if (process.argv.includes("--milp-output")) {
+    process.stdout.write(await run(`import { milpOutput } from "./pricing-optimization-table"; process.stdout.write(JSON.stringify(milpOutput(), null, 1) + "\\n");`));
+  } else {
+    process.stdout.write(await run(`import { renderPricingOptimization } from "./pricing-optimization-table"; process.stdout.write(renderPricingOptimization());`));
+  }
 } finally {
   rmSync(out, { recursive: true, force: true });
 }

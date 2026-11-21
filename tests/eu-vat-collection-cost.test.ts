@@ -2,7 +2,7 @@
  * 789 [IV1] step 3, unit 6 (coordinator, 21/11/2026 06:17 UTC: unit A, the dearest reading): what receiving one sale's
  * EU or UK VAT through the platform's fee costs Marktmorgen (lib/eu-vat-collection-cost.ts), read by
  * lib/eu-vat-collect.ts as euVatCollectionCostCents. It holds that:
- *   - every part is a percentage of the VAT taken from lib/receiving-costs.ts, rounded up; no figure is typed here;
+ *   - rates come from lib/receiving-costs.ts, rounded up; conversion funds the whole collected fee;
  *   - the fee carries the VAT and Marktmorgen's own costs of receiving it, never the processing fee on the VAT part:
  *     in a direct charge Stripe already takes that from the creator's account, so the fee would charge it twice
  *     (coordinator, 06:20 UTC); it is a separate part, counted only in Marktmorgen's worst case;
@@ -28,7 +28,17 @@ const up = (cents: number, bps: number) => Math.ceil((cents * bps) / 10_000);
 const s = PROVIDER_FEES.stripe;
 const processing = (vat: number) => Math.max(up(vat, s.cardBps) + up(vat, s.internationalBps) + up(vat, s.conversionBps) + up(vat, s.billingBps) + up(vat, s.taxBps), up(vat, PROVIDER_FEES.paddle.bps));
 /** What the fee carries beside the VAT: the conversion, the exchange-rate allowance, paying the return, the reserves. */
-const expected = (vat: number, fxBps: number) => up(vat, s.conversionBps) + up(vat, fxBps) + up(vat, REMITTANCE_BPS) + up(vat, REFUND_RESERVE_BPS) + up(vat, DISPUTE_RESERVE_BPS);
+const expected = (vat: number, fxBps: number) => {
+  const other = up(vat, fxBps) + up(vat, REMITTANCE_BPS) + up(vat, REFUND_RESERVE_BPS) + up(vat, DISPUTE_RESERVE_BPS);
+  // Independent iterative oracle: the fee must fund conversion of the actual VAT-plus-fee transfer.
+  let fee = other;
+  for (let tries = 0; tries < 100; tries++) {
+    const next = other + up(vat + fee, s.conversionBps);
+    if (next === fee) return fee;
+    fee = next;
+  }
+  throw new Error("synthetic fixed point did not converge");
+};
 
 function main(): void {
   part("Today: no reviewed allowance, so unknown and refused");

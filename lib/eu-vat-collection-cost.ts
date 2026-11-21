@@ -3,7 +3,8 @@
  * `application_fee_amount` = the plan's share + the tax + the costs of receiving that tax). Read by lib/eu-vat-collect.ts
  * as euVatCollectionCostCents, which the checkout adds to the fee beside the VAT itself.
  *
- * Every part is a percentage of the VAT, from lib/receiving-costs.ts, rounded up; no figure is typed here. The fee
+ * The rates come from lib/receiving-costs.ts, rounded up; no figure is typed here. Conversion applies to the whole
+ * collected fee (VAT plus its costs); the other parts apply to the VAT. The fee
  * carries Marktmorgen's own costs of receiving the VAT (feeCents):
  *   - conversion: the fee turned into the platform's currency (Stripe's conversion percentage);
  *   - exchange-rate movement until the OSS or HMRC return is paid, from a reviewed allowance with its source and the
@@ -56,10 +57,25 @@ function up(cents: number, bps: number): number {
   return Number((BigInt(cents) * BigInt(bps) + BigInt(9_999)) / BigInt(10_000));
 }
 
+/** A review day is a real UTC calendar day, not only a string with a date's shape. */
+function reviewedDay(day: string): boolean {
+  return typeof day === "string" && DAY.test(day) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
+}
+
+/** A source must name a parseable HTTPS location; a bare scheme has no page to review. */
+function httpsSource(source: string): boolean {
+  try {
+    const url = new URL(source);
+    return typeof source === "string" && url.protocol === "https:" && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** The dearer allowance in force today for the currency, or null. */
 function allowanceOf(currency: string, allowances: readonly VatFxAllowance[], day: string): number | null {
   const valid = allowances.filter((a) => a.currency === currency && Number.isSafeInteger(a.bps) && a.bps > 0 && a.bps <= 10_000
-    && /^https:\/\//.test(a.source) && DAY.test(a.checkedOn) && DAY.test(a.validThrough) && a.checkedOn <= day && day <= a.validThrough);
+    && httpsSource(a.source) && reviewedDay(a.checkedOn) && reviewedDay(a.validThrough) && a.checkedOn <= day && day <= a.validThrough);
   return valid.length ? Math.max(...valid.map((a) => a.bps)) : null;
 }
 
@@ -72,14 +88,21 @@ export function vatCollectionCostOf(vatCents: number, currency: string, allowanc
   if (fxBps === null) return null;
   const s = PROVIDER_FEES.stripe;
   const stripe = up(vatCents, s.cardBps) + up(vatCents, s.internationalBps) + up(vatCents, s.conversionBps) + up(vatCents, s.billingBps) + up(vatCents, s.taxBps);
-  const parts = {
-    conversionCents: up(vatCents, s.conversionBps),
+  const otherParts = {
     fxCents: up(vatCents, fxBps),
     returnPaymentCents: up(vatCents, REMITTANCE_BPS),
     refundReserveCents: up(vatCents, REFUND_RESERVE_BPS),
     disputeReserveCents: up(vatCents, DISPUTE_RESERVE_BPS),
   };
-  const feeCents = Object.values(parts).reduce((sum, cents) => sum + cents, 0);
+  const otherCents = Object.values(otherParts).reduce((sum, cents) => sum + cents, 0);
+  if (!Number.isSafeInteger(otherCents) || !Number.isSafeInteger(s.conversionBps) || s.conversionBps < 0 || s.conversionBps >= 10_000) return null;
+  // The full application fee is converted: VAT + other costs + conversion itself. The minimum conversion C obeys
+  // C >= ceil((VAT + other + C) * bps / 10,000), hence C = ceil((VAT + other) * bps / (10,000 - bps)).
+  // BigInt keeps that ceiling exact; the existing safe-cent check below refuses an unrepresentable result.
+  const divisor = BigInt(10_000 - s.conversionBps);
+  const conversionCents = Number(((BigInt(vatCents) + BigInt(otherCents)) * BigInt(s.conversionBps) + divisor - BigInt(1)) / divisor);
+  const parts = { conversionCents, ...otherParts };
+  const feeCents = otherCents + conversionCents;
   const processingCents = Math.max(stripe, up(vatCents, PROVIDER_FEES.paddle.bps));
   const worstCaseCents = feeCents + processingCents;
   return Number.isSafeInteger(worstCaseCents) ? { ...parts, feeCents, processingCents, worstCaseCents } : null;

@@ -114,8 +114,15 @@ const part = (value: unknown, max: number): string | null => {
   return text && text.length <= max ? text : null;
 };
 
-/** A part that may be shown: no money, earnings, guarantee, urgency or deal, and every number, link and address in the facts. */
-const allowed = (text: string, facts: string) => !IDEA_REFUSED.test(text) && !DEAL_WORDS.test(text) && heldToFacts(text, facts);
+/**
+ * A site written without http or www ("sam.bread/club"), the same shape lib/funnel-explain.ts refuses. The facts are
+ * the reading model's account with links taken out (cleanLines), so no link in an answer can come from them (Claude 1's
+ * LOW on #3447, 6787599738). Node.js and the like are not sites.
+ */
+const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}\b(?:\/\S*)?/i;
+
+/** A part that may be shown: no money, earnings, guarantee, urgency, deal or site, and every number, link and address in the facts. */
+const allowed = (text: string, facts: string) => !IDEA_REFUSED.test(text) && !DEAL_WORDS.test(text) && !BARE_LINK.test(text) && heldToFacts(text, facts);
 
 /**
  * What may be shown from the writing step's answer: the title and the short

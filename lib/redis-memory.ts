@@ -2044,6 +2044,34 @@ export class MemoryRedis {
           }
           return n;
         }
+        // lib/summary-live.ts: period, part/time, AI-read and retry admissions share the store erasure fence.
+        if (key.startsWith("-- marktmorgen:summary-live:v1\n")) {
+          if (args[0] !== "4" || args.length !== 14) return [-2, 0];
+          const [live, erasing, mark, related] = args.slice(1, 5);
+          const [field, ref, legacy, keep, value, mode, now, window, ceiling] = args.slice(5);
+          const call = (command: (string | number)[]) => { this.scriptCalls += 1; return this.run(command); };
+          const identity = legacy === "" ? call(["GET", live]) : call(["GETRANGE", live, 0, 1_000_000]);
+          if (legacy === "") { if (identity !== ref) return [-1, 0]; }
+          else {
+            if (typeof identity !== "string" || !identity) return [-1, 0];
+            if (Buffer.byteLength(identity) > 1_000_000) return [-2, 0];
+            try { const row: unknown = JSON.parse(identity); if (!row || typeof row !== "object") return [-2, 0]; if ((row as { statsId?: unknown }).statsId !== legacy) return [-1, 0]; } catch { return [-2, 0]; }
+          }
+          if (call(["HEXISTS", erasing, field]) !== 0) return [-1, 0];
+          if (mode === "peek") return [call(["GET", mark]) === null ? 1 : 0, 0];
+          if (mode === "retry") {
+            const count = Number(call(["INCR", mark])); call(["EXPIRE", mark, keep]);
+            if (count < 1) return [-2, count];
+            if (count < Number(ceiling)) { call(["DEL", related]); return [1, count]; }
+            return [0, count];
+          }
+          if (mode !== "claim" && mode !== "part") return [-2, 0];
+          if (call(["SET", mark, value, "NX", "EX", keep]) !== "OK") return [0, 0];
+          if (mode === "part" && Number(window) > 0) {
+            call(["SET", related, now, "NX", "EX", keep]); return [1, call(["GETRANGE", related, 0, 16])];
+          }
+          return [1, now];
+        }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
         if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {

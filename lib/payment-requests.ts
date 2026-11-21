@@ -520,8 +520,16 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
   if (!read.complete) console.error("a store's refunds for payment requests were not all read; shown as not checked", { pages: REFUND_PAGES, capped: read.capped });
   const changed = new Map<string, PaymentRequest>();
   const unsaved = new Set<string>();
+  const impossible = new Set<string>();
   for (const r of paid) {
-    const latest = await raiseRefunded(store, r, read.back.get(r.payment) ?? 0, now);
+    const refunded = read.back.get(r.payment) ?? 0;
+    // Stripe cannot have refunded more than this payment took (Codex U-20261119-0141): such a 200 reply is an unknown
+    // shape, never money returned. Nothing is written, and the request is shown as it was, not checked.
+    if (refunded > (r.amountPaid || r.total)) {
+      impossible.add(r.id);
+      continue;
+    }
+    const latest = await raiseRefunded(store, r, refunded, now);
     if (latest) changed.set(r.id, latest);
     // What was read could not be written: what is shown is older than Stripe, so not checked.
     else unsaved.add(r.id);
@@ -537,7 +545,8 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
     // A refund of this payment in another currency (or none) was not added: what is shown may be short of it, and a
     // reload reads the same list.
     const otherMoney = read.otherMoney.has(r.payment);
-    return checkedOf(store, latest, read.complete && !short && !passing && !otherMoney, read.complete && !short && !otherMoney && passing, read.capped);
+    const possible = !impossible.has(r.id);
+    return checkedOf(store, latest, read.complete && possible && !short && !passing && !otherMoney, read.complete && possible && !short && !otherMoney && passing, read.capped);
   });
 }
 
@@ -629,6 +638,8 @@ export async function checkRequestRefunds(store: Store, id: string, now = Date.n
       else if (REFUND_UNDER_WAY.has(row.status)) underWay = true;
     }
     if (!Number.isSafeInteger(sum)) return not("shape", r, false);
+    // More refunded than the payment took cannot be Stripe's truth (Codex U-20261119-0141): unknown, nothing written.
+    if (sum > (r.amountPaid || r.total)) return not("shape", r, false);
     if (underWay) {
       const latest = await raiseRefunded(store, r, sum, now);
       return not("under_way", latest ?? r);

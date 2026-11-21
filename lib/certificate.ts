@@ -512,6 +512,8 @@ export async function withdrawCertificate(courseId: string, id: string, why?: "r
 export const REFUND_WALK_IDS = 1;
 /** SSCAN's COUNT while a withdrawal for a refund walks the student's list: a hint, so a page may hold a few more. */
 export const REFUND_WALK_SCAN = 10;
+/** The refunded payment a walk is for, as its "done" mark names it: a Stripe id, never empty. */
+export const REFUND_WALK_PAYMENT = /^[A-Za-z0-9_]{1,255}$/;
 /** How long a walk's place is kept between calls: longer than the refund pass takes to come back to the row. */
 export const REFUND_WALK_SECONDS = 60 * 86_400;
 /** The ids of the student's list a walk has read and not yet looked at (a list), and where its SSCAN stands (a string). */
@@ -540,9 +542,12 @@ export type RefundWithdrawal = { changed: boolean; more: boolean };
  * read exactly: one that is not what was asked for throws UnknownReply (CX-123 rule 24), and the caller tries again on
  * its next run, from the place kept.
  */
-export async function withdrawForRefund(courseId: string, email: string): Promise<RefundWithdrawal> {
+export async function withdrawForRefund(courseId: string, email: string, refund: string): Promise<RefundWithdrawal> {
   if (!isRedisConfigured()) return { changed: false, more: false };
   const what = "a certificate's withdrawal for a refund";
+  // The payment the walk is for: its "done" mark names it, so a later refund of another payment walks the list again.
+  if (!REFUND_WALK_PAYMENT.test(refund)) throw new Error(`${what}: the refunded payment is not named`);
+  const doneMark = `done:${refund}`;
   const who = emailKey(email);
   let changed = false;
   const holder = await slotHolder(courseId, who, what);
@@ -554,15 +559,18 @@ export async function withdrawForRefund(courseId: string, email: string): Promis
   const list = walkKey(courseId, who);
   const place = walkCursorKey(courseId, who);
   const [cursorRaw, keptRaw] = exactReplies(await redisPipeline([["GET", place], ["LRANGE", list, 0, REFUND_WALK_IDS - 1]]), 2, what);
-  if (cursorRaw !== null && (typeof cursorRaw !== "string" || !/^(?:\d{1,20}|done)$/.test(cursorRaw))) throw new UnknownReply(what);
-  // Walked to its end already: nothing of the list is looked at again (a second refund row of the same student and
-  // course, or the pass coming back), until the mark ends or goes with the person.
-  if (cursorRaw === "done") return { changed, more: false };
+  if (cursorRaw !== null && (typeof cursorRaw !== "string" || !/^(?:\d{1,20}|done(?::[A-Za-z0-9_]{1,255})?)$/.test(cursorRaw))) throw new UnknownReply(what);
+  // Walked to its end already for this payment: nothing of the list is looked at again (the pass coming back to the
+  // row), until the mark ends or goes with the person. A walk done for another payment, or a mark from before it named
+  // one, is walked again from the start: a later refund (the course bought again, a certificate issued and replaced
+  // since) must reach the certificates the earlier walk did not see (Claude 4 AA's LEVE on #3409). Looking again is
+  // harmless: one marked for the refund is skipped.
+  if (cursorRaw === doneMark) return { changed, more: false };
   const kept = plainList(keptRaw);
   if (!kept || !kept.every((id) => typeof id === "string")) throw new UnknownReply(what);
   let ids = kept as string[];
   // Where the SSCAN stands: "0" before the first page and after the last, so a list read to its end says "no more".
-  let cursor = cursorRaw ?? "0";
+  let cursor = cursorRaw === null || cursorRaw.startsWith("done") ? "0" : cursorRaw;
   if (ids.length === 0) {
     const [page] = exactReplies(await redisPipeline([["SSCAN", byKey(courseId, who), cursor, "COUNT", REFUND_WALK_SCAN]]), 1, what);
     const parts = plainList(page);
@@ -607,7 +615,7 @@ export async function withdrawForRefund(courseId: string, email: string): Promis
   const queued = replyCount(remaining, what);
   if (queued > 0 || cursor !== "0") return { changed, more: true };
   // Done: the ids it kept go, and its place says so, so the list is not walked again for this refund.
-  const [ended, cleared] = exactReplies(await redisPipeline([["SET", place, "done", "EX", REFUND_WALK_SECONDS], ["DEL", list]]), 2, what);
+  const [ended, cleared] = exactReplies(await redisPipeline([["SET", place, doneMark, "EX", REFUND_WALK_SECONDS], ["DEL", list]]), 2, what);
   if (ended !== "OK" || replyCount(cleared, what) > 1) throw new UnknownReply(what);
   return { changed, more: false };
 }

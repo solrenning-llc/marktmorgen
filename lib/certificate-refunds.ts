@@ -490,7 +490,7 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
           continue;
         }
         if (standing !== "shut") continue;
-        const done = await withdrawForRefund(product.course!.id, sale!.email);
+        const done = await withdrawForRefund(product.course!.id, sale!.email, pi);
         if (done.changed) withdrawn += 1;
         // The student's list walked only part way (lib/certificate.ts, REFUND_WALK_IDS): the row comes back on a later
         // pass, inside the month's checks, and goes on from the walk's place.

@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   let more = true;
   while (more && calls < EARLIER * 3) {
     commands = 0;
-    const result = await withdrawForRefund(course.id, email);
+    const result = await withdrawForRefund(course.id, email, "pi_test_walk00001");
     most = Math.max(most, commands);
     more = result.more;
     calls += 1;
@@ -70,8 +70,8 @@ async function main(): Promise<void> {
   part("Every certificate of the list ends marked for the refund, the standing one withdrawn");
   const records = await Promise.all([issued.certificate.id, ...earlier].map((c) => readCertificate(c)));
   is("all marked withdrawn for the refund", records.filter((r) => r?.withdrawnFor !== "refund").length, 0);
-  is("once done, the ids it kept are gone and its place says done", (await healthy([["EXISTS", `nl:course:${course.id}:certs:rw:${who}`], ["GET", `nl:course:${course.id}:certs:rwc:${who}`]])), [0, "done"]);
-  is("a call after the walk changes nothing and says no more", await withdrawForRefund(course.id, email), { changed: false, more: false });
+  is("once done, the ids it kept are gone and its place says done", (await healthy([["EXISTS", `nl:course:${course.id}:certs:rw:${who}`], ["GET", `nl:course:${course.id}:certs:rwc:${who}`]])), [0, "done:pi_test_walk00001"]);
+  is("a call after the walk changes nothing and says no more", await withdrawForRefund(course.id, email, "pi_test_walk00001"), { changed: false, more: false });
 
   part("A walk stopped part way is gone with the person");
   const other = "half@example.com";
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   is("withdrawn by the creator", await withdrawCertificate(course.id, second.certificate.id), true);
   const more2 = Array.from({ length: 40 }, (_, n) => `h${String(n).padStart(15, "0")}`);
   await healthy([...more2.map((c) => ["SET", certKey(c), JSON.stringify({ ...base, id: c, email: other })]), ["SADD", `nl:course:${course.id}:certs:by:${otherWho}`, ...more2]]);
-  is("one call leaves more", (await withdrawForRefund(course.id, other)).more, true);
+  is("one call leaves more", (await withdrawForRefund(course.id, other, "pi_test_walk00002")).more, true);
   await forgetCertificatesPerson([course.id], other, ROOM);
   is("the person's deletion takes the walk's place with it", (await healthy([["EXISTS", `nl:course:${course.id}:certs:rw:${otherWho}`, `nl:course:${course.id}:certs:rwc:${otherWho}`]]))[0], 0);
   done();

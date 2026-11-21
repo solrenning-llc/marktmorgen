@@ -30,7 +30,7 @@ import {
   openingReadinessDetails,
 } from "@/lib/opening-readiness";
 import { done, is, part } from "./check";
-import { CURRENT_PRICE_AND_RIGHTS_SNAPSHOT as SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS } from "@/lib/commercial-margin";
+import { CURRENT_TERMS_DIGEST as SNAPSHOT_DIGEST, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS } from "@/lib/commercial-margin";
 import { fundedCustomerWithAi, planPaymentDisputeFixture, zeroExposureFixture, zeroFixedCompanyFixture } from "./margin-test-fixtures";
 
 const others = () => openingReadiness().filter((condition) => condition.id !== "ownerRequest");
@@ -104,7 +104,7 @@ is(
 part("A record that exists but fails its own check is never ready (Codex G and Claude 3 on #3665, MEDIUM)");
 {
   // Synthetic records, recorded but stale or incomplete: present, so "recorded" is true, and refused by the gate's own checks.
-  const staleReview = { priceAndRightsSnapshot: "stale" } as unknown as CommercialMarginReview;
+  const staleReview = { priceAndRightsDigest: "stale" } as unknown as CommercialMarginReview;
   const staleExposure = { reviewId: "stale-review", termsSnapshot: "stale", review: {}, reservedFundsCents: 1, reserveEvidence: "synthetic" } as unknown as ExposureBudgetPolicy;
   const staleContract = { reviewId: "stale-review", financialSnapshot: "stale", fundedGrants: {} } as unknown as ContractFundingPolicy;
   const rows = commercialReviewParts({ review: staleReview, exposure: staleExposure, contract: staleContract });
@@ -121,7 +121,7 @@ part("With a review the gate accepts, the exposure and contract validators decid
   const accepted = {
     companyBase: zeroFixedCompanyFixture,
     planPaymentDisputes: planPaymentDisputeFixture(),
-    priceAndRightsSnapshot: SNAPSHOT,
+    priceAndRightsDigest: SNAPSHOT_DIGEST!,
     taxEvidence: "TEST ONLY: hypothetical ceilings",
     costAndLimitEvidence: "TEST ONLY: hypothetical enforced limits",
     allocatedFixedCostsVerified: true,

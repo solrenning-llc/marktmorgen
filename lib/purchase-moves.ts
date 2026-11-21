@@ -134,8 +134,8 @@ return n`;
  * so two asks at the same moment cannot both make a request. The index is written first: if a later write is refused,
  * every later ask finds that one index and fails closed rather than making another request. Answers {1, index} when it
  * made them, {0, index} when an ask of the day already had (nothing written), {-1, ...} when a write was refused. A SET
- * ... NX answers Lua a status table or false, never the string 'OK', so each write is tested for truth. Billed as four
- * commands (the EVAL, GET and up to three SETs); lib/redis-memory.ts models it for the tests.
+ * ... NX answers Lua a status table or false, never the string 'OK', so each write is tested for truth. Billed as five
+ * commands at most (the EVAL, a GET and up to three SETs); lib/redis-memory.ts models it for the tests.
  */
 export const MOVE_ASK_TO_ONCE = `-- marktmorgen:purchase-move-ask-to-once:v1
 local current = redis.call('GET', KEYS[1])

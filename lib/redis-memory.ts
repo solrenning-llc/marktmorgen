@@ -3456,6 +3456,23 @@ export class MemoryRedis {
           });
           return removed;
         }
+        // lib/team-booking.ts WRITE_TEAM_IF_LIVE: every inner call is billed, including short refusals.
+        if (key.startsWith("-- marktmorgen:team-setup-live:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, identity, erasing, teams, field, product, value, ref, legacyCallsId] = args;
+          this.scriptCalls += 1;
+          const raw = this.run(["GET", identity]);
+          if (typeof raw !== "string") return 0;
+          if (legacyCallsId !== "") {
+            let record: unknown;
+            try { record = JSON.parse(raw); } catch { return 0; }
+            if (!record || typeof record !== "object" || (record as { callsId?: unknown }).callsId !== legacyCallsId) return 0;
+          } else if (raw.toLowerCase() !== ref) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erasing, field]) === 1) return 0;
+          this.scriptCalls += 1;
+          this.run(["HSET", teams, product, value]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];

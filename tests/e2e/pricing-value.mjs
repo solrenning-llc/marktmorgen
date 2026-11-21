@@ -1,4 +1,11 @@
 /** HT3 static value before plan prices on both existing routes; no paid action. */
+import { readFileSync } from "node:fs";
+
+/**
+ * The date the page gives for the Hotmart sources, read from the record it is drawn from (lib/competitor-prices.ts,
+ * hotmartPricing.readOn), so each dated re-read of the competitors does not leave this check behind on an old date.
+ */
+const HOTMART_READ_ON = readFileSync(new URL("../../lib/competitor-prices.ts", import.meta.url), "utf8").match(/const hotmartPricing\b[^\n]*readOn: "(\d{4}-\d{2}-\d{2})"/)?.[1] ?? "the Hotmart source date could not be read";
 export async function checkPricingValue({browser,LOCAL,axeSource,is}){
  const names=["Checkout","Upsells","Affiliates","Funnels","Email automation","Community","Courses","Video calls","Analytics","CRM"];
  for(const width of [390,1280]){
@@ -21,7 +28,7 @@ export async function checkPricingValue({browser,LOCAL,axeSource,is}){
     }
     const models=value.locator("[data-pricing-fee-models]"),text=await models.innerText();
     is("HT3 fee scope retained "+path+"/"+width,text.includes("above $15")&&text.includes("9.9% + $1.00"),true);
-    is("HT3 source date visible "+path+"/"+width,text.includes("2026-10-20"),true);
+    is("HT3 source date visible "+path+"/"+width,text.includes(HOTMART_READ_ON),true);
     is("HT3 separate Stripe costs "+path+"/"+width,text.includes("Stripe processing, optional add-ons and applicable taxes remain separate"),true);
     is("HT3 no lower-bill promise "+path+"/"+width,text.includes("Neither model is a promise of the lower total bill"),true);
     is("HT3 existing official pricing source "+path+"/"+width,await models.locator('a[href="https://hotmart.com/en/pricing"]').count(),1);

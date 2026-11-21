@@ -16,41 +16,25 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { claimValue } from "@/lib/claim-mark";
+import { setIfStoreLive, type StoreLiveFence } from "@/lib/live-fence";
 import { ERASING_KEY, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 
-// ARGV[4] is "" for a store with an id (its id key is fenced on with EXISTS); for one from before ids it is the
-// store's statsId, compared with the record's own. A record that does not parse is unknown (-1), never this store.
-const SET_IF_STORE_LIVE = `-- marktmorgen:store-cache-live:v2
-if redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
-if ARGV[4] == "" then
-  if redis.call("EXISTS", KEYS[1]) ~= 1 then return 0 end
-else
-  local raw = redis.call("GET", KEYS[1])
-  if not raw then return 0 end
-  local ok, record = pcall(cjson.decode, raw)
-  if not ok or type(record) ~= "table" then return -1 end
-  if record["statsId"] ~= ARGV[4] then return 0 end
-end
-redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
-return 1`;
+/** The fence of this store (lib/live-fence.ts): its id key, or its record and statsId for a store kept from before ids. */
+export async function storeLiveFence(store: Pick<Store, "email" | "sid" | "extra" | "statsId">): Promise<StoreLiveFence> {
+  const ref = storeRef(store);
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  // A store from before ids is told from its owner's next store only by its statsId: without one, nothing is known.
+  const statsId = withId ? "" : store.statsId || null;
+  return { live, erasing: ERASING_KEY, field: await erasingField(ref), statsId, ref };
+}
 
 /**
  * Keeps `value` under `key` for `seconds` while `store` is live: "kept"; "gone" when its erasure has begun or its
  * record is gone, and then nothing is written; "unknown" for any other answer (nothing known to be written).
  */
 export async function setWhileStoreLive(store: Pick<Store, "email" | "sid" | "extra" | "statsId">, key: string, value: string, seconds: number): Promise<"kept" | "gone" | "unknown"> {
-  if (!isRedisConfigured()) return "unknown";
-  const ref = storeRef(store);
-  const withId = STORE_ID_PATTERN.test(store.sid);
-  // A store from before ids is told from its owner's next store only by its statsId: without one, nothing is known.
-  const statsId = store.statsId ?? "";
-  if (!withId && !statsId) return "unknown";
-  const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
-  const replies = repliesFor(await redisPipeline([
-    ["EVAL", SET_IF_STORE_LIVE, 3, live, ERASING_KEY, key, await erasingField(ref), value, seconds, withId ? "" : statsId],
-  ]), 1);
-  const answer = replies?.[0];
-  return answer === 1 ? "kept" : answer === 0 ? "gone" : "unknown";
+  return setIfStoreLive(await storeLiveFence(store), key, value, seconds);
 }
 
 // The same identity rule as SET_IF_STORE_LIVE, for a mark taken once (lib/claim-mark.ts claimMark's SET NX): a job that

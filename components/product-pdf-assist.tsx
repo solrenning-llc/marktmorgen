@@ -115,8 +115,9 @@ export function ProductPdfAssist({
     const summary = now.summary === set.summary ? before.summary : (kept.push("short description"), now.summary);
     let about = before.about;
     if (now.about !== set.about) {
+      // The creator's words stay either way (with the list taken out when it is still there whole), so it is said.
       about = withoutList(now.about, inserted.current);
-      if (about === now.about) kept.push("full description");
+      kept.push("full description");
     }
     change.current({ title, summary, about });
     inserted.current = null;

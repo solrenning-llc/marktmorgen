@@ -12,7 +12,7 @@ const real=redis.pipeline.bind(redis);
 for(const [label,bad] of [['missing',[]],['undefined',[undefined]],['null',[null]],['wrong-type',[0]],['sparse',[new Array(1)]],['unparseable',[['broken JSON']]]] as const){
 redis.clear();await writeForm(stats,form);await addResponse(stats,form.id,answer,ROOM);
 let refused=false,result:unknown;
-redis.pipeline=(async commands=>commands.some(c=>c[0]==='HVALS'&&c[1]===`nl:forms:${stats}`)?bad:real(commands)) as typeof redis.pipeline;
+redis.pipeline=(async commands=>commands.some(c=>c[0]==='HGETALL'&&c[1]===`nl:forms:${stats}`)?bad:real(commands)) as typeof redis.pipeline;
 try{result=await forgetFormsPerson(stats,email,ROOM);}catch{refused=true;}finally{redis.pipeline=real;}
 console.log(label,'returned',result,'refused',refused);
 is(`${label}: underlying private response still exists`,(await readResponses(stats,form.id)).total,1);

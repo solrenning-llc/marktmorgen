@@ -27,30 +27,104 @@ const responsesKey = (statsId: string, formId: string) => `nl:form:r:${statsId}:
 /** Every form of a store, newest change first. */
 export async function readForms(statsId: string | null): Promise<FormDef[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", formsKey(statsId)]]);
-  const list = Array.isArray(raw) ? raw : [];
-  return list
-    .map((value) => {
-      try {
-        return parseForm(JSON.parse(String(value)));
-      } catch {
-        return null;
-      }
-    })
-    .filter((f): f is FormDef => f !== null)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const what = "the store's forms";
+  // HGETALL, not HVALS: each record is evidence only of the form its hash field names.
+  const [raw] = exactReplies(await redisPipeline([["HGETALL", formsKey(statsId)]]), 1, what);
+  const list = plainList(raw);
+  if (!list || list.length % 2 !== 0) throw new UnknownReply(what);
+  const forms: FormDef[] = [];
+  for (let at = 0; at < list.length; at += 2) {
+    const field = list[at];
+    const form = confirmedForm(list[at + 1], what);
+    // A readable record of another form under this field is evidence of neither.
+    if (typeof field !== "string" || form.id !== field) throw new UnknownReply(what);
+    forms.push(form);
+  }
+  // Each hash field holds one form: the same form twice is not evidence of either.
+  if (new Set(forms.map(form => form.id)).size !== forms.length) throw new UnknownReply(what);
+  return forms.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** One form, or null. */
 export async function readForm(statsId: string | null, id: string): Promise<FormDef | null> {
   if (!statsId || !FORM_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", formsKey(statsId), id]]);
+  const what = "the form";
+  const [raw] = exactReplies(await redisPipeline([["HGET", formsKey(statsId), id]]), 1, what);
+  if (raw === null) return null;
+  const form = confirmedForm(raw, what);
+  // A readable record of another form is not the form asked for: writing to it would edit the wrong one.
+  if (form.id !== id) throw new UnknownReply(what);
+  return form;
+}
+
+/**
+ * Only a stored, readable form is evidence of its contents. parseForm
+ * sanitizes what an editor sends, so a stored record it would shorten (a
+ * question, a choice, a result or a category dropped) is unknown here, never
+ * a shorter definition that exports or edits would then certify.
+ */
+function confirmedForm(raw: unknown, what: string): FormDef {
+  const form = storedFormRecord(raw);
+  if (form) return form;
+  throw new UnknownReply(what);
+}
+
+/**
+ * The form a stored record holds, only when parsing keeps all of it; null for
+ * anything else (unreadable, not a form, or one parseForm would shorten).
+ * Every reader of nl:forms: uses this, so a record is unknown everywhere or nowhere.
+ */
+export function storedFormRecord(raw: unknown): FormDef | null {
   if (typeof raw !== "string") return null;
   try {
-    return parseForm(JSON.parse(raw));
+    const value: unknown = JSON.parse(raw);
+    const form = parseForm(value);
+    return form && complete(value, form) ? form : null;
   } catch {
+    // The record is unavailable, rather than absent.
     return null;
   }
+}
+
+/**
+ * Keys parseForm can write at any level of a form. A stored key it does not
+ * know (none today) changes nothing it reads, so it is left alone; a key it
+ * knows must survive parsing unchanged.
+ */
+const FORM_KEYS = new Set([
+  "id", "name", "fields", "button", "doneHeading", "doneBody", "outcomes", "offerList", "updatedAt", "scoring", "categories", "opensAt", "closesAt",
+  "type", "label", "required", "options", "outcome", "next", "points", "category", "title", "body", "product", "min", "max",
+]);
+
+/** What parseForm writes when a stored record leaves a key out: an older record without it reads the same. */
+const isDefault = (value: unknown): boolean =>
+  value === undefined || value === null || value === "" || value === false || value === 0 || (Array.isArray(value) && value.length === 0);
+
+/**
+ * Whether parsing kept the stored record as it is: every question, choice,
+ * result and category, and every value parseForm reads (a branch, a schedule,
+ * a reference, points, a range, a flag, a text), unchanged. A key the record
+ * leaves out may only come back as its default; a key parseForm drops may only
+ * have held its default. So a stored record that parseForm would shorten or
+ * rewrite is unknown, never a different definition acted on (Codex X5, #2857).
+ */
+function complete(stored: unknown, parsed: unknown): boolean {
+  if (Array.isArray(parsed)) return Array.isArray(stored) && stored.length === parsed.length && parsed.every((item, at) => complete(stored[at], item));
+  if (parsed && typeof parsed === "object") {
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return false;
+    const was = stored as Record<string, unknown>;
+    const now = parsed as Record<string, unknown>;
+    for (const key of Object.keys(now)) {
+      if (Object.prototype.hasOwnProperty.call(was, key) ? !complete(was[key], now[key]) : !isDefault(now[key])) return false;
+    }
+    return Object.keys(was).every(key => Object.prototype.hasOwnProperty.call(now, key) || !FORM_KEYS.has(key) || isDefault(was[key]));
+  }
+  return stored === parsed || (isDefault(stored) && isDefault(parsed));
+}
+
+function confirmedCount(raw: unknown, what: string): number {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) throw new UnknownReply(what);
+  return raw;
 }
 
 /** Checks capacity before a multi-step setup; writeForm still checks concurrent changes. */
@@ -79,15 +153,25 @@ export async function writeForm(statsId: string, form: FormDef): Promise<boolean
 
 /** Removes a form and every answer kept for it, and gives back the answers' room. */
 export async function dropForm(statsId: string, id: string, room: DataStore): Promise<boolean> {
-  const [removed] = await redisPipeline([
+  const what = "the removal of the form and its answers";
+  const [removed, answers] = exactReplies(await redisPipeline([
     ["HDEL", formsKey(statsId), id],
     ["DEL", responsesKey(statsId, id)],
-  ]);
+  ]), 2, what);
+  if ((removed !== 0 && removed !== 1) || (answers !== 0 && answers !== 1)) throw new UnknownReply(what);
   await giveData(room, [{ slot: ANSWERS_SLOT(id), bytes: 0, set: true }]);
-  return Number(removed) === 1;
+  return removed === 1;
 }
 
 const ANSWERS_SLOT = (formId: string) => `fr:${formId}`;
+
+/** The keep was sent but its receipt is unknown: the response may be kept, so the buyer is never told nothing was sent. */
+export class UnconfirmedKeep extends UnknownReply {
+  constructor(what: string) {
+    super(what);
+    this.name = "UnconfirmedKeep";
+  }
+}
 
 /** One response kept, the newest first, and the ones past ARGV[2] let go, answered: what was really let go. */
 export const KEEP_FORM_RESPONSE = `-- marktmorgen:form-keep:v1
@@ -107,12 +191,24 @@ return out`;
  */
 export async function addResponse(statsId: string, formId: string, response: FormResponse, room: DataStore): Promise<void> {
   const json = JSON.stringify(response);
-  const [kept, oldest] = await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]);
-  const guessed = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
+  const what = "the keeping of a form response";
+  const [rawKept, oldest] = exactReplies(await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]), 2, what);
+  const kept = confirmedCount(rawKept, what);
+  if (kept === 0 ? oldest !== null : parseResponse(oldest) === null) throw new UnknownReply(what);
+  const guessed = kept >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const charged = dataBytes([json], 1) - guessed;
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
-  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]);
-  const dropped = (Array.isArray(gone) ? gone : []).reduce<number>((sum, raw) => sum + (typeof raw === "string" ? dataBytes([raw], 1) : 0), 0);
+  // Once the keep is sent, a lost or unreadable receipt does not say whether it was kept.
+  let list: unknown[] | null;
+  try {
+    const [gone] = exactReplies(await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]), 1, what);
+    list = plainList(gone);
+  } catch {
+    throw new UnconfirmedKeep(what);
+  }
+  if (!list || list.some(raw => parseResponse(raw) === null)) throw new UnconfirmedKeep(what);
+  // Unknown writes retain their reservation; only an exact receipt can release room.
+  const dropped = list.reduce<number>((sum, raw) => sum + dataBytes([raw as string], 1), 0);
   const off = dataBytes([json], 1) - dropped - charged;
   if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);
   else if (off < 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -off }]);
@@ -161,8 +257,9 @@ export async function readResponses(statsId: string | null, formId: string, limi
 /** How many responses each of these forms has kept. */
 export async function responseCounts(statsId: string | null, ids: string[]): Promise<Record<string, number>> {
   if (!statsId || !ids.length || !isRedisConfigured()) return {};
-  const counts = await redisPipeline(ids.map((id) => ["LLEN", responsesKey(statsId, id)]));
-  return Object.fromEntries(ids.map((id, i) => [id, Number(counts[i]) || 0]));
+  const what = "the form response counts";
+  const counts = exactReplies(await redisPipeline(ids.map((id) => ["LLEN", responsesKey(statsId, id)])), ids.length, what);
+  return Object.fromEntries(ids.map((id, i) => [id, confirmedCount(counts[i], what)]));
 }
 
 /**
@@ -207,19 +304,24 @@ export async function forgetFormsPerson(statsId: string | null, email: string, r
   // Which forms there are, read exactly (Codex G on #2584): the list as asked, every value a form that reads. Only an
   // exact empty list means no forms; a reply in another shape, or a form record that does not read, is not "no
   // responses to delete", so it throws UnknownReply and the erasure is said as incomplete.
-  const [listed] = exactReplies(await redisPipeline([["HVALS", formsKey(statsId)]]), 1, `${what} (its forms)`);
-  const values = plainList(listed);
-  if (!values) throw new UnknownReply(`${what} (its forms)`);
-  const forms = values.map((value) => {
-    if (typeof value !== "string") throw new UnknownReply(`${what} (its forms)`);
+  // HGETALL, so each record is bound to the field it is kept under: a record of another form would send the
+  // deletion to that form's answers and leave this one's, said as done. Parsed loosely here (parseForm), not with the
+  // complete-record rule, so a record parseForm would tidy never blocks a person's deletion.
+  const [listed] = exactReplies(await redisPipeline([["HGETALL", formsKey(statsId)]]), 1, `${what} (its forms)`);
+  const pairs = plainList(listed);
+  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReply(`${what} (its forms)`);
+  const forms: FormDef[] = [];
+  for (let at = 0; at < pairs.length; at += 2) {
+    const [field, value] = [pairs[at], pairs[at + 1]];
+    let form: FormDef | null = null;
     try {
-      const form = parseForm(JSON.parse(value));
-      if (form) return form;
+      form = typeof value === "string" ? parseForm(JSON.parse(value)) : null;
     } catch {
       // Falls through to the refusal below.
     }
-    throw new UnknownReply(`${what} (its forms)`);
-  });
+    if (!form || typeof field !== "string" || form.id !== field) throw new UnknownReply(`${what} (its forms)`);
+    forms.push(form);
+  }
   if (!forms.length) return 0;
   const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
   // Exactly {form's place, response, times removed} for each: any other shape

@@ -604,6 +604,14 @@ export class MemoryRedis {
           this.run(["ZADD", line, due, id]);
           return 1;
         }
+        // lib/host-calendar.ts: compare the exact config and keep the reading in the same operation.
+        if (key.startsWith("-- marktmorgen:host-reading-current:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, config, target, failure, expected, value, seconds, kind] = args;
+          if (this.run(["GET", config]) !== expected) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (kind === "good") this.run(["DEL", failure]);
+          return 1;
+        }
         // lib/store-join.ts SAVE_GRANT_IF_LIVE: a join grant and its erasure note, only while the store is live.
         if (key.startsWith("-- marktmorgen:join-grant-if-live:v1\n") && args[0] === "4" && args.length === 13) {
           const [, live, erasing, grantKey, notes, field, grant, seconds, at, cutoff, keep, statsId, ref] = args;

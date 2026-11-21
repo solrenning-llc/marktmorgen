@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { type Store, storeForEmail } from "@/lib/store";
+import { type Store, storeForEmail, withLiveStore } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { type Listing, readListingExactly } from "@/lib/catalog";
@@ -151,48 +151,53 @@ export async function POST(request: NextRequest) {
 
     return await paid(store, action === "off" ? PUBLIC_SETTINGS_WORST_BYTES.off : PUBLIC_SETTINGS_WORST_BYTES.change, (moved) => withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
       // Read again under the lock: a product removed, turned into another podcast or made a draft while this waited
-      // is not written for.
+      // is not written for. The store is read again under its own lock too, the one its erasure takes (withLiveStore,
+      // Codex L-20261120-1151), held until the write is done: a store whose erasure began or ended is not written for,
+      // and an erasure that begins meanwhile waits for this write and then deletes it, so nothing is left behind it.
       const now = store.sid ? await storeForIdExactly(store.sid) : "unknown";
       if (now === "unknown") return fail("unavailable", 503);
       if (now === "none") return fail("none", 404);
-      const still = await readListingExactly(now, id);
-      if (still === "unknown") return fail("unavailable", 503);
-      if (!still || still.podcast?.id !== podcastId) return fail("unknown", 404);
-      const { show, bytes: showBytes } = await readPublicShowSized(podcastId);
-      moved.bytes += showBytes;
-      const current = show ? settingsOf(show) : null;
-      if (show && !current) throw new UnknownReplyError("a podcast's public settings");
+      const live = await withLiveStore(now, async () => {
+        const still = await readListingExactly(now, id);
+        if (still === "unknown") return fail("unavailable", 503);
+        if (!still || still.podcast?.id !== podcastId) return fail("unknown", 404);
+        const { show, bytes: showBytes } = await readPublicShowSized(podcastId);
+        moved.bytes += showBytes;
+        const current = show ? settingsOf(show) : null;
+        if (show && !current) throw new UnknownReplyError("a podcast's public settings");
 
-      if (action === "off") {
-        if (show) await dropPublicShow(now, podcastId);
-        return answer(now, still, null, moved);
-      }
-      // A hidden product gets no feed and no new public episode, but one can still be taken out (Claude 5's LOW 2 on
-      // #3544): its public feed already answers 404 while the product is hidden.
-      if (still.hidden && (action === "on" || makePublic)) return fail("private", 409);
-      const { podcast, bytes: podcastBytes } = await readPodcastSized(podcastId);
-      moved.bytes += podcastBytes;
-      const episodes = new Set((podcast?.episodes ?? []).map((e) => e.id));
-      // Only episodes the podcast still has stay in it: one deleted since is let go.
-      const kept: Record<string, string> = {};
-      for (const [episodeId, address] of Object.entries(current?.episodes ?? {})) if (episodes.has(episodeId)) kept[episodeId] = address;
+        if (action === "off") {
+          if (show) await dropPublicShow(now, podcastId);
+          return answer(now, still, null, moved);
+        }
+        // A hidden product gets no feed and no new public episode, but one can still be taken out (Claude 5's LOW 2 on
+        // #3544): its public feed already answers 404 while the product is hidden.
+        if (still.hidden && (action === "on" || makePublic)) return fail("private", 409);
+        const { podcast, bytes: podcastBytes } = await readPodcastSized(podcastId);
+        moved.bytes += podcastBytes;
+        const episodes = new Set((podcast?.episodes ?? []).map((e) => e.id));
+        // Only episodes the podcast still has stay in it: one deleted since is let go.
+        const kept: Record<string, string> = {};
+        for (const [episodeId, address] of Object.entries(current?.episodes ?? {})) if (episodes.has(episodeId)) kept[episodeId] = address;
 
-      let next: PublicShowSettings;
-      if (action === "on") {
-        next = { category: category as PublicCategory, explicit, episodes: kept };
-      } else {
-        if (!current) return fail("off", 409);
-        if (!episodes.has(episode)) return fail("unknown", 404);
-        if (makePublic) kept[episode] = audio;
-        else delete kept[episode];
-        next = { ...current, episodes: kept };
-        if (JSON.stringify(next.episodes) === JSON.stringify(current.episodes)) return answer(now, still, current, moved);
-      }
-      // Count the Redis record actually written. An unknown write keeps the full hold through paid().
-      const written = await writePublicShow(now, podcastId, next, show);
-      if (!written.ok) return refused(written);
-      moved.bytes += written.bytes;
-      return answer(now, still, next, moved);
+        let next: PublicShowSettings;
+        if (action === "on") {
+          next = { category: category as PublicCategory, explicit, episodes: kept };
+        } else {
+          if (!current) return fail("off", 409);
+          if (!episodes.has(episode)) return fail("unknown", 404);
+          if (makePublic) kept[episode] = audio;
+          else delete kept[episode];
+          next = { ...current, episodes: kept };
+          if (JSON.stringify(next.episodes) === JSON.stringify(current.episodes)) return answer(now, still, current, moved);
+        }
+        // Count the Redis record actually written. An unknown write keeps the full hold through paid().
+        const written = await writePublicShow(now, podcastId, next, show);
+        if (!written.ok) return refused(written);
+        moved.bytes += written.bytes;
+        return answer(now, still, next, moved);
+      });
+      return live ?? fail("none", 404);
     }));
   } catch (error) {
     if (error instanceof LockBusyError) return fail("busy", 409);

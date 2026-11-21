@@ -14,12 +14,15 @@
  * when no other store is due; an entry that does not read is counted as left,
  * never dropped from the count; and a store is taken out of the batch only on
  * Redis's own answer to the HDEL. Synthetic data only, in-memory Redis.
+ * Store D is closed the way the closing job leaves it (closeForErasure): a store
+ * only marked due is taken for a live one and never erased (#3156).
  */
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_KEY, eraseClosed, markDue, type Batched } from "@/lib/closed-store-data";
 import { finishClosed } from "@/lib/plan-closing";
 import { claimHandle, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 const HOUR = 3_600_000;
@@ -113,6 +116,7 @@ async function main(): Promise<void> {
   part("before a walk: a batch that does not read never leaves a prepared store without a walk");
   redis.clear();
   await claimHandle("walk-d@example.test", "walkd", "Walk D", "");
+  await closeForErasure("walk-d@example.test");
   const d = storeRef((await storeForEmail("walk-d@example.test"))!);
   await markDue(d, now - 1);
   batchReply = { value: "garbled" };

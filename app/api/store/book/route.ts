@@ -11,7 +11,7 @@ import { holdAndCheckout, isCallProduct, releaseOwnHold } from "@/lib/calls";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { countHit } from "@/lib/visit";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
@@ -158,11 +158,13 @@ export async function POST(request: NextRequest) {
   const previous = request.cookies.get(HOLD_COOKIE)?.value ?? "";
   if (previous) await releaseOwnHold(store, previous).catch(() => {});
 
-  // Sent by an affiliate within the store's window: credited to them.
-  const via = await attributionFor(store, product.id, {
+  // Sent by an affiliate within the store's window: credited to them. A lookup that does not answer never stops the
+  // booking: the click rides on the order as pending, credited once a later read answers (owner's decision 6).
+  const credit = await attributionOrPending(store, product.id, {
     via: request.cookies.get(viaCookieName(store.handle))?.value,
     session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-  }).catch(() => null);
+  });
+  const via = credit.known ? credit.via : null;
   // From a package: checked, and the session's coupon made, before the time is held.
   const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;
   if (prepared && !prepared.ok) return back(`pkg-${prepared.reason}`);
@@ -181,19 +183,25 @@ export async function POST(request: NextRequest) {
     minutes,
     // Checked against the creator's list again here, as the card's checkout checks it (app/api/store/checkout).
     embedSite: listedReturn(store.embedSites, returnAsked) ?? listedSite(store.embedSites, siteAsked) ?? null,
-    channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
+    channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)), ...pendingChannel(credit) },
   });
   if (!result.ok) return back(result.reason);
   // The session counts against the package from now; if another tab took the
   // last one meanwhile, this time is let go again.
   if (prepared && prepared.ok && prepared.checkout) {
-    const counted = await holdSession(store, prepared.checkout, result.session, Math.floor(Date.now() / 1000) + HOLD_SECONDS).catch(() => false);
-    if (!counted) {
+    // false is a package read with no session left; a hold that could not be read or written is unknown (null), told
+    // as "try again", never as "no sessions left" (Codex X6's LOW on #2617, 7052207176).
+    const counted = await holdSession(store, prepared.checkout, result.session, Math.floor(Date.now() / 1000) + HOLD_SECONDS).catch((error: unknown) => {
+      console.error("Counting a package session failed (pkg-error):", error instanceof Error ? error.message : error);
+      return null;
+    });
+    if (counted !== true) {
+      const reason = counted === false ? "pkg-used" : "pkg-error";
       // This request opened that checkout: it is closed at Stripe even if the hold cannot be read, and a failure is logged.
       await releaseOwnHold(store, result.session, { openedHere: true }).catch((error: unknown) => {
-        console.error("Call hold could not be released (pkg-used):", error instanceof Error ? error.message : error);
+        console.error(`Call hold could not be released (${reason}):`, error instanceof Error ? error.message : error);
       });
-      return back("pkg-used");
+      return back(reason);
     }
   }
   after(() => countHit(request, store, { kind: "checkout", id: product.id }));

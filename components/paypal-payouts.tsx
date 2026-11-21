@@ -21,6 +21,9 @@ const MESSAGES: Record<string, string> = {
   reconnect: "Connect your PayPal app again: its Secret has to be entered once more.",
   nothing: "Nobody is owed anything that has cleared right now.",
   refunds: "We could not check every refund on your Stripe account just now, so nothing was sent. Try again in a minute.",
+  invoices: "We could not check every membership and plan payment on your Stripe account just now, so what is owed is not known and nothing was sent. Try again in a minute.",
+  invoices_ceiling: "Your store has more membership and plan payments from affiliate links than we can keep track of, so what is owed is not known and nothing was sent. Trying again will not change that: pay each affiliate yourself and write it down with Mark as paid.",
+  invoices_unlinked: "Some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here and nothing was sent. Trying again will not change that: pay each affiliate yourself and write it down with Mark as paid.",
   funds: "Your PayPal balance does not cover this batch. Nothing was sent. Add money to your PayPal balance and try again.",
   busy: "A payment is being sent right now. Wait a moment and reload.",
   off: "Switch your affiliate program on first.",
@@ -192,7 +195,9 @@ export function PayPalPayouts({
                   if (data) {
                     toast(
                       data.unavailable
-                        ? data.retryNow
+                        ? data.limit
+                          ? "Your studio's requests left this month are not enough for this check. Nothing was asked of PayPal. We still check these payments with PayPal once a day on our own."
+                          : data.retryNow
                           ? "We could not check these payments with PayPal just now. Nothing was asked of PayPal, so you can try again right away."
                           : "We could not check these payments with PayPal just now. Nothing was asked of PayPal. Try again in a minute."
                         : data.asked === false

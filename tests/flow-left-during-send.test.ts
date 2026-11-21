@@ -5,7 +5,7 @@
  * with an open attempt for good (Claude 2 (nuvem D) bug hunt, lib/flows.ts). Synthetic: the memory Redis and the SES
  * stand-in.
  */
-import { personOf, readRun } from "@/lib/flow-runs";
+import { personOf, readRun, runPeople } from "@/lib/flow-runs";
 import { enroll, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
 import { forgetContactPerson, upsertContact } from "@/lib/contacts";
 import { forgetWorkflowPerson } from "@/lib/flows";
@@ -23,9 +23,18 @@ Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let leaveAfterRead: string | null = null;
 let eraseAfterRead: (() => Promise<void>) | null = null;
+let refuseErasedCleanup = false;
+// sendGroup's read: the contacts' rows, then each lease entry. Since #4234 a lease entry is read with its run's generation
+// in one EVAL (lib/flow-runs.ts LEASE_AND_GEN) instead of a ZSCORE; either shape is that read (merge of main, Claude 1
+// cloud c1-fila).
+const leaseRead = (c: Command) => c[0] === "ZSCORE" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-lease-gen:"));
 redis.pipeline = (async (batch: Command[]) => {
+  if (refuseErasedCleanup && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flow-forget-if-erased:v1"))) {
+    refuseErasedCleanup = false;
+    throw new Error("synthetic: the cleanup write failed");
+  }
   const values = await real(batch);
-  if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+  if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every(leaseRead)) {
     // The person unsubscribes right after sendGroup read their row (before sendTo's own tokensFor read).
     const key = String(batch[0][1]);
     const [raw] = await real([["HGET", key, leaveAfterRead]]);
@@ -33,7 +42,7 @@ redis.pipeline = (async (batch: Command[]) => {
     await real([["HSET", key, leaveAfterRead, JSON.stringify({ ...contact, unsub: true, unsubAt: new Date().toISOString() })]]);
     leaveAfterRead = null;
   }
-  if (eraseAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+  if (eraseAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every(leaseRead)) {
     // The person is erased right after sendGroup read their row (before sendTo's own read).
     const erase = eraseAfterRead;
     eraseAfterRead = null;
@@ -92,6 +101,62 @@ async function main(): Promise<void> {
   is("their run is not written back: nothing of them is left", await readRun(flowId, personOf("erased@example.com")), null);
   const [indexed] = await real([["ZSCORE", `nl:wf:runs:${flowId}`, personOf("erased@example.com")]]);
   is("and they are not in the workflow's list of runs", indexed, null);
+
+  part("Erased between the step's row read and the send, with any later cleanup write failing once (Codex L on #2287)");
+  // The attempt is written only while this take still holds the person's lease, in the same Redis step: an erasure
+  // that took the lease first leaves nothing to write back, so nothing hangs on a cleanup that can fail and is not
+  // retried. Here every write that would come after the claim to clear their run again fails, once.
+  await upsertContact(list, "erased2@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "erased2@example.com", { joined: false, tag: "welcome" });
+  refuseErasedCleanup = true;
+  eraseAfterRead = async () => {
+    await forgetContactPerson(list, "erased2@example.com");
+    await forgetWorkflowPerson(store, "erased2@example.com");
+  };
+  await run();
+  refuseErasedCleanup = false;
+  is("the erasure was injected", eraseAfterRead, null);
+  is("nothing was sent to them", sentTo("erased2@example.com"), 0);
+  is("no attempt or history of theirs is written back, with no cleanup to depend on", await readRun(flowId, personOf("erased2@example.com")), null);
+
+  part("A run that keeps stepping never expires in the middle of its sequence (Claude 5 on #2287, LEVE)");
+  // A run's record and history are kept RUN_KEEP_SECONDS from when they were last renewed, and a sequence can last
+  // longer than that (20 steps of up to 35 days). Each attempt written renews them, and the run's place in the list
+  // of runs, in the same step: a run near its end that takes one more step is kept, never dropped as erased.
+  await upsertContact(list, "longrun@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "longrun@example.com", { joined: false, tag: "welcome" });
+  const long = personOf("longrun@example.com");
+  const opened = Math.floor(Date.now() / 1000) - 399 * 86_400;
+  const index = `nl:wf:runs:${flowId}`;
+  const expired = personOf("expired-run@example.com");
+  await real([
+    ["EXPIRE", `nl:wf:run:${flowId}:${long}`, 60],
+    ["EXPIRE", `nl:wf:log:${flowId}:${long}`, 60],
+    ["ZADD", index, opened, long],
+    ["ZADD", index, opened - 2 * 86_400, expired],
+    ["EXPIRE", index, 60],
+  ]);
+  await run();
+  is("the step was sent to them", sentTo("longrun@example.com"), 1);
+  const [runTtl, logTtl, listed, indexTtl, oldScore] = await real([
+    ["TTL", `nl:wf:run:${flowId}:${long}`],
+    ["TTL", `nl:wf:log:${flowId}:${long}`],
+    ["ZSCORE", index, long],
+    ["TTL", index],
+    ["ZSCORE", index, expired],
+  ]);
+  is("their record and history are kept again for the full time", [Number(runTtl) > 300 * 86_400, Number(logTtl) > 300 * 86_400], [true, true]);
+  is("and their place in the list of runs is renewed with them", Number(listed) > opened, true);
+  is("the index lives as long as the renewed run", Number(indexTtl) > 300 * 86_400, true);
+  is("renewing the shared index removes entries past their retention", oldScore, null);
+  // Advance only the synthetic Redis hot clock past the old 60-second index TTL.
+  const restoreClock = Date.now;
+  Date.now = () => restoreClock() + 61_000;
+  try {
+    is("workflow erasure can still enumerate the renewed run", (await runPeople(flowId)).some((r) => r.person === long), true);
+  } finally {
+    Date.now = restoreClock;
+  }
 
   part("Refused by the email service, address by address: failed with the service's words, never also 'left' (Claude 1 on #4307)");
   // On main since #3489, sendTo answers a fourth list, `refused`, in neither done nor rest. The PR's rule (whoever is

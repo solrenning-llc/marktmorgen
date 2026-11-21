@@ -12,10 +12,14 @@ const MESSAGES: Record<string, string> = {
   name: "Give the key a name, so you can tell later what uses it.",
   full: `A store can have ${MAX_KEYS} keys. Revoke one you no longer use first.`,
   unknown: "That key is already gone. Reload the page.",
+  revoke_unconfirmed: "We could not confirm that this key was revoked. Try again, then check the list before relying on it being off.",
   unavailable: "Keys cannot be made right now. Nothing was changed.",
+  make_unconfirmed: "We could not confirm this change. Reload your keys before trying again.",
   signed_out: "Your session ended. Log in again.",
   role: "Only the store's owner and Admins can make a key that writes.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+  reauth:
+    "Making a key needs a login from the last 15 minutes, because a key keeps working after you log out, even from every device. Log in again, then come back here to make it. Nothing was made.",
   second_step:
     "You logged in this time with the emailed link alone, and your account has a passkey or an authenticator app. Log in again with your passkey, or with the emailed link and your app's code, then make the key. Nothing was made.",
   second_step_on:
@@ -285,7 +289,16 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
         </form>
       )}
 
-      {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
+      {error ? (
+        <div className="notice notice-error mt-4" role="alert">
+          <p>{error}</p>
+          {error === MESSAGES.reauth ? (
+            <Link href="/signin?status=reauth-key" className="btn btn-secondary mt-3">
+              Log in again
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

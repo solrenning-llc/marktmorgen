@@ -85,6 +85,11 @@ const en = {
   uncheckedRetry: "Check my access again",
   doneOf: (done: number, total: number) => `${done} of ${total} done`,
   yourProgress: "Your progress",
+  /** A course's "Next step" (560 [AS1]): the one product its creator suggests next, and the way to say no to it. */
+  nextStepLabel: "Next step",
+  nextStepSee: (title: string) => `See ${title}`,
+  nextStepNoThanks: "No thanks",
+  nextStepNoThanksDone: "Done. It will not be suggested again in this browser.",
   /** Said instead of the count when the lessons done could not be read (rule 24). */
   progressUnknown: "We could not check your progress just now. Your lessons are all here. Reload the page to try again.",
   /** Said in the certificate box when the lessons done could not be read. */
@@ -304,6 +309,8 @@ const en = {
   withdrawnOn: (date: string) => `This certificate was withdrawn on ${date}.`,
   withdrawnBody: (creator: string) =>
     `${creator} withdrew it, so it no longer certifies anything. If it is yours, the course page lets you issue it again.`,
+  /** A certificate withdrawn because its course's payment was given back (lib/certificate-refunds.ts): its page shows no name. */
+  withdrawnRefundBody: "It was withdrawn because the payment for the course was given back, so it no longer certifies anything.",
   certReady: "Your certificate is ready.",
   certGenuine: "This certificate is genuine.",
   onRecord: (store: string, date: string) =>
@@ -434,6 +441,10 @@ const es: CoursesWords = {
   uncheckedRetry: "Comprobar mi acceso de nuevo",
   doneOf: (done, total) => `${done} de ${total} completadas`,
   yourProgress: "Tu progreso",
+  nextStepLabel: "Siguiente paso",
+  nextStepSee: (title) => `Ver ${title}`,
+  nextStepNoThanks: "No, gracias",
+  nextStepNoThanksDone: "Listo. No se volverá a sugerir en este navegador.",
   progressUnknown: "No pudimos comprobar tu progreso en este momento. Todas tus lecciones siguen aquí. Vuelve a cargar la página para intentarlo de nuevo.",
   certProgressUnknown: "No pudimos comprobar en este momento si terminaste el curso, así que todavía no puedes pedir el certificado. Vuelve a cargar la página para intentarlo de nuevo.",
   startFirst: "Empezar la primera lección",
@@ -632,6 +643,7 @@ const es: CoursesWords = {
   withdrawnOn: (date) => `Este certificado se retiró el ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} lo retiró, así que ya no certifica nada. Si es tuyo, desde la página del curso puedes volver a emitirlo.`,
+  withdrawnRefundBody: "Se retiró porque se devolvió el pago del curso, así que ya no certifica nada.",
   certReady: "Tu certificado está listo.",
   certGenuine: "Este certificado es auténtico.",
   onRecord: (store, date) =>
@@ -757,6 +769,10 @@ const fr: CoursesWords = {
   uncheckedRetry: "Vérifier à nouveau mon accès",
   doneOf: (done, total) => `${done} sur ${total} ${frPlural(done, "terminée", "terminées")}`,
   yourProgress: "Votre progression",
+  nextStepLabel: "Étape suivante",
+  nextStepSee: (title) => `Voir ${title}`,
+  nextStepNoThanks: "Non merci",
+  nextStepNoThanksDone: "C'est noté. Elle ne vous sera plus proposée dans ce navigateur.",
   progressUnknown: "Nous n'avons pas pu vérifier votre progression pour le moment. Toutes vos leçons sont bien là. Rechargez la page pour réessayer.",
   certProgressUnknown: "Nous n'avons pas pu vérifier pour le moment si vous avez terminé la formation. Le certificat ne peut donc pas encore être demandé. Rechargez la page pour réessayer.",
   startFirst: "Commencer la première leçon",
@@ -955,6 +971,7 @@ const fr: CoursesWords = {
   withdrawnOn: (date) => `Ce certificat a été retiré le ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'a retiré, il ne certifie donc plus rien. S'il est à vous, la page de la formation vous permet de le délivrer à nouveau.`,
+  withdrawnRefundBody: "Il a été retiré parce que le paiement de la formation a été rendu : il ne certifie donc plus rien.",
   certReady: "Votre certificat est prêt.",
   certGenuine: "Ce certificat est authentique.",
   onRecord: (store, date) =>
@@ -1074,6 +1091,10 @@ const de: CoursesWords = {
   uncheckedRetry: "Meinen Zugang erneut prüfen",
   doneOf: (done, total) => `${done} von ${total} erledigt`,
   yourProgress: "Ihr Fortschritt",
+  nextStepLabel: "Nächster Schritt",
+  nextStepSee: (title) => `${title} ansehen`,
+  nextStepNoThanks: "Nein, danke",
+  nextStepNoThanksDone: "Erledigt. Es wird Ihnen in diesem Browser nicht mehr vorgeschlagen.",
   progressUnknown: "Wir konnten Ihren Fortschritt gerade nicht prüfen. Alle Ihre Lektionen sind noch da. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
   certProgressUnknown: "Wir konnten gerade nicht prüfen, ob Sie den Kurs abgeschlossen haben. Das Zertifikat kann deshalb noch nicht angefordert werden. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
   startFirst: "Erste Lektion beginnen",
@@ -1274,6 +1295,7 @@ const de: CoursesWords = {
   withdrawnOn: (date) => `Dieses Zertifikat wurde am ${date} zurückgezogen.`,
   withdrawnBody: (creator) =>
     `${creator} hat es zurückgezogen, es bescheinigt also nichts mehr. Wenn es Ihres ist, können Sie es auf der Kursseite erneut ausstellen.`,
+  withdrawnRefundBody: "Es wurde zurückgezogen, weil die Zahlung für den Kurs zurückgegeben wurde, und bescheinigt daher nichts mehr.",
   certReady: "Ihr Zertifikat ist fertig.",
   certGenuine: "Dieses Zertifikat ist echt.",
   onRecord: (store, date) =>
@@ -1396,6 +1418,10 @@ const it: CoursesWords = {
   uncheckedRetry: "Verifica di nuovo il mio accesso",
   doneOf: (done, total) => `${done} di ${total} completate`,
   yourProgress: "I tuoi progressi",
+  nextStepLabel: "Prossimo passo",
+  nextStepSee: (title) => `Vedi ${title}`,
+  nextStepNoThanks: "No, grazie",
+  nextStepNoThanksDone: "Fatto. Non ti verrà più suggerito in questo browser.",
   progressUnknown: "Non siamo riusciti a controllare i tuoi progressi in questo momento. Tutte le tue lezioni sono ancora qui. Ricarica la pagina per riprovare.",
   certProgressUnknown: "Non siamo riusciti a controllare in questo momento se hai finito il corso, quindi non puoi ancora chiedere il certificato. Ricarica la pagina per riprovare.",
   startFirst: "Inizia la prima lezione",
@@ -1594,6 +1620,7 @@ const it: CoursesWords = {
   withdrawnOn: (date) => `Questo attestato è stato revocato il ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'ha revocato, quindi non attesta più nulla. Se è tuo, dalla pagina del corso puoi farlo rilasciare di nuovo.`,
+  withdrawnRefundBody: "È stato revocato perché il pagamento del corso è stato restituito, quindi non attesta più nulla.",
   certReady: "Il tuo attestato è pronto.",
   certGenuine: "Questo attestato è autentico.",
   onRecord: (store, date) =>
@@ -1716,6 +1743,10 @@ const nl: CoursesWords = {
   uncheckedRetry: "Mijn toegang opnieuw controleren",
   doneOf: (done, total) => `${done} van ${total} afgerond`,
   yourProgress: "Je voortgang",
+  nextStepLabel: "Volgende stap",
+  nextStepSee: (title) => `Bekijk ${title}`,
+  nextStepNoThanks: "Nee, bedankt",
+  nextStepNoThanksDone: "Klaar. Het wordt je in deze browser niet meer voorgesteld.",
   progressUnknown: "We konden je voortgang op dit moment niet controleren. Al je lessen staan er nog. Laad de pagina opnieuw om het nog eens te proberen.",
   certProgressUnknown: "We konden op dit moment niet controleren of je de cursus hebt afgerond, dus je kunt het certificaat nog niet aanvragen. Laad de pagina opnieuw om het nog eens te proberen.",
   startFirst: "Begin met de eerste les",
@@ -1915,6 +1946,7 @@ const nl: CoursesWords = {
   withdrawnOn: (date) => `Dit certificaat is ingetrokken op ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} heeft het ingetrokken, dus het bevestigt niets meer. Is het van jou, dan kun je het via de cursuspagina opnieuw laten uitreiken.`,
+  withdrawnRefundBody: "Het is ingetrokken omdat de betaling voor de cursus is teruggegeven, dus het bevestigt niets meer.",
   certReady: "Je certificaat is klaar.",
   certGenuine: "Dit certificaat is echt.",
   onRecord: (store, date) =>
@@ -2037,6 +2069,10 @@ const pt: CoursesWords = {
   uncheckedRetry: "Verificar o meu acesso novamente",
   doneOf: (done, total) => `${done} de ${total} concluídas`,
   yourProgress: "O seu progresso",
+  nextStepLabel: "Próximo passo",
+  nextStepSee: (title) => `Ver ${title}`,
+  nextStepNoThanks: "Não, obrigado",
+  nextStepNoThanksDone: "Pronto. Não voltará a ser sugerido neste navegador.",
   progressUnknown: "Não foi possível verificar o seu progresso agora. Todas as suas aulas continuam aqui. Recarregue a página para tentar de novo.",
   certProgressUnknown: "Não foi possível verificar agora se concluiu o curso, por isso o certificado ainda não pode ser pedido. Recarregue a página para tentar de novo.",
   startFirst: "Começar a primeira aula",
@@ -2236,6 +2272,7 @@ const pt: CoursesWords = {
   withdrawnOn: (date) => `Este certificado foi retirado a ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} retirou-o, por isso já não certifica nada. Se for seu, pode voltar a emiti-lo na página do curso.`,
+  withdrawnRefundBody: "Foi retirado porque o pagamento do curso foi devolvido, por isso já não certifica nada.",
   certReady: "O seu certificado está pronto.",
   certGenuine: "Este certificado é autêntico.",
   onRecord: (store, date) =>

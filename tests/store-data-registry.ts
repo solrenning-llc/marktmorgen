@@ -254,6 +254,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:weekly:lock@app/api/cron/weekly/route.ts": lock("The weekly job"),
   "nl:meet:zoomseen:@app/api/integrations/zoom/deauthorize/route.ts": company("Zoom's notices already handled", "Zoom's own notices, kept a day: the company's."),
   "nl:inbound:seen:@app/api/mail/inbound/route.ts": company("Inbound mail already handled", "The email provider's notices, kept a few days: the company's."),
+  "nl:inbound:counted:@lib/inbound-mail.ts": company("Inbound mail already counted in a store's hourly allowance", "One mark a message written to a store, kept the allowance's hour: the company's."),
   "nl:inbound:support:bytes:@lib/inbound-mail.ts": company("Bytes of files sent on to our own support in a UTC day", "One counter a day, kept two days: the company's (docs/funded-exposure-review.md)."),
   "nl:inbound:support:counted:@lib/inbound-mail.ts": company("The counts one support message has taken, and its files' bytes", "One small hash a message, kept two days: the company's."),
   "nl:inbound:support:held:@lib/inbound-mail.ts": company("That the support inbox was told today that messages are held", "One key a day, kept two days: the company's."),
@@ -1168,6 +1169,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
   "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 2 + 13) * KEY, "Eight figures, the window and the one before; and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },
+  // Claude 2's MEDIUM on #3369: the drip job's start reads, taken from the store's monthly figure in its window.
+  "nl:dripstart:@lib/drip-start.ts": { what: "The drip job's start reads taken in the window", parts: [capped(2 * KEY, "One count, the window and the one before (each kept to its window's end and a day, lib/drip-start.ts keepSecondsFor).")] },
   "nl:blog:body:@lib/store-blog.ts": { what: "Blog posts' words", room: ["lib/store-blog.ts"] },
   "nl:blog:meta:@lib/store-blog.ts": { what: "Blog posts", room: ["lib/store-blog.ts"] },
   "nl:blog:pub:@lib/store-blog.ts": { what: "Published blog posts", room: ["lib/store-blog.ts"] },

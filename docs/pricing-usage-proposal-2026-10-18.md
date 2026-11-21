@@ -42,7 +42,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 76.5% | 60.20% | 60.07% | $77.66 | 0.50 |
+| $129 / $1,290 **(recommended)** | 76.5% | 60.20% | 60.06% | $77.66 | 0.50 |
 | $149 / $1,490 | 100.0% | 60.43% | 60.30% | $90.05 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.82% | 60.70% | $102.79 | 0.38 |
 | $199 / $1,990 | 100.0% | 61.25% | 61.15% | $121.90 | 0.32 |
@@ -91,7 +91,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Access emails a month: included · #553 · before #553 | **110** · 150 · 150 | **190** · 400 · 400 | **570** · 1,000 · 1,000 |
 | Store emails a month: included · #553 · before #553 | **57** · 75 · 75 | **140** · 300 · 300 | **460** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.20% | 60.40% | 60.45% |
-| Net at full included use, yearly (sizing reading) | 60.07% | 60.02% | 60.00% |
+| Net at full included use, yearly (sizing reading) | 60.06% | 60.02% | 60.00% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.06% | 12.14% | 12.16% |
 | Net a customer, a month, at full included use | $77.66 | $271.23 | $603.97 |
 | The same at #553's price | $39.09 | $265.27 | $593.22 |

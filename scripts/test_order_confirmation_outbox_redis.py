@@ -181,9 +181,31 @@ def main():
         assert db.command("EXISTS", fullkeys[0], fullkeys[1]) == 0
         print("PASS: closed-store fence wins before creation/binding, and full storage budget creates neither origin nor source")
         assert profiles == {"enqueue": 27, "create": 17, "bound_replay": 15, "cursor": 17, "bind": 18}, profiles
-        def shared_change(op, k, expected=None, owner="f" * 48):
+        def shared_change(op, k, expected=None, owner="f" * 48, at=now):
             return db.command("EVAL", shared, 10, *k, op,
-                db.command("GET", k[0]) if expected is None else expected, "", now, 131072, json.dumps(policy), owner)
+                db.command("GET", k[0]) if expected is None else expected, "", at, 131072, json.dumps(policy), owner)
+        # An open checkout waits for the buyer without spending delivery checks
+        # (a deferred unpaid pass gives its check back), but only until the
+        # latest possible Stripe expiry (created + 47h).
+        late, latekeys = fixture("late-payment")
+        late = candidate(late, "cs_test_latePayment000001", "late")
+        late.update(checks=policy["maximumChecks"], next=now)
+        db.command("SET", latekeys[0], json.dumps(late)); db.command("SET", latekeys[1], late["sourceValue"])
+        waited = shared_change("claim", latekeys, owner="1" * 48)
+        assert waited[0] == "preparing" and json.loads(waited[1])["checks"] == policy["maximumChecks"] + 1
+        deferred = shared_change("defer", latekeys, owner="1" * 48)
+        assert deferred[0] == "queued" and json.loads(deferred[1])["next"] == now + policy["retryMilliseconds"]
+        assert json.loads(deferred[1])["checks"] == policy["maximumChecks"]
+        assert int(db.command("ZSCORE", latekeys[2], late["id"])) == now + policy["retryMilliseconds"]
+        stale = dict(late, created=now - 47 * 3_600_000, next=now)
+        db.command("SET", latekeys[0], json.dumps(stale))
+        parked = shared_change("claim", latekeys, owner="1" * 48)
+        assert parked[0] == "queued" and json.loads(parked[1])["next"] == 0 and json.loads(parked[1])["checks"] == policy["maximumChecks"]
+        fresh = dict(late, checks=0, created=now - 47 * 3_600_000, next=now)
+        db.command("SET", latekeys[0], json.dumps(fresh))
+        assert json.loads(shared_change("claim", latekeys, owner="1" * 48)[1])["checks"] == 1
+        db.command("DEL", latekeys[0], latekeys[1]); db.command("ZREM", latekeys[2], late["id"])
+        print("PASS: an unpaid open checkout spends no delivery check until its latest possible Stripe expiry, then the bounded budget applies")
         newperson = prefix + "person:verified-buyer"
         newfence = prefix + "erased:verified-buyer"
         made.update([newperson, newfence])

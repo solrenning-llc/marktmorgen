@@ -2129,6 +2129,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
       { file: "lib/store-contact.ts", names: ["MAX_PER_DAY"] },
+      // The creator told once of a buyer's move of purchases (611 [WP10] unit 4a), a mark taken first.
+      { file: "lib/purchase-move-notice.ts", names: ["kind: \"email\"", "MOVE_TOLD_SECONDS"] },
       { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
@@ -2376,7 +2378,7 @@ export const COST_LINES: CostLine[] = [
       // request (takePublicRequest), a later page of its own, refused past the store's window (C2's L-1 on #3445).
       { file: "app/api/store/course/start/route.ts", names: ["purchaseStamp(store, email, product.id)", "noteStudentStamp(", "takePublicRequest(store, \"buyer\")"] },
       // A buyer's move of purchases (611 [WP10]): the ask, a link's page and its Confirm each hold a public request before they read (tests/purchase-move-flow.test.ts holds the reads under it).
-      { file: "lib/purchase-move-flow.ts", names: ["MOVE_ASK_UNITS", "MOVE_LINK_UNITS", "MOVE_ASK_COMMANDS", "MOVE_LINK_COMMANDS", "MOVE_CONFIRM_COMMANDS", "MOVE_ISSUE_COMMANDS"] },
+      { file: "lib/purchase-move-flow.ts", names: ["MOVE_ASK_UNITS", "MOVE_LINK_UNITS", "MOVE_CONFIRM_UNITS", "MOVE_ASK_COMMANDS", "MOVE_LINK_COMMANDS", "MOVE_CONFIRM_COMMANDS", "MOVE_ISSUE_COMMANDS", "MOVE_APPLY_COMMANDS"] },
       // A license key's device activation or release (610 [WP9] unit 2): at most ACTIVATION_COMMANDS commands and the record's
       // bytes, counted as ACTIVATION_REQUEST_UNITS requests before anything is read (the price is held in tests/licence-activations.test.ts);
       // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
@@ -3755,6 +3757,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   // A buyer's move of purchases to another email (611 [WP10]): one link to each address, from the store's access emails.
   "lib/purchase-move-flow.ts": STORE,
+  // The creator told once of a buyer's move of purchases (611 [WP10] unit 4a): one of the store's own emails, taken before it goes.
+  "lib/purchase-move-notice.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE, "lib/plan-stuck-notice.ts": STORE, "lib/plan-late-notice.ts": STORE,
   "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/community-held-notice.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,

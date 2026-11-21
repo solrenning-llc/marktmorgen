@@ -43,7 +43,8 @@ jobs:
   rollover:
     name: Coordination rollover
     if: ${{ github.event_name == 'workflow_dispatch' || vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run' }}
-    # One run at a time, never two parts at once; a pending run is never cancelled (every run is equivalent).
+    # One run at a time, never two parts at once. At most one more waits: a newer waiting run replaces an older one,
+    # which loses nothing, because every run reads the state afresh and does the same.
     concurrency:
       group: coordination-rollover
       cancel-in-progress: false

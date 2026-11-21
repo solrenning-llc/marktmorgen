@@ -521,9 +521,9 @@ async function main() {
   if (mode !== "dry-run" && mode !== "run" && mode !== "on") throw new Error(`MODE must be dry-run, run or on; got ${JSON.stringify(mode)}`);
   // A manual run in mode run writes only once the switch is on (AGENTS.md AC (p)); a dry run needs no switch.
   if (mode === "run" && process.env.SWITCH !== "on") throw new Error("mode run needs the repository variable COORDINATION_ROLLOVER set to on; run a dry run instead");
-  const event = process.env.EVENT_ISSUE ? { issue: process.env.EVENT_ISSUE, labeled: process.env.EVENT_LABELED, pullRequest: process.env.EVENT_IS_PR,
-    count: process.env.EVENT_COMMENTS, atRoll: process.env.EVENT_AT_ROLL } : null;
-  const result = await rollover({ api: httpApi({ fetch, token, base }), now: new Date(), dryRun: mode === "dry-run", event });
+  // The workflow runs on a schedule and by hand, so no event reaches the script: a part left mid-rollover is found by
+  // scanning the open coordination parts (only those opened from inside the repository).
+  const result = await rollover({ api: httpApi({ fetch, token, base }), now: new Date(), dryRun: mode === "dry-run" });
   // A PAINEL left as it is marks the run with a warning, visible in GitHub, and never fails it.
   if (result.panelLeft) console.log(warningLine(result.panelLeft));
 }

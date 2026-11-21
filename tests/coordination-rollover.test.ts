@@ -45,6 +45,8 @@ const condition = /\n {4}if: \$\{\{ (.+) \}\}\n/.exec(workflow)?.[1] ?? "";
 is("the job runs by hand, or on the schedule only when the variable is on or dry-run (unset, every scheduled run skips it)",
   condition, "github.event_name == 'workflow_dispatch' || vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run'");
 is("no event field reaches the job at all: only the mode, the switch and the token", [/github\.event\.(issue|comment)/.test(workflow), /EVENT_/.test(workflow)], [false, false]);
+is("nor the script: main() reads no event, and the comment on the group says only what holds",
+  [/process\.env\.EVENT_/.test(script), /never cancelled/.test(workflow), /a newer waiting run replaces an older one/.test(workflow)], [false, false, true]);
 is("the pending pointer differs from the final one, so a run finds the part left mid-rollover",
   [pointerLine(5000, true).includes("keep writing here until the label"), pointerLine(5000).includes("keep writing here until the label")], [true, false]);
 is("only an issue opened from inside the repository is ever taken for one left mid-rollover", [...TRUSTED].sort().join(), "COLLABORATOR,MEMBER,OWNER");

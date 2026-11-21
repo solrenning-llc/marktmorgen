@@ -71,6 +71,7 @@ import { challengesOf } from "@/lib/community-challenges";
 import { votesOf } from "@/lib/community-polls";
 import { heldCopy, heldOf } from "@/lib/community-approval";
 import { keysOf } from "@/lib/licence-keys";
+import { madeOrdersOf } from "@/lib/made-to-order";
 import { activationsOf } from "@/lib/licence-activations";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
@@ -163,6 +164,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
   "lib/tier-benefits.ts": { how: "copied", what: "Which membership benefits the store marked as handed to you, and for which month or year" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
+  "lib/made-to-order.ts": { how: "copied", what: "Orders made to order you bought: the sale, the days promised and each stage with its time" },
 };
 
 /**
@@ -547,6 +549,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/made-to-order.ts": async (s) => (await madeOrdersOf(s.store, s.email)).map((r) => ({ sale: r.sale, paid: iso(r.order.paidAt), days: r.order.days, stages: r.order.steps.map((step) => ({ stage: step.stage, at: iso(step.at) })) })),
   "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),

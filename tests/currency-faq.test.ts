@@ -28,6 +28,7 @@ is("the currency field, its button, its confirm step and its mark only when Stri
 is("for whoever may change settings, with no plan read by its route", [studio.includes('{may("settings") ? ( <PaymentsPanel'), /planOf\(|PLANS_ON_SALE|canUse\(|isPaidUp\(|canSell\(/.test(read("app/api/store/currency/route.ts")), read("app/api/store/currency/route.ts").includes('guardStoreWrite(request, "settings"')], [true, false, true]);
 is("a new store starts in the default currency", [read("lib/store.ts").includes("currency: DEFAULT_CURRENCY,"), currencyLabel(DEFAULT_CURRENCY)], [true, "US dollar (USD)"]);
 is("the Stripe link only once Stripe is connected", [panel.includes(`ways.state !== "none" ? (`), panel.indexOf(`ways.state !== "none" ? (`) < panel.indexOf(w.more), studio.includes(': [null, { state: "none" as const }, null];')], [true, true, true]);
+// lib/earnings-read.ts only lists checkout sessions already paid (426 [BX2]), it never makes one.
 // lib/stripe-account.ts is the transport: since #1732 it names the path only to mark that Stripe was asked to open a
 // checkout (watchCheckoutOpening), and builds none itself, which the line after the scan holds.
 // Rule 23 (#3395): the scan counts a file as a checkout only where it asks Stripe to create one (onAccount("POST", ...,

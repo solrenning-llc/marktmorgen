@@ -128,7 +128,7 @@ Orientação do dono, repassada pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C
 
 (g) O cookie não gera custo de fornecedor. Se a escolha também for guardada no servidor, essa leitura e essa gravação entram no pior caso de cada plano, com teto, antes de serem ligadas (regra MR); custo desconhecido reprova.
 
-**Estado (regra VR):** nada disso está construído. O item 790 [FZ1] de docs/codex-queue.md guarda o trabalho, em PRs pequenos: primeiro o fuso único (detecção, troca pelo cliente e cookie), depois a migração tela por tela. Conferido pelo Claude 4 no main em 21/11/2026, às 00h12 Fortaleza: algumas telas já usam o fuso do navegador, cada uma por conta própria; há 101 ocorrências de `timeZone: "UTC"` em app/ e components/, a classificar uma a uma; não existe opção de troca. O item 367 [EZ4] cobre só a entrega de e-mails às 9h no fuso do leitor.
+**Estado (regra VR):** nada disso está construído. O item 792 [FZ1] de docs/codex-queue.md guarda o trabalho, em PRs pequenos: primeiro o fuso único (detecção, troca pelo cliente e cookie), depois a migração tela por tela. Conferido pelo Claude 4 no main em 21/11/2026, às 00h12 Fortaleza: algumas telas já usam o fuso do navegador, cada uma por conta própria; há 100 ocorrências de `timeZone: "UTC"` em app/ e components/ (recontadas no main 4bb6c9d29c em 21/11/2026, às 06h05 UTC; eram 101 às 00h12), a classificar uma a uma; não existe opção de troca. O item 367 [EZ4] cobre só a entrega de e-mails às 9h no fuso do leitor.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

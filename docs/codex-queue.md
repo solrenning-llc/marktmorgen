@@ -23889,17 +23889,17 @@ Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível
 
 ## FZ — Horários no fuso do cliente (21/11/2026)
 
-### 790 [FZ1] — Todo horário visível ao cliente no fuso dele, que pode trocá-lo
+### 792 [FZ1] — Todo horário visível ao cliente no fuso dele, que pode trocá-lo
 
 Orientação do dono (21/11/2026, por volta das 00h11 Fortaleza), repassada pelo Claude 4 (sessão 01S9eVA6MR) na mensagem C4-20261121-0016-c3-sem-uso-fuso e gravada pelo coordenador (Claude 5 ibqho), nas palavras transcritas: "No site, sempre que um horário estiver visível ao cliente, ele deverá ser exibido automaticamente no fuso horário do próprio cliente, que poderá alterá-lo." A regra permanente está em AGENTS.md, seção FZ.
 
 Pedidos repetidos: conferidos o main, os PRs abertos e a fila em 21/11/2026. Não há item nem regra igual; o item 367 [EZ4] cobre só a entrega às 9h no fuso do leitor e continua como está.
 
-Estado: na fila. O dono pediu que o trabalho seja distribuído já a uma sessão com uso, em PRs pequenos e sem sobrecarregar a fila; o coordenador nomeia a sessão no canal. O número 790 é o próximo livre (789 era o maior no main e nos PRs abertos que mexem nesta fila), localizador e não prioridade.
+Estado: na fila. O dono pediu que o trabalho seja distribuído já a uma sessão com uso, em PRs pequenos e sem sobrecarregar a fila; o coordenador nomeia a sessão no canal. O número 792 é o próximo livre (790 é [IV2] no main e 791 está no #4981; conferido em 21/11/2026 às 06:05 UTC no main e nos 23 PRs abertos que mexem nesta fila), localizador e não prioridade.
 
 Unidades, nesta ordem, uma por PR:
 1. O fuso único: detecção no navegador (`Intl.DateTimeFormat().resolvedOptions().timeZone`), validação do identificador IANA no servidor, cookie próprio lido na renderização do servidor, uma opção visível para o cliente trocar o fuso e um único formatador reaproveitado por todas as telas. Teste: um fuso inválido nunca é aceito; a hidratação não diverge; o horário de verão vem do `Intl`.
-2. A migração tela por tela, começando pelo estúdio (12 ocorrências de `timeZone: "UTC"` em app/studio/page.tsx) e pelas páginas do comprador. Cada uma das 101 ocorrências em app/ e components/ é classificada como horário exibido (converte) ou regra em UTC (fica em UTC, com o horário exibido convertido, como `utcAndLocal` em lib/local-clock.ts).
+2. A migração tela por tela, começando pelo estúdio (12 ocorrências de `timeZone: "UTC"` em app/studio/page.tsx) e pelas páginas do comprador. Cada uma das 100 ocorrências em app/ e components/ é classificada como horário exibido (converte) ou regra em UTC (fica em UTC, com o horário exibido convertido, como `utcAndLocal` em lib/local-clock.ts).
 3. E-mails (o fuso salvo na conta, ou o fuso escrito ao lado do horário), exportações (ISO 8601 com deslocamento) e datas de cobrança e prazos legais (data e fuso explícitos).
 
 Acessibilidade (AX274): rótulo visível na opção de troca, operação por teclado, alvo de pelo menos 44 × 44 px, e o fuso dito por extenso para leitores de tela.

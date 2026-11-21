@@ -1437,6 +1437,7 @@
     "components/client-sessions.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
+    "components/color-scheme-switch.tsx",
     "components/community-approval-studio.tsx",
     "components/community-challenges-studio.tsx",
     "components/community-challenges.tsx",

@@ -1,8 +1,9 @@
 /**
  * Dark mode, stage 1 (complement WG (a) of 274 [AX1]): the dormant dark tokens of lib/dark-tokens.ts. Each part fails
  * on the wrong behavior it names: a pair under its AAA threshold, a token nobody proved, a CSS block that drifted
- * from the module, a block that applies without the attribute (a visible change today), a page that sets the
- * attribute before stage 2, a link and a button sharing one color, and a contrast formula that is not WCAG's.
+ * from the module, a block that applies without the attribute or off the covered pages, an unexpected file that sets
+ * the attribute, a link and a button sharing one color, and a contrast formula that is not WCAG's. Stage 2's switch,
+ * script and page-by-page proof are held by tests/dark-scheme-switch.test.ts.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -48,14 +49,15 @@ is("a link is only ever text; a button's fill is a background for its label and 
 ], [true, false, false]);
 is("the button's label reads on the button at 7:1", contrastRatio(DARK_TOKENS["action-on"], DARK_TOKENS["action-bg"]) >= 7, true);
 
-part("Dormant: app/globals.css carries the block exactly, and only under the attribute");
+part("app/globals.css carries the block exactly, and only under the attribute");
 const css = readFileSync("app/globals.css", "utf8").replace(/\r\n/g, "\n");
 is("the block is there, byte for byte as the module makes it", css.includes(darkTokensCss()), true);
 is("once", css.split(DARK_BLOCK_START).length - 1, 1);
 const block = css.slice(css.indexOf(DARK_BLOCK_START), css.indexOf(DARK_BLOCK_END));
 const selectors = [...block.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)].map((m) => m[1].trim());
-is("its one rule applies only under :root[data-color-scheme=\"dark\"]", selectors, [':root[data-color-scheme="dark"]']);
-is("no prefers-color-scheme rule anywhere yet (stage 2 adds the switch)", /prefers-color-scheme/.test(css), false);
+is("its tokens apply only under the attribute, on a covered page", selectors[0], ':root[data-color-scheme="dark"]:has(.legal-body)');
+is("every other rule in it too", selectors.slice(1).filter((s) => !s.startsWith(':where(:root[data-color-scheme="dark"]:has(.legal-body)) ')), []);
+is("no prefers-color-scheme rule anywhere: the device's setting counts only when the reader chose \"Match my device\"", /prefers-color-scheme/.test(css), false);
 
 const sources: string[] = [];
 const walk = (dir: string) => {
@@ -66,7 +68,7 @@ const walk = (dir: string) => {
   }
 };
 ["app", "components", "lib"].forEach(walk);
-const setters = sources.filter((p) => !p.replace(/\\/g, "/").endsWith("lib/dark-tokens.ts") && /data-color-scheme|colorScheme\s*=\s*["']dark|dataset\.colorScheme/.test(readFileSync(p, "utf8")));
-is("nothing in app, components or lib sets the attribute, so no page changes today", setters, []);
+const setters = sources.map((p) => p.replace(/\\/g, "/")).filter((p) => p !== "lib/dark-tokens.ts" && /data-color-scheme|colorScheme\s*=\s*["']dark|dataset\.colorScheme/.test(readFileSync(p, "utf8")));
+is("only the script and the switch set the attribute (stage 2); the layout only names it", setters.sort(), ["app/layout.tsx", "components/color-scheme-switch.tsx", "lib/color-scheme.ts"]);
 
 done();

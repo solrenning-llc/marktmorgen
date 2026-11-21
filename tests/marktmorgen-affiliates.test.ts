@@ -13,14 +13,15 @@
  *     more does not;
  *   - the cost of paying an affiliate abroad is unknown, so it is never zero:
  *     the proposal certifies no percentage and every page says so;
- *   - docs/marktmorgen-affiliates.md is exactly what the renderer writes
- *     (node scripts/marktmorgen-affiliates.mjs), and nothing is in force.
+ *   - docs/marktmorgen-affiliates.md holds only its fixed text: the report is generated on demand
+ *     (node scripts/marktmorgen-affiliates.mjs; owner, DONO-20261120-2249-OPCAO-D), and nothing is in force.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
 import { POSITIVE_NET_CENTS } from "@/lib/receiving-costs";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import * as table from "./marktmorgen-affiliates-table";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { affiliateRows, netWithCommissionCents, renderMarktmorgenAffiliates } from "./marktmorgen-affiliates-table";
 import { done, is, part } from "./check";
 
@@ -74,8 +75,8 @@ if (lowestLine) {
   is("every plan can pay: the lowest is given", lowestLine([{ name: "A", maxCommissionBps: 5000 }, { name: "B", maxCommissionBps: 4000 }]).includes("**40.00%**"), true);
 }
 
-part("The record is what the renderer writes");
+part("The path holds only its fixed text: the report is generated on demand");
 const path = "docs/marktmorgen-affiliates.md";
-is("docs/marktmorgen-affiliates.md is current (node scripts/marktmorgen-affiliates.mjs)", existsSync(path) ? readFileSync(path, "utf8") : "", doc);
+is("docs/marktmorgen-affiliates.md holds only its fixed on-demand text", existsSync(path) ? readFileSync(path, "utf8") : "", onDemandText(onDemandReport(path)));
 
 done();

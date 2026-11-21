@@ -6,6 +6,12 @@ import { EmailInput } from "@/components/email-input";
 import { formatMoney } from "@/lib/money";
 import type { MemberSub } from "@/lib/member-discount";
 
+/** " a month", " every 3 months", as Stripe bills the membership (609 [WP8]); nothing when either is not known. */
+export function everyWords(m: Pick<MemberSub, "interval" | "every">): string {
+  if (!m.interval || m.every === null) return "";
+  return m.every === 1 ? ` a ${m.interval}` : ` every ${m.every} ${m.interval}s`;
+}
+
 /**
  * Give one member a discount on their running membership (616 [WP15](8)):
  * their address, then their memberships here and your active codes, then
@@ -96,7 +102,7 @@ export function MemberDiscount({ titles }: { titles: Record<string, string> }) {
                 {found.memberships.map((m) => (
                   <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] px-3 py-2 ring-1 ring-line">
                     <span className="text-sm text-ink">
-                      {`${titles[m.product] ?? "A membership"} · ${m.amount && m.currency ? formatMoney(m.amount, m.currency.toUpperCase()) : "amount not known"}${m.interval ? ` a ${m.interval}` : ""}`}
+                      {`${titles[m.product] ?? "A membership"} · ${m.amount && m.currency ? formatMoney(m.amount, m.currency.toUpperCase()) : "amount not known"}${everyWords(m)}`}
                       {m.discounted ? <span className="text-ink-soft"> · a discount already comes off</span> : null}
                     </span>
                     {m.discounted ? null : (

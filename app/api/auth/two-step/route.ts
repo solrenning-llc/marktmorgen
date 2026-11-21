@@ -4,6 +4,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { liveSecondStep, mayAddNow, mayAddSecondStep } from "@/lib/second-step-gate";
 import { LockBusyError } from "@/lib/redis-lock";
 
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest) {
   const email = await emailForSession(session);
   if (!email) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
   // A session let in without its second step changes nothing about it (lib/two-step.ts).
-  if ((await lockedUntil(session)) > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
+  const until = await lockRead(lockedUntil(session));
+  if (until instanceof Response) return until;
+  if (until > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
   if (!isRedisConfigured() || !canSeal()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
 
   let body: Record<string, unknown>;

@@ -44,7 +44,7 @@ function answer(match: (commands: Command[]) => boolean, reply: unknown[]) {
   }) as typeof redis.pipeline;
 }
 const restore = () => { redis.pipeline = real; };
-const writes = (commands: Command[]) => commands.some((c) => c[0] === "HSET" || c[0] === "HDEL");
+const writes = (commands: Command[]) => commands.some((c) => c[0] === "HSET" || c[0] === "HDEL" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:outreach-pitch-if-read:v1")));
 const kept = (statsId: string) => JSON.parse(String(redis.run(["HGET", pitchesKey(statsId), ID]))) as { status: string; subject: string };
 
 for (const status of ["stopped", "sent"] as const) {

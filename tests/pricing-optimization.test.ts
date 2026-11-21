@@ -11,12 +11,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { onDemandReport, onDemandText } from "./generated-on-demand";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
 import { MOST_TAX_READING } from "./historical-margin-model";
 import {
-  DOC_FILE, ELASTICITIES, INPUT_FILE, SAFETY_CENTS, dataset, exhaustive, hedonic, keeps, linearityGap, milpInput, milpOutput, minimaxRegret, ones,
+  DOC_FILE, ELASTICITIES, INPUT_FILE, OUTPUT_FILE, SAFETY_CENTS, cornerGap, dataset, exhaustive, hedonic, keeps, linearityGap, milpInput, milpOutput, minimaxRegret, ones, printedShares,
   renderPricingOptimization, unitAt, verified,
 } from "./pricing-optimization-table";
 
@@ -27,20 +28,23 @@ test("it changes nothing in force: today's prices, and nothing on sale", () => {
   assert.equal(PLANS_ON_SALE, false);
 });
 
-test("the program's input is what the repository's margin code gives today (run node scripts/pricing-optimization.mjs)", () => {
+test("the program's input is what the repository's margin code gives today (node scripts/pricing-optimization.mjs --milp-input)", () => {
   // Numbers are compared to a part in a billion: floating-point functions may differ in their last bit between Node versions.
   const close = (a: unknown, b: unknown, path: string): void => {
-    if (typeof a === "number" && typeof b === "number") { assert.ok(Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a)), `${INPUT_FILE} is stale at ${path}: ${a} against ${b}`); return; }
+    if (typeof a === "number" && typeof b === "number") { assert.ok(Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a)), `the solver would not read milpInput() as computed at ${path}: ${a} against ${b}`); return; }
     if (a && b && typeof a === "object" && typeof b === "object") {
-      assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), `${INPUT_FILE} is stale at ${path}`);
+      assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), `the solver would not read milpInput() as computed at ${path}`);
       for (const k of Object.keys(a)) close((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`);
       return;
     }
-    assert.equal(a, b, `${INPUT_FILE} is stale at ${path}`);
+    assert.equal(a, b, `the solver would not read milpInput() as computed at ${path}`);
   };
-  close(JSON.parse(read(INPUT_FILE)), JSON.parse(JSON.stringify(milpInput())), "input");
+  // Generated on demand (owner, 20/11/2026): the solver reads milpInput() as JSON, so the JSON it receives must be the
+  // input itself. A NaN, an Infinity or an undefined would turn into null or vanish in silence on the way.
+  close(JSON.parse(JSON.stringify(milpInput())), milpInput(), "input");
   assert.ok(SAFETY_CENTS >= 5, "the actual solver deducts at least five cents on both intervals");
   assert.ok(linearityGap() < SAFETY_CENTS, "the linear usage stays strictly inside the deducted safety reserve");
+  assert.ok(cornerGap() < SAFETY_CENTS, "at every share the program may choose, the linear usage stays strictly inside the reserve");
 });
 
 test("every solution keeps 60% at full use on both intervals, fails the most-tax gate, respects the plan order, and equals the exhaustive search", () => {
@@ -77,9 +81,20 @@ test("every competitor figure has its page and its day, and the regression repor
   assert.ok(main.r2 > 0 && main.r2 < 1);
 });
 
-test("the document is what the numbers render today", () => {
-  assert.equal(read(DOC_FILE), renderPricingOptimization(), `${DOC_FILE} is stale: run node scripts/pricing-optimization.mjs`);
-  assert.match(read(DOC_FILE), /\*\*An analysis for the owner, not a change\.\*\*/);
+test("the report, its input and its solutions are generated on demand from the numbers of today, with no stored copy", () => {
+  for (const file of [DOC_FILE, INPUT_FILE, OUTPUT_FILE]) assert.equal(read(file), onDemandText(onDemandReport(file)), `${file} holds only its fixed text: it is generated on demand`);
+  assert.match(renderPricingOptimization(), /\*\*An analysis for the owner, not a change\.\*\*/);
+});
+
+test('no lowest share a solution may take prints more than the program counted',()=>{
+ // Under the printed floors (an hour of video, half a GiB), a tenth of a small figure prints as more than a tenth: the program's
+ // lowest share is raised to what the page prints, so a solution never needs more room than the program kept (#4514, 18 Nov 2026).
+ const input=milpInput();
+ for(const tier of TIERS)for(const alt of ['A','C'] as const)for(const name of input.printed){
+  const low=input.plans[tier].lowest[alt][name];
+  assert.ok(low>=input.alternatives[alt]&&low<=1,`${tier} ${alt} ${name}`);
+  assert.ok(printedShares(tier,{...ones(),[name]:low})[name]<=low,`${tier} ${alt} ${name} prints no more than its lowest share`);
+ }
 });
 
 test('the exhaustive C oracle keeps the solver raw share floor and the same five-cent linear budgets',()=>{
@@ -87,7 +102,7 @@ test('the exhaustive C oracle keeps the solver raw share floor and the same five
  for(const tier of TIERS){
   const choice=exhaustive(tier,'C',-1.5)!;
   const plan=input.plans[tier],option=plan.options.find(o=>o.monthCents===choice.monthCents)!;
-  for(const name of input.printed)assert.equal(choice.shares[name],plan.figures[name]>0?input.alternatives.C:1);
+  for(const name of input.printed)assert.equal(choice.shares[name],plan.lowest.C[name]);
   for(const cycle of ['Month','Year'] as const){
    const base=cycle==='Month'?plan.baseMonth:plan.baseYear;
    const coef=cycle==='Month'?plan.coefMonth:plan.coefYear;

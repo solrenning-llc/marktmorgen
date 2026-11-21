@@ -38,7 +38,7 @@
 import { normaliseEmail } from "@/lib/auth";
 import { customerOf, isAddOn, isBillingConfigured, onPlatformAt, ownedBy, planOf } from "@/lib/billing";
 import { LEGACY_PLAN_PRICES, PLAN_PRICES, PRICES_WITH_COMMISSION, PRICES_WITHOUT_COMMISSION, REFUND_DAYS } from "@/lib/plan";
-import { type PlanRefund, type PlanRefundCharge, planRefund } from "@/lib/plan-refund-rules";
+import { type PlanRefund, type PlanRefundCharge, isPaidAt, planRefund } from "@/lib/plan-refund-rules";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store } from "@/lib/store";
 
 const AT = "2024-06-20";
@@ -178,11 +178,15 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (!disputes || disputePage.has_more !== false) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
-        // Only this charge's own row decides (rule 30): one of another charge, or naming none, is unknown, so a dispute
-        // won elsewhere never makes the guarantee payable on a charge whose own dispute may be lost (Claude 5 on #3133).
-        if (idOf(disputes[0].charge) !== chargeId) return { refund: { kind: "unknown", reason: "unreadable" } };
-        disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
-        disputedCents = num(disputes[0].amount);
+        // The one row must prove it is this charge's own dispute (#4468, rule 30): the list's filter is not proof, and
+        // another payment's lost or won dispute would hide or allow this refund (also Claude 5 on #3133). Its payment intent, when given, must match too.
+        const dispute = disputes[0];
+        const intent = dispute.payment_intent;
+        if (idOf(dispute.charge) !== chargeId || (intent != null && idOf(intent) !== idOf(charge.payment_intent))) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
+        disputeStatus = typeof dispute.status === "string" ? dispute.status : "unknown";
+        disputedCents = num(dispute.amount);
       }
       const lines = embedded(invoice.lines);
       if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };
@@ -190,8 +194,13 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
       const cycle = interval === "year" ? "year" : interval === "month" ? "month" : planOf(sub).cycle;
-      const fee = obj(charge.balance_transaction);
-      const paidAt = num(obj(invoice.status_transitions)?.paid_at);
+      // Stripe's fee is taken only from this charge's own balance transaction: its source is this charge and its type a
+      // charge's (or a payment's, for a py_ charge). One that belongs to another charge, or whose source cannot be read,
+      // would size the refund with a fee that is not this payment's: the fee is then unread, never another's or zero
+      // (rule 30, issue #4450).
+      const bt = obj(charge.balance_transaction);
+      const fee = bt && idOf(bt.source) === chargeId && (bt.type === "charge" || bt.type === "payment") ? bt : null;
+      const paidAt = obj(invoice.status_transitions)?.paid_at;
       const input: PlanRefundCharge = {
         currency: typeof charge.currency === "string" ? charge.currency : "",
         succeeded: charge.status === "succeeded" && charge.paid === true,
@@ -202,7 +211,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         taxCents: invoice.tax === null || invoice.tax === undefined ? 0 : num(invoice.tax),
         feeCents: fee ? num(fee.fee) : null,
         feeCurrency: fee && typeof fee.currency === "string" ? fee.currency : null,
-        paidAtSeconds: Number.isFinite(paidAt) ? paidAt : num(charge.created),
+        paidAtSeconds: num(paidAt ?? charge.created),
         disputeStatus,
         disputedCents,
       };
@@ -291,15 +300,16 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (own) {
           // The guarantee covers the first payment and every plan payment of this subscription made since: asked
           // within REFUND_DAYS of the first, each of them is inside the window too (owner, 31/10/2026 15h41).
-          const firstPaid = num(obj(own.status_transitions)?.paid_at);
+          const firstPaid = obj(own.status_transitions)?.paid_at;
+          if (!isPaidAt(firstPaid, nowSeconds)) return { refund: { kind: "unknown", reason: "unreadable" } };
           // Only while the first payment's window is open (the rule's own measure, lib/plan-refund-rules.ts): asked later,
           // a renewal is never judged as a first payment.
           const windowOpen = nowSeconds <= firstPaid + REFUND_DAYS * DAY_SECONDS;
           // A paid invoice whose time cannot be read is never left out silently: less would be refunded and the plan
           // still ended (independent review, 31/10/2026); the whole is then not decided here.
-          if (windowOpen && paid.some((r) => r !== own && !Number.isFinite(num(obj(r.status_transitions)?.paid_at)))) return { refund: { kind: "unknown", reason: "unreadable" } };
-          const since = windowOpen ? paid.filter((r) => r === own || num(obj(r.status_transitions)?.paid_at) >= firstPaid) : [own];
-          if (!Number.isFinite(firstPaid) || since.length > MAX_PARTS) return { refund: { kind: "unknown", reason: "too_many" } };
+          if (windowOpen && paid.some((r) => !isPaidAt(obj(r.status_transitions)?.paid_at, nowSeconds))) return { refund: { kind: "unknown", reason: "unreadable" } };
+          const since = windowOpen ? paid.filter((r) => num(obj(r.status_transitions)?.paid_at) >= firstPaid) : [own];
+          if (since.length > MAX_PARTS) return { refund: { kind: "unknown", reason: "too_many" } };
           const parts: PlanRefundPart[] = [];
           let main: PlanRefundFound | null = null;
           let ownReading: PlanRefundReading | null = null;

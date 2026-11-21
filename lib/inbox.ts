@@ -38,7 +38,7 @@ import { alertCreator, messageEpisodeKey, messageEpisodeSeed } from "@/lib/phone
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
-import type { Store } from "@/lib/store";
+import { ERASING_KEY, LIST_ID_PATTERN, MAX_STORE_BYTES, STORE_ID_PATTERN, erasingField, ownerKey, storeIdCommand, storeRef, type Store } from "@/lib/store";
 import { stringList } from "@/lib/redis-reply";
 import { type Member, readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
@@ -139,6 +139,59 @@ if #KEYS >= 5 then redis.call('SET', KEYS[5], ARGV[8], 'EX', ARGV[3]) end
 if ARGV[9] == '1' then redis.call('DEL', KEYS[4]) end
 return 1`;
 
+/** New conversations must belong to the same live store, in the write itself. The final two keys are
+ * identity and erasing; final three arguments are erasing field, expected ref and legacy statsId (or "").
+ * Legacy JSON is read with a byte bound and must name this very statsId, never just exist. */
+const INBOX_STORE_LIVE_LUA = `
+local legacy = ARGV[#ARGV]
+local ref = ARGV[#ARGV - 1]
+if legacy == '' then
+  if redis.call('GET', KEYS[#KEYS - 1]) ~= ref then return -1 end
+else
+  local raw = redis.call('GETRANGE', KEYS[#KEYS - 1], 0, ${MAX_STORE_BYTES})
+  if not raw or raw == '' or #raw > ${MAX_STORE_BYTES} then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= 'table' or record.statsId ~= legacy then return -1 end
+end
+if redis.call('HEXISTS', KEYS[#KEYS], ARGV[#ARGV - 2]) ~= 0 then return -1 end
+`;
+export const INBOX_STORE_LIVE = `-- marktmorgen:inbox-store-live:v1
+${INBOX_STORE_LIVE_LUA}return 1`;
+// The plain writer's body, with its token key taken by position: here the fence's identity and erasing keys come
+// last, so the token key (KEYS[5]) is there only with 7 keys. With "#KEYS >= 5", a new conversation without a token
+// (6 keys) would write "" over the store's identity key (Claude 6's LEVE on #5000).
+const OPEN_WRITE_BODY = INBOX_WRITE.slice(INBOX_WRITE.indexOf("\n") + 1).replace("if #KEYS >= 5 then", "if #KEYS >= 7 then");
+if (!OPEN_WRITE_BODY.includes("if #KEYS >= 7 then")) throw new Error("the inbox open writer lost its token test");
+export const INBOX_OPEN_WRITE = `-- marktmorgen:inbox-open-write:v2
+${INBOX_STORE_LIVE_LUA}${OPEN_WRITE_BODY}`;
+/** Two extra redis.call operations in the open writer; the pre-mail check is EVAL plus those same two calls. */
+export const INBOX_OPEN_FENCE_COMMANDS = 2;
+export const CONTACT_LIVE_COMMANDS = 1 + INBOX_OPEN_FENCE_COMMANDS;
+/** Extra wire bytes: the bounded script plus two keys, a 40-byte field, a ref of at most 320 code units
+ * (at most six JSON bytes per unit), a 32-byte legacy id and framing; no raw legacy JSON leaves Redis. */
+export const INBOX_LIVE_BYTES = 4_096;
+
+async function liveFence(store: Store): Promise<{ keys: string[]; args: string[] } | null> {
+  if (!store.email || (store.sid && !STORE_ID_PATTERN.test(store.sid)) || (store.extra && !store.sid) || (!store.sid && (!store.statsId || !LIST_ID_PATTERN.test(store.statsId)))) return null;
+  const ref = storeRef(store);
+  if (!ref || ref.length > 320) return null;
+  return {
+    keys: [store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref), ERASING_KEY],
+    args: [await erasingField(ref), ref, store.sid ? "" : store.statsId!],
+  };
+}
+
+/** Read-only admission immediately before mail. Unknown is distinct from confirmed gone; no send on either. */
+export async function contactStoreLive(store: Store): Promise<boolean | null> {
+  const fence = await liveFence(store);
+  if (!fence) return false;
+  try {
+    const result = repliesFor(await redisPipeline([["EVAL", INBOX_STORE_LIVE, 2, ...fence.keys, ...fence.args]]), 1)?.[0];
+    return result === 1 ? true : result === -1 ? false : null;
+  } catch { return null; }
+}
+class InboxStoreGoneError extends Error {}
+
 /**
  * Writes a conversation, and its new message, only over `expected`: the exact record text it was read from ("" for
  * a new conversation). Its room is taken first: what the message adds in the month the conversation is counted in,
@@ -148,6 +201,8 @@ return 1`;
  * less than what is kept). An answer of unknown shape throws UnknownReplyError (rule 24).
  */
 async function write(store: Store, statsId: string, handle: string, conversation: Kept, add: Message | null, refusable: boolean, expected: string, now = Date.now()): Promise<Kept | null> {
+  const fence = expected === "" ? await liveFence(store) : null;
+  if (expected === "" && !fence) throw new InboxStoreGoneError();
   const [length, oldest] = add ? await redisPipeline([["LLEN", msgKey(statsId, conversation.id)], ["LINDEX", msgKey(statsId, conversation.id), 0]]) : [0, null];
   const dropped = add && Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const messages = Math.max(0, (conversation.b ?? 0) + (add ? dataBytes([JSON.stringify(add)], 1) : 0) - dropped);
@@ -167,12 +222,13 @@ async function write(store: Store, statsId: string, handle: string, conversation
     msgKey(statsId, conversation.id),
     messageEpisodeKey(statsId, conversation.id),
     ...(conversation.token ? [tokenKey(conversation.token)] : []),
+    ...(fence?.keys ?? []),
   ];
   const written = repliesFor(
     await redisPipeline([
       [
         "EVAL",
-        INBOX_WRITE,
+        fence ? INBOX_OPEN_WRITE : INBOX_WRITE,
         keys.length,
         ...keys,
         expected,
@@ -185,10 +241,12 @@ async function write(store: Store, statsId: string, handle: string, conversation
         conversation.token ? `${statsId}|${conversation.id}|${handle}` : "",
         // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
         conversation.unread === 0 ? "1" : "0",
+        ...(fence?.args ?? []),
       ],
     ]),
     1,
   )?.[0];
+  if (fence && written === -1) throw new InboxStoreGoneError();
   if (written !== 0 && written !== 1) throw new UnknownReplyError("an inbox conversation's write");
   return written === 1 ? conversation : null;
 }
@@ -250,10 +308,10 @@ async function trim(statsId: string): Promise<void> {
   ]);
 }
 
-type NewInput = { store: Store; email: unknown; name: unknown; text: unknown; source: Source; now?: number };
+type NewInput = { store: Store; email: unknown; name: unknown; text: unknown; source: Source; now?: number; id?: string };
 
 /** A new conversation, its first message and the visitor's token. */
-async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; messages: Message[] } | { ok: false; reason: "email" | "short" | "limited" | "closed" }> {
+async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; messages: Message[] } | { ok: false; reason: "email" | "short" | "limited" | "used" | "closed" }> {
   const { store } = input;
   const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return { ok: false, reason: "closed" };
@@ -265,9 +323,11 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
   const now = input.now ?? Date.now();
   // One of the store's inbox messages for its window (lib/store-allowance-rules.ts), before it is written.
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
-  if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
+  // The store's own inbox messages for its window are used up: "used", told apart from the day's cap above (review of #3837).
+  const allowed = await takeAllowance(store, "inbox", 1, now);
+  if (!allowed.ok) return { ok: false, reason: allowed.reason === "used" ? "used" : "limited" };
   const conversation: Kept = {
-    id: newId(),
+    id: input.id && CONVERSATION_ID.test(input.id) ? input.id : newId(),
     email,
     name: nameText(input.name),
     source: input.source,
@@ -280,7 +340,13 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "visitor", text };
-  const kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  let kept: Kept | null;
+  try {
+    kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  } catch (error) {
+    if (error instanceof InboxStoreGoneError) return { ok: false, reason: "closed" };
+    throw error;
+  }
   // A new random id that is already taken is not written over: said as an error, never as kept.
   if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
@@ -301,13 +367,13 @@ export type ChatResult = { ok: true; thread: VisitorThread } | { ok: false; reas
 export async function startChat(input: { store: Store; email: unknown; name: unknown; text: unknown; ip: string; now?: number }): Promise<ChatResult> {
   const { store } = input;
   if (!chatOpen(store)) return { ok: false, reason: "closed" };
-  if (!(await withinLimit("chat-start", `${store.statsId}:${input.ip}`, 5, 3_600))) return { ok: false, reason: "limited" };
+  if (!(await withinLimit("chat-start", `${store.statsId}|${input.ip}`, 5, 3_600))) return { ok: false, reason: "limited" };
   // A store whose data room is full is not taking messages here: said as closed, nothing kept.
   const made = await open({ ...input, source: "chat" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
     throw error;
   });
-  if (!made.ok) return made;
+  if (!made.ok) return { ok: false, reason: made.reason === "used" ? "limited" : made.reason };
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a chat failed", error));
   await tellPhones(store, made.conversation, 0, made.conversation.startedAt);
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
@@ -341,10 +407,60 @@ export async function handOver(input: { store: Store; email: unknown; name: unkn
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
     throw error;
   });
-  if (!made.ok) return made;
+  if (!made.ok) return { ok: false, reason: made.reason === "used" ? "limited" : made.reason };
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a handed-over question failed", error));
   await tellPhones(store, made.conversation, 0, made.conversation.startedAt);
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
+}
+
+/**
+ * "filed" with the conversation that holds the case; "unknown" with the id the case would have, when the filing threw
+ * on its way and whether it was written could not be read either; otherwise why nothing was filed.
+ */
+export type FiledProblem = { state: "filed"; id: string } | { state: "unknown"; id: string } | { state: "limited" | "used" | "full" | "error" };
+
+/** One conversation's record read exactly (rule 24): the record, "none" when Redis answered nothing is kept, or "unknown". */
+async function keptExactly(statsId: string, id: string): Promise<Kept | "none" | "unknown"> {
+  let read: unknown[] | null;
+  try {
+    read = repliesFor(await redisPipeline([["GET", convKey(statsId, id)]]), 1);
+  } catch {
+    return "unknown";
+  }
+  if (!read) return "unknown";
+  if (read[0] === null) return "none";
+  return parseKept(read[0]) ?? "unknown";
+}
+
+/**
+ * A buyer's report of a problem with an order (567 [GD1] (a), lib/order-problem.ts):
+ * filed as an order problem ("order") from the address the order was paid with, and the team
+ * told by email, as a chat is. One inbox message from the store's allowance,
+ * taken before it is written (open).
+ */
+export async function fileOrderProblem(input: { store: Store; email: string; text: string; now?: number }): Promise<FiledProblem> {
+  const { store } = input;
+  if (!store.statsId || !isRedisConfigured()) return { state: "error" };
+  // The case's id is chosen before anything is written, so a filing that throws on its way can be looked for.
+  const id = newId();
+  let made: Awaited<ReturnType<typeof open>>;
+  try {
+    made = await open({ ...input, name: "", source: "order", id });
+  } catch (error) {
+    // The data room refused it before any write (needData): nothing was filed.
+    if (error instanceof DataRoomError) return { state: "full" };
+    // Anything else may have come after the write (a lost reply, the clean-up failing): not known until the case's own
+    // record is read (review of #3837). There, it is filed and the team is told; confirmed not there, nothing was filed.
+    console.error("filing a problem with an order threw; looking for the case it may have written", error);
+    const kept = await keptExactly(store.statsId, id);
+    if (kept === "none") return { state: "error" };
+    if (kept === "unknown") return { state: "unknown", id };
+    await tellTeam(store, kept, messageText(input.text)).catch((tellError) => console.error("telling a store of a problem with an order failed", tellError));
+    return { state: "filed", id };
+  }
+  if (!made.ok) return { state: made.reason === "limited" ? "limited" : made.reason === "used" ? "used" : "error" };
+  await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a problem with an order failed", error));
+  return { state: "filed", id: made.conversation.id };
 }
 
 async function fromToken(token: unknown): Promise<{ statsId: string; id: string; handle: string } | null> {
@@ -552,7 +668,15 @@ export async function readInbox(statsId: string | null): Promise<Conversation[]>
   // Only a slot that answered exactly null has expired; nothing else leaves the index.
   const gone = ids.filter((_, i) => values[i] === null);
   if (gone.length) await redisPipeline([["ZREM", indexKey(statsId), ...gone]]).catch(() => {});
-  return inboxOrder(values.map(parseKept).filter((c): c is Kept => Boolean(c)).map(shown));
+  // A kept record that does not read is unknown, never a conversation that is not there (rule 24): the studio and the
+  // person's data copy would otherwise go on without it in silence.
+  const kept = values.map((value) => {
+    if (value === null) return null;
+    const conversation = parseKept(value);
+    if (!conversation) throw new UnknownReplyError("the inbox's conversations");
+    return conversation;
+  });
+  return inboxOrder(kept.filter((c): c is Kept => c !== null).map(shown));
 }
 
 /** How many open conversations have something the store has not read. */
@@ -668,7 +792,13 @@ export async function writeToAffiliate(
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "store", text, by };
-  const kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  let kept: Kept | null;
+  try {
+    kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  } catch (error) {
+    if (error instanceof InboxStoreGoneError) return { ok: false, reason: "closed" };
+    throw error;
+  }
   if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
   const w = chatWords(store.language);
@@ -781,6 +911,9 @@ export async function forgetInboxPerson(statsId: string | null, email: string): 
 /** How many conversations the inbox keeps: what deleting a person reads (lib/person-erasure.ts). */
 export async function conversationCount(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["ZCARD", indexKey(statsId)]]);
-  return Math.min(Number(n) || 0, MAX_CONVERSATIONS);
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(statsId)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the count of the inbox's conversations");
+  return Math.min(n, MAX_CONVERSATIONS);
 }

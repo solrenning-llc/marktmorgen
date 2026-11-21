@@ -36,3 +36,6 @@ export function readTags(raw: string | string[]): string[] {
   }
   return out;
 }
+
+/** A store's list: address -> what is known (lib/contacts.ts, Contact as JSON). */
+export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;

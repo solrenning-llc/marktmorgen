@@ -56,7 +56,7 @@ async function fresh(): Promise<{ shop: Store; statsId: string }> {
   await ensureStatsId(OWNER);
   const shop = (await storeForEmail(OWNER))!;
   const statsId = shop.statsId as string;
-  const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: shop.handle } });
+  const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: shop.handle }, startedAt: Date.now() });
   if (!connected.ok) throw new Error("not connected");
   return { shop, statsId };
 }

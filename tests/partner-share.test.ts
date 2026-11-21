@@ -202,9 +202,10 @@ test("a partner never earns on their own purchase", () => {
   const at = aff.indexOf("export async function notePartners");
   assert.ok(at > 0, "notePartners should exist");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  // As one inbox however it is written (tests/partner-share-own-purchase.test.ts runs it).
+  // As one inbox however it is written (tests/partner-share-own-purchase.test.ts runs it), the partner's inbox or
+  // their payout address (tests/partner-share-payout-address-self.test.ts runs it).
   assert.match(body, /const buyer = sale\.buyer \? canonicalEmail\(sale\.buyer\) : "";/);
-  assert.match(body, /self: Boolean\(buyer\) && canonicalEmail\(partner\.email\) === buyer/);
+  assert.match(body, /self: Boolean\(buyer\) && \(canonicalEmail\(partner\.email\) === buyer \|\| canonicalEmail\(payAddress\(partner\)\) === buyer\)/);
 });
 
 test("a share is written for every sale, not only the referred ones", () => {
@@ -226,7 +227,9 @@ test("a sale already made keeps the share it was made at", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function notePartners");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /percent: shareOn\(partner\.share, theirs\[0\]\.product\)/, "the percentage is frozen onto the line");
+  // The share in force when the sale was paid (shareAt, Codex G's point 3 on #1924), its percentage read at that time.
+  assert.match(body, /const held = shareAt\(partner, sale\.at, lines\);/, "the share is the one in force at the sale's own time");
+  assert.match(body, /percent: shareOn\(held, theirs\[0\]\.product, sale\.at\)/, "the percentage is frozen onto the line, read at the sale's own time");
   assert.match(
     aff,
     /Shares already earned are untouched by a change here/,

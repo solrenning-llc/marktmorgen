@@ -29,8 +29,11 @@ import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
-import { emailKey } from "@/lib/learn";
+import { emailKey, studentsIndexKey } from "@/lib/learn";
+import type { CourseIndexes } from "@/lib/removed-courses";
 import { randomLetters } from "@/lib/random-letters";
+import { HDEL_IF_EQUAL } from "@/lib/redis-reply";
+import { suppressedAmong } from "@/lib/suppression";
 
 export const CERT_ID_PATTERN = /^[a-z0-9]{16}$/;
 export const MIN_CERT_NAME = 2;
@@ -203,14 +206,31 @@ export const certKey = (id: string) => `nl:cert:${id}`;
 const CERTS_SLOT = (courseId: string) => `cc:${courseId}`;
 const indexKey = (courseId: string) => `nl:course:${courseId}:certs`;
 export const allKey = (courseId: string) => `nl:course:${courseId}:certs:all`;
+/** The work handed in for a course, as lib/assignment.ts keeps it (its allKey), read here only for courseIndexes. */
+const tasksIndexKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
+/**
+ * A course's students, certificates and handed-in work, the indexes a dropped course's note is kept by while any holds
+ * anyone (lib/removed-courses.ts; Claude 1 cloud R on #4563: a ca: slot read as nothing does not prove no work is kept).
+ */
+export const courseIndexes: CourseIndexes = (courseId) => [studentsIndexKey(courseId), allKey(courseId), tasksIndexKey(courseId)];
 /** Every certificate one student was ever issued for a course, withdrawn ones too (added 17 October 2026), so deleting them finds each. */
 const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by:${who}`;
+/** A command answering 1 when this learner holds a certificate of a course: a dropped one's probe (lib/person-erasure.ts). */
+export const certificateProbe = (courseId: string, who: string): (string | number)[] => ["EXISTS", byKey(courseId, who)];
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
 const LEGACY_SCAN = 500;
 
+/**
+ * The certificate kept under this id: null for a confirmed none (nil) or a
+ * record that is itself malformed; any other reply throws UnknownReply
+ * (CX-123 rule 24), so the page that proves a certificate never says "not
+ * found", and a withdrawal never says "no such certificate", on a guess.
+ */
 export async function readCertificate(id: string): Promise<Certificate | null> {
   if (!isRedisConfigured() || !CERT_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["GET", certKey(id)]]);
+  const what = "a certificate's record";
+  const [raw] = exactReplies(await redisPipeline([["GET", certKey(id)]]), 1, what);
+  if (raw !== null && typeof raw !== "string") throw new UnknownReply(what);
   return parseCertificate(raw);
 }
 
@@ -264,7 +284,7 @@ return redis.call('HDEL', KEYS[1], ARGV[1])`;
 /** How many times one press looks at the slot again when it changed between two reads. */
 const CLAIM_TRIES = 3;
 
-export type IssueResult = { ok: true; certificate: Certificate; fresh: boolean } | { ok: false; reason: "name" };
+export type IssueResult = { ok: true; certificate: Certificate; fresh: boolean } | { ok: false; reason: "name" | "gone" };
 
 /**
  * Issues the certificate, or hands back the one already issued.
@@ -285,6 +305,12 @@ export async function issueCertificate(input: {
   name: unknown;
   /** The store whose data room it takes from (DataRoomError when it does not fit). */
   room: DataStore;
+  /**
+   * The store's list id, whose deletion prints say the student was erased (lib/suppression.ts), read after the press's
+   * writes: a store with none yet gets one from the erasure itself (lib/person-erasure.ts erasureScope), so it is read
+   * then, not when the press began. Null when it cannot be had: not known, so nothing is issued. Not given, none read.
+   */
+  listId?: () => Promise<string | null>;
 }): Promise<IssueResult> {
   const name = cleanName(input.name);
   if (!name) return { ok: false, reason: "name" };
@@ -341,7 +367,47 @@ export async function issueCertificate(input: {
     return { ok: true, certificate: existing, fresh: false };
   }
   await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);
+  // The student's deletion print read after every write (#4783): an erasure writes it before it deletes anything, so
+  // one that completed while this press was past its checks found nothing yet, and what was just written would hold
+  // their name and address with the erasure said done. Found, or unknown, it is all taken back and nothing is issued
+  // (unknown throws, as a press whose writes could not be confirmed does). An erasure after this read finds the
+  // certificate through its lists and deletes it itself.
+  if (input.listId) {
+    let erased: boolean;
+    try {
+      const listId = await input.listId();
+      if (!listId) throw new Error("the store's list of deleted people could not be had");
+      erased = (await suppressedAmong(listId, [input.email])).size > 0;
+    } catch (error) {
+      await takeBackIssued(input.course.id, input.who, id, input.room, bytes);
+      throw error;
+    }
+    if (erased) {
+      await takeBackIssued(input.course.id, input.who, id, input.room, bytes);
+      return { ok: false, reason: "gone" };
+    }
+  }
   return { ok: true, certificate, fresh: true };
+}
+
+/**
+ * Takes back what one press wrote (#4783): its record, its places in the course's lists, and the student's slot only
+ * while it still names this record (HDEL_IF_EQUAL), so a later press's slot is kept. The record's room comes back once
+ * its deletion is confirmed. Each reply read exactly; any other throws, and an erasure run again deletes the rest
+ * through the lists it can still find.
+ */
+async function takeBackIssued(courseId: string, who: string, id: string, room: DataStore, bytes: number): Promise<void> {
+  const what = "a certificate taken back from a student erased meanwhile";
+  // Keep every reference until the record's deletion is known: a partial pipeline must not orphan personal data.
+  const [record] = exactReplies(await redisPipeline([["DEL", certKey(id)]]), 1, what);
+  if (replyCount(record, what) > 1) throw new UnknownReply(what);
+  if (record === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes }]);
+  const [all, mine, slot] = exactReplies(await redisPipeline([
+    ["SREM", allKey(courseId), id],
+    ["SREM", byKey(courseId, who), id],
+    ["EVAL", HDEL_IF_EQUAL, 1, indexKey(courseId), who, id],
+  ]), 3, what);
+  for (const n of [all, mine, slot]) if (replyCount(n, what) > 1) throw new UnknownReply(what);
 }
 
 /**

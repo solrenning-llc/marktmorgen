@@ -31,7 +31,7 @@ const BIN = join(T, "bin"); mkdirSync(BIN);
 writeFileSync(join(BIN, "gh"), `#!/bin/sh
 case "$FAKE_GH" in
   down) echo "gh: connection refused" >&2; exit 1 ;;
-  req) echo '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'"]' ;;
+  req) printf '%s\\n' '["https://github.com/solrenning-llc/marktmorgen/issues/'"\${FAKE_ISSUE:-4932}"'#issuecomment-'"$FAKE_ID"'","'"$FAKE_BODY"'","'"\${FAKE_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"'"]' ;;
   nohead) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","READY, no head here",""]' ;;
   *) echo '["https://github.com/solrenning-llc/marktmorgen/pull/'"$FAKE_PR"'#issuecomment-1","Review @'"$FAKE_SHA"' READY",""]' ;;
 esac
@@ -40,8 +40,8 @@ esac
 const base = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", CORREIO_REPO: join(T, "mail.git"), CORREIO_PR_REPO: join(T, "prs.git"), CORREIO_SEM_VERSAO: "1", PATH: `${BIN}:${process.env.PATH}` };
 delete base.CLAUDE_CODE_REMOTE_SESSION_ID;
 // Both outputs are read: warnings go to stderr even when the command succeeds.
-const run = (args, env = {}) => {
-  const r = spawnSync("node", [TOOL, ...args], { cwd: join(T, "w"), env: { ...base, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const run = (args, env = {}, cwd = join(T, "w")) => {
+  const r = spawnSync("node", [TOOL, ...args], { cwd, env: { ...base, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 };
 const as = (k) => ({ CLAUDE_CODE_REMOTE_SESSION_ID: SES[k] });
@@ -71,38 +71,55 @@ r = rec0();
 is("an ON written without the coordinator's session (raw git, old copy) does not turn anything on", !r.ok && /DESLIGADO/.test(r.out), r.out);
 is("list-switches says the raw ON was ignored", /record-review: DESLIGADO .*ON IGNORADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
 console.log("privileged actions: the named session only, on a coordinator request on #4932 (OWNER-20261121-1904 step 2)");
-// A coordinator request: comment 77 on #4932 that names the switch. FAKE_ISSUE moves it to another issue.
-const pedido = (id, body, extra = {}) => ({ FAKE_GH: "req", FAKE_ID: String(id), FAKE_BODY: body, ...extra });
-const REQ = "https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-77";
-const ligar = (who, k, extra = [], env = {}) => run(["set-switch", "--as", who, "--name", "record-review", "--on", "--reason", "teste", ...extra], { ...as(k), ...env });
-r = ligar("Claude 5 X", "c5", ["--request", REQ], pedido(77, "please turn record-review on"));
+// A coordinator request is a fresh comment on #4932 with the marker line; each one gets its own id (single use).
+let nReq = 100;
+const marca = (cmd, alvo) => `AGENT-MAIL-REQUEST C1-20261121-2100-TEST ${cmd} ${alvo}`;
+const pedidoDe = (body, extra = {}) => { const id = ++nReq; return { args: ["--request", `https://github.com/solrenning-llc/marktmorgen/issues/4932#issuecomment-${id}`], env: { FAKE_GH: "req", FAKE_ID: String(id), FAKE_BODY: body, ...extra }, id }; };
+const ligar = (who, k, q = null, extra = [], nome = "record-review") => run(["set-switch", "--as", who, "--name", nome, "--on", "--reason", "teste", ...(q ? q.args : []), ...extra], { ...as(k), ...(q ? q.env : {}) });
+r = ligar("Claude 5 X", "c5", pedidoDe(marca("set-switch", "record-review")));
 is("another Claude 5 session (not the named one) cannot turn a switch on", !r.ok && /sessão nomeada/.test(r.out), r.out);
 r = ligar("Claude 5 ibqho", "ibq");
 is("the named session needs --request (condition 4)", !r.ok && /--request é obrigatório/.test(r.out), r.out);
-r = ligar("Claude 5 ibqho", "ibq", ["--request", REQ], pedido(77, "please turn record-review on", { FAKE_ISSUE: "4933" }));
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_ISSUE: "4933" }));
 is("a request comment that is not on #4932 is refused", !r.ok && /não é da #4932/.test(r.out), r.out);
-r = ligar("Claude 5 ibqho", "ibq", ["--request", REQ], pedido(77, "please turn something on"));
-is("a request comment that does not name the switch is refused", !r.ok && /não cita "record-review"/.test(r.out), r.out);
-r = ligar("Claude 5 ibqho", "ibq", ["--request", REQ], { FAKE_GH: "down" });
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe("please turn record-review on"));
+is("a comment that only mentions the switch, without the marker line, is refused (review of Claude 4 3Kc)", !r.ok && /não traz a linha "AGENT-MAIL-REQUEST/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "ready-check")));
+is("a marker for another switch is refused", !r.ok && /não traz a linha/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe("AGENT-MAIL-REQUEST C5-20261121-2100-TEST set-switch record-review"));
+is("a marker without the coordinator's identifier (C1-...) is refused", !r.ok && /não traz a linha/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review"), { FAKE_CREATED: "2026-01-01T00:00:00Z" }));
+is("an old request is refused (at most 2 hours)", !r.ok && /não é um pedido recente/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", { args: ["--request", "77"], env: { FAKE_GH: "down" } });
 is("a request that cannot be checked now is refused (nothing NOT CHECKED goes on)", !r.ok && /NÃO FOI CONFERIDO/.test(r.out), r.out);
 is("nothing was turned on by the refused attempts", /record-review: DESLIGADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
-r = run(["set-switch", "--as", "Claude 1 A", "--name", "ready-check", "--on", "--reason", "t", "--request", REQ], { ...as("c1a"), ...pedido(77, "ready-check") });
+r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "ready-check")), [], "ready-check");
 is("with no sign from the named session in 60 minutes, the backup acts, and the record says why", r.ok && /ready-check: LIGADO/.test(run(["list-switches"]).out), r.out);
 run(["set-switch", "--as", "Claude 2 X", "--name", "ready-check", "--off", "--reason", "fim do teste"], as("c2"));
-r = ligar("Claude 5 ibqho", "ibq", ["--request", "77"], pedido(77, "coordinator: turn record-review on"));
+const q1 = pedidoDe(`Coordinator decision.\\n${marca("set-switch", "record-review")}`);
+r = ligar("Claude 5 ibqho", "ibq", q1);
 is("the named session turns it on, on the coordinator's request", r.ok && /LIGADO/.test(r.out), r.out);
 r = run(["read", "--as", "Claude 2 Z"], as("c2"));
-is("the privileged action is announced to all in the same minute, with the request", /interruptor record-review LIGADO/.test(r.out) && /issuecomment-77/.test(r.out), r.out);
-r = ligar("Claude 1 A", "c1a", ["--request", REQ], pedido(77, "record-review"));
+is("the privileged action is announced to all in the same minute, with the request and its identifier", /interruptor record-review LIGADO/.test(r.out) && new RegExp(`issuecomment-${q1.id}`).test(r.out) && /C1-20261121-2100-TEST/.test(r.out), r.out);
+r = ligar("Claude 5 ibqho", "ibq", q1);
+is("a request is used once only", !r.ok && /já foi usado/.test(r.out), r.out);
+// A shallow clone whose history does not reach the named session's last write: no sign is NOT CHECKED (review of Claude 4 3Kc).
+run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "a"], as("c2"));
+const W2 = join(T, "w2"); g(["init", "-q", W2]); g(["fetch", "-q", "--depth", "1", `file://${join(T, "mail.git")}`, "+refs/heads/correio:refs/x"], W2);
+run(["send", "--from", "Claude 2 Z", "--to", "Claude 3 Z", "--subject", "s", "--text", "b"], as("c2"));
+r = run(["set-switch", "--as", "Claude 1 A", "--name", "record-review", "--on", "--reason", "t", ...pedidoDe(marca("set-switch", "record-review")).args], { ...as("c1a"), ...pedidoDe(marca("set-switch", "record-review")).env, FAKE_ID: String(nReq - 1) }, W2);
+is("in a shallow clone that does not cover 60 minutes, the backup does not act on 'no sign'", !r.ok && /NÃO FOI CONFERIDO: o histórico local do correio é raso/.test(r.out), r.out);
+r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "record-review")));
 is("the backup is refused while the named session signed in the last 60 minutes", !r.ok && /três casos/.test(r.out), r.out);
-r = ligar("Claude 1 A", "c1a", ["--request", REQ, "--owner-message", "OWNER-20261121-2100-TEST"], pedido(77, "record-review"));
+r = ligar("Claude 1 A", "c1a", pedidoDe(marca("set-switch", "record-review")), ["--owner-message", "OWNER-20261121-2100-TEST"]);
 is("the backup acts on an owner message, and says so", r.ok && /Reserva: mensagem do dono: OWNER-20261121-2100-TEST/.test(run(["read", "--as", "Claude 2 Z"], as("c2")).out), r.out);
-r = run(["set-switch", "--as", "Claude 5 ibqho", "--name", "record-review", "--on", "--request", REQ], { ...as("ibq"), ...pedido(77, "record-review") });
+const qr = pedidoDe(marca("set-switch", "record-review"));
+r = run(["set-switch", "--as", "Claude 5 ibqho", "--name", "record-review", "--on", ...qr.args], { ...as("ibq"), ...qr.env });
 is("a reason is required", !r.ok && /--reason/.test(r.out), r.out);
 is("list-switches shows it on and who", /record-review: LIGADO \(por Claude 1 A/.test(run(["list-switches"]).out), run(["list-switches"]).out);
 raw(`chaves/record-review/${Date.now() + 5}-claude-5-ibqho-cd34`, "ON\nClaude 5 ibqho\nforged\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n");
 is("an ON with the named session's line but no request line is ignored (read as off, the safe side)", /record-review: DESLIGADO .*ON IGNORADO/.test(run(["list-switches"]).out), run(["list-switches"]).out);
-ligar("Claude 5 ibqho", "ibq", ["--request", REQ], pedido(77, "record-review"));
+ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review")));
 
 console.log("record-review (item 2)");
 const rec = (who, n, sha, env, extra = []) => run(["record-review", "--as", who, "--pr", String(n), "--sha", sha.slice(0, 10), "--result", "READY", "--link", link(n), ...extra], env);
@@ -130,27 +147,33 @@ is("an unidentified record is accepted but NOT CHECKED and does not take anyone 
 const id7 = /registrado: (\S+)/.exec(r.out)?.[1];
 r = run(["confirm-review-record", "--as", "Claude 6 X", id7, "--reason", "t"], as("c6"));
 is("only the named session confirms a record", !r.ok && /sessão nomeada/.test(r.out), r.out);
-r = run(["confirm-review-record", "--as", "Claude 5 X", id7, "--reason", "t", "--request", REQ], { ...as("c5"), ...pedido(77, id7) });
+let qc = pedidoDe(marca("confirm-review-record", id7));
+r = run(["confirm-review-record", "--as", "Claude 5 X", id7, "--reason", "t", ...qc.args], { ...as("c5"), ...qc.env });
 is("another Claude 5 session cannot confirm a record", !r.ok && /sessão nomeada/.test(r.out), r.out);
-r = run(["confirm-review-record", "--as", "Claude 5 ibqho", id7, "--reason", "conferido no PR", "--request", REQ], { ...as("ibq"), ...pedido(77, "confirm") });
-is("a request that does not name the record is refused", !r.ok && new RegExp(`não cita "${id7}"`).test(r.out), r.out);
-r = run(["confirm-review-record", "--as", "Claude 5 ibqho", id7, "--reason", "conferido no PR", "--request", REQ], { ...as("ibq"), ...pedido(77, `confirm ${id7}`) });
+qc = pedidoDe(marca("confirm-review-record", "other-id"));
+r = run(["confirm-review-record", "--as", "Claude 5 ibqho", id7, "--reason", "conferido no PR", ...qc.args], { ...as("ibq"), ...qc.env });
+is("a request that does not name the record is refused", !r.ok && new RegExp(`não traz a linha .*confirm-review-record ${id7}`).test(r.out), r.out);
+qc = pedidoDe(marca("confirm-review-record", id7));
+r = run(["confirm-review-record", "--as", "Claude 5 ibqho", id7, "--reason", "conferido no PR", ...qc.args], { ...as("ibq"), ...qc.env });
 is("the named session confirms it, on the coordinator's request", r.ok, r.out);
 // Condition 3: never on a PR the privileged session wrote, reviewed or enqueued.
 r = rec("Claude 4 X", 1, H1, { ...as("c4"), FAKE_GH: "ok", FAKE_PR: "1", FAKE_SHA: H1.slice(0, 10) });
 const idr1 = /registrado: (\S+)/.exec(r.out)?.[1];
 raw("revisao/feitas/20261121T000000Z-claude-5-ibqho-0001.md", `Resultado: READY\nPR: 1\nHead: ${H1.slice(0, 10)}\nPor: Claude 5 ibqho\n\nok\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n`);
-r = run(["confirm-review-record", "--as", "Claude 5 ibqho", idr1, "--reason", "t", "--request", REQ], { ...as("ibq"), ...pedido(77, idr1) });
+qc = pedidoDe(marca("confirm-review-record", idr1));
+r = run(["confirm-review-record", "--as", "Claude 5 ibqho", idr1, "--reason", "t", ...qc.args], { ...as("ibq"), ...qc.env });
 is("the named session does not confirm a record of a PR it reviewed", !r.ok && /revisou/.test(r.out), r.out);
 g(["checkout", "-q", "-B", "pr8", M], P); const H8 = commit("f8.txt", "8\n", "pr8\n\nClaude-Session: https://claude.ai/code/session_012ST5ibqhoHCYrphJXU5az3"); g(["push", "-q", "../prs.git", "HEAD:refs/pull/8/head"], P);
 r = rec("Claude 4 X", 8, H8, { ...as("c4"), FAKE_GH: "ok", FAKE_PR: "8", FAKE_SHA: H8.slice(0, 10) });
 const idr8 = /registrado: (\S+)/.exec(r.out)?.[1];
-r = run(["confirm-review-record", "--as", "Claude 5 ibqho", idr8, "--reason", "t", "--request", REQ], { ...as("ibq"), ...pedido(77, idr8) });
+qc = pedidoDe(marca("confirm-review-record", idr8));
+r = run(["confirm-review-record", "--as", "Claude 5 ibqho", idr8, "--reason", "t", ...qc.args], { ...as("ibq"), ...qc.env });
 is("the named session does not confirm a record of a PR it wrote", !r.ok && /escreveu/.test(r.out), r.out);
 raw("fila/feitas/20261121T000000Z-claude-2-0003.md", `Resultado: enfileirado\nPR: 2\nHead: ${H2.slice(0, 10)}\nPor: Claude 5 ibqho\n\nfila #2\nSessão: session_012ST5ibqhoHCYrphJXU5az3 (claude-5)\n`);
 r = rec("Claude 4 X", 2, H2, { ...as("c4"), FAKE_GH: "ok", FAKE_PR: "2", FAKE_SHA: H2.slice(0, 10) });
 const idr2 = /registrado: (\S+)/.exec(r.out)?.[1];
-r = run(["confirm-review-record", "--as", "Claude 5 ibqho", idr2, "--reason", "t", "--request", REQ], { ...as("ibq"), ...pedido(77, idr2) });
+qc = pedidoDe(marca("confirm-review-record", idr2));
+r = run(["confirm-review-record", "--as", "Claude 5 ibqho", idr2, "--reason", "t", ...qc.args], { ...as("ibq"), ...qc.env });
 is("the named session does not confirm a record of a PR it enqueued", !r.ok && /enfileirou/.test(r.out), r.out);
 is("a confirmed record takes the family out of the queue", /confirmado pelo coordenador\) +tira a família/.test(run(["list-review-records", "--pr", "2"]).out));
 
@@ -223,7 +246,7 @@ is("with the switch off, record-review is refused", !r.ok && /DESLIGADO/.test(r.
 is("with the switch off, no record takes anyone out of the queue", !/tira a família/.test(run(["list-review-records", "--pr", "2"]).out));
 
 console.log("concurrency and order");
-ligar("Claude 5 ibqho", "ibq", ["--request", REQ], pedido(77, "record-review"));
+ligar("Claude 5 ibqho", "ibq", pedidoDe(marca("set-switch", "record-review")));
 const par = await Promise.all(["c4", "c2"].map((k) => new Promise((ok) => {
   const p = spawn("node", [TOOL, "record-review", "--as", k === "c4" ? "Claude 4 Y" : "Claude 2 Y", "--pr", "2", "--sha", H2.slice(0, 10), "--result", "READY", "--link", link(2)],
     { cwd: join(T, "w"), env: { ...base, ...as(k), FAKE_GH: "ok", FAKE_PR: "2", FAKE_SHA: H2.slice(0, 10) } });

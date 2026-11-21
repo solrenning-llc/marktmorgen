@@ -8,11 +8,11 @@ import { imageSize } from "@/lib/image-size";
 import { averageText, showsRating, summaryOf } from "@/lib/reviews";
 import { canUseDomain } from "@/lib/domains";
 import { salePill } from "@/components/store-product";
+import { holdState } from "@/lib/child-safety";
 import { takePublicRequest } from "@/lib/traffic";
 import { PRODUCT_CARD_PICTURE_PIXELS, PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
 import { speech } from "@/lib/buyer-words";
 import { plain } from "@/lib/serve-file";
-import { holdState } from "@/lib/child-safety";
 
 /**
  * The picture a product's link unfolds into when it is shared: the product's

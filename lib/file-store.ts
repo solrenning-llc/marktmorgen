@@ -17,6 +17,7 @@ import * as blob from "@/lib/blob";
 import { deleteVault, headVault, listVault, readVault, vaultHeld, vaultUrl, writeVault } from "@/lib/vault";
 import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { VAULT_PREFIX, isVaultPath } from "@/lib/vault-rules";
+import { isFileHeld } from "@/lib/held-files";
 
 export type Measured = { pathname: string; size: number; contentType: string };
 
@@ -68,6 +69,8 @@ export async function deleteFile(pathnames: string | string[], reason: BackupDel
  * playing in place.
  */
 export async function fileUrl(pathname: string, seconds: number, saveAs?: string): Promise<string | null> {
+  // A file kept for a child-safety report is handed to nobody; a mark that cannot be read hands out nothing.
+  if (await isFileHeld(pathname).catch(() => true)) return null;
   if (isVaultPath(pathname)) return vaultUrl(pathname, seconds, saveAs);
   try {
     const token = await blob.issueSignedToken({ pathname, operations: ["get"], validUntil: Date.now() + seconds * 1000 });

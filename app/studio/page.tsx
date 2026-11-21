@@ -194,6 +194,7 @@ import {
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
 import { RISK_WORDS } from "@/lib/payment-risk";
+import { SaleVatLines } from "@/components/sale-vat-lines";
 import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
@@ -3563,6 +3564,7 @@ export default async function StudioPage({
                             )}
                           </p>
                           {sale.risk ? <p className="mt-1 text-sm text-ink-soft">{RISK_WORDS[sale.risk]}</p> : null}
+                          <SaleVatLines vat={sale.vat} currency={sale.currency} />
                           {sale.shipTo !== undefined && sale.shipTo !== null ? (
                             <MarkShipped session={sale.reference} to={sale.shipTo} shipped={sale.shipped ?? null} />
                           ) : null}

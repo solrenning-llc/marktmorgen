@@ -78,6 +78,7 @@ import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 import { type RiskLevel, riskLevelOf } from "@/lib/payment-risk";
+import { type SaleVatLine, saleVatLine } from "@/lib/sale-vat-line";
 import { type UnpaidProof, unpaidProof } from "@/lib/checkout-return";
 
 /**
@@ -1342,6 +1343,8 @@ export type Sale = {
    * "normal". Null only for a free trial, which charged nothing at checkout.
    */
   risk: RiskLevel | null;
+  /** The VAT the Solrenning LLC collected on this sale and Stripe's fee on it (lib/sale-vat-line.ts); null when none. */
+  vat?: SaleVatLine | "unreadable" | null;
 };
 
 // Each state is its own member so a check on one narrows the rest away;
@@ -1398,7 +1401,8 @@ export async function listSales(store: Store): Promise<SaleList> {
       "GET",
       store.stripeAccountId as string,
       // Each payment's charge comes on the same read, for its risk (647 [WG7]).
-      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&expand[]=data.payment_intent.latest_charge&expand[]=data.payment_intent.latest_charge.review`,
+      // And its balance transaction, for Stripe's fee on a VAT the LLC collected (793 [IV3]): the same single read.
+      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&expand[]=data.payment_intent.latest_charge&expand[]=data.payment_intent.latest_charge.review&expand[]=data.payment_intent.latest_charge.balance_transaction`,
     );
   } catch (error) {
     console.error("listing orders failed", error);
@@ -1449,6 +1453,7 @@ export async function listSales(store: Store): Promise<SaleList> {
         trial,
         isTip: row.metadata?.kind === "tip",
         risk: trial ? null : riskLevelOf(chargeOfPayment(row.payment_intent)),
+        vat: saleVatLine(row.payment_intent),
         shipTo: wasShipped(row) ? (shippingAddressOf(row as Record<string, unknown>) ?? { name: "", lines: [], country: "" }) : null,
         shipped: null,
       };

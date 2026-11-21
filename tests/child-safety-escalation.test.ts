@@ -322,6 +322,17 @@ async function main(): Promise<void> {
   });
   is("the claim answered off its shape: unknown, no alert opened, the urgent email still goes and says so", [due().length, records(), LINK.test(oddClaim), /could not be set up/i.test(oddClaim)], [before, before, false, true]);
 
+  part("An outside outcome accepted by the writer stays readable");
+  redis.clear();
+  sent.length = 0;
+  const outsideAt = Date.UTC(2026, 10, 7, 9, 0);
+  await alertOwner({ kind: "child_safety", url: "https://example.test/placeholder" }, "outside", outsideAt);
+  const outsideToken = tokenOf(sent[0]);
+  is("the first notice has a handled link", outsideToken.length, 96);
+  is("the outside outcome gets a reminder the next day", (await sendDueAlerts(outsideAt + DAY)).sent, 1);
+  is("the reminder keeps the outside address private", [sent[1]?.text.includes("an address outside Marktmorgen"), sent[1]?.text.includes("example.test")], [true, false]);
+  is("its handled link closes the alert", await closeAlert(outsideToken), "closed");
+
   part("Wired into a cron that runs every hour, and documented");
   const quiet = readFileSync("app/api/cron/quiet/route.ts", "utf8");
   is("the hourly quiet cron sends the due reminders, under its lock", [/import \{ sendDueAlerts \} from "@\/lib\/child-safety-alerts"/.test(quiet), /await sendDueAlerts\(/.test(quiet)], [true, true]);

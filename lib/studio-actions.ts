@@ -113,6 +113,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
 export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   new: "Makes another store in the account, opened from the store switcher rather than from inside a store.",
   totals: "Figures for all the stores of the account, opened from the store switcher rather than from inside a store.",
+  applications: "Applications to buy (604 [WP3]): no product can ask for one yet, so the screen is not offered until the product setting that does links to it.",
   paused: "Shown only when the studio's requests for the period are used up, never something to open.",
   disputes: "The review of one disputed purchase, which opens only from that purchase in Payment requests.",
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",

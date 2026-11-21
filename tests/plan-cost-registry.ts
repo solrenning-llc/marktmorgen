@@ -2483,6 +2483,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-search-index.ts", names: ["takePublicRequest(store, \"public\", undefined, units, { shared: true })", "takePublicRequest(store, \"public\", undefined, 1)", "paidRead(store, shownIds)", "paidRead(store, missing)", "takePublicRequest(store, \"public\", undefined, units)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
+      // An application to buy (604 [WP3] unit 3) takes APPLY_SUBMIT_REQUEST_UNITS before its product, its mode or any application is
+      // read, and is kept only within the store's day and caps; its commands are held under that many later pages in tests/apply-first-routes.test.ts.
+      { file: "lib/apply-first-store.ts", names: ["APPLY_SUBMIT_REQUEST_UNITS", "APPLY_SUBMIT_COMMANDS", "APPLY_MODE_COMMANDS", "APPLY_PER_STORE_DAY", "APPLY_PER_CONNECTION_HOUR"] },
+      { file: "app/api/store/apply/route.ts", names: ["takePublicRequest(store, \"public\", now, APPLY_SUBMIT_REQUEST_UNITS)", "withinStore(\"apply-ip\""] },
       // A count settles its lapsed holds in one HDEL and one STOCK_SELL a product at the most (Claude 5's MÉDIO on #4472), STOCK_PAGE_SETTLE_COMMANDS_MOST.
       { file: "lib/stock.ts", names: ["MAX_CHECKS", '["HDEL", stockKey(store.statsId, product.id), ...letGo]', "sellCommand(store.statsId, product.id, paid)", "#ARGV > ${MAX_CHECKS}"] },
       // A stamped copy or a preview kept in the store's storage: its measurement (a Blob and an R2 listing) is
@@ -2616,6 +2620,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_SEARCH_UNITS"] },
       { file: "lib/studio-search-rules.ts", names: ["SEARCHES_PER_MINUTE", "SEARCHES_PER_DAY"] },
       { file: "lib/catalog.ts", names: ["readCardsExact"] },
+      // A decision on an application to buy (604 [WP3] unit 3) takes APPLY_DECIDE_STUDIO_UNITS more than its door's one before it reads;
+      // the studio's list of them is two commands inside the page's own units (held in tests/apply-first-routes.test.ts).
+      { file: "lib/apply-first-store.ts", names: ["APPLY_DECIDE_STUDIO_UNITS", "APPLY_DECIDE_COMMANDS", "APPLY_LIST_COMMANDS"] },
+      { file: "app/api/store/applications/route.ts", names: ["guardStoreWrite(request, \"send\", 1_000)", "countStudio(store, null, APPLY_DECIDE_STUDIO_UNITS)"] },
       // A list file or the buyers audience holds the units of each read before it is made and counts every byte it moved (R31, reviews of #3354).
       { file: "lib/list-download.ts", names: ["listDownloadHeld", "listDownloadUnits", "listPageMost", "jsonBytes", "holdStudio(store, units)", "holdStudio(store, need - holding)"] },
       { file: "lib/contacts.ts", names: ["CONTACT_READ_BYTES", "LIST_PAGE_READ_BYTES", "read: ListRead = plainRead"] },
@@ -3471,7 +3479,6 @@ export const NOT_A_COST: Record<string, string> = {
   STATUS_COUNTS_PER_ADDRESS_PER_HOUR: "Times one address may make one server instance count a request on the public status page in an hour (247 [SP4] unit 2, lib/status-page.ts, lib/local-limit.ts): a pace that only refuses, held in memory at no cost, so one client cannot use up the hour's reads; the page's cost is the company's, priced in tests/status-page.test.ts.",
   REPLY_FILE_LIMITS: "The kinds and the largest size of one file a creator may attach to a reply to a buyer's submission (750 [CD1] unit 1, lib/submission-rules.ts, pure rules with no I/O): not an allowance and not metered. The file's bytes are reserved against the plan's own storage before its upload is authorized (preauthorizeSubmission, the same arithmetic as lib/storage-reservations.ts), and its upload starts and requests come from the monthly upload allowance (lib/upload-budget-policy.ts), both already priced per plan. Nothing reads, stores or sends anything in unit 1; the routes, the email for each reply and the video transfer when a file is watched get their cost lines with the units that add them, and that transfer is unmeasured, unknown, never zero.",
   STORE_FORGET_MONTH_READ_COMMANDS: "The unwired monthly owner-report reader in lib/store-forget-retry.ts sends exactly four Redis commands per invocation. It has no production caller today; before it is wired, its frequency and non-zero command cost must be included in the reviewed company fixed-cost ceiling. Unknown funding stays unknown, never zero, and this is not a store plan allowance.",
-  APPLY_PER_STORE_DAY: "Applications to buy a store takes in one UTC day (604 [WP3] unit 2, lib/apply-first-store.ts): a ceiling that refuses before anything is kept, not a figure a plan pays for. What the kept applications weigh is bounded in tests/store-data-registry.ts (nl:apply:*, capped by APPLY_MAX_KEPT and APPLY_RECORD_MAX_BYTES). Nothing calls lib/apply-first-store.ts yet; before a route does (604 [WP3] unit 3), its commands (APPLY_SUBMIT_COMMANDS, APPLY_DECIDE_COMMANDS, APPLY_LIST_COMMANDS) must be priced inside the public-request or studio line its door counts. Unknown stays unknown, never zero.",
   BACKUP_RUNS_PER_MONTH: "The daily backup of the whole database is a company cost, never a plan's (273 [BK1], inbox C4-44): its worst month is priced from a review's caps by lib/backup-cost.ts and counted once among the LLC fixed costs (lib/llc-fixed-costs.ts, line backup, 100% Marktmorgen under FX275), whose reviewed ceiling stays unknown, never zero, while BACKUP_COST_UNKNOWNS are open.",
   BACKUP_DAYS_PER_MONTH: "The UTC days a billing month touches for the daily backup, a company cost (273 [BK1], inbox C4-49): its worst month is priced by lib/backup-cost.ts among the LLC fixed costs (lib/llc-fixed-costs.ts, line backup, 100% Marktmorgen under FX275), never a plan's allowance.",
   BACKUP_RUNS_PER_DAY: "The backup's runs a UTC day at the most, a run and one new try after a failure, counted before any cost (lib/backup-run.ts, 273 [BK1], inbox C4-49); priced in the company's backup line (lib/backup-cost.ts, lib/llc-fixed-costs.ts line backup), never a plan's allowance.",
@@ -3631,7 +3638,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "free-conn": PUBLIC, "free-net": PUBLIC,
   // Public requests: counted in the store's window as well (lib/metered-limits.ts, withinStore).
   "ads-event": PUBLIC, "aff-join": PUBLIC, "aff-open": PUBLIC, "aff-partner": PUBLIC, "book-move": PUBLIC, "cart-read": PUBLIC, "come-back": PUBLIC, "course-start": PUBLIC,
-  "discord-join": PUBLIC, download: PUBLIC, "orders-bundle": PUBLIC, "orders-older": PUBLIC, "form-ip": PUBLIC, heard: PUBLIC, "join-ip": PUBLIC, "manage-card": PUBLIC, "manage-card-back": PUBLIC,
+  "discord-join": PUBLIC, download: PUBLIC, "orders-bundle": PUBLIC, "orders-older": PUBLIC, "form-ip": PUBLIC, "apply-ip": PUBLIC, heard: PUBLIC, "join-ip": PUBLIC, "manage-card": PUBLIC, "manage-card-back": PUBLIC,
   "manage-leave": PUBLIC, "manage-open": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
   "course-start-order": BURST("public-requests"), "review-order": BURST("public-requests"), "join-address": BURST("public-requests"),

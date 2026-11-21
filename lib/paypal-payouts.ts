@@ -6,6 +6,7 @@
  *   nl:pp:open:<statsId>     batches sent and not yet settled: what each affiliate was sent
  *   nl:pp:item:<item>        a PayPal payout item already written into the book (once)
  *   nl:pp:stores             the stores with a batch still open, for the daily job
+ *   nl:pp:pace:<statsId>     a reading asked for by a view, so the next views for a few minutes do not ask PayPal again
  *
  * How it works, and why this way. PayPal's Payouts API only ever sends money
  * from the balance of the account whose app makes the call. So the creator
@@ -32,13 +33,15 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
-import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
+import { type Affiliate, type Book, BOOK_STRIPE_PAGES, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type BookSizes, bookWork } from "@/lib/api-read-rules";
+import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { type Store, storeForId, storeIdGone } from "@/lib/store";
+import { ERASING_KEY, type Store, erasingField, ownerKey, storeForId, storeIdCommand, storeIdGone, storeRef } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
 const PAYPAL_API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? "")
@@ -58,24 +61,107 @@ const TIMEOUT_MS = 20_000;
 const linkKey = (statsId: string) => `nl:pp:${statsId}`;
 const openKey = (statsId: string) => `nl:pp:open:${statsId}`;
 const itemKey = (item: string) => `nl:pp:item:${item}`;
+/**
+ * How long an item's mark was kept when a batch wrote it (SET NX EX, before payouts took their item's id on 8 November
+ * 2026): the marks read now (lib/affiliates.ts, an older PayPal payout's Undo, #4606) lapse by then, and the family's
+ * bound in lib/data-families.ts is this one (tests/closing-families.test.ts, TIMED_IN_CODE; Claude 4 cloud Z on #4614).
+ */
+export const ITEM_MARK_SECONDS = 400 * 86_400;
 const STORES = "nl:pp:stores";
+const paceKey = (statsId: string) => `nl:pp:pace:${statsId}`;
+/** How long a reading asked for by a view stands for the next views (settlePayPal, `paced`). */
+const SETTLE_PACE_SECONDS = 300;
+/**
+ * The studio's "Check with PayPal" press: never held back by a view's pace (it would answer a check that was not made,
+ * reviews of #4212), but by its own mark, so a creator who presses again within this time is told PayPal was asked
+ * already, and repeated presses stay bounded.
+ */
+export const PRESS_PACE_SECONDS = 60;
+const pressKey = (statsId: string) => `nl:pp:press:${statsId}`;
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
+
+/**
+ * The link written only while its store is live, in one step (Codex L-20261119-2344): connectPayPal waits on PayPal
+ * to check the app, and the store's erasure can begin or end meanwhile; a plain SET after it would write the sealed
+ * Secret back into nl:pp:<statsId>, an erased family, with no expiry. KEYS[1] the store's own key (its id key, or
+ * for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the link;
+ * ARGV[1] the store's erasing field, ARGV[2] the link. 1 written, 0 not (gone or erasing). Billed 1 + 3, in place of
+ * the SET's 1: a connection stays inside the integration unit's 10 commands (tests/paypal-link-store-erasure.test.ts).
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const KEEP_LINK_IF_LIVE = `-- marktmorgen:paypal-link-live:v1
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("HGET", KEYS[2], ARGV[1]) then return 0 end
+redis.call("SET", KEYS[3], ARGV[2])
+return 1`;
+
+/**
+ * An open batch written only while its store is live, in one step (Codex L-20261120-0448 and -0349): payWithPayPal
+ * writes its batch down before asking PayPal for the money, and settlePayPal writes back the lines still on their way
+ * after PayPal answered a batch's status, which can take seconds; a store's erasure can begin meanwhile. A plain HSET
+ * (and SADD) would write the affiliates' ids, amounts and receiver prints back into nl:pp:open:<statsId>, an erased
+ * family, and, before a send, let the money be asked for after the erasure began. KEYS[1] the store's own key (its id
+ * key, or for a store from before ids its record), KEYS[2] the erasing marks (lib/store.ts ERASING_KEY), KEYS[3] the
+ * open batches, KEYS[4] the settling's set of stores; ARGV[1] the store's erasing field, ARGV[2] the batch's field,
+ * ARGV[3] the batch, ARGV[4] the store's id to put in the settling's set, or "" for none, ARGV[5] "" for a store with
+ * an id (its id key fenced on with EXISTS) or, for a store from before ids, its statsId, compared with its owner's
+ * record's own: after that store's erasure its owner may make a new store under the same key, and that record's being
+ * there must not let the erased store's batch back in (Codex P on #4963; the v2 identity of #4964,
+ * lib/store-live-cache.ts). A record that does not parse is not this store. Answers -1, nothing written, when the
+ * store is gone, being erased or no longer its owner's; otherwise { HSET's answer, SADD's answer or 0 }. Billed 1 + 2 + the writes:
+ * three more than the plain writes it replaces (tests/plan-cost-registry.ts, PAYPAL_PRESS_COMMANDS). lib/redis-memory.ts
+ * runs it the same way.
+ */
+export const KEEP_OPEN_IF_LIVE = `-- marktmorgen:paypal-open-live:v2
+if redis.call("HGET", KEYS[2], ARGV[1]) then return -1 end
+if ARGV[5] == "" then
+  if redis.call("EXISTS", KEYS[1]) ~= 1 then return -1 end
+else
+  local raw = redis.call("GET", KEYS[1])
+  if not raw then return -1 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" or record["statsId"] ~= ARGV[5] then return -1 end
+end
+local held = redis.call("HSET", KEYS[3], ARGV[2], ARGV[3])
+local added = 0
+if ARGV[4] ~= "" then added = redis.call("SADD", KEYS[4], ARGV[4]) end
+return {held, added}`;
 
 type Link = { client: string; secret: string; at: number; auto: boolean };
 export type PayPalView = { client: string; at: number; auto: boolean; broken: boolean };
 type OpenBatch = PendingPayoutBatch;
 type Sent = OpenBatch["lines"][number];
 
+/** The creator's link: null only when Redis confirms there is none; an answer in any other shape throws (rule 24). */
 async function readLink(store: Store): Promise<Link | null> {
+  return (await readLinkAsKept(store))?.link ?? null;
+}
+
+/**
+ * The app's record and its exact text as kept, so a write can go only onto that same record (AUTOPAY_IF). Null only
+ * when Redis confirms there is none; a reply or a record in any other shape throws (rule 24), never "not connected".
+ */
+async function readLinkAsKept(store: Store): Promise<{ link: Link; raw: string } | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(store.statsId)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", linkKey(store.statsId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the PayPal link");
+  const [raw] = reply;
+  if (raw === null) return null;
+  let v: unknown;
   try {
-    const v = JSON.parse(raw) as Link;
-    return typeof v.client === "string" && typeof v.secret === "string" ? v : null;
+    v = typeof raw === "string" ? JSON.parse(raw) : undefined;
   } catch {
-    return null;
+    v = undefined;
   }
+  // The auto-pay switch is true or false, written so since the link existed: "false", 1, null or a missing switch is a
+  // record in an unknown shape, neither permission to pay nor "off" (Codex J's MEDIUM on 7b1baef6). So is a link whose
+  // time is not a positive whole number of milliseconds (Codex g's MEDIUM, 6896518230).
+  if (
+    typeof raw !== "string" || !record(v) || typeof v.client !== "string" || typeof v.secret !== "string" ||
+    !Number.isSafeInteger(v.at) || Number(v.at) <= 0 || typeof v.auto !== "boolean"
+  ) {
+    throw new UnknownReplyError("the PayPal link");
+  }
+  return { link: v as Link, raw };
 }
 
 /** What the studio shows: never the Secret. */
@@ -217,9 +303,25 @@ export async function connectPayPal(store: Store, client: string, secret: string
     console.error("checking a PayPal app failed", error);
     return { ok: false, reason: "error" };
   }
-  const before = await readLink(store);
-  const link: Link = { client, secret: seal(secret, context(store.statsId)), at: Date.now(), auto: before?.auto ?? false };
-  await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify(link)]]);
+  // A previous link that cannot be read is replaced, with paying by itself off: connecting again is the creator's way
+  // out of a link in an unknown shape, and an unknown switch is never carried over as "on" (rule 24).
+  const before = await readLink(store).catch((error) => {
+    console.error("the previous PayPal link could not be read; it is replaced with auto-pay off", error);
+    return null;
+  });
+  const link: Link = { client, secret: seal(secret, context(store.statsId)), at: Date.now(), auto: before?.auto === true };
+  // The store's id key; for a store from before ids (sid ""), its record under its owner. A sid of any other shape
+  // has no id key to find, so it reads as gone and nothing is kept (fail closed).
+  const ref = storeRef(store);
+  const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  const written = repliesFor(await redisPipeline([
+    ["EVAL", KEEP_LINK_IF_LIVE, 3, live, ERASING_KEY, linkKey(store.statsId), await erasingField(ref), JSON.stringify(link)],
+  ]), 1);
+  // Kept only on its exact 1: 0 is a store gone or being erased, and any other answer is not known to be kept.
+  if (written?.[0] !== 1) {
+    console.error(written?.[0] === 0 ? "the PayPal link was not kept: the store is gone or being erased" : "the PayPal link's write got no exact answer");
+    return { ok: false, reason: "error" };
+  }
   return { ok: true };
 }
 
@@ -228,11 +330,28 @@ export async function disconnectPayPal(store: Store): Promise<void> {
   await redisPipeline([["DEL", linkKey(store.statsId)]]);
 }
 
+/**
+ * The switch written only onto the exact record read, in one step: KEYS[1] the app's record, ARGV[1] its text as read,
+ * ARGV[2] the text to write. Answers 1 (written) or 0 (gone or replaced meanwhile, nothing written).
+ */
+export const AUTOPAY_IF = `-- marktmorgen:paypal-autopay-if:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1`;
+
+/**
+ * Turns automatic payouts on or off on the app's record. Written only onto the exact record read (AUTOPAY_IF), its
+ * reply read exactly, 0 or 1: a disconnect between the read and the write is never undone (the app, with its sealed
+ * secret, is not written back), and an app replaced meanwhile is never overwritten by the old one's record (Codex X8
+ * on #4345, ALTO: SET XX proved only that some record was there). Either way the switch answers false: not
+ * connected, or changed meanwhile, to be tried again. Anything else is unknown and throws.
+ */
 export async function setAutoPay(store: Store, on: boolean): Promise<boolean> {
-  const link = await readLink(store);
-  if (!link || !store.statsId) return false;
-  await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify({ ...link, auto: on })]]);
-  return true;
+  const kept = await readLinkAsKept(store);
+  if (!kept || !store.statsId) return false;
+  const set = repliesFor(await redisPipeline([["EVAL", AUTOPAY_IF, 1, linkKey(store.statsId), kept.raw, JSON.stringify({ ...kept.link, auto: on })]]), 1);
+  if (!set || (set[0] !== 1 && set[0] !== 0)) throw new UnknownReplyError("turning PayPal automatic payouts on or off");
+  return set[0] === 1;
 }
 
 async function readOpen(statsId: string): Promise<Map<string, OpenBatch>> {
@@ -246,13 +365,64 @@ export async function onTheirWay(store: Store): Promise<Set<string>> {
   return new Set([...open.values()].flatMap((b) => b.lines.map((l) => l.a)));
 }
 
-/** Who can be paid now: owed, cleared, and not already on their way through PayPal. */
-export function payableLines(book: Book, away: Set<string>): BatchLine[] {
-  return owedLines(book).filter((line) => !away.has(line.affiliate.id));
+/**
+ * Why what the book says is owed cannot be paid from it, or null when it can: "refunds" while refunds and disputes
+ * were not all read from Stripe, "invoices" while the membership and plan payments were not, and "invoices_ceiling"
+ * while those are past what the book can keep between readings (Book.invoicesPastCeiling), which reloading does not
+ * change. The one test every way of paying a batch makes first: the file (GET payout-batch), its confirmation (POST),
+ * the PayPal press and payday (review of #3378 by Claude 2, HIGH: a file handed out that its confirmation would refuse
+ * could be paid twice).
+ */
+export function unsettledBook(book: Pick<Book, "refundsChecked" | "invoicesChecked" | "invoicesPastCeiling" | "unlinkedInvoices">): "refunds" | "invoices" | "invoices_ceiling" | "invoices_unlinked" | null {
+  if (!book.refundsChecked) return "refunds";
+  if (!book.invoicesChecked) return book.invoicesPastCeiling ? "invoices_ceiling" : "invoices";
+  // A paid invoice left out with no one payment to link it to (Book.unlinkedInvoices): its commission is not known,
+  // so no payout is made from a book that leaves it out (Codex X5's and Claude 1 cloud's MEDIUM on #3378). Reloading
+  // gives the same: the creator pays by hand, as past the ceiling.
+  if ((book.unlinkedInvoices ?? 0) > 0) return "invoices_unlinked";
+  return null;
 }
 
-/** The address a line is paid to, as the body sends it. */
-const receiverOf = (line: BatchLine) => payAddress(line.affiliate).slice(0, 127);
+/** Who can be paid now: owed, cleared, and not already on their way through PayPal. */
+export function payableLines(book: Book, away: Set<string>): BatchLine[] {
+  return owedLinesWhere(book, (affiliate) => !away.has(affiliate.id));
+}
+
+/**
+ * Of those, who a PayPal batch can pay: an affiliate whose PayPal address is longer than PayPal's receiver field
+ * holds (PAYPAL_RECEIVER_MAX) is left out of every batch, never sent under a cut address. They stay owed, never on
+ * their way, and the payout file (lib/affiliate-payouts.ts), which carries the address whole, can pay them.
+ */
+export function paypalPayableLines(book: Book, away: Set<string>): BatchLine[] {
+  return owedLinesWhere(book, (affiliate) => !away.has(affiliate.id) && paypalCanReceive(affiliate));
+}
+
+/**
+ * How many affiliates are owed something cleared, not on their way, and left out of every PayPal batch because PayPal
+ * cannot take their address (Claude 7 on #4318). Counted over the whole book, not cut at the batch ceiling, so the
+ * creator is never told that nobody is owed while someone is.
+ */
+export function paypalLeftOut(book: Book, away: Set<string>): number {
+  return book.rows.filter((row) => row.payable > 0 && row.affiliate.status === "approved" && !away.has(row.affiliate.id) && !paypalCanReceive(row.affiliate)).length;
+}
+
+/** What the creator is told about them, in the studio's PayPal panel and in the payday email. */
+export function paypalLeftOutText(count: number): string {
+  const who = count === 1 ? "1 affiliate is" : `${count} affiliates are`;
+  const their = count === 1 ? "their PayPal address is" : "their PayPal addresses are";
+  return `${who} owed money PayPal cannot send: ${their} longer than PayPal takes (${PAYPAL_RECEIVER_MAX} characters). Pay them another way, such as Wise, with the batch download on your affiliate page.`;
+}
+
+/** The most characters PayPal's receiver field holds (payments_payouts_batch_v1, payout_item receiver: maxLength 127). */
+export const PAYPAL_RECEIVER_MAX = 127;
+/**
+ * The address a line is paid to, as the body sends it: whole, never cut. An address cut to PayPal's length is
+ * another inbox (".store.com.br" cut to ".store.com" is another domain's), so the money would go to somebody else
+ * and the book would say "paid" once PayPal reported it.
+ */
+const receiverOf = (line: BatchLine) => payAddress(line.affiliate);
+/** Whether PayPal can take this affiliate's address as a receiver at all: one longer than it holds is never sent. */
+const paypalCanReceive = (affiliate: Affiliate) => payAddress(affiliate).length <= PAYPAL_RECEIVER_MAX;
 /**
  * Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681): an HMAC
  * under a key derived from the server's own secret, so it cannot be turned back by guessing addresses (Revisor 2's
@@ -262,6 +432,20 @@ const RECEIVER_PRINT_LABEL = "paypal-payout-receiver/v1";
 function receiverPrint(address: string): string {
   const key = deriveKey(RECEIVER_PRINT_LABEL);
   return key ? createHmac("sha256", key).update(address).digest("hex") : "";
+}
+/**
+ * An address as compared (Claude 4's MÉDIO on #4682): trimmed and in lower case, as an email address is matched, so a
+ * receiver PayPal gives back in another letter case is the same receiver. A batch is printed this way from now on.
+ */
+const receiverKey = (address: string) => address.trim().toLowerCase();
+/**
+ * Whether an address is the receiver a line kept the print of: printed as compared, or exactly as a batch sent before
+ * this change printed it. Never true without a print or without a key to print with.
+ */
+function sameReceiver(address: string, print: string | undefined): boolean {
+  if (!print) return false;
+  const compared = receiverPrint(receiverKey(address));
+  return Boolean(compared) && (compared === print || receiverPrint(address) === print);
 }
 
 /** The body PayPal is sent for one batch (payments_payouts_batch_v1, create_payout_request). */
@@ -292,8 +476,12 @@ export type PayResult =
    * "pending": nothing was paid now (not sent, or refused by PayPal), but the batch's "?" entry could not be confirmed
    * removed, so the settling may still send it (settleUnknown); its people stay on their way. "error" and PayPal's own
    * refusals ("funds", "refused") are said only once nothing will be sent.
+   * "refunds": refunds and disputes not all read from Stripe; "invoices": the membership and plan payments not all
+   * read (audit A1): either way what is owed is not known, so nothing is sent. "invoices_ceiling": those are past
+   * what the book can keep (unsettledBook), which reloading does not change. "invoices_unlinked": a paid invoice is left
+   * out with its commission not known (Book.unlinkedInvoices), which reloading does not change either.
    */
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" | "pending" };
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "invoices_ceiling" | "invoices_unlinked" | "funds" | "refused" | "busy" | "error" | "unknown" | "pending" };
 
 /**
  * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
@@ -332,6 +520,14 @@ async function promoteBatch(statsId: string, field: string, batch: string, entry
     console.error("a PayPal batch is held under its id, but its '?' entry could not be confirmed removed; the settling drops it", batch);
   }
   return true;
+}
+
+/** The one command that writes an open batch only while its store is live (KEEP_OPEN_IF_LIVE); `watch` puts it in the settling's set too. */
+async function keepOpenCommand(store: Store, field: string, value: string, watch: boolean): Promise<(string | number)[]> {
+  // The store's id key; for a store from before ids (sid ""), its record under its owner, as connectPayPal reads it.
+  const ref = storeRef(store);
+  const live = store.sid ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+  return ["EVAL", KEEP_OPEN_IF_LIVE, 4, live, ERASING_KEY, openKey(store.statsId as string), STORES, await erasingField(ref), field, value, watch ? store.sid : "", store.sid ? "" : (store.statsId as string)];
 }
 
 /** Takes one open-batch entry away: true only when Redis answers the HDEL with exactly 0 or 1 (rule 24). */
@@ -412,6 +608,22 @@ export async function paypalChecks(store: Store): Promise<{ checking: number; ma
   return out;
 }
 
+/**
+ * Integration units one press of "Pay with PayPal" takes before it reads anything (app/api/store/affiliates/paypal,
+ * withinServiceWhy; Claude 7 on #4488): a press is one call held for up to its route's 60 s, its own commands (the
+ * lock's tries, who is on their way twice, the lock held again and let go by EVAL, the batch written and settled) and
+ * the whole book read with no titles, whose commands grow with the program's PayPal refunds and moves. So it takes
+ * PAYPAL_PRESS_BASE_UNITS, and one more for each PAYPAL_PRESS_UNIT_COMMANDS of the book read at its size, counted
+ * first (lib/affiliates.ts, bookSizes) as bookWork counts it. tests/paypal-press-cost.test.ts holds the units above
+ * the press's cost at every size (tests/plan-cost-registry.ts, paypalPressCost) and its commands under the count.
+ */
+export const PAYPAL_PRESS_BASE_UNITS = 5;
+export const PAYPAL_PRESS_UNIT_COMMANDS = 40;
+export function paypalPressUnits(sizes: BookSizes): number {
+  const book = bookWork({ ...sizes, products: 0 }, BOOK_STRIPE_PAGES).commands;
+  return PAYPAL_PRESS_BASE_UNITS + Math.ceil(book / PAYPAL_PRESS_UNIT_COMMANDS);
+}
+
 /** The open batch's field for a batch sent whose answer is not known yet: "?" and our own sender_batch_id. */
 export const UNKNOWN_BATCH_PREFIX = "?";
 
@@ -422,41 +634,60 @@ export const UNKNOWN_BATCH_PREFIX = "?";
 export async function payWithPayPal(store: Store): Promise<PayResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "error" };
   const statsId = store.statsId;
-  const link = await readLink(store);
+  // A link that cannot be read pays nothing and says so as an error, never thrown past this function (payday and the
+  // route both get an answer); bearer() reads it again inside the lock, under the same catch.
+  let link: Link | null;
+  try {
+    link = await readLink(store);
+  } catch (error) {
+    console.error("reading the PayPal link before paying failed; nothing was sent", error);
+    return { ok: false, reason: "error" };
+  }
   if (!link) return { ok: false, reason: "not-connected" };
   try {
     return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (lock): Promise<PayResult> => {
-      const book = await readBook(store);
-      // What is owed is not known while refunds could not be read from Stripe.
-      if (!book.refundsChecked) return { ok: false, reason: "refunds" };
-      if (!payableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
+      // A batch names no product (batchBody, payoutNote), so nothing is read for the names, as the payout file does: up
+      // to BOOK_INVOICES listings fewer read on every press (PAYPAL_PRESS_BOOK_COMMANDS, Claude 7 on #4488).
+      const book = await readBook(store, undefined, { titles: false });
+      // What is owed is not known while refunds could not be read from Stripe, nor while the membership and plan
+      // payments could not all be read (audit A1): one left out is a commission the affiliate earned and is not paid.
+      const unsettled = unsettledBook(book);
+      if (unsettled) return { ok: false, reason: unsettled };
+      // Only the lines a PayPal batch can pay (main, #4318): an address PayPal cannot take is left to the payout file.
+      if (!paypalPayableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
       const token = await bearer(store);
       if (!token) return { ok: false, reason: "reconnect" };
       const { auth, sender } = token;
       // The lock may have run out while the book or PayPal's token took their time (#4618): another press or the
       // payday may have taken it since and sent these people. So who is on their way is read again now, after the
       // slow calls, and the lock must still be ours right before the batch is written down; otherwise nothing is sent.
-      const lines = payableLines(book, await onTheirWay(store));
+      const lines = paypalPayableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
       if (!(await holdLock(lock))) return { ok: false, reason: "busy" };
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
       // `p`: the app the money is asked from, so a retry of an unknown answer never comes from another account (#4448).
       const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => {
-        const r = receiverPrint(receiverOf(l));
+        const r = receiverPrint(receiverKey(receiverOf(l)));
         return { a: l.affiliate.id, c: l.cents, ...(r ? { r } : {}) };
       }), ...(sender ? { p: sender } : {}) };
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
+      // The lock was held again a full term just above (#4618), with nothing awaited since: it is still this press's
+      // own, so it is not held a second time (one EVAL more that buys nothing; Claude 7 on #4488).
+      // Written only while the store is live (KEEP_OPEN_IF_LIVE, Codex L-20261120-0448): a store whose erasure began is
+      // asked for no money and gets nothing written back. The erasure writes its mark under this same lock
+      // (lib/closed-store-data.ts), so a press that holds it finishes first, and one that comes after is refused here.
       let held: unknown = null;
       try {
-        held = await redisPipeline([
-          ["HSET", openKey(statsId), unknownField, JSON.stringify(open)],
-          ["SADD", STORES, store.sid],
-        ]);
+        held = (await redisPipeline([await keepOpenCommand(store, unknownField, JSON.stringify(open), true)]))?.[0];
       } catch (error) {
         // No answer is not "not written": Redis may have applied it before the answer was lost.
         console.error("writing a PayPal batch down before sending it got no answer", error);
+      }
+      if (held === -1) {
+        console.error("a PayPal batch was not sent: its store is gone or being erased");
+        return { ok: false, reason: "error" };
       }
       if (!Array.isArray(held) || held.length !== 2 || held[0] !== 1 || (held[1] !== 0 && held[1] !== 1)) {
         // Not known to be held: nothing is sent now. The field is taken out again if it was written, and "nothing was
@@ -505,7 +736,16 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   }
 }
 
-export type Settled = { paid: number; released: number; waiting: number };
+/**
+ * `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within
+ * PRESS_PACE_SECONDS, an unknown mark, or no token). `unavailable`: true, and only then present, when it was not asked
+ * because nothing could be checked (no token, or a pace mark that could not be confirmed), not because it was asked
+ * moments ago, so the creator is never told PayPal was just asked (Codex X4 on #4212). `retryNow`: with `unavailable`,
+ * true only when no mark of this reading is left (none was taken, or its release was confirmed), so a new try asks at
+ * once; false when the mark could not be confirmed taken or let go, so the next try may find it until it runs out
+ * (Codex L on #4212).
+ */
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean; unavailable?: boolean; retryNow?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -523,8 +763,13 @@ async function earlierItemMark(item: string): Promise<boolean> {
  * Reads every open batch from PayPal and writes into the book what PayPal
  * says was paid — once per item, whoever asks first. Items PayPal could not
  * pay go back to owed; the rest stay on their way.
+ *
+ * `paced`: asked for by a view (the studio's affiliates page, the route's "settle"), not by the daily job. Each reading
+ * is a new token from the creator's PayPal app and up to 10 pages of every open batch, so one reading is made per store
+ * every SETTLE_PACE_SECONDS and the views between them ask PayPal nothing: everyone is still on their way, as they were,
+ * until the next reading or the daily job (which is never paced). A pace mark that cannot be confirmed asks nothing.
  */
-export async function settlePayPal(store: Store): Promise<Settled> {
+export async function settlePayPal(store: Store, options: { paced?: boolean; press?: boolean } = {}): Promise<Settled> {
   const out: Settled = { paid: 0, released: 0, waiting: 0 };
   if (!store.statsId || !isRedisConfigured()) return out;
   const statsId = store.statsId;
@@ -546,8 +791,20 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       undropped.add(field);
     }
   }
+  const onTheirWayNow = () => ({ ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0), asked: false });
+  // A press is held back only by its own mark; a view by the view's. An unknown mark asks nothing.
+  const pace = options.press ? { key: pressKey(statsId), seconds: PRESS_PACE_SECONDS } : options.paced ? { key: paceKey(statsId), seconds: SETTLE_PACE_SECONDS } : null;
+  const mark = pace ? claimValue() : "";
+  const claimed = pace ? await claimMark(pace.key, pace.seconds, mark) : "ours";
+  if (claimed === "taken") return onTheirWayNow();
+  if (claimed !== "ours") return { ...onTheirWayNow(), unavailable: true, retryNow: false };
   const token = await bearer(store).catch(() => null);
-  if (!token) return { ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  if (!token) {
+    // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
+    // press asks again (review of #4212, LEVE).
+    const released = pace ? await releaseMark(pace.key, mark) : true;
+    return { ...onTheirWayNow(), unavailable: true, retryNow: released };
+  }
   const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
@@ -562,7 +819,10 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       out.waiting += sent.lines.length;
       continue;
     }
-    const statusOf = new Map<string, { status: string; item: string }>();
+    const statusOf = new Map<string, { status: string; item: string; receiver: string }>();
+    // Every item id and every sender item id once across all the pages read (#4656): a read that repeats either is
+    // ambiguous evidence, so the whole batch stays on its way and is read again next time, never booked on it.
+    const itemIds = new Set<string>();
     let batchStatus = "";
     try {
       for (let page = 1; page <= 10; page += 1) {
@@ -570,9 +830,13 @@ export async function settlePayPal(store: Store): Promise<Settled> {
         batchStatus = String((data.batch_header as { batch_status?: unknown } | undefined)?.batch_status ?? "");
         const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
         for (const item of items) {
-          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown };
+          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown; receiver?: unknown };
           const aff = typeof detail.sender_item_id === "string" ? detail.sender_item_id : "";
-          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: String(item.payout_item_id ?? "") });
+          const itemId = String(item.payout_item_id ?? "");
+          if (aff && statusOf.has(aff)) throw new Error("a PayPal batch read repeats a sender item id");
+          if (itemId && itemIds.has(itemId)) throw new Error("a PayPal batch read repeats a payout item id");
+          if (itemId) itemIds.add(itemId);
+          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: itemId, receiver: typeof detail.receiver === "string" ? detail.receiver : "" });
         }
         const pages = Number(data.total_pages) || 1;
         if (page >= pages) break;
@@ -587,6 +851,20 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
+      // Paid to the receiver it was sent to (#4657): a line that kept the receiver's print is booked only when the
+      // receiver PayPal answers has that same print. Another receiver, none, or no key to print with keeps it on
+      // its way. A line from before prints were kept is read as it always was.
+      // The same for an item that did not pay (Claude 5 on #4682, MÉDIO): another receiver's item proves neither the
+      // payment nor its failure, so it never releases the line to be owed and paid again. A batch PayPal DENIED or
+      // CANCELED as a whole speaks for every line, whatever its items say, and still releases them.
+      const itemLevel = batchStatus !== "DENIED" && batchStatus !== "CANCELED";
+      if (itemLevel && got && line.r && ((status === PAID && got.item) || NOT_PAID.has(status)) && !sameReceiver(got.receiver, line.r)) {
+        // Said where the operator reads it (Claude 5's LEVE): the line stays on its way, and the affiliate is left out
+        // of the next payouts, until a read names the receiver it was sent to.
+        console.error("a PayPal payout item names another receiver than the one its line was sent to; the line stays on its way", batch, line.a, status);
+        still.push(line);
+        continue;
+      }
       if (status === PAID && got?.item) {
         // The line leaves the open batch only when the book is confirmed to hold its payout (Claude 2 on #3272,
         // finding 1): a line dropped with nothing in the book is owed again, and the next payday pays it twice.
@@ -612,7 +890,9 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       }
     }
     if (still.length) {
-      await redisPipeline([["HSET", openKey(statsId), batch, JSON.stringify({ ...sent, lines: still })]]);
+      // Written back only while the store is live (Codex L-20261120-0349): PayPal's answer can take seconds, and an
+      // erasure begun meanwhile must not get the batch's affiliates and amounts back. Its people still count as waiting.
+      await redisPipeline([await keepOpenCommand(store, batch, JSON.stringify({ ...sent, lines: still }), false)]);
       out.waiting += still.length;
     } else {
       await redisPipeline([["HDEL", openKey(statsId), batch]]);
@@ -622,10 +902,15 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   return out;
 }
 
-/** Marks a batch whose answer is not known for the creator's own check, once, and counts it. */
-async function needsManualCheck(statsId: string, field: string, sent: OpenBatch): Promise<"manual"> {
+/**
+ * Marks a batch whose answer is not known for the creator's own check, once, and counts it. Written only while the
+ * store is live (KEEP_OPEN_IF_LIVE; Claude 6 on #4963): it can run outside the press's lock, after the settling's slow
+ * calls, and an erased store's batch is never written back nor counted.
+ */
+async function needsManualCheck(store: Store, field: string, sent: OpenBatch): Promise<"manual"> {
   if (sent.m === 1) return "manual";
-  await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, m: 1 })]]);
+  const [held] = await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, m: 1 }), false)]);
+  if (held === -1) return "manual";
   await countUnknown("manual");
   return "manual";
 }
@@ -644,7 +929,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   const statsId = store.statsId as string;
   const now = Date.now();
   if (seen.m === 1) return "manual";
-  if (now - seen.at >= UNKNOWN_MANUAL_AFTER_MS) return needsManualCheck(statsId, field, seen);
+  if (now - seen.at >= UNKNOWN_MANUAL_AFTER_MS) return needsManualCheck(store, field, seen);
   if (seen.t !== undefined && now - seen.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
   return withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async () => {
     // Read again under the payment's own lock: a press or another settling may have moved it.
@@ -659,29 +944,33 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     // the same sender_batch_id sent from another account (the store connected a new app since) could pay everyone
     // again. A batch that kept no sender (made before this check, or with no server secret) or whose app changed is
     // money that may have left: never sent again, left for the creator's own check (rule 30).
-    if (!sent.p || !sender || sender !== sent.p) return needsManualCheck(statsId, field, sent);
+    if (!sent.p || !sender || sender !== sent.p) return needsManualCheck(store, field, sent);
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
-    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,
-    // wait (no try counted). A line no longer owed in full (refunded since, or the affiliate gone or no longer
+    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds, or membership and plan payments,
+    // that cannot all be read: not known, wait (no try counted), never a line "no longer owed" (audit A1). A line no longer owed in full (refunded since, or the affiliate gone or no longer
     // approved), or a store whose currency changed: it cannot be told whether the first request paid it, so it is
     // left for the creator's own check and never sent.
     const book = await readBook(store);
-    if (!book.refundsChecked) return "waiting";
+    if (unsettledBook(book)) return "waiting";
     const rows = new Map(book.rows.map((row) => [row.affiliate.id, row]));
     const lines: BatchLine[] = [];
     for (const line of sent.lines) {
       const row = rows.get(line.a);
-      if (!row || row.affiliate.status !== "approved" || row.payable < line.c || sent.currency !== store.currency) return needsManualCheck(statsId, field, sent);
+      if (!row || row.affiliate.status !== "approved" || row.payable < line.c || sent.currency !== store.currency) return needsManualCheck(store, field, sent);
       const again: BatchLine = { affiliate: row.affiliate, cents: line.c };
       // The same recipient or none (review of Codex H2 on #2681, GRAVE): if the affiliate's PayPal address changed
       // since the first request, or the batch kept no fingerprint of it, the retry could pay someone else.
-      if (!line.r || receiverPrint(receiverOf(again)) !== line.r) return needsManualCheck(statsId, field, sent);
+      if (!sameReceiver(receiverOf(again), line.r)) return needsManualCheck(store, field, sent);
       lines.push(again);
     }
     // The try is counted before it is made, so a run that stops halfway never tries twice in a day.
-    const tried: unknown = await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, t: now })]]);
+    // Written only while the store is live (KEEP_OPEN_IF_LIVE; Claude 6 on #4963): the erasure's mark may be there while
+    // its deletes are still to come, and a store being erased is never asked for its money again. -1: nothing written,
+    // nothing sent, left waiting for the erasure to take it.
+    const tried: unknown = (await redisPipeline([await keepOpenCommand(store, field, JSON.stringify({ ...sent, t: now }), false)]))?.[0];
+    if (tried === -1) return "waiting";
     // HSET answers 0 for a field it changed (1 only if it was gone, which the read under the lock just ruled out).
-    if (!Array.isArray(tried) || tried.length !== 1 || (tried[0] !== 0 && tried[0] !== 1)) return "waiting";
+    if (!Array.isArray(tried) || tried.length !== 2 || (tried[0] !== 0 && tried[0] !== 1)) return "waiting";
     const senderBatchId = field.slice(UNKNOWN_BATCH_PREFIX.length);
     let batch = "";
     try {
@@ -691,7 +980,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     } catch (error) {
       if (!(error instanceof PayPalError && error.duplicate)) return "waiting";
       // PayPal already has it: sent. Its id when the refusal links it; otherwise the creator's own check.
-      if (!BATCH_ID.test(error.original)) return needsManualCheck(statsId, field, { ...sent, t: now });
+      if (!BATCH_ID.test(error.original)) return needsManualCheck(store, field, { ...sent, t: now });
       batch = error.original;
     }
     if (!BATCH_ID.test(batch)) return "waiting";
@@ -741,6 +1030,7 @@ export async function settleAllPayPal(deadline: number): Promise<number> {
 }
 
 /** Whether this store pays by itself on payday. */
+/** Throws when the link cannot be read: an unknown switch is neither "on" nor "off" (rule 24). */
 export async function paysAutomatically(store: Store): Promise<boolean> {
-  return Boolean((await readLink(store))?.auto);
+  return (await readLink(store))?.auto === true;
 }

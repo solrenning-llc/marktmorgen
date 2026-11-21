@@ -19,6 +19,13 @@ const en = {
   and: "and",
   more: (n: number) => `and ${n} more ${n === 1 ? "country" : "countries"}`,
   everywhere: "most countries",
+  /**
+   * Everywhere but the EU/EEA, the UK, Monaco and the Isle of Man (the places the VAT lock closes that the EU and
+   * the UK do not name), while the product's safety information is not filled and the VAT on goods
+   * there is not collected; everywhereElseEu: but the EU and the UK only (lib/physical-legal-ship.ts, `except`).
+   */
+  everywhereElse: "most countries, except for now the European Union, the United Kingdom, Monaco, the Isle of Man, Iceland, Liechtenstein and Norway",
+  everywhereElseEu: "most countries, except for now the European Union, the United Kingdom, Monaco and the Isle of Man",
   // After paying, on the page and in the email.
   goingTo: "Shipping to",
   shipsBy: (store: string) => `${store} ships it and emails you when it is on its way.`,
@@ -43,6 +50,8 @@ const es: ShippingWords = {
   and: "y",
   more: (n) => `y ${n} ${n === 1 ? "país más" : "países más"}`,
   everywhere: "la mayoría de los países",
+  everywhereElse: "la mayoría de los países, por ahora sin la Unión Europea, el Reino Unido, Mónaco, la Isla de Man, Islandia, Liechtenstein y Noruega",
+  everywhereElseEu: "la mayoría de los países, por ahora sin la Unión Europea, el Reino Unido, Mónaco ni la Isla de Man",
   goingTo: "Se envía a",
   shipsBy: (store) => `${store} lo envía y te escribe cuando esté en camino.`,
   alsoShips: (store) => `${store} lo envía con el resto de tu pedido, a la misma dirección.`,
@@ -62,6 +71,8 @@ const fr: ShippingWords = {
   and: "et",
   more: (n) => `et ${n}${S}${n === 1 ? "autre pays" : "autres pays"}`,
   everywhere: "la plupart des pays",
+  everywhereElse: "la plupart des pays, sauf pour l'instant l'Union européenne, le Royaume-Uni, Monaco, l'île de Man, l'Islande, le Liechtenstein et la Norvège",
+  everywhereElseEu: "la plupart des pays, sauf pour l'instant l'Union européenne, le Royaume-Uni, Monaco et l'île de Man",
   goingTo: "Livraison à",
   shipsBy: (store) => `${store} l'expédie et vous écrit quand il est en route.`,
   alsoShips: (store) => `${store} l'expédie avec le reste de votre commande, à la même adresse.`,
@@ -81,6 +92,8 @@ const de: ShippingWords = {
   and: "und",
   more: (n) => `und ${n} ${n === 1 ? "weiteres Land" : "weitere Länder"}`,
   everywhere: "die meisten Länder",
+  everywhereElse: "die meisten Länder, vorerst ohne die Europäische Union, das Vereinigte Königreich, Monaco, die Isle of Man, Island, Liechtenstein und Norwegen",
+  everywhereElseEu: "die meisten Länder, vorerst ohne die Europäische Union, das Vereinigte Königreich, Monaco und die Isle of Man",
   goingTo: "Versand an",
   shipsBy: (store) => `${store} verschickt es und schreibt Ihnen, sobald es unterwegs ist.`,
   alsoShips: (store) => `${store} verschickt es mit dem Rest Ihrer Bestellung an dieselbe Adresse.`,
@@ -100,6 +113,8 @@ const it: ShippingWords = {
   and: "e",
   more: (n) => `e altri ${n} ${n === 1 ? "paese" : "paesi"}`,
   everywhere: "la maggior parte dei paesi",
+  everywhereElse: "la maggior parte dei paesi, per ora esclusi l'Unione europea, il Regno Unito, Monaco, l'Isola di Man, l'Islanda, il Liechtenstein e la Norvegia",
+  everywhereElseEu: "la maggior parte dei paesi, per ora esclusi l'Unione europea, il Regno Unito, Monaco e l'Isola di Man",
   goingTo: "Spedito a",
   shipsBy: (store) => `${store} lo spedisce e ti scrive quando è in viaggio.`,
   alsoShips: (store) => `${store} lo spedisce con il resto del tuo ordine, allo stesso indirizzo.`,
@@ -119,6 +134,8 @@ const nl: ShippingWords = {
   and: "en",
   more: (n) => `en ${n} ${n === 1 ? "ander land" : "andere landen"}`,
   everywhere: "de meeste landen",
+  everywhereElse: "de meeste landen, voorlopig zonder de Europese Unie, het Verenigd Koninkrijk, Monaco, het eiland Man, IJsland, Liechtenstein en Noorwegen",
+  everywhereElseEu: "de meeste landen, voorlopig zonder de Europese Unie, het Verenigd Koninkrijk, Monaco en het eiland Man",
   goingTo: "Verzonden naar",
   shipsBy: (store) => `${store} verstuurt het en mailt je zodra het onderweg is.`,
   alsoShips: (store) => `${store} verstuurt het met de rest van je bestelling, naar hetzelfde adres.`,
@@ -138,6 +155,8 @@ const pt: ShippingWords = {
   and: "e",
   more: (n) => `e mais ${n} ${n === 1 ? "país" : "países"}`,
   everywhere: "a maioria dos países",
+  everywhereElse: "a maioria dos países, por agora sem a União Europeia, o Reino Unido, o Mónaco, a Ilha de Man, a Islândia, o Liechtenstein e a Noruega",
+  everywhereElseEu: "a maioria dos países, por agora sem a União Europeia, o Reino Unido, o Mónaco e a Ilha de Man",
   goingTo: "Enviado para",
   shipsBy: (store) => `${store} envia-o e escreve-lhe quando estiver a caminho.`,
   alsoShips: (store) => `${store} envia-o com o resto da sua encomenda, para a mesma morada.`,

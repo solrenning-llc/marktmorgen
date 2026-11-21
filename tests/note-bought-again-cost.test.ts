@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { MAX_DELIVERED } from "@/lib/bundle-rules";
 import { emailKey, noteBoughtAgain } from "@/lib/learn";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
+import { NOTE_MARK_SECONDS } from "@/lib/purchase-email";
 import type { Store } from "@/lib/store";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -56,6 +57,8 @@ async function main(): Promise<void> {
   is("it is noted for every course", known, true);
   console.log(`  at that worst: ${sent} commands and ${read} bytes read back, against ${String(commands)} and ${String(bytes)}`);
   is("it is the worst: every course read, noted, and the kept answer let go", sent, 2 * MAX_DELIVERED + 1);
+  is("with the note mark's GET and SET around it (lib/purchase-email.ts), the line's commands", commands, sent + 2);
+  is("the mark is priced for as long as it is kept", Number((registry as Record<string, unknown>).ORDER_BOUGHT_AGAIN_MARK_SECONDS) >= NOTE_MARK_SECONDS, true);
   is("ORDER_BOUGHT_AGAIN_COMMANDS covers every command it sends", typeof commands === "number" && sent <= commands, true);
   is("ORDER_BOUGHT_AGAIN_BYTES covers every row it reads back", typeof bytes === "number" && read <= bytes, true);
 

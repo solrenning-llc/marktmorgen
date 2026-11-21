@@ -329,13 +329,21 @@ const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCT
  * priced on the Claude 4 AA finding of 21 November 2026): one HGET of the buyer's student row for each course the order
  * hands over, MAX_DELIVERED at the most since every product handed over may be a course, then one SADD for each course
  * whose row holds an earlier day and one DEL of the buyer's kept answer. Each row read back is STUDENT_ROW_BYTES at the
- * most; the SADD and DEL replies are integers. Its own line (order-bought-again), outside ORDER_COST: orders past a plan
- * are not sold (lib/commercial-margin.ts, overage "not-sold"), so it is paid on the plan's orders and the trial's.
- * Held over the commands the real code sends at that worst in tests/note-bought-again-cost.test.ts.
+ * most; the SADD and DEL replies are integers. It runs once an order (Claude 1's MEDIUM on #5034): under the
+ * confirmation's "sending" claim, after one GET of the order's note mark, and the mark is then written (one SET) and
+ * kept ORDER_BOUGHT_AGAIN_MARK_SECONDS at ORDER_BOUGHT_AGAIN_MARK_BYTES (lib/purchase-email.ts, noteMarkKey), so a pass
+ * after a refused email reads the mark instead of noting again. Its own line (order-bought-again), outside ORDER_COST:
+ * orders past a plan are not sold (lib/commercial-margin.ts, overage "not-sold"), so it is paid on the plan's orders and
+ * the trial's. Held over the commands the real code sends at that worst in tests/note-bought-again-cost.test.ts.
  */
-export const ORDER_BOUGHT_AGAIN_COMMANDS = 2 * MAX_DELIVERED + 1;
+export const ORDER_BOUGHT_AGAIN_COMMANDS = 2 * MAX_DELIVERED + 1 + 2;
 export const ORDER_BOUGHT_AGAIN_BYTES = MAX_DELIVERED * STUDENT_ROW_BYTES;
-export const ORDER_BOUGHT_AGAIN = ORDER_BOUGHT_AGAIN_COMMANDS * COMMAND + ORDER_BOUGHT_AGAIN_BYTES * DB_BYTE;
+/** The note mark: its key ("nl:confirm:" with a checkout id and ":noted", under 100 characters) and its value, with
+ * what Redis keeps beside a key; kept as long as a sent mark (NOTE_MARK_SECONDS, held in the cost test). */
+export const ORDER_BOUGHT_AGAIN_MARK_BYTES = 256;
+export const ORDER_BOUGHT_AGAIN_MARK_SECONDS = 40 * 24 * 60 * 60;
+export const ORDER_BOUGHT_AGAIN = ORDER_BOUGHT_AGAIN_COMMANDS * COMMAND + ORDER_BOUGHT_AGAIN_BYTES * DB_BYTE
+  + ORDER_BOUGHT_AGAIN_MARK_BYTES * DB_BYTE_MONTH * (ORDER_BOUGHT_AGAIN_MARK_SECONDS / (30 * 86_400));
 /**
  * What an order leaves that outlives its store, for its whole life (18
  * October 2026): the buyers' library entries it writes, the buyer's and a
@@ -2092,11 +2100,11 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_BOUGHT_AGAIN,
     sources: [
       { file: "lib/learn.ts", names: ["noteBoughtAgain", "againKey"] },
-      { file: "lib/purchase-email.ts", names: ["noteBoughtAgain"] },
+      { file: "lib/purchase-email.ts", names: ["noteBoughtAgain", "noteMarkKey", "NOTE_MARK_SECONDS"] },
       { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
       { file: "lib/api-read-rules.ts", names: ["STUDENT_ROW_BYTES"] },
     ],
-    basis: "Every order of the plan's figure at its worst: every product it hands over a course whose student row for the buyer holds an earlier day, so MAX_DELIVERED HGETs each reading a row of STUDENT_ROW_BYTES, as many SADDs and one DEL (ORDER_BOUGHT_AGAIN_COMMANDS, held over the real code in tests/note-bought-again-cost.test.ts). Orders past the plan are not sold, so none is paid past it; the trial's orders pay it in nonPayingWorst. The drip job's SMEMBERS and SREM of the set are its run's, and the person's erasure's SREM is the erasure's.",
+    basis: "Every order of the plan's figure at its worst: every product it hands over a course whose student row for the buyer holds an earlier day, so MAX_DELIVERED HGETs each reading a row of STUDENT_ROW_BYTES, as many SADDs and one DEL, with the GET and SET of the order's note mark and the mark kept 40 days (ORDER_BOUGHT_AGAIN_COMMANDS, held over the real code in tests/note-bought-again-cost.test.ts). Once an order: under the confirmation's claim, and a later pass reads the mark instead (tests/course-repurchase-confirm-note.test.ts). Orders past the plan are not sold, so none is paid past it; the trial's orders pay it in nonPayingWorst. The drip job's SMEMBERS and SREM of the set are its run's, and the person's erasure's SREM is the erasure's.",
   },
   {
     id: "orders",

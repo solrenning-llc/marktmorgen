@@ -26,29 +26,28 @@ const workflow = read(WORKFLOW);
 const script = read("scripts/coordination_rollover.mjs");
 const triggers = workflow.split("\njobs:\n")[0] + "\n";
 
-part("the workflow: off until COORDINATION_ROLLOVER is set, a dry run by hand, and only comments on the labeled issue");
+part("the workflow: off until COORDINATION_ROLLOVER is set, a dry run by hand, and a schedule, never a comment");
 const onBlock = "\n" + (/\non:\n((?: .*\n)+)/.exec(triggers)?.[1] ?? "");
 const events = [...onBlock.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]);
-is("its only triggers are issue_comment (created) and workflow_dispatch", [events, /\n {2}issue_comment:\n {4}types: \[created\]\n/.test(onBlock)],
-  [["issue_comment", "workflow_dispatch"], true]);
+// A comment trigger created one workflow run per comment anywhere in the repository (about 130 an hour), each on main's
+// head even with the job skipped: scripts/main_red_alarm.mjs lists every run on main's head (at most 10 pages, failing when
+// the count changes while it reads), so the alarm broke within hours (independent security review of 379bedaccc). It also
+// let any account start runs. A schedule adds at most 6 runs an hour and nobody outside can start one.
+is("its only triggers are a schedule and workflow_dispatch: never issue_comment, issues or any pull request event",
+  [events, /\n {2}(issue_comment|issues|pull_request|pull_request_target|push|merge_group|workflow_run):/.test(onBlock)], [["schedule", "workflow_dispatch"], false]);
+const crons = [...triggers.matchAll(/^ {4}- cron: '([^']+)'$/gm)].map((m) => m[1]);
+is("one cron, every 10 minutes off the hour and off the agents' push minutes (:04/:19/:34/:49)", crons, ["8-58/10 * * * *"]);
+is("ten minutes against 250 comments of room: even at 200 comments an hour a part fills only after 75 minutes",
+  [(COMMENT_LIMIT - ROLL_AT) / 200 * 60 > 10 * 5, COMMENT_LIMIT - ROLL_AT], [true, 250]);
 is("the manual run offers dry-run and run, dry-run by default",
   /\n {6}mode:\n(?: {8}.*\n)*? {8}options: \[dry-run, run\]\n {8}default: dry-run\n/.test(onBlock), true);
 const condition = /\n {4}if: \$\{\{ (.+) \}\}\n/.exec(workflow)?.[1] ?? "";
-is("the job runs by hand, or on a comment on an issue (never a pull request) labeled canal-ativo (at the rollover count when the variable is on, at any count when it is dry-run), " +
-  "or on a comment on a coordination part caught mid-rollover (its pending pointer), so a run that died between the two label calls is finished by the next comment",
-  condition, `github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && (vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run') && ` +
-  `((contains(github.event.issue.labels.*.name, '${LABEL}') && (vars.COORDINATION_ROLLOVER == 'dry-run' || github.event.issue.comments >= ${ROLL_AT})) || ` +
-  `(startsWith(github.event.issue.title, 'Agent coordination') && contains(github.event.issue.body, 'keep writing here until the label') && ` +
-  `(contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) || github.event.issue.user.login == 'github-actions[bot]'))))`);
-// Owner, DONO-20261120-2254-4941: an outside account's issue that only looks mid-rollover must not even start a job, which
-// would enter the concurrency group and replace a legitimate pending run (the script refused it, but the run was delayed).
-is("the mid-rollover path admits only an issue opened from inside the repository or by this workflow, the same rule as trusted()",
-  [condition.includes(`fromJSON('["OWNER","MEMBER","COLLABORATOR"]')`), [...TRUSTED].sort().join(), /author_association\) \|\| github\.event\.issue\.user\.login == 'github-actions\[bot\]'/.test(condition)],
-  [true, "COLLABORATOR,MEMBER,OWNER", true]);
-is("the comment on the concurrency group says only what holds: an outsider's look-alike issue skips the job",
-  [/it can never replace a pending run/.test(workflow), /opened by an outside account also skips the job/.test(workflow)], [false, true]);
-is("the pending pointer the condition looks for is in the one the script writes, and only there (never in the final line)",
+is("the job runs by hand, or on the schedule only when the variable is on or dry-run (unset, every scheduled run skips it)",
+  condition, "github.event_name == 'workflow_dispatch' || vars.COORDINATION_ROLLOVER == 'on' || vars.COORDINATION_ROLLOVER == 'dry-run'");
+is("no event field reaches the job at all: only the mode, the switch and the token", [/github\.event\.(issue|comment)/.test(workflow), /EVENT_/.test(workflow)], [false, false]);
+is("the pending pointer differs from the final one, so a run finds the part left mid-rollover",
   [pointerLine(5000, true).includes("keep writing here until the label"), pointerLine(5000).includes("keep writing here until the label")], [true, false]);
+is("only an issue opened from inside the repository is ever taken for one left mid-rollover", [...TRUSTED].sort().join(), "COLLABORATOR,MEMBER,OWNER");
 // No YAML parser runs in CI, so the two things that break a plain YAML value are checked by hand on every line: ": " (it
 // starts a new key; c4425f2e14 broke the whole file on "(opening: keep") and " #" (it starts a comment).
 const plainBreaks = workflow.split("\n").map((line, i) => [i + 1, line] as const).filter(([, line]) => !/^\s*(#|- |$)/.test(line))
@@ -58,14 +57,9 @@ const plainBreaks = workflow.split("\n").map((line, i) => [i + 1, line] as const
     return !value || /^["'|>]/.test(value) ? [] : /: | #/.test(value) ? [`line ${n}: ${value.slice(0, 80)}`] : [];
   });
 is("every plain YAML value in the workflow is valid: no ': ' and no ' #' inside it", plainBreaks, []);
-// GitHub evaluates the condition itself; the same sub-expressions reach the script as values, which a dry run prints.
-is("the values GitHub evaluates for the condition, and the switch, reach the script through env, never a shell line", [
+is("the mode and the switch reach the script through env, never a shell line", [
   /\n {10}MODE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.mode \|\| vars\.COORDINATION_ROLLOVER \}\}\n/.test(workflow),
-  /\n {10}SWITCH: \$\{\{ vars\.COORDINATION_ROLLOVER \}\}\n/.test(workflow),
-  /\n {10}EVENT_LABELED: \$\{\{ contains\(github\.event\.issue\.labels\.\*\.name, 'canal-ativo'\) \}\}\n/.test(workflow),
-  /\n {10}EVENT_IS_PR: \$\{\{ github\.event\.issue\.pull_request != null \}\}\n/.test(workflow),
-  new RegExp(`\\n {10}EVENT_AT_ROLL: \\$\\{\\{ github\\.event\\.issue\\.comments >= ${ROLL_AT} \\}\\}\\n`).test(workflow),
-  /\n {10}EVENT_COMMENTS: \$\{\{ github\.event\.issue\.comments \}\}\n/.test(workflow)], [true, true, true, true, true, true]);
+  /\n {10}SWITCH: \$\{\{ vars\.COORDINATION_ROLLOVER \}\}\n/.test(workflow)], [true, true]);
 is("a PAINEL left as it is ends the run with a GitHub warning annotation on one line, never a failure",
   [/if \(result\.panelLeft\) console\.log\(warningLine\(result\.panelLeft\)\);/.test(script), warningLine("a\nb%c"), /throw new Error\(`[^`]*PAINEL/.test(script)],
   [true, "::warning title=PAINEL not updated::a b c", false]);

@@ -4,7 +4,7 @@
 // ROLL_AT comments this opens the next part (or uses one an agent already opened by hand with the same title), writes
 // the first comment there explaining the change and the label rule, puts one pointer line at the top of the previous
 // part's body, changes the PAINEL's first line and moves the label LAST, so a failure at any earlier step leaves the
-// channel where it was and the next comment's run finishes the same rollover. Every step is idempotent.
+// channel where it was and the next run (every 10 minutes) finishes the same rollover. Every step is idempotent.
 //
 // It never closes or locks an issue and never deletes, edits or hides a comment, with one exception the owner decided
 // (20/11/2026): the PAINEL's first line, and only that line. The PAINEL is found by its fixed id AND its fixed mark; its
@@ -322,7 +322,7 @@ async function editPanel(api, next, part, now, comments) {
  * Every read and check comes before the first write. The order of the writes keeps a retry finishing the same
  * rollover: the next part, then the pointer on the active part (which records the next part's number for a retry),
  * then the first comment, the PAINEL, and the label last; the label is what agents follow, so until it moves they
- * keep writing in the active part and each of their comments retries. A dry run stops after the reads and prints the plan.
+ * keep writing in the active part and the next scheduled run retries. A dry run stops after the reads and prints the plan.
  * A PAINEL that cannot be edited never stops the rollover (the channel must not fill): the PAINEL is left as it is, the
  * new part says why (with the first line found) and the result carries `panelLeft`, which main() turns into a warning.
  * @param {{ api: Api, now: Date, log?: (line: string) => void, dryRun?: boolean,

@@ -105,7 +105,17 @@ async function main(): Promise<void> {
     true,
   );
   const learn = readFileSync("lib/learn.ts", "utf8");
-  is("the drip schedule skips a course whose students it could not read this round, says so, and does not count it", /const read = await studentsOf\(course, 5000\);\n    if \(!read\) \{\n[^}]*console\.error\([^}]*\n      continue;\n    \}\n    counts\.courses \+= 1;/.test(learn), true);
+  // Since the drip index (docs/drip-due-index.md; tests/drip-due-index.test.ts): a course is walked into its store's
+  // index page by page, and a page that does not read throws; the run counts the course as failed, says so and goes
+  // on, and only a course read to its last student is counted walked. A pair's blocked check answered in another
+  // shape is unknown: the pair stays, never "not blocked".
+  is(
+    "the drip schedule skips a course whose students it could not read this round, says so, and does not count it",
+    /if \(!scanned \|\| scanned\.items\.length % 2 !== 0\) throw new UnknownReplyError\([^)]*\);[\s\S]*if \(!finished\) continue;[\s\S]*counts\.courses \+= 1;/.test(learn) &&
+      /\} catch \(error\) \{\n[^}]*counts\.failed \+= 1;\n\s*console\.error\("a course's drip emails failed/.test(learn) &&
+      /if \(blocked === 1\) \{ drop\.push\(pair\.member\); continue; \}\n\s*if \(blocked !== 0\) \{ unknown \+= 1; continue; \}/.test(learn),
+    true,
+  );
 
   done();
 }

@@ -109,7 +109,7 @@ import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SA
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
 import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { MAX_LESSONS } from "@/lib/course";
+import { MAX_LESSONS, MAX_ITEM_TITLE, MAX_MODULES } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
@@ -446,6 +446,112 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * financial envelope or retention approval is changed/certified here.
  */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
+
+/**
+ * The drip emails' worst month (line course-drip-run), at Upstash's command and transfer prices: each store's run reads
+ * its index of the pairs that fall due (lib/learn.ts, sendDripEmails; docs/drip-due-index.md), never its courses or its
+ * students, and walks at most DRIP_INDEX_PAGES_RUN pages of students into it (a course whose schedule changed).
+ */
+export const DRIP_RUNS_PER_MONTH = 32;
+/** The store read once a run (lib/store-exact.ts): its address and its record. */
+export const DRIP_STORE_COMMANDS = 2;
+/** A store's own fixed commands a run: its pending set, the window's ZREMRANGEBYSCORE, ZRANGEBYSCORE and ZCARD, and its SREM from the stores' set once empty. */
+export const DRIP_STORE_FIXED_COMMANDS = 5;
+/** The run's own, every store's together (the company's, a scheduled job): the old set, the stores' set, the cursor and its write. */
+export const DRIP_RUN_FIXED_COMMANDS = 4;
+/** The walk's fixed commands a run: the pending courses' cards (MGET) and where each walk stopped (HMGET). */
+export const DRIP_WALK_FIXED_COMMANDS = 2;
+/**
+ * A page of the walk: its HSCAN, which of its pairs are already indexed (ZMSCORE, so only new ones take room: Claude 5
+ * on #3344, MEDIUM 1), its room, its ZADD, and where it stopped (HSET) or its end (SREM and HDEL).
+ */
+export const DRIP_WALK_PAGE_COMMANDS = 6;
+/** The walk's pages a store a run: lib/learn.ts DRIP_INDEX_PAGES_PER_RUN. */
+export const DRIP_INDEX_PAGES_RUN = 8;
+/** The pairs a walk writes a run before it stops at the next page: lib/learn.ts DRIP_INDEX_PAIRS_PER_RUN. */
+export const DRIP_INDEX_PAIRS_RUN = 4_000;
+/** The runs a pair's window lasts, over which a store's email figure is read: lib/learn.ts DRIP_WINDOW_RUNS. */
+export const DRIP_WINDOW_RUNS_RUN = 7;
+/** A pair read: its student's row (HGET), its blocked check (SISMEMBER) and its mark (SET NX). */
+export const DRIP_ENTRY_COMMANDS = 3;
+/** Records read a hundred at a command (MGET): the cards, and the listings held outside the store's record. */
+export const DRIP_BATCH = 100;
+export const DRIP_PAGE_ROWS = 100;
+/** HSCAN's COUNT is a hint: a page is counted at twice its rows. */
+export const DRIP_PAGE_HINT = 2;
+export const DRIP_REFUSALS_PER_STORE_RUN = 5;
+export const DRIP_REFUSED_SEND_COMMANDS = 5;
+/** A student row's stamp (24 [E7]) at its largest, `,"x":` and twelve digits: lib/learn.ts STAMP_BYTES. */
+export const DRIP_STAMP_BYTES = ',"x":000000000000'.length;
+/** A student row on the wire at its largest: its 32-character field, its JSON with the longest address and its stamp, and framing. */
+export const DRIP_ROW_MAX_BYTES = 32 + MAX_EMAIL_LENGTH + 80 + DRIP_STAMP_BYTES;
+/** A pair on the wire, read or written: its member (course, address key, module and separators), its score and framing. */
+export const DRIP_PAIR_BYTES = 32 + 1 + 32 + 1 + 12 + 24;
+/** A card's access ends (24 [E7]) at their largest, its date and twelve kept ends: lib/learn.ts DRIP_CARD_END_BYTES. */
+export const DRIP_CARD_ENDS_BYTES = ',"e":000000000000,"k":[]'.length + 12 * '{"at":000000000000,"before":000000000000},'.length;
+/**
+ * A course's card at its largest: MAX_MODULES modules of an id, a title of MAX_ITEM_TITLE characters at three bytes, and
+ * their numbers, with its access ends.
+ */
+export const DRIP_CARD_MAX_BYTES = 256 + MAX_MODULES * (12 + 3 * MAX_ITEM_TITLE + 48) + DRIP_CARD_ENDS_BYTES;
+/** A member of a store's pending set: a course id, the store's address and a product id, at their longest. */
+export const DRIP_PENDING_MEMBER_BYTES = 128;
+/** The pairs a store's run reads, a seventh of its email figure (lib/learn.ts, dripIndexEntriesPerRun). */
+export function dripEntriesPerRun(tier: Tier): number {
+  return Math.ceil(STORE_ALLOWANCES[tier].email / DRIP_WINDOW_RUNS_RUN);
+}
+/** One store's commands a run, reading `entries` pairs due. */
+export function dripRunCommandsPerStore(entries: number): number {
+  return (
+    DRIP_STORE_COMMANDS +
+    DRIP_STORE_FIXED_COMMANDS +
+    DRIP_WALK_FIXED_COMMANDS +
+    DRIP_INDEX_PAGES_RUN * DRIP_WALK_PAGE_COMMANDS +
+    2 * Math.ceil(entries / DRIP_BATCH) +
+    2 +
+    DRIP_ENTRY_COMMANDS * entries +
+    DRIP_REFUSALS_PER_STORE_RUN * DRIP_REFUSED_SEND_COMMANDS
+  );
+}
+/** One store's bytes a run, read and written, reading `entries` pairs due. */
+export function dripRunBytesPerStore(entries: number): number {
+  const pagePairs = DRIP_PAGE_HINT * DRIP_PAGE_ROWS * MAX_MODULES;
+  return (
+    MAX_STORE_BYTES +
+    MAX_PRODUCTS * DRIP_PENDING_MEMBER_BYTES +
+    DRIP_INDEX_PAGES_RUN * (DRIP_CARD_MAX_BYTES + DRIP_PAGE_HINT * DRIP_PAGE_ROWS * DRIP_ROW_MAX_BYTES) +
+    // Each pair twice: asked whether it is already indexed (ZMSCORE) and written (ZADD).
+    2 * (DRIP_INDEX_PAIRS_RUN + pagePairs) * DRIP_PAIR_BYTES +
+    entries * (3 * DRIP_PAIR_BYTES + DRIP_CARD_MAX_BYTES + LISTING_BYTES + DRIP_ROW_MAX_BYTES)
+  );
+}
+/**
+ * What a student's first start or first visit moves through the database for the index (lib/learn.ts touchStudent,
+ * Claude 5 on #3344, MEDIUM 2): the course's card read or written at its largest, their pairs asked (ZMSCORE, a row
+ * already kept) and written (ZADD), MAX_MODULES of them, and the store's member of the stores' set. Its commands are
+ * inside the request's own (the course start is a public request, the course page a page of a visit, each priced at
+ * COMMANDS.laterPage: tests/drip-due-index.test.ts measures them); its bytes are here.
+ */
+export const DRIP_START_BYTES = DRIP_CARD_MAX_BYTES + 2 * MAX_MODULES * DRIP_PAIR_BYTES + DRIP_PENDING_MEMBER_BYTES;
+/** The students a month can bring: one an order (a purchase or a repurchase that moves a start), one an imported row. */
+export function dripStudentsPerMonth(tier: Tier): number {
+  return ORDERS_INCLUDED[tier] + IMPORT_ALLOWANCES[tier].rows;
+}
+export function dripRunMonthlyUsd(tier: Tier): number {
+  const entries = dripEntriesPerRun(tier);
+  return DRIP_RUNS_PER_MONTH * (dripRunCommandsPerStore(entries) * COMMAND + dripRunBytesPerStore(entries) * DB_BYTE)
+    + dripStudentsPerMonth(tier) * DRIP_START_BYTES * DB_BYTE;
+}
+/**
+ * The migration of a store's courses from the old global set, once (line course-drip-index-migration): each course's
+ * outline read once to write its card (DRIP_BATCH at an MGET, its card's SET and its room), every outline at most the
+ * store's data room together. Its students' pages are walked inside the monthly line's page budget.
+ */
+export function dripMigrationUsd(tier: Tier): number {
+  const commands = 2 * Math.ceil(MAX_PRODUCTS / DRIP_BATCH) + 2 * MAX_PRODUCTS + 3;
+  const bytes = DATA_ROOM_BYTES[tier] + MAX_PRODUCTS * (DRIP_CARD_MAX_BYTES + DRIP_PENDING_MEMBER_BYTES);
+  return commands * COMMAND + bytes * DB_BYTE;
+}
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -2368,6 +2474,24 @@ export const COST_LINES: CostLine[] = [
     basis: "At most ten first-message attempts per hour; 32 times 24 hours bounds a billing month of at most 31 days and its partial boundary hour. EVAL plus EXISTS, HEXISTS and SET replaces one SET, three extra billed Redis commands. The existing request and provider budgets are not re-certified by this incremental line. Includes 2 KiB of extra script/key/envelope transfer per attempt, above the sealed value already in the SET. No extra retained key.",
   },
   {
+    id: "course-drip-run",
+    feature: "The daily job's drip emails: each store's index of the pairs that fall due, and the walk into it of a course whose schedule changed (lib/learn.ts, sendDripEmails; docs/drip-due-index.md; Claude 7's MÉDIO on #3344, 15 November 2026)",
+    monthlyUsd: (tier) => dripRunMonthlyUsd(tier),
+    sources: [
+      { file: "lib/learn.ts", names: ["DRIP_CURSOR", "DRIP_PAGE", "DRIP_INDEX_PAGES_PER_RUN", "DRIP_INDEX_PAIRS_PER_RUN", "DRIP_WINDOW_RUNS", "dripIndexEntriesPerRun", "\"ZRANGEBYSCORE\", due, cut, nowSeconds, \"LIMIT\", 0, limit", "\"HSCAN\", studentsKey(courseId)", "claimMark(mark, 400 * 86_400, value)", "DRIP_REFUSALS_PER_COURSE", "DRIP_REFUSALS_PER_STORE", "loadOnce", "readListingsExactly"] },
+      { file: "app/api/cron/courses/route.ts", names: ["sendDripEmails(", "storeForHandleExactly"] },
+      { file: "lib/catalog-rules.ts", names: ["MAX_PRODUCTS"] },
+      { file: "lib/course.ts", names: ["MAX_MODULES", "MAX_ITEM_TITLE"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES"] },
+      { file: "lib/api-read-rules.ts", names: ["LISTING_BYTES"] },
+      // A student's first start or visit: only new pairs take room, the start's card is not written again (#3344).
+      { file: "lib/learn.ts", names: ["newPairs", "\"ZMSCORE\", dueKey(statsId)"] },
+      { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES"] },
+      { file: "lib/order-rules.ts", names: ["ORDERS_INCLUDED"] },
+    ],
+    basis: "Each of the DRIP_RUNS_PER_MONTH daily runs of a billing month, at the plan's full use, for one store: the store read once (DRIP_STORE_COMMANDS, its record at MAX_STORE_BYTES); its fixed commands (DRIP_STORE_FIXED_COMMANDS: its pending set, read whole at MAX_PRODUCTS members, and the window's ZREMRANGEBYSCORE, ZRANGEBYSCORE and ZCARD); the walk of its pending courses into its index, DRIP_INDEX_PAGES_PER_RUN pages a run (DRIP_WALK_FIXED_COMMANDS, then DRIP_WALK_PAGE_COMMANDS a page; each page a card at DRIP_CARD_MAX_BYTES and twice DRIP_PAGE rows at DRIP_ROW_MAX_BYTES, HSCAN's COUNT being a hint), writing DRIP_INDEX_PAIRS_PER_RUN pairs and at most one page more (twice DRIP_PAGE rows, MAX_MODULES pairs each); and the pairs due read, a seventh of the plan's store email figure (a third until 15 November 2026, with the three-day window) (STORE_ALLOWANCES email, dripIndexEntriesPerRun), each its row, its blocked check and its mark (DRIP_ENTRY_COMMANDS), its card and its listing read DRIP_BATCH at an MGET (at DRIP_CARD_MAX_BYTES and LISTING_BYTES), and one ZREM and one ZADD of the pairs handled; and the refused sends' ceiling, DRIP_REFUSALS_PER_STORE a run at DRIP_REFUSED_SEND_COMMANDS each (the mark's read-back or release, the email figure's two commands, the sender's state). The emails themselves are the store-email line's; the run's own sets and cursor (DRIP_RUN_FIXED_COMMANDS a run, for every store) are the company's, a scheduled job bounded by its schedule. Nothing of it grows with the store's courses or students.",
+  },
+  {
     id: "public-requests",
     feature: "Requests beyond the counted visit: pages drawn again, the cart, searches, downloads, the page after paying, reviews, members' pages to manage, forms (17 October 2026)",
     monthlyUsd: (tier) => {
@@ -2920,6 +3044,13 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     basis: "Once for each store, under a lock and marked filled so it never happens twice: two reads of each of KEPT_DAYS days, an HINCRBY for every field found (DAY_FIELDS_MAX a day at the most), its marks and the record read again (LIFE_FILL_SHAPE). Whichever reader comes first pays it (the studio's home page, the totals, the API, the weekly email), so it is priced here, once, in the first payment's worst case, like the closing.",
   },
   {
+    id: "course-drip-index-migration",
+    feature: "A store's drip courses moved from the old global set into its own index, once (lib/learn.ts, migrateDrip; docs/drip-due-index.md; 15 November 2026)",
+    monthlyUsd: (tier) => dripMigrationUsd(tier),
+    sources: [{ file: "lib/learn.ts", names: ["migrateDrip", "DRIP_SET", "A course of the old set, with no card yet"] }],
+    basis: "Once for each store that had drip courses before the index: each course of the old set (at most MAX_PRODUCTS) has its outline read once (every outline together at most the store's data room, DATA_ROOM_BYTES) and its card written (its SET and its room), DRIP_BATCH at an MGET; its pending set and the stores' set written once. No course enters the old set any more, so a store made since never pays it. Its students' pages are walked within the monthly line's page budget (course-drip-run).",
+  },
+  {
     id: "retained-files",
     feature: "Files a store keeps after its plan ends, until its closing day (18 October 2026: nothing past it)",
     monthlyUsd: (tier) => ((paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30),
@@ -3249,6 +3380,9 @@ export function nonPayingWorst(): number {
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
     + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    // Its drip courses: the daily run reads and walks every store in the drip set, one in its trial or whose plan ended
+    // until its closing day too (Claude 5 on #3344, MEDIUM 3), at Store's figures, which are more than a trial's.
+    + creator("course-drip-run")
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).
     + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
     // Its data room, and what it keeps outside it at Store's figures, which are more than a trial's, for the trial and to its closing day

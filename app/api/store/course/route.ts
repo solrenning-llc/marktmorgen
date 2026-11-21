@@ -367,6 +367,8 @@ export async function POST(request: NextRequest) {
         const result = editCourse(course, { op: "start", at });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
+        // The cohort's start is part of the drip schedule (the card's `s` and `g`): kept, and its students walked again.
+        await registerDrip(store, product, result.course);
         return Response.json({ ok: true, course: result.course });
       }
 
@@ -382,6 +384,8 @@ export async function POST(request: NextRequest) {
         const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000), membership: product.recurring !== null });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
+        // The drip card carries the ends (`e`, `k`), so the run stops a stamped student's emails with their access.
+        await registerDrip(store, product, result.course);
         return Response.json({ ok: true, course: result.course });
       }
 

@@ -4,8 +4,8 @@
  * time are not checked against anything. Each job declares it, within Vercel's 300 s, and its lock (claimMark) is
  * kept at least that long, so a run killed at its limit never leaves another run to start while it is still working.
  *
- * courses is the one job still without it: #3344 (Courses drip run: bounded, resumes where it stopped) declares it.
- * The exception fails here once courses declares it, so it is taken off then.
+ * courses was the last job without it; #3344 (Courses drip run: bounded, resumes where it stopped) declares it, so no
+ * job is pending any more. A job added to PENDING later fails here as soon as it declares its maxDuration.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const CRON = join(root, "app/api/cron");
-const PENDING: Record<string, string> = { courses: "#3344 declares it" };
+const PENDING: Record<string, string> = {};
 
 const jobs = readdirSync(CRON, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())

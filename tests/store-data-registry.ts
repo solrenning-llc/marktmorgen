@@ -66,6 +66,7 @@ import { PATH_LEAD_DAYS } from "@/lib/path-lead";
 import { BOOK_INVOICES_KEPT_BYTES, NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
+import { OUTBOX_MAX_KEPT, OUTBOX_RECORD_MAX_BYTES } from "@/lib/webhook-outbox";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
 import { MAX_NOTES, MAX_NOTE_LENGTH as MAX_STATS_NOTE } from "@/lib/stats-notes";
@@ -771,7 +772,13 @@ export const FAMILIES: Record<string, Family> = {
   "nl:intro:c:@lib/intro-coupon.ts": { what: "An introductory price's coupon: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:course:@lib/learn.ts": { what: "A course's students, what they marked done, who is blocked, the drip emails sent", room: ["lib/learn.ts"], parts: [per("store", 400, MARK, "A drip email's mark.", MAIL("drip"))] },
   "nl:course:@lib/student-bulk.ts": company("The students and blocked list of a course, read to change many students' access at once (279 [H3-4])", "Not written here: lib/student-bulk.ts only reads the students and blocked keys lib/learn.ts keeps, and writes through setBlocked; the entry nl:course:@lib/learn.ts bounds them."),
-  "nl:courses:drip@lib/learn.ts": company("Courses with drip emails", "One set for every store."),
+  "nl:courses:drip@lib/learn.ts": company("The old global set of courses with drip emails, read only to move each course into its store's pending set (docs/drip-due-index.md)", "One set for every store; nothing adds to it any more."),
+  "nl:drip:stores@lib/learn.ts": company("The stores with a drip index (docs/drip-due-index.md)", "One set for every store, a member a store; a store leaves it once its index and pending set are empty."),
+  "nl:drip:cursor@lib/learn.ts": company("Where the drip emails' last cut-short run stopped", "One key for every store, thirty days."),
+  "nl:drip:due:@lib/learn.ts": { what: "A store's drip index: a pair for each student and module that opens over time, scored when it opens (docs/drip-due-index.md); each pair's bytes taken from the room before it is written, counted until its window is over", room: ["lib/learn.ts"] },
+  "nl:drip:card:@lib/learn.ts": { what: "A drip course's card: its product, its cohort start and the modules that open over time, smaller than the outline it is read from; its slot set in the room as it is written", room: ["lib/learn.ts"] },
+  "nl:drip:pending:@lib/learn.ts": { what: "A store's drip courses waiting to be walked into its index", parts: [capped(KEY + MAX_PRODUCTS * (ENTRY_BYTES + 128), "At most one member a course of the store (a course id, the store's address and a product id).", src("lib/catalog-rules.ts", "MAX_PRODUCTS"))] },
+  "nl:drip:walk:@lib/learn.ts": { what: "Where each pending drip course's walk stopped", parts: [capped(KEY + MAX_PRODUCTS * (ENTRY_BYTES + 64), "One hash a store, at most one field a course (its id and a cursor).", src("lib/catalog-rules.ts", "MAX_PRODUCTS"))] },
   "nl:learn:enr:@lib/learn.ts": { what: "What a buyer is enrolled in", parts: [kept(KEY, "The record itself, one a buyer."), item(128, "Each product's place in it."), item(80, "Each product's mark that it was handed over with no end date (`<product>:open`, 24 [E7]): a group place or a PayPal sale, one field of a product id of at most 64 characters, \":open\" and \"1\", one a product at most, taken from the store's room like the place.")] },
   "nl:learn:link:@lib/learn.ts": short("A course link and its opens, an hour", "store", 1, LINK_BYTES, MAIL("course link")),
   "nl:learn:passes:@lib/learn.ts": { what: "The passes a buyer was given, so a deletion can find them", parts: [per("store", 90, MARK, "A pass's place, ninety days.", MAIL("course link"))] },
@@ -1285,7 +1292,7 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
-  "nl:hookout:@lib/webhook-outbox.ts": short("A webhook event noticed once that could not be queued then, kept to be tried again (#4284, #4275): at most one a free copy or a sign-up confirmed, only when its queueing failed, a week at most", "request", 7, 4_096),
+  "nl:hookout:@lib/webhook-outbox.ts": { what: "A webhook event noticed once that could not be queued then, kept to be tried again (#4284, #4275): at most one a free copy or a sign-up confirmed, only when its queueing failed, a week at most", parts: [capped(OUTBOX_MAX_KEPT * (OUTBOX_RECORD_MAX_BYTES + 2 * KEY), "The whole outbox, which one store may fill: OUTBOX_MAX_KEPT records of OUTBOX_RECORD_MAX_BYTES for the site, counted in OUTBOX_ADMIT, each with its key and its member in the due line.", src("lib/webhook-outbox.ts", "OUTBOX_MAX_KEPT", "OUTBOX_RECORD_MAX_BYTES", "OUTBOX_ADMIT"))] },
   "nl:hookout:due@lib/webhook-outbox.ts": company("Kept webhook events due to be tried again", "One sorted set, each member an event kept by lib/webhook-outbox.ts, gone when it is queued, dropped or its week is over; never more than OUTBOX_MAX_KEPT members, counted in the write that adds one."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),

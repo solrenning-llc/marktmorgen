@@ -48,6 +48,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
   "nl:oprob:": ["lib/order-problem-rules.ts", "ORDER_PROBLEM_REPLY_DAYS"],
   "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],
+  // A webhook event kept to be tried again (a capped part: the whole outbox, OUTBOX_MAX_KEPT records): kept a week at most.
+  "nl:hookout:": ["lib/webhook-outbox.ts", "OUTBOX_KEEP_SECONDS"],
   // A PayPal payout item's mark, written with its expiry by the batches before 8 November 2026 and only read now
   // (lib/affiliates.ts, #4606): gone by that expiry (Claude 4 cloud Z on #4614).
   "nl:pp:item:": ["lib/paypal-payouts.ts", "ITEM_MARK_SECONDS"],

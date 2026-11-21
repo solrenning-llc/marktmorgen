@@ -462,17 +462,25 @@ void (async () => {
     rule = { when: passes, reply };
     is(`forgetLearnerPerson, passes read as ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
   }
-  const removal = (commands: (string | number)[][]) => commands[0]?.[0] === "DEL" && commands.length === 2 && commands[1]?.[0] === "HDEL";
+  // The removal is one pipeline: the DEL, each course's HDEL and, since the drip index (docs/drip-due-index.md), one
+  // ZREM of the person's pairs; every reply counted exactly.
+  const removal = (commands: (string | number)[][]) => commands[0]?.[0] === "DEL" && commands.length === 3 && commands[1]?.[0] === "HDEL" && commands[2]?.[0] === "ZREM";
   for (const [label, bad] of BAD_COUNTS) {
-    rule = { when: removal, reply: [bad, 1] };
+    rule = { when: removal, reply: [bad, 1, 0] };
     is(`forgetLearnerPerson, a DEL that is ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
-    rule = { when: removal, reply: [2, bad] };
+    rule = { when: removal, reply: [2, bad, 0] };
     is(`forgetLearnerPerson, an HDEL that is ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
+    rule = { when: removal, reply: [2, 1, bad] };
+    is(`forgetLearnerPerson, a ZREM of the drip pairs that is ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
   }
   rule = { when: removal, reply: [2] };
   is("forgetLearnerPerson, a reply missing the HDEL: did not finish", await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
-  rule = { when: removal, reply: [3, 1] };
+  rule = { when: removal, reply: [2, 1] };
+  is("forgetLearnerPerson, a reply missing the ZREM: did not finish", await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
+  rule = { when: removal, reply: [3, 1, 0] };
   is("forgetLearnerPerson: three keys and one row are four records", await forgetLearnerPerson(store, "buyer@sg2-l3.example", courses), 4);
+  rule = { when: removal, reply: [3, 1, 1] };
+  is("forgetLearnerPerson: and a drip pair removed is a fifth", await forgetLearnerPerson(store, "buyer@sg2-l3.example", courses), 5);
   rule = null;
   const real = await forgetLearnerPerson(store, "nobody@sg2-l3.example", courses);
   // The in-memory stand-in keeps an empty set after SMEMBERS, so the real path may count it: only its shape is checked.

@@ -14,6 +14,7 @@ import {
   purchaseStamp,
   recordEnrollment,
   sendCourseLink,
+  dripCardFor,
   touchStudent,
 } from "@/lib/learn";
 import { clientAddress, essentialLimitState, limited } from "@/lib/request-guard";
@@ -80,7 +81,10 @@ export async function POST(request: NextRequest) {
   if (secret && order.buyerKey && buyerFingerprint(secret) === order.buyerKey) {
     // This browser goes to the course page next, which reads the same answer, then cached.
     const stamp = await stampNow();
-    await touchStudent(course.id, order.email, order.created, store, stamp === "unknown" ? undefined : stamp);
+    // Its pairs in the store's drip index from the kept card, so a student who never loads the course page still
+    // gets the module emails (docs/drip-due-index.md); an unknown card writes the row alone, and the page writes them.
+    const card = await dripCardFor(course.id);
+    await touchStudent(course.id, order.email, order.created, store, stamp === "unknown" ? undefined : stamp, card && card !== "unknown" ? { card } : undefined);
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }

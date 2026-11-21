@@ -675,7 +675,12 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
     sweptFirst = { cursor: savedPos.cursor, skip: savedPos.skip };
     const { stores } = await storesAfter(savedPos.cursor);
     const store = stores[savedPos.skip];
-    if (store && worthAsking(store) && Date.now() < deadline && !(await sweepOne(store))) holdAt(savedPos.cursor, savedPos.skip, savedPos.held + 1, store.handle);
+    if (store && worthAsking(store)) {
+      // A run that starts with no time left does not try the held store: it stays held as it was, never dropped to
+      // the frontier alone, and is not counted as a run that failed it (Claude 1 focal, 6872538009 on #3215).
+      if (Date.now() >= deadline) holdAt(savedPos.cursor, savedPos.skip, savedPos.held, store.handle);
+      else if (!(await sweepOne(store))) holdAt(savedPos.cursor, savedPos.skip, savedPos.held + 1, store.handle);
+    }
     start = { cursor: frontier.cursor, skip: frontier.skip, held: 0 };
   }
   let cursor = start.cursor;

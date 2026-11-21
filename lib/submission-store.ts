@@ -992,9 +992,16 @@ export async function forgetSubmissionsPerson(
 ): Promise<number> {
   const entries = await entriesOf(folder, who);
   let gone = 0;
-  const lessons = new Set<string>();
+  const lessons = new Set(entries.map((entry) => `${entry.courseId}|${entry.lessonId}`));
+  const liveKeys = [...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); });
+  // The live places go before any record (Codex X6 on #3574): a close waiting at the vault writes its record only while
+  // the buyer's place is there (SUBMISSION_CLOSE_WRITE), so once they are gone no close can write a record back after
+  // the loop below deleted it. The index (whoKey) stays to the end, the retry's only record of these lessons.
+  if (liveKeys.length > 0) {
+    const replies = repliesFor(await redisPipeline(liveKeys.map((key) => ["DEL", key])), liveKeys.length);
+    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
+  }
   for (const entry of entries) {
-    lessons.add(`${entry.courseId}|${entry.lessonId}`);
     const door = await readDoorById(folder, entry.id);
     const pathname = door?.pathname ?? entry.pathname;
     // Only the vault's own true is a cancel (lib/vault.ts abortVaultUpload): "busy" and "tries" cancelled nothing, so
@@ -1019,10 +1026,7 @@ export async function forgetSubmissionsPerson(
   }
   // Delete the doors again after the live places (Claude 6 on #3570). A refused close or abort that put a door back
   // before those places were removed is undone here. Once the live place is gone, the put-back check refuses it.
-  const keys = [
-    ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); }),
-    ...entries.map((entry) => doorKey(folder, entry.id)),
-  ];
+  const keys = [...liveKeys, ...entries.map((entry) => doorKey(folder, entry.id))];
   // And their slots' turns on the store's list (review of #3568, Claude 6): each names the buyer, taken off with them.
   const turns = [...lessons].flatMap((at) => {
     const [courseId, lessonId] = at.split("|");

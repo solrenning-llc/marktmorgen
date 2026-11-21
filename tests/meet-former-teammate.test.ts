@@ -85,7 +85,7 @@ async function access(store: Store, host = ""): Promise<string> {
 }
 
 async function connect(store: Store, by: string, host = ""): Promise<boolean> {
-  const result = await finishConsent("google", { statsId: store.statsId as string, code: by || "nobody@example.com", verifier: "v".repeat(43), by, owner: { email: store.email, handle: store.handle }, ...(host ? { host } : {}) });
+  const result = await finishConsent("google", { statsId: store.statsId as string, code: by || "nobody@example.com", verifier: "v".repeat(43), by, owner: { email: store.email, handle: store.handle }, startedAt: Date.now(), ...(host ? { host } : {}) });
   return result.ok;
 }
 

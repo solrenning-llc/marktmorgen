@@ -2,14 +2,15 @@
  * The count kept for a batch of emails whose answer was not known.
  *
  * sendBatchOutcome (lib/email.ts) answers "uncertain" when Resend may have
- * taken a batch (a post whose answer never came, a 5xx or 408), and its
- * caller keeps the count it reserved for it, never given back. The same batch
- * tried again (the same batch key, to the same people) is the same request
- * under the same idempotency key: Resend drops it if it took the first, so
- * the people in it are written to once. Amazon's lost acknowledgement is
- * "unconfirmed" and never marked: Amazon keeps no such key and writes to them
- * again on the retry, which is counted again (#4073 MEDIUM 1). Reserving its count again took the creator's monthly emails twice,
- * or once per unknown answer, for emails that went once (reviews of #4073).
+ * taken a batch (a post whose answer never came, a 5xx or 408), and
+ * "unconfirmed" when Amazon's acknowledgement was lost. Both keep the count
+ * already reserved, never given back, and mark it for a retry of the same
+ * batch key to the same people. Resend drops a repeat under its idempotency
+ * key; for Amazon, dispatchBatch leaves out whoever it may have taken
+ * (notMaybeTaken). So the kept count covers that retry while its mark lasts.
+ * Reserving the count again took the creator's monthly emails twice, or once
+ * per unknown answer, for emails that went once (#4073 MEDIUM 1; Codex X6's
+ * correction of this note).
  *
  * So the caller marks the batch when it keeps the count, and a retry that
  * finds the mark sends under the count already kept instead of reserving

@@ -487,11 +487,34 @@ export const putBackOnce = (noted: number): boolean => !Number.isInteger(noted);
  * shows, kept: storage, never a picture deleted).
  */
 export async function returnToDoor(entries: ReadonlyArray<readonly [string, number]>): Promise<void> {
-  const commands: (string | number)[][] = [];
+  const keys: string[] = [UNCLAIMED_KEY];
+  const words: (string | number)[] = [];
   for (const [path, at] of entries) {
     const key = doorsKey(path);
     if (!key || !Number.isFinite(at) || at <= 0) continue;
-    commands.push(["ZADD", key, at, path], ["EXPIRE", key, PICTURE_DOOR_SECONDS]);
+    keys.push(key, takenKey(path));
+    words.push(path, at);
   }
-  if (commands.length && isRedisConfigured()) await redisPipeline(commands).catch(() => {});
+  if (keys.length === 1 || !isRedisConfigured()) return;
+  await redisPipeline([["EVAL", RETURN_TO_DOOR, keys.length, ...keys, ...words]]).catch(() => {});
 }
+
+/**
+ * returnToDoor's one step (#3347 with #2843): each picture back on its store's list and on the list of unclaimed
+ * pictures at the same time, and its taken mark dropped, so the sweep finds it again as any picture never put on
+ * anything (the store note and the unclaimed note at one time, as notePictureDoor writes them). No expiry is put on
+ * the store's list: it has none (E in lib/data-families.ts), and the sweep reads every other picture's note on it.
+ * KEYS: nl:pictures:unclaimed, then each picture's store list and taken mark. ARGV: each picture's path and time.
+ * Answers how many were put back. Modelled by lib/redis-memory.ts.
+ */
+export const RETURN_TO_DOOR = `-- marktmorgen:picture-door-return:v1
+local n = 0
+for i = 2, #KEYS, 2 do
+  local path = ARGV[i - 1]
+  local at = ARGV[i]
+  redis.call("ZADD", KEYS[i], at, path)
+  redis.call("ZADD", KEYS[1], at, path)
+  redis.call("DEL", KEYS[i + 1])
+  n = n + 1
+end
+return n`;

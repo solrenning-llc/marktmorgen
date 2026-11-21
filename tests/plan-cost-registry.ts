@@ -97,7 +97,7 @@ import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES, MOVE_BESIDE_BATCH, MOVE_BESIDE_BATCHES, MOVE_BESIDE_BATCH_COMMANDS, MOVE_BESIDE_SWEEP_COMMANDS } from "@/lib/store";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS } from "@/lib/podcast-access";
 import { BODIES_PER_READ } from "@/lib/course";
-import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
+import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, STUDENT_ROW_BYTES, bookWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { BESIDE_POOL_BYTES, DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
@@ -106,7 +106,7 @@ import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
-import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import { BUMP_KEYS, MAX_BUNDLE_ITEMS, MAX_DELIVERED } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
 import { RESEND_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
@@ -324,6 +324,26 @@ const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
 const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCTION_GB) / 3600;
 
 
+/**
+ * A paid order's note for the drip job that its buyer bought a course again (lib/learn.ts, noteBoughtAgain; #3369,
+ * priced on the Claude 4 AA finding of 21 November 2026): one HGET of the buyer's student row for each course the order
+ * hands over, MAX_DELIVERED at the most since every product handed over may be a course, then one SADD for each course
+ * whose row holds an earlier day and one DEL of the buyer's kept answer. Each row read back is STUDENT_ROW_BYTES at the
+ * most; the SADD and DEL replies are integers. It runs once an order (Claude 1's MEDIUM on #5034): under the
+ * confirmation's "sending" claim, after one GET of the order's note mark, and the mark is then written (one SET) and
+ * kept ORDER_BOUGHT_AGAIN_MARK_SECONDS at ORDER_BOUGHT_AGAIN_MARK_BYTES (lib/purchase-email.ts, noteMarkKey), so a pass
+ * after a refused email reads the mark instead of noting again. Its own line (order-bought-again), outside ORDER_COST:
+ * orders past a plan are not sold (lib/commercial-margin.ts, overage "not-sold"), so it is paid on the plan's orders and
+ * the trial's. Held over the commands the real code sends at that worst in tests/note-bought-again-cost.test.ts.
+ */
+export const ORDER_BOUGHT_AGAIN_COMMANDS = 2 * MAX_DELIVERED + 1 + 2;
+export const ORDER_BOUGHT_AGAIN_BYTES = MAX_DELIVERED * STUDENT_ROW_BYTES;
+/** The note mark: its key ("nl:confirm:" with a checkout id and ":noted", under 100 characters) and its value, with
+ * what Redis keeps beside a key; kept as long as a sent mark (NOTE_MARK_SECONDS, held in the cost test). */
+export const ORDER_BOUGHT_AGAIN_MARK_BYTES = 256;
+export const ORDER_BOUGHT_AGAIN_MARK_SECONDS = 40 * 24 * 60 * 60;
+export const ORDER_BOUGHT_AGAIN = ORDER_BOUGHT_AGAIN_COMMANDS * COMMAND + ORDER_BOUGHT_AGAIN_BYTES * DB_BYTE
+  + ORDER_BOUGHT_AGAIN_MARK_BYTES * DB_BYTE_MONTH * (ORDER_BOUGHT_AGAIN_MARK_SECONDS / (30 * 86_400));
 /**
  * What an order leaves that outlives its store, for its whole life (18
  * October 2026): the buyers' library entries it writes, the buyer's and a
@@ -2075,6 +2095,18 @@ export const COST_LINES: CostLine[] = [
     basis: "The month's figure, every visit made by the heavy visitor a visit is costed as. Nothing is sold past it: public pages rest at 95% and buyers' pages at 100%.",
   },
   {
+    id: "order-bought-again",
+    feature: "A paid order's note that its buyer bought a course again, for the drip job (lib/learn.ts, noteBoughtAgain; #3369)",
+    monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_BOUGHT_AGAIN,
+    sources: [
+      { file: "lib/learn.ts", names: ["noteBoughtAgain", "againKey"] },
+      { file: "lib/purchase-email.ts", names: ["noteBoughtAgain", "noteMarkKey", "NOTE_MARK_SECONDS"] },
+      { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
+      { file: "lib/api-read-rules.ts", names: ["STUDENT_ROW_BYTES"] },
+    ],
+    basis: "Every order of the plan's figure at its worst: every product it hands over a course whose student row for the buyer holds an earlier day, so MAX_DELIVERED HGETs each reading a row of STUDENT_ROW_BYTES, as many SADDs and one DEL, with the GET and SET of the order's note mark and the mark kept 40 days (ORDER_BOUGHT_AGAIN_COMMANDS, held over the real code in tests/note-bought-again-cost.test.ts). Once an order: under the confirmation's claim, and a later pass reads the mark instead (tests/course-repurchase-confirm-note.test.ts). Orders past the plan are not sold, so none is paid past it; the trial's orders pay it in nonPayingWorst. The drip job's SMEMBERS and SREM of the set are its run's, and the person's erasure's SREM is the erasure's.",
+  },
+  {
     id: "orders",
     feature: "Orders (checkouts, carts, offers after paying, PayPal orders, places, free copies; since 17 October 2026 call packages, and each booked call as CALL_ORDER_UNITS; since 18 October 2026 each paid payment request)",
     monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_COST,
@@ -3318,7 +3350,7 @@ export function nonPayingWorst(): number {
     + requests
     // Every page reading the trial's window counts (line page-readings, 639 [GL7](25)).
     + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS)
-    + TRIAL_ORDERS * ORDER_COST
+    + TRIAL_ORDERS * (ORDER_COST + ORDER_BOUGHT_AGAIN)
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
     + CONTACT_LIVE_MONTH
     + TRIAL_VIDEO_HOURS * hourCost()

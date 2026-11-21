@@ -22,12 +22,13 @@ import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTran
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
-import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
+import { countSesSent, isSesConfigured, notMaybeTaken, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
+import { type AllowanceStore, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { repliesFor } from "@/lib/redis-reply";
+import { stopTags } from "@/lib/mail-health-rules";
 
 /**
  * What an email is counted against (added 17 October 2026), said by every
@@ -51,7 +52,10 @@ import { repliesFor } from "@/lib/redis-reply";
  */
 export type EmailMeter =
   | { by: "company" }
-  | { by: "order" }
+  // A buyer's email paid inside its order's own cost. `store` names the store it is about, so a bounce for good or a
+  // complaint on it takes the address off that store's list (messageTags; Codex C2's HIGH on #4245): required, so a new
+  // order email can never be sent without it.
+  | { by: "order"; store: { listId?: string | null; email?: string | null } }
   | { by: "monthly" }
   | { by: "store"; store: AllowanceStore; kind: "email" | "transactional"; asked?: boolean };
 
@@ -63,13 +67,13 @@ async function meterCohortReady(meter: EmailMeter): Promise<boolean> {
 }
 
 /** Takes a store's figure for `n` emails before they go; true for the meters already counted elsewhere. */
-async function metered(meter: EmailMeter, n: number): Promise<boolean> {
+async function metered(meter: EmailMeter, n: number, now = Date.now()): Promise<boolean> {
   if (!(await meterCohortReady(meter))) return false;
-  return takeMeteredAllowance(meter, n);
+  return takeMeteredAllowance(meter, n, now);
 }
-async function takeMeteredAllowance(meter: EmailMeter, n: number): Promise<boolean> {
+async function takeMeteredAllowance(meter: EmailMeter, n: number, now = Date.now()): Promise<boolean> {
   if (meter.by !== "store") return true;
-  const taken = await takeAllowance(meter.store, meter.kind, n, Date.now(), meter.asked === true);
+  const taken = await takeAllowance(meter.store, meter.kind, n, now, meter.asked === true);
   if (!taken.ok) console.error(`an email was not sent: the store's ${meter.kind} figure (${taken.reason})`);
   return taken.ok;
 }
@@ -311,7 +315,33 @@ type OneMessage = {
    * day, is answered without sending it again.
    */
   idempotencyKey?: string;
+  /**
+   * Labels the sender gives back with what became of it (BatchMessage.tags).
+   * Left out, a store's email (meter `by: "store"` or `by: "order"`) carries
+   * its store's list (stopTags), so a bounce for good or a complaint takes the
+   * address off it. A company or monthly email names no store, so none, and
+   * neither does a store's email to the store's own address (a notice to the
+   * creator is not mail to a list member). A notice to someone else on the
+   * creator's side, such as a host, passes `{}`.
+   */
+  tags?: Record<string, string>;
 };
+
+/**
+ * The tags one email goes with: its own, or, for a store's, the store's list (ALL-160), except when it goes to the
+ * store's own address: a complaint about a notice to the creator must not take the creator off their own list (Codex
+ * X6's LOW on #4245). Never shown to the reader.
+ */
+function messageTags(message: OneMessage): { name: string; value: string }[] {
+  if (message.tags) return cleanTags(message.tags);
+  const meter = message.meter;
+  const store = meter.by === "store" || meter.by === "order" ? meter.store : undefined;
+  if (!store) return [];
+  const to = oneAddress(message.to)?.toLowerCase();
+  const own = typeof store.email === "string" ? store.email.trim().toLowerCase() : "";
+  if (to && own && to === own) return [];
+  return cleanTags(stopTags(store));
+}
 
 const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
 
@@ -345,6 +375,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
     }
   }
   const headers = cleanHeaders(message.headers);
+  const tags = messageTags(message);
   let last: Awaited<ReturnType<typeof sesSend>> = { outcome: "busy", why: "" };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     last = await sesSend(config, {
@@ -356,6 +387,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
       replyTo: oneAddress(message.replyTo),
       headers,
       attachments: message.attachments,
+      ...(tags.length ? { tags } : {}),
     });
     // A timeout or server error may follow acceptance. Keep any existing
     // claim, report unknown, and make no second SES attempt or Resend send.
@@ -451,7 +483,9 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
       if (result.kind === "blocked") return "waiting";
       if (result.kind !== "response") return "unknown";
       if (result.response.ok) { await countSent(1); return "accepted"; }
-      return result.response.status === 429 ? "not_accepted" : "refused";
+      // A key that may not send from this domain (401/403, lib/mail-from.ts) is the account's answer, not the email's
+      // own fault, as SES's "account" is below: kept queued for a later try, never refused for good (mail-queue hunt).
+      return result.response.status === 429 || notThisDomain(result.response.status) ? "not_accepted" : "refused";
     }
     if (!(await beforePost())) return "unknown";
     const result = await sesSend(config, {
@@ -504,7 +538,11 @@ async function resendOutcome(message: OneMessage, originalIdempotencyKey: string
     ...(replyTo ? { reply_to: replyTo } : {}),
     ...(headers ? { headers } : {}),
   };
-  const body = () => JSON.stringify({ from: fromLine(from), ...payload });
+  // No second request without the tags on a 400 or 422: cleanTags already
+  // sends only what Resend takes, and the guard does not read a refusal's
+  // body, so a refusal for the recipient would be asked twice a pass.
+  const tags = messageTags(message);
+  const body = () => JSON.stringify({ from: fromLine(from), ...payload, ...(tags.length ? { tags } : {}) });
   let auth = key;
   // A sign-in link or a receipt must not be lost because the sender was busy
   // with a creator's newsletter a second earlier: asked to slow down, it
@@ -694,6 +732,12 @@ async function dispatchBatch(
   // What actually goes: a message with no address that can be written to is
   // left out below, and is not counted as sent either.
   let going = messages.slice(0, 100).filter((m) => oneAddress(m.to) !== null);
+  // A store's batch that names no tags carries its store's list (stopTags,
+  // ALL-160), as a single email of a store's does (messageTags).
+  if (meter.by === "store") {
+    const stop = stopTags(meter.store);
+    if (Object.keys(stop).length) going = going.map((m) => (m.tags ? m : { ...m, tags: { ...stop } }));
+  }
   const config = sesConfig();
   // Decide only a known unavailable selected route before taking its figure.
   // These synchronous observations grant no quota or provider permission.
@@ -703,6 +747,18 @@ async function dispatchBatch(
     : serviceMailKnownUnavailable(runtime))) return "retry";
   const resendSelected = only === "resend" || !(config && isSesConfigured());
   let authorization: MeterAuthorization | undefined;
+  // What this call took from a store's own figure up front (metered, the Amazon path), given back when the batch then
+  // answers "retry" or "waiting" with nothing handed to Amazon: a list sender tries such a batch again each run, and an
+  // outage must never spend the store's emails on mail that never went (outage drill, 14 November 2026).
+  let debited = 0;
+  // The moment it was taken: given back into that same window, never the one running when the answer came (a call
+  // that crossed the window's end debited the old month and would have credited the new one; Codex N1's LOW 2 on #3926).
+  let debitedAt = 0;
+  const nothingSent = async <T>(answer: T): Promise<T> => {
+    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited, debitedAt);
+    debited = 0;
+    return answer;
+  };
   if (going.length) {
     if (resendSelected) {
       // Keep the same recipients/content through tags/domain variants and
@@ -713,17 +769,35 @@ async function dispatchBatch(
       }));
       authorization = lazyMeter(meter, going.length);
       if (!(await authorization.preflight())) return "refused";
-    } else if (!(await metered(meter, going.length))) return "refused";
+    } else {
+      const at = Date.now();
+      if (!(await metered(meter, going.length, at))) return "refused";
+      if (meter.by === "store") {
+        debited = going.length;
+        debitedAt = at;
+      }
+    }
   }
   let idempotencyKey = batchKey;
+  // Whether Amazon took anyone in this call. Until it has, a "retry" further down (Amazon only, the Resend handoff
+  // mark, no Resend key) has handed nobody to either sender, so the store's figure is given back as above; once it
+  // has, the debit stays, as on a stall after somebody was taken (review of #4530, 15 November 2026).
+  let amazonTook = false;
+  const nothingYet = async (): Promise<"retry"> => (amazonTook ? "retry" : nothingSent("retry"));
   if (config && isSesConfigured() && only !== "resend") {
     const all = going.length;
     // Whoever Amazon already took under this key, in a batch that was then
     // cut short and is being tried again, is not written to twice.
     const pending = await notYetTaken(batchKey, going);
     // Unreadable evidence must not release recipients to either provider.
-    if (pending === null) return "retry";
-    going = pending;
+    if (pending === null) return nothingSent("retry");
+    // Nor whoever Amazon may have taken when its answer was lost: a batch tried again never writes to them twice.
+    // A list batch is left out of this: it hands each uncertain address back to its caller (ListBatchOutcome), which
+    // keeps it and lets the creator choose, a retry included (lib/flows.ts, held runs); a mark would turn that
+    // chosen retry into "sent" with nothing sent.
+    const clear = listOnly ? pending : await notMaybeTaken(batchKey, pending);
+    if (clear === null) return nothingSent("retry");
+    going = clear;
     // And a batch whose rest was once handed to Resend goes back to Resend,
     // under the same key: if Resend took it and the answer was lost on the
     // way, only Resend can tell, and Amazon would write to them all again.
@@ -731,27 +805,30 @@ async function dispatchBatch(
     let toResend = false;
     try {
       const reply: unknown = await redisPipeline([["GET", handed]]);
-      if (!Array.isArray(reply)) return "retry";
+      if (!Array.isArray(reply)) return nothingSent("retry");
       const length = Object.getOwnPropertyDescriptor(reply, "length");
-      if (!length || !("value" in length) || length.value !== 1) return "retry";
+      if (!length || !("value" in length) || length.value !== 1) return nothingSent("retry");
       const marker = Object.getOwnPropertyDescriptor(reply, "0");
       // Only explicit absence or our own handoff marker can select a sender.
       // A lost or malformed read must not turn into another provider attempt.
-      if (!marker || !("value" in marker)) return "retry";
+      if (!marker || !("value" in marker)) return nothingSent("retry");
       if (marker.value === "1") toResend = true;
-      else if (marker.value !== null) return "retry";
+      else if (marker.value !== null) return nothingSent("retry");
     } catch {
-      return "retry";
+      return nothingSent("retry");
     }
-    if (listOnly && toResend && going.length) return "retry"; // A prior provider handoff needs reconciliation, not another sender.
+    if (listOnly && toResend && going.length) return nothingSent("retry"); // A prior provider handoff needs reconciliation, not another sender.
     const state = going.length && !toResend ? await sesReady() : null;
+    // Whether SES was asked and definitively took nobody for a reason that is
+    // not an account refusal (it was only asked to slow down).
+    let throttledNoneTaken = false;
     // Many at a time use Amazon's day only up to a share of it; past that
     // they go through Resend, and the rest of the day is kept for the
     // emails that go one at a time (lib/ses.ts).
     const room = state ? await sesBulkRoom(state) : null;
     // Unknown usage cannot authorize SES or a fallback provider attempt.
-    if (state && room === null) return listOnly ? "waiting" : "retry";
-    if (listOnly && going.length && (!state || room === null || room < going.length)) return "waiting";
+    if (state && room === null) return nothingSent(listOnly ? "waiting" : "retry");
+    if (listOnly && going.length && (!state || room === null || room < going.length)) return nothingSent("waiting");
     if (state && room !== null && room >= going.length) {
       const result = await sesBatch(
         config,
@@ -767,8 +844,10 @@ async function dispatchBatch(
           original: m,
         })),
         batchKey,
+        { maybeMarks: !listOnly },
       );
       await countSesSent(result.taken.length);
+      if (result.taken.length > 0) amazonTook = true;
       if (result.down) {
         await sesDown(result.down);
         await tellAmazonIsDown(result.down);
@@ -777,6 +856,9 @@ async function dispatchBatch(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      // Nor one whose marks could not be written: nothing more was asked of Amazon, and it is not Amazon's doing,
+      // so the rest waits for it, never handed to Resend for good (lib/ses.ts, markMaybe).
+      if (result.stalled === true) return result.taken.length === 0 ? nothingSent("retry") : "retry";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {
@@ -806,20 +888,23 @@ async function dispatchBatch(
         return { refused: refusals };
       }
       going = result.left.map((m) => m.original);
+      throttledNoneTaken = result.taken.length === 0 && !result.down && going.length === all;
     }
     if (going.length === 0) return "sent";
-    if (only === "amazon") return "retry";
+    // List mail that Amazon throttled before taking anyone is known not sent: it waits in the queue for Amazon, its
+    // figure given back (this PR); anything else is main's: held as "retry", given back only when Amazon took nobody.
+    if (only === "amazon") return listOnly && throttledNoneTaken ? nothingSent("waiting") : nothingYet();
     if (!toResend) {
       try {
         const reply: unknown = await redisPipeline([["SET", handed, "1", "EX", 2 * 86_400]]);
-        if (!Array.isArray(reply)) return "retry";
+        if (!Array.isArray(reply)) return nothingYet();
         const length = Object.getOwnPropertyDescriptor(reply, "length");
-        if (!length || !("value" in length) || length.value !== 1) return "retry";
+        if (!length || !("value" in length) || length.value !== 1) return nothingYet();
         const acknowledgement = Object.getOwnPropertyDescriptor(reply, "0");
         // An unconfirmed handoff may already be stored. Keep it, and do not
         // post to Resend until the existing marker proves the provider choice.
-        if (!acknowledgement || !("value" in acknowledgement) || acknowledgement.value !== "OK") return "retry";
-      } catch { return "retry"; }
+        if (!acknowledgement || !("value" in acknowledgement) || acknowledgement.value !== "OK") return nothingYet();
+      } catch { return nothingYet(); }
     }
     // Resend answers a key it has seen with what it answered then, so a
     // different set of people must not go under the same key.
@@ -830,7 +915,8 @@ async function dispatchBatch(
   // A batch is one store's, so one address it is all from.
   const usageCredential = usageKey() ?? "";
   const key = going.length ? keyFor(going[0].from) : getKey();
-  if (!key) return "retry";
+  // Nothing has been posted to Resend yet: the first post is below.
+  if (!key) return nothingYet();
   const tagged = going.some((m) => cleanTags(m.tags).length > 0);
   let firstPost = true;
   const post = async (withTags: boolean, under: string, auth: string = key, fromSite = false): Promise<Response | "accepted_receipt" | null> => {

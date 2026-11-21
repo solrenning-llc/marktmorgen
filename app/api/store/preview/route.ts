@@ -1,4 +1,4 @@
-import { takePublicRequest } from "@/lib/traffic";
+import { givePublicRequests, holdPublicRequests, takePublicRequest } from "@/lib/traffic";
 import type { NextRequest } from "next/server";
 import { readListing } from "@/lib/catalog";
 import { normaliseHandle, setProductPreview, storeForHandle } from "@/lib/store";
@@ -27,7 +27,12 @@ export async function GET(request: NextRequest) {
   if (!(await takePublicRequest(store))) return plain(429, "This store can't show previews right now. Try again later.");
   const product = await readListing(store, (params.get("product") ?? "").slice(0, 40));
   if (!product || product.hidden || product.preview < 1 || !product.file) return plain(404, "This product has no preview.");
-  const copy = await previewCopy(product.file, product.preview, store);
+  // Measuring the store's storage before a new preview is kept is paid from its public requests first (lib/stamp-cost-rules.ts).
+  const now = Date.now();
+  const copy = await previewCopy(product.file, product.preview, store, {
+    take: (units) => holdPublicRequests(store, units, now),
+    give: (units) => givePublicRequests(store, units, now),
+  });
   if (!copy) return plain(404, "This product has no preview right now.");
   return serveFile(copy, { paid: false });
 }

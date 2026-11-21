@@ -1,11 +1,16 @@
-import {test} from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import {commercialMarginReady,CURRENT_COMMERCIAL_TERMS,CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,REQUIRED_MARGIN_SCENARIOS,BASE_PLAN_REVENUE_CEILINGS,type CommercialMarginReview} from "@/lib/commercial-margin";
+import {commercialMarginReady,CURRENT_COMMERCIAL_TERMS,CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,REQUIRED_MARGIN_SCENARIOS,BASE_PLAN_REVENUE_CEILINGS,type CommercialMarginReview,CURRENT_TERMS_DIGEST} from "@/lib/commercial-margin";
+import {commercialTermsDigest} from "@/lib/commercial-terms-digest";
 import {CURRENT_LLC_FIXED_COST_CEILINGS as lines,LLC_FIXED_COST_ALLOCATION,LLC_FIXED_COST_IDS} from "./llc-retention-approved-policy";
 import {planPaymentDisputeFixture,zeroExposureFixture,fundedCustomerWithAi} from "./margin-test-fixtures";
+// The synthetic review names this month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again on every call: a run crossing 00:00 UTC on a month's last day failed the review. Only Date
+// is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 const review=(fixed=100):CommercialMarginReview=>({
  companyBase:{monthlyFixedCostsCeilingCents:fixed,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: complete full LLC ceilings",fixedTaxEvidence:"TEST ONLY: explicit hypothetical taxes",reviewedPayingCustomers:100},
- planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,taxEvidence:"TEST ONLY",costAndLimitEvidence:"TEST ONLY",
+ planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsDigest:CURRENT_TERMS_DIGEST!,taxEvidence:"TEST ONLY",costAndLimitEvidence:"TEST ONLY",
  allocatedFixedCostsVerified:true,fundedExposure:zeroExposureFixture(),prepaidUsageEnforced:true,
  scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return[key,fundedCustomerWithAi(gross,Math.floor(gross*.7),12,key)];})),
 });
@@ -44,10 +49,10 @@ test("exposure money cannot replace missing fixed overhead and old inventory sna
  assert.equal(commercialMarginReady(insufficient),false);
  const old=JSON.parse(CURRENT_PRICE_AND_RIGHTS_SNAPSHOT);
  delete old.llcFixedCosts;
- assert.equal(commercialMarginReady({...review(),priceAndRightsSnapshot:JSON.stringify(old)}),false);
+ assert.equal(commercialMarginReady({...review(),priceAndRightsDigest:commercialTermsDigest(JSON.stringify(old))??"unreadable"}),false);
  const changed=JSON.parse(CURRENT_PRICE_AND_RIGHTS_SNAPSHOT);
  changed.llcFixedCosts.ceilings.find((x:{id:string})=>x.id==="deployment-artifact-retention").fullAnnualUsdCents+=1;
- assert.equal(commercialMarginReady({...review(),priceAndRightsSnapshot:JSON.stringify(changed)}),false);
+ assert.equal(commercialMarginReady({...review(),priceAndRightsDigest:commercialTermsDigest(JSON.stringify(changed))??"unreadable"}),false);
  assert.equal(commercialMarginReady(review()),true);
 });
 

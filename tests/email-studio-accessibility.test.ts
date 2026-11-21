@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   for (const title of ["First, how your emails are signed", "Not set up yet", "This month", "How your emails are signed", "Your list"]) {
     is(`"${title}" is an h2`, new RegExp(`<h2 className="[^"]*">${title}</h2>`).test(studio), true);
   }
-  is(`"Part of Pro" is an h2`, /<h2 className="[^"]*">Part of Pro<\/h2>/.test(page), true);
+  is(`"Part of the Studio plan" is an h2`, /<h2 className="[^"]*">\{`Part of the \$\{PLAN_TITLES\.pro\} plan`\}<\/h2>/.test(page), true);
 
   part("2.3.3: opening a draft or writing an email again scrolls without motion when motion is reduced");
   is("no smooth scroll that ignores prefers-reduced-motion", /scrollIntoView\(\{ behavior: "smooth"/.test(studio), false);

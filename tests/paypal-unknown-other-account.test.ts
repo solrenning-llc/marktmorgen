@@ -17,6 +17,7 @@
 import { connectPayPal, onTheirWay, payWithPayPal, paypalChecks, settlePayPal } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { markLive } from "./live-store";
 import { done, is, part } from "./check";
 
 const STATS = "statsother01";
@@ -56,7 +57,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 function shop(): Store {
   return {
     sid: "sidother01", handle: "harbor", name: "Harbor Kitchen", previousHandles: [], releasedHandles: [],
-    statsId: STATS, stripeAccountId: "acct_1TestHarbor0001", currency: "usd",
+    statsId: STATS, stripeAccountId: "acct_1TestHarbor0001", currency: "usd", catalog: { items: [] },
     affiliates: { enabled: true, percent: 30, days: 30, rates: {}, payday: 5, hold: 0 },
   } as unknown as Store;
 }
@@ -75,6 +76,7 @@ async function seed(): Promise<void> {
 }
 
 async function linked(store: Store, client: string, secret: string): Promise<void> {
+  await markLive(store);
   const result = await connectPayPal(store, client, secret);
   if (!result.ok) throw new Error(`not linked: ${JSON.stringify(result)}`);
 }

@@ -22,15 +22,15 @@ import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesT
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
-import { type Claimed, claimMark } from "@/lib/claim-mark";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { summaryAdmission, type SummaryClaim } from "@/lib/summary-live";
+import { type Claimed, claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { deriveKey } from "@/lib/secret-box";
 import { formatMoney } from "@/lib/money";
 import { insightsFrom } from "@/lib/insights";
 import type { AdSpend } from "@/lib/ad-spend-rules";
 import { SITE_URL } from "@/lib/site-url";
 import { goalProgress, moneyByDay, monthTitle } from "@/lib/sales-goal-rules";
-import { UnknownReplyError } from "@/lib/redis-reply";
 
 type Window = "d7" | "d30" | "d90";
 const WINDOWS: Window[] = ["d7", "d30", "d90"];
@@ -345,10 +345,13 @@ function confirmedWrite(replies: unknown, most: number[], what: string): void {
 const teamKey = (handle: string) => `nl:weekly:to:${handle}`;
 export const MAX_WEEKLY_TEAM = 5;
 
+/** Read exactly (CX-123 rule 24): an empty set is nobody; any other shape throws, never "nobody". */
 export async function weeklyTeam(handle: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", teamKey(handle)]]);
-  return Array.isArray(members) ? (members as unknown[]).map(String).sort() : [];
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", teamKey(handle)]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  if (!members) throw new UnknownReplyError("who gets the weekly email");
+  return members.sort();
 }
 
 export async function setWeeklyTeam(handle: string, emails: string[]): Promise<void> {
@@ -385,9 +388,10 @@ export async function claimWeek(handle: string, now = Date.now()): Promise<boole
 }
 
 /** The week's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
-export async function weekClaim(handle: string, now = Date.now()): Promise<Claimed> {
+export async function weekClaim(subject: string | Store, now = Date.now()): Promise<SummaryClaim> {
   if (!isRedisConfigured()) return "unknown";
-  return claimState(sentKey(weekOf(now), handle), 9 * 86400);
+  return typeof subject === "string" ? claimState(sentKey(weekOf(now), subject), 9 * 86400)
+    : (await summaryAdmission(subject, sentKey(weekOf(now), subject.handle), 9 * 86400, "claim")).claimed;
 }
 
 /**
@@ -414,6 +418,170 @@ export async function noteSeen(kind: "weekly" | "monthly", period: string, folde
   if (!folders.length || !isRedisConfigured()) return;
   const key = seenKey(kind, period);
   await redisPipeline([["SADD", key, ...folders], ["EXPIRE", key, (kind === "weekly" ? 9 : 40) * 86400]]);
+}
+
+// ---- A period's summary that did not go (8 November 2026) -------------------------
+
+/**
+ * One store's week or month of the numbers summary: the claim's key, and how long it and its marks are kept.
+ * The marks sit under the claim's own key (`<claim>:emailed`, `<claim>:posted`, `<claim>:tries`), so they are
+ * the same family, kept as long, and gone with it.
+ */
+export type SummaryPeriod = { key: string; seconds: number; store?: Store };
+export const weekPeriod = (subject: string | Store, now = Date.now()): SummaryPeriod => ({ key: sentKey(weekOf(now), typeof subject === "string" ? subject : subject.handle), seconds: 9 * 86400, ...(typeof subject === "string" ? {} : { store: subject }) });
+export const monthPeriod = (subject: string | Store, month: string): SummaryPeriod => ({ key: monthSentKey(month, typeof subject === "string" ? subject : subject.handle), seconds: 40 * 86400, ...(typeof subject === "string" ? {} : { store: subject }) });
+
+/**
+ * The runs that may try one period's summary for a store, at most: the first and two more. The crons run every
+ * hour over two days, so a refusal that passes is tried again within the hour; one that does not (an address
+ * the provider keeps refusing) stops after three tries, so the cost of trying is bounded.
+ */
+export const SUMMARY_TRIES = 3;
+/**
+ * The most Redis commands the weekly or monthly route sends for one store on one try of a period's summary, its own
+ * (the email's sender, lib/email.ts sendEmailPinned, is the email's): measured on the longest try, a post and the
+ * owner's email both refused, so every part's mark is taken, its first try's time kept, the mark let go, the tries
+ * counted and the period given back (tests/numbers-summary-retry-cost.test.ts). Priced in tests/plan-cost-registry.ts
+ * (NUMBERS_SUMMARY_RETRY).
+ */
+export const SUMMARY_TRY_COMMANDS_MOST = 64;
+/** Extra wire room for the five fenced summary operations and uncertain-claim readbacks; no legacy JSON leaves Redis. */
+export const SUMMARY_TRY_EXTRA_BYTES = 24_576;
+
+/** A part of the summary (the owner's email, the channel's post), marked once for the period before it goes. */
+export type SummaryPart = "emailed" | "posted";
+
+/**
+ * What a part's send came to: true or "sent" went; "refused" surely did not; "unknown" may have gone (a chat post
+ * the chat did not confirm: lib/chat-summary.ts, ChatPost). False is lib/email.ts's sendEmail answer, which is
+ * "refused" or "unknown" and cannot say which (an SES timeout or 5xx after acceptance, a once-key already held,
+ * Resend's unknown or idempotency conflict all answer false).
+ */
+export type PartSend = boolean | "sent" | "refused" | "unknown";
+
+/**
+ * How long a try of the owner's email stays covered by its idempotency key, with an hour to spare: the email is sent
+ * with sendEmailPinned (lib/email.ts), which keeps its sender for the key PINNED_SENDER_SECONDS (24 hours), and SES's
+ * once-key and Resend's idempotency each hold it 24 hours. Inside it, another try under the same key goes to the same
+ * sender and does not deliver an email whose answer was lost; past it, nothing would stop it, so an email whose first
+ * try is older is not tried again (rule 24: a false may be an unknown, and an unknown is never sent blind).
+ */
+export const EMAIL_KEY_HOLDS_MS = 23 * 3_600_000;
+
+/**
+ * When a part was first tried this period, in ms, read exactly (rule 24): set now when it was never tried, else the
+ * earlier time; null when the answer has another shape. Kept as long as the part's mark.
+ */
+async function firstTried(period: SummaryPeriod, part: SummaryPart, now: number): Promise<number | null> {
+  const key = `${period.key}:${part}:first`;
+  try {
+    const replies = repliesFor(await redisPipeline([["SET", key, String(now), "NX", "EX", period.seconds], ["GET", key]]), 2);
+    if (!replies || (replies[0] !== "OK" && replies[0] !== null) || typeof replies[1] !== "string" || !/^\d{1,16}$/.test(replies[1])) return null;
+    const at = Number(replies[1]);
+    return Number.isSafeInteger(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sends a part of the period's summary at most once (lib/claim-mark.ts). "sent" now; "earlier" when a previous run
+ * of the same period sent it, so a run that tries the period again never sends it twice; "missed" when it surely
+ * did not go, or when its mark or its first try's time answered in an unknown shape (rule 24: never sent on it),
+ * and then the mark is let go, while it still holds this run's value, so a later run sends it; "unconfirmed" when
+ * it may have gone (an unknown answer, a throw), and then the mark is kept, so no later try sends it blind.
+ *
+ * With `keyHoldsMs` (the owner's email, EMAIL_KEY_HOLDS_MS), a false is let go only while the first try is that
+ * recent, since a try under the same key, sent with its sender kept (sendEmailPinned), cannot deliver it twice; once
+ * the first try is older, the part is not
+ * tried again and is "unconfirmed". Without it, a false is "unconfirmed". Never throws.
+ */
+export async function sendPart(
+  period: SummaryPeriod,
+  part: SummaryPart,
+  send: () => Promise<PartSend>,
+  options: { keyHoldsMs?: number } = {},
+): Promise<"sent" | "earlier" | "missed" | "unconfirmed" | "gone"> {
+  const key = `${period.key}:${part}`;
+  const value = claimValue();
+  const admitted = period.store ? await summaryAdmission(period.store, key, period.seconds, "part", {
+    value, related: `${period.key}:${part}:first`, window: options.keyHoldsMs,
+  }) : null;
+  const got: SummaryClaim = admitted?.claimed ?? await claimMark(key, period.seconds, value);
+  if (got === "gone") return "gone";
+  if (got === "taken") return "earlier";
+  if (got === "ours") {
+    const window = options.keyHoldsMs;
+    const now = Date.now();
+    const first = admitted ? admitted.first : window === undefined ? now : await firstTried(period, part, now);
+    if (first === null) {
+      console.error(`stats-report: when a ${part} part was first tried could not be read; that part is not sent this run`);
+    } else if (now - first >= (window ?? Infinity)) {
+      console.error(`stats-report: a ${part} part was first tried more than its key holds and never confirmed; its mark is kept, so it is not sent again this period`);
+      return "unconfirmed";
+    } else {
+      const answer: PartSend = await send().catch(() => "unknown" as const);
+      if (answer === true || answer === "sent") return "sent";
+      if (answer !== "refused" && !(answer === false && window !== undefined)) {
+        console.error(`stats-report: a ${part} part's outcome is unknown; its mark is kept, so it is not sent again this period`);
+        return "unconfirmed";
+      }
+    }
+  }
+  if (got === "unknown") console.error(`stats-report: a ${part} mark answered in an unknown shape; that part is not sent this run`);
+  await releaseMark(key, value);
+  return "missed";
+}
+
+/**
+ * Whether no run has tried this period before (the tries count tryPeriodAgain keeps answered exactly nil). A period let
+ * go for another try, or a count that did not read exactly (rule 24), is not a first try: what a first try alone
+ * may spend (the weekly AI lead, one of the creator's monthly AI writing jobs; Claude 7's MEDIUM on #3297) is not
+ * spent again on it. Never throws.
+ */
+export async function firstTryOf(period: SummaryPeriod): Promise<boolean> {
+  if (period.store) return (await summaryAdmission(period.store, `${period.key}:tries`, period.seconds, "peek")).claimed === "ours";
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", `${period.key}:tries`]]), 1);
+    return !!replies && replies[0] === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A summary that did not go in full: counts the try and lets the period's claim go, so a later run sends what is
+ * missing, until SUMMARY_TRIES runs have tried. True when it was let go. A count not read exactly (rule 24) is
+ * not a try below the ceiling: the claim is kept and that is said, so an unread count never retries forever.
+ * Never throws.
+ */
+export async function tryPeriodAgain(period: SummaryPeriod): Promise<boolean> {
+  if (period.store) return (await summaryAdmission(period.store, `${period.key}:tries`, period.seconds, "retry", { related: period.key, tries: SUMMARY_TRIES })).claimed === "ours";
+  const tries = `${period.key}:tries`;
+  let count: number | null = null;
+  try {
+    const replies = repliesFor(await redisPipeline([["INCR", tries], ["EXPIRE", tries, period.seconds]]), 2);
+    count = replies && countOf(replies[1]) === 1 ? countOf(replies[0]) : null;
+  } catch {
+    count = null;
+  }
+  const family = period.key.split(":").slice(0, 2).join(":");
+  if (count === null || count < 1) {
+    console.error(`stats-report: the tries of a ${family} summary could not be read; it is not tried again this period`);
+    return false;
+  }
+  if (count >= SUMMARY_TRIES) {
+    console.error(`stats-report: a ${family} summary did not go in ${count} tries; it is not tried again this period`);
+    return false;
+  }
+  try {
+    const replies = repliesFor(await redisPipeline([["DEL", period.key]]), 1);
+    if (replies && countOf(replies[0]) !== null) return true;
+  } catch {
+    // Said below.
+  }
+  console.error(`stats-report: a ${family} summary's claim could not be let go; it is not tried again this period`);
+  return false;
 }
 
 /** A once-only claim (SET NX): true only when it is this run's; taken or unknown is false, and unknown is said. */
@@ -547,9 +715,10 @@ export async function claimMonth(handle: string, month: string): Promise<boolean
 }
 
 /** The month's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
-export async function monthClaim(handle: string, month: string): Promise<Claimed> {
+export async function monthClaim(subject: string | Store, month: string): Promise<SummaryClaim> {
   if (!isRedisConfigured()) return "unknown";
-  return claimState(monthSentKey(month, handle), 40 * 86400);
+  return typeof subject === "string" ? claimState(monthSentKey(month, subject), 40 * 86400)
+    : (await summaryAdmission(subject, monthSentKey(month, subject.handle), 40 * 86400, "claim")).claimed;
 }
 
 /** Lets a month's claim go, when the numbers could not be read, so a later run tries again. */

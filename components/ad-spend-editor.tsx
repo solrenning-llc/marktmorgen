@@ -45,6 +45,8 @@ const REASONS: Record<string, string> = {
   channel: "Choose where the ad ran.",
   amount: "Type what you spent, more than zero.",
   days: "Check the days: the first before the last, not in the future, and no more than 400 days apart.",
+  // A removal the server could not confirm: the line may still be saved and counted.
+  unconfirmed: "We could not confirm this line was removed. It may still count. Try again.",
 };
 
 /** What the editor says while saved entries cannot be read (lib/ad-spend.ts, UnreadableSpendsError): never a guessed amount. */
@@ -291,7 +293,7 @@ export function AdSpendEditor({
 
   return (
     <details className="mt-3 rounded-[12px] bg-paper px-4 py-3 text-sm ring-1 ring-line" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="cursor-pointer font-semibold text-ink">
+      <summary className="cursor-pointer py-3 font-semibold text-ink">
         {typed.length ? `What you spent on ads (${typed.length})` : meta?.connected ? "What you spent on ads" : "Add what you spent on ads"}
         {meta?.connected && !meta.broken && meta.account ? <span className="ml-1.5 font-normal text-ink-soft">· read from Meta</span> : null}
       </summary>

@@ -34,7 +34,8 @@ export const ANSWERS_KEPT = 20;
 /** The largest request body the route reads. */
 export const SEARCH_BODY_BYTES = 512;
 
-export type GroupId = "products" | "pages" | "tools";
+/** "actions": the things to do of 486 [IT3], found in the browser (lib/studio-search-actions.ts), never by the route. */
+export type GroupId = "actions" | "products" | "pages" | "tools";
 /** "partial": some products could not be searched yet (missing); "unknown": the group could not be read. */
 export type GroupState = "ok" | "partial" | "unknown";
 export type SearchResult = { id: string; title: string; detail: string; href: string };
@@ -108,6 +109,7 @@ export function pickMatches<T>(items: readonly T[], query: string, textOf: (item
 }
 
 const NOUNS: Record<GroupId, [string, string]> = {
+  actions: ["action", "actions"],
   products: ["product", "products"],
   pages: ["page", "pages"],
   tools: ["tool", "tools"],

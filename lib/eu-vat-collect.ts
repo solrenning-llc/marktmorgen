@@ -40,6 +40,7 @@ import { checkoutEvidence } from "@/lib/eu-vat-evidence";
 import { euCheckout } from "@/lib/eu-vat-checkout";
 import { EU_VAT_RATES, type EuVatRate, type VatOnTop, vatOnTop } from "@/lib/eu-vat-amount";
 import { applyEuVatLines } from "@/lib/eu-vat-lines";
+import { euVatCollectionCostCents } from "@/lib/eu-vat-collection-cost";
 import { recordedTreatment } from "@/lib/deemed-supplier";
 import { UK_VAT_RATE_VALID_UNTIL, ukCheckout, ukVatOnTop } from "@/lib/uk-vat";
 import { type SwitchInput, euVatCollectOn, ukVatCollectOn } from "@/lib/vat-registrations";
@@ -59,11 +60,11 @@ export class EuVatCollectRefused extends Error {
 }
 
 /**
- * The cost of receiving one sale's EU VAT through the platform's fee, in the charge's currency: the conversion of the
- * fee, the exchange-rate ceiling until the OSS return and the remittance. No reviewed figure yet (789 [IV1] step 2):
- * null, which refuses. Never zero.
+ * The cost of receiving one sale's EU or UK VAT through the platform's fee, in the charge's currency, part by part from
+ * lib/receiving-costs.ts (lib/eu-vat-collection-cost.ts, 789 [IV1] step 3, unit 6). The exchange-rate movement until
+ * the return is paid has no reviewed allowance yet, so it answers null, which refuses. Never zero.
  */
-export const euVatCollectionCostCents: (vatCents: number, currency: string) => number | null = () => null;
+export { euVatCollectionCostCents };
 
 /** Whether the EU may be collected now: the EU record says "collect" and the whole switch (lib/vat-registrations.ts) is on. */
 function collectingEu(records: unknown, vatSwitch: Omit<SwitchInput, "now"> | undefined, now: Date): boolean {

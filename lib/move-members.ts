@@ -27,9 +27,9 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
+import { namedPriceGone, namedPriceOffered, withInvitedOption } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { storeBase } from "@/lib/purchase-email";
 import { membershipLine, speech } from "@/lib/buyer-words";
@@ -37,6 +37,8 @@ import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
 import { giveData, needData } from "@/lib/store-data";
+import { takePublicRequest } from "@/lib/traffic";
+import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const invitesKey = (statsId: string) => `nl:mv:${statsId}`;
@@ -84,9 +86,21 @@ export type Invite = {
   at: number;
   /** The token of their link. */
   t: string;
-  /** When they kept it here, in seconds; 0 until then. */
+  /** When they kept it here, in seconds; 0 until then; KEPT_UNKNOWN when the record does not say. */
   kept: number;
+  /** Set when the record's kept could not be read: taken as used, never as unused (Codex C2, Revisor 1 on #2685). */
+  keptUnknown?: true;
 };
+
+/**
+ * The kept of a record whose kept cannot be read. Not 0, so every "not yet kept" check (openMove, the emails, the
+ * moving-in page) takes it as used: no price taken off sale reopens to it and no email goes. The record itself is
+ * still read, so the person's copy shows it and their erasure deletes it.
+ */
+export const KEPT_UNKNOWN = -1;
+/** How long a moving-in checkout stays the one an invitation opens: Stripe's own life of a checkout, and a minute. */
+const OPEN_SECONDS = 86_400 + 60;
+const openKey = (statsId: string, field: string) => `nl:mv:open:${statsId}:${field}`;
 
 export const inviteField = (email: string, productId: string) => `${addressHash(email)}:${productId}`;
 
@@ -95,7 +109,13 @@ function parseInvite(raw: unknown): Invite | null {
   try {
     const v = JSON.parse(raw) as Partial<Invite>;
     if (typeof v.e !== "string" || typeof v.p !== "string" || typeof v.r !== "number" || typeof v.t !== "string") return null;
-    return { e: v.e, p: v.p, o: typeof v.o === "string" ? v.o : "", r: v.r, job: typeof v.job === "string" ? v.job : "", at: Number(v.at) || 0, t: v.t, kept: Number(v.kept) || 0 };
+    // When it was kept, exactly (Codex C2 on #2685): a whole number of seconds, 0 for not yet. Anything else cannot
+    // say whether the invitation was used, so it is KEPT_UNKNOWN: taken as used, never as unused, which would reopen a
+    // price taken off sale to it (withInvitedOption). The record is still read, for the person's copy and erasure
+    // (Revisor 1 on #2685).
+    const keptAt: unknown = v.kept;
+    const known = typeof keptAt === "number" && Number.isSafeInteger(keptAt) && keptAt >= 0;
+    return { e: v.e, p: v.p, o: typeof v.o === "string" ? v.o : "", r: v.r, job: typeof v.job === "string" ? v.job : "", at: Number(v.at) || 0, t: v.t, kept: known ? keptAt : KEPT_UNKNOWN, ...(known ? {} : { keptUnknown: true as const }) };
   } catch {
     return null;
   }
@@ -282,7 +302,9 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
   if (!store.statsId || !isRedisConfigured()) return { invited: 0, kept: 0 };
   const [all] = await redisPipeline([["HVALS", invitesKey(store.statsId)]]);
   const invites = (Array.isArray(all) ? all : []).map(parseInvite).filter((i): i is Invite => i !== null);
-  return { invited: invites.length, kept: invites.filter((i) => i.kept > 0).length };
+  // An invitation whose state cannot be read (KEPT_UNKNOWN) is in neither column: not a guess either way.
+  const known = invites.filter((i) => !i.keptUnknown);
+  return { invited: known.length, kept: known.filter((i) => i.kept > 0).length };
 }
 
 /** Marks an invitation kept: the member paid, or their membership was found live. */
@@ -318,7 +340,9 @@ export async function inviteEmail(store: Store, field: string, now = Date.now())
   if (!store.statsId) return null;
   const invite = await readInvite(store.statsId, field);
   if (!invite || invite.kept) return null;
-  const product = await readListing(store, invite.p);
+  // The price their invitation names, even one the creator has since taken off sale (642 [WG2]): theirs to keep.
+  const listing = await readListing(store, invite.p);
+  const product = listing ? withInvitedOption(listing, invite.o) : null;
   if (!product?.recurring || !canSellProduct(store, product)) return null;
   const price = priceWords(store, product, invite.o);
   if (!price) return null;
@@ -347,7 +371,8 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   if (!invite || invite.kept) return null;
   const first = firstChargeAt(invite.r, now);
   if (!first) return null;
-  const product = await readListing(store, invite.p);
+  const listing = await readListing(store, invite.p);
+  const product = listing ? withInvitedOption(listing, invite.o) : null;
   if (!product?.recurring || !canSellProduct(store, product)) return null;
   const price = priceWords(store, product, invite.o);
   if (!price) return null;
@@ -385,16 +410,25 @@ function legibleSub(row: Record<string, unknown>): boolean {
  * in its exact shape and each row legible. A list in another shape, one read in part (has_more past what is read), or
  * a row that cannot be read throws StripeListUnreadable (an unknown answer, never "not kept"), so openMove opens
  * nothing and a reminder is put back in line.
+ *
+ * `most` bounds a read whose pages were counted before it (openMove): at most that many customer records under the
+ * address forms together, each list asked for that many; more is not read whole, so it throws. Without it (the
+ * reminders), the lists are read as above.
  */
-export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
+export async function keptAlready(store: Store, email: string, productId: string, most?: number): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
   const customers: string[] = [];
   for (const address of new Set([email, normaliseEmail(email)])) {
-    const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+    const limit = most ?? 100;
+    const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: String(limit) })}`), undefined, CUSTOMER_PATTERN);
     if (page.hasMore || page.unreadable > 0) throw new StripeListUnreadable("a moved member's customers, read in part");
+    // More rows than were asked for is not a page Stripe answers (Claude 4's LEVE on #2685): not read as whole.
+    if (page.rows.length > limit) throw new StripeListUnreadable("a moved member's customers, more than were asked for");
     for (const row of page.rows) if (!customers.includes(row.id)) customers.push(row.id);
   }
+  // More records than were counted for (the two forms together): not read whole.
+  if (most !== undefined && customers.length > most) throw new StripeListUnreadable("a moved member's customers, more than are read");
   for (const customer of customers) {
     let after = "";
     for (let pages = 0; ; pages += 1) {
@@ -470,7 +504,10 @@ export async function readMove(store: Store, productId: string, token: string): 
   return { ...invite, field: link.f };
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "kept" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "kept" | "unavailable" | "price" | "refused" | "consent" | "checking" | "unknown" };
+
+/** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
+const OPEN_UNKNOWN = "unknown";
 
 /** The checkout a member's link opens: this membership, this address, first charged on the renewal date. */
 export async function openMove(
@@ -491,9 +528,17 @@ export async function openMove(
     return { ok: false, reason: "refused" };
   }
   if (!invite) return { ok: false, reason: "expired" };
-  // Kept already (read exactly above): said so, and no second checkout is opened.
-  if (invite.kept) return { ok: false, reason: "kept" };
-  const product: Product | null = await readProduct(store, productId);
+  // Kept already, or its state cannot be read (KEPT_UNKNOWN): the link opens nothing more, at any price, so one
+  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was kept only when it was;
+  // a state that cannot be read is said to be unknown, never kept (Claude 4's MÉDIO on #2685), so nobody lets
+  // their old membership lapse on our word. Kept: main's own answer, "kept" (review of #4121).
+  if (invite.keptUnknown) return { ok: false, reason: "unknown" };
+  if (invite.kept !== 0) return { ok: false, reason: "kept" };
+  const stored: Product | null = await readProduct(store, productId);
+  // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet
+  // kept (642 [WG2], C4-20261105-1945-C2-2): the checkout below gets the product with that option back on sale;
+  // every other path reads the product as it is, and refuses it.
+  const product: Product | null = stored && !invite.kept ? withInvitedOption(stored, invite.o) : stored;
   if (!product?.recurring) return { ok: false, reason: "unavailable" };
   // The option they had. One the creator has since taken away, even the last,
   // is not swapped for another or for the product's own price: the page says
@@ -501,34 +546,117 @@ export async function openMove(
   if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
-  // Kept already, through this link or found live on the creator's account: a second checkout would be a second
-  // membership of the same thing, charged every period beside the first. A reply that cannot be read opens nothing.
-  // (Kept through this link is answered above, before the product is read.)
+  // Kept already, found live on the creator's account (review of #4121; B4): paid in a checkout the thanks page and
+  // the sweep never saw. A second checkout would be a second membership of the same thing, charged every period
+  // beside the first, so the link opens nothing more and says it was kept, before any checkout this link opened is
+  // handed back (main's order: a press after paying says "kept", not the paid page again). Read whole by keptAlready
+  // (main's reader): a reply that cannot be read, or one with more than is counted, opens nothing, and the next press
+  // asks again. Every Stripe page this press may read is counted before the first (Codex C2 on #2685):
+  // MOVE_STRIPE_PAGES, each a public request unit at AFFILIATE_STRIPE_PAGES_PER_UNIT. Not counted (the store's month
+  // is used): nothing read, nothing opened. None of this takes the open mark below, so none can leave it behind.
+  if (!(await takePublicRequest(store, "buyer", now, Math.ceil(MOVE_STRIPE_PAGES / AFFILIATE_STRIPE_PAGES_PER_UNIT)))) return { ok: false, reason: "unavailable" };
+  let live: boolean;
   try {
-    if (await keptAlready(store, invite.e, productId)) {
-      await noteKept(store, invite.e, productId, now);
-      return { ok: false, reason: "kept" };
-    }
+    live = await keptAlready(store, invite.e, productId, MOVE_CUSTOMERS_READ);
   } catch (error) {
     console.error("reading a moved member's live membership failed", store.handle, error);
     return { ok: false, reason: "refused" };
   }
+  if (live) {
+    // Kept, whatever the note says (Claude 4 A5 on #2690): a note that fails to be written is written by the next
+    // press, the thanks page or the sweep.
+    try {
+      await noteKept(store, invite.e, productId, now);
+    } catch (error) {
+      console.error("noting a moved membership as kept failed", store.handle, error);
+    }
+    return { ok: false, reason: "kept" };
+  }
   const option = product.options.length ? invite.o : undefined;
+  // One invitation opens one checkout at a time (Claude 4 on #2690): pressed twice at once or again while it is open,
+  // it is the same one, so one member never holds two memberships from it. Taken before Stripe is asked, for the
+  // longest a checkout lives; an answer in any other shape than OK or nil opens nothing.
+  const key = openKey(store.statsId as string, invite.field);
+  const taken = repliesFor(await redisPipeline([["SET", key, "opening", "NX", "EX", OPEN_SECONDS]]), 1);
+  if (!taken || (taken[0] !== "OK" && taken[0] !== null)) return { ok: false, reason: "refused" };
+  if (taken[0] === null) {
+    const open = repliesFor(await redisPipeline([["GET", key]]), 1);
+    const url = open ? open[0] : null;
+    // The checkout already opened for it, or one still being opened: never a second. A last try whose outcome is not
+    // known says so (Revisor 1 on #2685), rather than "try again in a few minutes" for up to a day.
+    if (typeof url === "string" && url.startsWith("https://")) return { ok: true, url };
+    return { ok: false, reason: url === OPEN_UNKNOWN ? "checking" : "refused" };
+  }
+  /** Let go only when nothing was made at Stripe, so the invitation may be pressed again. */
+  const release = () => redisPipeline([["DEL", key]]).catch(() => {});
+  /** Kept for the longest a checkout lives, marked as an outcome not known, so later presses say so. */
+  const keepUnknown = () => redisPipeline([["SET", key, OPEN_UNKNOWN, "XX", "EX", OPEN_SECONDS]]).catch(() => {});
+  let asked = false;
   try {
-    const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent }),
-    );
-    if (!held.ok) return { ok: false, reason: "unavailable" };
+    const held = await withStockHold(store, product, (holding) => {
+      asked = true;
+      return createCheckout(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent });
+    });
+    if (!held.ok) {
+      // Refused before Stripe was asked (no unit left, or the hold not taken): nothing made. A hold not recorded
+      // after the checkout was made keeps the mark, so a second is not made while the first may be open.
+      if (!asked || held.reason === "soldout") {
+        await release();
+        return { ok: false, reason: "unavailable" };
+      }
+      // The checkout may exist: said as a try still being checked, as every later press says it.
+      await keepUnknown();
+      return { ok: false, reason: "checking" };
+    }
+    // The mark lives as long as Stripe keeps this checkout open, and a minute (B2): a checkout on a store with
+    // reminders closes in an hour, a held unit's in half an hour. Its closing time not read: the longest.
+    // The time Stripe gave with the checkout is used first; read again only when that answer left it out (A3).
+    // When Stripe closes it, as openCheckout read it (closesAt, main's since #3482); unknown (null), read from Stripe.
+    const closes = held.value.closesAt ?? (await checkoutCloses(store, held.value.id));
+    const life = closes === null ? OPEN_SECONDS : Math.min(OPEN_SECONDS, Math.max(60, closes - Math.floor(Date.now() / 1000) + 60));
+    await redisPipeline([["SET", key, held.value.url, "XX", "EX", life]]);
     return { ok: true, url: held.value.url };
   } catch (error) {
+    // Let go only when nothing was made (B3): not asked yet, refused by the store's own rules before Stripe, or
+    // refused by Stripe itself. A failure whose outcome is unknown (an answer lost on the way back, a timeout, a
+    // server error) keeps the mark for the longest a checkout lives: the link opens nothing until then.
+    const nothingMade =
+      !asked || error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || (error instanceof StripeError && error.status >= 400 && error.status < 500);
+    if (nothingMade) await release();
+    else await keepUnknown();
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a moved member's checkout failed", store.handle, error);
-    return { ok: false, reason: "refused" };
+    // Nothing made: try again. Not known: the same words every later press shows (Claude 4 on #2690).
+    return { ok: false, reason: nothingMade ? "refused" : "checking" };
   }
 }
+
+/** When Stripe closes one checkout on the store's account (expires_at, in seconds); null when it cannot be read. */
+async function checkoutCloses(store: Store, sessionId: string): Promise<number | null> {
+  const account = store.stripeAccountId;
+  if (!account || !/^cs_[A-Za-z0-9_]+$/.test(sessionId)) return null;
+  try {
+    const session = await onAccount("GET", account, `/checkout/sessions/${sessionId}`);
+    const at: unknown = Object.hasOwn(session, "expires_at") ? session.expires_at : null;
+    return typeof at === "number" && Number.isSafeInteger(at) && at > 0 ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Customer records read for an invitation's press, under the address forms together; more is not read whole (Codex C2 on #2685). */
+export const MOVE_CUSTOMERS_READ = 5;
+/** Address forms keptAlready asks Stripe for: the address as kept, and its normalised form when that differs. */
+const MOVE_ADDRESS_FORMS = 2;
+/**
+ * Stripe pages one press may read, all counted before the first: a customer page for each address form, up to
+ * KEPT_PAGES pages of memberships for each customer record read (keptAlready, main's reader since #4121), and the
+ * checkout's closing time when its creation leaves it out.
+ */
+export const MOVE_STRIPE_PAGES = MOVE_ADDRESS_FORMS + MOVE_CUSTOMERS_READ * KEPT_PAGES + 1;
 
 /**
  * Deletes the invitations an import gave one person to keep a membership
@@ -561,7 +689,9 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-  ]), 3);
+    // The checkout their link last opened, kept a day so it is not opened twice.
+    ["DEL", ...held.map((h) => openKey(statsId, h.field))],
+  ]), 4);
   if (!gone || gone.some((n) => { const c = countOf(n); return c === null || c > held.length; })) throw new UnknownReplyError(what);
   return held.length;
 }

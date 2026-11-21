@@ -34,6 +34,7 @@ import { activeIntro, introLineEnglish } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
 import { activePlan, planWords } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
+import { sellableOptions } from "@/lib/product-option";
 import { CELL_NO, CELL_YES, type SalesPage } from "@/lib/sales-page";
 import {
   ANSWERS_MONTHLY,
@@ -111,7 +112,7 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
         : SHIP_REGIONS[shipping.region].label;
     return `It is a physical product the creator ships themselves, to: ${where}. Shipping is ${shipping.cents > 0 ? `${formatMoney(shipping.cents, currency)} per order` : "free"}, added on the payment page.${shipping.note ? ` ${shipping.note}.` : ""} The buyer gives the address on the payment page and gets an email when it ships.`;
   }
-  if (product.file || product.options.some((o) => o.file)) return "It is a download: after paying, the buyer downloads the file from the page they land on, and the link comes by email too.";
+  if (product.file || sellableOptions(product).some((o) => o.file)) return "It is a download: after paying, the buyer downloads the file from the page they land on, and the link comes by email too.";
   return "After paying, the buyer gets the link on the page they land on, and by email.";
 }
 
@@ -126,7 +127,10 @@ export function priceWords(product: Listing, currency: string, tiers: readonly s
       const cents = plan?.options?.[o.id];
       return cents ? ` (or ${plan!.payments} ${plan!.interval === "week" ? "weekly" : "monthly"} payments of ${money(cents)})` : "";
     };
-    return `It is sold at several prices, and the buyer picks one: ${product.options.map((o) => `${o.label} for ${money(o.priceCents)}${each(o)}`).join("; ")}.`;
+    // Only the prices a buyer can pick today (lib/product-option.ts, sellableOptions): never one taken off sale (642 [WG2]).
+    const offered = sellableOptions(product);
+    if (offered.length === 0) return "It is not on sale right now.";
+    return `It is sold at several prices, and the buyer picks one: ${offered.map((o) => `${o.label} for ${money(o.priceCents)}${each(o)}`).join("; ")}.`;
   }
   if (product.recurring) {
     // An introductory price is said first (lib/intro-price.ts), as on the page.

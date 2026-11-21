@@ -2214,6 +2214,9 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    // The renewal date, once read: no reminder can go after it (reminderEmail), so an answer that stays unknown is
+    // tried again only before it, never for ever (Claude 4's LEVE on #3598).
+    let renews: number | null = null;
     // The line only leases what it hands out (dueReminders): a reminder put back for later says so, and every other
     // way out of this turn (sent, nothing to send, no longer wanted) takes it off the line at the end.
     let later = false;
@@ -2226,6 +2229,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      renews = invite.r * 1000;
       // It carries the creator's postal address: with none, it is not sent now. Checked before any other read (review
       // of #3476, Claude 7's cost MEDIUM 1), and tried again once a day while the renewal date is still more than a day
       // away, so a creator who saves the address again still has it sent (review of #3476, LOW 2); after that there is
@@ -2311,7 +2315,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await putBack(now);
+      if (renews === null || now < renews) await putBack(now);
     } finally {
       // A drop that cannot reach Redis leaves the lease to bring it back, where the send's own key keeps it once.
       if (!later) await dropReminder(sid, field).catch((error) => console.error("taking a finished moved member's reminder off the line failed", error));

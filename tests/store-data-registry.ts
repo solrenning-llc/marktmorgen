@@ -839,6 +839,7 @@ export const FAMILIES: Record<string, Family> = {
   // Claude 3, MEDIUM on #3473: a membership is noted before its removal and taken off once its invitations are deleted.
   "nl:mv:pend:@lib/move-members.ts": { what: "Memberships removed whose invitations a person's erasure must still reach", parts: [capped(PENDING_MAX * MARK + KEY, "One set a store, at most PENDING_MAX product ids (a removal that would add one more is refused); each taken off once its invitations are deleted.", src("lib/move-members.ts", `PENDING_MAX = ${PENDING_MAX};`))] },
   "nl:mv:link:@lib/move-members.ts": room("An invite's link, until a while after the renewal it is for", "lib/move-members.ts"),
+  "nl:mv:open:@lib/move-members.ts": short("The checkout an invitation's link opened: one key an invitation, as long as Stripe keeps that checkout open and a minute, never more than a day and a minute", "request", 2, LINK_BYTES),
   // ---------------------------------------------------------------- lib/ n–p
   "nl:next:@lib/next-bought.ts": { what: "What buyers bought next, cached", parts: [capped(256 * KB, "One cached view.")] },
   "nl:next:lock:@lib/next-bought.ts": short("One reading at a time", "studio", 1, 128),

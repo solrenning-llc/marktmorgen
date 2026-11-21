@@ -6,7 +6,7 @@
  * reading held its function for up to the route's 60 s, and the page's for the platform's longer default: on the
  * Store's 2,000 studio requests, $6.93 a year or more that no line priced.
  *
- * What is held, with a Redis stand-in, a PayPal stand-in and a clock that moves 20 s with each PayPal call:
+ * What is held, with a Redis stand-in, a PayPal stand-in and a clock that moves with each PayPal call:
  *   - a reading takes paypalReadingUnits studio requests before PayPal is asked, worth at least its cost at the
  *     registry's own figures, at every size; its commands and bytes are inside what the units count;
  *   - with no room, nothing is asked of PayPal, the mark is let go and the press is told it could not check;
@@ -32,7 +32,7 @@ const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 const OPEN = `nl:pp:open:${STATS}`;
 
-/** The clock: each PayPal call takes 20 s when `slow`, the most one may wait (lib/paypal-payouts.ts, TIMEOUT_MS). */
+/** The clock, when `slow`: a token takes 10 s and every other PayPal call 20 s, the most one may wait (TIMEOUT_MS). */
 const realNow = Date.now.bind(Date);
 let shift = 0;
 let slow = false;
@@ -49,8 +49,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (v: unknown, code = 200) => new Response(JSON.stringify(v), { status: code });
   if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
-  if (slow) shift += 20_000;
   if (url.pathname === "/v1/oauth2/token") {
+    if (slow) shift += 10_000;
     tokens += 1;
     return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: "https://uri.paypal.com/payments/payouts", expires_in: 32400 });
   }
@@ -58,6 +58,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     posts += 1;
     return json({ name: "VALIDATION_ERROR" }, 400);
   }
+  if (slow) shift += 20_000;
   const batch = /^\/v1\/payments\/payouts\/(BATCH\w+)$/.exec(url.pathname)?.[1];
   if (batch) {
     reads += 1;
@@ -106,7 +107,7 @@ async function openBatches(batches: number, lines: number, say: string): Promise
   await pipeline([["DEL", OPEN, `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]);
   for (let b = 0; b < batches; b += 1) {
     const id = `BATCH${b}READ`;
-    const rows = Array.from({ length: lines }, (_, l) => ({ a: `aff${String(b).padStart(3, "0")}${String(l).padStart(5, "0")}`, c: 1_000 }));
+    const rows = Array.from({ length: lines }, (_, l) => ({ a: `a${String(b).padStart(3, "0")}${String(l).padStart(8, "0")}`, c: 1_000 }));
     for (const row of rows) status.set(`${id}:${row.a}`, say);
     await pipeline([["HSET", OPEN, id, JSON.stringify({ at: realNow(), currency: "usd", lines: rows })]]);
   }
@@ -178,7 +179,8 @@ async function main(): Promise<void> {
   reads = 0;
   const refused = await settlePayPal(store, { press: true });
   is("no token, no page", [tokens, reads], [0, 0]);
-  is("it says nothing could be checked, and may be tried again at once (its mark let go)", [refused.asked, refused.unavailable, refused.retryNow, refused.waiting], [false, true, true, 1]);
+  is("it says nothing could be checked for want of room, not to try again at once", [refused.asked, refused.unavailable, refused.retryNow, (refused as { limit?: boolean }).limit, refused.waiting], [false, true, false, true, 1]);
+  is("and the button says so, and that the daily check goes on", readFileSync("components/paypal-payouts.tsx", "utf8").includes("data.limit"), true);
   const [mark] = await pipeline([["GET", `nl:pp:press:${STATS}`]]);
   is("no press mark left", mark, null);
 

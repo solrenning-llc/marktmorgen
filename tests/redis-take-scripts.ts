@@ -60,6 +60,26 @@ const SCRIPTS: Record<string, Script> = {
     run(["SET", key, value, "EX", seconds]);
     return 1;
   },
+  // lib/store-live-cache.ts CLAIM_IF_STORE_LIVE: a mark taken once (SET NX) only while the store is its own and not
+  // erasing, by the same identity rule; -1 gone or erasing, -2 an owner's record that does not parse, 1 ours, 0 taken.
+  "store-claim-live:v1": (run, [live, erasing, key], [field, value, seconds, statsId, ref]) => {
+    if (run(["HGET", erasing, field]) !== null) return -1;
+    if (statsId === "") {
+      if (run(["GET", live]) !== ref) return -1;
+    } else {
+      const raw = run(["GET", live]);
+      if (raw === null) return -1;
+      let record: unknown;
+      try {
+        record = JSON.parse(String(raw));
+      } catch {
+        return -2;
+      }
+      if (!record || typeof record !== "object") return -2;
+      if ((record as { statsId?: unknown }).statsId !== statsId) return -1;
+    }
+    return run(["SET", key, value, "NX", "EX", seconds]) === "OK" ? 1 : 0;
+  },
   "zset-take-count:v1": (run, [zset]) => {
     const n = Number(run(["ZCARD", zset])) || 0;
     run(["DEL", zset]);

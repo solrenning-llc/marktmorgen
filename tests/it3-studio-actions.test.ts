@@ -158,8 +158,17 @@ is("\"receipt\" still finds the plan's own invoices", ids("receipt").includes("p
 is("\"plan receipt\" opens the plan's own invoices", first("plan receipt"), "plan-bills");
 // Codex X6's LEVE (6997739189) and Claude 5's (6906524419): "plan" alone ties on the title word of three billing
 // actions; the creator's own plan comes first, never the invite to other creators.
-is("\"plan\" opens the plan's own invoices, never the invite first", ids("plan").slice(0, 3), ["plan-bills", "invite", "refund"]);
-is("\"my plan\" opens the plan's own invoices", first("my plan"), "plan-bills");
+is("\"plan\" opens the creator's own plan first, then its invoices, never the invite first", ids("plan").slice(0, 4), ["plan", "plan-bills", "invite", "refund"]);
+is("\"my plan\" opens the creator's own plan", first("my plan"), "plan");
+
+// Codex T's LOW (6846832002): changing or cancelling the plan is on the studio home's #billing, drawn only where the
+// plan page is (billingReady && may("billing"), the context's planHref); before, no action matched these words.
+const planHrefOf = (query: string, ctx: GalleryContext = owner) => searchActions(query, ctx, href).find((result) => result.id === "plan")?.href ?? null;
+is("\"cancel subscription\" opens the plan on the studio home", [first("cancel subscription"), planHrefOf("cancel subscription")?.endsWith("#billing")], ["plan", true]);
+is("\"change plan\" opens the plan on the studio home", [first("change plan"), planHrefOf("change plan")?.endsWith("#billing")], ["plan", true]);
+is("\"upgrade\" and \"cancel plan\" too", [first("upgrade"), first("cancel plan")], ["plan", "plan"]);
+is("no plan page drawn (billing not set up): no plan action", ids("cancel subscription", context("owner", { planHref: null })).includes("plan"), false);
+is("a role that may not change the plan: no plan action", ids("change plan", context("editor", { planHref: null })).includes("plan"), false);
 is("\"companies\" opens the companies", first("companies"), "companies");
 is("\"company\" (singular) opens the companies", first("company"), "companies");
 is("\"b2b\" finds the companies", ids("b2b").includes("companies"), true);

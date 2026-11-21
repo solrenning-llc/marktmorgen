@@ -19,6 +19,7 @@ import { maximumUploadBytes, storageBrakeFor, storageUsed } from "@/lib/storage-
 import { rememberFolderOwner } from "@/lib/delivery";
 import { isVaultConfigured } from "@/lib/vault";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { DOOR_ECHO_HEADER, doorFromHeader } from "@/lib/upload-door";
 
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
@@ -50,6 +51,17 @@ export async function POST(request: NextRequest) {
   // Refused before anything else is read: another site, by Origin or by
   // Sec-Fetch-Site (lib/request-guard.ts).
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
+
+  // The client's second ask, carrying the door the studio already asked for
+  // and was given (lib/upload-door.ts): that very door goes back, and nothing
+  // else happens here. A header that is there but is not a door is refused,
+  // never treated as a first ask.
+  const echoed = request.headers.get(DOOR_ECHO_HEADER);
+  if (echoed !== null) {
+    const door = doorFromHeader(echoed);
+    if (!door) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+    return Response.json({ type: "blob.generate-presigned-url", presignedUrlPayload: door });
+  }
 
   let body: HandleUploadPresignedBody;
   try {

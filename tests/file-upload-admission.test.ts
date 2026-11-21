@@ -11,6 +11,7 @@ import { POST } from "@/app/api/store/file/route";
 import { admission, type Refusal } from "./file-upload-admission-world";
 import { resetWorld, state, FOLDER } from "./upload-route-world";
 import { reset, calls } from "./upload-budget-redis";
+import { DOOR_ECHO_HEADER } from "@/lib/upload-door";
 
 const scenarios: readonly [Refusal, number][] = [["locked", 403], ["signed_out", 401], ["forbidden", 403], ["gone", 403], ["used", 429], ["two_step", 403]];
 
@@ -80,5 +81,48 @@ test("an uncountable studio action keeps its own words, never just \"used\" (Cla
   } finally {
     globalThis.fetch = previousFetch;
     console.error = previousError;
+  }
+});
+
+/** The client's second ask, carrying a door the studio already holds (lib/upload-door.ts). */
+async function echoAsk(header: string): Promise<{ status: number; body: unknown; commands: number }> {
+  reset();
+  resetWorld();
+  admission.reason = "used";
+  admission.calls = 0;
+  admission.needs.length = 0;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("External calls are forbidden in this synthetic test"); };
+  try {
+    const request = new Request("https://upload.example.test/api/store/file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://upload.example.test", [DOOR_ECHO_HEADER]: header },
+      body: JSON.stringify({ type: "blob.generate-presigned-url", payload: { pathname: `stores/${FOLDER}/product-1/file.pdf`, clientPayload: JSON.stringify({ productId: "product-1" }), multipart: false } }),
+    }) as NextRequest;
+    const response = await POST(request);
+    return { status: response.status, body: await response.json(), commands: calls.reduce((total, batch) => total + batch.length, 0) };
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+}
+
+test("the echo hands back exactly the door it carries, with no admission, count, budget or signing", async () => {
+  const door = { delegationToken: "synthetic.token", signature: "synthetic-signature", params: { pathname: `stores/${FOLDER}/product-1/file.pdf` } };
+  const answer = await echoAsk(JSON.stringify(door));
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.body, { type: "blob.generate-presigned-url", presignedUrlPayload: door });
+  assert.equal(admission.calls, 0, "the studio action is counted once, on the real ask, never on the echo");
+  assert.equal(answer.commands, 0, "no Redis work");
+  assert.deepEqual(state.events, [], "no storage measurement, provider work or token issuance");
+});
+
+test("an echo header that is not a door is refused, never taken for a first ask", async () => {
+  for (const header of ["", "not json", "[]", JSON.stringify({ delegationToken: "a.b", signature: "s" }), JSON.stringify({ delegationToken: "a.b", signature: "s", params: {}, extra: 1 }), JSON.stringify({ delegationToken: "a.b", signature: "s", params: { p: 1 } }), "x".repeat(9_000)]) {
+    const answer = await echoAsk(header);
+    assert.equal(answer.status, 400, header.slice(0, 40));
+    assert.deepEqual(answer.body, { ok: false, error: "invalid" });
+    assert.equal(admission.calls, 0);
+    assert.equal(answer.commands, 0);
+    assert.deepEqual(state.events, []);
   }
 });

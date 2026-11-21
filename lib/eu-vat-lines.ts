@@ -9,7 +9,8 @@
  *   - The VAT reaches the LLC only through the platform's fee on the direct charge (the money lands on the creator's
  *     account), so the fee becomes share + VAT + the VAT money's own costs (conversion, remittance), never taken from
  *     the share. The share's base, the goods before the VAT, is written on the payment (share_base), so no share is
- *     ever worked out on the VAT (793 [IV3], item 2 (d)); a line whose amount or quantity cannot be read refuses.
+ *     ever worked out on the VAT (793 [IV3], item 2 (d)); a line whose amount or quantity cannot be read refuses, and
+ *     so does a discount or a promotion box, which would make that base the price before the discount.
  *   - The buyer pays the price and the VAT, nothing else: the costs of receiving the VAT are never a line, so there is
  *     no card surcharge (item 2 (c)). Those costs must be given by the caller: unknown is never zero, so without them nothing is written and
  *     the sale is refused.
@@ -44,6 +45,10 @@ export function applyEuVatLines(
   if (input.vatCostsCents === null || !Number.isSafeInteger(input.vatCostsCents) || input.vatCostsCents < 0) return "refuse";
   if (!vat || !Number.isSafeInteger(vat.vatCents) || vat.vatCents < 0 || !Number.isSafeInteger(vat.basisPoints) || !/^[A-Z]{2}$/.test(vat.country)) return "refuse";
   if (typeof input.currency !== "string" || !/^[a-z]{3}$/i.test(input.currency)) return "refuse";
+  // The share's base written below is the lines' total: with a discount or a promotion box it would be the price
+  // before the discount, so such a body is refused here too, as its only caller already does (Claude 5's MEDIUM on
+  // #5048).
+  if ([...body.keys()].some((key) => key.startsWith("discounts[") || key === "allow_promotion_codes")) return "refuse";
   const feeNow = body.get(FEE);
   if (feeNow !== null && !WHOLE.test(feeNow)) return "refuse";
   const fee = (feeNow === null ? 0 : Number(feeNow)) + vat.vatCents + input.vatCostsCents;

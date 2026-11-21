@@ -122,3 +122,14 @@ test("a line whose amount or quantity cannot be read refuses: the base would be 
     assert.equal(b.toString(), before);
   }
 });
+
+test("a body with a discount or a promotion box refuses: the share's base would be the price before the discount (Claude 5's MEDIUM on #5048)", () => {
+  for (const [key, value] of [["discounts[0][coupon]", "co_X"], ["discounts[0][promotion_code]", "promo_X"], ["allow_promotion_codes", "true"]] as const) {
+    const b = body();
+    b.set(key, value);
+    const before = b.toString();
+    assert.equal(applyEuVatLines(b, { vat, recurring: false, vatCostsCents: 12, currency: "eur" }), "refuse", key);
+    assert.equal(b.toString(), before, `${key}: nothing written`);
+    assert.equal(b.get("payment_intent_data[metadata][share_base]"), null);
+  }
+});

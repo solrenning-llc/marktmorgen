@@ -19,12 +19,12 @@ test("the VAT collected for the tax office and Stripe's fee on it, each its own 
   const html = renderToStaticMarkup(<SaleVatLines vat={vat} currency="eur" />);
   assert.equal(html.match(/<p /g)?.length, 2);
   assert.match(html, /VAT for Germany \(19%\), collected by Marktmorgen for the tax office: €19</);
-  assert.match(html, /Stripe&#x27;s fee on that VAT, which you pay: €0\.59/);
+  assert.match(html, /The share of Stripe&#x27;s fee on this sale that matches that VAT, which you pay: €0\.59/);
 });
 
 test("a fee not given yet is said in words, never 0", () => {
   const html = renderToStaticMarkup(<SaleVatLines vat={{ ...vat, stripeFeeOnVat: "unknown" }} currency="eur" />);
-  assert.match(html, /which you pay: not known yet\./);
+  assert.match(html, /The share of Stripe&#x27;s fee on this sale that matches that VAT, which you pay: not known yet\./);
   assert.doesNotMatch(html, /€0\.00/);
 });
 

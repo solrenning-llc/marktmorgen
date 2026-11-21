@@ -1,7 +1,9 @@
 /**
  * 793 [IV3] unit 2, item 2 (b): a sale's own lines in the studio's list of sales when the Solrenning LLC collected
  * its VAT (lib/sale-vat-line.ts). Nothing is drawn for a sale without VAT collected. Plain text in the sale's entry,
- * no color or icon carrying meaning; an amount Stripe has not given is said in words, never shown as 0.
+ * no color or icon carrying meaning; an amount Stripe has not given is said in words, never shown as 0. The fee line is
+ * named for what it is, the share of Stripe's whole fee in proportion to the VAT: Stripe does not give its fixed part
+ * apart, so the line never claims to be the exact fee the VAT added (Claude 2's and Claude 5's LOW on #5048).
  */
 import { formatMoney } from "@/lib/money";
 import type { SaleVatLine } from "@/lib/sale-vat-line";
@@ -31,8 +33,8 @@ export function SaleVatLines({ vat, currency }: { vat: SaleVatLine | "unreadable
       </p>
       <p className="mt-1 text-sm text-ink-soft">
         {vat.stripeFeeOnVat === "unknown"
-          ? "Stripe's fee on that VAT, which you pay: not known yet."
-          : `Stripe's fee on that VAT, which you pay: ${formatMoney(vat.stripeFeeOnVat.cents, vat.stripeFeeOnVat.currency)}`}
+          ? "The share of Stripe's fee on this sale that matches that VAT, which you pay: not known yet."
+          : `The share of Stripe's fee on this sale that matches that VAT, which you pay: ${formatMoney(vat.stripeFeeOnVat.cents, vat.stripeFeeOnVat.currency)}`}
       </p>
     </>
   );

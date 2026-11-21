@@ -8,7 +8,8 @@
  *     whole amount the buyer paid, VAT included, and the creator pays it, as on every sale (item 2: Marktmorgen does
  *     not pay it back). It is Stripe's own fee (`stripe_fee` in the charge's balance transaction, never the platform's
  *     `application_fee`) in proportion to the VAT in the amount charged, rounded half up, in the currency Stripe
- *     settled it in.
+ *     settled it in. It is a share of the whole fee, fixed part included, because the balance transaction does not give
+ *     the fixed part apart; the studio names it as that share, never as the exact fee the VAT added.
  *
  * Pure, on the payment intent Stripe gave with its charge and balance transaction expanded. No mark: null, nothing is
  * shown. A mark that cannot be read is "unreadable", never taken as no VAT. A fee Stripe has not given (the balance

@@ -22,6 +22,7 @@ import {
   RECEIPT_BATCH_MAX,
   RECEIPT_BATCH_READS_AT_ONCE,
   RECEIPT_BATCH_RESERVE_SECONDS,
+  RECEIPT_LIST_PAGE_SIZE,
   RECEIPT_LIST_PAGES,
   SKIP_WORDS,
   lastMonthDays,
@@ -262,7 +263,7 @@ async function main(): Promise<void> {
 
   part("Over the cap: refused with the count, before anything is read or numbered");
   await refill();
-  listed = Array.from({ length: RECEIPT_BATCH_MAX + 1 }, (_, i) => sale(ref(`many${i}`), OCT(1 + (i % 28))));
+  listed = Array.from({ length: RECEIPT_BATCH_MAX + 1 }, (_, i) => sale(ref(`many${String(i).padStart(4, "0")}`), OCT(1 + (i % 28))));
   calls.length = 0;
   const counted = (await redis.pipeline([["GET", `nl:rcpt:seq:${store.sid}`]]))[0];
   const over = await get("month=2026-10");
@@ -273,9 +274,28 @@ async function main(): Promise<void> {
   const halfMonth = await get("from=2026-10-01&to=2026-10-14");
   is("half the month fits", [halfMonth.status, halfMonth.headers.get("content-type")], [200, "application/zip"]);
 
+  part("A checkout repeated by the list cannot make the same receipt twice");
+  await refill();
+  const repeated = sale(ref("repeated"), OCT(2));
+  const otherStores = Array.from({ length: RECEIPT_LIST_PAGE_SIZE - 1 }, (_, i) =>
+    sale(ref(`other${String(i).padStart(4, "0")}`), OCT(2), { metadata: { store: "someoneelse" } }),
+  );
+  listed = [repeated, ...otherStores, repeated];
+  calls.length = 0;
+  const sequenceKey = `nl:rcpt:seq:${store.sid}`;
+  const sequence = (await redis.pipeline([["GET", sequenceKey]]))[0];
+  const duplicate = await get("month=2026-10");
+  const names = duplicate.ok ? unzip(new Uint8Array(await duplicate.arrayBuffer())).map(entry => entry.name) : [];
+  is("a duplicate across pages makes no ZIP and starts no receipt", [
+    duplicate.status,
+    calls.filter(path => path.includes("/line_items")).length,
+    (await redis.pipeline([["GET", sequenceKey]]))[0],
+    names,
+  ], [502, 0, sequence, []]);
+
   part("Unknown never becomes a partial download presented as complete");
   await refill();
-  listed = Array.from({ length: RECEIPT_LIST_PAGES * 100 + 1 }, (_, i) => sale(ref(`open${i}`), OCT(2), { metadata: { store: "someoneelse" } }));
+  listed = Array.from({ length: RECEIPT_LIST_PAGES * 100 + 1 }, (_, i) => sale(ref(`open${String(i).padStart(4, "0")}`), OCT(2), { metadata: { store: "someoneelse" } }));
   const tooLong = await get("month=2026-10");
   is("more checkouts than the pages read: refused, nothing made", [tooLong.status, /shorter/.test(await tooLong.text())], [409, true]);
   listed = [sale(ref("p"), OCT(2))];
@@ -299,7 +319,7 @@ async function main(): Promise<void> {
   is("no sales in those days: said so, no file", [none.status, (await none.text()).includes("October 1, 2026 to October 31, 2026")], [404, true]);
 
   part("Out of time: the sales not read are named, never dropped");
-  listed = Array.from({ length: RECEIPT_BATCH_READS_AT_ONCE * 2 }, (_, i) => sale(ref(`late${i}`), OCT(4)));
+  listed = Array.from({ length: RECEIPT_BATCH_READS_AT_ONCE * 2 }, (_, i) => sale(ref(`late${String(i).padStart(4, "0")}`), OCT(4)));
   const range = receiptRange(new URLSearchParams("month=2026-10"));
   if (!range.ok) throw new Error("range");
   let clock = 0;
@@ -315,6 +335,15 @@ async function main(): Promise<void> {
   clock = 0;
   const stopped = await receiptBatch(fresh, ACCOUNT, range, { now: () => clock, readsUntil: 10 * RECEIPT_STRIPE_TIMEOUT_MS, stopAt: 1, afterRound: () => { clock += 2; } });
   is("past the hard stop while numbering or drawing: no file at all", [stopped.ok, !stopped.ok && stopped.status], [false, 503]);
+  listed = [sale(ref("expired"), OCT(4), {}, { amount_refunded: 4900, refunded: true })];
+  clock = 0;
+  const expired = await receiptBatch(fresh, ACCOUNT, range, {
+    now: () => clock,
+    readsUntil: 10 * RECEIPT_STRIPE_TIMEOUT_MS,
+    stopAt: 2,
+    afterRound: () => { clock = 2; },
+  });
+  is("at the hard stop with only refused receipts: no ZIP is returned", [expired.ok, !expired.ok && expired.status], [false, 503]);
   is("handles read as the store's own", saleHandles(fresh).has(HANDLE), true);
 
   part("Reached from the list of sales");

@@ -71,3 +71,36 @@ test("a record is made only in a currency written in hundredths", () => {
   assert.notEqual(euVatRecord({ ...sale, currency: "usd" }), null);
   for (const currency of ["jpy", "krw", "kwd", "bhd", "JPY"]) assert.equal(euVatRecord({ ...sale, currency }), null, currency);
 });
+
+test("two partial refunds, each from euVatOnRefund, are both written on the record (Claude 7 on #4572)", async () => {
+  const { euVatAdjustment } = await import("@/lib/eu-vat-record");
+  const { euVatOnRefund } = await import("@/lib/eu-vat-refund");
+  const at = 1_794_000_000;
+  const priced = { ...sale, vat: { priceCents: 18_874, vatCents: 3_964, totalCents: 22_838, basisPoints: 2100, country: "NL" }, place: { kind: "eu" as const, country: "NL", evidence: { ip: "NL", billing: "NL" } }, payments: [{ at, cents: 22_838 }] };
+  let record = euVatRecord(priced);
+  assert.notEqual(record, null);
+  const money = { priceCents: 18_874, vatCents: 3_964, totalCents: 22_838 };
+  let refunded = 0;
+  let vatBack = 0;
+  for (const refundCents of [3_569, 17_872]) {
+    const back = euVatOnRefund(money, { refundCents, refundedBeforeCents: refunded, vatBackBeforeCents: vatBack, kind: "refund" });
+    assert.notEqual(back, null);
+    record = euVatAdjustment(record!, { at: at + 60, taxableCents: -back!.taxableBackCents, vatCents: -back!.vatBackCents, reason: "Refund" });
+    assert.notEqual(record, null, `refund of ${refundCents}`);
+    refunded += refundCents;
+    vatBack += back!.vatBackCents;
+  }
+});
+
+test("VAT taken back with no value refunded cannot drain a sale's VAT", async () => {
+  const { euVatAdjustment } = await import("@/lib/eu-vat-record");
+  let record = euVatRecord(sale)!;
+  let taken = 0;
+  for (let i = 0; i < 50; i += 1) {
+    const next = euVatAdjustment(record, { at: 1_794_000_060, taxableCents: 0, vatCents: -1, reason: "Correction" });
+    if (!next) break;
+    record = next;
+    taken += 1;
+  }
+  assert.ok(taken <= 1, `VAT-only reductions accepted: ${taken}`);
+});

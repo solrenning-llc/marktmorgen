@@ -175,7 +175,8 @@ export async function writeFileSections(
     }
   };
   const unrun: Unrun = { jobs: 0, asked: false, partial: true };
-  return countedRun<FileDraft>(
+  // No type argument: tests/ai-funded-rights.test.ts finds this counted run by `countedRun(`.
+  return countedRun(
     store,
     now,
     async () => {

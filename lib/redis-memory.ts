@@ -1376,6 +1376,15 @@ export class MemoryRedis {
           const length = this.run(["STRLEN", args[2]]);
           return [this.run(["DEL", args[2]]), length];
         }
+        // lib/mail-clicks.ts NOTE_CLICK_IF_ALLOWED: consent and its link marker
+        // are checked in the same Redis step that keeps the click.
+        if (key.startsWith("-- marktmorgen:mail-click-if-allowed:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, marker, contacts, used, token, email, raw, campaign, seconds] = args;
+          if (this.run(["GET", marker]) !== token || this.run(["HGET", contacts, email]) !== raw) return 0;
+          this.run(["SADD", used, campaign]);
+          this.run(["EXPIRE", used, seconds]);
+          return 1;
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;

@@ -31,7 +31,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Store, ensureListId, saleHandles, storeIdCommand, storeRef, erasingField, ERASING_KEY } from "@/lib/store";
+import { type Store, ensureListId, ownerKey, saleHandles, STORE_ID_PATTERN, storeIdCommand, storeRef, erasingField, ERASING_KEY } from "@/lib/store";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { readListings } from "@/lib/catalog";
 import { productOfSub } from "@/lib/tier-rules";
@@ -403,7 +403,9 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   const taken = await takeData(store, [{ slot: SLOT, bytes }], now);
   if (!taken.ok) return taken.reason === "full" ? { ok: false, reason: "full", message: taken.message } : { ok: false, reason: "room" };
   const byPerson = people.map((person) => ({ person, writes: writes.filter((w) => w.row.person === person) }));
-  const storeIdKey = storeIdCommand(store.sid)[1];
+  // The store's own key: its id key, or for a store from before ids its owner's record, told apart by its statsId (v3).
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  const storeIdKey = withId ? storeIdCommand(store.sid)[1] : await ownerKey(storeRef(store));
   const erasing = await erasingField(storeRef(store));
   const commands: (string | number)[][] = byPerson.map(({ person, writes: own }) => [
     "EVAL",
@@ -417,11 +419,15 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
     suppressionPrint(listId, own[0].row.email),
     person,
     erasing,
+    withId ? "" : statsId,
     ...own.flatMap((w) => [w.field, givenJson(mark)]),
   ]);
   const replies = repliesFor(await redisPipeline(commands).catch(() => null), commands.length);
   // The closing walk owns the room now; do not recreate even its counter by giving a late reservation back.
   if (replies?.some((reply) => reply === -2)) return { ok: false, reason: "erased" };
+  // The owner's record could not be read: not known whether this store is still its own. Nothing was written; the room
+  // is kept (errs fuller, never short).
+  if (replies?.some((reply) => reply === -3)) return { ok: false, reason: "unknown" };
   let giveBack = 0;
   byPerson.forEach(({ person, writes: own }, i) => {
     const reply: unknown = replies ? replies[i] : null;
@@ -454,15 +460,27 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
  * this look is either deleted by that erasure or refused here, never left behind it. KEYS[1] their marks, KEYS[2] the
  * list of people with marks, KEYS[3] the store's prints; ARGV[1] their print, ARGV[2] the person. -1 when they were
  * deleted (nothing written); otherwise each HSETNX's reply, then the SADD's.
- * KEYS[4] is the store's identity, KEYS[5] its erasing index, and ARGV[3] its erasing field. A gone/erasing store
- * returns -2 without any mark/index write. Mark pairs start at ARGV[4]. lib/redis-memory.ts runs it the same way.
+ * KEYS[4] is the store's own key, KEYS[5] its erasing index, ARGV[3] its erasing field and ARGV[4] "" for a store with
+ * an id (its id key fenced on with EXISTS) or, for a store from before ids, its statsId, compared with its owner's
+ * record's own (v3, the rule of lib/store-live-cache.ts setWhileStoreLive v2; Claude 2 and Codex X4 on #4880: v2 fenced
+ * a legacy store on an id key it never has). A gone, erasing or no-longer-its-owner's store returns -2 without any
+ * mark/index write; an owner record that does not parse returns -3 (unknown), never erased. Mark pairs start at
+ * ARGV[5]. lib/redis-memory.ts runs it the same way.
  */
-export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v2
-if redis.call("EXISTS", KEYS[4]) == 0 then return -2 end
+export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v3
+if ARGV[4] == "" then
+  if redis.call("EXISTS", KEYS[4]) == 0 then return -2 end
+else
+  local raw = redis.call("GET", KEYS[4])
+  if not raw then return -2 end
+  local ok, record = pcall(cjson.decode, raw)
+  if not ok or type(record) ~= "table" then return -3 end
+  if record["statsId"] ~= ARGV[4] then return -2 end
+end
 if redis.call("HEXISTS", KEYS[5], ARGV[3]) == 1 then return -2 end
 if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return -1 end
 local out = {}
-for i = 4, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
+for i = 5, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
 out[#out + 1] = redis.call("SADD", KEYS[2], ARGV[2])
 return out`;
 

@@ -100,8 +100,10 @@ async function main(): Promise<void> {
   is("refusal changes no data room", await redis.pipeline([["HGETALL", room]]), before);
   is("no mark after work refusal", (await redis.pipeline([["HLEN", `nl:tben:given:${store.statsId}:${personKey(store.statsId!, ANN)}`]]))[0], 0);
   is("literal script fits its one KB in the four KB per-person ceiling", Buffer.byteLength(BENEFIT_MARK) <= 1_000, true);
-  const commands: (string | number)[] = ["EVAL", BENEFIT_MARK, 5, "x4:marks", "x4:who", "x4:prints", storeIdCommand(store.sid)[1], ERASING_KEY, "p".repeat(40), "a".repeat(32), await erasingField(storeRef(store)), "f".repeat(94), JSON.stringify({ at: Number.MAX_SAFE_INTEGER, by: "\u0001".repeat(320) })];
-  is("worst escaped mark and all EVAL arguments fit four KB", Buffer.byteLength(JSON.stringify(commands)) < 4_096, true);
+  const commands: (string | number)[] = ["EVAL", BENEFIT_MARK, 5, "x4:marks", "x4:who", "x4:prints", storeIdCommand(store.sid)[1], ERASING_KEY, "p".repeat(40), "a".repeat(32), await erasingField(storeRef(store)), "", "f".repeat(94), JSON.stringify({ at: Number.MAX_SAFE_INTEGER, by: "\u0001".repeat(320) })];
+  // v3 (Claude 2 and Codex X4 on #4880): ARGV[4] is "" for a store with an id; a store from before ids sends its statsId
+  // there instead, so the four KB check counts a 64-character one on top.
+  is("worst escaped mark and all EVAL arguments fit four KB", Buffer.byteLength(JSON.stringify(commands)) + 64 < 4_096, true);
   const calls = redis.scriptCalls;
   const reply = await redis.pipeline([commands]);
   is("literal memory protocol answers one new mark and index", reply, [[1, 1]]);

@@ -1824,10 +1824,23 @@ export class MemoryRedis {
         }
         // lib/tier-benefits.ts BENEFIT_MARK: one person's benefit marks written only while they are not on the store's
         // list of the deleted; -1 when they are, otherwise each HSETNX's reply and the SADD's.
-        if (key.startsWith("-- marktmorgen:benefit-mark:v2\n") && args[0] === "5" && args.length >= 11 && (args.length - 9) % 2 === 0) {
-          const [, marks, who, erased, identity, erasing, print, person, erasingField, ...pairs] = args;
+        if (key.startsWith("-- marktmorgen:benefit-mark:v3\n") && args[0] === "5" && args.length >= 12 && (args.length - 10) % 2 === 0) {
+          const [, marks, who, erased, identity, erasing, print, person, erasingField, statsId, ...pairs] = args;
           this.scriptCalls += 1;
-          if (this.run(["EXISTS", identity]) === 0) return -2;
+          if (statsId === "") {
+            if (this.run(["EXISTS", identity]) === 0) return -2;
+          } else {
+            const raw = this.run(["GET", identity]);
+            if (raw === null) return -2;
+            let record: unknown;
+            try {
+              record = JSON.parse(String(raw));
+            } catch {
+              return -3;
+            }
+            if (!record || typeof record !== "object" || Array.isArray(record)) return -3;
+            if ((record as { statsId?: unknown }).statsId !== statsId) return -2;
+          }
           this.scriptCalls += 1;
           if (this.run(["HEXISTS", erasing, erasingField]) === 1) return -2;
           this.scriptCalls += 1;

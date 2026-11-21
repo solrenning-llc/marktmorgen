@@ -11,7 +11,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const account = "acct_1TestClubToken01";
+const account = "acct_1TestClub01";
 const customer = "cus_MemberToken001";
 const origin = "https://marktmorgen.com";
 const emails: string[] = [];

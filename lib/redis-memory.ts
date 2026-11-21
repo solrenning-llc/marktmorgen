@@ -3990,6 +3990,8 @@ export class MemoryRedis {
     if (!Number.isFinite(limit) || limit < 0 || !/^\d{4}-\d{2}$/.test(month ?? "") || rest.length % 3 !== 0) return [-1, 0];
     const held = this.data.get(target);
     if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+    // A give-back ("2") on a room that is not there writes nothing (TAKE_DATA, Codex L 20/11).
+    if (always === "2" && !(held instanceof Map && held.has("#"))) return [1, 0];
     const room = this.hash(target);
     let total = Number(room.get("#") ?? "0");
     if (!Number.isFinite(total)) return [-1, 0];
@@ -4044,7 +4046,7 @@ export class MemoryRedis {
       if (old === 0 && next > 0) delta += 64;
       else if (old > 0 && next === 0) delta -= 64;
     }
-    if (delta > 0 && always !== "1" && total + delta > limit) {
+    if (delta > 0 && always !== "1" && always !== "2" && total + delta > limit) {
       keep();
       return [0, total];
     }

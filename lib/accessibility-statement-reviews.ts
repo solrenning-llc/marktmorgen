@@ -63,6 +63,8 @@ export const STATEMENT_REVIEWS: Readonly<Record<string, { date: string; digest: 
   "page:/[handle]/media-kit": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/move/[product]": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/orders": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/[handle]/orders/move": { date: "November 18, 2026", digest: "eba44788522343cb" },
+  "page:/[handle]/orders/move/confirm": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/orders/problem": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/orders/sessions": { date: "November 18, 2026", digest: "eba44788522343cb" },
   "page:/[handle]/orders/withdraw": { date: "November 18, 2026", digest: "eba44788522343cb" },

@@ -21,7 +21,7 @@ import { parsePage } from "@/lib/sales-page";
 import { readPageExact, writePage } from "@/lib/sales-page-store";
 import { POST as aiRoute } from "@/app/api/store/ai/route";
 import { ROOM } from "./data-room";
-import { copyKey, stampedCopy } from "@/lib/pdf-stamp";
+import { copyKey, stampedDelivery } from "@/lib/pdf-stamp";
 import { previewCopy, previewKey } from "@/lib/pdf-preview";
 import { holdReported } from "@/lib/child-safety";
 import { HELD_FILE_SECONDS, holdFiles, isFileHeld } from "@/lib/held-files";
@@ -126,7 +126,11 @@ async function main(): Promise<void> {
   await holdFiles([heldPdf.pathname]);
   const keptCopy = { ...heldPdf, pathname: "stores/placeholder/stamped/abc/held.pdf" };
   await redis.pipeline([["SET", copyKey("pi_placeholder", heldPdf), JSON.stringify(keptCopy)], ["SET", previewKey(heldPdf, 2), JSON.stringify(keptCopy)]]);
-  is("no stamped copy of a held file, not even one kept from before", await stampedCopy(heldPdf, { reference: "pi_placeholder", email: "buyer@example.com", paidAt: 1 }, ROOM), null);
+  // The paid download's one door (stampedDelivery, from the base #3471 with main): a held file gets the original's answer,
+  // which serveFile refuses, never the kept copy nor one stamped on the fly, and the store's requests are never asked.
+  let metered = 0;
+  const meter = { take: async () => { metered += 1; return true; }, give: async () => {} };
+  is("no stamped copy of a held file, not even one kept from before nor one stamped on the fly", [await stampedDelivery(heldPdf, { reference: "pi_placeholder", email: "buyer@example.com", paidAt: 1 }, ROOM, meter), metered], [{ kind: "original" }, 0]);
   is("no preview copy either", await previewCopy(heldPdf, 2, ROOM), null);
 
   part("A mark that cannot be read keeps the file and hands nothing out");

@@ -197,7 +197,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
             <h2 ref={heading} tabIndex={-1} className="font-display text-lg font-semibold leading-snug">
               {w.title(storeName)}
             </h2>
-            <button type="button" onClick={close} className="st-muted text-sm underline" aria-label={w.close}>
+            <button type="button" onClick={close} className="st-muted inline-flex min-h-11 min-w-11 items-center text-sm underline" aria-label={w.close}>
               {w.close}
             </button>
           </div>
@@ -211,7 +211,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                 {t.from === "ai" ? <p className="st-muted mb-0.5 text-xs font-semibold uppercase tracking-wide" data-ai-label>{w.label}</p> : null}
                 <p className={`inline-block whitespace-pre-line rounded-xl px-3 py-2 text-left text-sm ${t.from === "buyer" ? "st-chat-mine" : "st-chat-theirs"}`}>{t.text}</p>
                 {t.from === "ai" && (t.status === "unknown" || t.status === "handoff") && i === (thread?.turns.length ?? 0) - 1 && !handing ? (
-                  <button type="button" className="st-muted mt-1 block text-xs underline" onClick={startHandoff}>
+                  <button type="button" className="st-muted mt-1 flex min-h-11 min-w-11 items-center text-xs underline" onClick={startHandoff}>
                     {w.askCreator(storeName)}
                   </button>
                 ) : null}
@@ -250,7 +250,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                   {w.handoffSend(storeName)}
                 </button>
                 {!spent ? (
-                  <button type="button" className="st-muted text-xs underline" onClick={stopHandoff}>
+                  <button type="button" className="st-muted inline-flex min-h-11 min-w-11 items-center text-xs underline" onClick={stopHandoff}>
                     {w.close}
                   </button>
                 ) : null}
@@ -276,7 +276,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                 <button type="submit" aria-disabled={busy} aria-busy={busy} className="btn st-btn">
                   {w.send}
                 </button>
-                <button type="button" className="st-muted text-xs underline" onClick={startHandoff}>
+                <button type="button" className="st-muted inline-flex min-h-11 min-w-11 items-center text-xs underline" onClick={startHandoff}>
                   {w.askCreator(storeName)}
                 </button>
               </div>

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PaymentRequestsStudio, type Prefill } from "@/components/payment-requests-studio";
 import { can } from "@/lib/team-roles";
@@ -38,6 +39,7 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
+  // oxlint-disable-next-line react/purity -- async server component: the request time is read once on the server per request; the former ESLint React Compiler rule did not flag new Date()
   const now = new Date().getTime();
   const listed = await listRequests(store, now);
   const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsedExact(store, "email", now), openCount(store.sid, now).catch(() => null)]);
@@ -60,7 +62,7 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Payment requests</p>
+          <StudioTrail store={store} here="Payment requests" />
           <h1 className="t-h2 mt-3">Ask one person to pay you, with a link</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             A custom amount for work you agreed on, as an invoice with lines, a due date if you want one, and its receipt. Each is paid like any

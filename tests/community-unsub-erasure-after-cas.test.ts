@@ -13,7 +13,7 @@ let afterAtomic: null | (()=>Promise<void>) = null;
 const gate: null = null;
 const pipeline=redis.pipeline.bind(redis);
 redis.pipeline=(async(commands:Command[])=>{
-  if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).startsWith('local cur = redis.call("HGET"')){
+  if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')){
     const[,,,members,dir,field,expected,next,listed,at]=commands[0];
     // Atomic region: no await between HGET, comparison, HSET and directory update.
     if(redis.run(["HGET",members,field])!==expected)return[0];

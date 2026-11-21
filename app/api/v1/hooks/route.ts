@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { apiAdder, apiError, apiOk, apiWriter, readApiBody } from "@/lib/api-guard";
 import { noticeCreator } from "@/lib/account-notice";
 import { addedEndpointWhere, endpointJustAdded } from "@/lib/webhook-added";
-import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, webhooksView } from "@/lib/webhooks";
+import { MAX_ENDPOINT_URL, WebhookSettingsUnsureError, addEndpoint, removeEndpoint, webhooksView } from "@/lib/webhooks";
 
 /**
  * POST /api/v1/hooks — adds a webhook endpoint from a tool, as the studio's
@@ -38,7 +38,8 @@ export async function POST(request: Request) {
   try {
     // Kept with the key that added it, so it pauses and stops with that key (owner C3-100).
     const now = Date.now();
-    const result = await addEndpoint(writer.store, url, body.events, now, writer.keyId);
+    // The view it answers from is read without the delivery log, which this answer never sends (inside one API request).
+    const result = await addEndpoint(writer.store, url, body.events, now, writer.keyId, false);
     if (!result.ok) return apiError(ADD_ERRORS[result.reason], result.reason, result.message);
     // R34: the address it added, from its own URL, so the notice never names an endpoint added at the same moment.
     const addedWhere = addedEndpointWhere(url) ?? "a new address";
@@ -49,6 +50,8 @@ export async function POST(request: Request) {
     return apiOk({ data: { id: added.id, where: added.where, events: added.events, secret: result.secret, added_at: added.addedAt } });
   } catch (error) {
     console.error("api: adding a webhook failed", error);
+    // A write that may have landed is never said unchanged (lib/webhooks.ts, changeConfig).
+    if (error instanceof WebhookSettingsUnsureError) return apiError(502, "unavailable", "The endpoint may have been added, but this could not be confirmed. Check the store's Webhooks page in the studio before adding it again.");
     return apiError(502, "unavailable", "The endpoint could not be added just now. Nothing was changed; try again in a moment.");
   }
 }
@@ -60,13 +63,15 @@ export async function DELETE(request: Request) {
   if (body instanceof Response) return body;
   const id = typeof body.id === "string" ? body.id.slice(0, 40) : "";
   try {
-    const before = (await webhooksView(writer.store)).endpoints.find((e) => e.id === id);
+    // Only the endpoints, never the delivery log, which this answer never sends (inside one API request).
+    const before = (await webhooksView(writer.store, { log: false })).endpoints.find((e) => e.id === id);
     if (!before) return apiError(404, "not_found", "No endpoint with that id on this store.");
-    await removeEndpoint(writer.store, id);
+    await removeEndpoint(writer.store, id, false);
     later(() => noticeCreator(writer.store, { kind: "webhook-removed", where: before.where }));
     return apiOk({ data: { id, status: "removed" } });
   } catch (error) {
     console.error("api: removing a webhook failed", error);
+    if (error instanceof WebhookSettingsUnsureError) return apiError(502, "unavailable", "The endpoint may have been removed, but this could not be confirmed. Check the store's Webhooks page in the studio before trying again.");
     return apiError(502, "unavailable", "The endpoint could not be removed just now. Try again in a moment.");
   }
 }

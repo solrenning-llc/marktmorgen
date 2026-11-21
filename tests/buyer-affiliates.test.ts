@@ -83,7 +83,8 @@ async function main(): Promise<void> {
   is("as the address that paid", dana.affiliate.email, "dana@example.com");
   is("and this browser is signed in as them", (await affiliateForSession(store, dana.session))?.id, dana.affiliate.id);
   const again = await joinAsBuyer(store, "cs_test_dana000000001");
-  is("the same order twice is the same affiliate", again.ok && again.affiliate.id, dana.affiliate.id);
+  is("the same order twice is the same affiliate", !again.ok && again.reason === "known" && again.affiliate.id, dana.affiliate.id);
+  is("but it signs nobody in the second time: their own link is emailed instead (MM-SA-34)", again.ok, false);
   is("and nobody is made twice", (await listAffiliates(store)).length, 1);
   const refuse = async (id: string) => {
     const r = await joinAsBuyer(store, id);
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
   ]);
   paid("cs_test_ivy000000001", "ivy@example.com");
   const ivy = await joinAsBuyer(store, "cs_test_ivy000000001");
-  is("somebody waiting on an application is let in, as themselves", ivy.ok && [ivy.affiliate.id, ivy.affiliate.status], ["0123456789ab", "approved"]);
+  is("somebody waiting on an application is approved, as themselves, and signs in by their emailed link", !ivy.ok && ivy.reason === "known" && [ivy.affiliate.id, ivy.affiliate.status], ["0123456789ab", "approved"]);
   const gusFirst = await joinAsBuyer(store, "cs_test_gus000000001");
   if (!gusFirst.ok) throw new Error("no gus");
   await decide(store, gusFirst.affiliate.id, "decline");
@@ -122,7 +123,7 @@ async function main(): Promise<void> {
   const halDot = await joinAsBuyer(store, "cs_test_haldot0000001");
   is("removed hal, buying with a trailing dot on the domain: waits too", halDot.ok && halDot.affiliate.status, "pending");
   const halAgain = await joinAsBuyer(store, "cs_test_haldot0000001");
-  is("and buying again does not approve the waiting one", halAgain.ok && halAgain.affiliate.status, "pending");
+  is("and buying again does not approve the waiting one", !halAgain.ok && halAgain.reason === "known" && halAgain.affiliate.status, "pending");
   // Jo applied the ordinary way as jo+news, and the creator declined jo; jo+news then buys.
   await redis.pipeline([
     ["HSET", `nl:aff:${statsId}:people`, "abcdefabcdef", JSON.stringify({ id: "abcdefabcdef", email: "jo@example.com", code: "jo", status: "declined", appliedAt: 1, decidedAt: 2, note: "" })],
@@ -132,7 +133,7 @@ async function main(): Promise<void> {
   ]);
   paid("cs_test_jonews000001", "jo+news@example.com");
   const jo = await joinAsBuyer(store, "cs_test_jonews000001");
-  is("somebody waiting whose inbox the creator declined is not approved by buying", jo.ok && [jo.affiliate.id, jo.affiliate.status], ["fedcbafedcba", "pending"]);
+  is("somebody waiting whose inbox the creator declined is not approved by buying", !jo.ok && jo.reason === "known" && [jo.affiliate.id, jo.affiliate.status], ["fedcbafedcba", "pending"]);
   paid("cs_test_owntag000001", "owner+shop@example.com");
   is("the creator under a + tag is still the creator", await refuse("cs_test_owntag000001"), "owner");
   paid("cs_test_kim000000001", "kim@example.com");
@@ -145,8 +146,10 @@ async function main(): Promise<void> {
     const response = await joinRoute(new NextRequest("https://marktmorgen.com/api/store/affiliates/join", { method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: form }));
     return response.headers.get("location") ?? `status ${response.status}`;
   };
-  is("the page then says the application is in, not that a link is ready", await viaRoute("cs_test_gusplus000001"), "https://marktmorgen.com/@harbor/affiliates?status=applied");
-  is("and a buyer let in hears their link is ready", await viaRoute("cs_test_kim000000001"), "https://marktmorgen.com/@harbor/affiliates?status=joined");
+  paid("cs_test_gusdot0000001", "gus+news@example.com");
+  paid("cs_test_lou000000001", "lou@example.com");
+  is("the page then says the application is in, not that a link is ready", await viaRoute("cs_test_gusdot0000001"), "https://marktmorgen.com/@harbor/affiliates?status=applied");
+  is("and a buyer let in hears their link is ready", await viaRoute("cs_test_lou000000001"), "https://marktmorgen.com/@harbor/affiliates?status=joined");
 
   part("The purchase email offers it only where it works");
   const session = { ...sessions.get("cs_test_dana000000001")!, metadata: { store: "harbor", product: "p8w2m4q9zz" } };

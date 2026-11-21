@@ -187,12 +187,14 @@ function withZoomArrival(request: NextRequest, response: NextResponse): NextResp
 const MAX_API_BODY_BYTES = 4 * 1024 * 1024;
 
 /**
- * The one address another site may post to: the one-click unsubscribe that
- * mail apps send (RFC 8058). Its token is the whole key, it only ever takes
- * somebody off a list, and a web mail app is entitled to press it from its
- * own page.
+ * The addresses another site may post to: the one-click unsubscribes that
+ * mail apps send (RFC 8058), the list's and the waitlist launch's. Each token
+ * is the whole key, each only ever takes somebody off, and a web mail app is
+ * entitled to press it from its own page. The waitlist route still refuses a
+ * post from another site without its token in the address (its page's own
+ * button; tests/proxy-one-click-waitlist.test.ts).
  */
-const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe"]);
+const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe", "/api/store/waitlist/leave"]);
 
 /**
  * Every request under /api/ that changes something passes here first.
@@ -265,6 +267,19 @@ export async function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) return guardApi(request);
 
   if (isPlatformHost(host)) {
+    /*
+     * The card's address in any case but lowercase (/Embed/kitchen/abc):
+     * next.config matches its header rules without regard to case, so the
+     * address escapes the page rule, while the card route and isEmbedPage
+     * do not match it either; it would answer a page with neither a policy
+     * nor X-Frame-Options, framable by any site. Sent to the lowercase
+     * address, which next.config and the card's own policy cover.
+     */
+    if (/^\/embed\//i.test(request.nextUrl.pathname) && !request.nextUrl.pathname.startsWith("/embed/")) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/embed/${request.nextUrl.pathname.slice("/embed/".length)}`;
+      return NextResponse.redirect(url, 308);
+    }
     // The site's own map and rules: nothing of a store's to add to them.
     if (CRAWLER_FILES.test(request.nextUrl.pathname)) return NextResponse.next();
     // A store's own map, under its address here.

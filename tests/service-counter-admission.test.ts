@@ -15,16 +15,16 @@ async function attempt() {
 }
 
 async function main() {
-  const sparse = new Array(2); sparse[1] = 1;
+  const sparse = new Array(2); sparse[0] = 1;
   const unknowns: [string, unknown][] = [
     ["missing reply", undefined], ["null reply", null], ["empty pipeline", []],
-    ["missing increment", ["OK"]], ["missing SET acknowledgment", sparse],
-    ["extra reply", ["OK", 1, "extra"]], ["text increment", ["OK", "1"]],
-    ["null increment", ["OK", null]], ["zero increment", ["OK", 0]],
-    ["negative increment", ["OK", -1]], ["fractional increment", ["OK", 0.5]],
-    ["unsafe increment", ["OK", Number.MAX_SAFE_INTEGER + 1]],
-    ["nonfinite increment", ["OK", Number.NaN]], ["false SET", [false, 1]],
-    ["unknown SET", [undefined, 1]], ["noncanonical SET", ["queued", 1]],
+    ["missing increment", [1]], ["missing SET acknowledgment", sparse],
+    ["extra reply", [1, 1, "extra"]], ["text increment", ["1", 1]],
+    ["null increment", [null, 1]], ["zero increment", [0, 1]],
+    ["negative increment", [-1, 1]], ["fractional increment", [0.5, 1]],
+    ["unsafe increment", [Number.MAX_SAFE_INTEGER + 1, 1]],
+    ["nonfinite increment", [Number.NaN, 1]], ["false EXPIRE", [1, false]],
+    ["unknown EXPIRE", [undefined, 1]], ["noncanonical SET", ["queued", 1]],
   ];
   for (const [name, reply] of unknowns) {
     await check(`${name}: no monthly quota or supplier call`, async () => {
@@ -46,10 +46,10 @@ async function main() {
   await check("exact confirmed increment uses the existing key, TTL and bound", async () => {
     reset(); await attempt(); await attempt(); await attempt();
     assert.deepEqual([state.supplierCalls, state.quotaCalls, state.commands.length], [2, 2, 6]);
-    assert.equal(state.commands[0][0], "SET");
+    assert.equal(state.commands[0][0], "INCR");
     assert.match(String(state.commands[0][1]), /^nl:rl:host-calendar:[0-9a-f]{32}$/);
-    assert.deepEqual(state.commands[0].slice(2), ["0", "EX", 60, "NX"]);
-    assert.deepEqual(state.commands[1], ["INCR", state.commands[0][1]]);
+    assert.deepEqual([state.commands[0][0], ...state.commands[1]], ["INCR", "EXPIRE", state.commands[0][1], 60, "NX"]);
+    assert.deepEqual(state.commands[1], ["EXPIRE", state.commands[0][1], 60, "NX"]);
   });
   for (const reason of ["used", "pool", "unknown"] as const) {
     await check(`confirmed short window preserves monthly ${reason}`, async () => {

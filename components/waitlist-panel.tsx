@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
+import { LAUNCH_HOLD_SECONDS, MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
 import type { WaitlistView } from "@/lib/waitlist";
 import type { PreorderView } from "@/lib/preorders";
 import { MAX_PREORDER_DAYS, PREORDER_PROBLEMS, type PreorderProblem, addDays, todayOf } from "@/lib/preorder-rules";
@@ -13,11 +13,15 @@ const MESSAGES: Record<string, string> = {
   free: "A free product already takes addresses. A waitlist is for something paid.",
   address: "Add a postal address for the bottom of the email: US law asks for one in any email about something for sale.",
   busy: "The launch email is still going out. Wait for it to finish.",
+  switched_off: "Your store is switched off after notices about its content, so no launch email can go out. Check the notice at the top of your studio.",
   unknown: "That product is no longer in your store. Reload the page.",
   empty: "Buyers have pre-ordered it, and they get it the moment it goes on sale. Add its file, its link or a lesson first.",
   soon: "Mark it coming soon first: pre-orders are taken instead of a buy button.",
   day: `Choose a day from tomorrow to ${MAX_PREORDER_DAYS} days ahead.`,
   agree: "Check the box that says you refund every pre-order in full if it does not come out: buyers are told so.",
+  preorders_unread: "Saved. Its pre-orders could not be read just now, so they are not shown. Reload the page in a minute to see them.",
+  soon_unchecked: "We could not check this product just now. Nothing was changed; try again in a moment.",
+  day_unconfirmed: "The change could not be confirmed and may or may not have been saved. Reload the page in a minute to see the day it has now, then change it again if it is not what you chose.",
 };
 
 async function postPreorder(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string; view?: PreorderView }> {
@@ -60,27 +64,37 @@ async function post(payload: Record<string, unknown>): Promise<WaitlistAnswer> {
 export function WaitlistPanel({
   productId,
   initial,
+  waitlistUnread = false,
   suggestedAddress,
   preorders = null,
+  preordersUnread = false,
   preorderBlocked = null,
   hasContent = true,
   price,
+  canLaunch = true,
 }: {
   productId: string;
   initial: WaitlistView | null;
+  /** Its waitlist could not be read (lib/waitlist.ts threw): said so, never drawn as off with 0 confirmed. */
+  waitlistUnread?: boolean;
   suggestedAddress: string;
   /** Its pre-orders, when it takes or took any (lib/preorders.ts). */
   preorders?: PreorderView | null;
+  /** Its pre-orders could not be read (lib/preorders.ts threw): said so, never shown as none. */
+  preordersUnread?: boolean;
   /** Why it cannot take pre-orders, when it cannot (lib/preorder-rules.ts). */
   preorderBlocked?: PreorderProblem | null;
   /** Whether it has its file, its link or a lesson: what pre-orders get when it goes on sale. */
   hasContent?: boolean;
   /** Its price, in the store's currency, as the waitlist's email carries it. */
   price: string;
+  /** Whether this role may put it on sale: that emails the waitlist, so it needs "send" (lib/team-roles.ts). */
+  canLaunch?: boolean;
 }) {
-  const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null });
+  const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null, switchedOff: false });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
   const [day, setDay] = useState(preorders?.day ?? "");
+  const [unread, setUnread] = useState(preordersUnread);
   const [agree, setAgree] = useState(false);
   const [editingDay, setEditingDay] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -115,8 +129,15 @@ export function WaitlistPanel({
     setBusy(false);
     if (answer.ok && answer.view) {
       setPre(answer.view);
+      setUnread(false);
       setEditingDay(false);
       setAgree(false);
+    } else if (answer.error === "preorders_unread" || answer.error === "day_unconfirmed") {
+      // Saved but unread, or not confirmed saved: what it shows now is not known, so never the old day, old counts or none.
+      setUnread(true);
+      setEditingDay(false);
+      setAgree(false);
+      setError(MESSAGES[answer.error]);
     } else setError(MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error ?? "Something went wrong. Try again.");
   }
 
@@ -148,6 +169,18 @@ export function WaitlistPanel({
       </button>
     </div>
   );
+
+  // Nothing about the waitlist was read, so no switch, count or sale is drawn from a guess (VR 2).
+  if (waitlistUnread) {
+    return (
+      <div className="mt-3 rounded-[var(--r-sm)] border border-line bg-white p-4">
+        <p className="font-semibold text-ink">Coming soon, with a waitlist</p>
+        <p className="mt-1 text-sm text-ink" role="status">
+          The waitlist could not be read just now, so it is not shown here. Reload the page in a minute to see it and to change it.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3 rounded-[var(--r-sm)] border border-line bg-white p-4">
@@ -181,6 +214,10 @@ export function WaitlistPanel({
           <p className="text-sm font-semibold text-ink">Pre-orders</p>
           {preorderBlocked ? (
             <p className="text-sm text-ink-soft">{PREORDER_PROBLEMS[preorderBlocked]}</p>
+          ) : unread ? (
+            <p className="text-sm text-ink" role="status">
+              Pre-orders could not be read just now, so they are not shown here. Reload the page in a minute to see them and to change them.
+            </p>
           ) : taking && !editingDay ? (
             <>
               <p className="text-sm text-ink">
@@ -205,7 +242,7 @@ export function WaitlistPanel({
               {dayForm}
             </>
           )}
-          {pre.waiting || pre.given || pre.refunded ? (
+          {!unread && (pre.waiting || pre.given || pre.refunded) ? (
             <p className="text-sm text-ink">
               <strong>{pre.waiting.toLocaleString("en-US")}</strong>
               {` pre-ordered and waiting`}
@@ -218,7 +255,9 @@ export function WaitlistPanel({
       {view.soon ? (
         <div className="mt-4 space-y-3 border-t border-line pt-4">
           <p className="text-sm font-semibold text-ink">Put it on sale and tell the waitlist</p>
-          {pre.waiting ? (
+          {unread ? (
+            <p className="text-sm text-ink">Any pre-orders are handed over the moment it goes on sale, and each buyer is emailed the way to open it.</p>
+          ) : pre.waiting ? (
             <p className="text-sm text-ink">
               {hasContent
                 ? `Each of the ${pre.waiting.toLocaleString("en-US")} pre-orders is handed over at the same moment, and its buyer is emailed the way to open it.`
@@ -230,7 +269,7 @@ export function WaitlistPanel({
               ? `It goes on sale at once, and ${view.confirmed === 1 ? "the confirmed address gets" : `each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses gets`} one email with its link and price. Then the waitlist's addresses are deleted; whoever also asked to hear from you is on your list already.`
               : "Nobody has confirmed yet, so no email goes out: it just goes on sale."}
           </p>
-          {view.confirmed ? (
+          {canLaunch && view.confirmed ? (
             <>
               <label className="block">
                 <span className="field-label">A note in the email (optional)</span>
@@ -259,7 +298,7 @@ export function WaitlistPanel({
               </label>
             </>
           ) : null}
-          {confirming && view.confirmed ? (
+          {canLaunch && confirming && view.confirmed ? (
             <div id={`waitlist-${productId}-review`} className="rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
               <h3 id={`waitlist-${productId}-review-title`} tabIndex={-1} className="font-semibold">Check before it goes out</h3>
               {/* A summary list, one answer a row (GOV.UK "Check answers"). */}
@@ -289,6 +328,7 @@ export function WaitlistPanel({
               </dl>
             </div>
           ) : null}
+          {canLaunch ? (
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -313,14 +353,32 @@ export function WaitlistPanel({
                 ? "Put it on sale and tell the waitlist"
                 : "Put it on sale"}
           </button>
+          ) : (
+            // An Editor has no sending to the list (lib/team-roles.ts): the server refuses the launch, so it is not offered.
+            <p className="text-sm text-ink-soft">
+              Putting it on sale emails its waitlist, so it is done by someone on your team who can send to your list: the owner or an Admin.
+            </p>
+          )}
         </div>
       ) : null}
 
       {launch ? (
         <p className="mt-3 text-sm text-ink-soft" role="status">
-          {launch.finished
-            ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
-            : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+          {launch.stopped
+            ? `The waitlist email stopped because your store stayed switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} went out. Whoever did not get it is still on the waitlist. To email them, mark it coming soon again, then put it on sale.`
+            : launch.finished
+              ? launch.total === 0
+                ? "Launched. Nobody on the waitlist had confirmed, so no email went out."
+                : `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
+              : view.switchedOff
+                ? `Paused while your store is switched off: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails sent so far. The rest go out by themselves once your store is back on. If it is still switched off on ${dayWords(new Date((launch.started + LAUNCH_HOLD_SECONDS) * 1000).toISOString().slice(0, 10))}, the email stops, and whoever did not get it stays on the waitlist.`
+                : launch.total === 0
+                  ? // Nobody to email: only the waitlist's deletion is left, done by the next run.
+                    "On sale. Nobody on the waitlist had confirmed, and the waitlist is being deleted."
+                  : launch.cursor >= launch.total
+                    ? // Every email went: only the waitlist's deletion is left, done by the next run.
+                      `On sale. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out, and the waitlist is being deleted.`
+                    : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
         </p>
       ) : null}
 

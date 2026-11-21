@@ -511,6 +511,18 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return 0;
           return this.run(["DEL", lock]);
         }
+        // lib/mail-health.ts: count once, but keep pause evaluation recoverable.
+        if (key.startsWith("-- marktmorgen:mail-health-outcome:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, seen, daily, field, dailySeconds, seenSeconds] = args;
+          const state = this.run(["GET", seen]);
+          if (state === "done" || state === "1") return 0;
+          if (state === "pending") return 2;
+          if (state !== null) return -1;
+          this.run(["HINCRBY", daily, field, 1]);
+          this.run(["EXPIRE", daily, dailySeconds]);
+          this.run(["SET", seen, "pending", "EX", seenSeconds]);
+          return 1;
+        }
         // lib/plans.ts MOVE_IF_LIVE: a plan put back in the line of plans tried only while its store is live.
         if (key.startsWith("-- marktmorgen:plan-move-if-live:v1\n") && args[0] === "3" && args.length === 8) {
           const [, retry, idKey, erasing, at, member, ref, field] = args;

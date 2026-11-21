@@ -17,6 +17,16 @@ const fromKey = (id: string) => `nl:mail:health:${id}:from`;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const COUNT = /^\d{1,15}$/;
 
+/**
+ * A day the UTC calendar has, written as dayOf writes it: the shape alone admits 2026-11-31 and 2026-13-01, which
+ * JavaScript would roll over instead of refusing, so the day read back must be the same text (Codex V on #2314).
+ */
+function isCalendarDay(value: unknown): value is string {
+  if (typeof value !== "string" || !DAY.test(value)) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(time) && dayOf(time) === value;
+}
+
 /** A field of a day's hash: a count it holds, or 0 when it holds none (nil); anything else is not read. */
 function countOf(field: unknown): number | null {
   if (field === null) return 0;
@@ -32,7 +42,7 @@ export async function listHealthExact(id: string, now = Date.now()): Promise<Hea
   const replies: unknown = await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", mailHealthDayKey(id, Date.parse(`${day}T12:00:00Z`)), "s", "b", "c"])]);
   if (!Array.isArray(replies) || replies.length !== days.length + 1) throw new UnknownReplyError("a store's email health");
   const [from, ...rows] = replies as unknown[];
-  if (from !== null && (typeof from !== "string" || !DAY.test(from))) throw new UnknownReplyError("a store's email health");
+  if (from !== null && !isCalendarDay(from)) throw new UnknownReplyError("a store's email health");
   const total: Health = { sent: 0, bounced: 0, complained: 0 };
   rows.forEach((row, i) => {
     if (!Array.isArray(row) || row.length !== 3) throw new UnknownReplyError("a store's email health");

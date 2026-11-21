@@ -32,7 +32,7 @@
  * "unknown" or throws UnknownReplyError; a record that does not read is
  * counted as unreadable, never as absent.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { claimMark } from "@/lib/claim-mark";
 import { type MadeOrder, MAX_PRODUCTION_DAYS, parseMadeOrder } from "@/lib/made-to-order-rules";
 import { personKey } from "@/lib/person-key";
@@ -73,6 +73,12 @@ redis.call('EXPIRE',KEYS[1],ARGV[5])
 return 1
 `;
 
+/** A list score read back: a whole second after now, or null (unknown, never kept). */
+function listEnd(raw: unknown, nowSeconds: number): number | null {
+  const score = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(score) && score > nowSeconds ? score : null;
+}
+
 const saleId = (sale: string) => createHash("sha256").update(`mto-sale:${sale}`).digest("hex").slice(0, 32);
 const listKey = (statsId: string) => `nl:mto:i:${statsId}`;
 const recordKey = (statsId: string, id: string) => `nl:mto:o:${statsId}:${id}`;
@@ -84,9 +90,13 @@ function statsOf(store: DataStore): string | null {
   return typeof store.statsId === "string" && STATS_ID.test(store.statsId) ? store.statsId : null;
 }
 
-/** The record's value as written: the sale, the person's key, then the order. */
-function valueOf(record: MadeRecord): string {
-  return JSON.stringify({ sale: record.sale, person: record.person, paidAt: record.order.paidAt, days: record.order.days, steps: record.order.steps });
+/**
+ * The record's value as written: the sale, the person's key, the order, and this keep's own claim (a fresh random
+ * token): two keeps of the same sale never write the same value, so a keep whose SET answer was lost never reads
+ * the other's record back as its own (Codex X6's LOW 1 on #3630).
+ */
+function valueOf(record: MadeRecord, claim: string): string {
+  return JSON.stringify({ sale: record.sale, person: record.person, claim, paidAt: record.order.paidAt, days: record.order.days, steps: record.order.steps });
 }
 
 /** A kept value, whole or null. */
@@ -99,8 +109,10 @@ export function parseMadeRecord(raw: unknown): MadeRecord | null {
     return null;
   }
   if (!value || typeof value !== "object") return null;
-  const { sale, person, ...rest } = value as Record<string, unknown>;
+  const { sale, person, claim, ...rest } = value as Record<string, unknown>;
   if (typeof sale !== "string" || !SALE.test(sale) || typeof person !== "string" || !/^[0-9a-f]{32}$/.test(person)) return null;
+  // The keep's claim token (valueOf); a record written before it had none.
+  if (claim !== undefined && (typeof claim !== "string" || !/^[0-9a-f]{32}$/.test(claim))) return null;
   const order = parseMadeOrder(rest);
   return order ? { sale, person, order } : null;
 }
@@ -127,14 +139,13 @@ export async function keepMadeOrder(store: DataStore, input: { sale: string; ema
   if (!statsId || typeof input.sale !== "string" || !SALE.test(input.sale) || !order || order.steps.length !== 1) return "invalid";
   if (typeof input.email !== "string" || !input.email.includes("@")) return "invalid";
   const record: MadeRecord = { sale: input.sale, person: personKey(statsId, input.email), order };
-  const value = valueOf(record);
+  const value = valueOf(record, randomBytes(16).toString("hex"));
   if (Buffer.byteLength(value, "utf8") > RECORD_MAX_BYTES) return "invalid";
   const nowSeconds = Math.floor(now / 1000);
   if (order.paidAt > nowSeconds + CLOCK_SLACK_SECONDS) return "invalid";
   // Counted from now at the latest, so the record never ends after the list (EXPIRE KEEP_SECONDS from now) that finds it.
-  const endsAt = Math.min(order.paidAt, nowSeconds) + KEEP_SECONDS;
-  const seconds = endsAt - nowSeconds;
-  if (seconds <= 0) return "invalid";
+  let endsAt = Math.min(order.paidAt, nowSeconds) + KEEP_SECONDS;
+  if (endsAt - nowSeconds <= 0) return "invalid";
   if (!isRedisConfigured()) return "unknown";
   const id = saleId(input.sale);
   const list = listKey(statsId);
@@ -145,6 +156,13 @@ export async function keepMadeOrder(store: DataStore, input: { sale: string; ema
     if (!replies || countOf(replies[0]) === null || count === null || (replies[2] !== null && typeof replies[2] !== "string")) return "unknown";
     listed = replies[2] !== null;
     if (!listed && count >= MAX_KEPT_ORDERS) return "full";
+    // Already listed (a retry, or a keep at the same time): the record ends with the list's own score, never after
+    // it, so the copy and the erasure can always find it (Codex X6's LOW 2 on #3630).
+    if (listed) {
+      const listedEnd = listEnd(replies[2], nowSeconds);
+      if (listedEnd === null) return "unknown";
+      endsAt = Math.min(endsAt, listedEnd);
+    }
   } catch {
     return "unknown";
   }
@@ -160,11 +178,18 @@ export async function keepMadeOrder(store: DataStore, input: { sale: string; ema
       const answer = replies ? replies[0] : null;
       if (answer === 0) return "full";
       if (answer !== 1 && answer !== 2) return "unknown";
+      // 2: listed by another keep in between, at its own score: the record ends no later than it.
+      if (answer === 2) {
+        const again = repliesFor(await redisPipeline([["ZSCORE", list, id]]), 1);
+        const listedEnd = again ? listEnd(again[0], nowSeconds) : null;
+        if (listedEnd === null) return "unknown";
+        endsAt = Math.min(endsAt, listedEnd);
+      }
     } catch {
       return "unknown";
     }
   }
-  const claimed = await claimMark(recordKey(statsId, id), seconds, value);
+  const claimed = await claimMark(recordKey(statsId, id), endsAt - nowSeconds, value);
   return claimed === "ours" ? "kept" : claimed === "taken" ? "already" : "unknown";
 }
 

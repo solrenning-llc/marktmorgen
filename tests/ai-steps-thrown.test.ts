@@ -18,6 +18,7 @@
  *     an empty reading, a stop after the reading, the first or the second
  *     reservation refused, and a reading reservation that throws.
  */
+import type { AiStepId, AiStepState } from "@/lib/ai-steps";
 import { PDFDocument } from "pdf-lib";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import * as ai from "@/lib/ai";
@@ -31,7 +32,8 @@ import { paidPeriod } from "./billing-period-fixture";
 import { fail, refuse, reservations as spent } from "./ai-steps-spend-stub";
 
 type Step = { step: string; state: string };
-type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
+// The library's own step types: a run that writes a file has a step per part too (`section-N`, #3474).
+type Steps = { run: string; onStep: (step: AiStepId, state: AiStepState) => void };
 type Outcome = { ok: boolean; reason?: string; returned?: number | null; left?: number | null };
 
 const FACTS = { parts: [{ title: "Week 1: Pantry basics", detail: "Ten dinners from what is in the cupboard" }, { title: "Week 2: One-pan meals", detail: "Dinners cooked in a single pan" }], format: "A printable PDF of 40 recipes, one on each page", for: "Busy parents" };

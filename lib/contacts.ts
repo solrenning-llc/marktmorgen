@@ -39,6 +39,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
+import { NO_COMPANY_MARK, companyGoneKey } from "@/lib/crm-companies";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, countData, dataKey, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, fieldReleaseBytes, orderWriteIfSame, releaseOrderData } from "@/lib/order-data";
@@ -454,11 +455,11 @@ const CONTACT_WRITE_TRIES = 3;
 
 /**
  * The most redis.call one run of CONTACT_WRITE_IF makes: the row's read, the mark's read, the row, the lifted mark,
- * the agreed count, the left count (INCR or DECR, one of them) and the stores joined (SADD, EXPIREAT). Upstash bills
- * a script as one command plus every call inside it (lib/capped-count.ts), so a script is 1 + this. Held against
- * the script's text in tests/contacts-write-cost.test.ts.
+ * the companies' lifted mark (since #4026), the agreed count, the left count (INCR or DECR, one of them) and the
+ * stores joined (SADD, EXPIREAT). Upstash bills a script as one command plus every call inside it
+ * (lib/capped-count.ts), so a script is 1 + this. Held against the script's text in tests/contacts-write-cost.test.ts.
  */
-export const CONTACT_WRITE_CALLS = 8;
+export const CONTACT_WRITE_CALLS = 9;
 
 /**
  * The most redis.call one run of CONTACT_FENCED_WRITE_IF makes: CONTACT_WRITE_CALLS, and the fence's PTTL and, to
@@ -517,16 +518,19 @@ function afterDeletion(mark: string | null, at: string | undefined): boolean {
 /**
  * A contact's row written only while it and the address's deleted mark hold what was read, with the counts that go
  * with it, in one step: KEYS[1] the list, KEYS[2] the store's deleted marks (lib/suppression.ts), KEYS[3] the
- * list's count of those who agreed, KEYS[4] of those who left; ARGV[1] the address, ARGV[2] the SHA-1 of its row as
- * read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark is not looked at),
- * ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the write (their own
- * yes, given after the deletion), ARGV[7] "1" to count one more who agreed, ARGV[8] "1" or "-1" for one more or
- * one fewer who left; with KEYS[5] (the person's set of stores joined, lib/joined-stores.ts) ARGV[9] the store's id
- * to add to it and ARGV[10] the day it ends. Answers 1 written, 0 changed (nothing written).
+ * list's count of those who agreed, KEYS[4] of those who left, KEYS[5] the address's companies' deletion mark
+ * (lib/crm-companies.ts companyGoneKey; NO_COMPANY_MARK when there is none to lift); ARGV[1] the address, ARGV[2]
+ * the SHA-1 of its row as read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark
+ * is not looked at), ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the
+ * write (their own yes, given after the deletion), and the companies' mark with it, in the same step (#4026: a lift
+ * sent in a write of its own could be lost, and the next yes no longer finds them deleted), ARGV[7] "1" to count one
+ * more who agreed, ARGV[8] "1" or "-1" for one more or one fewer who left; with KEYS[6] (the person's set of stores
+ * joined, lib/joined-stores.ts) ARGV[9] the store's id to add to it and ARGV[10] the day it ends. Answers 1
+ * written, 0 changed (nothing written).
  */
 export const CONTACT_WRITE_IF = [
   // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
-  "-- marktmorgen:contact-write-if:v1",
+  "-- marktmorgen:contact-write-if:v2",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
   'local seen = ""',
   "if cur then seen = redis.sha1hex(cur) end",
@@ -538,13 +542,16 @@ export const CONTACT_WRITE_IF = [
   "  if markSeen ~= ARGV[5] then return 0 end",
   "end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
-  'if ARGV[6] == "1" and ARGV[4] ~= "" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[6] == "1" and ARGV[4] ~= "" then',
+  '  redis.call("HDEL", KEYS[2], ARGV[4])',
+  '  redis.call("DEL", KEYS[5])',
+  "end",
   'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
   'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
   // The stores the address joined, with the row and only after the checks held: a deletion that won leaves no index.
   "if #ARGV >= 10 then",
-  '  redis.call("SADD", KEYS[5], ARGV[9])',
-  '  redis.call("EXPIREAT", KEYS[5], ARGV[10])',
+  '  redis.call("SADD", KEYS[6], ARGV[9])',
+  '  redis.call("EXPIREAT", KEYS[6], ARGV[10])',
   "end",
   "return 1",
 ].join("\n");
@@ -553,7 +560,8 @@ export const CONTACT_WRITE_IF = [
  * CONTACT_WRITE_IF fenced by a link that the person's erasure deletes (#4268: a waitlist confirmation read before an
  * erasure that completed meanwhile put the address back and lifted the print), all in one step. KEYS[1]..KEYS[4] and
  * ARGV[1]..ARGV[8] as CONTACT_WRITE_IF; KEYS[5] the fence, ARGV[9] its whole lifetime in ms (it was set with that EX);
- * with KEYS[6] (the person's set of stores joined) ARGV[10] the store's id and ARGV[11] the day it ends. Answers:
+ * KEYS[6] the address's companies' deletion mark, deleted with the lifted print (CONTACT_WRITE_IF's KEYS[5], #4026);
+ * with KEYS[7] (the person's set of stores joined) ARGV[10] the store's id and ARGV[11] the day it ends. Answers:
  *   - 2 refused by the fence, nothing written, never to be retried: the fence is gone (an erasure that finished
  *     deleted it), or a mark to lift was written in or after the second the fence was issued (PTTL against its
  *     lifetime, on Redis's clock, as the mark's second is: lib/suppression.ts ERASED_PRINT); a fence with no expiry,
@@ -564,7 +572,7 @@ export const CONTACT_WRITE_IF = [
  * Billed as one EVAL and its calls, at most CONTACT_FENCED_WRITE_CALLS; lib/redis-memory.ts runs the same steps.
  */
 export const CONTACT_FENCED_WRITE_IF = [
-  "-- marktmorgen:contact-fenced-write-if:v3",
+  "-- marktmorgen:contact-fenced-write-if:v4",
   'local left = redis.call("PTTL", KEYS[5])',
   "if left == -2 then return 2 end",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
@@ -587,12 +595,15 @@ export const CONTACT_FENCED_WRITE_IF = [
   "  if (at + 1) * 1000 > issued then return 2 end",
   "end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
-  'if lift then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  "if lift then",
+  '  redis.call("HDEL", KEYS[2], ARGV[4])',
+  '  redis.call("DEL", KEYS[6])',
+  "end",
   'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
   'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
   "if #ARGV >= 11 then",
-  '  redis.call("SADD", KEYS[6], ARGV[10])',
-  '  redis.call("EXPIREAT", KEYS[6], ARGV[11])',
+  '  redis.call("SADD", KEYS[7], ARGV[10])',
+  '  redis.call("EXPIREAT", KEYS[7], ARGV[11])',
   "end",
   "return 1",
 ].join("\n");
@@ -631,18 +642,24 @@ async function writeContactIf(
   const value = JSON.stringify(next);
   const was = typeof raw === "string" ? sha1(raw) : "";
   const markWas = mark === null ? "" : sha1(mark);
+  // Their own yes also lifts the companies' mark of the deletion (lib/crm-companies.ts), in the same step as the
+  // suppression and the row: a company never takes them while the store still holds them as deleted, and the two never
+  // part (#4026; a lift sent in a write of its own could be lost, and the next yes no longer finds them deleted).
+  const statsId = room && isOrderRoom(room) ? room.order.statsId : room?.statsId;
+  const company = lift && statsId ? companyGoneKey(statsId, email) : null;
   if (room && isOrderRoom(room) && dataKey(room.order) && !inContacts) {
     const commands: (string | number)[][] = [
       ...joined,
       ["HSET", key, email, value],
       ...(lift ? [liftCommand(listId, email)] : []),
+      ...(company ? [["DEL", company]] : []),
       ...(counts.agreed ? [["INCR", agreedKey(listId)]] : []),
       ...(counts.left === 1 ? [["INCR", unsubKey(listId)]] : counts.left === -1 ? [["DECR", unsubKey(listId)]] : []),
     ];
     return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
   }
   // A room that is an order's but has no key of its own (dataKey) gets them here as well, in the same script.
-  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined, fence);
+  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined, company, fence);
 }
 
 /**
@@ -660,6 +677,8 @@ async function writeRowIf(
   strict = false,
   /** joinedCommands: the person's set of stores joined, added to in the script after its checks. */
   joined: (string | number)[][] = [],
+  /** The companies' deletion mark lifted with the suppression (companyGoneKey), or null for none. */
+  company: string | null = null,
   /** A fence (upsertContact's): CONTACT_FENCED_WRITE_IF in place of CONTACT_WRITE_IF, its 2 answered as "gone". */
   fence?: { key: string; seconds: number },
 ): Promise<boolean | "gone"> {
@@ -670,9 +689,11 @@ async function writeRowIf(
   const [add, expire] = joined;
   const index = add?.[0] === "SADD" && expire?.[0] === "EXPIREAT" && joined.length === 2 && add[1] === expire[1];
   const keys = [key, marks, agreedKey(listId), unsubKey(listId)];
+  // The companies' deletion mark, lifted in the same step as the suppression by either script (#4026).
+  const companyMark = company ?? NO_COMPANY_MARK;
   const command: (string | number)[] = fence
-    ? ["EVAL", CONTACT_FENCED_WRITE_IF, index ? 6 : 5, ...keys, fence.key, ...(index ? [String(add[1])] : []), ...args, fence.seconds * 1000, ...(index ? [String(add[2]), String(expire[2])] : [])]
-    : ["EVAL", CONTACT_WRITE_IF, index ? 5 : 4, ...keys, ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])];
+    ? ["EVAL", CONTACT_FENCED_WRITE_IF, index ? 7 : 6, ...keys, fence.key, companyMark, ...(index ? [String(add[1])] : []), ...args, fence.seconds * 1000, ...(index ? [String(add[2]), String(expire[2])] : [])]
+    : ["EVAL", CONTACT_WRITE_IF, index ? 6 : 5, ...keys, companyMark, ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])];
   let result: unknown;
   try {
     result = repliesFor(await redisPipeline([command]), 1)?.[0];

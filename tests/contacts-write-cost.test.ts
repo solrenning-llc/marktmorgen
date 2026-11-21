@@ -28,8 +28,8 @@ function billed(commands: Commands, scriptCalls: number): number {
     const head = String(c[1] ?? "");
     if (c[0] !== "EVAL") total += 1;
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
-    else if (head.startsWith("-- marktmorgen:contact-write-if:v1")) total += 1 + scriptCalls;
-    else if (head.startsWith("-- marktmorgen:contact-fenced-write-if:v3")) total += 1 + CONTACT_FENCED_WRITE_CALLS;
+    else if (head.startsWith("-- marktmorgen:contact-write-if:v2")) total += 1 + scriptCalls;
+    else if (head.startsWith("-- marktmorgen:contact-fenced-write-if:v4")) total += 1 + CONTACT_FENCED_WRITE_CALLS;
     else if (head.startsWith("-- marktmorgen:contact-cas-hset:v1")) total += 1 + 2 * ((c.length - 4) / 3);
     else total += 1000; // a script this test does not know is not free
   }
@@ -59,10 +59,13 @@ async function main() {
     const written = (CONTACT_WRITE_IF.match(/redis\.call\(/g) ?? []).length;
     // The counts line holds INCR and DECR as alternatives, of which one runs.
     is("CONTACT_WRITE_CALLS is the most redis.call a run of CONTACT_WRITE_IF makes (the INCR/DECR pair counted once)", CONTACT_WRITE_CALLS, written - 1);
-    is("and it is the eight it was reviewed at: two reads, the row, the lifted mark, both counts, the stores joined (2)", CONTACT_WRITE_CALLS, 8);
+    // Nine since #4026 (Claude 7, 15 November 2026): the companies' deletion mark is lifted in the same step as the
+    // suppression, one DEL more, raising every figure built on it; none is lowered.
+    is("and it is the nine it was reviewed at: two reads, the row, the lifted mark, the companies' lifted mark, both counts, the stores joined (2)", CONTACT_WRITE_CALLS, 9);
     const fenced = (CONTACT_FENCED_WRITE_IF.match(/redis\.call\(/g) ?? []).length;
     is("CONTACT_FENCED_WRITE_CALLS is the most redis.call a run of CONTACT_FENCED_WRITE_IF makes (the INCR/DECR pair counted once)", CONTACT_FENCED_WRITE_CALLS, fenced - 1);
-    is("and it is CONTACT_WRITE_CALLS with the fence's PTTL and TIME (#4268): ten", CONTACT_FENCED_WRITE_CALLS, 10);
+    // Merge of main into #4026 (16 November 2026): the fenced script lifts the companies' mark with the print too.
+    is("and it is CONTACT_WRITE_CALLS with the fence's PTTL and TIME (#4268): eleven, the companies' lifted mark included (#4026)", CONTACT_FENCED_WRITE_CALLS, 11);
   }
 
   part("the worst case of each path, scripts counted by what they run");
@@ -121,7 +124,7 @@ async function main() {
       let sum = 0;
       redis.pipeline = async (commands: Commands) => {
         // Another writer changes the row just before each of the first two checked writes: theirs is not counted here.
-        if (losses > 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
+        if (losses > 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v2"))) {
           losses -= 1;
           const [row] = await real([["HGET", leadsKey(list), email]]);
           await real([["HSET", leadsKey(list), email, String(row).replace(/"lastAt":"[^"]*"/, `"lastAt":"2026-01-0${losses + 1}T00:00:00.000Z"`)]]);

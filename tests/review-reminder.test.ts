@@ -51,11 +51,12 @@ async function main(): Promise<void> {
   const withReminder = afterSent([first, again], { days: 7, again: 5 }, onTime);
   is("the first is marked sent, with its time; the reminder, again", withReminder.filter((c) => c[0] === "SET").map((c) => c[2]), [`sent:${onTime}`, "again"]);
   is("the first waits on the list for its reminder's day", withReminder.find((c) => c[0] === "ZADD"), ["ZADD", "nl:rev:ask:due", "XX", againDueAt(first.paidAt, 7, 5), "m1"]);
-  is("nothing leaves the list then", withReminder.some((c) => c[0] === "ZREM"), false);
+  // A reminder stays on the list while it is claimed and leaves it only once its batch went (Codex L and U on #4495).
+  is("only the reminder that went leaves the list then", withReminder.filter((c) => c[0] === "ZREM"), [["ZREM", "nl:rev:ask:due", "m2"]]);
   const without = afterSent([first], { days: 7 }, onTime);
   is("no reminder: the first leaves the list", without.find((c) => c[0] === "ZREM"), ["ZREM", "nl:rev:ask:due", "m1"]);
   is("…and nothing is put back", without.some((c) => c[0] === "ZADD"), false);
-  is("only reminders: nothing to take off (already taken when claimed)", afterSent([again], { days: 7, again: 5 }, onTime).some((c) => c[0] === "ZREM" || c[0] === "ZADD"), false);
+  is("only reminders: each taken off once it went, nothing put back", afterSent([again], { days: 7, again: 5 }, onTime).filter((c) => c[0] === "ZREM" || c[0] === "ZADD"), [["ZREM", "nl:rev:ask:due", "m2"]]);
 
   part("A first held back does not bring the reminder closer");
   // The first was due on day 7 but went out on day 10 (the plan, Stripe, the

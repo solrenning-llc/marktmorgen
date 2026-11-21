@@ -89,8 +89,11 @@ async function main() {
           failed = true;
           return [42] as never;
         }
-        // The DEL never reaches Redis and its reply is lost: the mark stays.
-        if (!lostDel && commands.length === 1 && commands[0][0] === "DEL" && commands[0][1] === mark) {
+        // The cleanup never reaches Redis and its reply is lost: the mark stays. Opening lets its mark go with a plain
+        // DEL (claimAndStart); finishing lets its owner-token lease go with the compare-and-delete script
+        // (lib/claim-mark.ts releaseMark, Codex X5 on #3989), whose key is the mark.
+        const cleanup = commands.length === 1 && ((commands[0][0] === "DEL" && commands[0][1] === mark) || (commands[0][0] === "EVAL" && commands[0][2] === 1 && commands[0][3] === mark));
+        if (!lostDel && cleanup) {
           lostDel = true;
           return [] as never;
         }

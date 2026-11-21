@@ -1124,6 +1124,34 @@ export class MemoryRedis {
           if (this.run(["HGET", hash, field]) !== value) return 0;
           return this.run(["HDEL", hash, field, mark]);
         }
+        // lib/course-finish.ts: only the live pending attempt can become a confirmed finish.
+        if (key.startsWith("-- marktmorgen:course-finish-confirm:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, mark, token, seconds] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", mark]) !== token) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", mark, "1", "EX", seconds]);
+          return 1;
+        }
+        // lib/course-finish.ts RAISE_REACHED: a share mark raised only, and never written back after the student's erasure.
+        if (key.startsWith("-- marktmorgen:course-reach-raise:v1\n") && (args[0] === "1" || args[0] === "2")) {
+          const count = Number(args[0]);
+          if (args.length !== 1 + count + 5) return -1;
+          const [mark, prints] = args.slice(1, 1 + count);
+          const [step, seen, seconds, field, printSeen] = args.slice(1 + count);
+          this.scriptCalls += 1;
+          const cur = this.run(["GET", mark]);
+          if (typeof cur === "string" && /^\d+$/.test(cur) && Number(cur) >= Number(step)) return 0;
+          if (cur === null && seen !== "") return 0;
+          if (count === 2) {
+            this.scriptCalls += 1;
+            const print = this.run(["HGET", prints, field]);
+            if ((print === null ? "" : String(print)) !== printSeen) return 0;
+          }
+          this.scriptCalls += 1;
+          this.run(["SET", mark, step, "EX", seconds]);
+          return 1;
+        }
         // lib/traffic.ts FLY_SHARE_HOLD: a hold added to a connection's share of copies only under a token not yet there.
         if (key.startsWith("-- marktmorgen:fly-share-hold:v1\n") && args[0] === "1" && args.length === 6) {
           const [, hash, field, token, units, keep] = args;
@@ -3325,8 +3353,14 @@ export class MemoryRedis {
         }
         return gone;
       }
-      case "EXISTS":
-        return this.data.has(key) && !MemoryRedis.empty(this.data.get(key)) ? 1 : 0;
+      case "EXISTS": {
+        let count = 0;
+        for (const name of rest.map(String)) {
+          this.live(name);
+          if (this.data.has(name) && !MemoryRedis.empty(this.data.get(name))) count += 1;
+        }
+        return count;
+      }
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.

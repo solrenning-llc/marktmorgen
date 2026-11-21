@@ -1,7 +1,7 @@
 import { MAX_STEP_NEXT_ACTION, MAX_STEP_NEXT_DAYS } from "@/lib/flow-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Flow } from "@/lib/flows";
-import { FLOW_TRIGGERS } from "@/lib/flow-rules";
+import { FLOW_TRIGGERS, isReachedShare } from "@/lib/flow-rules";
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const strings = (value: Record<string, unknown>, keys: string[]) => keys.every(key => typeof value[key] === "string");
 function condition(value: unknown): boolean {
@@ -32,6 +32,8 @@ export function parseFlowList(raw: unknown): Flow[] | null {
     if (flow.productId !== null && typeof flow.productId !== "string") return null;
     if (typeof flow.createdAt !== "number" || !Number.isFinite(flow.createdAt)) return null;
     if ((flow.tag !== undefined && typeof flow.tag !== "string") || (flow.formId !== undefined && typeof flow.formId !== "string") || (flow.formOutcome !== undefined && typeof flow.formOutcome !== "string")) return null;
+    // The share a "reached" workflow starts at (287 [H4-1]): only on that trigger, and only a share it may have.
+    if (flow.trigger === "reached" ? !isReachedShare(flow.share) : flow.share !== undefined) return null;
     if (flow.goal !== undefined && (!record(flow.goal) || ("any" in flow.goal ? flow.goal.any !== true : "tag" in flow.goal ? typeof flow.goal.tag !== "string" : typeof flow.goal.productId !== "string"))) return null;
     if (!Array.isArray(flow.steps)) return null;
     const steps = new Set<string>();

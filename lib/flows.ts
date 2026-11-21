@@ -2,7 +2,7 @@ import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListRaw, readFlowListStrict } from "@/lib/flow-list";
 import { changesWhatItDoes, dropFlowVersions, flowHistorySize, keepFlowVersion, keepFlowVersionOnce, payFlowHistory, readFlowVersions, versionedFlowIds } from "@/lib/flow-versions";
 import { restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
-import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
+import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS, isReachedShare } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, SES_PARKS_PER_RUN, SES_WAKE_PER_JOB, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { FIRST_DELAY_SECONDS, type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -126,7 +126,9 @@ export type Flow = {
    * agreed to hear from the creator; "paid_request": paid one of the store's
    * payment requests, sent to their address (635 [GL3], lib/payment-flow-
    * trigger.ts), while they are on the list and agreed to hear from the
-   * creator.
+   * creator; "reached": marked done at least `share` percent of the lessons
+   * of the course `productId` is (287 [H4-1], added 12 November 2026,
+   * lib/course-finish.ts).
    */
   trigger: FlowTrigger;
   productId: string | null;
@@ -160,6 +162,8 @@ export type Flow = {
   starter?: "welcome" | "bought";
   /** Ends for anyone who gets this product, or has bought anything (lib/flow-rules.ts). */
   goal?: FlowGoal;
+  /** For "reached": the percent of the course's lessons done that starts it (lib/flow-rules.ts, isReachedShare). */
+  share?: number;
 };
 
 const QUEUE = "nl:mail:flowq";
@@ -444,7 +448,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 export type FlowResult =
   // `kept`, when putting a version back: whether the version it replaced was kept (false when nothing changed).
   | { ok: true; flows: Flow[]; kept?: boolean }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "history_room" | "history_unconfirmed" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "history_room" | "history_unconfirmed" | "share" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -482,11 +486,14 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
   if (!trigger) return { ok: false, reason: "trigger" };
   const courses = new Set(idsOfKind(store, "course"));
   const isCourse = (id: string) => courses.has(id);
-  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "abandoned";
+  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "abandoned" || trigger === "reached";
   const productId = aboutProduct && typeof raw.productId === "string" ? raw.productId : null;
   if ((trigger === "product" || trigger === "abandoned") && !(productId && hasProduct(store, productId))) return { ok: false, reason: "product" };
   // Finishing and opening are things only a course can be done to.
-  if ((trigger === "finished" || trigger === "started") && !(productId && hasProduct(store, productId) && isCourse(productId))) return { ok: false, reason: "product" };
+  if ((trigger === "finished" || trigger === "started" || trigger === "reached") && !(productId && hasProduct(store, productId) && isCourse(productId))) return { ok: false, reason: "product" };
+  // How much of the course a student has done before it starts (287 [H4-1]).
+  const share = trigger === "reached" && isReachedShare(raw.share) ? raw.share : null;
+  if (trigger === "reached" && share === null) return { ok: false, reason: "share" };
   const tag = trigger === "tagged" ? cleanTag(raw.tag) : "";
   if (trigger === "tagged" && !tag) return { ok: false, reason: "tag" };
   // A form of the store's own that asks for an address: without one, nobody it starts could be written to.
@@ -557,6 +564,7 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
     ...(formId ? { formId } : {}),
     ...(formOutcome ? { formOutcome } : {}),
     ...(stageId ? { stageId } : {}),
+    ...(share !== null ? { share } : {}),
     steps,
     active,
     createdAt: at >= 0 ? flows[at].createdAt : Math.floor(Date.now() / 1000),
@@ -808,41 +816,54 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * (lib/course-finish.ts); each start is claimed per person and sequence
  * (startFlows), so trying again never starts anybody twice.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<boolean> {
+export type EnrollEvent = { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; reached?: { productId: string; share: number } };
+
+export async function enroll(store: Store, email: string, event: EnrollEvent): Promise<boolean> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return true;
-    // Whether what they just got is sold for money: the store's own index
-    // knows, so "bought" costs no read.
-    const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
-    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
-    // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
-    const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
-      (f) =>
-        f.active &&
-        f.steps.length > 0 &&
-        ((f.trigger === "joined" && event.joined) ||
-          (f.trigger === "product" && event.productId && f.productId === event.productId) ||
-          (f.trigger === "bought" && paid) ||
-          (f.trigger === "tagged" && event.tag && f.tag && sameLabel(f.tag, event.tag)) ||
-          (f.trigger === "finished" && event.finished && f.productId === event.finished) ||
-          (f.trigger === "started" && event.started && f.productId === event.started) ||
-          (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
-          (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
-          (f.trigger === "signed" && event.signed) ||
-          (f.trigger === "paid_request" && event.paidRequest) ||
-          (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
-    );
-    if (!flows.length) return true;
-    const address = normaliseEmail(email);
-    // Only someone who may be written to starts one; their one start is not
-    // spent on a moment they could not have received it.
-    if (!(await mailableExactly(store.listId, address))) return true;
-    await startFlows(store, flows, [address]);
+    await enrollOrThrow(store, email, event);
     return true;
   } catch (error) {
     console.error("starting a sequence failed", error);
     return false;
   }
+}
+
+/**
+ * enroll, but a failure (the sequences or a claim not read, rule 24) throws instead of being logged, so a caller
+ * that keeps a mark of what it started writes that mark only once the start is known (Codex X5's MEDIUM on #3989).
+ * Starting again after a failure starts nobody twice: each start is claimed once per sequence (startFlows).
+ */
+export async function enrollOrThrow(store: Store, email: string, event: EnrollEvent): Promise<void> {
+  if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
+  // Whether what they just got is sold for money: the store's own index
+  // knows, so "bought" costs no read.
+  const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
+  // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
+  // not exactly nil or a list of sequences throws (enroll logs it), never read as "no sequences" (rule 24).
+  const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
+    (f) =>
+      f.active &&
+      f.steps.length > 0 &&
+      ((f.trigger === "joined" && event.joined) ||
+        (f.trigger === "product" && event.productId && f.productId === event.productId) ||
+        (f.trigger === "bought" && paid) ||
+        (f.trigger === "tagged" && event.tag && f.tag && sameLabel(f.tag, event.tag)) ||
+        (f.trigger === "finished" && event.finished && f.productId === event.finished) ||
+        (f.trigger === "started" && event.started && f.productId === event.started) ||
+        // Every share at or below what they have now: a student who went from 20% to 60% at once has reached 25% and 50%.
+        (f.trigger === "reached" && event.reached && f.productId === event.reached.productId && isReachedShare(f.share) && event.reached.share >= f.share) ||
+        (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
+        (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
+        (f.trigger === "signed" && event.signed) ||
+        (f.trigger === "paid_request" && event.paidRequest) ||
+        (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
+  );
+  if (!flows.length) return;
+  const address = normaliseEmail(email);
+  // Only someone who may be written to starts one; their one start is not
+  // spent on a moment they could not have received it.
+  if (!(await mailableExactly(store.listId, address))) return;
+  await startFlows(store, flows, [address], true);
 }
 
 /**
@@ -864,11 +885,12 @@ async function mailableExactly(listId: string, address: string): Promise<boolean
  * Says how many starts were new; throws UnknownReplyError, after the
  * definite starts, when a claim's reply was unknown.
  */
-async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
+async function startFlows(store: Store, flows: Flow[], addresses: string[], retryDeferred = false): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
   let unknown = false;
+  let deferred = false;
   for (const flow of flows) {
     if (!flow.steps.length) continue;
     // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
@@ -898,6 +920,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     const admitted = await admitRuns(store.listId, dailyRunLimit(store), claimed.length, now);
     const fresh = claimed.slice(0, admitted);
     const refused = claimed.slice(admitted);
+    if (refused.length) deferred = true;
     if (refused.length) await redisPipeline(refused.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
     if (!fresh.length) continue;
     // Each run takes room in the store's data room before it starts, at the
@@ -905,6 +928,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     // it does not start, and its start and its place in the day go back.
     const room = await takeData(store, [{ until: runGoneBy(flow, now) * 1000, bytes: fresh.length * runBytes(flow) }]);
     if (!room.ok) {
+      deferred = true;
       await redisPipeline(fresh.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
       await refuseRuns(store.listId, fresh.length, now);
       continue;
@@ -936,6 +960,9 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     started += queued;
   }
   if (unknown) throw new UnknownReplyError("a sequence's once-only start");
+  // A caller that persists its event must retry known capacity refusals as well as unknown writes. Ordinary
+  // internal starters still receive their count, and enroll() keeps its existing catch-and-log boundary.
+  if (retryDeferred && deferred) throw new Error("A sequence start was deferred by its existing daily or data-room allowance");
   return started;
 }
 

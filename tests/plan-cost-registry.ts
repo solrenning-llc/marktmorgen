@@ -2747,6 +2747,11 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
+      { file: "lib/course-finish.ts", names: ["FINISH_PENDING_SECONDS", "CONFIRM_FINISH", "withCutoff(cutoff", "releaseMark(key, token)"] },
+      // A share passed (287 [H4-1]) takes its own buyer action before the sequences are read; since Codex X6's LOW on #3989
+      // its mark is read with the store's deletion print (GET + HGET) and written by RAISE_REACHED (EVAL + GET + HGET + SET):
+      // four commands more than the plain SET, inside that action's hundred, at most once a step per student and course.
+      { file: "lib/course-finish.ts", names: ["RAISE_REACHED", "suppressedAtCommand(listId, email)", "takeBuyerAction(store)"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
       // 543 [CM2]: a post or comment held for approval is the same action, inside the community's and the member's ceilings; since unit 2 it also puts its store on
       // the daily notice's list and line (two ZADDs), and a hold with its HOLD_SWEEP sweep at its most stays inside one action's 100 commands (tests/cm2-u2-daily-notice.test.ts);
@@ -2785,7 +2790,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],
-    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. A confirmed course finish adds one EVAL with one GET and one SET inside it (three commands); cleanup uses the existing token-owned release (EVAL, GET, and at most DEL). The three-command confirmation is charged to the existing 100-command action envelope; the single-flow finish measures 22 including Lua-internal commands, not a proof of every workflow configuration. Workflow starts retain their separate daily run and command ceilings. A pending attempt uses the same finish key for at most 60 seconds, with network work cut off one Redis timeout before expiry; confirmed marks retain the existing 400-day maximum. Capacity refusals leave the event retryable under the same allowances, never additional runs past them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
   },
   {
     id: "webhooks",

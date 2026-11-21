@@ -2044,6 +2044,37 @@ export class MemoryRedis {
           }
           return n;
         }
+        // lib/inbox.ts INBOX_OPEN_IF_LIVE: a new conversation written only while its store is live, then as INBOX_WRITE.
+        if (key.startsWith("-- marktmorgen:inbox-open-if-live:v1\n") && args[0] === "7" && args.length === 1 + 7 + 11) {
+          const [record, index, list, episode, token, live, erasing] = args.slice(1, 8);
+          const [, next, keep, score, id, message, max, tokenValue, endEpisode, field, statsId] = args.slice(8);
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          if (call(["HGET", erasing, field]) !== null) return -1;
+          if (statsId === "") {
+            if (Number(call(["EXISTS", live])) !== 1) return -1;
+          } else {
+            const raw = call(["GET", live]);
+            if (typeof raw !== "string") return -1;
+            let parsed: unknown;
+            try { parsed = JSON.parse(raw); } catch { return -2; }
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return -2;
+            if ((parsed as { statsId?: unknown }).statsId !== statsId) return -1;
+          }
+          if (call(["GET", record]) !== null) return 0;
+          call(["SET", record, next, "EX", keep]);
+          call(["ZADD", index, score, id]);
+          if (message !== "") {
+            call(["RPUSH", list, message]);
+            call(["LTRIM", list, -Number(max), -1]);
+          }
+          call(["EXPIRE", list, keep]);
+          call(["SET", token, tokenValue, "EX", keep]);
+          if (endEpisode === "1") call(["DEL", episode]);
+          return 1;
+        }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
         if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {

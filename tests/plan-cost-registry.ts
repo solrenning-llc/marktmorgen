@@ -1156,8 +1156,10 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000),
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
-  // A message written to the inbox, and its index.
-  inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
+  // A message written to the inbox, and its index; for a new conversation, the fence's two reads of its store's
+  // erasing field and identity (lib/inbox.ts INBOX_OPEN_IF_LIVE), and for a contact message, the same two read before
+  // its email (storeStillLive, lib/store-contact.ts) (Codex L-20261120-1945).
+  inbox: request("light", 16 + TAKE_COMMANDS, 4_000),
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
   // An access email; and since 9 November 2026 (13 [D10], review 6748073377 of #3431, M2) the Path lead its link may

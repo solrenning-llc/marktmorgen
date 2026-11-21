@@ -15,6 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { storeStillLive } from "@/lib/inbox";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured } from "@/lib/redis";
 import { essentialLimitState } from "@/lib/request-guard";
@@ -56,6 +57,8 @@ export async function sendContact(input: { store: Store; name: string; email: st
   const byStore = await essentialLimitState("contact-store", who, MAX_PER_DAY, 86_400);
   if (byStore !== "within") return byStore === "exceeded" ? "limited" : "error";
   const from = name || email;
+  // A message admitted on an old Store writes to nobody once the store's erasure has begun (Codex L-20261120-1945).
+  if (!(await storeStillLive(store))) return "closed";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,

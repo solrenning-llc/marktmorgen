@@ -38,6 +38,7 @@ import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { type BatchMessage, type SendOutcome, NIMBUS_FROM, sendBatchOutcome, sendEmailOutcome } from "@/lib/email";
+import { stopTags } from "@/lib/mail-health-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -593,7 +594,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
             sent: g.sentWith,
             lang: speech(store).lang.locale,
           });
-          messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+          messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) });
         }
         const outcome = await sendBatchOutcome(messages, batchKey, { by: "monthly" });
         if (outcome === "sent") await batchCountSettled(batchKey, recipients);

@@ -30,6 +30,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { type BatchMessage, sendListBatchOutcome } from "@/lib/email";
+import { stopTags } from "@/lib/mail-health-rules";
 import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import { leadsKey } from "@/lib/contact-rules";
@@ -491,7 +492,7 @@ export async function advanceAnnouncement(
             label: communityWords(store.language).stopLabel,
             after: communityWords(store.language).stopAfterAnnounce,
           });
-          messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+          messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) });
         }
         const outcome = await sendListBatchOutcome(messages, batchKey, { by: "monthly" });
         if (outcome === "sent") await batchCountSettled(batchKey, to);

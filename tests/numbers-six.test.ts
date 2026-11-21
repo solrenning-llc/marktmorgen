@@ -172,7 +172,7 @@ async function main(): Promise<void> {
 
   part("The month's goal");
   is("a goal is a whole positive amount, or 0 for none", [readGoal(300000), readGoal(0), readGoal(-1), readGoal(1.5), readGoal("x")], [300000, 0, null, null, null]);
-  await setSalesGoal(store.statsId!, 300_000, "usd", Date.parse("2026-10-01T03:00:00Z"));
+  await setSalesGoal(store, 300_000, "usd", Date.parse("2026-10-01T03:00:00Z"));
   is("kept for the store, with the month it was set in", await readSalesGoal(store.statsId, "usd"), { cents: 300_000, since: "2026-10" });
   is("and not read as a goal in another currency", await readSalesGoal(store.statsId, "jpy"), { cents: 0, since: "" });
   const channelDays = { instagram: { "2026-10-01": 50_000, "2026-10-05": 40_000, "2026-09-30": 99_000 }, direct: { "2026-10-05": 10_000 } };

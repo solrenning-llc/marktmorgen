@@ -382,7 +382,9 @@ async function failingBatch(r: Awaited<ReturnType<typeof setup>>, answer: "refus
   let posted = false;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
-    if (!posted && url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
+    // A refusal refuses every post of the batch: since main tags a store's batch (stopTags, ALL-160), a 422 is sent once
+    // more without its tags (lib/email.ts dispatchBatch), and that second post must be refused too.
+    if ((answer === "refused" || !posted) && url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
       posted = true;
       if (answer === "refused") return new Response("synthetic refusal", { status: 422 });
       // The provider took the batch and its answer was lost on the way: sendBatch says "retry", which may mean sent.

@@ -90,6 +90,7 @@ async function main(): Promise<void> {
   const pressWith = async (id: string, ip: string, { consent = true, cookie = "" } = {}) => {
     const form = new FormData();
     form.set("handle", "stockholdshop");
+    form.set("billing_country", "US");
     form.set("product", id);
     const before = made;
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", {
@@ -106,6 +107,7 @@ async function main(): Promise<void> {
   const pressCart = async (id: string, ip: string, consent = true): Promise<number> => {
     const form = new FormData();
     form.set("handle", "stockholdshop");
+    form.set("billing_country", "US");
     form.set("id", id);
     const before = made;
     await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", body: consent ? withConsent(form) : form, headers: headers(ip) }));

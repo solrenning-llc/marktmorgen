@@ -17,20 +17,21 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
  * The optimization: a mixed-integer program (scripts/pricing-optimization-milp.py,
  * scipy.optimize.milp with HiGHS) chooses each plan's monthly price on a $X9
  * grid and the share of each #553 per-use figure, under constant-elasticity
- * demand scenarios. Its input is written by this file
- * (milpInput, docs/pricing-optimization-milp-input-2026-10-18.json), and
- * every solution it returns (docs/pricing-optimization-milp-output-2026-10-18.json)
- * is checked here against the repository's own margin code and against an
- * exhaustive search over the same grid.
+ * demand scenarios. Its input is computed by this file (milpInput), and
+ * every solution it returns (milpOutput, run on demand) is checked here
+ * against the repository's own margin code and against an exhaustive search
+ * over the same grid.
  *
- *   node scripts/pricing-optimization.mjs
+ *   node scripts/pricing-optimization.mjs [--milp-input | --milp-output]
  *
- * writes the input, runs the solver and writes docs/pricing-optimization-2026-10-18.md;
- * tests/pricing-optimization.test.ts fails when any of the three files is
- * stale or a solution stops keeping 60%.
+ * prints the report, the solver's input or its solutions. Since the owner's
+ * decision of 20/11/2026 none of the three is stored: their paths hold only a
+ * fixed text (tests/generated-on-demand.ts), and
+ * tests/pricing-optimization.test.ts fails when a solution stops keeping 60%.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { PLAN_PRICES, PLAN_TITLES, TIERS, monthlyEmails, type Cycle, type Tier } from "@/lib/plan";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
@@ -266,8 +267,6 @@ export const profit = (tier: Tier, monthCents: number, shares: Shares, e: number
 /** The lower share of each #553 figure an alternative allows: A keeps every one; C allows cuts down to a tenth (the proposal's MIN_INCLUDED_SHARE). */
 export const ALTERNATIVES = { A: 1, C: 0.1 } as const;
 export type Alternative = keyof typeof ALTERNATIVES;
-// Reserve exceeds the measured four-cent rounding gap; it reduces both solver budgets.
-export const SAFETY_CENTS = 5;
 
 export type MilpInput = {
   generatedBy: string;
@@ -279,11 +278,42 @@ export type MilpInput = {
   plans: Record<Tier, {
     anchorCents: number;
     figures: Record<Printed, number>;
+    /** Each figure's lowest share under each alternative, never below what a page prints for it (a printed figure has a floor: an hour of video, half a GiB). */
+    lowest: Record<Alternative, Record<Printed, number>>;
     options: { monthCents: number; roomMonth: number; roomYear: number; netAtOnes: number; usageMonthAtOnes: number; exactKeepsAtOnes: boolean; demand: Record<string, number> }[];
     baseMonth: number; baseYear: number; coefMonth: Record<Printed, number>; coefYear: Record<Printed, number>;
   }>;
 };
 const firstFigure = (tier: Tier, id: Printed) => figures(tier)[id].find((n) => n > 0) ?? 0;
+/** The lowest share of a figure the program may choose: the alternative's, raised to what a page prints there when its printed
+ * floor (tidy) rounds that figure up, so a solution never prints more usage than the program counted. At or above it, a page
+ * only rounds down. */
+export function lowestShare(tier: Tier, id: Printed, share: number): number {
+  if (firstFigure(tier, id) <= 0 || share >= 1) return 1;
+  return Math.min(1, Math.max(share, printedShares(tier, { ...ones(), [id]: share })[id]));
+}
+/** The most usageCents exceeds the program's linear usage, in cents, at any share the program may choose: every figure at its
+ * lowest share or kept, on both intervals of every plan (rounding only). */
+export function cornerGap(): number {
+  let worst = 0;
+  for (const tier of TIERS) for (const c of ["month", "year"] as const) {
+    const base = usageFor(tier, c, zeros());
+    const coef = Object.fromEntries(ORDER.map((id) => [id, usageFor(tier, c, { ...zeros(), [id]: 1 }) - base])) as Record<Printed, number>;
+    for (const alt of Object.keys(ALTERNATIVES) as Alternative[]) {
+      const cut = ORDER.filter((id) => lowestShare(tier, id, ALTERNATIVES[alt]) < 1);
+      for (let mask = 0; mask < 1 << cut.length; mask += 1) {
+        const shares = ones();
+        cut.forEach((id, i) => { if (mask & (1 << i)) shares[id] = lowestShare(tier, id, ALTERNATIVES[alt]); });
+        worst = Math.max(worst, usageFor(tier, c, shares) - ORDER.reduce((sum, id) => sum + coef[id] * shares[id], base));
+      }
+    }
+  }
+  return worst;
+}
+/** The reserve both solver budgets lose: never under five cents, and always a cent more than the largest rounding gap measured at
+ * the shares the program may choose (cornerGap), so a cost that moves the rounding never leaves the program counting too little. */
+export const SAFETY_CENTS = Math.max(5, cornerGap() + 1);
+
 /** The program's coefficients, each read from the repository's code: rooms from unitUnder, usage from usageCents. */
 export function milpInput(): MilpInput {
   const plans = {} as MilpInput["plans"];
@@ -293,6 +323,7 @@ export function milpInput(): MilpInput {
     plans[tier] = {
       anchorCents: anchorCents(tier),
       figures: Object.fromEntries(ORDER.map((id) => [id, firstFigure(tier, id)])) as Record<Printed, number>,
+      lowest: Object.fromEntries((Object.keys(ALTERNATIVES) as Alternative[]).map((alt) => [alt, Object.fromEntries(ORDER.map((id) => [id, lowestShare(tier, id, ALTERNATIVES[alt])]))])) as Record<Alternative, Record<Printed, number>>,
       options: grid(tier).map((monthCents) => ({
         monthCents,
         roomMonth: unitUnder(monthCents, 0, SIZING_READING, true).usageRoomCents - PLAN_ROOM.month - SAFETY_CENTS,
@@ -322,7 +353,17 @@ export function linearityGap(): number {
 
 export type MilpSolution = { scenario: string; alternative: Alternative; status: string; objective: number; plans: Record<Tier, { monthCents: number; shares: Shares }> };
 export type MilpOutput = { solver: string; solutions: MilpSolution[] };
-export const milpOutput = (): MilpOutput => readJson<MilpOutput>(OUTPUT_FILE);
+let solved: MilpOutput | null = null;
+/** The solver's solutions for today's milpInput(), computed on demand (owner, 20/11/2026): OUTPUT_FILE holds only a
+ * fixed text. The interpreter is MILP_PYTHON when set (the test job's own environment with the pinned packages of
+ * scripts/requirements-solver.txt), python3 otherwise; a missing solver fails here, by name, and never reads a copy. */
+export function milpOutput(): MilpOutput {
+  if (solved) return solved;
+  const python = process.env.MILP_PYTHON || "python3";
+  const run = spawnSync(python, [join(root(), "scripts/pricing-optimization-milp.py")], { cwd: root(), input: JSON.stringify(milpInput()), encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+  if (run.status !== 0) throw new Error(`the solver did not run (${python} scripts/pricing-optimization-milp.py needs numpy and scipy: pip install -r scripts/requirements-solver.txt): ${run.error?.message ?? run.stderr}`);
+  return (solved = JSON.parse(run.stdout) as MilpOutput);
+}
 
 let exhaustiveInput: MilpInput | null = null;
 /** Enumerate the same raw-share problem as the solver; printed rounding is
@@ -330,7 +371,7 @@ let exhaustiveInput: MilpInput | null = null;
 export function exhaustive(tier: Tier, alt: Alternative, e: number): { monthCents: number; shares: Shares; profit: number } | null {
   const input = exhaustiveInput ??= milpInput();
   const plan = input.plans[tier];
-  const lowest = Object.fromEntries(ORDER.map(id => [id, plan.figures[id] > 0 ? ALTERNATIVES[alt] : 1])) as Shares;
+  const lowest = { ...plan.lowest[alt] } as Shares;
   const used = (cycle: "Month" | "Year") => (cycle === "Month" ? plan.baseMonth : plan.baseYear) +
     ORDER.reduce((sum, id) => sum + (cycle === "Month" ? plan.coefMonth : plan.coefYear)[id] * lowest[id], 0);
   let best: { monthCents: number; shares: Shares; profit: number } | null = null;
@@ -496,7 +537,7 @@ export function renderPricingOptimization(): string {
 
   push("# Prices and limits that maximize profit, under stated demand scenarios: 18 October 2026");
   push("");
-  push("<!-- Generated by `node scripts/pricing-optimization.mjs` from docs/pricing-optimization-data-2026-10-18.json and tests/pricing-optimization-table.ts (the solver is scripts/pricing-optimization-milp.py). Do not edit by hand: tests/pricing-optimization.test.ts fails when this file, the program's input or its output is stale. -->");
+  push("<!-- Generated by `node scripts/pricing-optimization.mjs` from docs/pricing-optimization-data-2026-10-18.json and tests/pricing-optimization-table.ts (the solver is scripts/pricing-optimization-milp.py). Generated on demand from the current code (owner, 20 November 2026): no copy is stored, so there is nothing to edit. The program's input and its solutions are computed on demand too. -->");
   push("");
   push("**An analysis for the owner, not a change.** No price, limit, gate or tax assumption in code changes with it, and `PLANS_ON_SALE` stays false. Every margin is the repository's own (lib/receiving-costs.ts `unitUnder` under the sizing reading; tests/limits-proposal-table.ts `usageCents`; lib/customer-base-rules.ts `assessMinimumCustomerBase`); every competitor figure is in the dataset with its page and the day it was read. **Demand is unknown**: every profit below is under a labeled constant-elasticity scenario, not a forecast.");
   push("");

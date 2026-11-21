@@ -250,7 +250,7 @@ async function main(): Promise<void> {
   await saveCourse(withEnd(c.courseId, end), c.store);
   const pay = async (fields: Record<string, string>) => {
     opened.length = 0;
-    const form = withConsent(new URLSearchParams({ handle: c.store.handle, product: c.product.id, ...fields }));
+    const form = withConsent(new URLSearchParams({ handle: c.store.handle, product: c.product.id, billing_country: "US", ...fields }));
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.test/api/store/checkout", {
       method: "POST",
       headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
@@ -316,7 +316,7 @@ async function main(): Promise<void> {
   const nearEnd = Math.floor(Date.now() / 1000) + 12 * 3600;
   await saveCourse(withEnd(near.courseId, nearEnd), near.store);
   opened.length = 0;
-  const nearForm = withConsent(new URLSearchParams({ handle: near.store.handle, product: near.product.id, access_end: "none" }));
+  const nearForm = withConsent(new URLSearchParams({ handle: near.store.handle, product: near.product.id, billing_country: "US", access_end: "none" }));
   await checkoutRoute(new NextRequest("https://marktmorgen.test/api/store/checkout", { method: "POST", headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" }, body: nearForm.toString() }));
   is("a page drawn in the last 24 hours said none: the checkout opens with no stamp", [opened.length, opened[0]?.get("metadata[access_end]") ?? null], [1, null]);
 
@@ -365,7 +365,7 @@ async function main(): Promise<void> {
   const planEnd = Math.floor(Date.now() / 1000) + 30 * DAY;
   await saveCourse(withEnd(plan.courseId, planEnd), plan.store);
   opened.length = 0;
-  const planForm = withConsent(new URLSearchParams({ handle: plan.store.handle, product: plan.product.id, pay: "plan", access_end: String(planEnd) }));
+  const planForm = withConsent(new URLSearchParams({ handle: plan.store.handle, product: plan.product.id, billing_country: "US", pay: "plan", access_end: String(planEnd) }));
   await checkoutRoute(new NextRequest("https://marktmorgen.test/api/store/checkout", { method: "POST", headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" }, body: planForm.toString() }));
   is("a payment-plan checkout opens as a plan, with no end stamped", [opened.length, opened[0]?.get("metadata[kind]") ?? null, opened[0]?.get("metadata[access_end]") ?? null], [1, "plan", null]);
   listed = [{ ...session(a.store, { product: a.product.id, kind: "plan", access_end: String(END) }, SET_AT + DAY), mode: "subscription", subscription: { status: "active" } }];

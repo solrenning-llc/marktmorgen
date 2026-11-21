@@ -78,6 +78,8 @@ async function main(): Promise<void> {
   const optioned = await addOption(OWNER, item, "Option A", "29");
   if (!optioned.ok) throw new Error("no option");
   const option = (await listing(item)).options[0].id;
+  const secondOption = await addOption(OWNER, item, "Option B", "39");
+  if (!secondOption.ok) throw new Error("no second option");
   await setProductFile(OWNER, option, { pathname: `stores/x/${option}/item-1a.bin`, name: "item-1a.bin", bytes: 4, contentType: "application/octet-stream", addedAt: "" });
   await setProductImage(OWNER, item, { path: picture("1"), width: 10, height: 10, alt: "", bytes: 4, small: null });
   await setProductPage(OWNER, item, true);
@@ -127,6 +129,10 @@ async function main(): Promise<void> {
   is("an option removed, with its file", await send(optionRoute as Handler, "option", { action: "remove", id: option }), ON_HOLD);
   is("an option changed", await send(optionRoute as Handler, "option", { action: "edit", id: option, label: "Option B", price: "39" }), ON_HOLD);
   is("an option added", await send(optionRoute as Handler, "option", { action: "add", id: item, label: "Option C", price: "49" }), ON_HOLD);
+  // Codex G's MEDIUM on #3471: the order of a held product's options is part of what is kept, so reordering is refused too.
+  const optionOrder = (await listing(item)).options.map((entry) => entry.id);
+  is("an option reordered", await send(optionRoute as Handler, "option", { action: "move", id: option, direction: "down" }), ON_HOLD);
+  is("the kept option order is unchanged", (await listing(item)).options.map((entry) => entry.id), optionOrder);
 
   part("Its picture");
   is("removed", await send(imageRoute as Handler, "image", { action: "remove", id: item }), ON_HOLD);
@@ -150,7 +156,7 @@ async function main(): Promise<void> {
   part("And everything is still there, as it was; nothing deleted, nothing sent out");
   const kept = await listing(item);
   is("its file", kept.file?.pathname, `stores/x/${item}/item-1.bin`);
-  is("its option, with the option's file", [kept.options.length, (await readDelivery((await storeForEmail(OWNER))!, option))?.option?.file?.pathname], [1, `stores/x/${option}/item-1a.bin`]);
+  is("its options, with the first option's file", [kept.options.length, (await readDelivery((await storeForEmail(OWNER))!, option))?.option?.file?.pathname], [2, `stores/x/${option}/item-1a.bin`]);
   is("its picture", [kept.image?.path, kept.image?.alt], [picture("1"), ""]);
   is("its page", (await readPage(statsId, item)).blocks.length, 1);
   is("its episode", (await readPodcast(podcastId))?.episodes.map((entry) => entry.id), [episode]);

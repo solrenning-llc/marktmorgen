@@ -161,10 +161,10 @@ async function main(): Promise<void> {
   part("One door to a single product's checkout");
   const root = process.cwd();
   const callers = [...sources(join(root, "app")), ...sources(join(root, "lib"))]
-    .map((path) => relative(root, path))
+    .map((path) => relative(root, path).split("\\").join("/"))
     .filter((path) => path !== "lib/store-checkout.ts" && path !== "lib/held-checkout.ts")
-    // Code only: a comment may name it.
-    .filter((path) => /\bcreateCheckout\b/.test(readFileSync(join(root, path), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1")));
+    // Code only: a comment or a quoted string may name it (lib/sale-openings.ts says why a session is made inside it).
+    .filter((path) => /\bcreateCheckout\b/.test(readFileSync(join(root, path), "utf8").replace(/"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*'/g, '""').replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1")));
   is("no file but lib/held-checkout.ts calls createCheckout", callers, []);
 
   done();

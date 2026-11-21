@@ -1205,11 +1205,12 @@ export const PAYPAL_PRESS_LOCK_TRIES = lockTriesAtMost(5_000);
  * The Redis commands one press of "Pay with PayPal" sends besides its book read (lib/paypal-payouts.ts,
  * payWithPayPal; Claude 7 on #4488): the link read, the lock's tries, who is on their way, the link read again for the
  * token, who is on their way again, the lock held again (EVAL), the batch written down as on its way with its store
- * (HSET, SADD), its settling at the most (held under PayPal's id and the "?" entry taken off, or the month's two
+ * (one EVAL, only while the store is live: billed 1 + EXISTS + HGET + HSET + SADD = 5, three more than the HSET and
+ * SADD it replaced; lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE, Codex L-20261120-0448), its settling at the most (held under PayPal's id and the "?" entry taken off, or the month's two
  * counts when the answer is not known), and the lock let go (EVAL). Counted through the Redis stand-in on each path in
  * tests/paypal-press-cost.test.ts.
  */
-export const PAYPAL_PRESS_COMMANDS = 1 + PAYPAL_PRESS_LOCK_TRIES + 1 + 1 + 1 + 1 + 2 + 2 + 1;
+export const PAYPAL_PRESS_COMMANDS = 1 + PAYPAL_PRESS_LOCK_TRIES + 1 + 1 + 1 + 1 + 5 + 2 + 1;
 /**
  * And its book read (lib/affiliates.ts, readBook, no deadline, `titles: false`) at the caps: the seven records, the
  * PayPal refunds (BOOK_PAYPAL_REFUNDS), the moves and the refund marks, as bookWork counts them, with the eight counts it
@@ -2690,14 +2691,16 @@ export const COST_LINES: CostLine[] = [
       + DAY_WINDOWS * readShapeCost(LIST_MADE_SHAPE),
     sources: [
       { file: "lib/store-reading-rules.ts", names: ["STORE_READINGS_PER_DAY", "HEAVY_READINGS_PER_DAY", "READING_FRESH_SECONDS"] },
-      { file: "lib/store-readings.ts", names: ["READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "readingsLeft", "keptReading", "READING_KINDS", "listForNaming", "listTryKey"] },
+      { file: "lib/store-readings.ts", names: ["READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "readingsLeft", "keptReading", "READING_KINDS", "HEAVY_KINDS", "listForNaming", "listTryKey"] },
+      // 426 [BX2]: the twelve months of earnings are one of the day's heavy readings, within SALES_READ_SHAPE, kept as the fourth kind (tests/bx2-u2-year-read.test.ts).
+      { file: "lib/earnings-read.ts", names: ["readEarningsYear", 'keptReading(store, "earnings"', "EARNINGS_STRIPE_PAGES", "EARNINGS_PAYPAL_SALES", "EARNINGS_PAYPAL_REFUNDS"] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["listForNaming(store)"] },
       { file: "lib/read-ceilings.ts", names: ["LIST_MADE_SHAPE", "STORE_LOCK_TRIES"] },
       { file: "app/studio/page.tsx", names: ["keptStats(current, undefined, freshNumbers)", "keptSales(current, undefined, freshNumbers)", "readingsLeft(current)"] },
       { file: "app/studio/totals/page.tsx", names: ["keptNumbers(store)", "keptMembers(store)"] },
       { file: "lib/read-ceilings.ts", names: ["STATS_READ_SHAPE", "SALES_READ_SHAPE", "MEMBERS_READ_SHAPE", "STORE_READING_SHAPES", "KEPT_READINGS_SHAPE"] },
     ],
-    basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal, the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows; and the readings kept a day. The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
+    basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal (its recent sales or its twelve months of earnings, each within SALES_READ_SHAPE and counted as one of them), the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows; and the readings kept a day, one of each of READING_KINDS (four since the earnings). The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
   },
   {
     id: "calendar-feed",
@@ -2998,10 +3001,12 @@ export const DUE_READ_COMMANDS = 2;
  * prepareStore, lib/store.ts erasingSince and closeStoreRecord; Claude 5's LOW): the lock made to last before it
  * (holdLock: EVAL, GET, EXPIRE); its own fenced step (the EVAL, its read of the lock and the HSET); the mark read under
  * the lock before the record goes (one HGET); the mark read before anything is touched, for a store whose plan reads
- * running and whose closing day is out of the final line (one HGET, counted always); and its HDEL in the record's own
- * fenced step.
+ * running and whose closing day is out of the final line (one HGET, counted always); its HDEL in the record's own
+ * fenced step; and, since Codex L-20261120-0448, the PayPal press's own lock taken around the mark (withLock: up to
+ * PAYPAL_PRESS_LOCK_TRIES SETs over its 5 s wait, and its release, an EVAL with its GET and DEL), so a press already
+ * sending finishes first and one after it is refused (lib/paypal-payouts.ts KEEP_OPEN_IF_LIVE).
  */
-export const ERASING_MARK_COMMANDS = 3 + 3 + 1 + 1 + 1;
+export const ERASING_MARK_COMMANDS = 3 + 3 + 1 + 1 + 1 + PAYPAL_PRESS_LOCK_TRIES + 3;
 /**
  * What fencing the live store's deletes by the store's lock adds (#3156 on #3643: lib/closed-store-data.ts forgetLive,
  * fencedBy; lib/redis-lock.ts applyIfHeld, CLOSING_FENCED): the lock made to last again (holdLock: EVAL, GET, EXPIRE)

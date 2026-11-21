@@ -52,7 +52,7 @@ import { repliesFor } from "@/lib/redis-reply";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LANGUAGES } from "@/lib/store-language";
 import type { ProductFile } from "@/lib/product-file";
-import type { Store } from "@/lib/store";
+import { type FileResult, type Store, setProductFile } from "@/lib/store";
 import { vaultPath } from "@/lib/vault-rules";
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
@@ -246,14 +246,28 @@ export type FileSaveIo = {
   write: (pathname: string, bytes: Uint8Array) => Promise<boolean>;
   measure: (pathname: string) => Promise<{ size: number; contentType: string }>;
   remove: (pathname: string) => Promise<void>;
-  attach: (file: ProductFile | null) => Promise<{ ok: true; removed: ProductFile | null } | { ok: false; reason: string }>;
+  /** Attaches `file` only while the product is still a draft that hands over nothing (attachDraftFile); `restore` puts a displaced file back. */
+  attach: (file: ProductFile | null, how?: { restore: true }) => Promise<{ ok: true; removed: ProductFile | null } | { ok: false; reason: string }>;
   rememberOwner: (folder: string) => Promise<void>;
 };
 
-export type FileSaveResult = { ok: true; file: ProductFile; pages: number } | { ok: false; error: "letters" | "too_big" | "upload_budget_unavailable" | "storage_full" | "failed" | "changed" };
+export type FileSaveResult = { ok: true; file: ProductFile; pages: number } | { ok: false; error: "letters" | "too_big" | "upload_budget_unavailable" | "storage_full" | "storage_unknown" | "failed" | "changed" | "displaced" };
 
 /** The refusals that come before the PDF is drawn: only after one of these does the run get its one save back. */
-const UNDRAWN: ReadonlySet<string> = new Set(["letters", "storage_full", "upload_budget_unavailable"]);
+const UNDRAWN: ReadonlySet<string> = new Set(["letters", "storage_full", "storage_unknown", "upload_budget_unavailable"]);
+
+/**
+ * Puts the drawn PDF on the product only while it is still what the route
+ * checked before the model ran (fileTargetProblem: a draft with no file, link
+ * or options, of a kind that takes a file), checked again inside the same
+ * locked change as the write (Codex X3/X6 MEDIUM on #3474). A product that was
+ * published, or given a link, options or a file meanwhile, answers "changed"
+ * and keeps what it had. A restore puts a displaced file back and is never
+ * refused by that check.
+ */
+export function attachDraftFile(email: string, productId: string, file: ProductFile | null, how?: { restore: true }): Promise<FileResult> {
+  return setProductFile(email, productId, file, how?.restore ? undefined : (product) => fileTargetProblem(product) === null);
+}
 
 /** Whether a save that ended with this error gives the run its one save back: only when it drew nothing. */
 export function saveGivenBack(error: string): boolean {
@@ -273,7 +287,14 @@ export function saveGivenBack(error: string): boolean {
 export async function saveAiFile(store: Store, productId: string, draft: FileDraft, io: FileSaveIo, at = new Date()): Promise<FileSaveResult> {
   if (!(await fileDrawable(draft, store.name))) return { ok: false, error: "letters" };
   const folder = await io.folder();
-  const room = await io.reserveRoom(folder, MAX_AI_FILE_BYTES).catch(() => null);
+  // A reservation that could not be read is not a full storage (Codex X6 LOW on #3474): unknown, nothing drawn.
+  let room: string | null;
+  try {
+    room = await io.reserveRoom(folder, MAX_AI_FILE_BYTES);
+  } catch (error) {
+    console.error("the store's room for a file written with AI could not be read", error);
+    return { ok: false, error: "storage_unknown" };
+  }
   if (!room) return { ok: false, error: "storage_full" };
   let pathname: string | null = null;
   try {
@@ -295,11 +316,17 @@ export async function saveAiFile(store: Store, productId: string, draft: FileDra
     const attached = await io.attach(file);
     if (!attached.ok) {
       await io.remove(path).catch(() => {});
-      return { ok: false, error: "failed" };
+      return { ok: false, error: attached.reason === "changed" ? "changed" : "failed" };
     }
     if (attached.removed) {
-      // A file arrived on the product meanwhile: it is put back, and this one goes.
-      await io.attach(attached.removed).catch(() => null);
+      // A file arrived on the product meanwhile: it is put back, and this one goes. If putting it back fails, the
+      // product still points at this PDF, so it is kept rather than deleted under it (Codex X6 LOW on #3474).
+      const displaced = attached.removed;
+      const restored = await io.attach(displaced, { restore: true }).then((r) => r.ok, () => false);
+      if (!restored) {
+        console.error("a file displaced by a file written with AI could not be put back; the new file is kept on the product", displaced.pathname);
+        return { ok: false, error: "displaced" };
+      }
       await io.remove(path).catch(() => {});
       return { ok: false, error: "changed" };
     }

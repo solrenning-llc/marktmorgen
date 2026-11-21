@@ -115,7 +115,8 @@ async function main(): Promise<void> {
   advance(61_000);
   const drawnBefore = drawings.count;
   const [refusedStatus, refused] = await json(await ask({ action: "save", product: draft.product.id, run, draft: text, checks: [true, true, true] }));
-  is("refused for room or for an upload", [refusedStatus === 409 || refusedStatus === 503, refused.error === "storage_full" || refused.error === "upload_budget_unavailable"], [true, true]);
+  // The store's room cannot be read here: unknown (503), never "full" (Codex X6 LOW on #3474).
+  is("refused because the room could not be read, said as unknown, not full", [refusedStatus, refused.error], [503, "storage_unknown"]);
   is("no PDF drawn", drawings.count - drawnBefore, 0);
   is("the run's save is given back", redis.run(["GET", `nl:ai:file:${store.statsId}:${run}`]), "1");
 

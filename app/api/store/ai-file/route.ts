@@ -5,7 +5,7 @@ import { AI_PER_MINUTE, MAX_AI_NOTES } from "@/lib/ai-rules";
 import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
 import { AI_FILE_SAVE_BYTES, readFileDraft, readOutlineInput } from "@/lib/ai-file-rules";
 import { reviewDone } from "@/lib/ai-draft-review";
-import { fileTargetProblem, grantFileSave, saveAiFile, saveGivenBack, sectionRequests, takeFileSave, writeFileOutline, writeFileSections, type FileSaveIo } from "@/lib/ai-file";
+import { attachDraftFile, fileTargetProblem, grantFileSave, saveAiFile, saveGivenBack, sectionRequests, takeFileSave, writeFileOutline, writeFileSections, type FileSaveIo } from "@/lib/ai-file";
 import { readListing } from "@/lib/catalog";
 import { costPauseCode, standingOf } from "@/lib/plan-standing";
 import { isVaultConfigured, writeVault } from "@/lib/vault";
@@ -13,7 +13,7 @@ import { deleteFile, headFile } from "@/lib/file-store";
 import { reserveStoreUpload } from "@/lib/upload-budget";
 import { reserveStorage, releaseStorage } from "@/lib/storage-reservations";
 import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
-import { setProductFile, storeFolder } from "@/lib/store";
+import { storeFolder } from "@/lib/store";
 import { rememberFolderOwner } from "@/lib/delivery";
 
 /**
@@ -135,8 +135,8 @@ export async function POST(request: NextRequest) {
       return { size: found.size, contentType: found.contentType };
     },
     remove: (pathname) => deleteFile(pathname),
-    attach: async (file) => {
-      const result = await setProductFile(ref, product.id, file);
+    attach: async (file, how) => {
+      const result = await attachDraftFile(ref, product.id, file, how);
       return result.ok ? { ok: true, removed: result.removed } : { ok: false, reason: result.reason };
     },
     rememberOwner: (folder) => rememberFolderOwner(folder, ref),
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
   if (!saved.ok) {
     // Nothing was kept. The run's one save comes back only when this save drew nothing (a refusal before the PDF), so one run draws one PDF at the most.
     if (saveGivenBack(saved.error)) await grantFileSave(store, run).catch(() => false);
-    return fail(saved.error, saved.error === "failed" ? 502 : saved.error === "upload_budget_unavailable" ? 503 : 409);
+    return fail(saved.error, saved.error === "failed" ? 502 : saved.error === "upload_budget_unavailable" || saved.error === "storage_unknown" ? 503 : 409);
   }
   return Response.json({ ok: true, file: { name: saved.file.name, bytes: saved.file.bytes }, pages: saved.pages });
 }

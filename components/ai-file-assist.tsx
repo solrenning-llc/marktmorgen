@@ -56,8 +56,10 @@ const MESSAGES: Record<string, string> = {
   letters: "Some letters in the text cannot be drawn in the PDF. Change them, then try again.",
   too_big: "The file came out too big to keep. Write the parts again with less text to make one.",
   storage_full: "Your storage is full. Delete a file you do not need, then try again.",
+  storage_unknown: "We could not check your storage just now. Nothing was saved. Try again in a minute.",
   upload_budget_unavailable: "Files cannot be added just now. Try again later.",
-  changed: "A file was added to this product meanwhile. That file was kept.",
+  changed: "This product changed meanwhile: it was published or given a file, a link or price options. Nothing was added to it.",
+  displaced: "A file was added to this product meanwhile and could not be put back. The product now hands over the new file. Check it before you publish.",
   unconfirmed: "We could not confirm what happened. Reload the page to check.",
 };
 const said = (error: string) => MESSAGES[error] ?? MESSAGES.unconfirmed;

@@ -4157,7 +4157,7 @@ export async function moveProduct(
 
 export type FileResult =
   | { ok: true; store: Store; removed: ProductFile | null }
-  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" };
+  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" | "changed" };
 
 /** What is handed over when something is paid for. One or the other. */
 export type Delivery = { file: ProductFile | null; link: string | null };
@@ -4203,11 +4203,15 @@ async function changeDelivery(
   id: string,
   giving: boolean,
   change: (current: Delivery) => Delivery,
-): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" }> {
+  onlyIf?: (product: Product) => boolean,
+): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" | "changed" }> {
   const result = await withStore(email, async (store, save) => {
     const owner = productIdFor(store, id);
     const product = owner ? await readProduct(store, owner) : null;
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    // A caller that checked the product before slow work checks it again here, under the same lock as the write
+    // (Codex X3/X6 MEDIUM on #3474): one that no longer passes is left exactly as it is.
+    if (onlyIf && !onlyIf(product)) return { ok: false as const, reason: "changed" as const };
     // A call delivers a booking, a course its lessons and a bundle its
     // products, not a file or a link of their own.
     if (giving && product.id === id && product.call) return { ok: false as const, reason: "call" as const };
@@ -4237,12 +4241,13 @@ export async function setProductFile(
   email: string,
   id: string,
   file: ProductFile | null,
+  onlyIf?: (product: Product) => boolean,
 ): Promise<FileResult> {
   // A file replaces a link. One thing is delivered, never two.
   const done = await changeDelivery(email, id, file !== null, (current) => ({
     file,
     link: file ? null : current.link,
-  }));
+  }), onlyIf);
   if (!done.ok) return done;
   return { ok: true, store: done.store, removed: done.previous.file };
 }

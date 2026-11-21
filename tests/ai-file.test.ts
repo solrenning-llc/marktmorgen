@@ -295,6 +295,44 @@ async function main(): Promise<void> {
   });
   const changed = await saveAiFile(store, "prod000001", draft, raced.io);
   is("a file that arrived meanwhile is put back, and this one removed", [changed, raced.log.attached[1]?.name, raced.log.removed.length], [{ ok: false, error: "changed" }, "mine.pdf", 1]);
+  // Codex X6 LOW (#3474): a room that could not be read is not a full storage; nothing is drawn and the run keeps its save.
+  const unknownRoom = fake({ reserveRoom: async () => { throw new Error("storage_unknown"); } });
+  is("storage that does not read: unknown, never full, nothing written", [await saveAiFile(store, "prod000001", draft, unknownRoom.io), unknownRoom.log.written.length, saveGivenBack("storage_unknown")], [{ ok: false, error: "storage_unknown" }, 0, true]);
+  // Codex X3/X6 MEDIUM (#3474): the product changed between the route's first check and the attach (published, a link or
+  // options added); the guarded attach refuses, and the new PDF goes with its room.
+  const refusedAttach = fake({ attach: async (attached) => { refusedAttach.log.attached.push(attached); return { ok: false, reason: "changed" }; } });
+  is("an attach refused because the draft changed: changed, the new PDF removed, its room released", [await saveAiFile(store, "prod000001", draft, refusedAttach.io), refusedAttach.log.removed.length, refusedAttach.log.released.length], [{ ok: false, error: "changed" }, 1, 1]);
+  // Codex X6 LOW (#3474): putting the displaced file back fails, so the product still points at the new PDF: it is kept,
+  // never deleted under the product, and the save says the product changed.
+  let firstPut = true;
+  const unrestored = fake({
+    attach: async (attached, how) => {
+      unrestored.log.attached.push(attached);
+      if (firstPut) { firstPut = false; return { ok: true, removed: other }; }
+      return how?.restore ? { ok: false, reason: "unknown" } : { ok: true, removed: null };
+    },
+  });
+  is("a put-back that fails: the new PDF the product points at is not deleted, and the save says so", [await saveAiFile(store, "prod000001", draft, unrestored.io), unrestored.log.attached.length, unrestored.log.removed.length], [{ ok: false, error: "displaced" }, 2, 0]);
+  let firstThrow = true;
+  const restoreThrows = fake({
+    attach: async (attached) => {
+      restoreThrows.log.attached.push(attached);
+      if (firstThrow) { firstThrow = false; return { ok: true, removed: other }; }
+      throw new Error("down");
+    },
+  });
+  is("a put-back that throws: the same, nothing deleted", [await saveAiFile(store, "prod000001", draft, restoreThrows.io), restoreThrows.log.removed.length], [{ ok: false, error: "displaced" }, 0]);
+  let firstAsk = true;
+  const askedHow: (boolean | undefined)[] = [];
+  const restoreFlag = fake({
+    attach: async (attached, how) => {
+      askedHow.push(how?.restore);
+      if (firstAsk) { firstAsk = false; return { ok: true, removed: other }; }
+      return { ok: true, removed: null };
+    },
+  });
+  await saveAiFile(store, "prod000001", draft, restoreFlag.io);
+  is("the new PDF is attached as a draft's file, the displaced one put back as a restore", askedHow, [undefined, true]);
   const unreadable = fake();
   is("letters the PDF cannot draw: nothing made", [await saveAiFile(store, "prod000001", { ...draft, title: "東京の料理" }, unreadable.io), unreadable.log.written.length], [{ ok: false, error: "letters" }, 0]);
 

@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   for (const file of [...routes.sort(), ...LIB]) {
     const source = readFileSync(file, "utf8");
     const lines = source.split("\n");
-    lines.forEach((line, i) => {
+    lines.forEach((line) => {
       // deleteOrSweep (lib/file-drop.ts) deletes as del does, and hands a failed delete to the daily job.
       const call = line.match(/\b(del|deleteFile|dropFresh|deleteOrSweep)\(/);
       if (!call || call.index === undefined || /^\s*(\/\/|\*)/.test(line) || /^\s*const dropFresh/.test(line)) return;

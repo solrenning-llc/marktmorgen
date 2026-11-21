@@ -31,16 +31,18 @@ import { type ChatKind, chatKind } from "@/lib/chat-kind";
 // The reading of an address lives in lib/chat-kind.ts, browser-safe, so the studio's field checks it the same way.
 export { chatKind, type ChatKind };
 
-/** EVAL plus EXISTS (or GET, for a store from before ids), HEXISTS and SET replaces one SET: three extra billed commands. The v2 request is about 741 bytes before the sealed value, inside the 2 KiB below. */
+/** EVAL plus GET (the id key, or the owner's record for a store from before ids), HEXISTS and SET replaces one SET: three extra billed commands. The v2 request is about 741 bytes before the sealed value, inside the 2 KiB below. */
 export const CHAT_ADDRESS_FENCE_EXTRA_COMMANDS = 3;
 /** Extra script/key/envelope bytes, above the sealed value already in the old SET. */
 export const CHAT_ADDRESS_FENCE_EXTRA_BYTES = 2_048;
 // v2 (Claude 6's MEDIUM on #4936): a store from before ids (ARGV[3] its statsId) is live only while its owner's
 // record still carries that statsId, as in lib/store-live-cache.ts store-cache-live:v2; -1 when the record does not read.
-const KEEP_ADDRESS_IF_LIVE = `-- marktmorgen:chat-address-live:v2
+// v3 (Claude 2's MEDIUM on #4936): a store with an id is live only while its id key holds this very ref (ARGV[4]), as
+// store-claim-live:v1 reads: moveAccount repoints the key, so its mere existence does not tell this store from the next.
+const KEEP_ADDRESS_IF_LIVE = `-- marktmorgen:chat-address-live:v3
 if redis.call("HEXISTS", KEYS[2], ARGV[1]) ~= 0 then return 0 end
 if ARGV[3] == "" then
-  if redis.call("EXISTS", KEYS[1]) ~= 1 then return 0 end
+  if redis.call("GET", KEYS[1]) ~= ARGV[4] then return 0 end
 else
   local raw = redis.call("GET", KEYS[1])
   if not raw then return 0 end
@@ -130,7 +132,7 @@ export async function setChatAddress(statsId: string, storeName: string, raw: un
   const erasing = await erasingField(ref);
   const ok = (await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`)) === "sent";
   if (!ok) return "refused";
-  const [kept] = repliesFor(await redisPipeline([["EVAL", KEEP_ADDRESS_IF_LIVE, 3, live, ERASING_KEY, key(statsId), erasing, seal(url, context(statsId)), withId ? "" : statsId]]), 1) ?? [undefined];
+  const [kept] = repliesFor(await redisPipeline([["EVAL", KEEP_ADDRESS_IF_LIVE, 3, live, ERASING_KEY, key(statsId), erasing, seal(url, context(statsId)), withId ? "" : statsId, ref]]), 1) ?? [undefined];
   if (kept === 0) return "refused";
   if (kept !== "OK") throw new UnknownReplyError("the chat summary address save");
   return "saved";

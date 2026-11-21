@@ -284,12 +284,13 @@ export class MemoryRedis {
           return [gone, members.length];
         }
         // lib/chat-summary.ts KEEP_ADDRESS_IF_LIVE: a chat address written only while its store is live and not being
-        // erased; a store from before ids (argv[2] its statsId) only while its owner's record still carries that statsId.
-        if (key.startsWith("-- marktmorgen:chat-address-live:v2\n")) {
+        // erased: a store with an id while its id key holds this very ref (argv[3]); a store from before ids (argv[2] its
+        // statsId) only while its owner's record still carries that statsId.
+        if (key.startsWith("-- marktmorgen:chat-address-live:v3\n")) {
           const n = Number(args[0]), keys = args.slice(1, 1 + n), argv = args.slice(1 + n);
           if (this.run(["HEXISTS", keys[1], argv[0]]) !== 0) return 0;
           if (!argv[2]) {
-            if (this.run(["EXISTS", keys[0]]) !== 1) return 0;
+            if (this.run(["GET", keys[0]]) !== argv[3]) return 0;
           } else {
             const raw = this.run(["GET", keys[0]]);
             if (raw === null) return 0;

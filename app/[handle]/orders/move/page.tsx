@@ -6,7 +6,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { purchaseMoveOpen } from "@/lib/purchase-move-open";
 import { moveAskView } from "@/lib/purchase-move-flow";
-import { moveWords } from "@/lib/purchase-move-words";
+import { askFormHidden, moveWords } from "@/lib/purchase-move-words";
 
 // The longest one opening may run: one held request and one read.
 export const maxDuration = 15;
@@ -36,7 +36,7 @@ export default async function MovePurchasesPage({ params, searchParams }: Params
   const state = typeof query.m === "string" && Object.hasOwn(w.asked, query.m) ? (query.m as keyof typeof w.asked) : null;
   const view = await moveAskView(store, token);
   const notice = state ? w.asked[state] : view.kind === "open" ? null : w.asked[view.kind];
-  const showForm = view.kind === "open" && state !== "sent";
+  const showForm = view.kind === "open" && !(state && askFormHidden(state));
   const back = `/@${store.handle}/orders?${new URLSearchParams({ token })}`;
 
   return (

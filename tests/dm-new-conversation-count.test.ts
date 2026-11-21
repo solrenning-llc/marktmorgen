@@ -13,7 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { POST as messagesPost } from "@/app/api/store/community/messages/route";
-import { freshConfig, memberKey, saveConfig, type Member } from "@/lib/community";
+import { freshConfig, memberKey, readConfig, saveConfig, type Member } from "@/lib/community";
 import { parseDmSetting } from "@/lib/community-dm";
 import { emailKey, mintPass, passCookieName } from "@/lib/learn";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -59,6 +59,8 @@ async function main(): Promise<void> {
   const senderKey = memberKey(SENDER);
   await redis.pipeline([
     ["SET", `nl:cm:${cid}:ok:${emailKey(SENDER)}`, JSON.stringify({ v: 1, ok: true })],
+    // Since #3395 the doors read what a member holds once (lib/community-access.ts holdingsOf, `:h:`): the same answer, kept.
+    ["SET", `nl:cm:${cid}:h:${emailKey(SENDER)}`, JSON.stringify({ v: (await readConfig(cid))!.v, ids: [ticket.product.id], held: [ticket.product.id] })],
     ["HSET", members, senderKey, JSON.stringify({ k: senderKey, e: SENDER, n: "Sender", h: "sender", dir: true, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)],
   ]);
   const pass = await mintPass(club, SENDER, "all");

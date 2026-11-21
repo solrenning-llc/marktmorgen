@@ -8,7 +8,8 @@
  *   nl:pm:c:<id>:<side>      string  that address confirmed, and when (a mark, taken once)
  *   nl:pm:done:<id>          string  the request was claimed for its move (a mark, taken once)
  *   nl:pm:day:<fingerprint>  string  how many requests an address started today, under a one-way fingerprint
- *   nl:pm:retry:<fingerprint> string  the chosen request id and private claim nonce for a same-day retry
+ *   nl:pm:retry:<fingerprint> string the request an ask of the day already made for the same addresses and scope, and
+ *                                    a private nonce, under a one-way fingerprint (a same-day retry reuses it)
  *
  * Everything ends by itself: the request, its links and its confirmations
  * when its day is up (MOVE_CONFIRM_SECONDS), the claim and the day's count
@@ -23,7 +24,8 @@
  * allowance, and a claim says only that the move may now be made.
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import {
   type MoveRequest,
   type MoveSide,
@@ -56,28 +58,39 @@ const requestKey = (id: string) => `nl:pm:r:${id}`;
 const tokenKey = (token: string) => `nl:pm:t:${sha(token)}`;
 const confirmKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:${side}`;
 const doneKey = (id: string) => `nl:pm:done:${id}`;
+/** The current address's link was sent, once, after the new address confirmed (a mark kept under the confirmations). */
+const sentKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:sent-${side}`;
 /** One address's count of the day (UTC), under a fingerprint that cannot be turned back into the address. */
 const dayKey = (address: string, nowMs: number) => `nl:pm:day:${sha(`nimbus-pm-day:${Math.floor(nowMs / 86_400_000)}:${address}`).slice(0, 32)}`;
-/** A same-address, same-destination retry finds the existing request without storing either address in a key. */
-const retryKey = (from: string, to: string, scope: MoveRequest["scope"], nowMs: number) =>
-  `nl:pm:retry:${sha(`nimbus-pm-retry:v1:${Math.floor(nowMs / 86_400_000)}:${JSON.stringify([scope, from, to])}`).slice(0, 32)}`;
-const retryToken = (id: string, side: MoveSide): string | null => {
+/**
+ * The same ask of the day (the same addresses and scope), under a fingerprint that cannot be turned back into either
+ * address: a retry finds the request the first ask made instead of making a second one with a second live link
+ * (Codex V's MEDIUM on #3621, redone on the to-only design by Claude 5 on #3659).
+ */
+const retryKey = (made: Pick<MoveRequest, "from" | "to" | "scope">, nowMs: number) =>
+  `nl:pm:retry:${sha(`nimbus-pm-retry:v1:${Math.floor(nowMs / 86_400_000)}:${JSON.stringify([made.scope, made.from, made.to])}`).slice(0, 32)}`;
+/**
+ * The new address's link of a request asked with `links: "to"`, made again from the request's random id and the
+ * server's data key, so a retry can email the very same link without the link's secret being kept anywhere. Null
+ * without the key: no link is made then.
+ */
+const toLinkToken = (id: string): string | null => {
   const key = process.env.NIMBUS_DATA_KEY;
   if (!key) return null;
-  return createHmac("sha256", key).update(`nimbus-pm-link:v1:${id}:${side}`).digest("hex").slice(0, 48);
+  return createHmac("sha256", key).update(`nimbus-pm-link:v1:${id}:to`).digest("hex").slice(0, 48);
 };
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
 type Kept = Pick<MoveRequest, "from" | "to" | "scope" | "createdAt">;
 type Grant = { id: string; side: MoveSide };
-type RetryIndex = { id: string; claim: string };
+type RetryIndex = { id: string; nonce: string };
 
 function parseRetryIndex(raw: unknown): RetryIndex | null {
-  const value = parseJson(raw) as { id?: unknown; claim?: unknown } | undefined;
+  const value = parseJson(raw) as { id?: unknown; nonce?: unknown } | undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  if (Object.keys(value).sort().join(",") !== "claim,id") return null;
-  if (typeof value.id !== "string" || !ID.test(value.id) || typeof value.claim !== "string" || !ID.test(value.claim)) return null;
-  return { id: value.id, claim: value.claim };
+  if (Object.keys(value).sort().join(",") !== "id,nonce") return null;
+  if (typeof value.id !== "string" || !ID.test(value.id) || typeof value.nonce !== "string" || !ID.test(value.nonce)) return null;
+  return { id: value.id, nonce: value.nonce };
 }
 
 function parseJson(raw: unknown): unknown {
@@ -117,24 +130,41 @@ redis.call('EXPIRE', KEYS[1], ARGV[1])
 return n`;
 
 /**
- * Selects and writes one same-day retry identity atomically. The retry index is written first within
- * the script: if a later write fails, every later ask sees that one identity and fails closed rather
- * than creating another. The opaque claim nonce lets a caller reconcile a lost EVAL reply.
- * A SET ... NX answers Lua a status table on success and false when the key exists, never the
- * string 'OK', so each write is tested for truth (scripts/test_purchase_move_retry_redis.py).
+ * The same-day ask, its request and its new address's link, chosen and written in one step: Redis runs a script whole,
+ * so two asks at the same moment cannot both make a request. The index is written first: if a later write is refused,
+ * every later ask finds that one index and fails closed rather than making another request. Answers {1, index} when it
+ * made them, {0, index} when an ask of the day already had (nothing written), {-1, ...} when a write was refused. A SET
+ * ... NX answers Lua a status table or false, never the string 'OK', so each write is tested for truth. Billed as four
+ * commands (the EVAL, GET and up to three SETs); lib/redis-memory.ts models it for the tests.
  */
-export const MOVE_RETRY_CREATE = `-- marktmorgen:purchase-move-retry-create:v1
+export const MOVE_ASK_TO_ONCE = `-- marktmorgen:purchase-move-ask-to-once:v1
 local current = redis.call('GET', KEYS[1])
 if current then return {0, current} end
-local held = redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[5], 'NX')
-if not held then return {-1, ''} end
-local request = redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[5], 'NX')
-if not request then return {-1, ARGV[1]} end
-local from = redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[5], 'NX')
-if not from then return {-1, ARGV[1]} end
-local to = redis.call('SET', KEYS[4], ARGV[4], 'EX', ARGV[5], 'NX')
-if not to then return {-1, ARGV[1]} end
+if not redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4], 'NX') then return {-1, ''} end
+if not redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[4], 'NX') then return {-1, ARGV[1]} end
+if not redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4], 'NX') then return {-1, ARGV[1]} end
 return {1, ARGV[1]}`;
+
+const DAY_TAKEN = Symbol("purchase move day taken");
+export type MoveDayTaken = { ok: true; from: string; now: number; [DAY_TAKEN]: true };
+export type MoveDay = MoveDayTaken | { ok: false; reason: "email" | "over" | "unknown" };
+
+/**
+ * Takes one of an address's daily attempts without making a request. The
+ * opaque result lets a caller do a privacy check after the count, then make
+ * the request without counting it twice.
+ */
+export async function takePurchaseMoveDay(rawFrom: unknown, now = Date.now()): Promise<MoveDay> {
+  if (typeof rawFrom !== "string") return { ok: false, reason: "email" };
+  const from = normaliseEmail(rawFrom);
+  if (!from || from.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(from)) return { ok: false, reason: "email" };
+  if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
+  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, dayKey(from, now), MOVE_MARK_SECONDS]]), 1);
+  const count = counted ? countOf(counted[0]) : null;
+  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
+  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  return { ok: true, from, now, [DAY_TAKEN]: true };
+}
 
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };
 
@@ -143,7 +173,16 @@ export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string
  * store (its id) or "all". Counts against the old address's three a day
  * before anything is written; the request and both links end with its day.
  */
-export async function askPurchaseMove(input: { from: unknown; to: unknown; scope: unknown; now?: number }): Promise<MoveAsk> {
+type MoveAskInput = { from: unknown; to: unknown; scope: unknown; now?: number; day?: MoveDayTaken };
+/** An ask that made only the new address's link: the current address's comes later (issueMoveLink). */
+export type MoveAskTo = { ok: true; id: string; fromToken: null; toToken: string } | Extract<MoveAsk, { ok: false }>;
+export async function askPurchaseMove(input: MoveAskInput & { links: "to" }): Promise<MoveAskTo>;
+export async function askPurchaseMove(input: MoveAskInput & { links?: "both" }): Promise<MoveAsk>;
+/**
+ * `links: "to"`: only the new address's link is made now; the current address's comes from issueMoveLink once the new
+ * address confirmed (Codex L on #3621, decision (C): the asking buyer's inbox must not tell an erased new address apart).
+ */
+export async function askPurchaseMove(input: MoveAskInput & { links?: "both" | "to" }): Promise<MoveAsk | MoveAskTo> {
   const now = input.now ?? Date.now();
   const made = newMoveRequest({ from: input.from, to: input.to, scope: readMoveScope(input.scope), now: seconds(now) });
   if (typeof made === "string") return { ok: false, reason: made };
@@ -152,84 +191,84 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   const json = JSON.stringify(record);
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
-  const day = dayKey(made.from, now);
-  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
-  const count = counted ? countOf(counted[0]) : null;
-  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
-  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  // An unreadable Redis envelope while asking answers "unknown", no link (Codex V's LOW on #3608).
+  try {
+    if (input.day) {
+      if (input.day[DAY_TAKEN] !== true || input.day.from !== made.from || input.day.now !== now) return { ok: false, reason: "unknown" };
+    } else {
+      const day = await takePurchaseMoveDay(made.from, now);
+      if (!day.ok) return { ok: false, reason: day.reason === "email" ? "unknown" : day.reason };
+    }
 
-  const retry = retryKey(made.from, made.to, made.scope, now);
+    if (input.links === "to") return await askToOnce(made, json, now);
+
+    const id = randomBytes(16).toString("hex");
+    const fromToken = input.links === "to" ? null : randomBytes(24).toString("hex");
+    const toToken = randomBytes(24).toString("hex");
+    const writes: (string | number)[][] = [
+      ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
+      ...(fromToken ? [["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]] : []),
+      ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+    ];
+    const wrote = repliesFor(await redisPipeline(writes), writes.length);
+    // Not exactly written: no link goes out.
+    if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
+    return fromToken ? { ok: true, id, fromToken, toToken } : { ok: true, id, fromToken: null, toToken };
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
+    throw error;
+  }
+}
+
+/**
+ * The new address's link for an ask made with `links: "to"`, once a day for the same addresses and scope: the first
+ * ask makes the request and its link; a retry of the same day finds them and answers the very same link, so an email
+ * whose answer was lost, asked for again, never leaves a second live link (Codex V's MEDIUM on #3621). The current
+ * address's link is not made here: it comes from issueMoveLink once the new address confirmed. A reply that is not
+ * exactly what was asked for is unknown: the index is read back and the request it names checked, and no second
+ * request is ever made on an uncertain answer.
+ */
+async function askToOnce(made: Kept, json: string, now: number): Promise<MoveAskTo> {
+  const retry = retryKey(made, now);
   const id = randomBytes(16).toString("hex");
-  const claim = randomBytes(16).toString("hex");
-  const indexValue = JSON.stringify({ id, claim } satisfies RetryIndex);
-  const fromToken = retryToken(id, "from") ?? "";
-  const toToken = retryToken(id, "to") ?? "";
-  if (!fromToken || !toToken) return { ok: false, reason: "unknown" };
+  const nonce = randomBytes(16).toString("hex");
+  const index = JSON.stringify({ id, nonce } satisfies RetryIndex);
+  const toToken = toLinkToken(id);
+  if (!toToken) return { ok: false, reason: "unknown" };
 
-  const result = repliesFor(
+  const reuse = async (raw: unknown): Promise<MoveAskTo> => {
+    const kept = parseRetryIndex(raw);
+    const keptToken = kept && toLinkToken(kept.id);
+    if (!kept || !keptToken) return { ok: false, reason: "unknown" };
+    const existing = repliesFor(await redisPipeline([["GET", requestKey(kept.id)], ["GET", tokenKey(keptToken)]]), 2);
+    if (!existing || typeof existing[0] !== "string") return { ok: false, reason: "unknown" };
+    const prior = parseJson(existing[0]) as Partial<Kept> | undefined;
+    const request = prior && parseMoveRequest({ ...prior, fromConfirmedAt: null, toConfirmedAt: null, appliedAt: null });
+    const grant = parseGrant(existing[1]);
+    if (
+      !request || request.from !== made.from || request.to !== made.to || JSON.stringify(request.scope) !== JSON.stringify(made.scope) ||
+      seconds(now) >= request.createdAt + MOVE_CONFIRM_SECONDS || !grant || grant.id !== kept.id || grant.side !== "to"
+    ) return { ok: false, reason: "unknown" };
+    return { ok: true, id: kept.id, fromToken: null, toToken: keptToken };
+  };
+
+  const reply = repliesFor(
     await redisPipeline([[
-      "EVAL",
-      MOVE_RETRY_CREATE,
-      4,
-      retry,
-      requestKey(id),
-      tokenKey(fromToken),
-      tokenKey(toToken),
-      indexValue,
-      json,
-      JSON.stringify({ id, side: "from" } satisfies Grant),
-      JSON.stringify({ id, side: "to" } satisfies Grant),
-      MOVE_CONFIRM_SECONDS,
+      "EVAL", MOVE_ASK_TO_ONCE, 3, retry, requestKey(id), tokenKey(toToken),
+      index, json, JSON.stringify({ id, side: "to" } satisfies Grant), MOVE_CONFIRM_SECONDS,
     ]]),
     1,
   )?.[0];
-  const decision =
-    Array.isArray(result) &&
-    result.length === 2 &&
-    (result[0] === -1 || result[0] === 0 || result[0] === 1) &&
-    typeof result[1] === "string"
-      ? { status: result[0], index: result[1] }
-      : null;
-
-  const reuse = async (raw: unknown): Promise<MoveAsk> => {
-    const kept = parseRetryIndex(raw);
-    if (!kept) return { ok: false, reason: "unknown" };
-    const keptFromToken = retryToken(kept.id, "from") ?? "";
-    const keptToToken = retryToken(kept.id, "to") ?? "";
-    if (!keptFromToken || !keptToToken) return { ok: false, reason: "unknown" };
-    const existing = repliesFor(
-      await redisPipeline([[ "GET", requestKey(kept.id) ], [ "GET", tokenKey(keptFromToken) ], [ "GET", tokenKey(keptToToken) ]]),
-      3,
-    );
-    if (!existing || typeof existing[0] !== "string" || existing[1] === null || existing[2] === null) return { ok: false, reason: "unknown" };
-    const prior = parseJson(existing[0]) as Partial<Kept> | undefined;
-    const parsed = prior && parseMoveRequest({ ...prior, fromConfirmedAt: null, toConfirmedAt: null, appliedAt: null });
-    const fromGrant = parseGrant(existing[1]);
-    const toGrant = parseGrant(existing[2]);
-    if (
-      !parsed ||
-      parsed.from !== made.from ||
-      parsed.to !== made.to ||
-      JSON.stringify(parsed.scope) !== JSON.stringify(made.scope) ||
-      seconds(now) >= parsed.createdAt + MOVE_CONFIRM_SECONDS ||
-      !fromGrant || fromGrant.id !== kept.id || fromGrant.side !== "from" ||
-      !toGrant || toGrant.id !== kept.id || toGrant.side !== "to"
-    ) return { ok: false, reason: "unknown" };
-    return { ok: true, id: kept.id, fromToken: keptFromToken, toToken: keptToToken };
-  };
-
-  if (decision?.status === 1) {
-    if (decision.index !== indexValue) return { ok: false, reason: "unknown" };
-    return { ok: true, id, fromToken, toToken };
-  }
-  if (decision?.status === 0) return reuse(decision.index);
-  if (decision?.status === -1) return { ok: false, reason: "unknown" };
-
-  // EVAL may have committed before its reply was lost or malformed. Read the exact index and grants;
-  // never make another identity on an uncertain result.
-  const reconciled = repliesFor(await redisPipeline([["GET", retry]]), 1);
-  if (!reconciled || typeof reconciled[0] !== "string") return { ok: false, reason: "unknown" };
-  return reuse(reconciled[0]);
+  const answer = Array.isArray(reply) && reply.length === 2 && (reply[0] === -1 || reply[0] === 0 || reply[0] === 1) && typeof reply[1] === "string"
+    ? { status: reply[0], index: reply[1] }
+    : null;
+  if (answer?.status === 1) return answer.index === index ? { ok: true, id, fromToken: null, toToken } : { ok: false, reason: "unknown" };
+  if (answer?.status === 0) return reuse(answer.index);
+  if (answer?.status === -1) return { ok: false, reason: "unknown" };
+  // The script may have run before its answer was lost: read the index it would have written, never make another.
+  const again = repliesFor(await redisPipeline([["GET", retry]]), 1);
+  if (!again || typeof again[0] !== "string") return { ok: false, reason: "unknown" };
+  return reuse(again[0]);
 }
 
 /**
@@ -303,6 +342,32 @@ export async function confirmPurchaseMove(token: string, now = Date.now()): Prom
     if (error instanceof UnknownReplyError) return { ok: false, reason: "unknown" };
     throw error;
   }
+}
+
+export type MoveLinkIssue = { ok: true; token: string; undo: () => Promise<void> } | { ok: false; reason: "sent" | "unknown" };
+
+/**
+ * One address's link made after the request was asked, once: the current address's, sent only after the new
+ * address confirmed. "sent" when it was made before (a Confirm pressed again sends nothing more); `undo` lets the
+ * mark and the link go when the email may not have gone, so the next Confirm makes a new one. Ends with the request's day.
+ */
+export async function issueMoveLink(id: string, side: MoveSide, now = Date.now()): Promise<MoveLinkIssue> {
+  if (!ID.test(id) || !isRedisConfigured()) return { ok: false, reason: "unknown" };
+  const value = claimValue(now);
+  const claimed = await claimMark(sentKey(id, side), MOVE_CONFIRM_SECONDS, value);
+  if (claimed === "taken") return { ok: false, reason: "sent" };
+  if (claimed === "unknown") return { ok: false, reason: "unknown" };
+  const token = randomBytes(24).toString("hex");
+  const undo = async () => {
+    await redisPipeline([["DEL", tokenKey(token)]]).catch(() => undefined);
+    await releaseMark(sentKey(id, side), value).catch(() => undefined);
+  };
+  const wrote = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify({ id, side } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") {
+    await undo();
+    return { ok: false, reason: "unknown" };
+  }
+  return { ok: true, token, undo };
 }
 
 export type MoveClaim = { ok: true; request: MoveRequest } | { ok: false; reason: "gone" | "not-ready" | "done" | "expired" | "unknown" };

@@ -173,6 +173,9 @@ export function unseal(sealed: string, context: string): Unsealed {
     const nonce = Buffer.from(parts[2], "base64url");
     const data = Buffer.from(parts[3], "base64url");
     if (nonce.length !== 12 || data.length < 17) return { ok: false, reason: "broken" };
+    // Node's decoder skips characters outside the alphabet and padding, so an altered text could open: only the
+    // exact base64url seal() wrote is a sealed value (input fuzz, Claude 7).
+    if (nonce.toString("base64url") !== parts[2] || data.toString("base64url") !== parts[3]) return { ok: false, reason: "broken" };
     const decipher = createDecipheriv("aes-256-gcm", key, nonce);
     decipher.setAAD(Buffer.from(context, "utf8"));
     decipher.setAuthTag(data.subarray(data.length - 16));

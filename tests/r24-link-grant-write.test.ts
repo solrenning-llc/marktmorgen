@@ -238,14 +238,15 @@ async function main(): Promise<void> {
       const mail = mails.slice(before).find((m) => m.to === email);
       return { done, mail };
     };
+    // deliverPayPal answers true once the sender accepted the receipt (#3449), so a delivery that went is true.
     const control = await deliver("paypal.control@example.com", "PPCONTROL0001");
-    is("\"OK\": the purchase email carries the link with its token", [control.done, control.mail?.text.includes(`${base}/orders?token=`)], [undefined, true]);
+    is("\"OK\": the purchase email carries the link with its token", [control.done, control.mail?.text.includes(`${base}/orders?token=`)], [true, true]);
     for (const [i, [what, reply]] of SHAPES.entries()) {
       const email = `paypal.s${i}@example.com`;
       odd = { prefix: "nl:orders:link:", reply };
       const { done: finished, mail } = await deliver(email, `PPSHAPE000${i}`);
       odd = null;
-      is(`${what}: the purchase email still goes, with the generic orders link and no token`, [finished, Boolean(mail), mail?.text.includes(`${base}/orders`), mail?.text.includes("token=")], [undefined, true, true, false]);
+      is(`${what}: the purchase email still goes, with the generic orders link and no token`, [finished, Boolean(mail), mail?.text.includes(`${base}/orders`), mail?.text.includes("token=")], [true, true, true, false]);
     }
   }
 

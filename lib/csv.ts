@@ -14,8 +14,9 @@
  *     written twice ("") for one;
  *   - lines ending in \r\n, \n or \r, and blank lines, which are skipped.
  *
- * It reads text, not bytes: the browser decodes the file as UTF-8 before this
- * sees it, so accented names and every alphabet come through as typed.
+ * It reads text, not bytes: the page decodes the file's bytes first
+ * (decodeCsvBytes: UTF-8, UTF-16 or Windows-1252, as the file was written),
+ * so accented names and every alphabet come through as typed.
  *
  * A cell we write back into a spreadsheet — an error report, an export — is
  * always quoted, and one that begins with =, +, -, @ or a tab (after any
@@ -40,6 +41,25 @@ export type ParsedCsv = {
   /** Whether rows past `maxRows` were left unread. */
   truncated: boolean;
 };
+
+/**
+ * A file's bytes as text, the way the spreadsheet that wrote them meant them:
+ * UTF-16 when a byte-order mark says so (Excel's "Unicode Text"); UTF-8 when
+ * the bytes are UTF-8, with or without Excel's byte-order mark; and otherwise
+ * Windows-1252, the code page Excel's "CSV (Comma delimited)" is written in
+ * across the Americas and Western Europe. Read as UTF-8, every accented
+ * letter of such a file became the replacement character ("Jos� Concei��o").
+ * A byte-order mark is dropped in each case.
+ */
+export function decodeCsvBytes(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("windows-1252").decode(bytes);
+  }
+}
 
 /** The separator a file uses: the one its first line has most of, outside quotes. */
 export function detectSeparator(text: string): Separator {

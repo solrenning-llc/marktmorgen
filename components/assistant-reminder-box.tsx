@@ -1,6 +1,6 @@
 import { EmailField } from "@/components/email-field";
 import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
-import { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-rules";
+import { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-version";
 
 /**
  * The Store assistant's box at checkout (lib/assistant-reminder-rules.ts):

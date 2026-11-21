@@ -57,6 +57,9 @@ export function keyName(name: string): string {
     .replace(/[^A-Za-z0-9._-]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/-+\./g, ".")
+    // Dots in a row become one ("…" is three once NFKD has taken it apart): a path holding ".." is refused by
+    // isVaultPath, so an upload under one would open at the store and could never be signed, joined or cancelled.
+    .replace(/\.{2,}/g, ".")
     .replace(/^[-.]+|[-.]+$/g, "");
   return plain.slice(-120) || "file";
 }
@@ -86,7 +89,11 @@ export function readVaultPath(pathname: unknown): { folder: string; ownerId: str
 export function isVaultPath(pathname: unknown): boolean {
   if (typeof pathname !== "string" || pathname.includes("..") || pathname.includes("//")) return false;
   const parts = pathname.split("/");
-  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) && parts.slice(2).every((piece) => KEY_NAME_PATTERN.test(piece));
+  // A piece is a plain name, or a file's own last piece: its 16-hex token, "-" and a name of up to 120 characters
+  // (vaultPath), so a name the store keeps never makes a path this refuses (Codex X5 on #4356).
+  const piece = (part: string) =>
+    KEY_NAME_PATTERN.test(part) || (TOKEN_PATTERN.test(part.slice(0, 16)) && part[16] === "-" && KEY_NAME_PATTERN.test(part.slice(17)));
+  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) && parts.slice(2).every(piece);
 }
 
 /** Whether a path is a file of this store, on this product, option or lesson. */
@@ -108,6 +115,31 @@ export const PIECES_PER_ASK = 8;
 export const PIECE_SECONDS = 60 * 60;
 /** How long an upload may take from its first piece to its last. */
 export const UPLOAD_SECONDS = 24 * 60 * 60;
+/**
+ * How many pages of a store's vault listing a measurement of what it keeps
+ * reads at most (lib/vault.ts, vaultHeld), a thousand names to a page. Each
+ * page is one ListObjectsV2, a Class A operation on R2; the cost table
+ * prices an upload start from this (lib/spend-cost-table.ts).
+ */
+export const VAULT_LIST_PAGES = 20;
+/**
+ * Requests one measurement of a file makes at most (lib/vault.ts, headVault):
+ * a HEAD, and a one-byte ranged GET when the answer states no plain length.
+ * Both are Class B operations on R2.
+ */
+export const VAULT_MEASURE_REQUESTS = 2;
+/**
+ * Finish ("done") and cancel ("abort") requests one upload may make in all
+ * (lib/vault.ts, closeVaultUpload and abortVaultUpload), which is what one
+ * upload start is priced for (lib/spend-cost-table.ts,
+ * UPLOAD_REQUESTS_PER_OPEN). Each is counted before anything else is done
+ * for it; past this many, the request is refused and R2 is not asked. The
+ * first finish is written down with its answer, and a cancel once R2
+ * confirmed it, so a repeat inside the count is answered from that record,
+ * never from R2; a cancel R2 did not confirm may be asked again inside it.
+ * A finish refused for its piece list asks R2 nothing and is not counted.
+ */
+export const VAULT_CONTROL_CALLS_PER_UPLOAD = 2;
 
 /** How many pieces a file of this size goes up in. A file of one piece or less goes up whole. */
 export function pieceCount(bytes: number): number {

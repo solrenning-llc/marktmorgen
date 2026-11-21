@@ -33,8 +33,12 @@ import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-
  * day, daily cap. Returns {1, 0} when every host's time was taken, {-1, i}
  * when host i has something within the gap, {-2, i} when host i's day is
  * full, {-3, i} for anything malformed, writing nothing in every refusal.
+ * A claim of the same id already kept for good (until 0) stays kept for good:
+ * a hold written over it never downgrades it, so a group call's seat paid
+ * while another seat's hold was being written keeps the owner's time (cloud
+ * J's review of #3490, MEDIUM; team claims have ids of their own).
  */
-export const CLAIM_HOST_TIMES = `-- marktmorgen:host-claim:v1
+export const CLAIM_HOST_TIMES = `-- marktmorgen:host-claim:v2
 local now = tonumber(ARGV[1])
 local s = tonumber(ARGV[2])
 local e = tonumber(ARGV[3])
@@ -47,6 +51,7 @@ for i = 1, #KEYS do
   if kind ~= "none" and kind ~= "hash" then return {-3, i} end
 end
 local drop = {}
+local paid = {}
 for i = 1, #KEYS do
   local base = 6 + (i - 1) * 4
   local gap = tonumber(ARGV[base + 1])
@@ -65,7 +70,9 @@ for i = 1, #KEYS do
     if not a or not b or not u then return {-3, i} end
     if (u > 0 and u < now) or b < now - 172800000 then
       stale[#stale + 1] = rows[j]
-    elseif rows[j] ~= claim then
+    elseif rows[j] == claim then
+      if u == 0 then paid[i] = true end
+    else
       if s < b + gap and e + gap > a then return {-1, i} end
       if a >= d0 and a < d1 then count = count + 1 end
     end
@@ -73,11 +80,12 @@ for i = 1, #KEYS do
   if count >= cap then return {-2, i} end
   drop[i] = stale
 end
-local value = s .. "|" .. e .. "|" .. hold .. "|" .. ref
 local keep = e - now + 172800000
 for i = 1, #KEYS do
   if #drop[i] > 0 then redis.call("HDEL", KEYS[i], unpack(drop[i])) end
-  redis.call("HSET", KEYS[i], claim, value)
+  local until_ = hold
+  if paid[i] then until_ = 0 end
+  redis.call("HSET", KEYS[i], claim, s .. "|" .. e .. "|" .. until_ .. "|" .. ref)
   if redis.call("PTTL", KEYS[i]) < keep then redis.call("PEXPIRE", KEYS[i], keep) end
 end
 return {1, 0}`;

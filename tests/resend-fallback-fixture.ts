@@ -14,6 +14,8 @@ type Claim = { token: string; n: number; fingerprint: string; dispatchToken: str
 type FixtureOptions = {
   credential: string; usageCredential?: string; cap?: number; sent?: number; received?: number;
   accountId?: string; fetch?: typeof fetch;
+  /** The account's attempt records, kept across this account's synthetic days as the real ones are in Redis. */
+  claims?: Map<string, Claim>;
 };
 /** Prepare the exact finite review/binding synchronously for the no-IO
  * proof predicate. Sending still awaits this fixture's initialization. */
@@ -37,7 +39,7 @@ export function prepareResendFallbackFixture(options: FixtureOptions) {
     protection: { kind: "inclusive_provider_hard_cap", sentAndReceived: true, overagesDisabled: true, capEmails: cap, evidence: "SYNTHETIC ONLY" },
     bootstrap: { noUnresolvedPriorAttempts: true, allPriorUsageIncluded: true, evidence: "Explicit synthetic fixture initialization" },
   };
-  const claims = new Map<string, Claim>();
+  const claims = options.claims ?? new Map<string, Claim>();
   const acknowledgements = new MemoryRedis();
   let initialized = false, held = 0, accepted = options.sent ?? 0, lost: string | null = null;
   const commands: (string | number)[][] = [], requests: { method: string; url: string; body?: string }[] = [];
@@ -128,15 +130,21 @@ export async function createResendFallbackFixture(options: FixtureOptions) {
 // account, usage HTTP response and ACK adapter. Tests of the real defaults
 // and guard import the product module by relative path and are not aliased.
 const worlds = new Map<string, ReturnType<typeof prepareResendFallbackFixture>>();
+// The attempt records of each synthetic account, shared by all its days: the real ones (lib/resend-fallback-budget.ts,
+// resendFallbackBudgetKeys) are keyed by the account and the attempt (path, body, idempotency key) with no day, and one
+// whose answer was dispatched or unknown has no expiry, so the same attempt is refused on any later day.
+const accountClaims = new Map<string, Map<string, Claim>>();
 const clearApplication = store.clear.bind(store);
-store.clear = () => { clearApplication(); worlds.clear(); };
+store.clear = () => { clearApplication(); worlds.clear(); accountClaims.clear(); };
 function applicationWorld(credential: SyntheticResendCredential, usageCredential: SyntheticResendCredential) {
   const name = `${usageCredential}\n${Math.floor(Date.now() / 86_400_000)}`;
   let world = worlds.get(name);
   // Restoring the clock after a future-time journey starts a new synthetic
   // context, never a live ledger reset. Retain the existing finite epoch.
   if (!world || Date.now() < world.runtime.binding!.checkedAtMs) {
-    world = prepareResendFallbackFixture({ credential, usageCredential, fetch: (request, init) => fetch(request, init) });
+    let claims = accountClaims.get(usageCredential);
+    if (!claims) accountClaims.set(usageCredential, claims = new Map<string, Claim>());
+    world = prepareResendFallbackFixture({ credential, usageCredential, fetch: (request, init) => fetch(request, init), claims });
     worlds.set(name, world);
   }
   const binding = world.runtime.binding!;

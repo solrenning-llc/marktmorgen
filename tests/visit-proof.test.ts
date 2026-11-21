@@ -83,6 +83,20 @@ async function checks(): Promise<void> {
   is("none counted", (await visits()) - before, 0);
   is("the store's pages are open as before", await isResting(store), false);
 
+  part("An affiliate's arrival is sent on load like a visit, so the check is asked for it too (Claude 1's audit, 7070726978, (ii))");
+  botid.asked = 0;
+  botid.verdict = "bot";
+  await hitRoute(
+    new NextRequest("https://marktmorgen.com/api/store/hit", {
+      method: "POST",
+      headers: { "user-agent": PHONE, "x-forwarded-for": addressOf(8_000), "x-vercel-ip-country": "US" },
+      body: JSON.stringify({ h: "shop", k: "a", c: "abc" }),
+    }),
+  );
+  is("the check was asked for an affiliate's arrival", botid.asked, 1);
+  const affiliateClient = readFileSync("components/affiliate-click.tsx", "utf8");
+  is("the arrival goes by the fetch the check signs, never by sendBeacon", /startBrowserCheck\(\);\s*fetch\("\/api\/store\/hit"/.test(affiliateClient) && !/sendBeacon/.test(affiliateClient), true);
+
   part("Off the host there is no check: a visit counts as before");
   delete env.VERCEL;
   botid.asked = 0;

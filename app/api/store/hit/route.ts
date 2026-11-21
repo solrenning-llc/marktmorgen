@@ -107,7 +107,9 @@ export async function POST(request: NextRequest) {
   // nowhere: not toward the visits the store's plan covers, never in its numbers as a visit. What pages cost is still
   // bounded where they are drawn (lib/traffic.ts, isResting: every request against the store's window and its
   // connection's share of the day). Asked before the store's record is read, so a program reads nothing more.
-  if ((kind === "v" || kind === "p" || kind === "f") && (await browserProof()) !== "human") return done();
+  // An affiliate's arrival is sent on load, like a visit, so it is under the check too (Claude 1's audit, 7070726978, (ii));
+  // only a link's click, sent as the page is left, goes without it.
+  if ((kind === "v" || kind === "p" || kind === "f" || kind === "a") && (await browserProof()) !== "human") return done();
   const store = await storeForHandle(handle).catch(() => null);
   if (!store) return done();
 

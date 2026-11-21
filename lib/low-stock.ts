@@ -136,6 +136,41 @@ const CAS_HSET = [
 export type LowStockCheck = "crossed" | "no" | "off" | "unknown";
 
 /**
+ * Puts a product's record back as it was (`before`) when it still holds
+ * exactly what noteUnitsLeft wrote for `left`, by the same compare-and-set
+ * as noteUnitsLeft: a crossing that reached nobody stays one to say.
+ * Anything else, including a newer count, is left as it is.
+ */
+export async function restoreUnitsSeen(store: DataStore, productId: string, left: number, before: LowStock): Promise<boolean> {
+  if (!store.statsId || !productId || !isRedisConfigured()) return false;
+  const written = JSON.stringify({ low: before.low, seen: left });
+  const [result] = repliesFor(await redisPipeline([["EVAL", CAS_HSET, 1, keyOf(store.statsId), productId, sha1(written), JSON.stringify(before)]]), 1) ?? [];
+  const each = repliesFor(result, 1);
+  return each !== null && each[0] === 1;
+}
+
+/**
+ * Whether these units left would cross the creator's number, read only:
+ * nothing is written, so a crossing that cannot be said yet (the store's
+ * daily bound, an unreadable count) is still there at the next check.
+ */
+export async function wouldCrossLow(store: DataStore, productId: string, left: unknown): Promise<LowStockCheck> {
+  if (!isLeft(left) || !store.statsId || !productId || !isRedisConfigured()) return "unknown";
+  try {
+    const raw = await readRaw(store.statsId, productId);
+    if (raw === null) return "off";
+    const kept = parse(raw);
+    if (!kept) return "unknown";
+    if (kept.seen === left) return "no";
+    const crossed = crossedLow(kept.seen, left, kept.low);
+    return crossed === "unknown" ? "unknown" : crossed === "yes" ? "crossed" : "no";
+  } catch (error) {
+    console.error("reading a low-stock number failed", error);
+    return "unknown";
+  }
+}
+
+/**
  * The units left of a product now (`left`, as lib/stock.ts reads them):
  * "crossed" once when they fell from above the creator's number to it or
  * under it, "no" otherwise, "off" when no number is set. The count seen moves

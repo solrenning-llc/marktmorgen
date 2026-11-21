@@ -2387,7 +2387,8 @@ export async function confirmBooking(input: {
   const theirs = onTheirCalendar(meeting, creatorSide, store.email);
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
-  await sendEmail({ meter: { by: "order", store },
+  // A notice to the creator's side (the store or a host), never to a list member: no list tag (lib/email.ts messageTags).
+  await sendEmail({ meter: { by: "order", store }, tags: {},
     idempotencyKey: confirmEmailKey(session, "creator"),
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: creatorSide,

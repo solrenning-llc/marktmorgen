@@ -26,6 +26,7 @@ import { sendBatch, sendEmail } from "@/lib/email";
 import { sendTo } from "@/lib/mail";
 import { LIST_TAG, STORE_TAG, healthId, listHealth } from "@/lib/mail-health";
 import { recordSesEvent } from "@/lib/mail-report";
+import { tellCanceled } from "@/lib/paypal-cancel";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -139,6 +140,25 @@ async function main(): Promise<void> {
   // names its store's list too, so a complaint or a hard bounce on it takes the address off that list.
   is("the order-metered receipt names the store list", tagsTo("spam@example.com").nl_stop, list);
   is("and they stay off the list", await isMailable(list, "spam@example.com"), false);
+
+  part("A notice to the store's own address carries no list tag, so a complaint on it keeps the creator on their list");
+  // Codex X6's LOW on #4245: the creator's call reminder (lib/call-reminders.ts, remindCreator) and the PayPal
+  // cancellation notice to the creator are metered by the order; a complaint on one must not take the creator off the
+  // list they subscribed to themselves. The real PayPal sender is driven here; the call reminder has the same shape.
+  await upsertContact(list, OWNER, { agreed: true, explicit: true, source: "free" }, ROOM);
+  mail.clearCaptured();
+  const told = await tellCanceled(store, { order: "7E190127TN3647199", store: store.statsId as string, handle: store.handle, product: "p_none", cents: 4900, currency: "USD", email: null, charged: "none", at: Math.floor(Date.now() / 1000) }, "creator");
+  is("the PayPal cancellation notice goes to the creator", told.creator, "sent");
+  is("it carries no list tag", tagsTo(OWNER), {});
+  await recordSesEvent({ kind: "complained", permanent: false, recipients: [OWNER], tags: tagsTo(OWNER), messageId: "ses_tx_owner_paypal", occurredAt: Date.now() });
+  is("a complaint on it leaves the creator on their own list", await isMailable(list, OWNER), true);
+  mail.clearCaptured();
+  is("an order-metered notice to the store's address goes", await sendEmail({ meter: { by: "order", store }, from: "Marktmorgen <hello@marktmorgen.com>", to: ` ${OWNER.toUpperCase()} `, subject: "Starts in an hour", text: "A booked call starts in an hour." }), true);
+  is("with no list tag, whatever the case of the address", tagsTo(OWNER.toUpperCase()), {});
+  mail.clearCaptured();
+  is("a store-metered notice to the store's address goes", await sendEmail({ meter: { by: "store", store, kind: "email" }, from: "Marktmorgen <hello@marktmorgen.com>", to: OWNER, subject: "Your plan", text: "Your plan payment is late." }), true);
+  is("with no list tag either", tagsTo(OWNER), {});
+  is("a buyer's email from the same store still names the list", (await transactional("later@example.com", "Your cart"), tagsTo("later@example.com").nl_stop), list);
 
   done();
 }

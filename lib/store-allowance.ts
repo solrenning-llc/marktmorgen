@@ -28,7 +28,9 @@ import { windowCountBy } from "@/lib/window-count";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string;
   /** Read only to tag the store's email with its list (lib/mail-health-rules.ts stopTags), never to count. */
-  listId?: string | null };
+  listId?: string | null;
+  /** Read only so a notice to the store's own address carries no list tag (lib/email.ts messageTags), never to count. */
+  email?: string | null };
 
 /**
  * What taking from a figure answered. A refusal for being used says, when

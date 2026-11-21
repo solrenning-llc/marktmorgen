@@ -20,7 +20,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import type { Listing, Store } from "@/lib/store";
+import { ERASING_KEY, STORE_ID_PATTERN, type Listing, type Store, erasingField, ownerKey, storeIdCommand, storeRef } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { pageOut } from "@/lib/site-page-rules";
 import { productSegment } from "@/lib/product-slug";
@@ -142,11 +142,57 @@ const slotOf = (id: string) => `pf:${id}`;
 const countsLeft = (funnel: PageFunnel, now: number): DataChange => ({ until: now + KEEP_SECONDS * 1000, bytes: countsBytes(funnel) });
 
 /**
- * Keeps a funnel without exceeding capacity, duplicating an address or
- * resurrecting a removed record. Its room is taken first (DataRoomError when
- * it does not fit), and given back when the save is not confirmed.
+ * The same save, written only while the funnel's store is still live (Codex L-20261120-2144): the store's own key
+ * must still exist and its erasing mark (lib/store.ts ERASING_KEY) must be absent, in the same step as the capacity,
+ * id and address checks and the HSET. A save prepared before the store's erasure, and sent after the closing walk
+ * passed this hash or while it is still running, would otherwise write the erased store's private funnel back, its
+ * name, address and steps, with no expiry. The guard is the fence of lib/store-live-cache.ts (store-cache-live:v2):
+ * a store with an id is fenced on its id key; one from before ids, on its owner's record, and only while that record
+ * is still this store's own (its statsId); -4 means the store is gone or being erased, and nothing was written.
+ * KEYS[1] and ARGV[1..4] are SAVE_PAGE_FUNNEL's own. Two more commands than it (the HGET and the EXISTS or GET).
  */
-export async function writePageFunnel(statsId: string, funnel: PageFunnel, existing: readonly PageFunnel[], room: DataStore, now = Date.now()): Promise<PageFunnel> {
+export const SAVE_STORE_PAGE_FUNNEL = `-- marktmorgen:funnel-save-live:v1
+if redis.call("HGET", KEYS[3], ARGV[5]) then return -4 end
+if ARGV[6] == "" then
+  if redis.call("EXISTS", KEYS[2]) ~= 1 then return -4 end
+else
+  local raw = redis.call("GET", KEYS[2])
+  if not raw then return -4 end
+  local parsed, record = pcall(cjson.decode, raw)
+  if not parsed or type(record) ~= "table" then return -3 end
+  if record["statsId"] ~= ARGV[6] then return -4 end
+end
+local kind = redis.call("TYPE", KEYS[1]).ok
+if kind ~= "none" and kind ~= "hash" then return -3 end
+local exists = redis.call("HEXISTS", KEYS[1], ARGV[1])
+if ARGV[4] == "new" then
+  if exists == 1 then return -2 end
+  if redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+elseif ARGV[4] ~= "edit" or exists == 0 then return -2 end
+local valid, incoming = pcall(cjson.decode, ARGV[2])
+if not valid or type(incoming) ~= "table" or incoming.id ~= ARGV[1] or type(incoming.slug) ~= "string" then return -3 end
+local rows = redis.call("HGETALL", KEYS[1])
+for i = 1, #rows, 2 do
+  local ok, held = pcall(cjson.decode, rows[i + 1])
+  if not ok or type(held) ~= "table" or held.id ~= rows[i] or type(held.slug) ~= "string" then return -3 end
+  if rows[i] ~= ARGV[1] and string.lower(held.slug) == string.lower(incoming.slug) then return -1 end
+end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+return 1`;
+/** Commands SAVE_STORE_PAGE_FUNNEL adds to SAVE_PAGE_FUNNEL: the erasing mark's HGET and the store key's EXISTS or GET. */
+export const FUNNEL_LIVE_GUARD_COMMANDS = 2;
+
+/** The funnel's store is gone or being erased: nothing was written, and nothing is given back to its room. */
+export class PageFunnelStoreGoneError extends Error {
+  constructor() {
+    super("This store is gone or being closed, so the funnel was not saved.");
+    this.name = "PageFunnelStoreGoneError";
+  }
+}
+
+type FunnelCommand = (funnel: PageFunnel, isNew: boolean) => Promise<(string | number)[]>;
+
+async function saveFunnel(funnel: PageFunnel, existing: readonly PageFunnel[], room: DataStore, now: number, command: FunnelCommand): Promise<PageFunnel> {
   const held = existing.find((f) => f.id === funnel.id) ?? null;
   const isNew = !held;
   const changes: DataChange[] = [{ slot: slotOf(funnel.id), bytes: countsBytes(funnel) + dataBytes([JSON.stringify(funnel)], 1), set: true }];
@@ -155,16 +201,44 @@ export async function writePageFunnel(statsId: string, funnel: PageFunnel, exist
   await needData(room, changes, now);
   let replies: unknown[];
   try {
-    replies = await redisPipeline([["EVAL", SAVE_PAGE_FUNNEL, 1, funnelsKey(statsId), funnel.id, JSON.stringify(funnel), MAX_PAGE_FUNNELS, isNew ? "new" : "edit"]]);
+    replies = await redisPipeline([await command(funnel, isNew)]);
   } catch (error) {
     if (isNew) await giveData(room, [{ slot: slotOf(funnel.id), bytes: 0, set: true }], now);
     throw error;
   }
+  // A store known gone or being erased has no room left to give back to: giving it back would write its room's key again.
+  if (replies.length === 1 && replies[0] === -4) throw new PageFunnelStoreGoneError();
   if (replies.length !== 1 || replies[0] !== 1) {
     if (isNew) await giveData(room, [{ slot: slotOf(funnel.id), bytes: 0, set: true }], now);
     throw new Error("Funnel save could not be confirmed; review saved funnels before retrying");
   }
   return funnel;
+}
+
+/**
+ * Keeps a funnel without exceeding capacity, duplicating an address or
+ * resurrecting a removed record. Its room is taken first (DataRoomError when
+ * it does not fit), and given back when the save is not confirmed. The bare
+ * write, with no check that the store is still live: every route, import and
+ * copy saves through writeStorePageFunnel (tests/page-funnel-store-erasure.test.ts).
+ */
+export async function writePageFunnel(statsId: string, funnel: PageFunnel, existing: readonly PageFunnel[], room: DataStore, now = Date.now()): Promise<PageFunnel> {
+  return saveFunnel(funnel, existing, room, now, async (made, isNew) => ["EVAL", SAVE_PAGE_FUNNEL, 1, funnelsKey(statsId), made.id, JSON.stringify(made), MAX_PAGE_FUNNELS, isNew ? "new" : "edit"]);
+}
+
+/**
+ * Keeps a funnel of `store`, as writePageFunnel does, only while the store is still live (SAVE_STORE_PAGE_FUNNEL):
+ * PageFunnelStoreGoneError when it is gone or being erased, and nothing is written. `statsId` must be the store's
+ * own; a store from before ids without a statsId cannot be told from its owner's next one, so nothing is written.
+ */
+export async function writeStorePageFunnel(statsId: string, funnel: PageFunnel, existing: readonly PageFunnel[], store: Store, now = Date.now()): Promise<PageFunnel> {
+  if (!statsId || store.statsId !== statsId) throw new UnknownReplyError("a funnel's store");
+  const ref = storeRef(store);
+  const withId = STORE_ID_PATTERN.test(store.sid);
+  return saveFunnel(funnel, existing, store, now, async (made, isNew) => {
+    const live = withId ? storeIdCommand(store.sid)[1] : await ownerKey(ref);
+    return ["EVAL", SAVE_STORE_PAGE_FUNNEL, 3, funnelsKey(statsId), live, ERASING_KEY, made.id, JSON.stringify(made), MAX_PAGE_FUNNELS, isNew ? "new" : "edit", await erasingField(ref), withId ? "" : statsId];
+  });
 }
 
 /** Removes a funnel. Its numbers go with it, by their own expiry, and are counted until then. */

@@ -17,6 +17,10 @@ def main():
         raise RuntimeError("Expected static application funnel script")
     import json
     script = match.group(1)
+    live_match = re.search(r"export const SAVE_STORE_PAGE_FUNNEL = `([^`]+)`;", source)
+    if not live_match or "${" in live_match.group(1):
+        raise RuntimeError("Expected static store-live funnel script")
+    live_script = live_match.group(1)
     cap = int(re.search(r"export const MAX_PAGE_FUNNELS = (\d+);", (root / "lib/page-funnel.ts").read_text()).group(1))
     prefix = "marktmorgen:integration:funnel:" + uuid.uuid4().hex + ":"
     keys = [prefix + str(i) for i in range(5)]
@@ -64,6 +68,30 @@ def main():
         assert save(redis, keys[4], 1) == -3
         assert redis.command("GET", keys[4]) == "wrong-type"
         print("PASS: malformed records and wrong-type storage refuse without writes")
+
+        # The store-live guard (Codex L-20261120-2144): a store's key, its erasing mark, and a legacy record's statsId.
+        hold, live, erasing = prefix + "live-funnels", prefix + "live-store", prefix + "live-erasing"
+        keys.extend([hold, live, erasing])
+        def save_live(index, field="f1", stats=""):
+            identity = str(index).zfill(10)
+            body = json.dumps({"id": identity, "slug": "live-" + str(index)})
+            return redis.command("EVAL", live_script, 3, hold, live, erasing, identity, body, cap, "new", field, stats)
+        assert save_live(1) == -4 and redis.command("EXISTS", hold) == 0
+        redis.command("SET", live, "store-ref")
+        assert save_live(2) == 1 and redis.command("HLEN", hold) == 1
+        redis.command("HSET", erasing, "f1", "1")
+        assert save_live(3) == -4 and redis.command("HLEN", hold) == 1
+        assert save_live(4, field="f2") == 1 and redis.command("HLEN", hold) == 2
+        print("PASS: a store with an id saves only while its key exists and its erasing mark is absent")
+
+        redis.command("DEL", hold)
+        redis.command("SET", live, json.dumps({"statsId": "other-stats"}))
+        assert save_live(5, field="f2", stats="own-stats") == -4 and redis.command("EXISTS", hold) == 0
+        redis.command("SET", live, json.dumps({"statsId": "own-stats"}))
+        assert save_live(6, field="f2", stats="own-stats") == 1 and redis.command("HLEN", hold) == 1
+        redis.command("SET", live, "not-json")
+        assert save_live(7, field="f2", stats="own-stats") == -3 and redis.command("HLEN", hold) == 1
+        print("PASS: a store from before ids saves only while the owner's record is still its own")
     finally:
         assert all(key.startswith(prefix) for key in keys)
         redis.command("DEL", *keys)

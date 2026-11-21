@@ -40,7 +40,7 @@ import { CartShippingRefused } from "@/lib/cart-checkout";
 import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
-import { everywhereButGpsr } from "@/lib/physical-legal-ship";
+import { everywhereBut } from "@/lib/physical-legal-ship";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { giveBackHold, holdAdmission, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
 import { limitedStock } from "@/lib/product-extras";
@@ -133,10 +133,10 @@ export async function GET(request: NextRequest) {
           label: sending.cents > 0 ? sw.rate : sw.freeRate,
           where: sw.shipsTo(
             shipsToWords(
-              // Everywhere but the closed EU/EEA (lib/physical-legal-ship.ts): said in a few words, not listed.
-              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries, exceptGpsr: everywhereButGpsr(sending.countries) },
+              // Everywhere but the closed countries (lib/physical-legal-ship.ts): said in a few words, not listed.
+              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries, except: everywhereBut(sending.countries) ?? undefined },
               locale,
-              { and: sw.and, more: sw.more, everywhere: sw.everywhere, everywhereElse: sw.everywhereElse },
+              { and: sw.and, more: sw.more, everywhere: sw.everywhere, everywhereElse: sw.everywhereElse, everywhereElseEu: sw.everywhereElseEu },
             ),
           ),
           notTo: country && !sending.countries.includes(country) ? words.notTo(countryName(country)) : null,

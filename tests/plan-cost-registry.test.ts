@@ -10,6 +10,7 @@ import { MAX_UNLOCK_PRODUCTS } from "@/lib/community-locked";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_HOOK_LOOK, AUTO_CAPTIONS_HOOK_LOOKS, AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_LOOK_TIMING, AUTO_CAPTIONS_LOOK_WAIT_MS, AUTO_CAPTIONS_LOOKS_MONTH_USD, AUTO_CAPTIONS_LOOKS_PER_RUN, AUTO_CAPTIONS_REFUND_LOOK, SHAPES as COST_SHAPES, autoCaptionsGivenBackLooks } from "./plan-cost-registry";
 import { CRM_VALUE_SAVE, CRM_VALUE_SAVE_SECONDS, SHAPES } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, sentBytes } from "@/lib/crm-companies-rules";
@@ -864,4 +865,24 @@ test("an API reading that reads more than a page takes further requests that cov
   }
   const page = apiReadUnits(studentsPageWork(200, 0));
   console.log(`API readings: a page of 200 students takes ${page} more, the bookings ${apiReadUnits(bookingsWork(true))} more, an empty program ${apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 0 }, BOOK_STRIPE_PAGES))} more`);
+});
+
+test("the looks at an AI captions request given back in full are priced, from lib/auto-captions.ts's own figures (Claude 5 on #3427)", () => {
+  const source = read("lib/auto-captions.ts");
+  const { firstMs, againMs, maxGapMs, deliveryLooksMs, refundLooks } = AUTO_CAPTIONS_LOOK_TIMING;
+  assert.ok(source.includes("const LOOK_FIRST_MS = 3 * 60_000;") && firstMs === 3 * 60_000, "first look");
+  assert.ok(source.includes("const LOOK_AGAIN_MS = 10 * 60_000;") && againMs === 10 * 60_000, "looks again");
+  assert.ok(source.includes("const REFUND_LOOK_MAX_MS = 6 * 3_600_000;") && maxGapMs === 6 * 3_600_000, "longest gap");
+  assert.ok(source.includes("const DELIVERY_LOOKS_MS = 14 * 86_400_000;") && deliveryLooksMs === 14 * 86_400_000, "looks past the give-up");
+  assert.ok(source.includes(`export const REFUND_LOOKS_MAX = ${refundLooks};`), "looks at a refund owed");
+  assert.ok(source.includes(`["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, ${AUTO_CAPTIONS_LOOKS_PER_RUN}]`), "videos looked at in a run");
+  assert.ok(AUTO_CAPTIONS_LOOK_WAIT_MS <= COST_SHAPES.wait.seconds * 1000, "a look waits no longer than the wait shape holds");
+  // The announcements' looks are bounded in the code, and the bound is the one priced (Claude 7 and Claude 5 on #3427).
+  assert.ok(source.includes(`export const HOOK_LOOKS_MAX = ${AUTO_CAPTIONS_HOOK_LOOKS};`), "looks on the service's announcements");
+  assert.ok(read("app/api/stream/hook/route.ts").includes('syncAutoCaptions(guid.toLowerCase(), Date.now(), "announcement")'), "the hook looks as an announcement");
+  assert.ok(AUTO_CAPTIONS_HOOK_LOOK > AUTO_CAPTIONS_LOOK, "a look on an announcement pays its count too");
+  const looks = autoCaptionsGivenBackLooks();
+  assert.ok(Number.isSafeInteger(looks) && looks > 288, `${looks} looks`);
+  for (const usd of [AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_REFUND_LOOK, AUTO_CAPTIONS_HOOK_LOOK, AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_LOOKS_MONTH_USD]) assert.ok(Number.isFinite(usd) && usd > 0, String(usd));
+  console.log(`AI captions given back in full: ${looks} looks, ${AUTO_CAPTIONS_HOOK_LOOKS} on announcements and ${refundLooks} refund looks, at most $${AUTO_CAPTIONS_GIVEN_BACK_USD.toFixed(4)} a request; the five-minute job's looks at most $${AUTO_CAPTIONS_LOOKS_MONTH_USD.toFixed(2)} a month`);
 });

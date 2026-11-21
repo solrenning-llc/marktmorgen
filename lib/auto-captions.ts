@@ -34,7 +34,15 @@
  * What the service delivered is read only from its answer in its own shape
  * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
  * never "nothing delivered", and nothing is refunded on it (deliveredIn,
- * unknownLook).
+ * unknownLook). The same holds for its answer to the request to write them:
+ * only a 4xx or a 2xx saying `success: false` is a refusal, refunded at once;
+ * any other answer keeps the request for the sweep (finding R32).
+ *
+ * Only the service's own captions count as delivered (Claude 5 on #3427):
+ * while a request holds a language (ordered, being written, or kept for a
+ * person), a caption in it is not added or removed by hand (withOwnCaptions),
+ * and a language once delivered stays delivered, so a caption by hand is never
+ * charged as the AI's and what the AI never wrote is given back.
  *
  * A request kept for a person (what was delivered still unknown after every
  * automatic look) is marked `kept`: never shown as being written, never a
@@ -53,6 +61,10 @@ import type { Store } from "@/lib/store";
 import { GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
 const pendingKey = (id: string) => `nl:stream:auto:${id}`;
+/** Held while a caption in one language is added or removed by hand (withOwnCaptions), so no request for it starts meanwhile. */
+const ownKey = (id: string, lang: string) => `nl:stream:auto:${id}:own:${lang}`;
+/** How long a change by hand holds its language at the most: its calls to the service end long before. */
+const OWN_HOLD_SECONDS = 120;
 /** The videos of one store folder with captions money not settled: a refund owed, or a charge kept for a person. */
 const owedKey = (folder: string) => `nl:stream:autoowed:${folder}`;
 const QUEUE = "nl:stream:autoq";
@@ -77,6 +89,15 @@ const ORDER_LOOKS_MS = 14 * 86_400_000;
  * for this long; then kept for a person, never refunded on an unknown answer and never dropped.
  */
 const DELIVERY_LOOKS_MS = 14 * 86_400_000;
+/**
+ * The most looks the service's announcements (app/api/stream/hook) may take at one request being written, whatever it
+ * announces and however often it sends one again: one for each language a request may ask for (MAX_AUTO_LANGUAGES),
+ * and as many again for an announcement sent twice. Each is counted in the request's own record before the service is
+ * asked (syncAutoCaptions, `hooks`), so past it an announcement asks nothing and only the five-minute job's schedule
+ * looks. A request kept on an unknown answer lives up to 400 days; without this bound every announcement for its video
+ * in that time would be a call to the service and a write here (Claude 7 and Claude 5 on #3427).
+ */
+export const HOOK_LOOKS_MAX = 6;
 /** Each month's counts of what was kept for a person, for the owner's report: numbers only, no store, no person. */
 const keptMonthKey = (month: string) => `nl:stream:autokept:month:${month}`;
 const KEPT_KINDS = ["delivery", "order", "refund"] as const;
@@ -163,6 +184,8 @@ type Pending = {
   owed?: Owed;
   /** When it was kept for a person: what the service delivered was still unknown after every automatic look (unknownLook). */
   kept?: number;
+  /** Looks the service's announcements took at it, at most HOOK_LOOKS_MAX. */
+  hooks?: number;
 };
 
 function parseOwed(raw: unknown): Owed | undefined {
@@ -197,6 +220,8 @@ function parsePending(raw: unknown): Pending | null {
       // One that does not read is kept, never dropped: a refund to it is then not confirmed, so it is owed and shown.
       ...(value.credit !== undefined ? { credit: readCredit(value.credit) } : {}),
       ...(typeof value.kept === "number" && Number.isSafeInteger(value.kept) ? { kept: value.kept } : {}),
+      // A count that does not read is taken as spent (rule 24): an announcement then asks nothing, and the sweep looks.
+      ...(value.hooks !== undefined ? { hooks: Number.isSafeInteger(value.hooks) && (value.hooks as number) >= 0 ? (value.hooks as number) : HOOK_LOOKS_MAX } : {}),
       ...(value.owed !== undefined ? { owed: parseOwed(value.owed) ?? { cents: null, key: `nl-captions:unreadable:${value.at}:refund`, since: value.at, looks: REFUND_LOOKS_MAX, stuck: true as const } } : {}),
     };
   } catch {
@@ -218,7 +243,10 @@ export async function autoQuote(pathname: string): Promise<{ minutes: number; se
 /**
  * Charges for captions in the languages asked, and asks the service to write
  * them. Nothing is charged unless all of it can be asked for; a request the
- * service refuses is refunded at once.
+ * service refuses (a 4xx, or a 2xx saying `success: false`) is refunded at
+ * once. Any other answer is unknown, never a refusal: the request is kept,
+ * charged and queued, and the sweep uses it or gives it back on a known
+ * answer.
  */
 export async function requestAutoCaptions(store: Store, pathname: string, spoken: unknown, also: unknown, now = Date.now()): Promise<AutoAnswer> {
   if (!streamConfig() || !isRedisConfigured() || !isBillingConfigured()) return { ok: false, reason: "off" };
@@ -246,6 +274,13 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     return { ok: false, reason: "unavailable" };
   }
   if (claim === "taken") return heldBy(record.id, now);
+  // A caption by hand in an asked language, in flight or landed since the read above, is never charged as the AI's:
+  // read after the claim, so a change by hand either sees this order or is seen here (withOwnCaptions).
+  const free = await askedFree(record.id, pathname, asked.languages);
+  if (free !== "free") {
+    await releaseMark(key, value);
+    return { ok: false, reason: free === "language" ? "language" : "unavailable" };
+  }
   // Queued before the charge, so the sweep finds this order if nothing after the charge runs.
   const queued = repliesFor(await redisPipeline([["ZADD", QUEUE, now + ORDER_SETTLE_MS, record.id]]), 1);
   if (!queued || (queued[0] !== 0 && queued[0] !== 1)) {
@@ -303,7 +338,17 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     generateMoments: false,
   });
   const success = (answer.data as { success?: unknown } | null)?.success;
-  if (answer.status !== 200 || success === false) {
+  // Only a stated refusal gives the charge back here (finding R32, Claude 5 on #3286, #3345 and #3346; rule 24): a
+  // 4xx, or a 2xx saying `success: false`. Any other answer that is not a plain 200 (no answer, a request cut off, a
+  // 5xx whatever its body says) is unknown: the service may be writing them, so nothing is given back on it and the
+  // request stays as written above, charged and queued. The sweep settles it on an answer that says what was
+  // delivered: used, or given back once after GIVE_UP_HOURS; a retry meanwhile is told they are being written and
+  // charges nothing more.
+  const refused = (answer.status >= 400 && answer.status < 500) || (answer.status >= 200 && answer.status < 300 && success === false);
+  if (!refused && answer.status !== 200) {
+    console.error("the video service's answer to writing captions is unknown; the request is kept and looked at, nothing given back on it", record.id, answer.status);
+  }
+  if (refused) {
     console.error("the video service would not write captions", answer.status, answer.data);
     const refundKey = `nl-${sign}:refund`;
     if (await giveBack(pending, null, refundKey)) {
@@ -314,6 +359,82 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     return { ok: false, reason: "refund_pending" };
   }
   return { ok: true, writing: asked.languages, cents };
+}
+
+/**
+ * Whether the asked languages are still free once the order holds the video: no change by hand to one of them in
+ * flight (its hold, ownKey), none listed here since, and none the service itself lists. The service's own list is
+ * read (its free GET /videos/<id>, read as the sweep reads it, deliveredIn), because a change by hand whose answer was
+ * lost is not written down here and its hold runs out after OWN_HOLD_SECONDS, while the sweep counts every asked
+ * language the service lists as the AI's (Claude 2's MEDIUM on #3427). A language it lists that is not written down
+ * here is written down, so the studio lists what the player offers. Read exactly (rule 24): anything else, a 404
+ * included, is "unknown", never free, and nothing is charged.
+ */
+async function askedFree(id: string, pathname: string, langs: string[]): Promise<"free" | "language" | "unknown"> {
+  try {
+    const holds = repliesFor(await redisPipeline(langs.map((lang) => ["GET", ownKey(id, lang)])), langs.length);
+    if (!holds || holds.some((hold) => hold !== null)) return "unknown";
+    const listed = ((await streamCaptions([pathname]))[pathname] ?? []).map((t) => t.lang);
+    if (langs.some((lang) => listed.includes(lang))) return "language";
+    const answer = await askStream("GET", `/videos/${id}`);
+    const there = answer.status === 200 ? deliveredIn(answer.data) : null;
+    if (!there) {
+      console.error("the video service's list of a video's captions could not be read exactly; nothing charged", id, answer.status);
+      return "unknown";
+    }
+    const landed = langs.filter((lang) => there.includes(lang));
+    if (!landed.length) return "free";
+    await noteCaptionLanguages(id, landed);
+    return "language";
+  } catch (error) {
+    console.error("whether captions by hand are being changed for a video could not be read; nothing charged", id, error);
+    return "unknown";
+  }
+}
+
+/**
+ * A change by hand to a video's captions in one language (`change`: added or removed), run only while no AI captions
+ * request holds that language, so a caption by hand is never counted as delivered by the AI (Claude 5 on #3427).
+ * Refused with "auto_writing" while a request holds it (its order, or captions not yet delivered in it), "auto_held"
+ * while a request kept for a person holds it, "changing" while another change by hand in it holds it, and
+ * "unavailable" when that cannot be read exactly (rule 24). A
+ * request settled, owed a refund, or holding other languages lets it run. The language is held (ownKey) for the
+ * change, so no request for it starts meanwhile (askedFree); the hold is let go when the change's outcome is known
+ * (`known`), and otherwise kept until it runs out, since the service may still take it.
+ */
+export async function withOwnCaptions<T>(pathname: string, lang: string, change: () => Promise<T>, known: (result: T) => boolean): Promise<{ ok: true; result: T } | { ok: false; reason: "auto_writing" | "auto_held" | "changing" | "unavailable" }> {
+  const parts = readStreamPath(pathname);
+  // No request can hold a video that is not one, a language there is none of, or anything without the database.
+  if (!parts || !STREAM_ID_PATTERN.test(parts.id) || !captionLabel(lang) || !isRedisConfigured()) return { ok: true, result: await change() };
+  const own = ownKey(parts.id, lang);
+  const value = claimValue();
+  const claimed = await claimMark(own, OWN_HOLD_SECONDS, value);
+  // Held by another change by hand in this language (in flight, or its answer lost): said so (Claude 2's LOW on
+  // #3427). A claim that cannot be read is not known to be anyone's (rule 24).
+  if (claimed === "taken") return { ok: false, reason: "changing" };
+  if (claimed !== "ours") return { ok: false, reason: "unavailable" };
+  let letGo = true;
+  try {
+    const read = repliesFor(await redisPipeline([["GET", pendingKey(parts.id)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) return { ok: false, reason: "unavailable" };
+    const raw = read[0];
+    if (raw !== null) {
+      const order = parseOrder(raw);
+      const pending = order ? null : parsePending(raw);
+      // Neither an order nor a request (one still being charged, or in no known shape): not known free.
+      if (!order && !pending) return { ok: false, reason: "unavailable" };
+      if (order && order.langs.includes(lang)) return { ok: false, reason: "auto_writing" };
+      if (pending && !pending.owed && pending.langs.includes(lang) && !pending.got.includes(lang)) {
+        return { ok: false, reason: pending.kept !== undefined ? "auto_held" : "auto_writing" };
+      }
+    }
+    letGo = false;
+    const result = await change();
+    letGo = known(result);
+    return { ok: true, result };
+  } finally {
+    if (letGo) await releaseMark(own, value);
+  }
 }
 
 /**
@@ -446,15 +567,22 @@ function deliveredIn(data: unknown): string[] | null {
  * it arrives, and settles the request once it is all there, or refunds what
  * is not after GIVE_UP_HOURS, only on an answer that says what was delivered
  * (unknownLook has the rest).
+ *
+ * `by` the service's announcement (app/api/stream/hook): only a request being
+ * written is looked at, and only HOOK_LOOKS_MAX times, each counted in its
+ * record before the service is asked; an order or a refund owed is left to the
+ * five-minute job's schedule, where it is queued, so an announcement never
+ * calls Stripe.
  */
-export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"done" | "waiting" | "none"> {
+export async function syncAutoCaptions(id: string, now = Date.now(), by: "sweep" | "announcement" = "sweep"): Promise<"done" | "waiting" | "none"> {
   if (!STREAM_ID_PATTERN.test(id) || !isRedisConfigured()) return "none";
   const key = pendingKey(id);
   const read = repliesFor(await redisPipeline([["GET", key]]), 1);
   // Unread is not absent: the video stays queued (an order taken out of the queue would be found only by a retry).
   if (!read) return "waiting";
-  const raw = read[0];
+  let raw = read[0];
   const order = parseOrder(raw);
+  if (order && by === "announcement") return "waiting";
   if (order) {
     if (now - order.at < ORDER_SETTLE_MS) {
       await redisPipeline([["ZADD", QUEUE, order.at + ORDER_SETTLE_MS, id]]);
@@ -467,7 +595,18 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
     if (raw !== "charging") await unqueue(id, raw, now);
     return "none";
   }
-  if (pending.owed) return collectRefund(id, raw as string, pending, pending.owed, now);
+  if (pending.owed) return by === "announcement" ? "waiting" : collectRefund(id, raw as string, pending, pending.owed, now);
+  if (by === "announcement") {
+    // Counted before the service is asked, only over the record read (MARK_KEPT's compare-and-set, keeping its time to
+    // live): a count spent, a record changed meanwhile or a reply that does not read exactly asks nothing (rule 24).
+    const hooks = pending.hooks ?? 0;
+    if (hooks >= HOOK_LOOKS_MAX) return "waiting";
+    const counted = JSON.stringify({ ...(JSON.parse(raw as string) as object), hooks: hooks + 1 });
+    const swapped = repliesFor(await redisPipeline([["EVAL", MARK_KEPT, 1, key, raw as string, counted]]), 1)?.[0];
+    if (swapped !== 1) return "waiting";
+    raw = counted;
+    pending.hooks = hooks + 1;
+  }
   const answer = await askStream("GET", `/videos/${id}`);
   if (answer.status === 404) {
     // The video is gone, deleted with its lesson: what was not written is given back.
@@ -475,7 +614,9 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   }
   const there = answer.status === 200 ? deliveredIn(answer.data) : null;
   if (!there) return unknownLook(id, pending, raw as string, answer.status, now);
-  const got = pending.langs.filter((lang) => there.includes(lang));
+  // Delivered once is delivered: a language the service listed stays so if it is removed by hand later, and only the
+  // service's own captions are listed in a language the request holds (withOwnCaptions).
+  const got = pending.langs.filter((lang) => pending.got.includes(lang) || there.includes(lang));
   const fresh = got.filter((lang) => !pending.got.includes(lang));
   if (fresh.length) await noteCaptionLanguages(id, fresh);
   // A language delivered at an earlier look stays delivered (R47): captions taken off since are not refunded.
@@ -494,6 +635,7 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
 /**
  * Marks a request kept for a person only while its record is still the one read before asking the service, keeping
  * its time to live (the EXPIRE just before it): 1 marked, 0 changed or gone meanwhile, and nothing written over it.
+ * The same compare-and-set counts an announcement's look (syncAutoCaptions, `hooks`).
  */
 const MARK_KEPT = [
   "-- marktmorgen:auto-captions-kept:v1",

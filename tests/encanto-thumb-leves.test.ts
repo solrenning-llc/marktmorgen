@@ -3,7 +3,7 @@
  *
  *   1. a thumbnail copy refused after its check is cleaned with no second head: the cleanup takes the age the
  *      request already read (dropTakenPictures' `known`), so the attaching request asks the file store about it once,
- *      as the line picture-thumbnails prices;
+ *      as the line studio-blob prices it with the check (pictureCheckBlob);
  *   2. the copy to the pictures' own bucket reads and writes at most PICTURE_R2_FILES_PER_ATTACH files, the picture,
  *      its smaller copy and its thumbnail, and refuses more;
  *   3. what the storage meter counts: filesHeld lists `stores/` only, so the thumbnail in `images/` is not in it, and
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   })));
   is("the picture is put on without the refused thumbnail", attached, [200, "ok"]);
   is("the refused thumbnail is deleted", [files.has(thumb), deleted.includes(thumb)], [false, true]);
-  is("and the attaching request asked the file store about it once, as picture-thumbnails prices", heads.get(thumb) ?? 0, 1);
+  is("and the attaching request asked the file store about it once, as studio-blob prices", heads.get(thumb) ?? 0, 1);
 
   part("2. The copy to the pictures' own bucket: at most the picture, its smaller copy and its thumbnail");
   const reads: string[] = [];

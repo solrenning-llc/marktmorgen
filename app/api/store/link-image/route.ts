@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { deleteOrSweep } from "@/lib/file-drop";
 import { StoreFullError, imageFolder, setLinkImage, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { ownsImagePath } from "@/lib/product-image";
+import { checkedSizes, ownsImagePath } from "@/lib/product-image";
 import { LINK_IMAGE_SIDE, type LinkImage } from "@/lib/store-link";
 import { checkUploadedImage } from "@/lib/uploaded-image";
 import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
@@ -66,29 +66,38 @@ export async function POST(request: NextRequest) {
         await dropFresh(path);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
-      // An outage of the file store is unknown, not "not a picture": the creator is told it could not be checked just
-      // now, never a bare server error (Claude 3's LOW on #2801). The door's note is taken, so they choose the picture
-      // again, a new upload under a new name; this one would be an orphan nothing sweeps, so it is let go as any refused
-      // fresh upload is (dropFresh: only while its own head answers, never a picture of anything else; Claude 4's LOW).
-      const checked = await checkUploadedImage(path).catch((error: unknown) => {
-        console.error("checking a link picture failed; nothing saved", error);
-        return null;
-      });
-      if (!checked) {
-        await dropFresh(path);
-        return Response.json({ ok: false, error: "check_unavailable" }, { status: 503 });
-      }
-      if (!checked.ok) {
-        await dropFresh(path);
-        return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
-      }
       // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
       // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
-      // link or its picture off later can never delete it (lib/picture-door.ts).
+      // link or its picture off later can never delete it (lib/picture-door.ts). It is answered before the file store is
+      // asked anything, like a missing link above: a read is only ever of a file this request took from the door
+      // (C1-20261107-1550-TODOS-10).
       if (!fresh.has(path) && link.image?.path !== path) {
         return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
-      image = { path, width, height, bytes: checked.bytes };
+      // The link's own picture, sent again and not fresh: checked when it was put on, so its size comes from the record.
+      // One whose size the record cannot vouch for is refused, not read on its say-so (checkedSizes, rule 24).
+      let bytes = fresh.has(path) ? undefined : checkedSizes(link.image).get(path);
+      if (bytes === undefined && !fresh.has(path)) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      if (bytes === undefined) {
+        // An outage of the file store is unknown, not "not a picture": the creator is told it could not be checked just
+        // now, never a bare server error (Claude 3's LOW on #2801). The door's note is taken, so they choose the picture
+        // again, a new upload under a new name; this one would be an orphan nothing sweeps, so it is let go as any refused
+        // fresh upload is (dropFresh: only while its own head answers, never a picture of anything else; Claude 4's LOW).
+        const checked = await checkUploadedImage(path).catch((error: unknown) => {
+          console.error("checking a link picture failed; nothing saved", error);
+          return null;
+        });
+        if (!checked) {
+          await dropFresh(path);
+          return Response.json({ ok: false, error: "check_unavailable" }, { status: 503 });
+        }
+        if (!checked.ok) {
+          await dropFresh(path);
+          return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
+        }
+        bytes = checked.bytes;
+      }
+      image = { path, width, height, bytes };
     }
 
     const result = await setLinkImage(ref, id, image);

@@ -24,6 +24,7 @@ import {
   type ProductImage,
   type SmallCopy,
   TONE_PATTERN,
+  checkedSizes,
   imagePaths,
   isDisplayStyle,
   ownsImagePath,
@@ -123,16 +124,33 @@ export async function POST(request: NextRequest) {
         await dropFresh([smallPath, thumbPath]);
         return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
-      const found = await head(path).then(noted(path));
-      if (found.size > MAX_IMAGE_BYTES) {
+      // This product's record was written only after each of its files passed the checks below, so a name it shows,
+      // sent again and not fresh from the door, is answered from the record and not read again; a fresh one always is
+      // (C1-20261107-1550-TODOS-10). So the file store is only ever asked about a file this request took from the door.
+      const checked = checkedSizes(product.image);
+      const keptSize = (name: string) => (fresh.has(name) ? undefined : checked.get(name));
+      // A name it shows whose size the record cannot vouch for (checkedSizes) is not taken as checked, and not read on
+      // its say-so either; sent fresh through the door it is checked as any (rule 24). The picture itself: refused,
+      // nothing written or deleted. One of its copies: left out, unread, as a copy that fails is (Claude 2 on #2843, LOW 2).
+      const unvouched = (name: string) => !fresh.has(name) && own.has(name) && !checked.has(name);
+      if (unvouched(path)) {
         await dropFresh([path, smallPath, thumbPath]);
-        return Response.json({ ok: false, error: "too_big" }, { status: 413 });
+        return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
-      const bytes = await firstBytes(path);
-      const kind = bytes ? sniffPhotoType(bytes) : null;
-      if (!kind || !(IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) || kind !== found.contentType) {
-        await dropFresh([path, smallPath, thumbPath]);
-        return Response.json({ ok: false, error: "type" }, { status: 400 });
+      let size = keptSize(path);
+      if (size === undefined) {
+        const found = await head(path).then(noted(path));
+        if (found.size > MAX_IMAGE_BYTES) {
+          await dropFresh([path, smallPath, thumbPath]);
+          return Response.json({ ok: false, error: "too_big" }, { status: 413 });
+        }
+        const bytes = await firstBytes(path);
+        const kind = bytes ? sniffPhotoType(bytes) : null;
+        if (!kind || !(IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) || kind !== found.contentType) {
+          await dropFresh([path, smallPath, thumbPath]);
+          return Response.json({ ok: false, error: "type" }, { status: 400 });
+        }
+        size = found.size;
       }
       const side = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n > 0 && n <= 10_000 ? n : 0);
       const width = side(body.width);
@@ -151,9 +169,13 @@ export async function POST(request: NextRequest) {
       // The smaller copy for phones, checked exactly as the picture was.
       let small: SmallCopy | null = null;
       // A smaller copy named that is neither fresh nor this product's own is left out, and kept.
-      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath))) {
+      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath)) && !unvouched(smallPath)) {
         const smallWidth = side(sent?.width);
-        try {
+        const kept = keptSize(smallPath);
+        // This product's own copy, checked when it was put on: its size from the record, its width held to its place.
+        if (kept !== undefined) {
+          if (smallWidth > 0 && smallWidth < width) small = { path: smallPath, width: smallWidth, bytes: kept };
+        } else try {
           const copy = await head(smallPath).then(noted(smallPath));
           // Its size and width first: a copy that fails them is never read (Claude 1 on #2801, rule 30).
           const fits = smallWidth > 0 && smallWidth < width && copy.size <= MAX_IMAGE_BYTES;
@@ -174,9 +196,13 @@ export async function POST(request: NextRequest) {
       // The thumbnail copy (Encanto 5b-2), checked exactly as the smaller copy, within MAX_THUMB_BYTES and narrower
       // than the copy above it; one that fails is dropped and never written.
       let thumb: SmallCopy | null = null;
-      if (thumbOwned && (fresh.has(thumbPath) || own.has(thumbPath))) {
+      if (thumbOwned && (fresh.has(thumbPath) || own.has(thumbPath)) && !unvouched(thumbPath)) {
         const thumbWidth = side(sentThumb?.width);
-        try {
+        const kept = keptSize(thumbPath);
+        // This product's own copy, checked when it was put on: its size from the record, its width held to its place.
+        if (kept !== undefined) {
+          if (thumbWidth > 0 && thumbWidth < (small ? small.width : width) && kept <= MAX_THUMB_BYTES) thumb = { path: thumbPath, width: thumbWidth, bytes: kept };
+        } else try {
           const copy = await head(thumbPath).then(noted(thumbPath));
           // Its size and width first: the upload token allows MAX_IMAGE_BYTES under any picture name, so a file over
           // MAX_THUMB_BYTES is dropped unread, and the read its cost line counts is never more than that (Claude 1 on #2801).
@@ -197,7 +223,7 @@ export async function POST(request: NextRequest) {
       }
       // Checked above: exact, or none.
       const tone = typeof body.tone === "string" ? body.tone : null;
-      image = { path, width, height, alt, bytes: found.size, small, ...(thumb ? { thumb } : {}), ...(tone ? { tone } : {}) };
+      image = { path, width, height, alt, bytes: size, small, ...(thumb ? { thumb } : {}), ...(tone ? { tone } : {}) };
       // Copied to the pictures' own bucket when it is on (313 [CV1] unit 4b); off, nothing is read. A failed copy
       // never refuses the picture: it is kept where it always was, unmarked.
       const mirrored = await copyAttachedPicture(imagePaths(image)).catch(() => false);

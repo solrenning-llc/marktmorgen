@@ -98,7 +98,7 @@ export async function keepMeetStore(store: Pick<Store, "callsId" | "handle">, en
 
 const lockKey = (scope: string) => `nl:meet:lock:${scope}`;
 
-type StoreRef = Pick<Store, "statsId" | "handle" | "callsId" | "email">;
+type StoreRef = Pick<Store, "statsId" | "sid" | "handle" | "callsId" | "email">;
 
 /** A problem, in words a creator can act on. */
 export function problemWords(error: unknown, provider: MeetProvider): string {
@@ -165,7 +165,7 @@ async function create(
   ask: Pick<MeetingAsk, "store" | "provider" | "title" | "description" | "start" | "end" | "tz" | "group" | "scope"> & { host?: string; calendar?: string },
   guests: string[],
 ) {
-  const access = await accessFor(ask.store.statsId as string, ask.provider, brokenHook(ask.store), ask.host ?? "");
+  const access = await accessFor(ask.store.statsId as string, ask.provider, brokenHook(ask.store), ask.host ?? "", ask.store);
   const spec = {
     eventId: eventId(ask.scope),
     title: ask.title,
@@ -196,7 +196,7 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
       let record: MeetRecord = { ...found, guests };
       if (found.made && found.todo === "") {
         try {
-          const access = await accessFor(ask.store.statsId as string, "google", brokenHook(ask.store), found.host);
+          const access = await accessFor(ask.store.statsId as string, "google", brokenHook(ask.store), found.host, ask.store);
           if (access.account !== found.account) throw new NotConnected("the event was made on another Google account");
           await googleGuests(access.token, found.id, guests, found.added, found.calendar || "primary");
           record = { ...record, added: guests };
@@ -261,8 +261,11 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
     return await withLock(lockKey(ask.scope), 45, lockWait(15_000), work);
   } catch (error) {
     if (!(error instanceof LockBusyError)) console.error("arranging a meeting failed", error);
-    // Whatever is there is the link; failing that, the fallback, unrecorded.
-    const there = await readRecord(ask.scope).catch(() => null);
+    // Whatever is there is the link; failing that, the fallback, unrecorded. A record that is there but does not read
+    // is unknown, never "no record": its link may already be in people's hands, so a fallback is not handed out in its
+    // place and the read's error goes to the caller, which keeps the booking or the event without a meeting record
+    // (CX-123 rule 24; Codex X6's LOW on #2619, 6952486935).
+    const there = await readRecord(ask.scope);
     return there ?? { ...emptyRecord(ask), link: (await ask.fallback().catch(() => null)) ?? "" };
   }
 }
@@ -312,7 +315,7 @@ async function onRecord(scope: string, change: (record: MeetRecord) => Promise<M
 
 /** What to do for a record, against the provider. Throws what the provider throws. */
 async function perform(record: MeetRecord, store: StoreRef): Promise<MeetRecord> {
-  const access = await accessFor(record.statsId, record.provider, brokenHook(store), record.host);
+  const access = await accessFor(record.statsId, record.provider, brokenHook(store), record.host, store);
   const calendar = record.calendar || "primary";
   if (record.id && record.account && access.account !== record.account) {
     throw new NotConnected(`it was made on another ${ACCOUNT_NAMES[record.provider]} account, which is no longer connected`);
@@ -346,7 +349,7 @@ export async function moveMeeting(store: StoreRef, scope: string, start: number,
     // Not made yet: a later try makes it at the new time.
     if (!record.made) return moved;
     try {
-      const access = await accessFor(record.statsId, record.provider, brokenHook(store), record.host);
+      const access = await accessFor(record.statsId, record.provider, brokenHook(store), record.host, store);
       if (access.account !== record.account) throw new NotConnected(`it was made on another ${ACCOUNT_NAMES[record.provider]} account`);
       if (record.provider === "google") await googleMove(access.token, record.id, { start, end, tz }, record.calendar || "primary");
       else await zoomMove(access.token, record.id, { start, end, tz });
@@ -372,7 +375,7 @@ export async function leaveMeeting(store: StoreRef, scope: string, guest: string
     const left: MeetRecord = { ...record, guests };
     if (record.provider !== "google" || !record.made || !record.added.includes(who)) return left;
     try {
-      const access = await accessFor(record.statsId, "google", brokenHook(store), record.host);
+      const access = await accessFor(record.statsId, "google", brokenHook(store), record.host, store);
       if (access.account !== record.account) throw new NotConnected("it was made on another Google account");
       await googleGuests(access.token, record.id, guests, record.added, record.calendar || "primary");
       return { ...left, added: guests };
@@ -394,7 +397,7 @@ export async function cancelMeeting(store: StoreRef, scope: string): Promise<Mee
     const gone: MeetRecord = { ...record, gone: true };
     if (!record.made) return { ...gone, todo: "", next: 0 };
     try {
-      const access = await accessFor(record.statsId, record.provider, brokenHook(store), record.host);
+      const access = await accessFor(record.statsId, record.provider, brokenHook(store), record.host, store);
       if (access.account !== record.account) throw new NotConnected(`it was made on another ${ACCOUNT_NAMES[record.provider]} account`);
       if (record.provider === "google") await googleDelete(access.token, record.id, record.calendar || "primary");
       else await zoomDelete(access.token, record.id);
@@ -612,11 +615,11 @@ export async function callRefunded(
 
 /** How many times the link of a booking was replaced after a failure, for its calendar file's sequence. */
 export async function linkUpdates(callsId: string | null, booking: { session: string; product: string; start: number }): Promise<number> {
-  if (!callsId || !isRedisConfigured()) return 0;
+  if (!callsId) return 0;
   const [own, shared] = await readRecords([
     callScope(callsId, { group: false, ...booking }),
     callScope(callsId, { group: true, ...booking }),
-  ]).catch(() => [null, null]);
+  ]);
   return (own ?? shared)?.updates ?? 0;
 }
 
@@ -643,7 +646,7 @@ export async function slotMeetings(
 export async function hostLink(store: StoreRef, scope: string): Promise<string | null> {
   const record = await readRecord(scope);
   if (!record || record.provider !== "zoom" || !record.made || record.gone || record.statsId !== store.statsId) return null;
-  const access = await accessFor(record.statsId, "zoom", brokenHook(store));
+  const access = await accessFor(record.statsId, "zoom", brokenHook(store), "", store);
   if (access.account !== record.account) return null;
   return zoomStartUrl(access.token, record.id);
 }

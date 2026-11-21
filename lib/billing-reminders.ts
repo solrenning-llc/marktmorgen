@@ -97,6 +97,14 @@ export type Reminder = {
    * at all, but counted apart and never reported as on time.
    */
   late: boolean;
+  /**
+   * A cancellation already set (Stripe's cancel_at), at least a full period
+   * after the charge: when the plan ends, so the email never promises a
+   * charge "until you cancel" that will not come. Absent when none is set.
+   */
+  endsAt?: number;
+  /** With endsAt: the charge at `at` is the only one before the plan ends. */
+  onlyCharge?: boolean;
 };
 
 function day(seconds: number): string {
@@ -120,16 +128,21 @@ export function reminderEmail(reminder: Reminder): { subject: string; text: stri
   const price = money(reminder.amountCents);
   const studio = `${SITE_URL}/studio#billing`;
   if (reminder.kind === "trial") {
-    const then =
-      reminder.cycle === "year"
-        ? `${price} for a year, and then ${price} every year`
-        : `${price}, and then ${price} every month`;
+    const every = reminder.cycle === "year" ? "year" : "month";
+    // A cancellation already set: the charge, then the day it ends, never "until you cancel" (Codex N1/X6).
+    const then = reminder.endsAt
+      ? reminder.onlyCharge
+        ? `${price} for the first ${every}. That is the only charge: your plan is already set to end on ${day(reminder.endsAt)}, and nothing is charged after that day.`
+        : `${price} for the first ${every}. Your plan is already set to end on ${day(reminder.endsAt)}: it renews every ${every} until then, and nothing is charged after that day.`
+      : reminder.cycle === "year"
+        ? `${price} for a year, and then ${price} every year, until you cancel.`
+        : `${price}, and then ${price} every month, until you cancel.`;
     return {
       subject: `Your ${name} trial ends on ${date}`,
       text: [
         "Hello,",
         "",
-        `Your free trial of ${name} ends on ${date}. On that day your card will be charged ${then}, until you cancel.`,
+        `Your free trial of ${name} ends on ${date}. On that day your card will be charged ${then}`,
         "",
         "If you do not want to be charged, cancel before then in your studio. It takes two clicks, with no email to us:",
         studio,
@@ -200,13 +213,17 @@ function noticeFor(subscription: Record<string, unknown>, nowSeconds: number, to
   // says. In between, Stripe prorates the last period (API reference,
   // cancel_at), so the email's amount and "another year" would be untrue:
   // nothing is sent, and the gap is recorded (queue 414 [KX1], G17).
+  let ends: { endsAt: number; onlyCharge: boolean } | undefined;
   if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) {
-    if (subscription.cancel_at < fullPeriodAfter(at, plan.cycle, subscription.billing_cycle_anchor)) return null;
+    const fullEnd = fullPeriodAfter(at, plan.cycle, subscription.billing_cycle_anchor);
+    if (subscription.cancel_at < fullEnd) return null;
+    // Ending exactly where the first full period ends: this charge is the only one.
+    ends = { endsAt: subscription.cancel_at, onlyCharge: subscription.cancel_at === fullEnd };
   }
 
   if (trialing) {
     return left <= TRIAL_NOTICE_SECONDS
-      ? { kind: "trial", subscription: id, email, at, ...plan, late: left < TRIAL_FLOOR_SECONDS }
+      ? { kind: "trial", subscription: id, email, at, ...plan, late: left < TRIAL_FLOOR_SECONDS, ...ends }
       : null;
   }
   if (subscription.status === "active" && plan.cycle === "year") {

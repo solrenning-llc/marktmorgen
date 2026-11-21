@@ -219,6 +219,32 @@ async function main() {
   }
   is("none of the controls is counted as unknown", controls, [0, 0, 0]);
 
+  // Codex X6 (@a8bd96a695, NOT FIXED): the claim's write landed, and both its answer and the read-back were lost. The
+  // run cannot tell, sends nothing and says unknown; it must let go of its own mark, or the next 90 days see it taken.
+  part("A write that landed with its answer and its read-back both lost: let go, so the next run sends it once");
+  {
+    subscriptions = [sub("sub_claimboth1")];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const claim = commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:remind:failed:") && commands[0].includes("NX");
+      const readBack = commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:remind:failed:");
+      if (claim) {
+        await original.call(redis, commands);
+        throw new Error("synthetic: the answer was lost");
+      }
+      if (readBack) throw new Error("synthetic: the read-back was lost");
+      return original.call(redis, commands);
+    }) as typeof redis.pipeline;
+    let both: Awaited<ReturnType<typeof sendFailedPlanNotices>>;
+    try {
+      both = await sendFailedPlanNotices();
+    } finally {
+      redis.pipeline = original;
+    }
+    is("nothing sent, counted as unknown", [both.sent, both.unknown], [0, 1]);
+    const next = await sendFailedPlanNotices();
+    is("the next run sends it, once", [next.sent, emails.filter((e) => e.to.startsWith("sub_claimboth1")).length], [1, 1]);
+  }
+
   done();
 }
 

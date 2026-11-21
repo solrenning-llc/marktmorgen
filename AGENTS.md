@@ -14,7 +14,13 @@ Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM
 
 (d) **Confirmação de leitura.** Toda mensagem é confirmada (`confirmar`) assim que lida, e respondida quando pede resposta. Mensagem sem confirmação continua acordando o destinatário e, depois de 30 minutos, aparece como atrasada para os dois lados (`pendentes`).
 
-(e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)). Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
+(e) **Revisão.** Sempre de uma família diferente da do autor (FQ (2)) e sem nenhum commit no PR, nem de sessão antiga, nem de junção do main. Pedido do dono (21/11/2026, por volta das 03h55 Fortaleza, depois de uma família com commit no #3929 receber o pedido de revisão dele), nas palavras dele: "gera regra para erro assim nao ocorrer mais, para quem pedir revisao só pedir a quem realmente pode fazer". Por isso:
+- o pedido de revisão é feito com `pedir-revisao`, que lê os commits do PR além do main e deixa de fora, sozinho, toda família com commit nele (pelo trailer `Claude-Session`, pelo nome "Claude N" do autor e, sem trailer, pelo Codex); quem pede confere a lista "podem revisar" que ele mostra e acrescenta com `--exclui` a família de uma sessão "sem família conhecida";
+- na hora de pegar, `pegar-revisao` confere de novo, porque o head pode ter mudado, e devolve sozinho o pedido à família que tem commit nele;
+- um pedido feito fora do correio (no PR ou no canal) só nomeia revisor de família sem commit no PR, conferida nos commits do PR, e diz quais famílias têm commits;
+- quem pegar uma revisão e achar commit da própria família no PR devolve na hora (`devolver-revisao`), sem revisar.
+
+Cada pedido é entregue a um revisor só, do mais antigo para o mais novo. A preferência por um revisor (`--para`) vale por 30 minutos e só enquanto ele tem cota; depois, qualquer outra família com cota o pega. O veredito chega à caixa do autor.
 
 (f) **Fila, na ordem.** Os enfileiramentos respeitam a fila: `pegar-fila` só entrega o pedido mais antigo ainda aberto, um de cada vez, a uma família diferente da do autor, que confere as condições de FQ (1), inclusive o `estado-pr` do PR e os comentários do próprio PR, e enfileira, ou conclui como `recusado`, com o motivo. Nenhum pedido mais novo passa na frente. Enquanto o primeiro da fila tiver HOLD, ou CLAIMED de outra família, no correio, `pegar-fila` não o entrega e a fila espera. Uma tomada sem conclusão em 30 minutos, ou de quem ficou sem cota, cai, e o pedido volta a ser o primeiro da fila.
 
@@ -23,6 +29,15 @@ Pedido do dono, nas palavras dele: "HÁ UM SÉRIO PROBLEMA. VCS NAO SE COMUNICAM
 (h) **Pedir ao dono para passar um recado** só em caso de problema: o correio fora do ar, ou uma mensagem importante sem confirmação depois de 2 horas sem outro agente com cota que possa atendê-la.
 
 (i) **Transição.** A issue com o rótulo `canal-ativo` (AC (p) e (y)) e a caixa do Claude 1 (AV11) continuam sendo lidas até cada família confirmar a mensagem de boas-vindas do correio; até lá, o que for urgente vai pelo correio e também por elas. Depois disso, ficam só como histórico.
+
+(j) **Depois da transição, "o canal" das outras regras é o correio** (dono, 21/11/2026, por volta das 03h40 Fortaleza: "faça o que for mais correto e seguro", sobre as regras que ainda mandavam escrever no canal antigo). A transição de (i) termina quando `pendentes` do aviso de boas-vindas do correio não mostrar mais nenhuma família; quem vir isso primeiro avisa `todos` pelo correio. Daí em diante, toda remissão das outras seções deste arquivo ao canal de coordenação (a issue com o rótulo `canal-ativo`, "no canal", "issue de coordenação") e à caixa ou ao canal `para-claude-1` quer dizer o correio, assim:
+- `fila #N @sha` (FQ (1), CV (c), (f) e (g), AC (k)): o autor pede com `pedir-fila`; quem enfileira conclui com `concluir-fila`, com `fila #N @sha` e o próprio nome no texto;
+- "re-review needed #N @sha", pedido de revisor e "pode entrar" (CV (f), AC (b) e (f)): `pedir-revisao` e `concluir-revisao`;
+- CLAIMED, UNCLAIMED e HOLD (FQ (1), AC (m) e (p)): `reivindicar`, `liberar` e `segurar`, com a mesma marca numa linha no próprio PR, como em (c);
+- recados, perguntas, bloqueios, colisões, causa comum, adoção e confirmações de leitura (AV9, AV11, MV (c), CV (d), (e) e (g), AC (a), (c) e (e)): `enviar` a quem precisa (o coordenador, o autor ou a família), e `todos` só para aviso geral;
+- falta de uso anunciada (PV (d), AC (a)): `cota --sem --ate`.
+
+Continuam onde estão, porque não são conversa entre agentes: o que se escreve no próprio PR (a revisão e o veredito, CLAIMED, HOLD e `fila #N @sha`), a issue `main-vermelho` (MV (a)), o relatório `prs-parados` (PV (c)) e a troca automática do canal (AC (p)), que só age se a issue voltar a ser usada. Até o fim da transição, vale (i): o urgente vai pelo correio e também pelo canal antigo.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

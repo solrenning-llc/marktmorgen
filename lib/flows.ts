@@ -2,12 +2,12 @@ import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListRaw, readFlowListStrict } from "@/lib/flow-list";
 import { changesWhatItDoes, dropFlowVersions, flowHistorySize, keepFlowVersion, keepFlowVersionOnce, payFlowHistory, readFlowVersions, versionedFlowIds } from "@/lib/flow-versions";
 import { restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
-import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
+import { FLOW_TRIGGERS, type FlowTrigger, LAYOUT_HOLD_START, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, SES_PARKS_PER_RUN, SES_WAKE_PER_JOB, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { FIRST_DELAY_SECONDS, type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { ANY_GEN, RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, genOf, leaseAndGenCommand, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun, countSesParks } from "@/lib/flow-runs";
+import { ANY_GEN, RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, genOf, leaseAndGenCommand, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, holdRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, runStampCommand, settleAttempts, settleLeftIfRun, countSesParks } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -145,6 +145,13 @@ export type Flow = {
   steps: FlowStep[];
   active: boolean;
   createdAt: number;
+  /**
+   * When a save last changed the steps' places (one added in between, removed or moved; positionsChanged), in
+   * seconds. People wait in the queue by a step's position, so anyone queued before this moment may now be at a
+   * different step: they are held for the creator instead of being sent anything (sendDueSteps). Words, delays or a
+   * step added at the end change no place and leave it as it was. Absent until the first such save.
+   */
+  layoutAt?: number;
   /**
    * Made from emails that had already gone out (lib/mail-reuse.ts, "Keep
    * sending it"), which is how the next one kept finds the sequence to join.
@@ -532,6 +539,38 @@ export type FlowResult =
  * the creator chose in the editor. Either way, switching on counts against
  * the plan's number of active workflows (lib/flow-limits.ts).
  */
+/**
+ * Whether a save changed the place of a step someone may be waiting at: a position both versions have now holds
+ * another step (one added in between, removed or moved). Words, delays, conditions or steps added at the end keep
+ * every place; a step taken off the end leaves no one at a place that holds another step (that run ends, as before).
+ */
+/**
+ * The mark a save that moves places gives the workflow (Flow.layoutAt): strictly after the second it is saved in, and
+ * strictly after the mark before it. A list read before this save was read in this second or earlier, so every run
+ * stamped from it is below the mark and held, even in the save's own second; two saves in one second stay in order
+ * (Codex N1 and X6 on #4539: whole seconds alone let a step queued in the save's second compare equal).
+ */
+export function nextLayoutAt(flow: Pick<Flow, "layoutAt">, nowSeconds: number): number {
+  return Math.max(nowSeconds + 1, (typeof flow.layoutAt === "number" ? flow.layoutAt : 0) + 1);
+}
+
+/**
+ * The stamp for a run whose step was chosen from this workflow as read: the moment read, or the workflow's own layout
+ * mark when that is later, since a run chosen from a list that already holds the mark is on the new places. Somebody
+ * started or sent on right after a save (the mark may be a second or more ahead) is then not held for nothing.
+ * The stamp is also the run's shown time (updatedAt, and startedAt at the start), so right after several saves that
+ * move places within one second it can read up to that many seconds ahead (Claude 5, LOW on #4539).
+ */
+export function layoutStamp(flow: Pick<Flow, "layoutAt">, seconds: number): number {
+  return Math.max(seconds, typeof flow.layoutAt === "number" ? flow.layoutAt : 0);
+}
+
+export function positionsChanged(before: readonly Pick<FlowStep, "id">[], after: readonly Pick<FlowStep, "id">[]): boolean {
+  const n = Math.min(before.length, after.length);
+  for (let i = 0; i < n; i += 1) if (before[i].id !== after[i].id) return true;
+  return false;
+}
+
 export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: SaveOptions = {}): Promise<FlowResult> {
   let tries = 0;
   return changing(async () => {
@@ -627,6 +666,9 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
   if (active && !(at >= 0 && flows[at].active) && flows.filter((f) => f.active && f.id !== id).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
   // Where a written-for-you sequence came from stays with it through an edit.
   const starter = starterOf(raw.starter) ?? (at >= 0 ? flows[at].starter : undefined);
+  // People wait by a step's position: a save that moves places is marked, so whoever waited before it is held, not
+  // sent another step than the one they were due (sendDueSteps).
+  const layoutAt = at >= 0 ? (positionsChanged(flows[at].steps, steps) ? nextLayoutAt(flows[at], Math.floor(Date.now() / 1000)) : flows[at].layoutAt) : undefined;
   const flow: Flow = {
     id: id ?? newId(),
     name,
@@ -642,6 +684,7 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
     ...(raw.kept === true || (at >= 0 && flows[at].kept === true) ? { kept: true } : {}),
     ...(starter ? { starter } : {}),
     ...(goal ? { goal } : {}),
+    ...(layoutAt !== undefined ? { layoutAt } : {}),
   };
   const next = [...flows];
   if (at >= 0) next[at] = flow;
@@ -770,7 +813,8 @@ export async function forgetWorkflowPerson(store: Store, rawEmail: string): Prom
   const flows = await readFlowListStrict(store.listId);
   const person = personOf(email);
   const commands: (string | number)[][] = [];
-  for (const flow of flows) commands.push(...forgetPersonCommands(store.listId, flow.id, person), ["DEL", enrolledKey(flow.id, email)], ...queuedOf(store, flow, [email]));
+  // Take the queued steps and leases away before deleting their records, including a legacy run with no stamp.
+  for (const flow of flows) commands.push(...queuedOf(store, flow, [email]), ...forgetPersonCommands(store.listId, flow.id, person), ["DEL", enrolledKey(flow.id, email)]);
   await erase(commands);
   return { flows: flows.length };
 }
@@ -781,8 +825,8 @@ async function purgeFlow(store: Store, flow: Flow): Promise<void> {
   const people = await runPeople(flow.id);
   const commands: (string | number)[][] = [];
   for (const { person, email } of people) {
-    commands.push(...forgetPersonCommands(store.listId, flow.id, person), ["DEL", `nl:mail:enr:${flow.id}:${person}`]);
     if (email) commands.push(...queuedOf(store, flow, [email]));
+    commands.push(...forgetPersonCommands(store.listId, flow.id, person), ["DEL", `nl:mail:enr:${flow.id}:${person}`]);
   }
   commands.push(forgetIndexCommand(flow.id), ["DEL", statsKey(flow.id)]);
   await erase(commands);
@@ -895,6 +939,9 @@ export async function enroll(store: Store, email: string, event: { joined: boole
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
     // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
     // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
+    // The second the list is read: every run this call starts is stamped from it, never from a later clock, so a save
+    // that moves the steps while the contact is read below is after the stamp and holds the run (Codex L and X6, #4539).
+    const listReadAt = Math.floor(Date.now() / 1000);
     const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
       (f) =>
         f.active &&
@@ -916,7 +963,7 @@ export async function enroll(store: Store, email: string, event: { joined: boole
     // Only someone who may be written to starts one; their one start is not
     // spent on a moment they could not have received it.
     if (!(await mailableExactly(store.listId, address))) return true;
-    await startFlows(store, flows, [address]);
+    await startFlows(store, flows, [address], listReadAt);
     return true;
   } catch (error) {
     console.error("starting a sequence failed", error);
@@ -943,7 +990,7 @@ async function mailableExactly(listId: string, address: string): Promise<boolean
  * Says how many starts were new; throws UnknownReplyError, after the
  * definite starts, when a claim's reply was unknown.
  */
-async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
+async function startFlows(store: Store, flows: Flow[], addresses: string[], listReadAt: number): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
@@ -989,7 +1036,10 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
       continue;
     }
     // The run's record first, so its first step always finds it.
-    await openRuns(flow.id, fresh, now);
+    // Stamped from the workflow list as read (listReadAt, the second before it was read), which chose step 0: never
+    // from this later clock, and never below a layout mark it already holds. A save that moved the steps after that
+    // read is then after the stamp, and the run is held instead of sent from the new order (Codex L and X6, #4539).
+    await openRuns(flow.id, fresh, layoutStamp(flow, Math.min(listReadAt, now)));
     // Its place in the queue and its 400-day mark in one atomic step: both or neither. A start whose claim is gone
     // (the person was erased meanwhile) is not queued. Exactly the number queued, from 0 to all, confirms it.
     const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
@@ -1053,7 +1103,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; listReadAt: number; lease?: (email: string) => { member: string; score: number } }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -1124,7 +1174,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     const target = startableFlows(flows, activeFlowLimit(store)).find((f) => f.id === action.flowId && f.active && f.steps.length > 0);
     if (!target) return each(emails, "failed", "The workflow to start is paused, removed, empty or over your plan's number of active workflows.");
     try {
-      const started = await startFlows(store, [target], emails);
+      const started = await startFlows(store, [target], emails, at.listReadAt);
       // Which of them were new is not told apart; the count of new starts is kept on the first ones.
       return each(emails, "confirmed", `Started on “${target.name}”, unless they were in it already or today's runs were used up.`).map((o, i) => ({ ...o, changed: i < started }));
     } catch {
@@ -1162,7 +1212,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
   const labeled = [...changed, ...same];
   const starting = startableFlows(flows, activeFlowLimit(store)).filter((f) => f.active && f.steps.length > 0 && f.trigger === "tagged" && f.tag && sameLabel(f.tag, action.tag));
   // Starting what the label starts is repeat-safe (one start per person per workflow), so a failure here only means fewer starts.
-  if (labeled.length && starting.length) await startFlows(store, starting, labeled).catch((error) => console.error("starting labeled workflows failed", error));
+  if (labeled.length && starting.length) await startFlows(store, starting, labeled, at.listReadAt).catch((error) => console.error("starting labeled workflows failed", error));
   return emails.map((email) =>
     changed.includes(email) ? { email, state: "confirmed", changed: true, note: `Label “${action.tag}” given.` } : same.includes(email) ? { email, state: "confirmed", note: `They already had the label “${action.tag}”.` } : { email, state: "failed", note: "Not given: they already have ten labels, or their record changed while it was written." },
   );
@@ -1521,6 +1571,10 @@ async function waitOrStop(
   return { queue, outcomes };
 }
 
+/** Shown on the held runs screen for a run held because the workflow's steps changed places (sendDueSteps). */
+export const LAYOUT_HOLD_NOTE = (index: number) =>
+  `${LAYOUT_HOLD_START} while this person was waiting, so step ${index + 1} may not be the one they were due. Choose to send step ${index + 1} as it is now, skip it, or end the run.`;
+
 export type ResolveChoice = "continue" | "retry" | "end";
 export const RESOLVE_CHOICES: readonly ResolveChoice[] = ["continue", "retry", "end"];
 
@@ -1558,7 +1612,9 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
     due: choice === "retry" ? now : now + flow.steps[target].delayHours * 3600,
     member: `${store.listId}|${store.handle}|${flowId}|${target}|${run.email}`,
   };
-  return await releaseHold(store.listId, flowId, person, run.open, note, status, target, now, next) ? "ok" : "not_held";
+  // The step it goes on to was chosen from the workflow as read here: stamped no lower than its layout mark, so a run sent
+  // on right after a save is not held again for that save.
+  return await releaseHold(store.listId, flowId, person, run.open, note, status, target, layoutStamp(flow, now), next) ? "ok" : "not_held";
 }
 
 /**
@@ -1580,7 +1636,11 @@ export async function sendDueSteps(
   const counts = { sent: 0, dropped: 0, later: 0 };
   if (!isRedisConfigured()) return counts;
   const stores = new Map<string, Store | null>();
-  const flowsFor = new Map<string, Flow[]>();
+  // Each store's workflows, read once a job, with the second they were read (taken just before the read). Every run
+  // this job moves on is stamped with that second, not the moment it is written: the stamp then says which list chose
+  // the step they are queued for, so a save that changes places later in the same job (Flow.layoutAt) is after it, and
+  // the next job holds them instead of sending the step now at that position (#4539, comment 6900339629).
+  const flowsFor = new Map<string, { flows: Flow[]; readAt: number }>();
   // What an earlier run took and never finished goes back in the queue first.
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
@@ -1661,8 +1721,13 @@ export async function sendDueSteps(
       counts.dropped += emails.length;
       return;
     }
-    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlowsExact(listId));
-    const flow = flowsFor.get(listId)!.find((f) => f.id === flowId);
+    if (!flowsFor.has(listId)) {
+      const readAt = Math.floor(Date.now() / 1000);
+      // An unreadable list throws, nothing is kept, and the batch goes back in the queue (CX-123 rule 24).
+      flowsFor.set(listId, { flows: await readFlowsExact(listId), readAt });
+    }
+    const { flows: listed, readAt: listReadAt } = flowsFor.get(listId)!;
+    const flow = listed.find((f) => f.id === flowId);
     const step = flow?.steps[index];
     // With the rows, who still holds this step's lease entry, and the generation of their run: each lease entry and
     // its run's generation are one command (lib/flow-runs.ts LEASE_AND_GEN, in place of the lease entry's ZSCORE, so a
@@ -1671,20 +1736,30 @@ export async function sendDueSteps(
     // person started again after being erased meanwhile (Codex L's MEDIUM on #4234). Taken out by another workflow's
     // step since this batch was taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or
     // attempted for them, whatever the step's condition says.
-    const reply: unknown = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => leaseAndGenCommand(LEASE, `${group}|${email}`, flowId, email))]);
+    // A workflow whose steps changed places (Flow.layoutAt): with them, when each run last moved, read in the same step
+    // (#4539), so a run queued before the save is held for the creator instead of sent the step now at its position.
+    const reshaped = flow && typeof flow.layoutAt === "number" ? flow.layoutAt : null;
+    const reply: unknown = await redisPipeline([
+      ["HMGET", leadsKey(listId), ...emails],
+      ...emails.map((email) => leaseAndGenCommand(LEASE, `${group}|${email}`, flowId, email)),
+      ...(reshaped === null ? [] : emails.map((email) => runStampCommand(flowId, email))),
+    ]);
     // Only an exact reply decides: a row that is exactly nil is "no longer on your list", a score that is exactly nil is
     // "taken out", a generation is exactly 32 hex characters or nil (a run with none). Any other shape is unknown:
     // neither of those, and no go-ahead to send either. The batch goes back in the queue (sendDueSteps puts it back on a
     // throw) and is done on a later run (CX-123 rule 24). The outer reply, the rows and each pair are read from their
     // own slots (repliesFor): a hole, a getter or a Proxy is not a reply, so neither a missing row nor a missing score
     // is ever read as nil or as held (Codex U on #3124).
-    const replies = repliesFor(reply, emails.length + 1);
+    const replies = repliesFor(reply, emails.length * (reshaped === null ? 1 : 2) + 1);
     const rows = replies ? repliesFor(replies[0], emails.length) : null;
-    const pairs = replies ? replies.slice(1).map((r) => repliesFor(r, 2)) : [];
+    const pairs = replies ? replies.slice(1, emails.length + 1).map((r) => repliesFor(r, 2)) : [];
     const scores: unknown[] = pairs.map((pair) => (pair ? pair[0] : undefined));
     // Named apart from `score`, this take's own lease score, which the held filter below compares against (#2287).
     const scoreShape = (s: unknown) => s === null || ((typeof s === "number" || (typeof s === "string" && s.trim() !== "")) && Number.isFinite(Number(s)));
-    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || pairs.some((pair) => !pair || genOf(pair[1]) === null) || !scores.every(scoreShape)) {
+    // Each run's last move: a number, or exactly nil (no run): anything else is unknown (rule 24), never "after".
+    const stamps: unknown[] = replies && reshaped !== null ? replies.slice(emails.length + 1) : [];
+    const stamp = (s: unknown) => s === null || (typeof s === "string" && /^\d{1,12}$/.test(s)) || (typeof s === "number" && Number.isSafeInteger(s));
+    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || pairs.some((pair) => !pair || genOf(pair[1]) === null) || !scores.every(scoreShape) || !stamps.every(stamp)) {
       throw new Error("A due workflow step's rows or lease entries could not be read");
     }
     const gens = new Map(emails.map((email, i) => [email, genOf(pairs[i]![1]) ?? ANY_GEN]));
@@ -1713,6 +1788,9 @@ export async function sendDueSteps(
       await noteRuns(flow.id, ofRun(ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const }))), now).catch((error) => console.error("writing workflow history failed", error));
       return;
     }
+    // Every run this batch moves is stamped from the list as read: its read second, or the layout mark that list
+    // already holds when that is later (layoutStamp), so a save after this read is always after the stamp.
+    const chosenAt = layoutStamp(flow, listReadAt);
     const found: unknown[] = rows;
     // Held at this take's own score: an entry a later run took over is not this run's (Codex G2, #2287).
     const held = new Set(emails.filter((_, i) => scores[i] !== null && Number(scores[i]) === score));
@@ -1734,8 +1812,18 @@ export async function sendDueSteps(
     const notes: Parameters<typeof noteRuns>[1] = [];
     let done = 0;
     let left = 0;
+    // Queued before the steps changed places: the place they hold may now be another step. Held for the creator.
+    // A save marks the workflow strictly after the second it is saved in (nextLayoutAt), and a run is stamped from the
+    // list that chose its step (chosenAt, layoutStamp): a run chosen before the save is below the mark, even in the
+    // save's own second, and one chosen from a list that holds the mark is not. A save later in this same job, while
+    // this list is still the one in use, is after the stamp: it is held next time.
+    const stale: Parameters<typeof holdRuns>[4] = [];
     emails.forEach((email, i) => {
       if (!held.has(email)) return;
+      if (reshaped !== null && (stamps[i] === null || Number(stamps[i]) < reshaped)) {
+        stale.push({ email, score: Number(scores[i]), stamp: String(stamps[i] ?? "") });
+        return;
+      }
       const contact = parseContact(found[i]);
       if (!contact || !mailable(contact)) {
         counts.dropped += 1;
@@ -1768,7 +1856,11 @@ export async function sendDueSteps(
     if (left + onward.length) tallies.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
     const skippedOut = await queueHeld(moved, tallies);
     counts.dropped += skippedOut.size;
-    await noteRuns(flow.id, ofRun(notes.filter((n) => !skippedOut.has(n.email))), now).catch((error) => console.error("writing workflow history failed", error));
+    await noteRuns(flow.id, ofRun(notes.filter((n) => !skippedOut.has(n.email))), chosenAt).catch((error) => console.error("writing workflow history failed", error));
+    if (stale.length) {
+      counts.dropped += stale.length;
+      await holdRuns(listId, flow.id, index, step.id, stale, LAYOUT_HOLD_NOTE(index), { key: LEASE, group }, chosenAt);
+    }
     if (!still.length) return;
     const mine = still;
 
@@ -1780,7 +1872,7 @@ export async function sendDueSteps(
     // back (Codex L and G2 on #2287; Codex L's MEDIUM on #4234).
     let claim: { claimed: string[]; open: string[]; gone: string[]; opens: Map<string, string> };
     try {
-      claim = await claimAttempts(flow.id, mine, index, step.id, kind, now, gens, { key: LEASE, member: (email) => `${group}|${email}`, score });
+      claim = await claimAttempts(flow.id, mine, index, step.id, kind, chosenAt, gens, { key: LEASE, member: (email) => `${group}|${email}`, score });
     } catch {
       // Nothing was attempted: back in the queue, as before history existed, unless taken out meanwhile.
       const out = await queueHeld(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
@@ -1792,7 +1884,7 @@ export async function sendDueSteps(
     counts.dropped += claim.gone.length;
     if (claim.open.length) {
       // Not this step's own attempt, so any open one of this run (its generation still checked).
-      await settleAttempts(listId, flow.id, index, step.id, kind, ofRun(claim.open.map((email) => ({ email, state: "uncertain" as const, note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index }))), now).catch(() => {});
+      await settleAttempts(listId, flow.id, index, step.id, kind, ofRun(claim.open.map((email) => ({ email, state: "uncertain" as const, note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index }))), chosenAt).catch(() => {});
     }
     // Read again right before the step does anything: someone this run's take no longer holds (taken out, or taken
     // over by a later run that took the same entry) is that run's, and this one does nothing for them, not even a
@@ -1818,7 +1910,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const acted = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const acted = await act(store, listed, step.action, going, { flow, step, index, listReadAt, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Someone a later run took over is that run's: nothing is noted, queued or settled for them here (C3-141).
         const superseded = new Set(acted.filter((o) => o.state === "superseded").map((o) => o.email));
         const outcomes = acted.filter((o) => o.state !== "superseded");
@@ -1832,7 +1924,7 @@ export async function sendDueSteps(
         const out = await queueHeld([...queueNext(onwards), ...waiting.queue], confirmed.length ? [["HINCRBY", statsKey(flow.id), "acted", confirmed.length]] : []);
         const stay = new Set(going.filter((email) => !out.has(email)));
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, own([...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)]), now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, own([...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)]), chosenAt);
         return;
       }
 
@@ -1840,7 +1932,7 @@ export async function sendDueSteps(
       const result = await sendTo(store, going, step.subject, step.body, key, { medium: "sequence", campaign: stepCampaign(flow.id, step.id) }).catch(() => null);
       if (!result) {
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, own(going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index }))), now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, own(going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index }))), chosenAt);
         return;
       }
       const uncertain = new Set(result.uncertain ?? []);
@@ -1912,7 +2004,7 @@ export async function sendDueSteps(
         counts.dropped += waiting.outcomes.length - later;
       }
       queued = true;
-      await settleAttempts(listId, flow.id, index, step.id, kind, own(outcomes), now);
+      await settleAttempts(listId, flow.id, index, step.id, kind, own(outcomes), chosenAt);
       // Each with the generation of the run this step was taken from, as every late write here (own): one erased and
       // started again meanwhile is not ended as left.
       await settleLeftIfRun(flow.id, index, step.id, kind, gone, "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", now, gens);
@@ -1921,7 +2013,7 @@ export async function sendDueSteps(
       // open, so nothing is repeated by itself; when nothing was queued after
       // them either, the runs are held here for the creator to see.
       console.error("finishing a workflow step failed", error);
-      if (!queued) await settleAttempts(listId, flow.id, index, step.id, kind, own(going.map((email) => ({ email, state: "uncertain", note: "What happened at this step could not be confirmed.", to: index }))), now).catch(() => {});
+      if (!queued) await settleAttempts(listId, flow.id, index, step.id, kind, own(going.map((email) => ({ email, state: "uncertain", note: "What happened at this step could not be confirmed.", to: index }))), chosenAt).catch(() => {});
     }
   }
 }
